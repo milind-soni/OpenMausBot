@@ -29,7 +29,7 @@ describe("control-omb command mapping", () => {
   it("keeps every ui verb off discovery: the launch handle is required, whatever the environment says", async () => {
     const env = { OPENMAUSBOT_URL: "http://127.0.0.1:19999", OMB_PORT: "19999" };
     const verbs = [...UI_MUTATING, "snapshot", "screenshot", "console", "wait-settle"];
-    expect(UI_MUTATING).toEqual(new Set(["click", "type", "press", "flag", "eval"]));
+    expect(UI_MUTATING).toEqual(new Set(["click", "type", "select", "drag", "press", "flag", "eval"]));
     for (const verb of verbs) {
       await expect(runControlOmb(["ui", verb], { env })).rejects.toMatchObject({
         message: `ui ${verb} requires --ui HANDLE`,

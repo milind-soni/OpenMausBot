@@ -53,6 +53,8 @@ interface PendingDelegationItem extends DelegationItem {
   /** The bot that queued this handoff. Stored explicitly because a shared
    * channel's thread is not owned by any single bot. */
   sourceBotId: string;
+  sourceMessageId?: string;
+  queuedAt?: number;
   /** Busy-target retries so far. The item stays queued (not canceled) while
    * the target is busy, and is retried when any of the target's turns
    * settles — up to MAX_BUSY_ATTEMPTS. */
@@ -71,6 +73,9 @@ export type DelegationOutcome = "done" | "failed" | "denied" | "busy_gave_up" | 
 export interface DelegationReceipt {
   id: string;
   sourceThreadId: string;
+  sourceBotId?: string;
+  sourceMessageId?: string;
+  targetThreadId?: string;
   toBotId: string;
   toBotName: string;
   status: DelegationOutcome;
@@ -120,6 +125,7 @@ function saveReceipts(): void {
  * drawer can never grow without bound. */
 export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finishedAt"> & { finishedAt?: number }): void {
   const now = Date.now();
+  const pending = pendingDelegations.get(receipt.sourceThreadId)?.find((item) => item.id === receipt.id);
   const bounded: DelegationReceipt = {
     id: receipt.id,
     sourceThreadId: receipt.sourceThreadId,
@@ -128,6 +134,10 @@ export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finish
     status: receipt.status,
     finishedAt: receipt.finishedAt ?? now,
   };
+  for (const key of ["sourceBotId", "sourceMessageId", "targetThreadId"] as const) {
+    const value = receipt[key] ?? pending?.[key];
+    if (value) bounded[key] = value;
+  }
   if (receipt.result !== undefined) bounded.result = receipt.result.slice(0, RESULT_MAX_CHARS);
   receipts = [bounded, ...receipts.filter((existing) => existing.id !== bounded.id)]
     .filter((existing) => now - existing.finishedAt <= RECEIPT_MAX_AGE_MS)
@@ -210,6 +220,8 @@ export function _loadPending(): void {
           depth: Math.max(0, Math.trunc(item.depth!)),
           attempts: Number.isFinite(item.attempts) ? Math.max(0, Math.trunc(item.attempts!)) : 0,
         };
+        if (typeof item.sourceMessageId === "string") loaded.sourceMessageId = item.sourceMessageId;
+        if (typeof item.queuedAt === "number" && Number.isFinite(item.queuedAt)) loaded.queuedAt = item.queuedAt;
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
         if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
         if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
@@ -244,6 +256,9 @@ export function _loadPending(): void {
         if (!Number.isFinite(finishedAt) || now - finishedAt! > RECEIPT_MAX_AGE_MS) continue;
         const receipt: DelegationReceipt = { id, sourceThreadId, toBotId, toBotName, status, finishedAt: finishedAt! };
         if (typeof result === "string") receipt.result = result;
+        for (const key of ["sourceBotId", "sourceMessageId", "targetThreadId"] as const) {
+          if (typeof candidate[key] === "string") receipt[key] = candidate[key];
+        }
         loaded.push(receipt);
       }
       receipts = loaded.slice(0, MAX_RECEIPTS);
@@ -276,6 +291,21 @@ export function pendingDelegationSnapshot(): Array<{
       ...(item.targetThreadId ? { targetThreadId: item.targetThreadId } : {}),
     })),
   );
+}
+
+/** Stable, directed identities for the studio. The older map shape stays unchanged. */
+export function studioPendingDelegations(): Array<{
+  id: string; sourceThreadId: string; sourceBotId: string; toBotId: string; targetThreadId?: string; sourceMessageId?: string; queuedAt?: number;
+}> {
+  return [...pendingDelegations.entries()].flatMap(([sourceThreadId, items]) => items.map((item) => ({
+    id: item.id, sourceThreadId, sourceBotId: item.sourceBotId, toBotId: item.toBotId,
+    targetThreadId: item.targetThreadId, sourceMessageId: item.sourceMessageId, queuedAt: item.queuedAt,
+  })));
+}
+
+/** Copy the bounded receipt metadata without exposing peer reply text. */
+export function studioDelegationReceipts(): Array<Omit<DelegationReceipt, "result">> {
+  return receipts.map(({ result: _result, ...receipt }) => ({ ...receipt }));
 }
 
 /** How many handoffs one turn may queue. Small on purpose: this is the only
@@ -313,7 +343,7 @@ export function queueDelegation(
       ? originatingGroup.id
       : undefined;
   const id = newId();
-  list.push({ ...item, id, sourceBotId: from.id, attempts: 0, ...(groupId ? { originatingGroupId: groupId } : {}) });
+  list.push({ ...item, id, sourceBotId: from.id, queuedAt: Date.now(), attempts: 0, ...(groupId ? { originatingGroupId: groupId } : {}) });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const sourceGroup = sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined;
@@ -329,12 +359,15 @@ export function queueDelegation(
       name: openedThread
         ? `Opened thread #${openedThread.title} on ${target.name}`
         : `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`,
+      summary: item.message,
       ok: true,
     },
   };
   if (openedThread) chip.threadRef = { botId: target.id, threadId: openedThread.threadId, title: openedThread.title };
   if (sourceGroup && !sourceGroup.dm) chip.from = { botId: from.id, name: from.name, color: from.color };
-  bus.store.appendMessage(sourceThreadId, chip);
+  const note = bus.store.appendMessage(sourceThreadId, chip);
+  const queued = list.find((entry) => entry.id === id);
+  if (queued) { queued.sourceMessageId = note.id; savePending(); }
   return { result: "ok", id };
 }
 

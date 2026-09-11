@@ -77,6 +77,7 @@ const SLEEPING_BOX_STATES = new Set(["archived", "stopped"]);
  * independent of the engine: even the box-native Computer engine needs an
  * explicit Cloud choice before the panel may provision. */
 export function resolveBoxPanelAction({
+  observationOnly = false,
   computer,
   configured,
   boxState,
@@ -88,8 +89,9 @@ export function resolveBoxPanelAction({
   boxState: string | null;
   canUseCloud: boolean;
   autoLocal: boolean;
+  observationOnly?: boolean;
 }): BoxPanelAction {
-  const explicitCloud = computer === "cloud";
+  const explicitCloud = computer === "cloud" && !observationOnly;
 
   if (!configured) {
     if (explicitCloud) return "unconfigured";

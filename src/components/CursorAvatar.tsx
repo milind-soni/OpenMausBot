@@ -150,7 +150,7 @@ export const MOTION = {
   receiving: { bob: [3, 900] },
   uploading: { bob: [3, 1000] },
   notifying: { bob: [4, 700], sway: [2.5, 700] },
-  alerting: { jitter: [2.6, 85] },
+  alerting: { jitter: [1.1, 160] },
   dragging: { tilt: -6, sway: [2, 900] },
   bouncing: { bob: [12, 560], squash: 0.45 },
   'powering-down': { settle: 0.05, tilt: 4 },

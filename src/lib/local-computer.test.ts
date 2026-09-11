@@ -229,3 +229,11 @@ describe("local computer UI eligibility", () => {
     })).toBe(false);
   });
 });
+
+it("a studio workstation observes an existing Box until the person explicitly starts it", () => {
+  const base = { computer: "cloud" as const, configured: true, canUseCloud: true, autoLocal: false };
+  expect(resolveBoxPanelAction({ ...base, boxState: "ready", observationOnly: true })).toBe("show-ready-box");
+  expect(resolveBoxPanelAction({ ...base, boxState: "stopped", observationOnly: true })).toBe("show-sleeping-box");
+  expect(resolveBoxPanelAction({ ...base, boxState: null, observationOnly: true })).toBe("auto-unavailable");
+  expect(resolveBoxPanelAction({ ...base, boxState: "stopped" })).toBe("ensure-box");
+});

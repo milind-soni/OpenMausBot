@@ -149,12 +149,15 @@ function readPanelWidth(): number {
 export function ComputerPanel({
   bot,
   onOpenVmWorkspace,
+  observationOnly = false,
 }: {
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
+  observationOnly?: boolean;
 }) {
   // The panel is a fixed column by default; a drag handle on its left edge
   // makes it wide enough to actually read a page in the Browser tab.
+  const [watchOnly, setWatchOnly] = useState(observationOnly);
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
   const onResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -223,6 +226,7 @@ export function ComputerPanel({
     browser?: boolean;
     acknowledgeLocalAuto?: boolean;
   }) => {
+    setWatchOnly(false);
     // Clear old-provider UI in the same render as the optimistic profile
     // change. The resolving effect waits for its PATCH before doing any work.
     setResolvedComputerSelection(null);
@@ -269,7 +273,7 @@ export function ComputerPanel({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [error, setError] = useState<Error | string | null>(null);
   const errorText = panelErrorText(error);
-  const [panelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
+  const [panelView, setPanelView] = useState<ComputerPanelView>(() => observationOnly ? "computer" : readComputerPanelView(bot.id));
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
   // Keep installation reachable before the engine is ready. Actual browser
@@ -303,8 +307,8 @@ export function ComputerPanel({
   };
 
   useEffect(() => {
-    setPanelView(readComputerPanelView(bot.id));
-  }, [bot.id]);
+    setPanelView(observationOnly ? "computer" : readComputerPanelView(bot.id));
+  }, [bot.id, observationOnly]);
 
   // Pause the screenshot poll while this bot's viewer is open; seed from the
   // live viewer so a remount/switch mid-session doesn't wrongly resume it.
@@ -499,7 +503,7 @@ export function ComputerPanel({
             setPhase("vps-incompatible");
             return;
           }
-          if (bot.computer === "cloud") {
+          if (bot.computer === "cloud" && !watchOnly) {
             setPhase("starting");
             return api(`/api/bots/${bot.id}/computer/provision`, { method: "POST" }).then((result) => {
               if (!alive) return;
@@ -553,6 +557,7 @@ export function ComputerPanel({
         });
         const action = resolveBoxPanelAction({
           computer: bot.computer,
+          observationOnly: watchOnly,
           configured: Boolean(status.configured),
           boxState: typeof status.box?.state === "string" ? status.box.state : null,
           canUseCloud: cloudSupported,
@@ -567,7 +572,7 @@ export function ComputerPanel({
           if (action === "show-ready-box" || action === "show-sleeping-box" || action === "show-pending-box") {
             setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
           }
-          setPhase(action);
+          setPhase(watchOnly && bot.computer === "cloud" && action === "show-ready-box" ? "ready" : action);
           return;
         }
         setPhase("starting");
@@ -607,6 +612,7 @@ export function ComputerPanel({
     state.config?.vps?.sshAlias,
     panelView,
     computerSelectionPersisted,
+    watchOnly,
   ]);
 
   // Only frames received during this connection may replace its preview.
@@ -1090,6 +1096,7 @@ export function ComputerPanel({
         </button>
       </div>
 
+      {watchOnly && <div className="px-4 pb-3 text-xs text-ink-secondary"><p>{t("studio.observeComputer")}</p>{bot.computer === "cloud" && <button className="mt-2 min-h-11 rounded-lg border border-hairline px-3 text-ink" onClick={() => setWatchOnly(false)}>{t("studio.startComputer")}</button>}</div>}
       {panelView === "routines" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "maus"} />
