@@ -115,8 +115,9 @@ export interface SecretRequestCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "compaction";
   text?: string;
+  compaction?: { summary: string; firstKeptId: string; tokensBefore: number };
   /** Provider-generated files attached to this assistant response. */
   attachments?: Array<{ kind: "image"; path: string; mime: string }>;
   card?: OptionCardData;
@@ -249,6 +250,9 @@ export interface Task {
   /** set when a bot (not the person) started this thread — its own or a
    * teammate's; the sidebar shows a quiet "opened by <name>" under the title */
   openedBy?: ThreadOpener;
+  /** Live prompt size for this native session, overwritten each turn
+   * (not summed). Local-model header chip uses this vs Compact around. */
+  sessionPromptTokens?: number;
 }
 
 /** The bot that opened a thread on itself or a teammate. */
@@ -257,6 +261,7 @@ export interface ThreadOpener {
   name: string;
   delegationId?: string;
   at: number;
+
 }
 
 export interface TaskUsage {
@@ -428,6 +433,17 @@ export interface ConfigStatus {
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
   threads?: { maxConcurrentPerBot: number };
+  compaction?: {
+    enabled: boolean;
+    compactAround: number | null;
+    vectorBudget: number | null;
+    prompt: string | null;
+    keepVectors: boolean;
+    microVectorsEnabled: boolean;
+    vectorArchiveDir: string | null;
+    envOverride: number | null;
+  };
+
   localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   opencodeGo?: { configured: boolean };
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
@@ -480,7 +496,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "compaction" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -491,6 +507,17 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     vps: frame.vps,
     rooms: frame.rooms,
     threads: frame.threads,
+    compaction: {
+      enabled: frame.compaction?.enabled !== false,
+      compactAround: frame.compaction?.compactAround ?? null,
+      vectorBudget: frame.compaction?.vectorBudget ?? null,
+      prompt: frame.compaction?.prompt ?? null,
+      keepVectors: frame.compaction?.keepVectors === true,
+      microVectorsEnabled: frame.compaction?.microVectorsEnabled === true,
+      vectorArchiveDir: frame.compaction?.vectorArchiveDir ?? null,
+      envOverride: frame.compaction?.envOverride ?? null,
+    },
+
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
     tts: frame.tts,

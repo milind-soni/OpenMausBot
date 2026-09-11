@@ -155,6 +155,7 @@ describe("Store", () => {
     expect(artifact.parentId).toBe(turnEnd.id);
     // the re-parented child was announced so live clients converge
     expect(patches).toContain(followUp.id);
+    expect(new Store(selection).activePath(bot.threadId).at(-1)?.id).toBe(followUp.id);
   });
 
   it("insertMessageAfter is a plain append when the anchor is still the leaf, or unknown", () => {
@@ -577,6 +578,59 @@ describe("Store", () => {
 
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
+  });
+
+  it("clearResumeCursor drops one instance and leaves the others", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.setResumeCursor(bot.id, "claude", "sess-abc");
+    store.setResumeCursor(bot.id, "codex", "thread-xyz");
+    store.clearResumeCursor(bot.id, "claude");
+    expect(store.bot(bot.id)?.resumeCursors).toEqual({ codex: "thread-xyz" });
+    expect(new Store(selection).bot(bot.id)?.resumeCursors).toEqual({ codex: "thread-xyz" });
+  });
+
+  it("persists a compaction record on the active branch without deleting history", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const greeting = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "hello" });
+    const user = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "ship it" });
+    store.insertMessageAfter(bot.threadId, greeting.id, {
+      role: "bot",
+      kind: "compaction",
+      text: "Goal\nship it",
+      compaction: { summary: "Goal\nship it", firstKeptId: user.id, tokensBefore: 9000 },
+    });
+    const path = store.activePath(bot.threadId);
+    expect(path.map((m) => m.kind)).toEqual(["text", "compaction", "text"]);
+    expect(path[1]?.compaction?.firstKeptId).toBe(user.id);
+    const reloaded = new Store(selection);
+    expect(reloaded.activePath(bot.threadId).map((m) => m.kind)).toEqual(["text", "compaction", "text"]);
+    expect(reloaded.messagesFor(bot.threadId).some((m) => m.id === greeting.id && m.text === "hello")).toBe(true);
+  });
+
+  it("setSessionPromptTokens overwrites rather than summing", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.setSessionPromptTokens(bot.id, bot.threadId, 12_000);
+    store.setSessionPromptTokens(bot.id, bot.threadId, 800);
+    expect(store.taskByThread(bot.id, bot.threadId)?.sessionPromptTokens).toBe(800);
+    expect(new Store(selection).taskByThread(bot.id, bot.threadId)?.sessionPromptTokens).toBe(800);
+  });
+
+  it("setLastReportedPromptTokens persists and clears at 0; ignore flag is runtime-only", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.setLastReportedPromptTokens(bot.id, bot.threadId, 99_000);
+    store.setIgnoreReportedPromptFill(bot.id, bot.threadId, true);
+    expect(store.taskByThread(bot.id, bot.threadId)?.lastReportedPromptTokens).toBe(99_000);
+    expect(store.taskByThread(bot.id, bot.threadId)?.ignoreReportedPromptFill).toBe(true);
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)?.lastReportedPromptTokens).toBe(99_000);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)?.ignoreReportedPromptFill).toBeUndefined();
+    reloaded.setLastReportedPromptTokens(bot.id, bot.threadId, 0);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)?.lastReportedPromptTokens).toBeUndefined();
+    expect(new Store(selection).taskByThread(bot.id, bot.threadId)?.lastReportedPromptTokens).toBeUndefined();
   });
 
   it("seedIfEmpty creates exactly one starter bot, once", () => {

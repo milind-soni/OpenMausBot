@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { botUsage, cachedInput, costCaption, formatTaskTokens, formatTokens, formatUsd, sumUsage, usageChip, usageDetail } from "./usage";
+import { isLocalInjectModelId } from "../../shared/compact-around";
+import { botUsage, cachedInput, costCaption, fillChip, formatTaskTokens, formatTokens, formatUsd, sumUsage, usageChip, usageDetail } from "./usage";
 
 describe("usage formatting", () => {
   it("formats token counts compactly", () => {
@@ -70,6 +71,23 @@ describe("usage formatting", () => {
     expect(usageChip({ input: 0, output: 0, costUsd: null, turns: 0 })).toBe("");
     expect(usageChip({ input: 10_000, output: 2_400, costUsd: null, turns: 3 })).toBe("12.4k tok");
     expect(usageChip({ input: 10_000, output: 2_400, costUsd: 0.06, turns: 3 })).toBe("12.4k tok · $0.06");
+  });
+
+  it("shows live fill versus the refresh window for local models", () => {
+    expect(fillChip(2_080, 32_000)).toBe("2.1k / 32k");
+    expect(fillChip(140_761, 128_000)).toBe("141k / 128k");
+    expect(fillChip(0, 32_000)).toBe("0 / 32k");
+    expect(fillChip(10, 0)).toBe("");
+  });
+
+  it("recognizes injected local-host model ids", () => {
+    expect(isLocalInjectModelId("unsloth::glm-uncensored")).toBe(true);
+    expect(isLocalInjectModelId("ollama::llama3.2")).toBe(true);
+    expect(isLocalInjectModelId("omlx::qwen")).toBe(true);
+    expect(isLocalInjectModelId("lmstudio::foo")).toBe(true);
+    expect(isLocalInjectModelId("exo::bar")).toBe(true);
+    expect(isLocalInjectModelId("gpt-4o")).toBe(false);
+    expect(isLocalInjectModelId("grok-4")).toBe(false);
   });
 
   it("sums across tasks and leaves cost null until one reports it", () => {

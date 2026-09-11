@@ -91,6 +91,14 @@ export function usageChip(u: TaskUsage): string {
   return parts.join(" · ");
 }
 
+/** Local-model chip: how full this turn is versus the refresh window. */
+export function fillChip(fillTokens: number, ceilingTokens: number): string {
+  if (!Number.isFinite(fillTokens) || !Number.isFinite(ceilingTokens) || ceilingTokens <= 0) return "";
+  const fill = Math.max(0, Math.trunc(fillTokens));
+  const ceiling = Math.max(1, Math.trunc(ceilingTokens));
+  return `${formatTokens(fill)} / ${formatTokens(ceiling)}`;
+}
+
 /** How to caption a cost figure given how the engine is billed. */
 export function costCaption(billing: "metered" | "subscription" | undefined): string {
   if (billing === "subscription") return t("chat.usage.captionSubscription");

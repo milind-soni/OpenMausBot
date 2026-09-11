@@ -19,6 +19,7 @@ import {
   codexLocalProviderArgs,
   decodeInjectId,
   encodeInjectId,
+  contextWindowsFromCatalog,
   contextWindowsFromPs,
   loadedIdsFromPayloads,
   LOCAL_HOSTS,
@@ -68,6 +69,21 @@ describe("contextWindowsFromPs", () => {
   it("tolerates payloads that are not a ps listing", () => {
     expect(contextWindowsFromPs(null).size).toBe(0);
     expect(contextWindowsFromPs({ data: [] }).size).toBe(0);
+  });
+});
+
+describe("contextWindowsFromCatalog", () => {
+  it("reads OpenAI-compat catalog rows that advertise a window", () => {
+    const windows = contextWindowsFromCatalog({
+      data: [
+        { id: "GLM-5.2-mxfp4", context_length: 131072 },
+        { id: "qwen3", max_model_len: 40960 },
+        { id: "plain" },
+      ],
+    });
+    expect(windows.get("GLM-5.2-mxfp4")).toBe(131072);
+    expect(windows.get("qwen3")).toBe(40960);
+    expect(windows.has("plain")).toBe(false);
   });
 });
 

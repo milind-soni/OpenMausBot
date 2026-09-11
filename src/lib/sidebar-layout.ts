@@ -69,6 +69,12 @@ export function sidebarLayoutInteractive(density: SidebarDensityMode, query: str
   return density !== "icons" && query.trim().length === 0;
 }
 
+/** Bot rows can be long-pressed in icon mode too; a filtered search must
+ * not be saved as the real team order. */
+export function sidebarBotsReorderable(query: string): boolean {
+  return query.trim().length === 0;
+}
+
 export function sidebarSectionCollapsed(
   id: SidebarSectionId,
   collapsedIds: SidebarSectionId[],
@@ -205,4 +211,36 @@ export function mergeSectionOrder(
 
 export function sameSectionOrder(a: SidebarSectionId[], b: SidebarSectionId[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
+}
+
+/** Sort a list by a saved id order, keeping unknown ids in their incoming
+ * relative position. */
+export function applyItemOrder<T extends { id: string }>(items: T[], savedOrder: string[]): T[] {
+  if (items.length <= 1 || savedOrder.length === 0) return items;
+  const byId = new Map(items.map((item) => [item.id, item]));
+  return orderedSidebarSections(
+    items.map((item) => item.id),
+    savedOrder,
+  )
+    .map((id) => byId.get(id))
+    .filter((item): item is T => item !== undefined);
+}
+
+/** Rewrite the relative order of `subset` inside `full` without moving
+ * outsiders. Used when a section of bots is dragged independently. */
+export function replaceSubsetOrder(full: string[], subset: string[]): string[] {
+  if (subset.length === 0) return full;
+  const pending = [...subset];
+  const inSubset = new Set(subset);
+  const result: string[] = [];
+  for (const id of full) {
+    if (!inSubset.has(id)) {
+      result.push(id);
+      continue;
+    }
+    const next = pending.shift();
+    if (next) result.push(next);
+  }
+  result.push(...pending);
+  return unique(result);
 }

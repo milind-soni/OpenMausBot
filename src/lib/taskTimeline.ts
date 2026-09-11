@@ -5,7 +5,7 @@ import { redactSecretsInText } from "../../server/redact.js";
 export interface TimelineMessage {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "compaction";
   text?: string;
   tool?: { name: string; summary?: string; ok?: boolean };
   png?: string;
@@ -49,6 +49,14 @@ export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
         // Until that patch arrives, do not imply that the action succeeded.
         state: failed ? "failed" : message.tool.ok === true ? "complete" : "running",
         kind: "tool",
+      });
+    } else if (message.kind === "compaction") {
+      events.push({
+        id: message.id,
+        at: message.at,
+        label: "Context refreshed",
+        state: "observed",
+        kind: "task",
       });
     } else if (message.kind === "screen") {
       events.push({ id: message.id, at: message.at, label: "Screen observed", state: "observed", kind: "screen" });

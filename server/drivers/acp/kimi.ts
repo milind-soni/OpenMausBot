@@ -11,6 +11,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { hostProxy } from "../../context-host-proxy.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -537,8 +538,13 @@ const support: AcpSupport = {
     // subscription models. applyTurnEnv puts the inject back per turn.
     stripKimiModelEnv(env);
   },
-  applyTurnEnv: (env, { requestedModel }) => {
+  applyTurnEnv: (env, { requestedModel, threadId }) => {
     applyKimiLocalModelEnv(env, requestedModel);
+    const route = threadId ? hostProxy.routeFor(threadId) : null;
+    if (route) {
+      env.KIMI_MODEL_BASE_URL = route.baseUrl;
+      env.KIMI_MODEL_API_KEY = route.authorization;
+    }
   },
 
   // The only advertised authMethod is {id:"login", type:"terminal"} — a

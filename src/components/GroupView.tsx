@@ -34,6 +34,7 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
+import { CompactionDivider } from "./CompactionDivider";
 import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 
@@ -248,6 +249,8 @@ const Transcript = memo(function Transcript({
                   : undefined}
               />
             </div>
+          ) : m.kind === "compaction" ? (
+            <CompactionDivider message={m} />
           ) : m.kind === "activity" && m.tool ? (
             roomActivityVisible(m, showToolCalls) ? (
               <RoomToolChip message={m} roomId={group.id} />

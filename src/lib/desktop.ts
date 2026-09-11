@@ -29,8 +29,13 @@ const browserCapabilities: DesktopCapabilities = {
 let cached: DesktopCapabilities | null = null;
 let cacheRevision = 0;
 
+function desktopBridge(): Window["ogb"] | undefined {
+  if (typeof window === "undefined") return undefined;
+  return window.ogb;
+}
+
 export function initialDesktopCapabilities(): DesktopCapabilities {
-  const platform = window.ogb?.platform;
+  const platform = desktopBridge()?.platform;
   if (!platform) return browserCapabilities;
   const isMac = platform === "darwin";
   const dictation: DesktopCapabilities["dictation"] = {
@@ -53,11 +58,12 @@ export function initialDesktopCapabilities(): DesktopCapabilities {
 
 export async function loadDesktopCapabilities(): Promise<DesktopCapabilities> {
   if (cached) return cached;
-  if (!window.ogb?.getCapabilities) return browserCapabilities;
+  const ogb = desktopBridge();
+  if (!ogb?.getCapabilities) return browserCapabilities;
   const revisionAtStart = cacheRevision;
   let loaded: DesktopCapabilities;
   try {
-    loaded = await window.ogb.getCapabilities();
+    loaded = await ogb.getCapabilities();
   } catch {
     loaded = browserCapabilities;
   }

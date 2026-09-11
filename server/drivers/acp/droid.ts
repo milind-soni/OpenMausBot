@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { hostProxy } from "../../context-host-proxy.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -76,6 +77,7 @@ function factoryHome(env: Record<string, string | undefined>): string {
 export function ensureDroidInjectModel(
   modelId: string,
   env: Record<string, string | undefined> = process.env,
+  route?: { baseUrl: string; apiKey: string },
 ): string {
   const inject = decodeInjectId(modelId);
   if (!inject) return modelId;
@@ -93,13 +95,21 @@ export function ensureDroidInjectModel(
     if (existsSync(path)) throw error;
   }
   const custom = Array.isArray(settings.customModels) ? [...settings.customModels] : [];
+  const baseUrl = route?.baseUrl ?? host.baseUrl;
+  const apiKey = route?.apiKey ?? hostApiKey(host, env);
   const match = custom.find(
     (row) =>
-      row.id === id || (row.model === inject.model && row.baseUrl === host.baseUrl),
+      row.id === id || (row.model === inject.model && (route || row.baseUrl === host.baseUrl)),
   );
   if (match) {
-    if (!match.id) {
-      match.id = id;
+    let dirty = !match.id;
+    if (!match.id) match.id = id;
+    if (route && (match.baseUrl !== baseUrl || match.apiKey !== apiKey)) {
+      match.baseUrl = baseUrl;
+      match.apiKey = apiKey;
+      dirty = true;
+    }
+    if (dirty) {
       settings.customModels = custom;
       writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
     }
@@ -109,8 +119,8 @@ export function ensureDroidInjectModel(
     id,
     model: inject.model,
     displayName: `${inject.model} (${host.label})`,
-    baseUrl: host.baseUrl,
-    apiKey: hostApiKey(host, env),
+    baseUrl,
+    apiKey,
     provider: "generic-chat-completion-api",
   });
   settings.customModels = custom;
@@ -251,8 +261,12 @@ const support: AcpSupport = {
   isAuthenticated: (env) => authFilePaths(env).some(existsSync) || Boolean(env.FACTORY_API_KEY),
   resolveModels,
   resolveTurnModel: (model, env) => (model ? ensureDroidInjectModel(model, env) : model),
-  applyTurnEnv: (env, { requestedModel }) => {
+  applyTurnEnv: (env, { requestedModel, threadId }) => {
     applyDroidLocalAuthEnv(env, requestedModel);
+    const route = threadId ? hostProxy.routeFor(threadId) : null;
+    if (route && requestedModel) {
+      ensureDroidInjectModel(requestedModel, env, { baseUrl: route.baseUrl, apiKey: route.authorization });
+    }
   },
 
   async configureSession({ request, sessionId, config, turn }) {

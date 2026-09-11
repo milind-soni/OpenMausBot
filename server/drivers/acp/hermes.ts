@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { hostProxy } from "../../context-host-proxy.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -73,6 +74,7 @@ function replaceHermesHostBlock(text: string, hostId: string, block: string): st
 export function ensureHermesInjectProvider(
   modelId: string,
   env: Record<string, string | undefined> = process.env,
+  route?: { baseUrl: string; apiKey: string },
 ): string {
   const inject = decodeInjectId(modelId);
   if (!inject) return modelId;
@@ -88,7 +90,12 @@ export function ensureHermesInjectProvider(
   } catch {
     text = "";
   }
-  const next = upsertHermesProvider(text, inject.host, host.baseUrl, hostApiKey(host, env));
+  const next = upsertHermesProvider(
+    text,
+    inject.host,
+    route?.baseUrl ?? host.baseUrl,
+    route?.apiKey ?? hostApiKey(host, env),
+  );
   if (next !== text) writeFileSync(path, next);
   return hermesAcpModelId(modelId) ?? modelId;
 }
@@ -425,6 +432,12 @@ const support: AcpSupport = {
     // named custom provider + session/set_model is the real route.
     delete env.OPENAI_API_KEY;
     delete env.OPENROUTER_API_KEY;
+  },
+  applyTurnEnv: (env, { requestedModel, threadId }) => {
+    if (!requestedModel || !threadId) return;
+    const route = hostProxy.routeFor(threadId);
+    if (!route) return;
+    ensureHermesInjectProvider(requestedModel, env, { baseUrl: route.baseUrl, apiKey: route.authorization });
   },
   pickAuthMethod: () => null,
   authFailure: "continue",

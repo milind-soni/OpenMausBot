@@ -37,6 +37,20 @@ describe("groupActivityRuns", () => {
     expect(items.map((i) => i.kind)).toEqual(["message", "message", "message"]);
   });
 
+  it("keeps a compaction divider as its own row", () => {
+    const compact: Message = {
+      id: "c1",
+      at: 1,
+      role: "bot",
+      kind: "compaction",
+      text: "Goal\nship it",
+      compaction: { summary: "Goal\nship it", firstKeptId: "u1", tokensBefore: 9000 },
+    };
+    const items = groupTranscript([text("hello"), compact, text("next")]);
+    expect(items.map((i) => i.kind)).toEqual(["message", "message", "message"]);
+    expect(items[1]?.kind === "message" && items[1].message.kind).toBe("compaction");
+  });
+
   it("keeps a step that is still running out of the run, so live progress stays visible", () => {
     const items = groupActivityRuns([tool("Edit"), tool("Edit"), running("Bash")]);
     expect(items.map((i) => i.kind)).toEqual(["run", "message"]);

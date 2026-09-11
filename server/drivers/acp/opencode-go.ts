@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { hostProxy } from "../../context-host-proxy.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
@@ -197,6 +198,7 @@ function opencodeConfigDir(env: Record<string, string | undefined>): string {
 export function ensureOpenCodeInjectModel(
   modelId: string,
   env: Record<string, string | undefined> = process.env,
+  route?: { baseUrl: string; apiKey: string },
 ): string {
   const inject = decodeInjectId(modelId);
   if (!inject) return modelId;
@@ -233,8 +235,8 @@ export function ensureOpenCodeInjectModel(
     existing.options && typeof existing.options === "object" && !Array.isArray(existing.options)
       ? { ...(existing.options as Record<string, unknown>) }
       : {};
-  options.baseURL = host.baseUrl;
-  if (!options.apiKey) options.apiKey = hostApiKey(host, env);
+  options.baseURL = route?.baseUrl ?? host.baseUrl;
+  options.apiKey = route?.apiKey ?? (typeof options.apiKey === "string" && options.apiKey ? options.apiKey : hostApiKey(host, env));
   const models =
     existing.models && typeof existing.models === "object" && !Array.isArray(existing.models)
       ? { ...(existing.models as Record<string, unknown>) }
@@ -368,6 +370,15 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   resolveTurnModel: (model, env) => model
     ? ensureOpenCodeInjectModel(normalizeLegacyOpenCodeModel(model, env), env)
     : model,
+  applyTurnEnv: (env, { requestedModel, threadId }) => {
+    const route = threadId ? hostProxy.routeFor(threadId) : null;
+    if (route && requestedModel) {
+      ensureOpenCodeInjectModel(normalizeLegacyOpenCodeModel(requestedModel, env), env, {
+        baseUrl: route.baseUrl,
+        apiKey: route.authorization,
+      });
+    }
+  },
   transformEnv: stripForeignProviderKeys,
   pickAuthMethod: () => null,
   authFailure: "continue",

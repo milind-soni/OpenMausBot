@@ -1013,9 +1013,10 @@ async function call(id: unknown, name: string, args: any) {
     observations.noteAction();
     const out = await runOnBox(command, 120_000);
     const note = `exit ${out.exitCode}\n${out.stdout.slice(-6000)}${out.stderr ? `\n[stderr]\n${out.stderr.slice(-2000)}` : ""}`;
-    if (args.observe !== true) return text(id, note);
+    const failed = !out.ok;
+    if (args.observe !== true) return text(id, note, failed);
     const shot = await runOnBox([ENV, GEOMETRY, ensureRemoteCuaCommand(), captureBlock()].join("; "), 60_000);
-    return observed(id, note, await frameFrom(shot));
+    return observed(id, note, await frameFrom(shot), null, true, failed);
   }
   if (name === "wait_for") {
     const condition = String(args.condition ?? "").trim().toLowerCase();

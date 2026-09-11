@@ -6,24 +6,31 @@ type DesktopState = {
   ready: boolean;
 };
 
+function hasDesktopBridge(): boolean {
+  return typeof window !== "undefined" && Boolean(window.ogb);
+}
+
 const DesktopContext = createContext<DesktopState>({
   capabilities: initialDesktopCapabilities(),
-  ready: !window.ogb,
+  ready: !hasDesktopBridge(),
 });
 
 export function DesktopCapabilitiesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DesktopState>(() => ({
     capabilities: initialDesktopCapabilities(),
-    ready: !window.ogb,
+    ready: !hasDesktopBridge(),
   }));
 
   useEffect(() => {
     let alive = true;
     let eventRevision = 0;
-    const unsubscribe = window.ogb?.onCapabilitiesChanged?.((capabilities) => {
-      eventRevision += 1;
-      if (alive) setState({ capabilities: cacheDesktopCapabilities(capabilities), ready: true });
-    });
+    const unsubscribe =
+      typeof window !== "undefined"
+        ? window.ogb?.onCapabilitiesChanged?.((capabilities) => {
+            eventRevision += 1;
+            if (alive) setState({ capabilities: cacheDesktopCapabilities(capabilities), ready: true });
+          })
+        : undefined;
     const initialRevision = eventRevision;
     void loadDesktopCapabilities().then((capabilities) => {
       if (alive && eventRevision === initialRevision) {

@@ -47,21 +47,64 @@ export interface InjectedModel {
 /** Ollama's /api/ps lists running models with their context_length; a
  * small model's real window matters more than a big one's — an 8k model
  * guessed at 32k gets a rebuild it cannot hold. */
+function contextLengthOf(row: object): number | null {
+  const rec = row as {
+    context_length?: unknown;
+    contextLength?: unknown;
+    context_window?: unknown;
+    max_model_len?: unknown;
+    max_context_length?: unknown;
+    meta?: unknown;
+  };
+  const nested = rec.meta && typeof rec.meta === "object" ? (rec.meta as { context_length?: unknown }) : null;
+  for (const value of [rec.context_length, rec.contextLength, rec.context_window, rec.max_model_len, rec.max_context_length, nested?.context_length]) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return Math.floor(value);
+  }
+  return null;
+}
+
+function rememberWindow(out: Map<string, number>, id: string, ctx: number) {
+  out.set(id, ctx);
+  const baseId = id.split(":")[0]!;
+  const current = out.get(baseId);
+  out.set(baseId, current === undefined ? ctx : Math.min(current, ctx));
+}
+
 export function contextWindowsFromPs(extra: unknown): Map<string, number> {
   const out = new Map<string, number>();
   const rec = extra && typeof extra === "object" ? (extra as { models?: unknown }) : null;
   if (!rec || !Array.isArray(rec.models)) return out;
   for (const m of rec.models) {
     if (!m || typeof m !== "object") continue;
-    const row = m as { name?: unknown; model?: unknown; context_length?: unknown };
+    const row = m as { name?: unknown; model?: unknown };
     const id = typeof row.model === "string" ? row.model : typeof row.name === "string" ? row.name : null;
-    const ctx = typeof row.context_length === "number" && Number.isFinite(row.context_length) && row.context_length > 0 ? row.context_length : null;
-    if (id && ctx) {
-      out.set(id, ctx);
-      const baseId = id.split(":")[0]!;
-      const current = out.get(baseId);
-      out.set(baseId, current === undefined ? ctx : Math.min(current, ctx));
-    }
+    const ctx = contextLengthOf(m);
+    if (id && ctx) rememberWindow(out, id, ctx);
+  }
+  return out;
+}
+
+/** OpenAI-compat /v1/models rows (oMLX, LM Studio, Unsloth, EXO) sometimes
+ * advertise the window on the catalog itself, not on a /api/ps listing. */
+export function contextWindowsFromCatalog(catalog: unknown): Map<string, number> {
+  const out = new Map<string, number>();
+  const records = Array.isArray(catalog)
+    ? catalog
+    : catalog && typeof catalog === "object" && Array.isArray((catalog as { data?: unknown }).data)
+      ? (catalog as { data: unknown[] }).data
+      : catalog && typeof catalog === "object" && Array.isArray((catalog as { models?: unknown }).models)
+        ? (catalog as { models: unknown[] }).models
+        : [];
+  for (const record of records) {
+    if (!record || typeof record !== "object") continue;
+    const row = record as { id?: unknown; name?: unknown; model?: unknown };
+    const id =
+      (typeof row.id === "string" && row.id) ||
+      (typeof row.model === "string" && row.model) ||
+      (typeof row.name === "string" && row.name) ||
+      "";
+    const ctx = contextLengthOf(record);
+    if (id && ctx) rememberWindow(out, id, ctx);
   }
   return out;
 }
@@ -130,18 +173,19 @@ const CODEX_RESERVED_PROVIDERS = new Set(["openai", "ollama", "lmstudio"]);
 export function codexLocalProviderArgs(
   env: Record<string, string | undefined>,
   modelId: string | null | undefined,
+  route?: { baseUrl: string; authorization: string } | null,
 ): string[] {
   const inject = decodeInjectId(modelId);
   if (!inject || CODEX_RESERVED_PROVIDERS.has(inject.host)) return [];
   const host = localHost(inject.host);
   if (!host) return [];
   const envKey = `OPENMAUSBOT_LOCAL_${host.id.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
-  env[envKey] = hostApiKey(host, env);
+  env[envKey] = route?.authorization ?? hostApiKey(host, env);
   return [
     "-c",
     `model_providers.${host.id}.name=${JSON.stringify(host.label)}`,
     "-c",
-    `model_providers.${host.id}.base_url=${JSON.stringify(host.baseUrl)}`,
+    `model_providers.${host.id}.base_url=${JSON.stringify(route?.baseUrl ?? host.baseUrl)}`,
     "-c",
     `model_providers.${host.id}.env_key=${JSON.stringify(envKey)}`,
   ];
@@ -332,7 +376,7 @@ export async function probeLocalInjects(
       const extraIds = extra ? idsFromModelsPayload(extra) : [];
       const loaded = loadedIdsFromPayloads(host, catalog ?? extra, extra);
       const ids = [...new Set([...catalogIds, ...extraIds, ...loaded])];
-      const windows = contextWindowsFromPs(extra);
+      const windows = new Map([...contextWindowsFromCatalog(catalog), ...contextWindowsFromPs(extra)]);
       return { host, ids, loaded, windows };
     }),
   );

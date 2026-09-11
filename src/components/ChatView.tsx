@@ -20,7 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
-import { cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, usageChip, usageDetail } from "@/lib/usage";
+import { cachedInput, costCaption, fillChip, formatTokens, formatUsd, hasFiniteCost, usageChip, usageDetail } from "@/lib/usage";
+import { AUTO_COMPACT_AROUND_TOKENS, isLocalInjectModelId } from "../../shared/compact-around";
 import {
   api,
   currentTaskBot,
@@ -50,6 +51,7 @@ import { askText, nameIsCommand, runSteps, runSummary, showRun, skillPrompt, ski
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
+import { CompactionDivider } from "./CompactionDivider";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
@@ -765,6 +767,8 @@ const MessagesList = memo(function MessagesList({
             }
             case "screen":
               return m.png ? <ScreenFrame png={m.png} mime={m.mime} /> : null;
+            case "compaction":
+              return <CompactionDivider message={m} />;
             default:
               return (
                 <Bubble
@@ -1428,23 +1432,45 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
  * Click opens the bot's settings, where the Usage card has the breakdown. */
 function UsageChip({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
-  const usage = bot.tasks?.find((t) => t.threadId === bot.threadId)?.usage;
-  const text = usage ? usageChip(usage) : "";
-  if (!usage || !text) return null;
+  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
+  const usage = task?.usage;
+  const local = isLocalInjectModelId(bot.modelSelection.model);
+  const keepChattingOn = state.config?.compaction?.enabled !== false;
+  const ceiling =
+    state.config?.compaction?.envOverride ??
+    state.config?.compaction?.compactAround ??
+    AUTO_COMPACT_AROUND_TOKENS;
+  const fill = task?.sessionPromptTokens;
+  const localText = local && ceiling > 0 && (typeof fill === "number" || usage) ? fillChip(fill ?? 0, ceiling) : "";
+  const text = localText || (usage ? usageChip(usage) : "");
+  if (!text) return null;
   const billing = state.instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.snapshot.billing;
-  const detail = [
-    usage.turns === 1 ? t("chat.usage.turnsOne") : t("chat.usage.turnsMany", { count: usage.turns }),
-    usageDetail(usage),
-    // the whole thread rides along on every turn, so most of "in" is the
-    // model re-reading what it already saw — say so, or the figure reads as
-    // a bug (issue #527)
-    cachedInput(usage) > 0 ? t("chat.usage.cachedNote") : null,
-    hasFiniteCost(usage.costUsd) ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const detail = local
+    ? [
+        `Live backend context: ${formatTokens(fill ?? 0)} of ${formatTokens(ceiling)} (hard cap).`,
+        keepChattingOn
+          ? "At the cap, OpenMausBot forces a recap and resets the host session. This chat stays. Lifetime spend is in Settings → Usage."
+          : "Keep chatting is off — no forced recap or host reset. Lifetime spend is in Settings → Usage.",
+      ].join("\n")
+    : !usage
+      ? ""
+      : [
+          usage.turns === 1 ? t("chat.usage.turnsOne") : t("chat.usage.turnsMany", { count: usage.turns }),
+          usageDetail(usage),
+          // the whole thread rides along on every turn, so most of "in" is the
+          // model re-reading what it already saw — say so, or the figure reads as
+          // a bug (issue #527)
+          cachedInput(usage) > 0 ? t("chat.usage.cachedNote") : null,
+          hasFiniteCost(usage.costUsd) ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
+        ]
+          .filter(Boolean)
+          .join("\n");
   // folded: one figure — cost when the engine reports one, else tokens
-  const short = usage.costUsd !== null ? formatUsd(usage.costUsd) : formatTokens(usage.input + usage.output);
+  const short = local
+    ? formatTokens(fill ?? 0)
+    : usage && usage.costUsd !== null
+      ? formatUsd(usage.costUsd)
+      : formatTokens((usage?.input ?? 0) + (usage?.output ?? 0));
   return (
     <button
       onClick={() => dispatch({ type: "toggleSettings", open: true, section: "usage" })}

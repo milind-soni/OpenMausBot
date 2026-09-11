@@ -107,6 +107,12 @@ import {
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
+  compactAroundTokens,
+  vectorBudgetTokens,
+  vectorPrompt,
+  keepVectorsEnabled,
+  microVectorsEnabled,
+  vectorArchiveDir,
   roomTurnTimeoutMinutes,
   maxConcurrentBotThreads,
   saveConfig,
@@ -124,6 +130,7 @@ import {
   EVENTS_DIR,
   NATIVE_DIR,
   customMcpServers,
+  compactionEnabled,
 } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
@@ -221,6 +228,32 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
+import { decodeInjectId } from "./drivers/local-inject.ts";
+import { AUTO_COMPACT_AROUND_TOKENS, advertisedWindowFor, contextCeiling, envCeilingOverride, probeMemory } from "./context-ceiling.ts";
+import {
+  appendMidTaskContinuitySystem,
+  clipCompactUserText,
+  collectCompactSeedDirs,
+  compactSession,
+  decideSettledPromptTokens,
+  existingDirectory,
+  fillTokensFor,
+  generateSideText,
+  resolveOutgoingTurn,
+} from "./context-compact.ts";
+import { archiveStateVector } from "./vector-archive.ts";
+import {
+  appendTurnPage,
+  archiveAndSeedNotebook,
+  awaitPendingNotebookUpdate,
+  buildMicroNotebookPrompt,
+  markMicroCompacted,
+  NOTEBOOK_STACK_READ_CHARS,
+  readTaskNotebook,
+  trackNotebookUpdate,
+} from "./micro-vectors.ts";
+import { bindLocalHostRewrite, hostProxy } from "./context-host-proxy.ts";
+import { estimateTokens, modelFacingTurns, shouldCompact, usersAfterCompaction, vectorBudget } from "./context-rebuild.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
@@ -1393,8 +1426,16 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
  * to resume, per instance, per task. No client has ever used it, and a
  * paired phone has even less business holding provider session identifiers
  * than the desktop window did. Stripped here rather than at each call site
- * so a new broadcast cannot forget. */
-const wireTask = ({ resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, ...task }: TaskRecord) => task;
+ * so a new broadcast cannot forget.
+ *
+ * `sessionPromptTokens` is the live fill (this turn's prompt size), not a
+ * session id — the header chip needs it so local models show window use
+ * instead of lifetime spend. */
+const wireTask = ({
+  resumeCursors: _resumeCursors,
+  lastInstanceId: _lastInstanceId,
+  ...task
+}: TaskRecord) => task;
 
 const wireBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, ...rest } = bot;
@@ -2752,6 +2793,10 @@ const providerLabel = (provider: string): string => {
   const bare = provider.replace(/Agent$/, "");
   return bare.charAt(0).toUpperCase() + bare.slice(1);
 };
+/** Log once when micro notebook side LLM (inject + generateText) both fail. */
+let warnedMicroSideLlmFail = false;
+const MICRO_NOTEBOOK_TIMEOUT_MS = 120_000;
+
 
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
@@ -3684,6 +3729,89 @@ bus.subscribe((event: RuntimeEvent) => {
               : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
         noteSpend(DATA_DIR, event.cost ?? null);
+        if (typeof tokens?.input === "number") {
+          // Chip fill vs hard-cap: SPT is the chip/soft-fill baseline (post-compact
+          // estimate, or a plausible settle). lastReported keeps raw host
+          // prompt_tokens. Inflated cumulative Unsloth/local-inject reports after
+          // compact must not overwrite SPT — decideSettledPromptTokens gates that
+          // and sets ignoreReportedPromptFill so fillTokensFor stays on SPT.
+          // Hard-cap recycle still sees real size via lastReported / shouldCompact
+          // inputs; we do not clamp SPT to the ceiling here.
+          const inject = Boolean(decodeInjectId(selection.model));
+          const ceiling = compactAroundTokens(cfg) ?? AUTO_COMPACT_AROUND_TOKENS;
+          const decision = decideSettledPromptTokens({
+            reported: tokens.input,
+            ceiling,
+            currentSpt: settledTask?.sessionPromptTokens,
+            inject,
+          });
+          store.setLastReportedPromptTokens(bot.id, event.threadId, decision.lastReported);
+          if (decision.nextSpt != null) {
+            store.setSessionPromptTokens(bot.id, event.threadId, decision.nextSpt);
+          }
+          store.setIgnoreReportedPromptFill(bot.id, event.threadId, decision.ignoreReportedPromptFill);
+        }
+        // Opt-in rolling notebook: side LLM harvests a rich turn page; APPEND to live
+        // notebook.md (never rewrite prior pages). Prefer local inject over provider
+        // generateText. Fire-and-forget; compact awaits the in-flight write briefly.
+        if (!internal && compactionEnabled(cfg) && microVectorsEnabled(cfg) && reply.trim()) {
+          const instance = registry.get(bot.modelSelection.instanceId);
+          const modelId =
+            store.bot(bot.id)?.modelSelection?.model ?? bot.modelSelection.model;
+          const generateText = instance?.generateText?.bind(instance);
+          const taskRec = store.taskByThread(bot.id, event.threadId);
+          const botId = bot.id;
+          const threadId = event.threadId;
+          const replyForMicro = reply;
+          const lastUserMsg = [...store.messagesFor(event.threadId)]
+            .reverse()
+            .find((m) => m.role === "user" && m.kind === "text" && m.text?.trim());
+          const userTextForMicro = lastUserMsg?.text?.trim() ?? "";
+          const priorNotebook = readTaskNotebook(botId, threadId);
+          const update = (async () => {
+            try {
+              const prompt = buildMicroNotebookPrompt({
+                priorNotebook,
+                userText: userTextForMicro,
+                assistantReply: replyForMicro,
+              });
+              const raw = await Promise.race([
+                generateSideText({
+                  modelId,
+                  prompt,
+                  generateText,
+                  maxTokens: 4096,
+                }),
+                new Promise<string | null>((_resolve, reject) => {
+                  const timer = setTimeout(
+                    () => reject(new Error("micro notebook timeout")),
+                    MICRO_NOTEBOOK_TIMEOUT_MS,
+                  );
+                  timer.unref?.();
+                }),
+              ]);
+              if (!raw) {
+                if (!warnedMicroSideLlmFail) {
+                  warnedMicroSideLlmFail = true;
+                  console.warn(
+                    "micro vectors: inject + generateText both failed — skipping notebook write (no heuristic fallback)",
+                  );
+                }
+                return;
+              }
+              appendTurnPage({
+                botId,
+                threadId,
+                text: raw,
+                userText: userTextForMicro,
+                taskTitle: taskRec?.title,
+              });
+            } catch {
+              /* never throw into the bus — disk/LLM/timeout failures are soft */
+            }
+          })();
+          trackNotebookUpdate(botId, threadId, update);
+        }
         const routineReportThread = routineRun ? routineSourceThread(routineRun) : null;
         // A routine's result belongs to its reporting thread's unread state.
         // Its internal execution should not light up the sidebar as well.
@@ -4589,20 +4717,18 @@ async function startTurn(
   }
 
   // transcript for API-backed drivers: settled text turns on the ACTIVE
-  // branch only — abandoned forks never reach the model
+  // branch only — abandoned forks never reach the model. After a
+  // compaction record the tail starts at firstKeptId; the display path
+  // still has everything.
   const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
   const activeMessages = store.activePath(threadId);
   // A flat reply may deliberately point across a fork in the same thread.
   // Resolve its quote from full storage, while the replay itself remains
   // strictly limited to the selected branch below.
+  const userName = cfg.profile?.name?.trim() || "User";
   const messagesById = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
-  const transcript = activeMessages
-    .filter((m) => m.kind === "text" && m.text && !skipTranscript.has(m.id))
-    .slice(-40)
-    .map((m) => ({
-      role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-      text: transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
-    }));
+  const facing = modelFacingTurns(activeMessages, skipTranscript, messagesById, userName);
+  const transcript = facing.transcript;
 
   // After a rewind (edit / branch switch) the provider's native session
   // still contains the abandoned branch: start a fresh session instead of
@@ -4636,12 +4762,13 @@ async function startTurn(
   // which also depends on the bot's soul/description — is decided below,
   // from the same bot snapshot the prompt's soul is built from.
   const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
+  const userPrompt = promptWithReply(
+    skillAuthoring ? expandLearnTurnText(setupText) : setupText,
+    opts?.replyTo,
+    cfg.profile?.name?.trim() || "User",
+  );
   const { turnText, resume } = buildTurnContext({
-    text: promptWithReply(
-      skillAuthoring ? expandLearnTurnText(setupText) : setupText,
-      opts?.replyTo,
-      cfg.profile?.name?.trim() || "User",
-    ),
+    text: userPrompt,
     transcript,
     rewound,
     fresh,
@@ -4652,11 +4779,37 @@ async function startTurn(
   // can arrive during async computer/setup work and clear the task cursor;
   // this already-built turn must either keep its old session or replay on the
   // following turn, never start a blank session with no transcript.
-  const resumeCursor = resume ? task.resumeCursors[instanceId] : undefined;
+  const initialResumeCursor = resume ? task.resumeCursors[instanceId] : undefined;
   // A cursor the provider no longer honours must not brick the thread: the
   // driver may fall back to ONE fresh session, and this is what it sends
   // there, so the new session is not blank (server/resume-recovery.ts).
-  const recoveryText = resumeCursor !== undefined ? buildRecoveryText({ text: turnText, transcript }) : undefined;
+  const recoveryText = initialResumeCursor !== undefined ? buildRecoveryText({ text: turnText, transcript }) : undefined;
+  const memory = probeMemory();
+  const ceiling = contextCeiling({
+    advertisedWindow: advertisedWindowFor(instance.models, model),
+    modelId: model,
+    memory,
+    env: process.env,
+    compactAround: compactAroundTokens(cfg),
+  });
+  const fill = fillTokensFor({
+    sessionPromptTokens: task.sessionPromptTokens,
+    lastReportedPromptTokens: task.lastReportedPromptTokens,
+    ignoreReportedPromptFill: task.ignoreReportedPromptFill,
+    transcript,
+    userText: userPrompt,
+  });
+  const compactThisTurn =
+    compactionEnabled(cfg) &&
+    (Boolean(decodeInjectId(model)) || envCeilingOverride(process.env) !== undefined) &&
+    !opts?.cardContinuation &&
+    shouldCompact({
+      fillTokens: fill,
+      ceilingTokens: ceiling.tokens,
+      turnCount: transcript.length,
+      memory,
+      turnsSinceCompact: usersAfterCompaction(transcript, facing.lastCompaction),
+    });
 
   const persona = [
     `You are ${bot.name}, a personal bot in OpenMausBot.`,
@@ -5075,6 +5228,110 @@ async function startTurn(
       if (!markDirectTurnDispatching(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
+      // Compaction refreshes the provider context: clear this engine's ACP
+      // resumeCursor (session/new) and rewrite host chat bodies to the state
+      // vector + live user turn. The OpenMausBot UI transcript stays whole.
+      let outgoing = resolveOutgoingTurn({
+        compacted: false,
+        summary: "",
+        userText: userPrompt,
+        turnText,
+        resumeCursor: initialResumeCursor,
+        transcript,
+      });
+      const priorRewrite = hostProxy.get(threadId);
+      if (compactThisTurn) {
+        if (microVectorsEnabled(cfg)) {
+          await awaitPendingNotebookUpdate(bot.id, threadId);
+        }
+        const microLedger =
+          microVectorsEnabled(cfg)
+            ? readTaskNotebook(bot.id, threadId, { maxChars: NOTEBOOK_STACK_READ_CHARS })
+            : "";
+        const lastAssistantText =
+          [...transcript].reverse().find((turn) => turn.role === "assistant")?.text ?? "";
+        const result = await compactSession({
+          transcript: facing.lastCompaction
+            ? [{ role: "assistant", text: facing.lastCompaction.summary }, ...transcript]
+            : transcript,
+          previousSummary: facing.lastCompaction?.summary,
+          userText: userPrompt,
+          extractionPrompt: store.bot(bot.id)?.compactionPrompt?.trim() || vectorPrompt(cfg) || undefined,
+          maxTokens: vectorBudget(ceiling.tokens, vectorBudgetTokens(cfg)),
+          modelId: model,
+          generateText: instance.generateText ? (prompt) => instance.generateText!(prompt) : undefined,
+          workspaceDir: workspaceDir(bot.id),
+          workspaceDirs: collectCompactSeedDirs({
+            privateWorkspace: workspaceDir(bot.id),
+            taskCwd: task.cwd,
+            botCwd: bot.cwd,
+            instructions: bot.description,
+          }),
+          workingCwd: existingDirectory(task.cwd) ?? existingDirectory(bot.cwd),
+          ...(microLedger ? { microLedger } : {}),
+          ...(lastAssistantText ? { lastAssistantText } : {}),
+        });
+        if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+          throw new DirectTurnSetupCancelled("turn stopped during compaction");
+        }
+        store.insertMessageAfter(threadId, userMessage.parentId ?? undefined, {
+          role: "bot",
+          kind: "compaction",
+          text: result.summary,
+          compaction: {
+            summary: result.summary,
+            firstKeptId: userMessage.id,
+            tokensBefore: fill,
+          },
+        });
+        store.setSessionPromptTokens(bot.id, threadId, estimateTokens(result.summary) + estimateTokens(clipCompactUserText(userPrompt)));
+        store.setLastReportedPromptTokens(bot.id, threadId, 0);
+        store.setIgnoreReportedPromptFill(bot.id, threadId, true);
+        if (keepVectorsEnabled(cfg)) {
+          archiveStateVector({
+            summary: result.summary,
+            fallbackDir: workspaceDir(bot.id),
+            customDir: vectorArchiveDir(cfg),
+            botLabel: bot.name || bot.id,
+          });
+        }
+        if (microVectorsEnabled(cfg)) {
+          markMicroCompacted({ botId: bot.id, threadId });
+          // Archive live stack → notebooks/session-NNN.md; seed live notebook.md with V.
+          archiveAndSeedNotebook({
+            botId: bot.id,
+            threadId,
+            seedText: result.summary,
+            userText: userPrompt,
+            taskTitle: task.title,
+          });
+        }
+        bindLocalHostRewrite({ threadId, modelId: model, vector: result.summary, userText: userPrompt });
+        await hostProxy.ensureListening();
+        // Drop the native session so the next sendTurn starts fresh with the
+        // vector (Claude/Codex/ACP) — Compact around is a hard backend reset.
+        store.clearResumeCursor(bot.id, instanceId, threadId);
+        outgoing = resolveOutgoingTurn({
+          compacted: true,
+          summary: result.summary,
+          userText: userPrompt,
+          turnText,
+          resumeCursor: undefined,
+          transcript,
+        });
+      } else if (compactionEnabled(cfg) && priorRewrite?.vector) {
+        bindLocalHostRewrite({
+          threadId,
+          modelId: model,
+          vector: priorRewrite.vector,
+          // Keep the compact-turn needle. Moving it to this prompt would
+          // drop post-refresh chat (the model forgets what it just said).
+          userText: priorRewrite.userText || userPrompt,
+        });
+        await hostProxy.ensureListening();
+      }
+      const midTaskContinuity =
+        compactThisTurn || Boolean(hostProxy.get(threadId)?.vector);
       watchdog.watch(threadId, bot.id);
       const computerPromptKind: ComputerPromptKind | null =
         computerKind === "vm"
@@ -5115,7 +5372,7 @@ async function startTurn(
       ]);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
-        text: turnText,
+        text: outgoing.text,
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0),
         model,
@@ -5123,10 +5380,10 @@ async function startTurn(
         // a rewound thread never resumes the abandoned branch's session
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
-        resumeCursor,
-        ...(recoveryText !== undefined ? { recoveryText } : {}),
-        transcript,
-        system: prompt.text,
+        resumeCursor: outgoing.resumeCursor,
+        ...(!compactThisTurn && recoveryText !== undefined ? { recoveryText } : {}),
+        transcript: outgoing.transcript,
+        system: midTaskContinuity ? appendMidTaskContinuitySystem(prompt.text) : prompt.text,
         systemStable: prompt.stable,
         systemVolatile: prompt.volatile,
         integrations,
@@ -8177,6 +8434,16 @@ function configStatus() {
     language: cfg.language ?? "",
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
     threads: { maxConcurrentPerBot: maxConcurrentBotThreads(cfg) },
+    compaction: {
+      enabled: compactionEnabled(cfg),
+      compactAround: compactAroundTokens(cfg),
+      vectorBudget: vectorBudgetTokens(cfg),
+      prompt: vectorPrompt(cfg),
+      keepVectors: keepVectorsEnabled(cfg),
+      microVectorsEnabled: microVectorsEnabled(cfg),
+      vectorArchiveDir: vectorArchiveDir(cfg),
+      envOverride: envCeilingOverride() ?? null,
+    },
     localVm: {
       mode: localVmMode(cfg),
       maxInstances: localVmMaxInstances(cfg),
@@ -10713,6 +10980,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ? msg.via === "api" ? `${userName} (via the local API)` : userName
           : (msg.from?.name ?? bot?.name ?? "Bot");
         if (msg.kind === "text" && msg.text) lines.push(`**${who}:**`, "", msg.text, "");
+        else if (msg.kind === "compaction") {
+          lines.push("> Context refreshed — earlier messages are still in this thread.", "");
+          if (msg.compaction?.summary || msg.text) {
+            lines.push("```", (msg.compaction?.summary || msg.text || "").trim(), "```", "");
+          }
+        }
         else if (msg.kind === "activity" && msg.tool) lines.push(`> ${msg.tool.name}`, "");
         else if (msg.kind === "screen") lines.push("> [screen capture]", "");
         else if (msg.kind === "options" && msg.card) {
@@ -14260,8 +14533,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       }
       // Provider keys change the fleet. Profile, language, voice, VPS, room
-      // timeout, and onboarding progress changes do not rebuild it: no driver
-      // reads them, and they should not interrupt in-flight turns.
+      // timeout, Compact around, and onboarding progress changes do not rebuild it:
+      // no driver reads them, and they should not interrupt in-flight turns.
       const reloadKeys = providerReloadKeys(patch);
       // Config is already durable. A provider credential or runtime change
       // invalidates every old child immediately, including when browser
@@ -14819,6 +15092,7 @@ const gracefulShutdown = createGracefulShutdown({
       for (const idle of localVmIdles.values()) idle.cancel();
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
+      void hostProxy.close();
       routines?.stop();
       calendarCalls?.stop();
       webhookIngress?.server.close();

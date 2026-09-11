@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { hostProxy } from "../../context-host-proxy.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -105,6 +106,7 @@ function envKeyFor(hostId: string): string {
 export function ensureQwenInjectModel(
   modelId: string,
   env: Record<string, string | undefined> = process.env,
+  route?: { baseUrl: string; apiKey: string },
 ): string {
   const inject = decodeInjectId(modelId);
   if (!inject) return modelId;
@@ -123,7 +125,8 @@ export function ensureQwenInjectModel(
     }
   }
   const keyName = envKeyFor(inject.host);
-  const key = hostApiKey(host, env);
+  const key = route?.apiKey ?? hostApiKey(host, env);
+  const baseUrl = route?.baseUrl ?? host.baseUrl;
   const envMap =
     settings.env && typeof settings.env === "object" && !Array.isArray(settings.env)
       ? { ...(settings.env as Record<string, unknown>) }
@@ -141,13 +144,17 @@ export function ensureQwenInjectModel(
       row &&
       typeof row === "object" &&
       (row as { id?: unknown }).id === inject.model &&
-      (row as { baseUrl?: unknown }).baseUrl === host.baseUrl,
+      (route || (row as { baseUrl?: unknown }).baseUrl === host.baseUrl),
   );
-  if (!match) {
+  if (match && route) {
+    (match as { baseUrl: string }).baseUrl = baseUrl;
+    envMap[keyName] = key;
+    settings.env = envMap;
+  } else if (!match) {
     openai.push({
       id: inject.model,
       name: `${inject.model} (${host.label})`,
-      baseUrl: host.baseUrl,
+      baseUrl,
       envKey: keyName,
     });
     providers.openai = openai;
@@ -206,6 +213,12 @@ const support: AcpSupport = {
   models: EMPTY,
   resolveModels,
   resolveTurnModel: resolveQwenTurnModel,
+  applyTurnEnv: (env, { requestedModel, threadId }) => {
+    const route = threadId ? hostProxy.routeFor(threadId) : null;
+    if (route && requestedModel) {
+      ensureQwenInjectModel(requestedModel, env, { baseUrl: route.baseUrl, apiKey: route.authorization });
+    }
+  },
   defaultCli: "qwen",
   nativeSource: "qwen.acp",
   loginNote: "Qwen Code CLI is not installed",

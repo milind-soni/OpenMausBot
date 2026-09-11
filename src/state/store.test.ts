@@ -697,6 +697,7 @@ describe("config status frames", () => {
         vps: { configured: true, sshAlias: "homelab" },
         rooms: { turnTimeoutMinutes: 20 },
         threads: { maxConcurrentPerBot: 10 },
+        compaction: { enabled: true, compactAround: 128_000, vectorBudget: null, prompt: null, keepVectors: false, microVectorsEnabled: false, vectorArchiveDir: null, envOverride: null },
         localVm: { mode: "per-bot", maxInstances: 3 },
         opencodeGo: { configured: true },
         tts: { configured: true, ready: true, voice: "Ada" },
@@ -710,6 +711,7 @@ describe("config status frames", () => {
       vps: { configured: true, sshAlias: "homelab" },
       rooms: { turnTimeoutMinutes: 20 },
       threads: { maxConcurrentPerBot: 10 },
+      compaction: { enabled: true, compactAround: 128_000, vectorBudget: null, prompt: null, keepVectors: false, microVectorsEnabled: false, vectorArchiveDir: null, envOverride: null },
       localVm: { mode: "per-bot", maxInstances: 3 },
       opencodeGo: { configured: true },
       tts: { configured: true, ready: true, voice: "Ada" },
@@ -776,6 +778,7 @@ describe("config status", () => {
     box: { configured: false },
     vps: { configured: false, sshAlias: "" },
     rooms: { turnTimeoutMinutes: 5 },
+    compaction: { enabled: true, compactAround: null, vectorBudget: null, prompt: null, keepVectors: false, microVectorsEnabled: false, vectorArchiveDir: null, envOverride: null },
     localVm: { mode: "shared", maxInstances: 2 },
     features: { skillAuthoring: true },
   });

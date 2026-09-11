@@ -7,8 +7,16 @@ import { join } from "node:path";
 import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
+import {
+  COMPACT_AROUND_PRESETS,
+  isCompactAroundPreset,
+  isVectorBudgetPreset,
+  VECTOR_BUDGET_PRESETS,
+  VECTOR_PROMPT_MAX,
+} from "../shared/compact-around.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { EFFORT_LEVELS, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
+import { isUsableArchiveDir } from "./vector-archive.ts";
 import { parseStoredMcpServer } from "./mcp-registry.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
 
@@ -56,6 +64,36 @@ const roomConfigSchema = z.object({
     .int()
     .min(MIN_ROOM_TURN_TIMEOUT_MINUTES)
     .max(MAX_ROOM_TURN_TIMEOUT_MINUTES),
+});
+const compactAroundSchema = z
+  .number()
+  .int()
+  .refine((value) => isCompactAroundPreset(value), {
+    message: `must be one of ${COMPACT_AROUND_PRESETS.join(", ")}`,
+  });
+const vectorBudgetSchema = z
+  .number()
+  .int()
+  .refine((value) => isVectorBudgetPreset(value), {
+    message: `must be one of ${VECTOR_BUDGET_PRESETS.join(", ")}`,
+  });
+const compactionConfigSchema = z.object({
+  /** Explicit Off for the whole Keep chatting card. Absent/true = on (Auto/presets). */
+  enabled: z.boolean().optional(),
+  compactAround: compactAroundSchema.nullable().optional(),
+  vectorBudget: vectorBudgetSchema.nullable().optional(),
+  prompt: z.string().max(VECTOR_PROMPT_MAX).nullable().optional(),
+  keepVectors: z.boolean().optional(),
+  /** Opt-in per-turn micro notes under each bot/task. Absent/false = off. */
+  microVectorsEnabled: z.boolean().optional(),
+  vectorArchiveDir: z
+    .string()
+    .max(1024)
+    .nullable()
+    .optional()
+    .refine((value) => value == null || value.trim() === "" || isUsableArchiveDir(value), {
+      message: "must be an absolute folder outside system locations",
+    }),
 });
 const localVmConfigSchema = z.object({
   mode: z.enum(["shared", "per-bot"]).optional(),
@@ -338,6 +376,7 @@ const appConfigSchema = z.object({
   language: optionalText,
   rooms: roomConfigSchema.optional(),
   threads: z.object({ maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS) }).strict().optional(),
+  compaction: compactionConfigSchema.optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -382,6 +421,20 @@ export interface AppConfig {
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
   threads?: { maxConcurrentPerBot: number };
+  /** Compact around ceiling, vector page size, rewrite prompt, and optional
+   * recap archive. `enabled: false` turns the whole Keep chatting card Off.
+   * Absent/true = on. `null`/absent compactAround = Auto. `null` prompt = house
+   * one-pager. `null` vectorArchiveDir = each bot's private state-vectors folder. */
+  compaction?: {
+    enabled?: boolean;
+    compactAround?: number | null;
+    vectorBudget?: number | null;
+    prompt?: string | null;
+    keepVectors?: boolean;
+    /** Opt-in running notebook between compact cycles. Absent/false = off. */
+    microVectorsEnabled?: boolean;
+    vectorArchiveDir?: string | null;
+  };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -510,6 +563,44 @@ export function maxConcurrentBotThreads(cfg: AppConfig): number {
   return cfg.threads?.maxConcurrentPerBot ?? DEFAULT_MAX_CONCURRENT_BOT_THREADS;
 }
 
+/** False when Settings → Keep chatting is Off. Absent/true keeps current Auto/presets. */
+export function compactionEnabled(cfg: AppConfig): boolean {
+  return cfg.compaction?.enabled !== false;
+}
+
+/** Compact around preset, or null for Auto. */
+export function compactAroundTokens(cfg: AppConfig): number | null {
+  const value = cfg.compaction?.compactAround;
+  return typeof value === "number" && isCompactAroundPreset(value) ? value : null;
+}
+
+/** Vector page size preset, or null for Auto (15% of compact ceiling, cap 6k). */
+export function vectorBudgetTokens(cfg: AppConfig): number | null {
+  const value = cfg.compaction?.vectorBudget;
+  return typeof value === "number" && isVectorBudgetPreset(value) ? value : null;
+}
+
+/** Custom rewrite prompt, or null to use the house one-pager. */
+export function vectorPrompt(cfg: AppConfig): string | null {
+  const value = cfg.compaction?.prompt?.trim();
+  return value ? value : null;
+}
+
+export function keepVectorsEnabled(cfg: AppConfig): boolean {
+  return cfg.compaction?.keepVectors === true;
+}
+
+/** Opt-in micro state vectors (per-task notebook). Absent/false = off. */
+export function microVectorsEnabled(cfg: AppConfig): boolean {
+  return cfg.compaction?.microVectorsEnabled === true;
+}
+
+/** Custom archive folder, or null to use each bot's private state-vectors dir. */
+export function vectorArchiveDir(cfg: AppConfig): string | null {
+  const value = cfg.compaction?.vectorArchiveDir?.trim();
+  return value && isUsableArchiveDir(value) ? value : null;
+}
+
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {
   return cfg.localVm?.mode ?? DEFAULT_LOCAL_VM_MODE;
 }
@@ -547,6 +638,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "vps",
   "rooms",
   "threads",
+  "compaction",
   "localVm",
   "features",
   "browserProfiles",
@@ -759,7 +851,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
+  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "compaction", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

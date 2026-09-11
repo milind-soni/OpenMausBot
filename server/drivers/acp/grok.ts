@@ -8,6 +8,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { hostProxy } from "../../context-host-proxy.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -112,10 +113,30 @@ function quoteToml(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+function patchGrokModelRoute(text: string, slug: string, baseUrl: string, apiKey: string): string {
+  const headings = [`[model.${slug}]`, `[model."${slug}"]`];
+  const lines = text.split("\n");
+  let inBlock = false;
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = lines[i]!.trim();
+    if (stripped.startsWith("[") && stripped.endsWith("]")) {
+      inBlock = headings.includes(stripped);
+      continue;
+    }
+    if (!inBlock || !stripped.includes("=")) continue;
+    const eq = stripped.indexOf("=");
+    const key = stripped.slice(0, eq).trim();
+    if (key === "base_url") lines[i] = `base_url = ${quoteToml(baseUrl)}`;
+    if (key === "api_key") lines[i] = `api_key = ${quoteToml(apiKey)}`;
+  }
+  return lines.join("\n");
+}
+
 /** Write a [model.slug] block so `grok -m` can reach the injected host. */
 export function ensureGrokInjectSlug(
   modelId: string,
   env: Record<string, string | undefined> = process.env,
+  route?: { baseUrl: string; apiKey: string },
 ): string {
   const inject = decodeInjectId(modelId);
   if (!inject) return modelId;
@@ -135,7 +156,7 @@ export function ensureGrokInjectSlug(
   const flush = () => {
     if (!current) return;
     taken.add(current.slug);
-    if (current.model === inject.model && current.baseUrl === host.baseUrl) {
+    if (current.model === inject.model && (route || current.baseUrl === host.baseUrl)) {
       found = current.slug;
     }
     current = null;
@@ -162,17 +183,22 @@ export function ensureGrokInjectSlug(
     if (key === "base_url") current.baseUrl = value;
   }
   flush();
-  if (found) return found;
+  const baseUrl = route?.baseUrl ?? host.baseUrl;
+  const apiKey = route?.apiKey ?? hostApiKey(host, env);
+  if (found) {
+    if (route) writeFileSync(path, patchGrokModelRoute(text, found, baseUrl, apiKey));
+    return found;
+  }
 
   const slug = suggestGrokSlug(inject.host, inject.model, taken);
   const heading = /[^a-z0-9_-]/i.test(slug) ? `[model."${slug}"]` : `[model.${slug}]`;
   const block = [
     heading,
     `model = ${quoteToml(inject.model)}`,
-    `base_url = ${quoteToml(host.baseUrl)}`,
+    `base_url = ${quoteToml(baseUrl)}`,
     `name = ${quoteToml(`${inject.model} (${host.label})`)}`,
     `api_backend = "chat_completions"`,
-    `api_key = ${quoteToml(hostApiKey(host, env))}`,
+    `api_key = ${quoteToml(apiKey)}`,
     "",
   ].join("\n");
   const next = text && !text.endsWith("\n") ? `${text}\n\n${block}` : `${text}${text ? "\n" : ""}${block}`;
@@ -262,6 +288,14 @@ const support: AcpSupport = {
   // billing from the subscription to pay-as-you-go.
   transformEnv: (env) => {
     delete env.XAI_API_KEY;
+  },
+  applyTurnEnv: (env, { requestedModel, threadId }) => {
+    if (!requestedModel || !threadId) return;
+    const route = hostProxy.routeFor(threadId);
+    if (!route) return;
+    env.OPENAI_BASE_URL = route.baseUrl;
+    env.OPENAI_API_KEY = route.authorization;
+    ensureGrokInjectSlug(requestedModel, env, { baseUrl: route.baseUrl, apiKey: route.authorization });
   },
 
   // Bind the grok.com subscription login. No API-key fallback by design —
