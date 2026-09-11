@@ -8936,7 +8936,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           from: { botId: from.id, name: from.name, color: from.color },
           tool: { name: `Closed by @${from.name}`, ok: true },
         });
-        if (task.unread) store.patchTask(owner.id, threadId, { unread: false });
+        store.patchTask(owner.id, threadId, { unread: false, closed: true });
         return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
       }
       if (method === "GET" && path === "/api/internal/rooms") {
