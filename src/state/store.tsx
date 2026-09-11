@@ -245,6 +245,8 @@ export interface Task {
   activity?: Bot["activity"];
   busy?: boolean;
   unread?: boolean;
+  /** A bot marked this finished; keep the transcript but hide it from history lists. */
+  closed?: boolean;
   pinnedMessageId?: string;
   /** set when a bot (not the person) started this thread — its own or a
    * teammate's; the sidebar shows a quiet "opened by <name>" under the title */
