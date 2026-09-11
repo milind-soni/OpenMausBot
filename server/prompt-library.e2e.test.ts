@@ -21,6 +21,11 @@ it("serves the built-in prompt catalog and rejects bad import sources", async ()
     expect(catalog.presets.map((p: { id: string }) => p.id)).toEqual(
       [...new Set(catalog.presets.map((p: { id: string }) => p.id))],
     );
+    expect(catalog.collections.length).toBeGreaterThanOrEqual(8);
+    for (const collection of catalog.collections) {
+      expect(collection.label).toBeTruthy();
+      expect(collection.source).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/tree\//);
+    }
     await expect(request("/api/prompt-library/not%20a%20github%20url", {}, url)).rejects.toThrow();
   } finally {
     await fixture.close();

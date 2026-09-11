@@ -16,6 +16,11 @@ interface Preset {
   source: string;
 }
 
+interface Collection {
+  label: string;
+  source: string;
+}
+
 /** Built-ins first, imported after; duplicate ids are skipped (first wins),
  * and the total stays bounded so a hostile import cannot flood the panel. */
 export function mergePresets(builtIns: Preset[], imported: Preset[]): Preset[] {
@@ -98,23 +103,29 @@ export function PromptLibrary({ hasExisting, onApply }: { hasExisting: boolean; 
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
+  const [collections, setCollections] = useState<Collection[] | null>(null);
 
   useEffect(() => {
     if (!open || presets || loading) return;
     setLoading(true);
     api("/api/prompt-library")
-      .then((data: { presets: Preset[] }) => setPresets(data.presets))
+      .then((data: { presets: Preset[]; collections?: Collection[] }) => {
+        setPresets(data.presets);
+        setCollections(data.collections ?? null);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
   }, [open, presets, loading]);
 
-  const importFromGitHub = async () => {
-    if (importing || !source.trim()) return;
+  const importFromGitHub = async (raw?: string) => {
+    const requested = (raw ?? source).trim();
+    if (importing || !requested) return;
+    setSource(requested);
     setImporting(true);
     setError(null);
     setNotice(null);
     try {
-      const data = (await api(`/api/prompt-library/${encodeURIComponent(source.trim())}`)) as {
+      const data = (await api(`/api/prompt-library/${encodeURIComponent(requested)}`)) as {
         presets: Preset[];
         errors: string[];
       };
@@ -169,8 +180,26 @@ export function PromptLibrary({ hasExisting, onApply }: { hasExisting: boolean; 
           {preview && presets && (
             <PresetPreview preset={preview} hasExisting={hasExisting} onApply={onApply} onClose={() => setPreviewId(null)} />
           )}
+          {collections && collections.length > 0 && (
+            <div className="mt-3 border-t border-hairline/40 pt-2">
+              <div className="text-[11.5px] text-ink-secondary">Import a whole collection in one click:</div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {collections.map((collection) => (
+                  <button
+                    key={collection.source}
+                    type="button"
+                    disabled={importing}
+                    onClick={() => void importFromGitHub(collection.source)}
+                    className="rounded-full border border-hairline/60 bg-inset px-2.5 py-1 text-[11px] font-medium text-accent-text hover:bg-accent/10 disabled:opacity-50"
+                  >
+                    {collection.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="mt-3 border-t border-hairline/40 pt-2">
-            <div className="text-[11.5px] text-ink-secondary">Import markdown prompts from a GitHub repo or file:</div>
+            <div className="text-[11.5px] text-ink-secondary">Or import markdown prompts from any GitHub repo or file:</div>
             <div className="mt-1.5 flex gap-2">
               <input
                 value={source}

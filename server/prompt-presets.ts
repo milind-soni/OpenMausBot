@@ -121,6 +121,28 @@ export const BUILT_IN_PRESETS: PromptPreset[] = [
 
 const underCap = (text: string): boolean => Buffer.byteLength(text, "utf8") <= PROMPT_PRESET_MAX_BYTES;
 
+/** One-click collections: vendor folders from the community prompt
+ * collection (asgeirtj/system_prompts_leaks). Sources are full tree URLs so
+ * parsePromptSource validates them by the same grammar as a pasted link —
+ * any fork of that repo works identically by pasting its path. Imports cap
+ * at the first 30 markdown files per folder, so oversized folders stay
+ * bounded rather than failing. */
+export const PROMPT_COLLECTION_SOURCE = "https://github.com/asgeirtj/system_prompts_leaks";
+export const PROMPT_COLLECTIONS: Array<{ label: string; source: string }> = [
+  { label: "Anthropic", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Anthropic` },
+  { label: "Claude Code agents", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Anthropic/claude-code/agents` },
+  { label: "Claude Code commands", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Anthropic/claude-code/commands` },
+  { label: "Google · Gemini", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Google` },
+  { label: "Grok · xAI", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/xAI` },
+  { label: "OpenAI", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/OpenAI` },
+  { label: "OpenAI · Codex", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/OpenAI/Codex` },
+  { label: "Misc", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Misc` },
+  { label: "Cursor", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Cursor` },
+  { label: "Kimi", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Kimi` },
+  { label: "DeepSeek", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/DeepSeek` },
+  { label: "GLM", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/GLM` },
+];
+
 /** Wire shape for the catalog endpoint. Accepts built-ins and imported
  * prompts, normalizing both sources to a string. */
 export function presetWire(preset: PromptPreset | ImportedPrompt): { id: string; label: string; description: string; text: string; source: string } {

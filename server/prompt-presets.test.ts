@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BUILT_IN_PRESETS,
+  PROMPT_COLLECTIONS,
   PROMPT_PRESET_MAX_BYTES,
   fetchPromptsFromSource,
   labelFromMarkdown,
@@ -34,6 +35,18 @@ describe("built-in presets", () => {
     const wired = presetWire({ id: "x", label: "X", description: "d", text: "t", source: { url: "https://raw.githubusercontent.com/a/b/main/p.md" } });
     expect(wired.source).toBe("https://raw.githubusercontent.com/a/b/main/p.md");
     expect(presetWire(BUILT_IN_PRESETS[0]!).source).toBe("built-in");
+  });
+
+  it("collections all parse as GitHub tree sources, by the same grammar as a pasted link", () => {
+    expect(PROMPT_COLLECTIONS.length).toBeGreaterThanOrEqual(8);
+    for (const collection of PROMPT_COLLECTIONS) {
+      expect(collection.label.length).toBeGreaterThan(0);
+      const parsed = parsePromptSource(collection.source);
+      expect(parsed).not.toHaveProperty("error");
+      expect((parsed as { owner: string }).owner).toBe("asgeirtj");
+      expect((parsed as { repo: string }).repo).toBe("system_prompts_leaks");
+      expect((parsed as { path: string }).path.length).toBeGreaterThan(0);
+    }
   });
 });
 
