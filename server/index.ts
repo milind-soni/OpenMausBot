@@ -177,7 +177,7 @@ import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.t
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -4118,6 +4118,16 @@ function drainThreadDelegations(threadId: string): void {
   const routineRunId = activeRoutineRunForThread(threadId)?.id;
   drainDelegations(commsBus, approvalBus, threadId, runDelegatedTurn,
     (receipt) => wakeUndispatchedDelegation(receipt, routineRunId));
+}
+
+// Queued handoffs expire DELEGATION_TTL_MS after they were queued. A drain
+// expires what it touches; this sweep covers a handoff nothing drains — a
+// target that never settles while its source sits idle — and wakes each
+// delegator the same way a drain-time failure does.
+const DELEGATION_SWEEP_MS = 60 * 60 * 1000;
+function expireDelegationsNow(): void {
+  expireStaleDelegations(commsBus, Date.now(), (receipt) =>
+    wakeUndispatchedDelegation(receipt, activeRoutineRunForThread(receipt.sourceThreadId)?.id));
 }
 
 // Most waiting handoffs retry from a target's turn.completed event. Some
@@ -9278,8 +9288,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // A busy peer used to be a flat bounce ("try again later") — a
         // dead-end mid-turn that models rarely retry, so the exchange just
         // evaporated. Demote the synchronous ask into a durable handoff
-        // instead: the message waits in the delegation ledger (bounded busy
-        // retries, receipts, restart-safe) and the asker gets a task id it
+        // instead: the message waits in the delegation ledger (up to 24
+        // hours, receipts, restart-safe) and the asker gets a task id it
         // can check next turn. If the ledger refuses (cap/depth), fall back
         // to the plain busy bounce rather than dropping the refusal reason.
         const queueBusyFallback = (approvalAlreadyGranted = false) => {
@@ -9441,9 +9451,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 recentActivity: recent,
               });
             }
+            const queuedTarget = store.bot(toBotId);
             return json(res, 200, {
               status: "queued",
-              toBotName: store.bot(toBotId)?.name ?? toBotId,
+              toBotName: queuedTarget?.name ?? toBotId,
+              ...(stillQueued
+                ? {
+                  targetStatus: peerStatus(queuedTarget?.activity, queuedTarget?.busy),
+                  expiresInMs: Math.max(0, stillQueued.queuedAt + DELEGATION_TTL_MS - Date.now()),
+                }
+                : {}),
             });
           }
           await new Promise((wake) => setTimeout(wake, 500));
@@ -14795,6 +14812,10 @@ server.listen(PORT, "127.0.0.1", () => {
     if (run && !["running", "waiting"].includes(run.status) && !reused) discardDelegations(commsBus, threadId);
     else drainThreadDelegations(threadId);
   }
+  // After the boot drain, not before it: that drain already expires stale
+  // leftovers, and a sweep ahead of it would wake delegators of stopped
+  // routine runs whose handoffs the loop above discards instead.
+  setInterval(expireDelegationsNow, DELEGATION_SWEEP_MS).unref();
 });
 
 // A second listener for `openmausbot serve --tunnel` (server/tunnel.ts): the

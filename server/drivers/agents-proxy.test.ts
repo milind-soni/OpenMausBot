@@ -838,6 +838,23 @@ describe("agents-proxy MCP surface", () => {
     delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
   });
 
+  it("check_delegation explains a queued handoff: who it is waiting on, and when it expires", async () => {
+    delegationStatusResponse = {
+      status: "queued",
+      toBotName: "Helper",
+      targetStatus: "waiting-on-user",
+      expiresInMs: 5 * 3_600_000 - 1,
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).toContain("still queued");
+      expect(text).toContain("@Helper is waiting on the user, so it goes through after they answer.");
+      expect(text).toContain("It expires if not picked up within 5 hours.");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+  });
+
   it("memory_update forwards only the configured owner and thread with its capability token", async () => {
     const result = await callTool("memory_update", {
       action: "replace", text: "- New preference", old_text: "- Old preference",
