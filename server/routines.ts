@@ -1128,10 +1128,7 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
-  /** Queue an event-driven job without inventing a calendar schedule. Webhook
-   * definitions live in their own store; the execution receipt deliberately
-   * reuses this manager so busy-bot ordering, task creation and VM routing stay
-   * identical for every unattended job. */
+  /** Look up an accepted delivery independently of run-log retention. */
   webhookRunReceipt(webhookId: string, deliveryId: string): { id: string } | null {
     const receipt = this.webhookRunReceipts.find((candidate) =>
       candidate.webhookId === webhookId && candidate.deliveryId === deliveryId &&
@@ -1143,6 +1140,7 @@ export class RoutineManager {
     return active ? { id: active.id } : null;
   }
 
+  /** Queue webhook work through the same dispatcher as scheduled routines. */
   enqueueWebhook(input: {
     webhookId: string;
     webhookName: string;
@@ -1174,18 +1172,24 @@ export class RoutineManager {
       attachments: [],
       createdAt: this.now(),
     };
-    this.commitMutation(() => {
-      this.webhookRunReceipts = this.webhookRunReceipts.filter((receipt) =>
-        receipt.acceptedAt >= this.now() - WEBHOOK_RETRY_WINDOW_MS);
-      // Never evict a promised retry identity to admit fresh work.
-      if (this.webhookRunReceipts.length >= MAX_WEBHOOK_RECEIPTS) {
-        throw Object.assign(new Error("Webhook retry history is full; try again later"), { status: 429 });
-      }
-      this.runs.push(run);
-      this.webhookRunReceipts.push({
-        webhookId: input.webhookId, deliveryId: input.deliveryId, runId: run.id, acceptedAt: this.now(),
-      });
-    });
+    const previousReceipts = this.webhookRunReceipts;
+    const receipts = previousReceipts.filter((receipt) =>
+      receipt.acceptedAt >= this.now() - WEBHOOK_RETRY_WINDOW_MS);
+    // Never evict a promised retry identity to admit fresh work.
+    if (receipts.length >= MAX_WEBHOOK_RECEIPTS) {
+      throw Object.assign(new Error("Webhook retry history is full; try again later"), { status: 429 });
+    }
+    receipts.push({ webhookId: input.webhookId, deliveryId: input.deliveryId, runId: run.id, acceptedAt: this.now() });
+    this.runs.push(run);
+    this.webhookRunReceipts = receipts;
+    try { this.save(); }
+    catch (error) {
+      // tick() may be awaiting a provider with references to other runs. Undo
+      // only this synchronous append, not those live objects or their array.
+      this.runs.splice(this.runs.indexOf(run), 1);
+      this.webhookRunReceipts = previousReceipts;
+      throw error;
+    }
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
     return cloneRun(run);
@@ -1733,7 +1737,6 @@ export class RoutineManager {
       routines: this.routines.map(cloneRoutine),
       runs: this.runs.map(cloneRun),
       receipts: this.routineRequestReceipts.map((receipt) => ({ ...receipt })),
-      webhookReceipts: this.webhookRunReceipts.map((receipt) => ({ ...receipt })),
     };
     try {
       mutate();
@@ -1742,7 +1745,6 @@ export class RoutineManager {
       this.routines = before.routines;
       this.runs = before.runs;
       this.routineRequestReceipts = before.receipts;
-      this.webhookRunReceipts = before.webhookReceipts;
       try {
         rollback?.();
       } catch (cleanupError) {

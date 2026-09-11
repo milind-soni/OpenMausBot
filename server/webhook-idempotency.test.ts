@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { RoutineManager } from "./routines.ts";
 import { WebhookManager } from "./webhooks.ts";
 
@@ -21,7 +21,7 @@ function harness() {
   };
   return { dir, options, manager: new RoutineManager(options), advance: (ms: number) => { now += ms; } };
 }
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => { vi.restoreAllMocks(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 it("recovers the canonical job when saving the ingress receipt failed, even with a full queue", () => {
   const h = harness();
@@ -100,4 +100,37 @@ it("refuses fresh work instead of evicting unexpired retry identities at capacit
   expect(reloaded.enqueueWebhook({ ...input, deliveryId: "event-0" })).toEqual({ id: "run-0" });
   expect(() => reloaded.enqueueWebhook(input)).toThrow("retry history is full");
   expect(reloaded.listRuns()).toEqual([]);
+});
+
+it.each(["capacity", "disk"] as const)("a rejected %s admission does not detach the scheduler's live runs", async (failure) => {
+  const h = harness();
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const starts: string[] = [];
+  const manager = new RoutineManager({
+    ...h.options, botState: () => "ready", createTask: (botId) => ({ threadId: `thread-${botId}` }),
+    startTurn: async (botId) => { starts.push(botId); if (botId === "A") await held; },
+  });
+  manager.enqueueWebhook({ ...input, botId: "A", deliveryId: "A" });
+  const second = manager.enqueueWebhook({ ...input, botId: "B", deliveryId: "B" });
+  await Promise.resolve();
+  expect(starts).toEqual(["A"]);
+  const internals = manager as unknown as {
+    webhookRunReceipts: Array<{ webhookId: string; deliveryId: string; runId: string; acceptedAt: number }>;
+    save(): void;
+  };
+  if (failure === "capacity") {
+    internals.webhookRunReceipts = Array.from({ length: 20_000 }, (_, index) => ({
+      webhookId: "hook", deliveryId: `filler-${index}`, runId: `run-${index}`, acceptedAt: Date.now(),
+    }));
+  } else {
+    vi.spyOn(internals, "save").mockImplementationOnce(() => { throw new Error("disk full"); });
+  }
+  expect(() => manager.enqueueWebhook({ ...input, botId: "C", deliveryId: "C" })).toThrow();
+  release();
+  await vi.waitFor(() => expect(starts).toEqual(["A", "B"]));
+  expect(manager.listRuns().find((run) => run.id === second.id)).toMatchObject({ status: "running", threadId: "thread-B" });
+  await manager.tick();
+  expect(starts).toEqual(["A", "B"]);
+  expect(manager.listRuns()).toHaveLength(2);
 });
