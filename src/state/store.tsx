@@ -2039,6 +2039,59 @@ interface StreamState {
 const EMPTY_STREAM: StreamState = { streaming: {}, reasoning: {} };
 const StreamContext = createContext<StreamState>(EMPTY_STREAM);
 
+type PendingDelta = { text: string; reasoning: string };
+
+/** Paint once per frame, but keep draining when a hidden tab pauses rAF.
+ * Flush pending chunks at 64 Ki UTF-16 characters or a 100ms fallback timer.
+ * Accumulated output remains intact and unbounded; this is not a memory cap. */
+export function createStreamDeltaBuffer(onFlush: (entries: Array<[string, PendingDelta]>) => void) {
+  const buffer = new Map<string, PendingDelta>();
+  let frame: number | null = null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let characters = 0;
+  const cancel = () => {
+    if (frame !== null) cancelAnimationFrame(frame);
+    frame = null;
+    clearTimeout(timer);
+    timer = undefined;
+  };
+  const flush = () => {
+    cancel();
+    if (!buffer.size) return;
+    const entries = [...buffer];
+    buffer.clear();
+    characters = 0;
+    onFlush(entries);
+  };
+  return {
+    push(threadId: string, kind: string, delta: string) {
+      if (kind !== "assistant_text" && kind !== "reasoning_text") return;
+      const entry = buffer.get(threadId) ?? { text: "", reasoning: "" };
+      if (kind === "assistant_text") entry.text += delta;
+      else entry.reasoning += delta;
+      buffer.set(threadId, entry);
+      characters += delta.length;
+      if (characters >= 64 * 1024) flush();
+      else if (frame === null) {
+        frame = requestAnimationFrame(flush);
+        timer = setTimeout(flush, 100);
+      }
+    },
+    clear(threadId: string) {
+      const entry = buffer.get(threadId);
+      if (entry) characters -= entry.text.length + entry.reasoning.length;
+      buffer.delete(threadId);
+      if (!buffer.size) cancel();
+    },
+    flush,
+    dispose() {
+      cancel();
+      buffer.clear();
+      characters = 0;
+    },
+  };
+}
+
 export function useStreaming() {
   return useContext(StreamContext);
 }
@@ -2067,8 +2120,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // state is intentionally OUTSIDE the reducer so token frames re-render
   // only StreamContext consumers
   const [stream, setStream] = useState<StreamState>(EMPTY_STREAM);
-  const deltaBuffer = useRef(new Map<string, { text: string; reasoning: string }>());
-  const deltaFlush = useRef<number | null>(null);
+  const deltaBuffer = useMemo(() => createStreamDeltaBuffer((entries) => {
+    setStream((prev) => {
+      const streaming = { ...prev.streaming };
+      const reasoning = { ...prev.reasoning };
+      for (const [threadId, d] of entries) {
+        if (d.text) streaming[threadId] = (streaming[threadId] ?? "") + d.text;
+        if (d.reasoning) reasoning[threadId] = (reasoning[threadId] ?? "") + d.reasoning;
+      }
+      return { streaming, reasoning };
+    });
+  }), []);
+  const flushDeltas = deltaBuffer.flush;
   const clearStream = (threadId: string) => {
     // Drop the thread's un-flushed deltas too: the settled message that
     // triggered this clear already contains them. Without this, the pending
@@ -2077,30 +2140,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // card looks glued to the top), keeps the caret blinking while the bot
     // is actually waiting, and the next block's deltas append onto the
     // duplicated tail instead of starting a fresh bubble.
-    deltaBuffer.current.delete(threadId);
+    deltaBuffer.clear(threadId);
     setStream((prev) => {
       if (!(threadId in prev.streaming) && !(threadId in prev.reasoning)) return prev;
       const { [threadId]: _s, ...streaming } = prev.streaming;
       const { [threadId]: _r, ...reasoning } = prev.reasoning;
-      return { streaming, reasoning };
-    });
-  };
-  const flushDeltas = () => {
-    if (deltaFlush.current !== null) {
-      cancelAnimationFrame(deltaFlush.current);
-      deltaFlush.current = null;
-    }
-    const buf = deltaBuffer.current;
-    if (buf.size === 0) return;
-    const entries = [...buf];
-    buf.clear();
-    setStream((prev) => {
-      const streaming = { ...prev.streaming };
-      const reasoning = { ...prev.reasoning };
-      for (const [threadId, d] of entries) {
-        if (d.text) streaming[threadId] = (streaming[threadId] ?? "") + d.text;
-        if (d.reasoning) reasoning[threadId] = (reasoning[threadId] ?? "") + d.reasoning;
-      }
       return { streaming, reasoning };
     });
   };
@@ -3037,20 +3081,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "runtime": {
           const event = frame.event;
           if (event.type === "content.delta") {
-            // Batch token deltas per animation frame (t3code-style): a fast
-            // stream dispatches once per frame instead of once per token, so
-            // the app tree re-renders at most ~60x/s while streaming.
-            const buf = deltaBuffer.current;
-            const entry = buf.get(event.threadId) ?? { text: "", reasoning: "" };
-            if (event.streamKind === "assistant_text") entry.text += event.delta;
-            else if (event.streamKind === "reasoning_text") entry.reasoning += event.delta;
-            buf.set(event.threadId, entry);
-            if (deltaFlush.current === null) {
-              deltaFlush.current = requestAnimationFrame(() => {
-                deltaFlush.current = null;
-                flushDeltas();
-              });
-            }
+            deltaBuffer.push(event.threadId, event.streamKind, event.delta);
           } else if (event.type === "turn.completed") {
             // flush any buffered tail before clearing so no tokens are lost
             flushDeltas();
@@ -3111,6 +3142,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
     return () => {
       alive = false;
+      deltaBuffer.dispose();
       clearTimeout(hydrationFallback);
       for (const refresh of peripheralRefresh.values()) {
         if (refresh.timer) clearTimeout(refresh.timer);

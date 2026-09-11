@@ -132,6 +132,30 @@ reason otherwise; `OMB_UI_E2E=1` forces the verified download. The `ui-smoke`
 job in `.github/workflows/ci.yml` runs it on Ubuntu 24.04 and uploads the
 screenshot; it is not one of the required checks.
 
+## Paused-frame stream buffering
+
+`scripts/testing/stream-buffer.e2e.test.ts` launches the same isolated server,
+Vite and disposable browser session, mounting the real `StoreProvider` with a
+fixture-only text/reasoning probe. It pauses `requestAnimationFrame`, sends
+through the shared control surface, and holds the fake CLI's final frames
+until both intermediate channels reach the renderer. After settlement it
+asserts exactly one complete reply and empty stream channels, including after
+the fallback timer could fire. This probes state; the current app's active-turn
+tail displays presence rather than partial text/reasoning.
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/stream-buffer.e2e.test.ts
+pnpm exec vitest run src/state/store.test.ts
+```
+
+Only the **pending buffer** is drained: once per frame, after 100ms when timers
+run, or at 64 × 1024 UTF-16 characters (not bytes). The size test also pauses
+timers and proves an oversized chunk is flushed intact. Total accumulated
+output is intentionally unbounded; no output is truncated and this is not a
+hard memory cap. Fully suspended browser execution cannot run either callback.
+The fixture prints a persistent `.stream.json` evidence path after closing its
+browser and server and removing its temporary data.
+
 ## Bot setup and MCP access recipe
 
 `scripts/testing/bot-tools-ui.e2e.test.ts` uses the same full-app launcher and

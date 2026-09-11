@@ -1,7 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   configStatusFromFrame,
+  createStreamDeltaBuffer,
   currentTaskBot,
   initialState,
   loadSnapshotBoundary,
@@ -20,6 +21,57 @@ import {
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { RoutineRun } from "../lib/routines";
+
+describe("stream delta flushing", () => {
+  afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
+  const prepare = () => {
+    vi.useFakeTimers();
+    const frames = new Map<number, FrameRequestCallback>();
+    let next = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { frames.set(++next, callback); return next; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
+    const flushed = vi.fn();
+    return { buffer: createStreamDeltaBuffer(flushed), frames, flushed };
+  };
+
+  it("drains a paused animation frame on the timer without duplication", () => {
+    const { buffer, frames, flushed } = prepare();
+    buffer.push("a", "assistant_text", "hello");
+    buffer.push("a", "assistant_text", " world");
+    buffer.push("b", "reasoning_text", "thinking");
+    expect(flushed).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(100);
+    expect(flushed).toHaveBeenCalledExactlyOnceWith([
+      ["a", { text: "hello world", reasoning: "" }], ["b", { text: "", reasoning: "thinking" }],
+    ]);
+    expect(frames.size).toBe(0);
+    vi.advanceTimersByTime(1_000);
+    expect(flushed).toHaveBeenCalledTimes(1);
+  });
+
+  it("flushes oversized chunks in full even when timers and frames are paused", () => {
+    const { buffer, flushed } = prepare();
+    const text = "🙂".repeat(40_000);
+    buffer.push("a", "assistant_text", text);
+    expect(flushed).toHaveBeenCalledExactlyOnceWith([["a", { text, reasoning: "" }]]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears only the settled task and cancels pending work on disposal", () => {
+    const { buffer, frames, flushed } = prepare();
+    buffer.push("a", "assistant_text", "already in transcript");
+    buffer.push("b", "assistant_text", "still streaming");
+    buffer.clear("a");
+    frames.values().next().value!(0);
+    expect(flushed).toHaveBeenCalledExactlyOnceWith([["b", { text: "still streaming", reasoning: "" }]]);
+    buffer.push("b", "reasoning_text", "unmounted");
+    buffer.dispose();
+    expect(frames.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(1_000);
+    expect(flushed).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("independent bot threads", () => {
   const bot: Bot = {

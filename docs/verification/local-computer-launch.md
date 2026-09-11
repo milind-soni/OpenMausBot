@@ -27,6 +27,21 @@ by this fix. The prompt prefers background window-targeted actions and asks
 before escalating to foreground control; that is guidance, not an OS-level
 background-input guarantee.
 
+## Responsive desktop startup
+
+`pnpm exec vitest run electron/cua-launch.test.mjs` checks the desktop CUA
+startup boundary without native permissions or controlling a real app. Electron
+and the CUA SDK are mocked; every subprocess is redirected to an inert Node
+child in a disposable home. The checks cover responsive asynchronous launch,
+the actual eight-second TERM-ignoring timeout, Stop cancellation, original
+failure details, bounded permission-status output, and cancellation of stalled
+or late embedded startup without publishing over or stopping a replacement.
+The installed SDK receives the startup AbortSignal directly.
+
+The Electron subprocess ratchet permits only the pre-existing cached boot-ID
+read and Linux private-group lookup. Those synchronous ownership checks remain
+outside this narrow change; the active macOS launch/status calls are asynchronous.
+
 Reference: OpenClaw's [macOS host coordinator](https://github.com/openclaw/openclaw/blob/7e1b9a63cf64fa5e77b92a7f77e8fccba7b61812/apps/macos/Sources/OpenClaw/CuaDriverHostCoordinator.swift)
 keeps the daemon owned by the desktop host, and its
 [window action adapter](https://github.com/openclaw/openclaw/blob/7e1b9a63cf64fa5e77b92a7f77e8fccba7b61812/extensions/cua-computer/src/window-actions.ts)
