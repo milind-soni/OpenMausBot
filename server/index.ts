@@ -697,8 +697,6 @@ function revokeAllInternalCapabilities(): void {
 function bindInternalCapabilityToProviderTurn(threadId: string, generation: string, turnId?: string): void {
   if (turnId && !internalGenerationByProviderTurn.bind(threadId, generation, turnId)) {
     revokeInternalCapabilityGeneration(threadId, generation);
-    // This exact provider turn completed before its dispatch ACK arrived.
-    settleDirectFollowup(generation);
   }
 }
 
@@ -707,7 +705,6 @@ function revokeInternalCapabilityForProviderEvent(event: RuntimeEvent): void {
   const owner = internalGenerationByProviderTurn.complete(event.threadId, event.turnId);
   if (!owner) return;
   revokeInternalCapabilityGeneration(owner.threadId, owner.generation);
-  settleDirectFollowup(owner.generation);
 }
 
 /** Resolve a high-entropy bearer to its immutable server-side claims.
@@ -807,12 +804,17 @@ type DirectTurnDispatchClaim = {
 class DirectTurnSetupCancelled extends Error {}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
-const directFollowupSettlers = new Map<string, () => void>();
+// Stop revokes credentials before completion, but the receipt must retain its
+// exact provider-turn owner until that completion or explicit failure cleanup.
+const directFollowupTurns = new ProviderTurnGenerationRegistry();
+const directFollowupSettlers = new Map<string, { threadId: string; settle: () => void }>();
 function settleDirectFollowup(generation: string | undefined): void {
   if (!generation) return;
-  const settle = directFollowupSettlers.get(generation);
+  const pending = directFollowupSettlers.get(generation);
+  if (!pending) return;
   directFollowupSettlers.delete(generation);
-  settle?.();
+  directFollowupTurns.deleteGeneration(pending.threadId, generation);
+  pending.settle();
 }
 // Keep the exact provider/profile settings that own a running conversation.
 // Selecting another thread or changing a default must not retarget its tools.
@@ -2931,6 +2933,10 @@ bus.subscribe((event: RuntimeEvent) => {
   else if (event.type === "turn.completed") {
     watchdog.settle(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);
+    if (event.turnId) {
+      const owner = directFollowupTurns.complete(event.threadId, event.turnId);
+      if (owner) settleDirectFollowup(owner.generation);
+    }
   } else if (event.type !== "session.exited") watchdog.touch(event.threadId);
 });
 
@@ -4814,7 +4820,7 @@ async function startTurn(
   const resourceOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
-  if (opts?.onTurnSettled) directFollowupSettlers.set(dispatchClaimId, opts.onTurnSettled);
+  if (opts?.onTurnSettled) directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts.onTurnSettled });
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" });
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
@@ -5273,6 +5279,11 @@ async function startTurn(
         throw new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
       bindInternalCapabilityToProviderTurn(threadId, dispatchClaimId, dispatch.value.turnId);
+      if (directFollowupSettlers.has(dispatchClaimId) && dispatch.value.turnId &&
+        !directFollowupTurns.bind(threadId, dispatchClaimId, dispatch.value.turnId)) {
+        // This exact queued turn completed before its dispatch ACK arrived.
+        settleDirectFollowup(dispatchClaimId);
+      }
       clearDirectTurnDispatch(threadId, dispatchClaimId);
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchTask(bot.id, threadId, { rewound: false, resumeCursors: {} });

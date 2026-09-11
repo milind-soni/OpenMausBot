@@ -109,6 +109,21 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     writeFileSync(join(dataDir, `${uncertain.threadId}.gate`), "finish first task only");
     await expect.poll(() => prompts(later.threadId).length, { timeout: 15_000 }).toBe(1);
 
+    // Stop revokes provider credentials before the provider reports completion;
+    // it must still retire the already-dispatched queue receipt exactly once.
+    const stopped = (await api("POST", "/api/bots", { name: "Stopped follow-up" }, 201)).bot;
+    const stoppedTask = (await api("POST", `/api/bots/${stopped.id}/tasks`, { title: "Stop this follow-up" }, 201)).task;
+    await api("POST", `/api/bots/${stopped.id}/messages`, { threadId: stopped.threadId, text: "Hold capacity before Stop" }, 202);
+    const stoppedBody = { threadId: stoppedTask.threadId, text: "Stop this dispatched follow-up", sendId: "stopped_bot_send_123456" };
+    const stoppedReceipt = await api("POST", `/api/bots/${stopped.id}/messages`, stoppedBody, 202);
+    expect(stoppedReceipt).toMatchObject({ queued: true, reason: "capacity" });
+    writeFileSync(join(dataDir, `${stopped.threadId}.gate`), "release capacity for the stopped follow-up");
+    await expect.poll(() => prompts(stoppedTask.threadId).length, { timeout: 15_000 }).toBe(1);
+    expect(journal()).toContainEqual({ id: stoppedReceipt.queueId, status: "dispatching" });
+    await api("POST", `/api/bots/${stopped.id}/interrupt`, { threadId: stoppedTask.threadId });
+    await expect.poll(() => journal().some((row) => row.id === stoppedReceipt.queueId), { timeout: 5_000 }).toBe(false);
+    expect((await api("POST", `/api/bots/${stopped.id}/messages`, stoppedBody, 202)).message.queueId).toBe(stoppedReceipt.queueId);
+
     const initial = await api("POST", `/api/groups/${channel.id}/messages`, { text: "Working channel" }, 202);
     const channelBody = { text: "Channel follow-up after restart", threadId: channel.threadId,
       replyToId: initial.message.id, sendId: "durable_channel_send_123456", mode: "chat" };
@@ -125,6 +140,8 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
     await waitForExit(fixture.child, { signal: "SIGKILL" });
     writeFileSync(join(dataDir, "restarted"), "allow restored fake turns to finish");
     await restart();
+    expect((await messages(stoppedTask.threadId)).some((message) => message.queueId === stoppedReceipt.queueId && message.kind === "activity")).toBe(false);
+    expect(prompts(stoppedTask.threadId)).toHaveLength(1);
     await expect.poll(async () => (await messages(bot.threadId)).filter((message) => message.sendId === body.sendId).length, { timeout: 15_000 }).toBe(1);
     const settled = await runControlOmb(["wait", "--bot", bot.id, "--task", bot.threadId, "--url", url]);
     expect(settled).toMatchObject({ status: "settled" });
