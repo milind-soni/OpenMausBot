@@ -20,6 +20,10 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(rows, "0", "", [], true).map((task) => task.threadId)).not.toContain("2");
     expect(visibleSidebarThreads(rows, "0", "thread 2", [], true)).toEqual([]);
   });
+  it("fills the six recent rows with open threads when closed threads appear first", () => {
+    const rows = tasks.map((task) => ({ ...task, closed: task.threadId === "1" || task.threadId === "3" }));
+    expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "2", "4", "5", "6", "7"]);
+  });
   it("keeps queued older threads visible", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));
     expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "9"]);
