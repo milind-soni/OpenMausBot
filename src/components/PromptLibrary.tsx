@@ -1,10 +1,14 @@
 // Prompt library: browse built-in standing-instruction presets, import more
 // from a GitHub repo the user names, preview, and apply to the SOUL draft.
-// Applying goes through the normal SoulField patch path, so the byte cap,
-// history, and drift logic keep single ownership; this component only ever
-// proposes text. A replace of non-empty instructions needs a second click.
+// Several prompts can be combined into one SOUL (each section gets a heading
+// so the bot can tell the rule groups apart); the combined byte size is
+// checked against the SOUL cap before apply is offered. Applying goes
+// through the normal SoulField patch path, so the cap, history, and drift
+// logic keep single ownership; this component only ever proposes text.
+// Replacing non-empty instructions needs a second click.
 import { useEffect, useState } from "react";
 
+import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { utf8Bytes } from "@/lib/soul";
 import { api } from "@/state/store";
 
@@ -35,15 +39,27 @@ export function mergePresets(builtIns: Preset[], imported: Preset[]): Preset[] {
   return merged;
 }
 
+/** Combined SOUL text from the selected prompts. One prompt applies as-is;
+ * several get a `## label` heading each, separated by `---`, so the bot can
+ * tell the rule groups apart instead of receiving one blended blob. Order
+ * follows the user's selection order. */
+export function combinePresets(selected: Preset[]): string {
+  if (selected.length === 0) return "";
+  if (selected.length === 1) return selected[0]!.text;
+  return selected.map((p) => `## ${p.label}\n\n${p.text}`).join("\n\n---\n\n");
+}
+
 export function PresetPreview({
   preset,
   hasExisting,
   onApply,
+  onAddToMix,
   onClose,
 }: {
   preset: Preset;
   hasExisting: boolean;
   onApply: (text: string) => void;
+  onAddToMix?: (preset: Preset) => void;
   onClose: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -83,11 +99,98 @@ export function PresetPreview({
             >
               {hasExisting ? "Replace instructions" : "Apply"}
             </button>
+            {onAddToMix && (
+              <button
+                type="button"
+                onClick={() => onAddToMix(preset)}
+                className="rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+              >
+                Add to mix
+              </button>
+            )}
             {hasExisting && <span className="text-[11px] text-ink-secondary">Your current instructions will be overwritten.</span>}
             <button type="button" onClick={onClose} className="ml-auto rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover">
               Close
             </button>
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The mix bar: what is selected, whether the combination fits the SOUL
+ * cap, and the gated apply. Shown only when at least one prompt is mixed. */
+export function MixBar({
+  mix,
+  hasExisting,
+  onApply,
+  onRemove,
+  onClear,
+}: {
+  mix: Preset[];
+  hasExisting: boolean;
+  onApply: (text: string) => void;
+  onRemove: (id: string) => void;
+  onClear: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const combined = combinePresets(mix);
+  const bytes = utf8Bytes(combined);
+  const over = bytes > BOT_PROFILE_LIMITS.soul;
+  const applyCombined = () => {
+    onApply(combined);
+    onClear();
+  };
+  return (
+    <div className="mt-2 rounded-lg border border-accent/50 bg-accent/5 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11.5px] text-ink-secondary">
+          {mix.length} prompt{mix.length === 1 ? "" : "s"} combined —{" "}
+          <span className={over ? "font-medium text-red-500" : ""}>
+            {bytes.toLocaleString()} / {BOT_PROFILE_LIMITS.soul.toLocaleString()} bytes
+          </span>
+          {over ? " — too big for SOUL.md, remove something" : ""}
+        </div>
+        <button type="button" onClick={onClear} className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised-hover">
+          Clear
+        </button>
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        {mix.map((preset) => (
+          <span key={preset.id} className="flex items-center gap-1 rounded-full border border-hairline/60 bg-inset px-2 py-0.5 text-[11px] text-ink">
+            {preset.label}
+            <button type="button" onClick={() => onRemove(preset.id)} aria-label={`Remove ${preset.label} from the mix`} className="text-ink-secondary hover:text-red-500">
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="mt-2">
+        {confirming ? (
+          <div className="flex items-center gap-2">
+            <span className="text-[11.5px] text-ink">Replace the existing instructions with the combination?</span>
+            <button
+              type="button"
+              disabled={over}
+              onClick={applyCombined}
+              className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+            >
+              Replace
+            </button>
+            <button type="button" onClick={() => setConfirming(false)} className="rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover">
+              Keep mine
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={over}
+            onClick={hasExisting ? () => setConfirming(true) : applyCombined}
+            className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
+          >
+            Apply combined ({mix.length})
+          </button>
         )}
       </div>
     </div>
@@ -104,6 +207,7 @@ export function PromptLibrary({ hasExisting, onApply }: { hasExisting: boolean; 
   const [notice, setNotice] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [collections, setCollections] = useState<Collection[] | null>(null);
+  const [mix, setMix] = useState<Preset[]>([]);
 
   useEffect(() => {
     if (!open || presets || loading) return;
@@ -145,6 +249,11 @@ export function PromptLibrary({ hasExisting, onApply }: { hasExisting: boolean; 
     }
   };
 
+  const addToMix = (preset: Preset) => {
+    setMix((current) => (current.some((p) => p.id === preset.id) ? current : [...current, preset]));
+    setPreviewId(null);
+  };
+  const removeFromMix = (id: string) => setMix((current) => current.filter((p) => p.id !== id));
   const preview = presets?.find((p) => p.id === previewId) ?? null;
 
   return (
@@ -165,20 +274,44 @@ export function PromptLibrary({ hasExisting, onApply }: { hasExisting: boolean; 
           {presets && (
             <div className="flex flex-col gap-1.5">
               {presets.map((preset) => (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => setPreviewId(previewId === preset.id ? null : preset.id)}
-                  className="rounded-lg border border-hairline/40 bg-inset p-2 text-left hover:bg-raised-hover"
-                >
-                  <div className="text-[12.5px] font-medium text-ink">{preset.label}</div>
-                  <div className="mt-0.5 line-clamp-2 text-[11px] text-ink-secondary">{preset.description}</div>
-                </button>
+                <div key={preset.id} className="flex items-stretch gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewId(previewId === preset.id ? null : preset.id)}
+                    className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset p-2 text-left hover:bg-raised-hover"
+                  >
+                    <div className="text-[12.5px] font-medium text-ink">{preset.label}</div>
+                    <div className="mt-0.5 line-clamp-2 text-[11px] text-ink-secondary">{preset.description}</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => (mix.some((p) => p.id === preset.id) ? removeFromMix(preset.id) : addToMix(preset))}
+                    aria-pressed={mix.some((p) => p.id === preset.id)}
+                    aria-label={mix.some((p) => p.id === preset.id) ? `Remove ${preset.label} from the mix` : `Add ${preset.label} to the mix`}
+                    title="Add to the combined mix"
+                    className={`shrink-0 rounded-lg border px-2.5 text-[13px] font-medium ${
+                      mix.some((p) => p.id === preset.id)
+                        ? "border-accent/60 bg-accent/15 text-accent-text"
+                        : "border-hairline/40 bg-inset text-ink-secondary hover:bg-raised-hover"
+                    }`}
+                  >
+                    +
+                  </button>
+                </div>
               ))}
             </div>
           )}
+          {mix.length > 0 && (
+            <MixBar mix={mix} hasExisting={hasExisting} onApply={onApply} onRemove={removeFromMix} onClear={() => setMix([])} />
+          )}
           {preview && presets && (
-            <PresetPreview preset={preview} hasExisting={hasExisting} onApply={onApply} onClose={() => setPreviewId(null)} />
+            <PresetPreview
+              preset={preview}
+              hasExisting={hasExisting}
+              onApply={onApply}
+              onAddToMix={addToMix}
+              onClose={() => setPreviewId(null)}
+            />
           )}
           {collections && collections.length > 0 && (
             <div className="mt-3 border-t border-hairline/40 pt-2">
