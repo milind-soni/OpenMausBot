@@ -1212,6 +1212,18 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
+  it.each(["safety-rpc", "safety-completion", "safety-notification"])("surfaces %s once without retrying or asking for login", async (mode) => {
+    await create({ mode });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-safety", text: "Deploy my site", approvalMode: "full" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(done).toMatchObject({ ok: false, stopReason: "provider_safety" });
+    const errors = recorder.events.filter((e) => e.type === "runtime.error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ message: expect.stringContaining("blocked by our safety systems") });
+    expect(errors[0]).not.toHaveProperty("setup");
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
+  });
+
   it("auto-retries a transient turn/start failure, then completes with one final message", async () => {
     process.env.FAKE_CODEX_TRANSIENTS = "2";
     process.env.FAKE_CODEX_STATE = join(scratch, "codex-launches");

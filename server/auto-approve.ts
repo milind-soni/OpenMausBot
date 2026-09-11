@@ -20,6 +20,16 @@ export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiate
   return mode;
 }
 
+// Tools that ask a PERSON something. A question exists so that a human
+// decides; any mode answering one on their behalf defeats the only reason
+// it was asked. They normally arrive typed as questions and never reach a
+// verdict at all — this is the backstop for the path where one arrives
+// mis-typed as a permission (a malformed AskUserQuestion call falls back to
+// the permission path in permission-proxy). Approving it there does not
+// produce an answer: the CLI runs the tool with none and the model is told
+// "The user did not answer the questions." — a question silently lost.
+const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
+
 /** Why a permission request landed where it did — the decision log's "which
  * rule". `full-access` is the one auto-approval; `native-approval` is a card
  * the provider's own reviewer (Auto, or Custom's config) left for the person;
@@ -48,6 +58,12 @@ export function autoVerdict(
     requiresExplicitApproval?: boolean;
   },
 ): AutoVerdict {
+  // A question is for a person, whatever channel it arrived on — and
+  // whatever the mode: even Full has no answer to give, only an approval
+  // that would run the tool with none.
+  if (ASKS_A_PERSON.has(tool.replace(/^mcp__[^_]+__/, "").toLowerCase())) {
+    return { approve: null, source: "no-grant" };
+  }
   // Full's promise is literal: even a sandbox widening is approved. Entering
   // Full is separately consent-gated by the bot PATCH endpoint, and the
   // request.opened caller invokes this for permissions only, never questions.

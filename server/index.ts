@@ -1570,6 +1570,13 @@ const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMod
 function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const message = raw as Record<string, unknown>;
+  const threadCanReceiveGrant = (bot: BotRecord): boolean => {
+    const threadId = bot.approvalGrant?.threadId;
+    if (!threadId) return true;
+    const target = store.projectBotForTask(bot.id, threadId);
+    return Boolean(target && !threadBusy(bot.id, threadId) &&
+      registry.cliTarget(target.modelSelection.instanceId)?.driverKind === registry.cliTarget(bot.modelSelection.instanceId)?.driverKind);
+  };
   if (message.type === "approval-trusted-mode-commit") {
     const requestId = typeof message.requestId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(message.requestId)
       ? message.requestId
@@ -1587,8 +1594,12 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.phase === "committed" &&
       bot.approvalMode === mode &&
       !bot.busy &&
+      threadCanReceiveGrant(bot) &&
       supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)
     ) {
+      if (bot.approvalGrant.threadId) {
+        store.patchTask(botId, bot.approvalGrant.threadId, { approvalMode: mode, autoApprove: false });
+      }
       store.patchBot(botId, { approvalGrant: undefined });
     } else if (bot?.approvalGrant?.requestId === requestId) {
       store.patchBot(botId, { approvalMode: "ask", autoApprove: false, approvalGrant: undefined });
@@ -1629,7 +1640,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
         return true;
       }
       store.patchBot(botId, {
-        approvalGrant: { requestId, mode, phase: "confirmed" },
+        approvalGrant: { ...bot.approvalGrant, requestId, mode, phase: "confirmed" },
       });
       confirm(true);
       return true;
@@ -1679,7 +1690,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       }
       // Still inert: Electron must receive this acknowledgement and request
       // finalization before the durable mode can affect any turn.
-      store.patchBot(botId, { approvalGrant: { requestId, mode, phase: "activated" } });
+      store.patchBot(botId, { approvalGrant: { ...bot.approvalGrant, requestId, mode, phase: "activated" } });
       activate(true);
       return true;
     }
@@ -1717,11 +1728,12 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
       bot.approvalGrant.phase === "activated" &&
       bot.approvalMode === mode &&
       !bot.busy &&
+      threadCanReceiveGrant(bot) &&
       supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)
     ) {
       // Durable but still inert. Electron must observe this exact ACK before
       // sending the one-way commit release that clears the journal.
-      store.patchBot(botId, { approvalGrant: { requestId, mode, phase: "committed" } });
+      store.patchBot(botId, { approvalGrant: { ...bot.approvalGrant, requestId, mode, phase: "committed" } });
       finalize(true);
       return true;
     }
@@ -1763,6 +1775,20 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     return true;
   }
   const currentMode = approvalModeFor(existing);
+  const threadId = message.threadId;
+  if (threadId !== undefined) {
+    const target = typeof threadId === "string" && /^[\w-]{1,128}$/.test(threadId)
+      ? store.projectBotForTask(botId, threadId) : null;
+    if (!target || (mode !== "full" && mode !== "custom") || currentMode !== mode || existing.approvalGrant) {
+      respond({ ok: false, error: "Choose this bot's approval level in bot settings before applying it to an existing thread" });
+      return true;
+    }
+    if (threadBusy(botId, threadId as string) ||
+      registry.cliTarget(target.modelSelection.instanceId)?.driverKind !== registry.cliTarget(existing.modelSelection.instanceId)?.driverKind) {
+      respond({ ok: false, error: "Stop this thread and use the bot's provider before applying its approval level" });
+      return true;
+    }
+  }
   const emergencyDowngrade = existing.busy && isEmergencyApprovalDowngrade(currentMode, mode);
   const clearsPendingElevation = mode === "ask" && existing.approvalGrant !== undefined;
   if (existing.busy && !emergencyDowngrade && !clearsPendingElevation) {
@@ -1791,7 +1817,7 @@ function handleDesktopTrustedApprovalMessage(raw: unknown): boolean {
     approvalMode: mode,
     autoApprove: mode === "auto",
     approvalGrant: mode === "full" || mode === "custom"
-      ? { requestId, mode, phase: "prepared" }
+      ? { requestId, mode, phase: "prepared", ...(typeof threadId === "string" ? { threadId } : {}) }
       : undefined,
   });
   if (!updated) {
@@ -2654,6 +2680,15 @@ async function answerRequest(
       outcome = "unavailable";
     }
   }
+  // An answered question keeps its words. `request.resolved` only records
+  // the behavior, so without this the card reads "answer" forever and the
+  // person can no longer see what they told the bot.
+  if (outcome !== "unavailable" && behavior === "answer" && message && cardMessage) {
+    const settled = store.messagesFor(threadId).find((m) => m.id === cardMessage.id)?.card;
+    if (settled) {
+      store.patchMessage(threadId, cardMessage.id, { card: { ...settled, answeredText: message } });
+    }
+  }
   // The human's verdict, recorded only when it actually reached the engine:
   // `unavailable` means the action never ran, and a "user-approved" row
   // over a request nothing answered would be the audit log lying. A
@@ -3348,7 +3383,11 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "request.opened": {
-      const permission = event.requestType === "permission";
+      // A structured ask carries the model's own options and has no
+      // allow/deny answer, so it is a question no matter which channel the
+      // provider routed it through — and, like every question, no approval
+      // mode may ever answer it for the person.
+      const permission = event.requestType === "permission" && !event.questions?.length;
       // A permission request here is one the provider left for a person: its
       // own mode already ran (Ask, Edits, Auto's reviewer, Custom's config).
       // OpenMausBot decides nothing about the action itself. Only Full access
@@ -3449,6 +3488,10 @@ bus.subscribe((event: RuntimeEvent) => {
         break;
       }
       const heldContext = { source: verdict?.source, permission };
+      // A structured ask (Claude's AskUserQuestion) is a question whatever
+      // the provider routed it as: it has no allow/deny answer, only the
+      // model's own options. The card carries them so the person can choose.
+      const questions = event.questions?.length ? event.questions : undefined;
       const message = pushMessage({
         role: "bot",
         kind: "options",
@@ -3463,6 +3506,7 @@ bus.subscribe((event: RuntimeEvent) => {
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
+          questionRequest: questions ? { version: 1, questions } : undefined,
           // the provider can keep an allow for its session; the app keeps
           // no grant of its own for a provider's tool
           allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
@@ -13142,7 +13186,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const mode = body.approvalMode ?? (body.autoApprove ? "auto" : "ask");
         // Elevated modes still require the trusted desktop transition. A
         // thread settings PATCH cannot manufacture that grant.
-        if (mode !== "ask" && mode !== "auto") return json(res, 403, { error: "Full and Custom access require confirmation in bot settings" });
+        if (mode !== "ask" && mode !== "auto" && mode !== "edits") return json(res, 403, { error: "Full and Custom access require trusted desktop confirmation" });
+        if (!supportsApprovalMode(registry.cliTarget(current.modelSelection.instanceId)?.driverKind, mode)) {
+          return json(res, 400, { error: "This provider does not support the selected approval level" });
+        }
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "stop this thread before changing its approval mode" });
         if (current.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
         if (mode === "auto" && approvalModeFor(current) !== "auto" && auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some((bot) => bot.busy)) {

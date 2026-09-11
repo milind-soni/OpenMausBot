@@ -37,7 +37,7 @@
 //                      Sonnet 4.5: init reports the mode it actually runs in.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -214,6 +214,9 @@ const playTurn = (prompt: JsonValue) => {
       }
     }
     const systemPromptPath = argAfter("--append-system-prompt-file");
+    const settingsPath = argAfter("--settings");
+    const settings = settingsPath ? JSON.parse(readFileSync(settingsPath, "utf8")) : null;
+    const settingsMode = settingsPath ? statSync(settingsPath).mode & 0o777 : null;
     let systemPrompt: string | null = null;
     if (systemPromptPath) {
       try {
@@ -224,7 +227,7 @@ const playTurn = (prompt: JsonValue) => {
     }
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
     );
   }
 

@@ -350,7 +350,10 @@ function handle(msg: any) {
               ...(acceptsImages ? { promptCapabilities: { image: true } } : {}),
             }
           : undefined,
-        _meta: { modelState: { currentModelId: "fake-acp-model" } },
+        _meta: {
+          modelState: { currentModelId: "fake-acp-model" },
+          ...(process.env.FAKE_ACP_GROK_VERSION ? { grokShell: true, agentVersion: process.env.FAKE_ACP_GROK_VERSION } : {}),
+        },
       });
       break;
     }

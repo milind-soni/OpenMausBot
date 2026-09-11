@@ -1021,7 +1021,14 @@ export function ComputerPanel({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <button
-          onClick={() => dispatch({ type: "toggleSettings", open: true, section: "access" })}
+          onClick={() => {
+            // Keep the panel/modal states exclusive at this entry point. That
+            // removes the still-mounted Computer panel from the settings
+            // dialog's focus path, and dismissing Settings returns directly
+            // to the conversation that opened it.
+            dispatch({ type: "toggleComputer", open: false });
+            dispatch({ type: "toggleSettings", open: true, section: "access" });
+          }}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           title={t("computer.botSettings")}
         >

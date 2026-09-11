@@ -283,6 +283,22 @@ describe("Store", () => {
     expect(persisted.find((candidate) => candidate.id === bot.id)).not.toHaveProperty("approvalGrant");
   });
 
+  it.each(["prepared", "confirmed", "activated", "committed"] as const)("revokes a thread-scoped grant after restart in phase %s", (phase) => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const target = store.createTask(bot.id, "Target")!;
+    store.patchBot(bot.id, { approvalMode: "full", approvalGrant: {
+      requestId: "123e4567-e89b-42d3-a456-426614174000", mode: "full", phase, threadId: target.threadId,
+    } });
+    // Even a crash between writing the thread and clearing the journal
+    // must not leave an unacknowledged elevated conversation executable.
+    store.patchTask(bot.id, target.threadId, { approvalMode: "full" });
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.approvalMode).toBe("ask");
+    expect(reloaded.bot(bot.id)?.approvalGrant).toBeUndefined();
+    expect(reloaded.projectBotForTask(bot.id, target.threadId)?.approvalMode).toBe("ask");
+  });
+
   it("normalizes persisted cloud backends without changing valid or absent values", () => {
     const store = new Store(selection);
     const box = store.createBot();

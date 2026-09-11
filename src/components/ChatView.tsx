@@ -35,6 +35,7 @@ import {
   type Message,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
+import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
@@ -49,6 +50,7 @@ import { askText, nameIsCommand, runSteps, runSummary, showRun, skillPrompt, ski
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
+import { QuestionCard } from "./QuestionCard";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
@@ -137,7 +139,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
  * Once the engine reports itself fixed the card flips back to Retry, which
  * (with the on-focus re-probe) happens by itself when the user returns from
  * the terminal. */
-function ErrorRow({
+export function ErrorRow({
   message,
   onRetry,
   setupInstance,
@@ -153,7 +155,12 @@ function ErrorRow({
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
           <span className="min-w-0 break-words">{message}</span>
         </div>
-        {setupInstance &&
+        {isProviderSafetyBlock(message) ? (
+          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
+            {PROVIDER_SAFETY_GUIDANCE}{" "}
+            <a href={PROVIDER_SAFETY_HELP_URL} target="_blank" rel="noreferrer" className="underline">About provider safety checks</a>
+          </p>
+        ) : setupInstance &&
         !(setupInstance.snapshot.state === "available" && setupInstance.snapshot.authenticated !== false) ? (
           <EngineSetup instance={setupInstance} className="mt-2 text-ink-secondary" />
         ) : (
@@ -715,8 +722,12 @@ const MessagesList = memo(function MessagesList({
             case "connector":
               return m.connector ? <ConnectorCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
             case "options":
-              // a live permission ask gets the approval box; questions keep
-              // the list card. The first-run quiz drops out once they talk.
+              // a live permission ask gets the approval box; a structured
+              // ask gets the question box; anything else keeps the list
+              // card. The first-run quiz drops out once they talk.
+              if (m.card?.requestId && m.card.questionRequest) {
+                return <QuestionCard threadId={bot.threadId} bot={bot} message={m} />;
+              }
               if (m.card?.requestId && m.card.tool) {
                 return <ApprovalCard bot={bot} message={m} />;
               }
@@ -1402,7 +1413,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       )}
       <Composer
         key={bot.threadId}
-        bot={bot}
+        bot={profile}
         replyTo={replyTo}
         onClearReply={clearReply}
         onConsumeReply={consumeReply}

@@ -19,6 +19,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
+import type { QuestionRequestCardData } from "../shared/ask-question.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
@@ -49,6 +50,10 @@ export interface OptionCardData {
   subtitle: string;
   options: string[];
   answered?: string;
+  /** What was actually answered, when the answer is words rather than a
+   * verdict. `answered` only records the behavior ("answer") for a live ask,
+   * so without this a question card forgets its own reply on reload. */
+  answeredText?: string;
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
@@ -81,6 +86,9 @@ export interface OptionCardData {
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
+  /** A provider's structured question set (Claude's AskUserQuestion), so the
+   * card can offer the model's own options instead of Allow/Deny. */
+  questionRequest?: QuestionRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -396,6 +404,24 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
     if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
+    if (typeof card.answeredText === "string") card.answeredText = redactSecretsInText(card.answeredText);
+    // Bot-authored question text sits behind the subtitle the same way a
+    // routine's instructions do, so it is scrubbed on the same boundary.
+    if (card.questionRequest) {
+      card.questionRequest = {
+        ...card.questionRequest,
+        questions: card.questionRequest.questions.map((question) => ({
+          ...question,
+          question: redactSecretsInText(question.question),
+          ...(question.header ? { header: redactSecretsInText(question.header) } : {}),
+          options: question.options.map((option) => ({
+            ...option,
+            label: redactSecretsInText(option.label),
+            ...(option.description ? { description: redactSecretsInText(option.description) } : {}),
+          })),
+        })),
+      };
+    }
     // Routine definitions are executable bot-authored text stored behind the
     // visible summary. Scrub the durable payload too so nesting it on a card
     // cannot bypass the transcript's secret-redaction boundary.
@@ -596,6 +622,8 @@ export interface BotRecord {
     requestId: string;
     mode: "full" | "custom";
     phase: "prepared" | "confirmed" | "activated" | "committed";
+    /** Optional existing thread receiving this already-approved bot default. */
+    threadId?: string;
   };
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */

@@ -600,6 +600,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const earlyNotifications: any[] = [];
       const state = {
         settled: false,
+        lastError: "",
         lastText: "",
         sawStreamDelta: false,
         // codex reports token usage as a running THREAD total; the harness
@@ -951,7 +952,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "turn/completed": {
             const t = p.turn ?? {};
-            void settle(t.status === "completed", t.status === "completed" ? null : (t.error?.message ?? t.status ?? "failed"));
+            const message = typeof t.error?.message === "string" ? t.error.message.slice(0, 400) : "";
+            if (t.status !== "completed" && message && message !== state.lastError) {
+              state.lastError = message;
+              emit({ ...base(threadId, turnId), type: "runtime.error", message,
+                ...(classifyError({ text: message }).reason === "auth" ? { setup: true } : {}),
+              });
+            }
+            void settle(t.status === "completed", t.status === "completed" ? null :
+              (classifyError({ text: message || state.lastError }).reason === "provider_safety" ? "provider_safety" : (message || t.status || "failed")));
             break;
           }
           case "error":
@@ -959,7 +968,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // {error:{message}} — surface either (agentcal armor)
             {
               const message = p.message ?? p.error?.message;
-              if (message) emit({ ...base(threadId, turnId), type: "runtime.error", message: String(message).slice(0, 400) });
+              if (message) {
+                state.lastError = String(message).slice(0, 400);
+                emit({ ...base(threadId, turnId), type: "runtime.error", message: state.lastError });
+              }
             }
             break;
         }
@@ -1199,7 +1211,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             message,
             ...(needsAuth ? { setup: true } : {}),
           });
-          await settle(false, needsAuth ? "auth_required" : "rpc_error");
+          await settle(false, needsAuth ? "auth_required" : verdict.reason === "provider_safety" ? "provider_safety" : "rpc_error");
         }
       }
     };

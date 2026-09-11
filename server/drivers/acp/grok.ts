@@ -180,10 +180,21 @@ export function ensureGrokInjectSlug(
   return slug;
 }
 
+/** Grok 1.0.25 consumes native image blocks but advertises image:false.
+ * Verified with the real CLI and a loopback model: scripts/verify-grok-images.ts.
+ * Keep unknown/older runtimes on the normal capability negotiation path. */
+export function grokAcceptsUnadvertisedImages(init: unknown): boolean {
+  const meta = (init as { _meta?: { grokShell?: unknown; agentVersion?: unknown } } | null)?._meta;
+  if (meta?.grokShell !== true || typeof meta.agentVersion !== "string") return false;
+  const version = /^1\.0\.(\d+)$/.exec(meta.agentVersion);
+  return Boolean(version && Number(version[1]) >= 25);
+}
+
 const support: AcpSupport = {
   driverKind: "grokAgent",
   displayName: "Grok",
-  images: false,
+  images: true,
+  acceptsUnadvertisedImages: grokAcceptsUnadvertisedImages,
   models: STATIC_GROK_MODELS,
   resolveModels: (env) => mergeLocalInject(readGrokModelCatalog(env), env),
   // Grok's accepted levels vary by model and the CLI validates lazily — a
