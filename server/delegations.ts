@@ -109,6 +109,12 @@ const MAX_RECEIPTS = 100;
 const RECEIPT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const RESULT_MAX_CHARS = 4_000;
 
+/** How long a queued handoff may wait for its target before it expires.
+ * A busy target is waited for through any number of its own turns; only
+ * this bounds the wait, so a handoff to a bot nobody uses cannot hold one
+ * of its source thread's MAX_QUEUED_PER_THREAD slots forever. */
+export const DELEGATION_TTL_MS = 24 * 60 * 60 * 1000;
+
 let receipts: DelegationReceipt[] = [];
 
 function saveReceipts(): void {
@@ -462,6 +468,67 @@ function acknowledgeDelegation(threadId: string, itemId: string): void {
   savePending();
 }
 
+const isExpired = (item: PendingDelegationItem, now: number): boolean => now - item.queuedAt >= DELEGATION_TTL_MS;
+
+/** Record an expired handoff. The chip goes into the source thread only
+ * while it still belongs to the bot that owns the handoff — a deleted
+ * conversation gets the receipt and nothing else. */
+function expireDelegation(bus: CommsBus, sourceThreadId: string, item: PendingDelegationItem, ownerId: string): void {
+  const name = bus.store.bot(item.toBotId)?.name ?? item.toBotId;
+  recordDelegationReceipt({
+    id: item.id,
+    sourceThreadId,
+    toBotId: item.toBotId,
+    toBotName: name,
+    status: "expired",
+    result: `@${name} was not free to take this for 24 hours`,
+  });
+  if (!sourceThreadBelongsToBot(bus.store, ownerId, sourceThreadId)) return;
+  bus.store.appendMessage(sourceThreadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Delegation to @${name} expired — not picked up within 24 hours`, ok: false },
+  });
+}
+
+/** Expire every queued handoff past DELEGATION_TTL_MS, wherever it waits.
+ * A drain already expires what it touches; this covers the handoff nothing
+ * drains — a target that never settles while its source sits idle. A
+ * thread mid-drain is skipped: that drain owns its items and expires them
+ * itself. Each expiry is reported through `onSettled`, the same hook a
+ * drain uses to wake the delegating bot. Returns how many expired. */
+export function expireStaleDelegations(
+  bus: CommsBus,
+  now: number,
+  onSettled?: (receipt: DelegationReceipt) => void,
+): number {
+  const expired: DelegationReceipt[] = [];
+  for (const [threadId, items] of [...pendingDelegations]) {
+    if (drainingThreads.has(threadId)) continue;
+    const due = items.filter((item) => isExpired(item, now));
+    if (!due.length) continue;
+    const remaining = items.filter((item) => !isExpired(item, now));
+    if (remaining.length) pendingDelegations.set(threadId, remaining);
+    else pendingDelegations.delete(threadId);
+    const ownerId = bus.store.botByThread(threadId)?.id;
+    for (const item of due) {
+      expireDelegation(bus, threadId, item, ownerId ?? item.sourceBotId);
+      const receipt = findDelegationReceipt(item.id);
+      if (receipt) expired.push(receipt);
+    }
+  }
+  if (!expired.length) return 0;
+  savePending();
+  for (const receipt of expired) {
+    try {
+      onSettled?.(receipt);
+    } catch (error) {
+      console.error("delegation expired but its source could not be resumed", error);
+    }
+  }
+  return expired.length;
+}
+
 /** Drop a thread's queued handoffs without running them, telling the user
  * they were dropped. Used when the queueing turn failed or was interrupted. */
 export function discardDelegations(bus: CommsBus, threadId: string): void {
@@ -520,6 +587,12 @@ async function processOne(
       status: "dropped",
       result: "the source conversation no longer belongs to the delegating bot",
     });
+    return "settled";
+  }
+  // Past its 24 hours: the only bound on how long a handoff waits. Checked
+  // first so no later branch — busy, approval, dispatch — can act on it.
+  if (isExpired(item, Date.now())) {
+    expireDelegation(bus, sourceThreadId, item, sender.id);
     return "settled";
   }
   if (!target) {
