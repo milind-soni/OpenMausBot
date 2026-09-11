@@ -1383,6 +1383,5 @@
   "remote.signInAccess.remove": "Retirer",
   "remote.signInAccess.empty": "Personne pour l’instant. Ajoutez une adresse, ou @votreentreprise.com pour toute l’entreprise.",
   "remote.signInAccess.invalid": "Saisissez une adresse e-mail, ou @domaine pour tout le monde sur ce domaine.",
-  "remote.signInAccess.note": "Les changements s’appliquent immédiatement. Retirer quelqu’un bloque les nouvelles connexions ; ses appareils déjà connectés le restent jusqu’à ce que vous les déconnectiez ci-dessus.",
   "remote.signInAccess.error": "Enregistrement impossible : {error}"
 }

@@ -78,8 +78,10 @@ export interface FleetWorkspace {
   host: string;
   port: number;
   webhookPort: number;
-  status: "running" | "suspended";
+  status: "running" | "suspended" | "provisioning" | "error" | "retained";
   createdAt: string;
+  /** Incomplete provisioning keeps its fence once the Unix account exists. */
+  accountCreated?: boolean;
 }
 
 export interface FleetRegistry {
@@ -205,6 +207,7 @@ export function fenceUnit(layout = fleetLayout()): string {
 export function fenceRules(workspaces: FleetWorkspace[]): string {
   const lines = ["#!/usr/sbin/nft -f", "# Written by `openmausbot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet openmausbot", "flush table inet openmausbot", "table inet openmausbot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
   for (const workspace of [...workspaces].sort((a, b) => a.slug.localeCompare(b.slug))) {
+    if (workspace.status !== "running" && workspace.status !== "suspended" && workspace.status !== "retained" && !workspace.accountCreated) continue;
     lines.push(`\t\toif lo tcp dport { ${workspace.port}, ${workspace.webhookPort} } meta skuid != { ${fleetUser(workspace.slug)}, caddy, root } reject`);
   }
   lines.push("\t}", "}", "");
@@ -212,8 +215,9 @@ export function fenceRules(workspaces: FleetWorkspace[]): string {
 }
 
 export function caddySite(workspace: Pick<FleetWorkspace, "host" | "port" | "webhookPort" | "status">): string {
-  if (workspace.status === "suspended") {
-    return [`${workspace.host} {`, "\trespond \"This workspace is suspended.\" 503", "}", ""].join("\n");
+  if (workspace.status !== "running") {
+    const message = workspace.status === "suspended" ? "This workspace is suspended." : "This workspace is not available.";
+    return [`${workspace.host} {`, `\trespond "${message}" 503`, "}", ""].join("\n");
   }
   return [
     `${workspace.host} {`,
@@ -235,7 +239,7 @@ export function caddyImportLine(layout = fleetLayout()): string {
   return `import ${layout.caddyDir}/*.caddy`;
 }
 
-export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string; licenseKey?: string }): string {
+export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string; licenseKey?: string; portalUrl?: string }): string {
   const lines = [
     `OMB_DATA_DIR=${input.dataDir}`,
     `OMB_PORT=${input.workspace.port}`,
@@ -243,6 +247,7 @@ export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string;
     `OMB_PUBLIC_URL=https://${input.workspace.host}`,
   ];
   if (input.licenseKey) lines.push(`OMB_LICENSE_KEY=${input.licenseKey}`);
+  if (input.portalUrl) lines.push(`OMB_ADMIN_URL=${input.portalUrl}`, `OMB_ADMIN_WORKSPACE=${input.workspace.slug}`);
   return lines.join("\n") + "\n";
 }
 
@@ -250,15 +255,37 @@ export interface WorkspaceSeed {
   admins: string[];
   members: string[];
   anthropicKey?: string;
+  anthropicUrl?: string;
+  openrouterKey?: string;
+  openrouterUrl?: string;
+  openrouterModels?: string[];
+  openrouterDefault?: boolean;
+  /** Root-owned hosted portal address; never configurable by a tenant. */
+  portalUrl?: string;
   monthlyCapUsd?: number;
   brandJson?: string;
+}
+
+export const MANAGED_OPENROUTER = "omb-managed-openrouter";
+
+/** The gateway validates assignments too; keep filesystem seeds bounded and literal. */
+export function openRouterModelIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 100 || value.some((id) => typeof id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:/+-]{0,159}$/.test(id))) {
+    throw new Error("OpenRouter models must be an array of at most 100 valid model IDs");
+  }
+  return [...new Set(value as string[])];
+}
+
+export function managedOpenRouterModels(models: unknown): Record<string, { name: string }> {
+  return Object.fromEntries(openRouterModelIds(models).map((id) => [id, { name: id }]));
 }
 
 /** The workspace's first config.json: who may sign in, the key it runs on,
  * and its cap. Everything else stays the server's defaults. */
 export function initialConfig(seed: WorkspaceSeed): string {
   const config: Record<string, unknown> = { signIn: { admins: seed.admins, members: seed.members } };
-  if (seed.anthropicKey) config.anthropic = { key: seed.anthropicKey };
+  if (seed.anthropicKey) config.anthropic = { key: seed.anthropicKey, ...(seed.anthropicUrl ? { url: seed.anthropicUrl } : {}) };
+  if (seed.openrouterDefault && seed.openrouterModels?.length) config.defaultModelSelection = { instanceId: "opencodeGo", model: `${MANAGED_OPENROUTER}/${seed.openrouterModels[0]}` };
   if (seed.monthlyCapUsd !== undefined) config.budgets = { monthlyUsd: seed.monthlyCapUsd };
   return `${JSON.stringify(config, null, 2)}\n`;
 }
@@ -313,6 +340,18 @@ export function createPlan(input: {
   layout?: FleetLayout;
 }): { steps: FleetStep[]; registry: FleetRegistry; workspace: FleetWorkspace } {
   assertSlug(input.slug);
+  if (input.seed.portalUrl) {
+    const portal = new URL(input.seed.portalUrl);
+    if (portal.protocol !== "https:" || portal.origin !== input.seed.portalUrl) throw new Error("portalUrl must be an HTTPS origin without a path or credentials");
+    if (portal.hostname === `${input.slug}.${input.registry.domain}`) throw new Error("this workspace name is reserved for the admin portal");
+    if (input.seed.anthropicUrl && input.seed.anthropicUrl !== `${portal.origin}/api/gateway/${input.slug}/anthropic`) throw new Error("managed provider URL must belong to this workspace's portal gateway");
+  } else if (input.seed.anthropicUrl) throw new Error("a managed provider URL requires portalUrl");
+  if (input.seed.openrouterKey !== undefined || input.seed.openrouterUrl !== undefined || input.seed.openrouterModels !== undefined || input.seed.openrouterDefault) {
+    if (!input.seed.portalUrl || input.seed.openrouterUrl !== `${input.seed.portalUrl}/api/gateway/${input.slug}/openrouter/v1`) throw new Error("managed OpenRouter URL must belong to this workspace's portal gateway");
+    if (!input.seed.openrouterKey || !/^[!-~]+$/.test(input.seed.openrouterKey)) throw new Error("managed OpenRouter requires a non-empty workspace credential without whitespace");
+    const models = openRouterModelIds(input.seed.openrouterModels ?? []);
+    if (input.seed.openrouterDefault && !models.length) throw new Error("a default OpenRouter model requires a model assignment");
+  }
   if (input.registry.workspaces[input.slug]) throw new Error(`workspace "${input.slug}" already exists`);
   if (!input.seed.admins.length) throw new Error("a workspace needs at least one admin email (--admin)");
   for (const entry of [...input.seed.admins, ...input.seed.members]) assertEmailOrDomain(entry);
@@ -328,15 +367,32 @@ export function createPlan(input: {
     createdAt: (input.now ?? new Date()).toISOString(),
   };
   const registry: FleetRegistry = { ...input.registry, nextPort: next, workspaces: { ...input.registry.workspaces, [workspace.slug]: workspace } };
+  const reserved = (accountCreated: boolean): FleetRegistry => ({
+    ...registry,
+    workspaces: { ...registry.workspaces, [workspace.slug]: { ...workspace, status: "provisioning", accountCreated } },
+  });
   const user = fleetUser(workspace.slug);
   const home = workspaceHome(layout, workspace.slug);
   const dataDir = workspaceDataDir(layout, workspace.slug);
   const steps: FleetStep[] = [
+    // Reserve the identity and ports before any external resource is created.
+    // A crash leaves an inspectable reservation, never a silently reusable home.
+    { kind: "write", path: layout.registryFile, content: `${JSON.stringify(reserved(false), null, 2)}\n`, mode: 0o600 },
     { kind: "run", argv: ["useradd", "--system", "--create-home", "--home-dir", home, "--shell", "/usr/sbin/nologin", "--user-group", user], why: `the workspace's own account` },
+    { kind: "write", path: layout.registryFile, content: `${JSON.stringify(reserved(true), null, 2)}\n`, mode: 0o600 },
     { kind: "mkdir", path: dataDir, mode: 0o700, owner: user },
     { kind: "write", path: join(dataDir, "config.json"), content: initialConfig(input.seed), mode: 0o600, owner: user },
+    ...(input.seed.openrouterKey ? [
+      { kind: "mkdir" as const, path: join(home, ".config"), mode: 0o700, owner: user },
+      { kind: "mkdir" as const, path: join(home, ".config", "opencode"), mode: 0o700, owner: user },
+      { kind: "write" as const, path: join(home, ".config", "opencode", "opencode.json"), mode: 0o600, owner: user, content: `${JSON.stringify({ provider: { [MANAGED_OPENROUTER]: {
+        npm: "@ai-sdk/openai-compatible", name: "Managed OpenRouter",
+        options: { baseURL: input.seed.openrouterUrl, apiKey: input.seed.openrouterKey },
+        models: managedOpenRouterModels(input.seed.openrouterModels ?? []),
+      } } }, null, 2)}\n` },
+    ] : []),
     ...(input.seed.brandJson ? [{ kind: "write" as const, path: join(dataDir, "brand.json"), content: input.seed.brandJson, mode: 0o600, owner: user }] : []),
-    { kind: "write", path: join(layout.instancesDir, `${workspace.slug}.env`), content: instanceEnv({ workspace, dataDir, licenseKey: input.licenseKey }), mode: 0o600 },
+    { kind: "write", path: join(layout.instancesDir, `${workspace.slug}.env`), content: instanceEnv({ workspace, dataDir, licenseKey: input.licenseKey, portalUrl: input.seed.portalUrl }), mode: 0o600 },
     ...(input.memoryMax
       ? [
           { kind: "mkdir" as const, path: join(layout.unitFile.replace(/openmausbot@\.service$/, ""), `openmausbot@${workspace.slug}.service.d`), mode: 0o755 },
@@ -356,10 +412,16 @@ export function createPlan(input: {
   return { steps, registry, workspace };
 }
 
-function withStatus(registry: FleetRegistry, slug: string, status: FleetWorkspace["status"]): { registry: FleetRegistry; workspace: FleetWorkspace } {
+/** Incomplete provisioning and retained homes need explicit operator recovery. */
+export function assertManagedWorkspace(workspace: FleetWorkspace): void {
+  if (workspace.status !== "running" && workspace.status !== "suspended") throw new Error(`workspace "${workspace.slug}" is ${workspace.status} and requires operator recovery`);
+}
+
+function withStatus(registry: FleetRegistry, slug: string, status: "running" | "suspended"): { registry: FleetRegistry; workspace: FleetWorkspace } {
   assertSlug(slug);
   const current = registry.workspaces[slug];
   if (!current) throw new Error(`no workspace "${slug}"`);
+  assertManagedWorkspace(current);
   const workspace = { ...current, status };
   return { registry: { ...registry, workspaces: { ...registry.workspaces, [slug]: workspace } }, workspace };
 }
@@ -398,8 +460,9 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
   const layout = input.layout ?? fleetLayout();
   const workspace = input.registry.workspaces[input.slug];
   if (!workspace) throw new Error(`no workspace "${input.slug}"`);
+  assertManagedWorkspace(workspace);
   const { [input.slug]: _gone, ...rest } = input.registry.workspaces;
-  const registry: FleetRegistry = { ...input.registry, workspaces: rest };
+  const registry: FleetRegistry = { ...input.registry, workspaces: input.keepData ? { ...rest, [input.slug]: { ...workspace, status: "retained" } } : rest };
   const unitsDir = layout.unitFile.replace(/openmausbot@\.service$/, "");
   return {
     registry,
@@ -410,8 +473,12 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
       { kind: "remove", path: join(layout.instancesDir, `${workspace.slug}.env`) },
       { kind: "remove", path: join(unitsDir, `openmausbot@${workspace.slug}.service.d`, "limits.conf") },
       { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
-      { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: "drop its fence rule" },
-      { kind: "run", argv: input.keepData ? ["userdel", fleetUser(workspace.slug)] : ["userdel", "--remove", fleetUser(workspace.slug)], why: input.keepData ? "remove the account, keep its home and data" : "remove the account and everything it owned" },
+      { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: input.keepData ? "keep the retained account's fence" : "drop its fence rule" },
+      // Retain the nologin account too: recycling its UID would give a new
+      // workspace ownership of the preserved home, even under a different slug.
+      ...(input.keepData
+        ? [{ kind: "note" as const, text: "keeping the disabled workspace's account, home and name reserved; operator recovery is required before reuse" }]
+        : [{ kind: "run" as const, argv: ["userdel", "--remove", fleetUser(workspace.slug)], why: "remove the account and everything it owned" }]),
       { kind: "write", path: layout.registryFile, content: `${JSON.stringify(registry, null, 2)}\n`, mode: 0o600 },
     ],
   };
@@ -441,9 +508,11 @@ export function applySignIn(configText: string, action: "add" | "remove", email:
   const members = without(list(current.members));
   if (action === "remove") {
     if (admins.length + members.length === list(current.admins).length + list(current.members).length) throw new Error(`${entry} is not on the list`);
+    if (!admins.length) throw new Error("a workspace needs at least one admin; add another admin first");
     return { config: `${JSON.stringify({ ...raw, signIn: { admins, members } }, null, 2)}\n`, summary: `${entry} can no longer sign in; existing sessions stay until they expire or are revoked` };
   }
   const next = chatOnly ? { admins, members: [...members, entry] } : { admins: [...admins, entry], members };
+  if (!next.admins.length) throw new Error("a workspace needs at least one admin; add another admin first");
   return { config: `${JSON.stringify({ ...raw, signIn: next }, null, 2)}\n`, summary: `${entry} can sign in with an emailed code (${chatOnly ? "chat and approvals" : "full access"})` };
 }
 
@@ -451,17 +520,22 @@ function shellQuote(value: string): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 }
 
-/** The plan as lines an operator can read or paste into a root shell. */
+/** Inspectable plan. Tenant I/O must use the executor's privilege drop. */
 export function describeSteps(steps: FleetStep[]): string[] {
   const lines: string[] = [];
   for (const step of steps) {
     switch (step.kind) {
       case "mkdir":
-        lines.push(`install -d -m ${step.mode.toString(8)}${step.owner ? ` -o ${step.owner} -g ${step.owner}` : ""} ${shellQuote(step.path)}`);
+        lines.push(step.owner
+          ? `# Create ${shellQuote(step.path)} mode ${step.mode.toString(8)} as ${step.owner} (use fleet --yes; never root chown on tenant paths)`
+          : `install -d -m ${step.mode.toString(8)} ${shellQuote(step.path)}`);
         break;
       case "write":
+        if (step.owner) {
+          lines.push(`# Write ${shellQuote(step.path)} mode ${step.mode.toString(8)} as ${step.owner} (use fleet --yes; tenant content omitted)`);
+          break;
+        }
         lines.push(`cat > ${shellQuote(step.path)} <<'OMB_EOF'`, step.content.replace(/\n$/, ""), "OMB_EOF", `chmod ${step.mode.toString(8)} ${shellQuote(step.path)}`);
-        if (step.owner) lines.push(`chown ${step.owner}:${step.owner} ${shellQuote(step.path)}`);
         break;
       case "append-once":
         lines.push(`grep -qxF ${shellQuote(step.line)} ${shellQuote(step.path)} || printf '\\n%s\\n' ${shellQuote(step.line)} >> ${shellQuote(step.path)}`);

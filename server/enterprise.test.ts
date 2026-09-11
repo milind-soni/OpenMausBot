@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { describeEdition, editionStatus, entitled, loadEnterpriseLayer } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, entitled, hostedWorkspaceConfigured, loadEnterpriseLayer } from "./enterprise.ts";
+import { SessionRegistry } from "./sessions.ts";
 
 const dirs: string[] = [];
 
@@ -22,6 +23,30 @@ afterEach(async () => {
 });
 
 describe("enterprise hook point", () => {
+  it("does not create a hosted bridge unless opted in, and marks partial configuration as hosted", () => {
+    expect(hostedWorkspaceConfigured({})).toBe(false);
+    expect(hostedWorkspaceConfigured({ OMB_PUBLIC_URL: "https://legacy.example.test" })).toBe(false);
+    expect(hostedWorkspaceConfigured({ OMB_ADMIN_URL: "" })).toBe(true);
+    expect(hostedWorkspaceConfigured({ OMB_ADMIN_WORKSPACE: "acme" })).toBe(true);
+    const dir = fakeLayer("export const fixture = true;");
+    const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    expect(createWorkspaceAccess({ sessions, cookieName: "session", closeSessionStreams() {}, env: {} })).toBeNull();
+    expect(createWorkspaceAccess({ sessions, cookieName: "session", closeSessionStreams() {}, env: { OMB_ADMIN_WORKSPACE: "acme" } })).toBeNull();
+  });
+  it("passes the live admin entitlement to the optional dynamically loaded bridge", async () => {
+    const dir = fakeLayer(`
+      export function register() { return { customer: 'Fixture', features: ['admin'], expiresAt: null }; }
+      export function createWorkspaceAccess(options) {
+        return { handlePublic: async () => options.entitled(), authorize: async () => null, revalidate: async () => {} };
+      }
+    `);
+    await loadEnterpriseLayer({ dir, licenseKey: "fixture" });
+    const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    const bridge = createWorkspaceAccess({ sessions, cookieName: "session", closeSessionStreams() {}, env: { OMB_ADMIN_WORKSPACE: "acme" } });
+    expect(await bridge!.handlePublic(null as never, null as never, null as never)).toBe(true);
+    await loadEnterpriseLayer({ dir: join(dir, "absent") });
+    expect(await bridge!.handlePublic(null as never, null as never, null as never)).toBe(false);
+  });
   it("is the open-source edition when the folder is absent, and says so if a key was set anyway", async () => {
     const absent = join(tmpdir(), "omb-enterprise-absent");
     expect(await loadEnterpriseLayer({ dir: absent, licenseKey: undefined })).toEqual({ edition: "oss", features: [] });

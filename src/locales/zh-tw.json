@@ -1560,6 +1560,5 @@
   "remote.signInAccess.remove": "移除",
   "remote.signInAccess.empty": "目前尚無任何人員。請新增一個電子郵件位址，或使用 @yourcompany.com 涵蓋貴公司的所有人。",
   "remote.signInAccess.invalid": "請輸入電子郵件位址，或以 @網域 涵蓋該網域的所有人。",
-  "remote.signInAccess.note": "變更會立即生效。移除某人後將無法再次登入；其現有裝置會維持登入狀態，直到你在上方將其登出為止。",
   "remote.signInAccess.error": "無法儲存：{error}"
 }

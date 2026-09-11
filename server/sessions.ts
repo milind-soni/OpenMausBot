@@ -172,11 +172,15 @@ export class SessionRegistry {
   private readonly onRevoked = new Set<(sessionId: string) => void>();
   private lastSeenWrites = new Map<string, number>();
   private readonly now: () => number;
-  private readonly options: { file: string; now?: () => number };
+  private readonly options: {
+    file: string;
+    now?: () => number;
+    emailScopes?: (email: string) => readonly Scope[] | null;
+  };
 
   // No parameter properties: the server runs this file under Node's
   // strip-only TypeScript mode, which only erases types.
-  constructor(options: { file: string; now?: () => number }) {
+  constructor(options: { file: string; now?: () => number; emailScopes?: (email: string) => readonly Scope[] | null }) {
     this.options = options;
     this.now = options.now ?? Date.now;
     this.load();
@@ -205,6 +209,7 @@ export class SessionRegistry {
   }
 
   private prune(): void {
+    this.revalidateEmailSessions();
     const now = this.now();
     this.pairings = this.pairings.filter((p) => p.expiresAt > now);
     this.replays = this.replays.filter((r) => r.expiresAt > now);
@@ -376,8 +381,36 @@ export class SessionRegistry {
 
   // ── sessions ───────────────────────────────────────────────────────────
 
+  /** Email membership is live, not a thirty-day grant. Losing any issued
+   * scope revokes the token and its streams; signing in again obtains the
+   * new role. Promotions never widen existing credentials. Pairing sessions
+   * have no email and remain independent of the hosted sign-in list. */
+  revalidateEmailSessions(): void {
+    const revoked = this.sessions.filter((session) => {
+      if (session.email === undefined) return false;
+      try {
+        const allowed = this.options.emailScopes?.(session.email);
+        return !allowed || session.scopes.some((scope) => !allowed.includes(scope));
+      } catch {
+        return true; // missing or unreadable membership must fail closed
+      }
+    });
+    if (!revoked.length) return;
+    const ids = new Set(revoked.map((session) => session.id));
+    this.sessions = this.sessions.filter((session) => !ids.has(session.id));
+    for (const session of revoked) this.forget(session.id);
+    try {
+      this.persist();
+    } catch (error) {
+      // Keep revocation effective in memory (and streams closed) even when
+      // storage is unavailable. Reloaded tokens face the same membership check.
+      console.error("Could not persist email session revocation:", error);
+    }
+  }
+
   authenticate(token: string | undefined): SessionRecord | null {
     if (!token) return null;
+    this.revalidateEmailSessions();
     const hash = sha256(token);
     const now = this.now();
     const record = this.sessions.find((s) => sameDigest(s.tokenHash, hash));
@@ -398,6 +431,7 @@ export class SessionRegistry {
    * Nothing expired is revived. Writes at most once per half-term, so it
    * adds nothing to the last-seen traffic. Returns whether it renewed. */
   renew(sessionId: string): boolean {
+    this.revalidateEmailSessions();
     const record = this.sessions.find((s) => s.id === sessionId);
     const now = this.now();
     if (!record || record.expiresAt <= now) return false;

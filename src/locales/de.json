@@ -1383,6 +1383,5 @@
   "remote.signInAccess.remove": "Entfernen",
   "remote.signInAccess.empty": "Noch niemand. Füge eine Adresse hinzu, oder @deinefirma.de für alle in deiner Firma.",
   "remote.signInAccess.invalid": "Gib eine E-Mail-Adresse ein oder @domain für alle dieser Domain.",
-  "remote.signInAccess.note": "Änderungen gelten sofort. Wer entfernt wird, kann sich nicht neu anmelden; bestehende Geräte bleiben angemeldet, bis du sie oben abmeldest.",
   "remote.signInAccess.error": "Konnte nicht speichern: {error}"
 }

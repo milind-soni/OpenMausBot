@@ -1,0 +1,37 @@
+[Unit]
+Description=OpenMausBot Admin portal (no bot runtime)
+After=network-online.target openmausbot-fleet.service
+Wants=network-online.target openmausbot-fleet.service
+
+[Service]
+Type=simple
+User=omb-admin
+Group=caddy
+SupplementaryGroups=omb-admin
+UMask=0077
+WorkingDirectory=/opt/openmausbot/enterprise/admin
+ExecStart=/usr/bin/node /opt/openmausbot/enterprise/admin/dist/server.mjs
+Environment=NODE_ENV=production
+EnvironmentFile=/etc/openmausbot/admin.env
+EnvironmentFile=/etc/openmausbot/admin-license.env
+StateDirectory=openmausbot-admin
+StateDirectoryMode=0700
+RuntimeDirectory=openmausbot-admin
+RuntimeDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+InaccessiblePaths=-/var/lib/openmausbot
+ReadWritePaths=/var/lib/openmausbot-admin /run/openmausbot-admin
+RestrictSUIDSGID=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

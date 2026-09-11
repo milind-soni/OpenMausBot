@@ -1,0 +1,15 @@
+# Fresh-server template. Merge into an existing Caddyfile; do not overwrite it.
+{
+	admin unix//run/caddy-admin/admin.sock
+}
+
+# Replace this exact host and OMB_ADMIN_URL together. Never use a wildcard here.
+admin.example.com {
+	reverse_proxy unix//run/openmausbot-admin/http.sock {
+		header_up Host admin.example.com
+		header_up X-OMB-Client-IP {remote_host}
+		flush_interval -1
+	}
+}
+
+import /etc/caddy/omb.d/*.caddy

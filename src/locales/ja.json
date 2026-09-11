@@ -1383,6 +1383,5 @@
   "remote.signInAccess.remove": "削除",
   "remote.signInAccess.empty": "まだ誰もいません。アドレスを追加するか、会社全員なら @yourcompany.com を追加してください。",
   "remote.signInAccess.invalid": "メールアドレス、またはそのドメイン全員を表す @domain を入力してください。",
-  "remote.signInAccess.note": "変更はすぐに反映されます。削除すると新しいサインインはできなくなります。既存のデバイスは上でサインアウトするまで残ります。",
   "remote.signInAccess.error": "保存できませんでした: {error}"
 }

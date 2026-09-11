@@ -12,6 +12,7 @@ import {
   fleetLayout,
   initPlan,
   initialConfig,
+  MANAGED_OPENROUTER,
   instanceEnv,
   parseRegistry,
   resumePlan,
@@ -63,6 +64,11 @@ describe("rendered files", () => {
     expect(rules.indexOf("omb-acme")).toBeLessThan(rules.indexOf("omb-globex"));
     expect(rules).toContain("oif lo tcp dport { 8810, 8811 } meta skuid != { omb-acme, caddy, root } reject");
     expect(fenceRules([])).not.toContain("reject");
+    const incomplete: FleetWorkspace = { slug: "pending", host: "pending.x", port: 8830, webhookPort: 8831, status: "provisioning", createdAt: "" };
+    expect(fenceRules([incomplete])).not.toContain("omb-pending");
+    expect(fenceRules([{ ...incomplete, accountCreated: true }])).toContain("omb-pending");
+    expect(fenceRules([{ ...incomplete, status: "error", accountCreated: true }])).toContain("omb-pending");
+    expect(fenceRules([{ ...incomplete, status: "retained" }])).toContain("omb-pending");
   });
 
   it("serves a running workspace and answers 503 for a suspended one", () => {
@@ -72,6 +78,9 @@ describe("rendered files", () => {
     expect(running).toContain("reverse_proxy 127.0.0.1:8810 {");
     expect(running).toContain("flush_interval -1");
     expect(caddySite({ host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "suspended" })).toContain('respond "This workspace is suspended." 503');
+    for (const status of ["provisioning", "error", "retained"] as const) {
+      expect(caddySite({ host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status })).toContain("503");
+    }
   });
 
   it("writes the environment, the first config and the sign-in edits the server reads live", () => {
@@ -89,6 +98,12 @@ describe("rendered files", () => {
     expect(JSON.parse(removed.config).signIn).toEqual({ admins: ["ada@example.test"], members: [] });
     expect(() => applySignIn(added.config, "remove", "nobody@acme.test", false)).toThrow("not on the list");
     expect(() => applySignIn("{}", "add", "not an email", false)).toThrow("email");
+    const promoted = applySignIn(added.config, "add", "bob@acme.test", false);
+    expect(JSON.parse(promoted.config).signIn).toEqual({ admins: ["ada@example.test", "bob@acme.test"], members: [] });
+    const demoted = applySignIn(promoted.config, "add", "ada@example.test", true);
+    expect(JSON.parse(demoted.config).signIn).toEqual({ admins: ["bob@acme.test"], members: ["ada@example.test"] });
+    expect(() => applySignIn(demoted.config, "add", "bob@acme.test", true)).toThrow("at least one admin");
+    expect(() => applySignIn(demoted.config, "remove", "bob@acme.test", false)).toThrow("at least one admin");
   });
 });
 
@@ -115,6 +130,16 @@ describe("plans", () => {
     const plan = createPlan({ registry, slug: "acme", seed: { admins: ["ada@example.test"], members: [] }, licenseKey: "omb1.k", memoryMax: "1G", now, layout });
     expect(plan.workspace).toEqual({ slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: now.toISOString() });
     expect(plan.registry.nextPort).toBe(8820);
+    const checkpoints = plan.steps.flatMap((step) => step.kind === "write" && step.path === layout.registryFile ? [JSON.parse(step.content)] : []);
+    expect(checkpoints.map((checkpoint) => checkpoint.workspaces.acme)).toEqual([
+      { ...plan.workspace, status: "provisioning", accountCreated: false },
+      { ...plan.workspace, status: "provisioning", accountCreated: true },
+      plan.workspace,
+    ]);
+    expect(plan.steps[0]).toMatchObject({ kind: "write", path: layout.registryFile });
+    expect(plan.steps[1]).toMatchObject({ kind: "run", argv: expect.arrayContaining(["useradd"]) });
+    expect(plan.steps[2]).toMatchObject({ kind: "write", path: layout.registryFile });
+    expect(checkpoints.every((checkpoint) => checkpoint.nextPort === 8820)).toBe(true);
     expect(argvOf(plan.steps)).toEqual([
       "useradd --system --create-home --home-dir /var/lib/openmausbot/acme --shell /usr/sbin/nologin --user-group omb-acme",
       "nft -f /etc/openmausbot/fence.nft",
@@ -149,24 +174,51 @@ describe("plans", () => {
     expect(resumed.registry.workspaces.acme?.status).toBe("running");
     expect(argvOf(resumed.steps)).toEqual(["systemctl enable --now openmausbot@acme.service", "systemctl reload caddy"]);
     const kept = deletePlan({ registry: resumed.registry, slug: "acme", keepData: true, layout });
-    expect(kept.registry.workspaces).toEqual({});
-    expect(argvOf(kept.steps)).toContain("userdel omb-acme");
+    expect(kept.registry.workspaces.acme).toMatchObject({ status: "retained", port: 8810 });
+    expect(argvOf(kept.steps).some((argv) => argv.startsWith("userdel"))).toBe(false);
     expect(argvOf(deletePlan({ registry: resumed.registry, slug: "acme", keepData: false, layout }).steps)).toContain("userdel --remove omb-acme");
-    expect(() => deletePlan({ registry: kept.registry, slug: "acme", keepData: true, layout })).toThrow('no workspace "acme"');
+    expect(() => deletePlan({ registry: kept.registry, slug: "acme", keepData: true, layout })).toThrow("operator recovery");
+    expect(() => createPlan({ registry: kept.registry, slug: "acme", seed: { admins: ["a@b.test"], members: [] }, layout })).toThrow("already exists");
+    expect(fenceRules(Object.values(kept.registry.workspaces))).toContain("omb-acme");
+    for (const status of ["provisioning", "error", "retained"] as const) {
+      const incomplete = { ...created.registry, workspaces: { acme: { ...created.workspace, status } } };
+      expect(() => resumePlan({ registry: incomplete, slug: "acme", layout })).toThrow("operator recovery");
+      expect(() => suspendPlan({ registry: incomplete, slug: "acme", layout })).toThrow("operator recovery");
+      expect(() => deletePlan({ registry: incomplete, slug: "acme", keepData: false, layout })).toThrow("operator recovery");
+    }
     const two = createPlan({ registry: created.registry, slug: "globex", seed: { admins: ["g@x.test"], members: [] }, now, layout }).registry;
     expect(argvOf(upgradePlan({ registry: suspendPlan({ registry: two, slug: "globex", layout }).registry }))).toEqual(["npm install -g openmausbot@latest", "systemctl restart openmausbot@acme.service"]);
   });
 
-  it("describes a plan as lines a root shell can run, quoting only what needs it", () => {
+  it("seeds only the trusted portal gateway and reserves the portal hostname", () => {
+    const registry = emptyRegistry("example.test");
+    const seed = { admins: ["owner@example.test"], members: [], portalUrl: "https://admin.example.test", anthropicUrl: "https://admin.example.test/api/gateway/acme/anthropic", anthropicKey: "workspace-scoped-token" };
+    const plan = createPlan({ registry, slug: "acme", seed, now, layout });
+    const env = plan.steps.find((step) => step.kind === "write" && step.path.endsWith("/acme.env"));
+    expect(env).toMatchObject({ mode: 0o600, content: expect.stringContaining("OMB_ADMIN_URL=https://admin.example.test\nOMB_ADMIN_WORKSPACE=acme") });
+    expect(env).not.toHaveProperty("owner");
+    const config = plan.steps.find((step) => step.kind === "write" && step.path.endsWith("/config.json"));
+    expect(config).toMatchObject({ owner: "omb-acme", content: expect.stringContaining('"url": "https://admin.example.test/api/gateway/acme/anthropic"') });
+    for (const portalUrl of ["http://admin.example.test", "https://admin.example.test/", "https://user:secret@admin.example.test", "https://admin.example.test/path"]) {
+      expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, portalUrl }, layout })).toThrow("HTTPS origin");
+    }
+    expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, anthropicUrl: "https://other.example.test" }, layout })).toThrow("workspace's portal gateway");
+    expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, portalUrl: undefined }, layout })).toThrow("requires portalUrl");
+    expect(() => createPlan({ registry, slug: "admin", seed, layout })).toThrow("reserved for the admin portal");
+  });
+
+  it("renders privileged steps but never recommends root writes through tenant paths", () => {
     const lines = describeSteps([
       { kind: "mkdir", path: "/var/lib/openmausbot/acme/.openmausbot", mode: 0o700, owner: "omb-acme" },
+      { kind: "write", path: "/var/lib/openmausbot/acme/.openmausbot/config.json", content: "secret", mode: 0o600, owner: "omb-acme" },
       { kind: "write", path: "/etc/openmausbot/instances/acme.env", content: "OMB_PORT=8810\n", mode: 0o600 },
       { kind: "run", argv: ["useradd", "--comment", "Acme Inc", "omb-acme"], why: "the account" },
       { kind: "append-once", path: "/etc/caddy/Caddyfile", line: "import /etc/caddy/omb.d/*.caddy" },
       { kind: "note", text: "done" },
     ]);
     expect(lines).toEqual([
-      "install -d -m 700 -o omb-acme -g omb-acme /var/lib/openmausbot/acme/.openmausbot",
+      "# Create /var/lib/openmausbot/acme/.openmausbot mode 700 as omb-acme (use fleet --yes; never root chown on tenant paths)",
+      "# Write /var/lib/openmausbot/acme/.openmausbot/config.json mode 600 as omb-acme (use fleet --yes; tenant content omitted)",
       "cat > /etc/openmausbot/instances/acme.env <<'OMB_EOF'",
       "OMB_PORT=8810",
       "OMB_EOF",
@@ -175,5 +227,32 @@ describe("plans", () => {
       "grep -qxF 'import /etc/caddy/omb.d/*.caddy' /etc/caddy/Caddyfile || printf '\\n%s\\n' 'import /etc/caddy/omb.d/*.caddy' >> /etc/caddy/Caddyfile",
       "# done",
     ]);
+  });
+
+  it("seeds private agentful OpenRouter config, including an empty catalog for later assignments", () => {
+    const seed = { admins: ["owner@example.test"], members: [], portalUrl: "https://admin.example.test", openrouterKey: "workspace-scoped-token", openrouterUrl: "https://admin.example.test/api/gateway/acme/openrouter/v1", openrouterModels: ["anthropic/claude-sonnet-4"], openrouterDefault: true };
+    const registry = emptyRegistry("example.test");
+    const plan = createPlan({ registry, slug: "acme", seed, layout });
+    const config = plan.steps.find((step) => step.kind === "write" && step.path.endsWith("/opencode.json"));
+    expect(config).toMatchObject({ owner: "omb-acme", mode: 0o600 });
+    expect(config?.kind === "write" && JSON.parse(config.content)).toEqual({ provider: { [MANAGED_OPENROUTER]: {
+      npm: "@ai-sdk/openai-compatible", name: "Managed OpenRouter",
+      options: { baseURL: seed.openrouterUrl, apiKey: seed.openrouterKey }, models: { "anthropic/claude-sonnet-4": { name: "anthropic/claude-sonnet-4" } },
+    } } });
+    expect(plan.steps.filter((step) => step.kind === "mkdir" && step.path.includes("/.config"))).toEqual([
+      { kind: "mkdir", path: "/var/lib/openmausbot/acme/.config", mode: 0o700, owner: "omb-acme" },
+      { kind: "mkdir", path: "/var/lib/openmausbot/acme/.config/opencode", mode: 0o700, owner: "omb-acme" },
+    ]);
+    expect(JSON.parse(initialConfig(seed)).defaultModelSelection).toEqual({ instanceId: "opencodeGo", model: `${MANAGED_OPENROUTER}/anthropic/claude-sonnet-4` });
+    expect(JSON.parse(initialConfig({ ...seed, openrouterDefault: false, anthropicKey: "other-scoped-token" }))).not.toHaveProperty("defaultModelSelection");
+    const empty = createPlan({ registry, slug: "acme", seed: { ...seed, openrouterModels: [], openrouterDefault: false }, layout });
+    const emptyConfig = empty.steps.find((step) => step.kind === "write" && step.path.endsWith("/opencode.json"));
+    expect(emptyConfig?.kind === "write" && JSON.parse(emptyConfig.content).provider[MANAGED_OPENROUTER].models).toEqual({});
+    for (const openrouterUrl of ["https://evil.example.test/v1", "https://admin.example.test/api/gateway/other/openrouter/v1", `${seed.openrouterUrl}?key=secret`]) {
+      expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, openrouterUrl }, layout })).toThrow("workspace's portal gateway");
+    }
+    expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, portalUrl: undefined }, layout })).toThrow("workspace's portal gateway");
+    expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, openrouterModels: [] }, layout })).toThrow("requires a model assignment");
+    for (const openrouterModels of [["bad\nmodel"], Array(101).fill("provider/model")]) expect(() => createPlan({ registry, slug: "acme", seed: { ...seed, openrouterModels }, layout })).toThrow("valid model IDs");
   });
 });

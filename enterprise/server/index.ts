@@ -2,6 +2,7 @@
 // Turn the configured license key into entitlements, or throw a message that
 // tells the operator what to fix; core degrades to the open-source edition.
 import { verifyLicenseKey } from "./license.ts";
+export { createWorkspaceAccess } from "./workspace-access.ts";
 
 export interface RegisteredLayer {
   customer: string;

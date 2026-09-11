@@ -1383,6 +1383,5 @@
   "remote.signInAccess.remove": "हटाएँ",
   "remote.signInAccess.empty": "अभी कोई नहीं। कोई पता जोड़ें, या पूरी कंपनी के लिए @yourcompany.com।",
   "remote.signInAccess.invalid": "ईमेल पता लिखें, या उस डोमेन के सभी के लिए @domain।",
-  "remote.signInAccess.note": "बदलाव तुरंत लागू होते हैं। किसी को हटाने से नए साइन-इन रुक जाते हैं; उनके मौजूदा डिवाइस तब तक साइन इन रहते हैं जब तक आप उन्हें ऊपर साइन आउट न करें।",
   "remote.signInAccess.error": "सहेज नहीं सका: {error}"
 }

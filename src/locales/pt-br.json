@@ -1383,6 +1383,5 @@
   "remote.signInAccess.remove": "Remover",
   "remote.signInAccess.empty": "Ninguém ainda. Adicione um endereço, ou @suaempresa.com para todos da empresa.",
   "remote.signInAccess.invalid": "Digite um e-mail, ou @domínio para todos daquele domínio.",
-  "remote.signInAccess.note": "As mudanças valem na hora. Remover alguém impede novos logins; os dispositivos já conectados continuam até você desconectá-los acima.",
   "remote.signInAccess.error": "Não foi possível salvar: {error}"
 }
