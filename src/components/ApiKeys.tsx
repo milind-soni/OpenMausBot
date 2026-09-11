@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai" | "vision";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai" | "vision" | "dictation";
 /** Sections whose key can be tried against the provider from the server. */
 export type TestableProvider = "anthropic" | "openaiCompat" | "xai";
 
@@ -26,15 +26,17 @@ const SECTIONS: Record<
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
   vision: { body: (v) => ({ vision: { key: v } }), flag: (c) => c.vision?.configured ?? false },
+  dictation: { body: (v) => ({ dictation: { key: v } }), flag: (c) => c.dictation?.configured ?? false },
 };
 
 // Provider keys have no desktop-shell slot yet and go through the server's
 // own 0600 config, the same place they live on a hosted server.
-const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey" | "visionApiKey">> = {
+const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey" | "visionApiKey" | "dictationApiKey">> = {
   composio: "composioApiKey",
   box: "boxToken",
   opencodeGo: "opencodeGoApiKey",
   vision: "visionApiKey",
+  dictation: "dictationApiKey",
 };
 
 const CREDENTIALS: Record<
@@ -106,6 +108,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.vision.desc",
     href: "https://github.com/freellmapi/freellmapi",
     linkLabelKey: "keys.vision.link",
+    optional: true,
+  },
+  dictation: {
+    labelKey: "keys.dictation.label",
+    placeholder: "dg-…",
+    descriptionKey: "keys.dictation.desc",
+    href: "https://console.deepgram.com",
+    linkLabelKey: "keys.dictation.link",
     optional: true,
   },
 };
