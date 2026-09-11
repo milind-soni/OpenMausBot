@@ -19,9 +19,10 @@ export function threadOpenerLabel(task: Pick<Task, "openedBy">): string | null {
 
 export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
   const needle = query.trim().toLowerCase();
-  return tasks.filter((task, index) => !task.closed && (needle
+  const recentOpenIds = new Set(tasks.filter((task) => !task.closed).slice(0, 6).map((task) => task.threadId));
+  return tasks.filter((task) => !task.closed && (needle
     ? task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle))
-    : showAll || index < 6 || task.threadId === activeId || task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.queued || task.unread));
+    : showAll || recentOpenIds.has(task.threadId) || task.threadId === activeId || task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.queued || task.unread));
 }
 
 /** One quiet row for bot and group histories. Surface denotes selection;
