@@ -40,6 +40,27 @@ command without starting a turn.
 - A bot working inside a channel must be awaited through that channel.
 - `needs-user`, `failed`, and `stalled` are results, not successful settlement.
 
+## Queued follow-up recovery
+
+Accepted bot and channel follow-ups are committed to the transcript database
+before acknowledgement. A normal restart restores only work whose dispatch has
+not begun. A claimed dispatch has an uncertain outcome: retain the user's words
+and a visible review notice instead of automatically repeating the action.
+Cancellation receipts survive restart. Importing a workspace backup pauses all
+of its queued work for review, even when restoring to the original directory.
+
+```sh
+pnpm exec vitest run server/chat-followups.test.ts server/chat-followups-restart.test.ts server/workspace-backup.test.ts
+```
+
+The restart test launches an isolated real server with the fake engine, accepts
+queued bot/channel sends, kills only that fixture server, and starts a replacement
+against the same disposable home. It checks original receipts, native image
+content, reply targets, cancellation conflicts, one uncertain-dispatch notice,
+and a second restart without replay. It records the fixture log and a retained
+`.log.chat-followups-restart.json` receipt before removing the temporary home.
+This does not prove resumption or cleanup of real provider sessions after a crash.
+
 ## Concurrent-task regression
 
 ```sh
