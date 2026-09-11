@@ -503,7 +503,7 @@ export function expireStaleDelegations(
   onSettled?: (receipt: DelegationReceipt) => void,
 ): number {
   const expired: DelegationReceipt[] = [];
-  for (const [threadId, items] of [...pendingDelegations]) {
+  for (const [threadId, items] of pendingDelegations) {
     if (drainingThreads.has(threadId)) continue;
     const due = items.filter((item) => isExpired(item, now));
     if (!due.length) continue;
