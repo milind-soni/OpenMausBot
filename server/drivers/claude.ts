@@ -453,7 +453,7 @@ function askSummary(ask: Ask): string {
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 
-export function permissionSocketPath(threadId: string) {
+export function permissionSocketPath(threadId: string, botId?: string) {
   // A readable prefix alone is not unique: ids that agree on their first
   // characters ("t-perm-dup-1", "t-perm-dup-2") would share a socket. POSIX
   // hides that — a new broker's listen replaces the socket FILE, so the name
@@ -463,8 +463,16 @@ export function permissionSocketPath(threadId: string) {
   // id so distinct threads get distinct sockets; the tag stays at 8 chars
   // total because the POSIX path already brushes the 104-byte sun_path
   // limit under deep tmp home dirs.
+  //
+  // botId is folded into the digest too (#1017): the driver's session/broker
+  // maps are a single process-wide table keyed on threadId alone, so a
+  // delegated child turn whose threadId ever coincides with its still-open
+  // parent's (or any other bot's) would otherwise collide on the exact same
+  // socket. Namespacing by bot makes that collision structurally impossible
+  // regardless of how two turns end up sharing a threadId.
+  const key = botId ? `${botId}\0${threadId}` : threadId;
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
-  const digest = createHash("sha256").update(threadId).digest("hex").slice(0, 4);
+  const digest = createHash("sha256").update(key).digest("hex").slice(0, 4);
   return brokerSocketPath(DATA_DIR, `${prefix}${digest}`);
 }
 
@@ -475,11 +483,11 @@ export function permissionSocketPath(threadId: string) {
  * longer than its small `sun_path` limit; a deep test HOME or long username
  * can otherwise make every approval silently unavailable. The proxy learns
  * the actual bound path from its argv, so either fallback is transparent. */
-export function brokerSocketCandidates(threadId: string): string[] {
-  const base = permissionSocketPath(threadId);
+export function brokerSocketCandidates(threadId: string, botId?: string): string[] {
+  const base = permissionSocketPath(threadId, botId);
   if (process.platform !== "win32") {
     const scope = createHash("sha256")
-      .update(`${DATA_DIR}\0${process.pid}\0${threadId}`)
+      .update(`${DATA_DIR}\0${process.pid}\0${botId ?? ""}\0${threadId}`)
       .digest("hex")
       .slice(0, 16);
     return [base, join(tmpdir(), `omb-perm-${scope}.sock`)];
@@ -954,7 +962,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const retryState = new Map<string, { attempt: number; cancelled: boolean }>();
 
     const sendTurn = async (turn: SendTurnInput) => {
-      const { threadId } = turn;
+      const { threadId, botId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       // A bot-level mode is authoritative for this turn. In particular, an
       // old provider instance may still be configured with
@@ -1125,7 +1133,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Keep ask_user available even in Full access. Native bypass skips
       // permission prompts, not questions requiring a person's answer.
       let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
-      const socketPath = permissionSocketPath(threadId);
+      const socketPath = permissionSocketPath(threadId, botId);
       if (permissionMode !== "bypassPermissions") {
         args.push("--permission-prompt-tool", "mcp__ogb__approve");
       }
@@ -1240,7 +1248,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           // event can scope approvals to real desktop-control tools only
           const askTools = new Map<string, string | undefined>();
           broker = await createPermissionBroker({
-            socketPaths: brokerSocketCandidates(threadId),
+            socketPaths: brokerSocketCandidates(threadId, botId),
             isActive: () => Boolean(sessions.get(threadId)?.turn),
             onAsk: (ask) => {
               const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;

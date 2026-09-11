@@ -188,6 +188,13 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // carrying the provider-native continuation (e.g. a claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  /** The bot this turn belongs to. threadIds are meant to be unique per bot
+   * task, but a driver's process-level resource maps (permission-broker
+   * socket, CLI session) key off threadId alone — botId lets a driver namespace
+   * those resources so a threadId that unexpectedly coincides across two
+   * bots (e.g. a delegation still holding its own broker open) can never
+   * collide with another bot's live session or broker (see #1017). */
+  botId?: string;
   text: string;
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */

@@ -161,8 +161,19 @@ describe("ClaudeDriver.decodeConfig", () => {
   });
 
   it("gives each collision test a distinct broker pipe path", () => {
-    const paths = COLLISION_THREAD_IDS.map(permissionSocketPath);
+    const paths = COLLISION_THREAD_IDS.map((threadId) => permissionSocketPath(threadId));
     expect(new Set(paths).size).toBe(COLLISION_THREAD_IDS.length);
+  });
+
+  it("gives two bots distinct broker pipes even if they ever share a threadId (#1017)", () => {
+    // A delegated child turn should never be able to collide with its
+    // parent's still-open broker on the shared driver-level socket table —
+    // whatever the reason a threadId is reused, namespacing by bot rules
+    // the collision out by construction.
+    const sharedThreadId = "t-shared-by-parent-and-child";
+    const parentPath = permissionSocketPath(sharedThreadId, "bot-chief");
+    const childPath = permissionSocketPath(sharedThreadId, "bot-cliff");
+    expect(parentPath).not.toBe(childPath);
   });
 
   it("disposes its account controller while a logout is running", async () => {

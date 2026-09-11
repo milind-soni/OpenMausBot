@@ -5089,6 +5089,7 @@ async function startTurn(
       ]);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
+        botId: bot.id,
         text: turnText,
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0),
@@ -6376,6 +6377,7 @@ async function runGroupMemberTurn(
     providerDispatched = true;
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
+        botId: readyBot.id,
         text,
         images: turnImages,
         approvalMode: approvalModeForTurn(readyBot, false),
