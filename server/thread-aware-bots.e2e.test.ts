@@ -549,6 +549,7 @@ describe("close_thread", () => {
       const closed = await close(opened.body.threadId);
       expect(closed.status).toBe(200);
       expect(closed.body).toMatchObject({ closed: true, title: "QA: PR #78", botName: "Quinn" });
+      expect((await botState(qa.id)).tasks.find((task: any) => task.threadId === opened.body.threadId)).toMatchObject({ closed: true, unread: false });
       expect((await messages(opened.body.threadId)).some((message) => message.tool?.name === "Closed by @Parker")).toBe(true);
       // Parker's own second thread closes too; the one it speaks in does not
       const own = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Notes" })).body.task.threadId as string;
