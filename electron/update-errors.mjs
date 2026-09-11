@@ -3,6 +3,10 @@
 export function updateErrorMessage(error) {
   const message = String(error?.message ?? error ?? "Update failed");
   const detail = `${error?.code ?? ""} ${message}`;
+  // A TLS leaf signature is a connection failure, not an installer signature.
+  if (/CERT_|UNABLE_TO_VERIFY_LEAF_SIGNATURE|certificate|SSL_ERROR/i.test(detail)) {
+    return "The update connection could not be verified. Check your clock, VPN or proxy; do not disable certificate checks.";
+  }
   // Integrity failures must never be explained away as a network/disk issue.
   if (/checksum|signature|codesign/i.test(detail)) {
     return "The update failed verification. Download a fresh installer from the official release page.";
@@ -15,9 +19,6 @@ export function updateErrorMessage(error) {
   }
   if (/\bEBUSY\b|being used by another process/i.test(detail)) {
     return "An update file is in use. Close other copies of OpenMausBot, then try again.";
-  }
-  if (/CERT_|CERTIFICATE|certificate|SSL_ERROR/i.test(detail)) {
-    return "The update connection could not be verified. Check your clock, VPN or proxy; do not disable certificate checks.";
   }
   if (/\b404\b|cannot find .*\.yml|cannot parse update info|no files provided|ERR_UPDATER_INVALID_RELEASE_FEED/i.test(detail)) {
     return "The update files are missing or invalid. Check the official release page, or try again later.";

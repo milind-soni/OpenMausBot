@@ -18,6 +18,7 @@ test("update failures keep integrity and certificate errors distinct from recove
     ["ETIMEDOUT", /connection and try again/],
   ]) assert.match(updateErrorMessage(new Error(message)), expected);
   assert.match(updateErrorMessage(Object.assign(new Error("écriture impossible"), { code: "ENOSPC" })), /Free some space/);
+  assert.match(updateErrorMessage(Object.assign(new Error("connection failed"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" })), /do not disable certificate checks/);
   assert.equal(updateErrorMessage(new Error("unknown failure")), "unknown failure");
 });
 
