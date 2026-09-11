@@ -317,6 +317,8 @@ export interface TaskRecord {
   autoApprove?: boolean;
   alwaysAllow?: string[];
   unread?: boolean;
+  /** A bot marked this finished; the transcript remains until the person deletes it. */
+  closed?: boolean;
   rewound?: boolean;
   pinnedMessageId?: string;
   /** Runtime-only state, reset on load and never written to bots.json. */
