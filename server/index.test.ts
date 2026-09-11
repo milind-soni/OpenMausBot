@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
+import { connect, type Socket } from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -860,6 +861,8 @@ beforeAll(async () => {
       OMB_SSE_HEARTBEAT_MS: "50",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      // the real CLI runs Manual for these even when asked for auto
+      FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS: "claude-haiku-4-5",
       OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -5387,6 +5390,69 @@ describe("harness HTTP API", () => {
     expect(disk.rooms).toEqual({ turnTimeoutMinutes: 20 });
 
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
+  });
+
+  it("answers as safe Auto when Claude's reviewer never started, and says so once", async () => {
+    // A bot on Approve for me with Haiku 4.5: the CLI takes `auto`, runs
+    // Manual, and would otherwise card the person for every tool call.
+    const bot = (await api("POST", "/api/bots", { name: "Quill" })).body.bot;
+    const conns: Socket[] = [];
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-haiku-4-5" },
+        approvalMode: "auto",
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "count my notes" })).status).toBe(202);
+      // the permission socket the driver handed its proxy, from the MCP
+      // config the fake read back
+      const dump = z.object({
+        mcpConfig: z.object({ mcpServers: z.object({ ogb: z.object({ args: z.array(z.string()) }) }) }),
+      }).parse(await readJsonFileWhenReady(fakeClaudeDump));
+      const socketPath = dump.mcpConfig.mcpServers.ogb.args[1];
+      const raise = async (id: string, command: string) => {
+        const conn = connect(socketPath);
+        conns.push(conn);
+        const answered = new Promise<{ behavior: string }>((resolve) => {
+          let buf = "";
+          conn.on("data", (chunk) => {
+            buf += chunk;
+            const nl = buf.indexOf("\n");
+            if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+          });
+        });
+        await new Promise<void>((resolve, reject) => {
+          conn.on("connect", resolve);
+          conn.on("error", reject);
+        });
+        conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command } }) + "\n");
+        return answered;
+      };
+      const messages = async () =>
+        (await api("GET", "/api/bots?messages=40")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id)
+          .messages as Array<{ kind: string; tool?: { name: string }; card?: { title: string; subtitle: string; allowKey?: string } }>;
+
+      // routine work is approved by the app, not carded
+      await expect(raise("ask-wc", "wc -l notes.md")).resolves.toMatchObject({ behavior: "allow" });
+      await expect.poll(async () => (await messages()).some((m) => m.tool?.name.startsWith("auto-approved Bash: wc -l notes.md"))).toBe(true);
+      // and the person is told once who is approving, naming the model
+      const notices = (await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer is not available"));
+      expect(notices).toHaveLength(1);
+      expect(notices[0].tool!.name).toContain("claude-haiku-4-5");
+
+      await expect(raise("ask-ls", "ls memory")).resolves.toMatchObject({ behavior: "allow" });
+      await expect.poll(async () => (await messages()).some((m) => m.tool?.name.startsWith("auto-approved Bash: ls memory"))).toBe(true);
+      expect((await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer"))).toHaveLength(1);
+
+      // the guards still stop the fallback: a destructive command is carded
+      void raise("ask-rm", "rm -rf build");
+      await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "rm -rf build")?.card?.title).toBe("Approval needed");
+      expect((await messages()).some((m) => m.tool?.name.startsWith("auto-approved Bash: rm -rf build"))).toBe(false);
+    } finally {
+      for (const conn of conns) conn.destroy();
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("mounts the verification skill into a real turn when its trigger appears", async () => {

@@ -863,6 +863,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
        * began the turn. The acceptance boundary for --resume: before it,
        * nothing was submitted and the turn has caused nothing. */
       sawInit: boolean;
+      /** the permission mode `init` says the session actually runs in. The
+       * CLI takes `--permission-mode auto` for any model and starts in
+       * "default" without a word when auto mode is unavailable (Haiku 4.5,
+       * Sonnet 4.5, an org that disabled it), so the flag we passed is not
+       * the truth — this is. null until init, or on a CLI that omits it. */
+      nativePermissionMode: string | null;
       /** the running turn, or null between turns */
       turn: { turnId: string; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
@@ -1228,6 +1234,14 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             onAsk: (ask) => {
               const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
               askTools.set(ask.id, typeof ask.tool === "string" ? ask.tool : undefined);
+              // Auto was requested: say whether the CLI's reviewer is actually
+              // running, from init, so the harness can tell a classifier's
+              // verdict from a Manual session asking about everything.
+              const nativeMode = sessions.get(threadId)?.nativePermissionMode ?? null;
+              const nativeReview =
+                permissionMode === "auto" && nativeMode !== null
+                  ? nativeMode === "auto" ? "active" : "inactive"
+                  : undefined;
               emit({
                 ...base(threadId, eventTurnId),
                 type: "request.opened",
@@ -1235,6 +1249,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 requestType: ask.kind,
                 tool: ask.tool,
                 summary: askSummary(ask),
+                nativeReview,
                 approvalScope:
                   typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
                     ? "local-computer"
@@ -1297,6 +1312,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         volatile: turn.systemVolatile ?? "",
         sessionId: sessionId ?? newSessionId,
         sawInit: false,
+        nativePermissionMode: null,
         turn: { turnId, settled: false, sawStreamDelta: false },
         idleTimer: null,
         closing: false,
@@ -1352,6 +1368,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "system":
             if (o.subtype === "init") {
               session.sawInit = true;
+              session.nativePermissionMode = typeof o.permissionMode === "string" ? o.permissionMode : null;
               if (typeof o.session_id === "string") session.sessionId = o.session_id;
               emit({ ...base(threadId, currentTurnId()), type: "session.started", sessionId: o.session_id, model: o.model });
             } else if (o.subtype === "thinking_tokens") {

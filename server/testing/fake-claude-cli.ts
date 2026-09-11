@@ -31,6 +31,10 @@
 //                      Unset, a turn makes the single default Bash call.
 //   FAKE_CLAUDE_AUTH   in (default) | out | unsupported | malformed |
 //                      inherited-api-key — what `auth status` reports
+//   FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS comma-separated --model values for
+//                      which `--permission-mode auto` starts in "default",
+//                      the way the real CLI (2.1.266) does for Haiku 4.5 and
+//                      Sonnet 4.5: init reports the mode it actually runs in.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -154,6 +158,12 @@ if (argAfter("--output-format") === "text") {
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 const sessionId = argAfter("--resume") ?? argAfter("--session-id") ?? "fake-session";
 const model = argAfter("--model") ?? "claude-fake";
+// The mode init reports: what was asked for, unless auto is unavailable for
+// this model, in which case the real CLI silently runs Manual ("default").
+const requestedPermissionMode = argAfter("--permission-mode") ?? "default";
+const autoUnavailableFor = (process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS ?? "").split(",").filter(Boolean);
+const permissionMode =
+  requestedPermissionMode === "auto" && autoUnavailableFor.includes(model) ? "default" : requestedPermissionMode;
 let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
@@ -244,7 +254,7 @@ const playTurn = (prompt: JsonValue) => {
     } catch {}
     const quota = Number(process.env.FAKE_CLAUDE_TRANSIENTS) || 0;
     writeFileSync(process.env.FAKE_CLAUDE_STATE, String(launched + 1));
-    out({ type: "system", subtype: "init", session_id: sessionId, model });
+    out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode });
     if (launched < quota) {
       if (process.env.FAKE_CLAUDE_PARTIAL_FAILS) {
         out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "half an answer" } } });
@@ -255,7 +265,7 @@ const playTurn = (prompt: JsonValue) => {
   }
 
   // the real CLI re-announces init on every turn of a live process
-  out({ type: "system", subtype: "init", session_id: sessionId, model });
+  out({ type: "system", subtype: "init", session_id: sessionId, model, permissionMode });
 
   // The CLI accepted the resumed session — it read the prompt — and then
   // died with nothing to show. The prompt may already have run tools, so

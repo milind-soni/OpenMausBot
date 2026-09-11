@@ -116,18 +116,26 @@ export function rememberableApprovalKey(
     source: AutoVerdictSource | undefined;
     scope?: "local-computer";
     requiresExplicitApproval?: boolean;
+    nativeReview?: "active" | "inactive";
   },
 ): string | undefined {
   if (
     !bot ||
     approvalModeFor(bot) === "custom" ||
-    context.source !== "no-grant" ||
     context.scope ||
     context.requiresExplicitApproval
   ) {
     return undefined;
   }
-  return approvalKey(tool, summary, context.scope);
+  // A native reviewer that is known to be running and still asked has
+  // reached a verdict of its own; remembering an answer over it would be
+  // the app second-guessing the classifier. A punt from a reviewer nobody
+  // can see (Grok's is feature-gated, Codex's has no fallback) is the
+  // person's to answer, and their standing answer counts next time.
+  const answerable =
+    context.source === "no-grant" ||
+    (context.source === "native-approval" && context.nativeReview !== "active");
+  return answerable ? approvalKey(tool, summary, context.scope) : undefined;
 }
 
 export interface AutoVerdict {
@@ -155,6 +163,11 @@ export function autoVerdict(
     unattended?: boolean;
     /** Respect the native reviewer (including a provider with no Auto mode). */
     nativeApproval?: boolean;
+    /** What the provider said about its reviewer on this request (see
+     * RuntimeEvent request.opened). "inactive" cancels nativeApproval: the
+     * provider asked for Auto and started without a reviewer, so the ask is
+     * not a verdict. "active" also fences remembered grants out. */
+    nativeReview?: "active" | "inactive";
     /** the request controls the user's active desktop */
     scope?: "local-computer";
     /** The provider is asking to widen its configured sandbox rather than
@@ -163,7 +176,17 @@ export function autoVerdict(
   },
 ): AutoVerdict {
   const mode = approvalModeFor(bot);
-  if (context?.nativeApproval) return { approve: null, source: "native-approval" };
+  // Claude with Haiku 4.5 (or any model its classifier does not cover) takes
+  // `--permission-mode auto` and starts in Manual without an error, so every
+  // ask would land here as a "reviewer's verdict" and card the person for
+  // `wc -l` in the bot's own workspace. The driver reads the effective mode
+  // from init and says so; when it does, Auto falls back to the app's own
+  // safe rules below, exactly what Auto meant before native review existed.
+  const reviewerOff = context?.nativeReview === "inactive";
+  const nativeApproval = Boolean(context?.nativeApproval) && !reviewerOff;
+  if (nativeApproval && (mode !== "auto" || context?.nativeReview === "active")) {
+    return { approve: null, source: "native-approval" };
+  }
   // This branch intentionally precedes every guard. Entering Full access is
   // separately consent-gated by the bot PATCH endpoint, and its promise is
   // literal: even destructive, sensitive, unattended, and host-computer
@@ -192,9 +215,22 @@ export function autoVerdict(
       ? null
       : mode !== "custom" && bot.alwaysAllow?.includes(key)
         ? { approve: `auto-approved ${key} (always allowed)`, source: "always-allow" as const, rule: key }
-        : mode === "auto"
-          ? { approve: `auto-approved ${tool}`, source: "auto-mode" as const, rule: undefined }
+        : mode === "auto" && !nativeApproval
+          ? {
+              approve: `auto-approved ${tool}`,
+              source: "auto-mode" as const,
+              // the log's "which rule": Auto itself, or Auto standing in for
+              // a reviewer that never started
+              rule: reviewerOff ? "native-review-inactive" : undefined,
+            }
           : null;
+  // A reviewer nobody can observe punted (Grok's classifier is feature-gated,
+  // Codex's asks are its own). Only a grant the person recorded for this
+  // exact key answers it; Auto's blanket approval does not, so a reviewer
+  // that DID block something is never overruled by a regex.
+  if (nativeApproval && grant?.source !== "always-allow") {
+    return { approve: null, source: "native-approval" };
+  }
   if (context?.unattended) {
     // Auto mode is something a person switched on for turns they are present
     // for. A webhook turn begins with nobody watching, on a payload someone

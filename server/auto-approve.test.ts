@@ -21,9 +21,62 @@ import {
 } from "./auto-approve.ts";
 
 describe("native permission decisions", () => {
-  it.each(["auto", "full"] as const)("does not override a native %s approval request, even with a remembered grant", (approvalMode) => {
-    expect(autoVerdict({ approvalMode, alwaysAllow: ["Read"] }, "Read", "README.md", { nativeApproval: true }))
+  it("does not override a native Full access request, even with a remembered grant", () => {
+    expect(autoVerdict({ approvalMode: "full", alwaysAllow: ["Read"] }, "Read", "README.md", { nativeApproval: true }))
       .toEqual({ approve: null, source: "native-approval" });
+  });
+
+  it("leaves a running reviewer's verdict alone, remembered grant or not", () => {
+    const bot = { approvalMode: "auto" as const, alwaysAllow: ["Read"] };
+    expect(autoVerdict(bot, "Read", "README.md", { nativeApproval: true, nativeReview: "active" }))
+      .toEqual({ approve: null, source: "native-approval" });
+    expect(autoVerdict(bot, "Bash", "wc -l notes.md", { nativeApproval: true, nativeReview: "active" }))
+      .toEqual({ approve: null, source: "native-approval" });
+    // and no "Always allow" is offered over it: the answer would not be
+    // honored next time either
+    expect(rememberableApprovalKey(bot, "Bash", "wc -l notes.md", { source: "native-approval", nativeReview: "active" }))
+      .toBeUndefined();
+  });
+
+  it("falls back to safe Auto when the provider says its reviewer never started", () => {
+    // Claude on Haiku 4.5: `--permission-mode auto` accepted, session runs
+    // Manual, every tool call arrives here. Auto answers as it always did.
+    const bot = { approvalMode: "auto" as const };
+    expect(autoVerdict(bot, "Bash", "wc -l notes.md", { nativeApproval: true, nativeReview: "inactive" }))
+      .toEqual({ approve: "auto-approved Bash", source: "auto-mode", rule: "native-review-inactive" });
+    expect(autoVerdict(bot, "Write", "memory/topic.md", { nativeApproval: true, nativeReview: "inactive" }))
+      .toEqual({ approve: "auto-approved Write", source: "auto-mode", rule: "native-review-inactive" });
+    // the guards still outrank the fallback
+    expect(autoVerdict(bot, "Bash", "rm -rf build", { nativeApproval: true, nativeReview: "inactive" }))
+      .toMatchObject({ approve: null, source: "destructive-guard" });
+    expect(autoVerdict(bot, "Bash", "cat ~/.ssh/id_rsa", { nativeApproval: true, nativeReview: "inactive" }))
+      .toMatchObject({ approve: null, source: "sensitive-guard" });
+    // and so does an unattended turn — the row names the grant it stopped
+    expect(autoVerdict(bot, "Bash", "wc -l notes.md", { nativeApproval: true, nativeReview: "inactive", unattended: true }))
+      .toEqual({ approve: null, source: "unattended-block", rule: "native-review-inactive" });
+    // a plain-Auto verdict carries no rule; only the fallback names itself
+    expect(autoVerdict(bot, "Bash", "wc -l notes.md", {}))
+      .toEqual({ approve: "auto-approved Bash", source: "auto-mode", rule: undefined });
+  });
+
+  it("lets a remembered grant answer a punt from a reviewer nobody can see", () => {
+    // Grok's classifier is feature-gated and its ACP never says whether it
+    // ran; Codex's asks are its own. The person's standing answer for this
+    // exact key stands in — Auto's blanket approval does not.
+    const bot = { approvalMode: "auto" as const, alwaysAllow: ["Bash:git"] };
+    expect(autoVerdict(bot, "Bash", "git status", { nativeApproval: true }))
+      .toEqual({ approve: "auto-approved Bash:git (always allowed)", source: "always-allow", rule: "Bash:git" });
+    expect(autoVerdict(bot, "Bash", "npm test", { nativeApproval: true }))
+      .toEqual({ approve: null, source: "native-approval" });
+    // guards outrank the grant here too
+    expect(autoVerdict(bot, "Bash", "git push --force origin main", { nativeApproval: true }))
+      .toEqual({ approve: null, source: "native-approval" });
+    // so the card may offer to remember the answer
+    expect(rememberableApprovalKey(bot, "Bash", "npm test", { source: "native-approval" })).toBe("Bash:npm");
+    expect(rememberableApprovalKey(bot, "Bash", "npm test", { source: "native-approval", nativeReview: "inactive" })).toBe("Bash:npm");
+    // but never for host control or a sandbox change
+    expect(rememberableApprovalKey(bot, "Bash", "npm test", { source: "native-approval", scope: "local-computer" })).toBeUndefined();
+    expect(rememberableApprovalKey(bot, "Bash", "npm test", { source: "native-approval", requiresExplicitApproval: true })).toBeUndefined();
   });
 });
 

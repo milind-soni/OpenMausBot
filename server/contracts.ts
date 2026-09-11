@@ -145,6 +145,13 @@ export type RuntimeEvent = RuntimeEventBase &
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */
         requiresExplicitApproval?: boolean;
+        /** Whether the provider's own automatic reviewer was running when it
+         * raised this request. Only providers that can tell set it: Claude
+         * reports the effective permission mode in its init frame, and starts
+         * in Manual without a word when Auto is unavailable for the model.
+         * "inactive" means this ask is not a reviewer's verdict, so the app's
+         * own safe-Auto rules may answer it; unset means nobody knows. */
+        nativeReview?: "active" | "inactive";
       }
     | {
         type: "request.resolved";

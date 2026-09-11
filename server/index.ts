@@ -2705,6 +2705,16 @@ function requestBehavior(value: unknown): "allow" | "deny" | "answer" | null {
 // the last settled assistant text per thread, so a "finished" notification
 // can carry what the bot actually said
 const lastReply = new Map<string, string>();
+/** the model each thread's provider session announced in session.started,
+ * so a fallback notice can name the model Auto is unavailable for */
+const sessionModelByThread = new Map<string, string>();
+/** threads already told that the provider's reviewer never started */
+const nativeReviewNoticed = new Set<string>();
+/** a driver kind as the chat should name it: "claudeAgent" → "Claude" */
+const providerLabel = (provider: string): string => {
+  const bare = provider.replace(/Agent$/, "");
+  return bare.charAt(0).toUpperCase() + bare.slice(1);
+};
 
 /** Put a notification on the wire. Clients decide what to do with it — a
  * desktop notification now, a push to a paired phone later. */
@@ -3321,6 +3331,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (bot && event.sessionId && event.providerInstanceId) {
         store.setResumeCursor(bot.id, event.providerInstanceId, event.sessionId, event.threadId);
       }
+      if (typeof event.model === "string" && event.model) sessionModelByThread.set(event.threadId, event.model);
       break;
     case "item.completed":
       if (event.itemType === "assistant_text") {
@@ -3415,8 +3426,32 @@ bus.subscribe((event: RuntimeEvent) => {
             // Match the dispatched mode for every provider, including
             // delegated Custom and unattended Auto downgrades.
             nativeApproval: requiresNativeApproval(event.provider, effectiveApprovalMode),
+            nativeReview: event.nativeReview,
           })
         : null;
+      // Auto's promise was "the bot handles routine actions". Claude on a
+      // model its classifier does not cover starts in Manual and asks about
+      // everything, which the person reads as Auto being broken. Say once
+      // per session who is actually approving, then let the verdict below
+      // answer as safe Auto always did.
+      if (
+        permission &&
+        asker &&
+        event.nativeReview === "inactive" &&
+        effectiveApprovalMode === "auto" &&
+        !nativeReviewNoticed.has(event.threadId)
+      ) {
+        nativeReviewNoticed.add(event.threadId);
+        const model = sessionModelByThread.get(event.threadId);
+        pushMessage({
+          role: "bot",
+          kind: "activity",
+          tool: {
+            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}, so OpenMausBot is approving routine actions itself and still asks about destructive or sensitive ones.`,
+            ok: true,
+          },
+        });
+      }
       if (verdict?.approve && asker && event.requestId) {
         const settled = verdict.approve;
         const instance = event.providerInstanceId
@@ -3527,6 +3562,7 @@ bus.subscribe((event: RuntimeEvent) => {
                 source: verdict?.source,
                 scope: event.approvalScope,
                 requiresExplicitApproval: event.requiresExplicitApproval,
+                nativeReview: event.nativeReview,
               })
             : undefined,
           // The text stays for cards saved before heldCode existed, and for

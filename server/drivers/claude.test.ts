@@ -319,6 +319,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   afterEach(async () => {
     delete process.env.FAKE_CLAUDE_MODE;
+    delete process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS;
     delete process.env.FAKE_CLAUDE_DUMP;
     delete process.env.FAKE_CLAUDE_PROMPTS;
     delete process.env.FAKE_CLAUDE_TRANSIENTS;
@@ -1525,6 +1526,42 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: false, stopReason: "spawn_error" });
 
     expect(await instance.snapshot()).toMatchObject({ state: "unavailable" });
+  });
+
+  it("tags each ask with whether the CLI's own reviewer is running, read from init", async () => {
+    // The real CLI accepts `--permission-mode auto` for every model and, when
+    // auto is unavailable (Haiku 4.5, Sonnet 4.5 on 2.1.266), starts in
+    // Manual without an error. Only init's permissionMode tells the truth,
+    // and the harness needs it to tell a verdict from a Manual session
+    // asking about everything.
+    process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS = "claude-haiku-4-5";
+    await create("hang", {}, { permissionMode: "bypassPermissions" });
+    const raise = async (threadId: string, id: string) => {
+      const conn = connect(permissionSocketPath(threadId));
+      await new Promise<void>((resolve, reject) => {
+        conn.on("connect", resolve);
+        conn.on("error", reject);
+      });
+      conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command: "wc -l notes.md" } }) + "\n");
+      const opened = await recorder.until((e) => e.type === "request.opened" && e.requestId === id);
+      conn.destroy();
+      return opened;
+    };
+
+    // Auto on a model the classifier does not cover: the session runs Manual
+    await instance.adapter.sendTurn({ threadId: "t-review-off", text: "go", approvalMode: "auto", model: "claude-haiku-4-5" });
+    await recorder.until((e) => e.type === "session.started" && e.threadId === "t-review-off");
+    expect(await raise("t-review-off", "ask-off")).toMatchObject({ nativeReview: "inactive" });
+
+    // Auto on a covered model: the reviewer is running, its ask is a verdict
+    await instance.adapter.sendTurn({ threadId: "t-review-on", text: "go", approvalMode: "auto", model: "claude-sonnet-5" });
+    await recorder.until((e) => e.type === "session.started" && e.threadId === "t-review-on");
+    expect(await raise("t-review-on", "ask-on")).toMatchObject({ nativeReview: "active" });
+
+    // Ask mode never claims anything about a reviewer
+    await instance.adapter.sendTurn({ threadId: "t-review-ask", text: "go", approvalMode: "ask", model: "claude-haiku-4-5" });
+    await recorder.until((e) => e.type === "session.started" && e.threadId === "t-review-ask");
+    expect(await raise("t-review-ask", "ask-ask")).toHaveProperty("nativeReview", undefined);
   });
 
   it("brokers a permission ask into request.opened and answers over the socket", async () => {

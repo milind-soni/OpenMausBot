@@ -6,7 +6,7 @@ when that provider resumes an existing native thread.
 | Level | Behavior |
 | --- | --- |
 | **Ask for approval** | The provider asks before actions outside its normal workspace or network permissions. |
-| **Approve for me** | Uses native automatic review on Codex, Claude, Cursor, and Grok. Other providers fall back to Ask. Requests the native reviewer leaves for you are not overridden by OpenMausBot. Unattended Auto runs use Ask. |
+| **Approve for me** | Uses native automatic review on Codex, Claude, Cursor, and Grok. Other providers fall back to Ask. Requests a running native reviewer leaves for you are not overridden by OpenMausBot, except by an **Always allow** answer you recorded for that exact command or tool. When Claude reports that its reviewer never started (see below), OpenMausBot approves routine actions itself and still asks about destructive or sensitive ones. Unattended Auto runs use Ask. |
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Applies to this bot's direct, scheduled, and delegated work (ask_bot, delegate_bot); delegation uses the receiving bot's setting, never the sender's. Some providers still ask for approval. Questions and separate OpenMausBot confirmations still wait for you. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
@@ -52,7 +52,7 @@ Cursor, Claude, or other engine's legacy full-auto mode.
 | Provider | Auto | Full access |
 | --- | --- | --- |
 | Codex | Native automatic reviewer; workspace sandbox | No native approval prompts; unrestricted native sandbox |
-| Claude | Native `auto` mode | Native `bypassPermissions` |
+| Claude | Native `auto` mode; safe Auto when the CLI starts in Manual instead | Native `bypassPermissions` |
 | Cursor | Native `--auto-review` | Native `--force` |
 | Antigravity | Legacy `auto` behaves as Ask; UI Auto selects Full access | Native `yolo` plus automatic approval of remaining tool-permission requests; shown as Auto |
 | Grok Build | Native `--permission-mode auto`; availability of Grok's reviewer depends on its feature rollout | Native `bypassPermissions`; remaining native requests still appear |
@@ -64,6 +64,33 @@ to a different provider while elevated requires leaving Full/Custom first;
 choose Ask. Switching models within Antigravity keeps the selected level.
 Native modes require a CLI version that supports them; OpenMausBot does not
 silently substitute unrestricted access when a mode is rejected.
+
+### When the native reviewer never starts
+
+Claude Code accepts `--permission-mode auto` for every model and, when auto
+mode is unavailable to the session, starts in Manual without an error. On
+Claude Code 2.1.266 that is the case for Claude Haiku 4.5 and Sonnet 4.5,
+and for any organization that set `disableAutoMode`. In that session every
+tool call reaches OpenMausBot as a permission request, and until now each one
+became a card: a bot on **Approve for me** asked before `wc -l` in its own
+workspace.
+
+The Claude driver reads the mode the session actually runs in from the CLI's
+`init` frame and marks each request accordingly. When Auto was requested and
+the session runs Manual, **Approve for me** answers the way it did before native
+review existed: routine commands, edits, and tool calls are approved by
+OpenMausBot, the destructive and sensitive guards still card, unattended turns
+still ask, and the chat shows one notice per session naming the model the
+reviewer is unavailable for. Each approval is written to the decision log with
+the rule `native-review-inactive`. A request from a reviewer that is known to be
+running is still never answered by the app.
+
+Grok and Codex do not report whether their reviewer ran, so their requests
+still reach you. For those, **Always allow** on a card now records an answer
+that stands in next time the same command or tool is asked about, unless a
+guard applies. This mirrors the remembered-approval behavior other harnesses
+offer for Grok. It is never offered for computer control or a sandbox change,
+and never over a reviewer Claude reports as running.
 
 ### Read-only integration tools
 
