@@ -7,6 +7,7 @@
 // never saw.
 
 import { newId } from "./contracts.ts";
+import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 
 interface ChannelQueueItem {
   id: string;
@@ -24,6 +25,17 @@ interface ChannelQueueEntry {
 }
 
 const queues = new Map<string, ChannelQueueEntry>(); // threadId -> waiting sends
+
+export function restoreChannelMessages(): void {
+  queues.clear();
+  for (const row of chatFollowups("channel")) {
+    if (row.status !== "pending") continue;
+    const entry = queues.get(row.threadId) ?? { groupId: row.ownerId, items: [] };
+    if (entry.groupId !== row.ownerId) throw new Error("queued task belongs to another channel");
+    entry.items.push({ ...row.payload, id: row.id, mode: row.payload.mode ?? "chat" });
+    queues.set(row.threadId, entry);
+  }
+}
 
 export interface QueuedChannelMessage {
   id: string;
@@ -50,6 +62,7 @@ export function queueChannelMessage(
     mode: options.mode ?? "chat",
     via: options.via,
   };
+  saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
   entry.items.push(item);
   queues.set(threadId, entry);
   return { id: item.id };
@@ -72,6 +85,7 @@ export function cancelChannelMessage(groupId: string, queueId: string): boolean 
     if (entry.groupId !== groupId) continue;
     const items = entry.items.filter((item) => item.id !== queueId);
     if (items.length === entry.items.length) continue;
+    settleChatFollowups([queueId], "cancelled");
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { groupId, items });
     return true;
@@ -86,17 +100,23 @@ export function cancelChannelMessage(groupId: string, queueId: string): boolean 
  */
 export function drainChannelMessages(
   isWorking: (groupId: string) => boolean,
-  run: (input: ChannelQueueItem & { groupId: string; threadId: string }) => void,
+  run: (input: ChannelQueueItem & { groupId: string; threadId: string }) => void | Promise<void>,
 ): void {
   for (const [threadId, entry] of queues) {
     if (isWorking(entry.groupId)) continue;
-    const item = entry.items.shift();
+    const item = entry.items[0];
     if (!item) {
       queues.delete(threadId);
       continue;
     }
+    settleChatFollowups([item.id], "dispatching");
+    entry.items.shift();
     if (entry.items.length === 0) queues.delete(threadId);
-    run({ ...item, groupId: entry.groupId, threadId });
+    const running = run({ ...item, groupId: entry.groupId, threadId });
+    void Promise.resolve(running).then(
+      () => settleChatFollowups([item.id], null),
+      () => settleChatFollowups([item.id], "interrupted"),
+    ).catch((error) => console.warn("channel-queue: could not settle durable follow-up", error));
   }
 }
 

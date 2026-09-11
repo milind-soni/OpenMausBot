@@ -47,6 +47,11 @@ function fixture(root: string): DatabaseSync {
   };
   db.prepare("INSERT INTO messages VALUES (?, ?, ?, ?)").run("thread", message.id, message.text, JSON.stringify(message));
   db.prepare("INSERT INTO thread_state VALUES (?, ?)").run("thread", "message");
+  db.exec("CREATE TABLE chat_followups(id TEXT PRIMARY KEY, kind TEXT, owner_id TEXT, thread_id TEXT, send_id TEXT, status TEXT, payload TEXT)");
+  for (const status of ["pending", "dispatching", "cancelled"]) {
+    db.prepare("INSERT INTO chat_followups VALUES (?, 'bot', 'bot', 'thread', ?, ?, ?)").run(status, `send-${status}`, status,
+      JSON.stringify({ text: message.text, replyToId: "message", prompt: "Source-only reply context" }));
+  }
   return db;
 }
 function encryptedPayload(root: string, plaintext: Buffer): string {
@@ -128,6 +133,12 @@ describe("encrypted full workspace backups", () => {
         expect(message.text).toContain(`<attached-image path="${join(target, "attachments", "image.png")}" name="image.png" />`);
         expect(message.text).toContain(`\`\`\`\n<attached-image path="${join(source, "attachments", "image.png")}" />\n\`\`\``);
         expect(restoredDb.prepare("SELECT active_leaf_id FROM thread_state").get()?.active_leaf_id).toBe("message");
+        expect(restoredDb.prepare("SELECT id, status FROM chat_followups ORDER BY rowid").all()).toEqual([
+          { id: "pending", status: "interrupted" }, { id: "dispatching", status: "interrupted" }, { id: "cancelled", status: "cancelled" },
+        ]);
+        const followup = JSON.parse(String(restoredDb.prepare("SELECT payload FROM chat_followups WHERE id = 'pending'").get()!.payload));
+        expect(followup).toMatchObject({ replyToId: "message", text: expect.stringContaining(join(target, "attachments", "image.png")) });
+        expect(followup).not.toHaveProperty("prompt");
       } finally { restoredDb.close(); }
       expect(readJson(join(target, "routines.json"))).toMatchObject({ routines: [{ enabled: false }], runs: [{ status: "failed" }, { status: "completed" }] });
       expect(readJson(join(target, "webhooks.json"))).toMatchObject({ webhooks: [{ enabled: false }], deliveries: [{ id: "delivery" }] });
@@ -146,6 +157,21 @@ describe("encrypted full workspace backups", () => {
         expect(statSync(join(target, "attachments", "image.png")).mode & 0o777).toBe(0o600);
       }
     } finally { if (db.isOpen) db.close(); }
+  });
+
+  it("also pauses pending chat follow-ups when restoring into the original home", async () => {
+    const source = directory();
+    fixture(source).close();
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(source, staged.id);
+    applyPendingWorkspaceRestore(source);
+    const db = new DatabaseSync(join(source, "messages.db"), { readOnly: true });
+    try {
+      expect(db.prepare("SELECT id, status FROM chat_followups ORDER BY rowid").all()).toEqual([
+        { id: "pending", status: "interrupted" }, { id: "dispatching", status: "interrupted" }, { id: "cancelled", status: "cancelled" },
+      ]);
+    } finally { db.close(); }
   });
 
   it("authenticates before extraction and leaves the existing workspace unchanged for wrong passwords or damaged ciphertext", async () => {

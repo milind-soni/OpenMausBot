@@ -173,7 +173,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { readMessageText, recallMessages, searchMessages, closeMessageDb } from "./message-db.ts";
+import { readMessageText, recallMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 
 /** A session_read answer competes with the transcript for the context
@@ -189,12 +189,14 @@ import {
   queuedSteeredMessage,
   queuedThreadPosition,
   queueSteeredMessage,
+  restoreSteeredMessages,
 } from "./steer-queue.ts";
 import {
   cancelChannelMessage,
   drainChannelMessages,
   queuedChannelMessage,
   queueChannelMessage,
+  restoreChannelMessages,
 } from "./channel-queue.ts";
 import {
   acceptedSendMatch,
@@ -802,6 +804,13 @@ type DirectTurnDispatchClaim = {
 class DirectTurnSetupCancelled extends Error {}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
+const directFollowupSettlers = new Map<string, () => void>();
+function settleDirectFollowup(generation: string | undefined): void {
+  if (!generation) return;
+  const settle = directFollowupSettlers.get(generation);
+  directFollowupSettlers.delete(generation);
+  settle?.();
+}
 // Keep the exact provider/profile settings that own a running conversation.
 // Selecting another thread or changing a default must not retarget its tools.
 const directTurnBots = new Map<string, BotRecord>();
@@ -1348,6 +1357,7 @@ function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | {
 }
 let bootSelection = { instanceId: "", model: "" };
 const store = new Store(() => bootSelection);
+let followupsReady = false;
 const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
@@ -2786,6 +2796,7 @@ const watchdog = new TurnWatchdog({
       kind: "activity",
       tool: { name: `error: no activity for ${minutes} minutes — the turn was stopped`, ok: false },
     });
+    settleDirectFollowup(stalledGeneration);
     finalizeDelegationWatch(turn.threadId, false, "", "Delegated turn stalled and was stopped");
     turnUsage.delete(turn.threadId);
     roomStallCompletions.stall(turn.threadId);
@@ -3744,6 +3755,7 @@ bus.subscribe((event: RuntimeEvent) => {
       if (bot) {
         const resourceOwner = turnResourceOwners.get(event.threadId);
         const generation = directTurnGenerationByThread.get(event.threadId);
+        settleDirectFollowup(generation);
         const isCurrent = () => directTurnGenerationByThread.get(event.threadId) === generation &&
           Boolean(store.taskByThread(bot.id, event.threadId));
         const settleDirectTurn = (resumeQueued = false) => {
@@ -4302,6 +4314,7 @@ bus.subscribe((event: RuntimeEvent) => {
 });
 
 function drainQueuedSends() {
+  if (!followupsReady) return;
   drainSteeredMessages(store, (botId, threadId, prompt, userMessage, excludeIds, unattended) =>
     // A plain attended turn — no automationSource, no comms depth: exactly
     // what typing the same words into an idle bot would run. The one
@@ -4310,15 +4323,19 @@ function drainQueuedSends() {
     // Drain just appended the held lines; userMessage keeps startTurn
     // from duplicating the last one, and excludeIds drops every drained
     // line from the transcript-replay so they are not also in `prompt`.
-    startTurn(botId, prompt, { threadId, userMessage, excludeMessageIds: excludeIds, unattended }).then(() => undefined).catch((err) => {
-      store.appendMessage(threadId, {
-        role: "bot",
-        kind: "activity",
-        tool: {
-          name: `error: queued message could not start — ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
-          ok: false,
-        },
-      });
+    new Promise<void>((resolve, reject) => {
+      void startTurn(botId, prompt, {
+        threadId, userMessage, excludeMessageIds: excludeIds, unattended, onTurnSettled: resolve,
+      }).catch((err) => {
+        store.appendMessage(threadId, {
+          role: "bot", kind: "activity",
+          tool: {
+            name: `error: queued message could not start — ${(err instanceof Error ? err.message : String(err)).slice(0, 120)}`,
+            ok: false,
+          },
+        });
+        resolve();
+      }).catch(reject);
     }),
     // Provider completion can precede its dispatch promise: keep the queue
     // intact until that exact handshake releases its runtime-only claim.
@@ -4561,6 +4578,8 @@ async function startTurn(
      * dispatch the same user action twice. */
     sendId?: string;
     onDispatchError?: (message: string) => void;
+    /** Queue receipts outlive the dispatch acknowledgment until this exact turn settles. */
+    onTurnSettled?: () => void;
   },
 ) {
   workspaceMaintenance.assertAvailable();
@@ -4793,6 +4812,7 @@ async function startTurn(
   const resourceOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
+  if (opts?.onTurnSettled) directFollowupSettlers.set(dispatchClaimId, opts.onTurnSettled);
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" });
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
@@ -5286,6 +5306,7 @@ async function startTurn(
         drainDelegationWakes();
       }
     } catch (e) {
+      settleDirectFollowup(dispatchClaimId);
       clearCancelledProviderHandshake(threadId, `direct:${dispatchClaimId}`);
       clearDirectTurnDispatch(threadId, dispatchClaimId);
       revokeInternalCapabilityGeneration(threadId, dispatchClaimId);
@@ -7239,6 +7260,7 @@ function startGroupTurn(
 }
 
 function drainQueuedChannelSends(): void {
+  if (!followupsReady) return;
   drainChannelMessages(
     (groupId) => {
       const group = store.group(groupId);
@@ -7251,8 +7273,11 @@ function drainQueuedChannelSends(): void {
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via });
+        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId });
       } catch (error) {
+        if (!store.messagesFor(threadId).some((message) => message.queueId === id && message.role === "user")) {
+          store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, sendId, channelMode: mode, queueId: id, via });
+        }
         store.appendMessage(threadId, {
           role: "bot",
           kind: "activity",
@@ -7265,6 +7290,7 @@ function drainQueuedChannelSends(): void {
       // A message with no eligible responder creates no operation. Continue
       // draining instead of leaving later user messages behind it forever.
       queueMicrotask(drainQueuedChannelSends);
+      return groupQueues.get(groupId);
     },
   );
 }
@@ -8409,6 +8435,7 @@ async function reloadProviders() {
         });
         store.setTaskActivity(botId, threadId, "idle");
       }
+      settleDirectFollowup(owner?.generation);
       retryDelegationsWaitingOn(botId);
     }
     for (const [threadId, speaker] of rooms) {
@@ -11377,6 +11404,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sendFingerprint(text, replyTo?.id, channelMode),
         async () => {
           if (sendId) {
+            if (cancelledChatFollowup("channel", group.id, threadId, sendId)) {
+              throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
+            }
             const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id, channelMode);
             if (accepted.kind === "conflict") {
               throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
@@ -12300,6 +12330,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // staged provider images into a message, so dispose them here.
           for (const task of store.tasks(bot.id)) {
             purgeGeneratedImagesForThread(task.threadId);
+            settleDirectFollowup(directTurnGenerationByThread.get(task.threadId));
             directTurnGenerationByThread.delete(task.threadId);
             directTurnBots.delete(task.threadId);
           }
@@ -12792,6 +12823,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sendFingerprint(text, replyTo?.id),
         async () => {
           if (sendId) {
+            if (cancelledChatFollowup("bot", bot.id, threadId, sendId)) {
+              throw Object.assign(new Error("this queued sendId was cancelled; send a new message to try again"), { status: 409 });
+            }
             const accepted = acceptedSendMatch(store.messagesFor(threadId), sendId, text, replyTo?.id);
             if (accepted.kind === "conflict") {
               throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
@@ -13301,6 +13335,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const stagedSkillCleanups = stagedSkillCleanupsForThread(m[2]);
       const updated = store.deleteTask(m[1], m[2]);
       if (!updated) return json(res, 400, { error: "a bot keeps at least one task" });
+      settleDirectFollowup(directTurnGenerationByThread.get(m[2]));
       rejectDeletedThreadSkillStages(stagedSkillCleanups);
       const fresh = botWithThread(updated);
       broadcast({ kind: "bot", bot: fresh });
@@ -14833,8 +14868,42 @@ try {
   console.warn(`attachments: startup partial cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
 }
 
+// A dispatch claim is deliberately committed before transcript/provider work.
+// If we died after that point, its outcome is unknown: recover the user's words
+// and a review notice, never hand them to a model for a second execution.
+for (const row of chatFollowups()) {
+  if (row.status !== "dispatching" && row.status !== "interrupted") continue;
+  const owned = row.kind === "bot"
+    ? Boolean(store.taskByThread(row.ownerId, row.threadId))
+    : Boolean(store.groupByThread(row.threadId)?.id === row.ownerId);
+  if (!owned) { settleChatFollowups([row.id], "cancelled"); continue; }
+  settleChatFollowups([row.id], "interrupted");
+  const messages = store.messagesFor(row.threadId);
+  if (!messages.some((message) => message.queueId === row.id && message.role === "user")) {
+    store.appendMessage(row.threadId, {
+      role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
+      sendId: row.payload.sendId, queueId: row.id,
+      ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
+    });
+  }
+  if (!messages.some((message) => message.queueId === row.id && message.kind === "activity")) {
+    store.appendMessage(row.threadId, {
+      role: "bot", kind: "activity", queueId: row.id,
+      tool: { name: "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.", ok: false },
+    });
+  }
+  // The FULL-sync retirement also flushes both transcript writes. Retrying
+  // this sendId now finds the canonical message, without a permanent journal scan.
+  settleChatFollowups([row.id], null);
+}
+restoreSteeredMessages();
+restoreChannelMessages();
+
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  followupsReady = true;
+  drainQueuedSends();
+  drainQueuedChannelSends();
   // Startup work uses the same turn dispatcher and local tool endpoint as
   // ordinary chat. Start only once every registry is initialized and the
   // endpoint is listening; earlier dispatch can hit uninitialized bindings.
@@ -14870,6 +14939,7 @@ if (TUNNEL_SOCKET) {
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
     () => {
+      followupsReady = false;
       // Child MCP processes and the HTTP listener can remain alive while the
       // asynchronous shutdown jobs drain. Invalidate their turn bearers before
       // any cleanup function reaches an await.

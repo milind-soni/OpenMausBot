@@ -39,7 +39,7 @@ const EXCLUSION_NOTES = [
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
 ];
-const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, and does not resume pending delegations or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
+const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
 
 type Entry = { path: string; type: "file" | "directory"; size: number; mode: number; sha256?: string };
 interface Manifest extends WorkspaceBackupPrivateMetadata {
@@ -743,16 +743,30 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
     });
   }
   const dbPath = join(prepared, "messages.db");
-  if (existsSync(dbPath) && manifest.sourceDataDir !== resolve(dataDir)) {
+  if (existsSync(dbPath)) {
     const db = new DatabaseSync(dbPath);
     try {
-      const update = db.prepare("UPDATE messages SET json = ?, text = ? WHERE thread_id = ? AND id = ?");
       db.exec("BEGIN");
-      for (const row of db.prepare("SELECT thread_id, id, json FROM messages").iterate()) {
-        const message: unknown = JSON.parse(String(row.json));
-        rebaseMessage(message, manifest.sourceDataDir, resolve(dataDir));
-        const json = JSON.stringify(message);
-        if (json !== row.json) update.run(json, record(message) && typeof message.text === "string" ? message.text : null, row.thread_id, row.id);
+      if (manifest.sourceDataDir !== resolve(dataDir)) {
+        const update = db.prepare("UPDATE messages SET json = ?, text = ? WHERE thread_id = ? AND id = ?");
+        for (const row of db.prepare("SELECT thread_id, id, json FROM messages").iterate()) {
+          const message: unknown = JSON.parse(String(row.json));
+          rebaseMessage(message, manifest.sourceDataDir, resolve(dataDir));
+          const json = JSON.stringify(message);
+          if (json !== row.json) update.run(json, record(message) && typeof message.text === "string" ? message.text : null, row.thread_id, row.id);
+        }
+      }
+      // Import is not a server restart: the source may still be running.
+      // Keep accepted words/receipts for review, but never execute a copy of
+      // its pending work (including when restoring to the original home).
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_followups'").get()) {
+        const pause = db.prepare("UPDATE chat_followups SET status = 'interrupted', payload = ? WHERE id = ?");
+        for (const row of db.prepare("SELECT id, payload FROM chat_followups WHERE status IN ('pending', 'dispatching', 'interrupted')").iterate()) {
+          const payload: unknown = JSON.parse(String(row.payload));
+          rebaseMessage(payload, manifest.sourceDataDir, resolve(dataDir));
+          if (record(payload)) delete payload.prompt;
+          pause.run(JSON.stringify(payload), row.id);
+        }
       }
       db.exec("COMMIT");
     } finally { db.close(); }
