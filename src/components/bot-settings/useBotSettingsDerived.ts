@@ -28,7 +28,6 @@ export type BotPatch = Partial<
     | "alwaysAllow"
     | "autoApprove"
     | "approvalMode"
-    | "autoReview"
     | "speakReplies"
     | "voice"
     | "chiefOfStaff"
@@ -50,7 +49,6 @@ export function useBotSettingsDerived(bot: Bot) {
   const activeState = stateForBot(bot);
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
-  const canAutoReview = engine?.capabilities?.approvalReview === true;
   // The approval level (ask / auto / full / custom) as the shared rule reads
   // it from the record — bots saved before approvalMode existed still carry
   // only autoApprove. Full and Custom need the packaged desktop's trusted
@@ -88,7 +86,6 @@ export function useBotSettingsDerived(bot: Bot) {
   return {
     patch,
     engine,
-    canAutoReview,
     approvalMode,
     trustedModesAvailable,
     canCoordinate,

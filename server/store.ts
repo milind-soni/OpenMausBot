@@ -64,8 +64,12 @@ export interface OptionCardData {
    * with no key) and on every card saved before this field existed, which is
    * why `held` still carries the English. */
   heldCode?: string;
-  /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
+  /** the narrow grant "always allow" remembers for a harness-native card
+   * (peer comms: "ask_bot:<botId>"). Provider tool asks never carry one. */
   allowKey?: string;
+  /** the provider can remember an allow for the rest of its session
+   * ("Always allow this session"), so the card may offer it */
+  allowSession?: boolean;
   /** Local actions never share remembered grants with cloud/tool approvals. */
   approvalScope?: "local-computer";
   /** A durable chat-created routine proposal. The scheduler only applies it
@@ -593,9 +597,6 @@ export interface BotRecord {
     mode: "full" | "custom";
     phase: "prepared" | "confirmed" | "activated" | "committed";
   };
-  /** Optional model review of otherwise undecided, attended approval cards.
-   * Unknown persisted values are treated as off by the review boundary. */
-  autoReview?: "off" | "shadow" | "enforce";
   /** Tools this bot may always use without asking, even outside auto mode
    * (set by "Always allow" on an approval card). */
   alwaysAllow?: string[];

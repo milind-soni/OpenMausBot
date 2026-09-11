@@ -152,6 +152,11 @@ export type RuntimeEvent = RuntimeEventBase &
          * "inactive" means this ask is not a reviewer's verdict, so the app's
          * own safe-Auto rules may answer it; unset means nobody knows. */
         nativeReview?: "active" | "inactive";
+        /** The provider can keep an allow for the rest of its session
+         * ("Always allow this session"): Claude through its own suggested
+         * permission rules, ACP agents through `allow_always` or the
+         * driver's per-session memory. Unset when answers are one-shot. */
+        allowSession?: boolean;
       }
     | {
         type: "request.resolved";
@@ -325,7 +330,15 @@ export interface ProviderAdapter {
   respondToRequest(
     threadId: ThreadId,
     requestId: string,
-    decision: { behavior: "allow" | "deny" | "answer"; message?: string },
+    decision: {
+      behavior: "allow" | "deny" | "answer";
+      message?: string;
+      /** "Always allow this session": hand the provider its own remembered
+       * approval (Claude's suggested permission rules, ACP `allow_always`)
+       * so it stops asking about this operation for the rest of the
+       * session. The app keeps no grant of its own. */
+      always?: boolean;
+    },
   ): Promise<RequestOutcome>;
   /** Deliver a user message into the RUNNING turn on this thread. Resolves
    * false when there is no live turn to steer (the caller then sends it as

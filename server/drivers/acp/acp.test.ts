@@ -219,6 +219,8 @@ describe("ACP turns (fake CLI)", () => {
   afterEach(async () => {
     delete process.env.FAKE_ACP_MODE;
     delete process.env.FAKE_ACP_DUMP;
+    delete process.env.FAKE_ACP_ALLOW_ALWAYS;
+    delete process.env.FAKE_ACP_PERMISSION_ANSWER;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CURSOR_API_KEY;
@@ -655,6 +657,57 @@ describe("ACP turns (fake CLI)", () => {
       { behavior: "allow" },
     );
     await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("maps Auto-accept edits to Grok's native acceptEdits", async () => {
+    await create(GrokAgentDriver);
+    const dump = join(scratch, "grok-edits.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-grok-edits", text: "go", approvalMode: "edits" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("acceptEdits");
+  });
+
+  it("hands 'Always allow this session' to the agent's own allow_always option", async () => {
+    process.env.FAKE_ACP_ALLOW_ALWAYS = "1";
+    const answer = join(scratch, "permission-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-always-native", text: "go", approvalMode: "ask" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // the card may offer it: the driver can honor a session-wide allow
+    expect(opened).toHaveProperty("allowSession", true);
+    await instance.adapter.respondToRequest("t-always-native", (opened as { requestId: string }).requestId, { behavior: "allow", always: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("allow-always");
+  });
+
+  it("remembers the exact operation for the session when the agent offers no allow_always", async () => {
+    // Grok 4.6 often omits allow_always. The driver then answers allow_once
+    // and repeats the person's answer for that exact operation on the
+    // resumed session — and only that operation, and only that session.
+    const answer = join(scratch, "permission-answer-once.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-always-memory", text: "go", approvalMode: "ask" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-always-memory", (opened as { requestId: string }).requestId, { behavior: "allow", always: true });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("allow-once");
+
+    // same operation on the resumed session: answered without a card
+    const second = await instance.adapter.sendTurn({ threadId: "t-always-memory", text: "again", approvalMode: "ask", resumeCursor: "fake-acp-session" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
+    expect(readFileSync(answer, "utf8")).toBe("allow-once");
+
+    // a fresh native session forgets it
+    const third = await instance.adapter.sendTurn({ threadId: "t-always-memory", text: "fresh", approvalMode: "ask" });
+    const reopened = await recorder.until((e) => e.type === "request.opened" && e.turnId === third.turnId);
+    await instance.adapter.respondToRequest("t-always-memory", (reopened as { requestId: string }).requestId, { behavior: "deny" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(2);
   });
 
   it.each(["grok-4.6", "grok-4.5", "local-model"])(

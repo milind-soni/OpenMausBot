@@ -502,7 +502,7 @@ export async function createPermissionBroker(opts: {
   const timeoutMs = opts.timeoutMs ?? 15 * 60_000;
   const pending = new Map<
     string,
-    { ask: Ask; finish: (behavior: AskBehavior, message: string | undefined, source: AskResolutionSource) => void }
+    { ask: Ask; finish: (behavior: AskBehavior, message: string | undefined, source: AskResolutionSource, always?: boolean) => void }
   >();
   // server.close() only stops accepting NEW connections — it does not touch
   // a connection that's already open. A still-alive child's MCP proxy can
@@ -568,11 +568,14 @@ export async function createPermissionBroker(opts: {
           continue;
         }
         const ask: Ask = { id: askId, kind, tool: msg.tool ?? "tool", input: msg.input ?? {}, at: Date.now() };
-        const finish = (behavior: AskBehavior, message: string | undefined, source: AskResolutionSource) => {
+        const finish = (behavior: AskBehavior, message: string | undefined, source: AskResolutionSource, always?: boolean) => {
           if (!pending.delete(askId)) return;
           clearTimeout(timer);
           try {
-            conn.write(JSON.stringify({ t: "answer", id: askId, behavior, message }) + "\n");
+            // `always` rides to the proxy, which hands the CLI's own suggested
+            // permission rules back as updatedPermissions: Claude remembers
+            // the allow for the session, the harness remembers nothing.
+            conn.write(JSON.stringify({ t: "answer", id: askId, behavior, message, ...(always ? { always: true } : {}) }) + "\n");
           } catch {}
           opts.onResolve({ ...ask, behavior, source });
         };
@@ -652,11 +655,11 @@ export async function createPermissionBroker(opts: {
     }
   };
   return {
-    answer(askId: string, behavior: AskBehavior, message?: string): boolean {
+    answer(askId: string, behavior: AskBehavior, message?: string, always?: boolean): boolean {
       const p = pending.get(askId);
       if (!p) return false;
       if (p.ask.kind === "question" ? behavior !== "answer" : behavior === "answer") return false;
-      p.finish(behavior, message, "user");
+      p.finish(behavior, message, "user", always && behavior === "allow");
       return true;
     },
     pause() {
@@ -954,7 +957,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const permissionMode = turn.approvalMode === undefined
         ? config.permissionMode
         : turn.approvalMode === "full" ? "bypassPermissions"
-          : turn.approvalMode === "auto" ? "auto" : "default";
+          : turn.approvalMode === "auto" ? "auto"
+            : turn.approvalMode === "edits" ? "acceptEdits" : "default";
       const controlsHost = turn.integrations?.localComputer?.scope === "local-computer";
       if (controlsHost && permissionMode === "bypassPermissions" && turn.approvalMode !== "full") {
         throw new Error("local computer control requires the interactive approval broker");
@@ -1250,6 +1254,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 tool: ask.tool,
                 summary: askSummary(ask),
                 nativeReview,
+                // the proxy hands Claude its own suggested rules on `always`;
+                // host control stays one action at a time
+                allowSession: ask.kind === "permission" && !(controlsHost && typeof ask.tool === "string" && ask.tool.startsWith("mcp__computer")) ? true : undefined,
                 approvalScope:
                   typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
                     ? "local-computer"
@@ -1808,7 +1815,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           const broker = sessions.get(threadId)?.broker ?? active.get(threadId)?.broker;
           if (!broker) return "unavailable";
           const behavior = decision.behavior === "answer" ? "answer" : decision.behavior;
-          if (!broker.answer(requestId, behavior, decision.message)) return "unavailable";
+          if (!broker.answer(requestId, behavior, decision.message, decision.always)) return "unavailable";
           return behavior === "allow" ? "allowed-once" : behavior === "answer" ? "answered" : "rejected";
         },
         hasSession: (threadId) => active.has(threadId),

@@ -39,12 +39,14 @@ describe("held notes name the buttons the selector shows", () => {
     setLocale("pt-br");
     expect(approvalModeOptions().map((option) => option.label)).toEqual([
       "Pedir aprovação",
+      // new level, not yet drafted: English fallback
+      "Auto-accept edits",
       "Aprovar por mim",
       "Acesso total",
       "Personalizado (config.toml)",
     ]);
 
     setLocale("ja");
-    expect(approvalModeOptions()[1].label).toBe("自動で承認");
+    expect(approvalModeOptions()[2].label).toBe("自動で承認");
   });
 });

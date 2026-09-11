@@ -19,17 +19,22 @@ describe("approval mode selector", () => {
     expect(html).toContain("does not enable Full access on other bots");
     expect(html).not.toContain("Requests that come from another bot still get the usual checks");
   });
-  it("matches the four Codex approval levels and their plain-language copy", () => {
+  it("lists the approval levels with their plain-language copy", () => {
     expect(approvalModeOptions().map(({ mode, label, description }) => ({ mode, label, description }))).toEqual([
       {
         mode: "ask",
         label: "Ask for approval",
-        description: "Always ask to edit external files and use the internet",
+        description: "Requests approval for commands and file changes",
+      },
+      {
+        mode: "edits",
+        label: "Auto-accept edits",
+        description: "Approves file edits automatically; other actions can still require approval",
       },
       {
         mode: "auto",
         label: "Approve for me",
-        description: "The provider reviews routine actions and asks about others; unattended turns always ask",
+        description: "Uses the provider's automatic review to approve routine actions and ask about others",
       },
       {
         mode: "full",
@@ -53,25 +58,32 @@ describe("approval mode selector", () => {
     ]);
     expect(approvalModeOptionsFor("claudeAgent").map((option) => option.mode)).toEqual([
       "ask",
+      "edits",
       "auto",
       "full",
     ]);
   });
 
-  it.each(["cursorAgent", "grokAgent", "opencodeGo"])("offers Full access for %s", (kind) => {
+  it.each(["cursorAgent", "opencodeGo"])("offers Full access for %s, and no Edits level it cannot map", (kind) => {
     expect(approvalModeOptionsFor(kind).map((option) => option.mode)).toEqual(["ask", "auto", "full"]);
     expect(approvalModeOptionsFor(kind, false).map((option) => option.mode)).toEqual(["ask", "auto"]);
+  });
+
+  it("offers Grok its native acceptEdits as Auto-accept edits", () => {
+    expect(approvalModeOptionsFor("grokAgent").map((option) => option.mode)).toEqual(["ask", "edits", "auto", "full"]);
+    expect(approvalModeOptionsFor("grokAgent", false).map((option) => option.mode)).toEqual(["ask", "edits", "auto"]);
   });
 
   it("offers Antigravity Auto as the explicit full-access grant, not native review", () => {
     const options = approvalModeOptionsFor("antigravityAgent");
     expect(options.map(({ mode, label }) => ({ mode, label }))).toEqual([
       { mode: "ask", label: "Ask for approval" },
+      { mode: "edits", label: "Auto-accept edits" },
       { mode: "full", label: "Auto (full access)" },
     ]);
-    expect(options[1].chip).toBe("Auto");
-    expect(options[1].description).toContain("Automatically approve tool requests");
-    expect(approvalModeOptionsFor("antigravityAgent", false).map((option) => option.mode)).toEqual(["ask"]);
+    expect(options[2].chip).toBe("Auto");
+    expect(options[2].description).toContain("Automatically approve tool requests");
+    expect(approvalModeOptionsFor("antigravityAgent", false).map((option) => option.mode)).toEqual(["ask", "edits"]);
   });
 
   it("shows the effective Antigravity mode without upgrading saved Auto settings", () => {
@@ -88,7 +100,7 @@ describe("approval mode selector", () => {
   });
 
   it("explains Auto fallbacks and does not elevate unknown providers", () => {
-    expect(approvalModeOptionsFor("grokAgent").find((option) => option.mode === "auto")?.description).toContain("provider reviews routine actions");
+    expect(approvalModeOptionsFor("grokAgent").find((option) => option.mode === "auto")?.description).toContain("automatic review to approve routine actions");
     expect(approvalModeOptionsFor("customAgent").find((option) => option.mode === "auto")?.description).toContain("behaves like Ask");
     expect(approvalModeOptionsFor("customAgent").map((option) => option.mode)).toEqual(["ask", "auto"]);
   });

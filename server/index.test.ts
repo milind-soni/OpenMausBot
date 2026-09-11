@@ -3780,7 +3780,6 @@ describe("harness HTTP API", () => {
       name: "Mira",
       title: "Project Lead",
       autoApprove: true,
-      autoReview: "enforce",
       alwaysAllow: ["Bash:git"],
       approvePeerComms: true,
       chiefOfStaff: true,
@@ -3807,8 +3806,7 @@ describe("harness HTTP API", () => {
             id: trusted.id,
             threadId: trusted.threadId,
             autoApprove: true,
-            autoReview: "enforce",
-            alwaysAllow: ["Bash"],
+                  alwaysAllow: ["Bash"],
             chiefOfStaff: true,
             approvePeerComms: false,
             composio: true,
@@ -3831,7 +3829,6 @@ describe("harness HTTP API", () => {
     expect(impostor.name).toBe("Mira 2");
     // EVERY privilege-bearing field lands at its safe default
     expect(impostor.autoApprove).toBeUndefined();
-    expect(impostor.autoReview).toBeUndefined();
     expect(impostor.alwaysAllow).toBeUndefined();
     expect(impostor.chiefOfStaff).toBeUndefined();
     expect(impostor.approvePeerComms).toBeUndefined();
@@ -3849,7 +3846,6 @@ describe("harness HTTP API", () => {
       title: "Project Lead",
       threadId: trusted.threadId,
       autoApprove: true,
-      autoReview: "enforce",
       alwaysAllow: ["Bash:git"],
       approvePeerComms: true,
       chiefOfStaff: true,
@@ -4965,18 +4961,6 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("stores only known approval-review modes", async () => {
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    for (const autoReview of ["off", "shadow", "enforce"]) {
-      const response = await api("PATCH", `/api/bots/${bot.id}`, { autoReview });
-      expect(response.status).toBe(200);
-      expect(response.body.bot.autoReview).toBe(autoReview);
-    }
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { autoReview: "always" })).status).toBe(400);
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { autoReview: true })).status).toBe(400);
-    await api("DELETE", `/api/bots/${bot.id}`);
-  });
-
   it("offers an idempotent stop boundary for active local turns", async () => {
     const unsupported = await api("POST", "/api/local-computer/interrupt");
     expect(unsupported).toEqual({
@@ -5392,9 +5376,10 @@ describe("harness HTTP API", () => {
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
   });
 
-  it("answers as safe Auto when Claude's reviewer never started, and says so once", async () => {
+  it("cards every ask when Claude's reviewer never started, says so once, and can hand the allow to Claude for the session", async () => {
     // A bot on Approve for me with Haiku 4.5: the CLI takes `auto`, runs
-    // Manual, and would otherwise card the person for every tool call.
+    // Manual, and asks about everything. OpenMausBot passes that through —
+    // no rule of its own answers — and says why, once.
     const bot = (await api("POST", "/api/bots", { name: "Quill" })).body.bot;
     const conns: Socket[] = [];
     try {
@@ -5413,7 +5398,7 @@ describe("harness HTTP API", () => {
       const raise = async (id: string, command: string) => {
         const conn = connect(socketPath);
         conns.push(conn);
-        const answered = new Promise<{ behavior: string }>((resolve) => {
+        const answered = new Promise<{ behavior: string; always?: boolean }>((resolve) => {
           let buf = "";
           conn.on("data", (chunk) => {
             buf += chunk;
@@ -5428,26 +5413,38 @@ describe("harness HTTP API", () => {
         conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command } }) + "\n");
         return answered;
       };
-      const messages = async () =>
-        (await api("GET", "/api/bots?messages=40")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id)
-          .messages as Array<{ kind: string; tool?: { name: string }; card?: { title: string; subtitle: string; allowKey?: string } }>;
+      type Msg = { kind: string; tool?: { name: string }; card?: { title: string; subtitle: string; requestId?: string; held?: string; heldCode?: string; allowKey?: string; allowSession?: boolean; answered?: string } };
+      const messages = async (): Promise<Msg[]> =>
+        (await api("GET", "/api/bots?messages=40")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).messages;
 
-      // routine work is approved by the app, not carded
-      await expect(raise("ask-wc", "wc -l notes.md")).resolves.toMatchObject({ behavior: "allow" });
-      await expect.poll(async () => (await messages()).some((m) => m.tool?.name.startsWith("auto-approved Bash: wc -l notes.md"))).toBe(true);
-      // and the person is told once who is approving, naming the model
+      const first = raise("ask-wc", "wc -l notes.md");
+      const card = await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "wc -l notes.md")?.card).toBeTruthy()
+        .then(async () => (await messages()).find((m) => m.card?.subtitle === "wc -l notes.md")!.card!);
+      expect(card.title).toBe("Approval needed");
+      expect(card.heldCode).toBe("approval.held.native");
+      // no app-side grant is offered for a provider's tool; the provider's
+      // own session-wide allow is
+      expect(card.allowKey).toBeUndefined();
+      expect(card.allowSession).toBe(true);
+      expect((await messages()).some((m) => m.tool?.name.startsWith("auto-approved"))).toBe(false);
+      // the person is told once who is asking and why, naming the model
       const notices = (await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer is not available"));
       expect(notices).toHaveLength(1);
       expect(notices[0].tool!.name).toContain("claude-haiku-4-5");
+      expect(notices[0].tool!.name).toContain("asks before each action");
 
-      await expect(raise("ask-ls", "ls memory")).resolves.toMatchObject({ behavior: "allow" });
-      await expect.poll(async () => (await messages()).some((m) => m.tool?.name.startsWith("auto-approved Bash: ls memory"))).toBe(true);
+      // "Always allow this session" rides to Claude as `always`
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "allow", always: true })).status).toBe(200);
+      await expect(first).resolves.toMatchObject({ behavior: "allow", always: true });
+
+      const second = raise("ask-ls", "ls memory");
+      await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls memory")?.card?.title).toBe("Approval needed");
       expect((await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer"))).toHaveLength(1);
-
-      // the guards still stop the fallback: a destructive command is carded
-      void raise("ask-rm", "rm -rf build");
-      await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "rm -rf build")?.card?.title).toBe("Approval needed");
-      expect((await messages()).some((m) => m.tool?.name.startsWith("auto-approved Bash: rm -rf build"))).toBe(false);
+      const secondCard = (await messages()).find((m) => m.card?.subtitle === "ls memory")!.card!;
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: secondCard.requestId, behavior: "allow" })).status).toBe(200);
+      const plain = await second;
+      expect(plain).toMatchObject({ behavior: "allow" });
+      expect(plain).not.toHaveProperty("always");
     } finally {
       for (const conn of conns) conn.destroy();
       await api("POST", `/api/bots/${bot.id}/interrupt`);

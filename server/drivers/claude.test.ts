@@ -469,7 +469,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await create(undefined, {}, { permissionMode: "bypassPermissions" });
     const dump = join(scratch, "approval-transitions.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
-    for (const [approvalMode, nativeMode] of [["full", "bypassPermissions"], ["auto", "auto"], ["ask", "default"]] as const) {
+    for (const [approvalMode, nativeMode] of [["full", "bypassPermissions"], ["auto", "auto"], ["edits", "acceptEdits"], ["ask", "default"]] as const) {
       const { turnId } = await instance.adapter.sendTurn({
         threadId: "t-mode-transitions",
         text: "hello",
@@ -1610,9 +1610,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // so the UI can offer a remembered grant for it
     expect(opened).toHaveProperty("approvalScope", undefined);
 
-    // the outcome names exactly what was granted: this action, once
-    await expect(instance.adapter.respondToRequest("t-perm-abc", "ask-1", { behavior: "allow" })).resolves.toBe("allowed-once");
-    expect(await answered).toMatchObject({ behavior: "allow" });
+    // the outcome names exactly what was granted: this action, once — and
+    // "Always allow this session" rides to the proxy as `always`, which hands
+    // Claude its own suggested rules; the driver remembers nothing itself
+    expect(opened).toHaveProperty("allowSession", true);
+    await expect(instance.adapter.respondToRequest("t-perm-abc", "ask-1", { behavior: "allow", always: true })).resolves.toBe("allowed-once");
+    expect(await answered).toMatchObject({ behavior: "allow", always: true });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
     expect(resolved).toMatchObject({ behavior: "allow", source: "user" });
     expect(resolved).toHaveProperty("approvalScope", undefined);
@@ -1633,8 +1636,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     );
     const opened2 = await recorder.until((e) => e.requestId === "ask-2" && e.type === "request.opened");
     expect(opened2).toHaveProperty("approvalScope", "local-computer");
+    expect(opened2).toHaveProperty("allowSession", undefined);
     await expect(instance.adapter.respondToRequest("t-perm-abc", "ask-2", { behavior: "allow" })).resolves.toBe("allowed-once");
-    expect(await answered2).toMatchObject({ behavior: "allow" });
+    const plain = await answered2;
+    expect(plain).toMatchObject({ behavior: "allow" });
+    expect(plain).not.toHaveProperty("always");
     const resolved2 = await recorder.until((e) => e.requestId === "ask-2" && e.type === "request.resolved");
     expect(resolved2).toHaveProperty("approvalScope", "local-computer");
 

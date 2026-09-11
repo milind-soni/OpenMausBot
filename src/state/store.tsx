@@ -77,6 +77,7 @@ export interface OptionCardData {
   heldCode?: string;
   /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
   allowKey?: string;
+  allowSession?: boolean;
   approvalScope?: "local-computer";
   /** Persisted proposal used by the server when the user confirms it. */
   routineRequest?: RoutineRequestCardData;
@@ -310,8 +311,6 @@ export interface Bot {
   autoApprove?: boolean;
   /** Explicit approval level; absent records use the legacy autoApprove bit. */
   approvalMode?: ApprovalMode;
-  /** optional model review for otherwise undecided, attended approvals */
-  autoReview?: "off" | "shadow" | "enforce";
   /** tools this bot may always use without asking */
   alwaysAllow?: string[];
   /** speak this bot's replies aloud as they settle */
@@ -828,6 +827,8 @@ export type Action =
       reviewedSha256?: string;
       /** remember this exact grant (the server's allowKey) for the bot */
       alwaysAllow?: { botId: string; key: string };
+      /** "Always allow this session": the provider keeps the allow */
+      always?: boolean;
       /** Local UI recovery hook for voice flows. Never sent to the server. */
       onError?: (message: string) => void;
     }
@@ -2399,6 +2400,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 behavior: action.behavior,
                 message: action.message,
                 reviewedSha256: action.reviewedSha256,
+                always: action.always,
               }),
             });
           void waitForExecutionSettings(executionBotsBeforeAction, action.threadId)

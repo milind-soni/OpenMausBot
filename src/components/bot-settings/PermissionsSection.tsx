@@ -30,7 +30,7 @@ export function PermissionsSection({
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
 }) {
-  const { patch, engine, canCoordinate, canAutoReview, approvalMode, trustedModesAvailable, sectionName, currentChief } = derived;
+  const { patch, engine, canCoordinate, approvalMode, trustedModesAvailable, sectionName, currentChief } = derived;
   const { dispatch } = useStore();
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const [fullAccessTarget, setFullAccessTarget] = useState<string | null>(null);
@@ -128,51 +128,6 @@ export function PermissionsSection({
           />
         </div>
       </div>
-
-      {!(engine?.driverKind === "antigravityAgent" && approvalMode === "full") && <div className="rounded-xl bg-card p-4">
-        <div className="text-[15px] font-medium text-ink">Review routine approvals</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">
-          {approvalMode === "custom"
-            ? "Custom follows your Codex config.toml and its approval prompts. Routine auto-review stays off in this mode."
-            : canAutoReview
-              ? "The same engine reviews ordinary approval cards. Existing safety rules, unattended turns, local-computer access, and questions still wait for you."
-              : "This engine cannot run an isolated review safely, so approval cards continue to wait for you."}
-        </div>
-        <div className="mt-3 flex gap-1 rounded-lg bg-inset p-0.5">
-          {(
-            [
-              ["off", "Off", "Every undecided approval waits for you."],
-              ["shadow", "Watch", "Record the review without answering the card."],
-              ["enforce", "On", "Answer only reviews that return a strict approval."],
-            ] as const
-          ).map(([value, label, hint]) => {
-            const current = approvalMode === "custom"
-              ? "off"
-              : bot.autoReview === "shadow" || bot.autoReview === "enforce"
-                ? bot.autoReview
-                : "off";
-            const disabled = value !== "off" && (approvalMode === "custom" || !canAutoReview);
-            return (
-              <button
-                key={value}
-                title={disabled
-                  ? approvalMode === "custom"
-                    ? "Custom approval behavior is controlled by config.toml"
-                    : "Not supported by this engine"
-                  : hint}
-                disabled={disabled}
-                onClick={() => patch({ autoReview: value })}
-                className={cn(
-                  "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-40",
-                  current === value ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
-                )}
-              >
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>}
 
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}

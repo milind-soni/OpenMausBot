@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
   assert.equal(created.status, 201);
   const id = created.body.bot.id;
   assert.equal((await api(`/api/bots/${id}`, "PATCH", { approvalMode: "full", acknowledgeFullAccess: true })).status, 403);
-  for (const [mode, native] of [["full", "bypassPermissions"], ["auto", "auto"], ["ask", "default"]]) {
+  for (const [mode, native] of [["full", "bypassPermissions"], ["auto", "auto"], ["edits", "acceptEdits"], ["ask", "default"]]) {
     await coordinator.request(child, id, mode);
     await until(async () => (await api("/api/bots?messages=0")).body.bots.find((bot) => bot.id === id)?.approvalMode === mode);
     assert.equal((await api(`/api/bots/${id}/messages`, "POST", { text: `Verify ${mode}` })).status, 202);

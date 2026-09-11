@@ -12,7 +12,6 @@ import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import {
   approvalModeFor,
   supportsApprovalMode,
-  requiresNativeApproval,
   isEmergencyApprovalDowngrade,
   isApprovalMode,
   type ApprovalMode,
@@ -27,8 +26,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, rememberableApprovalKey } from "./auto-approve.ts";
-import { requestReview, resolveAutoReviewMode, shouldReview } from "./auto-review.ts";
+import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict } from "./auto-approve.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import {
@@ -142,7 +140,6 @@ import { blockedTarget, buildNotification, type Notification } from "./notify.ts
 import {
   isEffortLevel,
   type ModelSelection,
-  type ProviderInstance,
   type RequestOutcome,
   type RuntimeEvent,
   newId,
@@ -1543,14 +1540,11 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * this too, but no provider dispatch or later permission callback relies on
  * persistence having been produced exclusively by that route. Delegation
  * uses the receiving bot's grant, never the sender's — see approvalModeForOrigin. */
-const approvalModeForTurn = (bot: BotRecord, peerInitiated = false, threadId = bot.threadId): ApprovalMode => {
+const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
     return "ask";
   }
-  // Native reviewers can approve before a permission reaches this process.
-  // Unattended Auto must therefore downgrade before spawning the provider.
-  if (mode === "auto" && isUnattended(bot.id, threadId)) return "ask";
   return mode;
 };
 
@@ -2621,6 +2615,8 @@ async function answerRequest(
   behavior: "allow" | "deny" | "answer",
   message?: string,
   decidedFor?: { id: string; name: string },
+  /** "Always allow this session": the provider keeps the allow, not the app */
+  always?: boolean,
 ): Promise<RequestOutcome> {
   // Snapshot the card BEFORE delivering the answer: a delivered answer
   // resolves the request synchronously through the fold, which consumes
@@ -2638,7 +2634,7 @@ async function answerRequest(
   let outcome: RequestOutcome = "unavailable";
   if (instance) {
     try {
-      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message });
+      outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, always: always && behavior === "allow" });
     } catch {
       outcome = "unavailable";
     }
@@ -2836,79 +2832,6 @@ const watchdog = new TurnWatchdog({
   },
 });
 watchdog.start();
-
-async function reviewPermissionCard(args: {
-  instance: ProviderInstance;
-  asker: {
-    id: string;
-    name: string;
-    title?: string;
-    description?: string;
-    autoReview?: string;
-    modelSelection: { instanceId: string };
-  };
-  threadId: string;
-  requestId: string;
-  messageId: string;
-  tool: string;
-  summary: string;
-}): Promise<boolean> {
-  const mode = resolveAutoReviewMode(args.asker.autoReview);
-  if (mode === "off" || !args.instance.reviewPermission) return false;
-  const persona = [args.asker.name, args.asker.title, args.asker.description].filter(Boolean).join(" — ");
-  const reviewed = await requestReview(args.instance.reviewPermission.bind(args.instance), {
-    tool: args.tool,
-    summary: args.summary,
-    persona,
-  });
-  if (!reviewed) return false;
-
-  if (mode === "shadow") {
-    appendDecision(DATA_DIR, {
-      threadId: args.threadId,
-      requestId: args.requestId,
-      botId: args.asker.id,
-      botName: args.asker.name,
-      tool: args.tool,
-      summary: args.summary,
-      decision: reviewed.allow ? "review-would-approve" : "review-would-deny",
-      source: "auto-review-shadow",
-      rule: reviewed.reason,
-    });
-    return false;
-  }
-  if (!reviewed.allow) return false;
-
-  // The human can answer while review is running. Their click wins before
-  // the provider receives anything and before the audit log claims approval.
-  const card = store.messagesFor(args.threadId).find((message) => message.id === args.messageId)?.card;
-  if (!card || card.answered) return false;
-  let outcome: RequestOutcome = "unavailable";
-  try {
-    outcome = await args.instance.adapter.respondToRequest(args.threadId, args.requestId, { behavior: "allow" });
-  } catch {
-    return false;
-  }
-  if (outcome === "unavailable") return false;
-
-  store.appendMessage(args.threadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: `review approved ${args.tool}: ${reviewed.reason}`, ok: true },
-  });
-  appendDecision(DATA_DIR, {
-    threadId: args.threadId,
-    requestId: args.requestId,
-    botId: args.asker.id,
-    botName: args.asker.name,
-    tool: args.tool,
-    summary: args.summary,
-    decision: "auto-approved",
-    source: "auto-review",
-    rule: reviewed.reason,
-  });
-  return true;
-}
 
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
@@ -3406,34 +3329,21 @@ bus.subscribe((event: RuntimeEvent) => {
       break;
     case "request.opened": {
       const permission = event.requestType === "permission";
-      // Approval modes and always-allow can answer permission requests for
-      // the bot so it keeps working. A QUESTION always reaches the human —
-      // even Full access never invents a person's answer. Safe Auto stops on
-      // the guards in auto-approve.ts; explicitly acknowledged Full does not.
+      // A permission request here is one the provider left for a person: its
+      // own mode already ran (Ask, Edits, Auto's reviewer, Custom's config).
+      // OpenMausBot decides nothing about the action itself. Only Full access
+      // answers, because that is exactly what the person granted. A QUESTION
+      // always reaches the human — even Full access never invents an answer.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
-      const effectiveApprovalMode = asker ? approvalModeForTurn(asker, isInternalTurn(event.threadId), event.threadId) : "ask";
+      const effectiveApprovalMode = asker ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
       const verdict = permission && asker && event.requestId
-        ? autoVerdict({
-            // Use the same receiving-bot mode as the provider dispatch.
-            approvalMode: effectiveApprovalMode,
-            autoApprove: false,
-            alwaysAllow: asker.alwaysAllow,
-          }, event.tool, event.summary, {
-            unattended,
-            scope: event.approvalScope,
-            requiresExplicitApproval: event.requiresExplicitApproval,
-            // Match the dispatched mode for every provider, including
-            // delegated Custom and unattended Auto downgrades.
-            nativeApproval: requiresNativeApproval(event.provider, effectiveApprovalMode),
-            nativeReview: event.nativeReview,
-          })
+        ? autoVerdict(effectiveApprovalMode, event.tool, { requiresExplicitApproval: event.requiresExplicitApproval })
         : null;
-      // Auto's promise was "the bot handles routine actions". Claude on a
-      // model its classifier does not cover starts in Manual and asks about
-      // everything, which the person reads as Auto being broken. Say once
-      // per session who is actually approving, then let the verdict below
-      // answer as safe Auto always did.
+      // Auto's reviewer is the engine's own. Claude accepts `--permission-mode
+      // auto` for any model and starts in Manual without a word when auto is
+      // unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it), so the
+      // bot asks about everything. Say once per session why, and what stops it.
       if (
         permission &&
         asker &&
@@ -3447,7 +3357,7 @@ bus.subscribe((event: RuntimeEvent) => {
           role: "bot",
           kind: "activity",
           tool: {
-            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}, so OpenMausBot is approving routine actions itself and still asks about destructive or sensitive ones.`,
+            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}, so this bot asks before each action. Choose a model it supports, or Full access, to stop the prompts.`,
             ok: true,
           },
         });
@@ -3485,7 +3395,6 @@ bus.subscribe((event: RuntimeEvent) => {
               summary,
               decision: "auto-approved",
               source: verdict.source,
-              rule: verdict.rule,
             });
           } catch {
             // couldn't answer it for them — hand it back to the human
@@ -3499,17 +3408,8 @@ bus.subscribe((event: RuntimeEvent) => {
                 options: ["Allow", "Deny"],
                 requestId,
                 tool,
-                allowKey: rememberableApprovalKey(asker, tool, summary, {
-                  source: verdict.source,
-                  scope: event.approvalScope,
-                  requiresExplicitApproval: event.requiresExplicitApproval,
-                }),
-                held: HELD_NOTE[verdict.source === "full-access"
-                  ? "approval.held.undeliveredFull"
-                  : "approval.held.undelivered"],
-                heldCode: verdict.source === "full-access"
-                  ? "approval.held.undeliveredFull"
-                  : "approval.held.undelivered",
+                held: HELD_NOTE["approval.held.undeliveredFull"],
+                heldCode: "approval.held.undeliveredFull",
                 approvalScope: event.approvalScope,
               },
             });
@@ -3523,24 +3423,12 @@ bus.subscribe((event: RuntimeEvent) => {
               summary,
               decision: "card-shown",
               source: "auto-fallback",
-              rule: verdict.rule,
             });
           }
         })();
         break;
       }
-      // A card can outlive the bot record that raised it. Without one there is
-      // no mode to explain, but the sandbox note still applies.
-      const heldContext = {
-        source: verdict?.source,
-        permission,
-        requiresExplicitApproval: event.requiresExplicitApproval,
-        mode: asker ? approvalModeForOrigin(approvalModeFor(asker), { peerInitiated: isInternalTurn(event.threadId) }) : ("ask" as const),
-        unattended: Boolean(unattended),
-        fullAccessAvailable: asker && !isInternalTurn(event.threadId)
-          ? supportsApprovalMode(registry.cliTarget(asker.modelSelection.instanceId)?.driverKind, "full")
-          : false,
-      };
+      const heldContext = { source: verdict?.source, permission };
       const message = pushMessage({
         role: "bot",
         kind: "options",
@@ -3555,16 +3443,9 @@ bus.subscribe((event: RuntimeEvent) => {
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
-          // the exact grant "always allow" would remember, decided here so
-          // client and server can never derive it differently
-          allowKey: permission
-            ? rememberableApprovalKey(asker, event.tool, event.summary, {
-                source: verdict?.source,
-                scope: event.approvalScope,
-                requiresExplicitApproval: event.requiresExplicitApproval,
-                nativeReview: event.nativeReview,
-              })
-            : undefined,
+          // the provider can keep an allow for its session; the app keeps
+          // no grant of its own for a provider's tool
+          allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
           // The text stays for cards saved before heldCode existed, and for
           // clients that do not know the key yet.
           held: approvalHeldReason(heldContext),
@@ -3573,39 +3454,8 @@ bus.subscribe((event: RuntimeEvent) => {
         },
       });
       if (event.requestId) askMessageByRequest.set(`${event.threadId}:${event.requestId}`, message.id);
-      const reviewMode = resolveAutoReviewMode(asker?.autoReview);
-      let reviewTask: Promise<boolean> | undefined;
-      if (
-        permission &&
-        !event.requiresExplicitApproval &&
-        asker &&
-        event.requestId &&
-        shouldReview({
-          source: verdict?.source,
-          mode: reviewMode,
-          approvalMode: approvalModeFor(asker),
-          unattended: Boolean(unattended),
-          approvalScope: event.approvalScope,
-        })
-      ) {
-        // Review stays on the provider boundary that opened the request.
-        // Falling back to an arbitrary sibling could disclose action details
-        // to a provider the user did not choose for this bot.
-        const instance = registry.get(event.providerInstanceId ?? asker.modelSelection.instanceId);
-        if (instance?.reviewPermission) {
-          reviewTask = reviewPermissionCard({
-            instance,
-            asker,
-            threadId: event.threadId,
-            requestId: event.requestId,
-            messageId: message.id,
-            tool: event.tool,
-            summary: event.summary,
-          });
-        }
-      }
-      // Every card that reaches a human is a decision too — "a rule sent
-      // this to you, and here is which one". `question` marks the cards no
+      // Every card that reaches a human is a decision too: "the provider
+      // left this for you, in this mode". `question` marks the cards no
       // rule may ever answer; a permission card without a verdict (no known
       // asker, or no requestId to answer through) can only mean nothing was
       // granted.
@@ -3618,41 +3468,25 @@ bus.subscribe((event: RuntimeEvent) => {
         summary: event.summary,
         decision: "card-shown",
         source: !permission ? "question" : verdict ? verdict.source : "no-grant",
-        rule: verdict?.rule,
         unattended: unattended || undefined,
       });
       // Notify from HERE, not from a separate subscriber on request.opened:
       // this is the branch where a card actually reached a human. Anything
-      // auto mode answered took the early return above and never buzzes.
-      const notifyHuman = () => {
-        if (!asker) return;
+      // Full access answered took the early return above and never buzzes.
+      if (asker) {
         const card = store.messagesFor(event.threadId).find((candidate) => candidate.id === message.id)?.card;
-        if (!card || card.answered) return;
-        // the bot is not working now — it is waiting on a person
-        if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
-        else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
-        const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
-        notify(buildNotification(
-          permission ? "approval" : "question",
-          notificationBot,
-          (routineRun && routineSourceThread(routineRun)) || event.threadId,
-          event.summary,
-        ));
-      };
-      if (reviewTask && reviewMode === "enforce") {
-        // Avoid buzzing the owner for a card the reviewer is about to answer.
-        // A deny, failure, or timeout falls back to the normal notification;
-        // if the human already answered meanwhile, notifyHuman is a no-op.
-        void reviewTask
-          .catch(() => false)
-          .then((approved) => {
-            if (!approved) notifyHuman();
-          });
-      } else {
-        // Watch mode notifies immediately, but its background audit must not
-        // become an unhandled rejection if an unexpected store error occurs.
-        if (reviewTask) void reviewTask.catch(() => false);
-        notifyHuman();
+        if (card && !card.answered) {
+          // the bot is not working now — it is waiting on a person
+          if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
+          else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
+          const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
+          notify(buildNotification(
+            permission ? "approval" : "question",
+            notificationBot,
+            (routineRun && routineSourceThread(routineRun)) || event.threadId,
+            event.summary,
+          ));
+        }
       }
       break;
     }
@@ -6053,7 +5887,7 @@ async function runGroupMemberTurn(
   }
   revokeInternalCapabilitiesForThread(threadId);
   spoken.add(botId);
-  const preparedApprovalMode = approvalModeForTurn(bot, false, threadId);
+  const preparedApprovalMode = approvalModeForTurn(bot, false);
   const preparedSelection = { ...bot.modelSelection };
   const preparedComposio = bot.composio;
   const instance = registry.get(bot.modelSelection.instanceId);
@@ -6188,7 +6022,7 @@ async function runGroupMemberTurn(
   if (!readyGroup || !stillOwnsThread || !readyGroup.memberIds.includes(readyBot.id)) return false;
   const setupChanged =
     registry.get(preparedSelection.instanceId) !== instance ||
-    approvalModeForTurn(readyBot, false, threadId) !== preparedApprovalMode ||
+    approvalModeForTurn(readyBot, false) !== preparedApprovalMode ||
     readyBot.modelSelection.instanceId !== preparedSelection.instanceId ||
     readyBot.modelSelection.model !== preparedSelection.model ||
     readyBot.modelSelection.effort !== preparedSelection.effort ||
@@ -6509,7 +6343,7 @@ async function runGroupMemberTurn(
         threadId,
         text,
         images: turnImages,
-        approvalMode: approvalModeForTurn(readyBot, false, threadId),
+        approvalMode: approvalModeForTurn(readyBot, false),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
@@ -11946,12 +11780,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           error: "This approval-level change can only be made from the packaged desktop app",
         });
       }
-      if (body.autoReview !== undefined) {
-        if (body.autoReview !== "off" && body.autoReview !== "shadow" && body.autoReview !== "enforce") {
-          return json(res, 400, { error: "autoReview must be off, shadow, or enforce" });
-        }
-        patch.autoReview = body.autoReview;
-      }
       // "Auto on this Mac" hands a bot the user's real session, so the grant
       // must prove a human saw the warning. The desktop dialog is the only
       // caller that sends acknowledgeLocalAuto; without it a PATCH that would
@@ -12989,7 +12817,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         resolvePeerComms(approvalBus, String(body.requestId), behavior)) {
         return json(res, 200, { ok: true, outcome: behavior === "allow" ? "allowed-once" : "rejected" });
       }
-      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name });
+      const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name }, body.always === true);
       return json(res, 200, { ok: true, outcome });
     }
     // Answer by THREAD, so a request raised inside a room can be answered
@@ -13072,7 +12900,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         : store.botByThread(threadId);
       if (!owner && !pending) return json(res, 404, { error: "nothing is waiting on an answer in this conversation" });
       const requestOwner = owner ? botForThread(owner.id, threadId) : null;
-      const outcome = await answerRequest(threadId, requestOwner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined);
+      const outcome = await answerRequest(threadId, requestOwner?.modelSelection.instanceId ?? "", requestId, behavior, body.message, owner ? { id: owner.id, name: owner.name } : undefined, body.always === true);
       return json(res, 200, { ok: true, outcome });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/interrupt$/);

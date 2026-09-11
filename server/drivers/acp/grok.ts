@@ -222,7 +222,9 @@ const support: AcpSupport = {
   // crates/codegen/xai-grok-pager-bin/src/main.rs:1259-1273.
   spawnArgs: (config, turn) => [
     "--permission-mode",
-    config.fullAuto ? "bypassPermissions" : turn.approvalMode === "auto" ? "auto" : "default",
+    config.fullAuto
+      ? "bypassPermissions"
+      : turn.approvalMode === "auto" ? "auto" : turn.approvalMode === "edits" ? "acceptEdits" : "default",
     "agent",
     ...(turn.model ? ["-m", turn.model] : []),
     // long form on purpose: `--effort` is documented as an alias, and an

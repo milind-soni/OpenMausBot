@@ -232,6 +232,9 @@ function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
 /** Codex persists these values on its native thread. Keep them explicit on
  * start, resume, and every turn so switching modes cannot leave a more
  * permissive sandbox/reviewer stuck to the next request. */
+/** Ask and Edits both run Codex's workspace-write sandbox with the person as
+ * reviewer: Codex has no narrower "edits only" mode, so the selector never
+ * offers Edits for it (supportsApprovalMode) and a stray value asks. */
 function namedApprovalParams(mode: Exclude<ApprovalMode, "custom">): CodexApprovalParams {
   if (mode === "full") {
     return {

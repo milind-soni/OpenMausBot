@@ -158,20 +158,26 @@ posixOnly("authorization decisions are logged", () => {
   });
 
   it(
-    "a rule-matched auto-approval writes a row naming the rule",
+    "an Auto bot's card is logged as the provider's own request",
     async () => {
-      const bot = await makePermissionBot({ name: "Granted", alwaysAllow: ["shell:echo"] });
+      // Auto passes the provider's mode through; a request that still
+      // reaches the harness is the reviewer's to leave, and the row says so.
+      const bot = await makePermissionBot({ name: "Granted", autoApprove: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "run it" })).status).toBe(202);
 
-      const row = await waitForDecision((r) => r.decision === "auto-approved" && r.botId === bot.id);
-      expect(row, "the auto-approval never reached the decision log").not.toBeNull();
-      expect(row!.source).toBe("always-allow");
-      expect(row!.rule).toBe("shell:echo");
+      const card = await waitForBotCard(bot.id);
+      expect(card, "no approval card ever appeared").not.toBeNull();
+      const row = await waitForDecision((r) => r.decision === "card-shown" && r.botId === bot.id);
+      expect(row, "the card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("native-approval");
+      expect(row!.rule).toBeUndefined();
       expect(row!.tool).toBe("shell");
       expect(row!.summary).toBe("echo hi");
       expect(row!.botName).toBe("Granted");
       expect(row!.threadId).toBeTruthy();
       expect(row!.requestId).toBeTruthy();
+      expect(card.card.held).toBe("The provider requires your approval for this action.");
+      expect(card.card.allowSession).toBe(true);
     },
     60_000,
   );
@@ -225,12 +231,11 @@ posixOnly("authorization decisions are logged", () => {
   );
 
   it(
-    "an unattended block writes the row that says a grant was withheld",
+    "a webhook turn's card is logged as unattended, in the bot's own mode",
     async () => {
-      // Auto mode on AND the exact key granted: an attended turn would sail
-      // straight through, so the only thing carding this one is the
-      // unattended block — which is precisely what the row must say.
-      const bot = await makePermissionBot({ name: "Nightshift", autoApprove: true, alwaysAllow: ["shell:echo"] });
+      // A webhook turn runs in the mode the bot has, like any other; the
+      // row only records that nobody was at the keyboard when it asked.
+      const bot = await makePermissionBot({ name: "Nightshift", autoApprove: true });
 
       const hook = await api("POST", "/api/webhooks", {
         name: "Nightly build",
@@ -250,12 +255,11 @@ posixOnly("authorization decisions are logged", () => {
       const threadId = await waitForRunThread(runId);
       expect(threadId, "the webhook never started a task").toBeTruthy();
       const card = await waitForThreadCard(threadId!);
-      expect(card, "the webhook turn auto-approved instead of asking").not.toBeNull();
+      expect(card, "the webhook turn never asked").not.toBeNull();
 
       const row = await waitForDecision((r) => r.threadId === threadId && r.decision === "card-shown");
-      expect(row, "the unattended block never reached the decision log").not.toBeNull();
-      expect(row!.source).toBe("unattended-block");
-      expect(row!.rule).toBe("shell:echo");
+      expect(row, "the card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("native-approval");
       expect(row!.unattended).toBe(true);
       expect(row!.botId).toBe(bot.id);
     },

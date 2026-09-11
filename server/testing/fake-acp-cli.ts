@@ -316,7 +316,10 @@ function handle(msg: any) {
   // client's response to our permission request
   if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined) && msg.id === pendingPermissionId) {
     pendingPermissionId = null;
-    onPermissionAnswered?.(msg.result?.outcome?.optionId === "allow-once");
+    const chosen = msg.result?.outcome?.optionId;
+    // which option the client picked, for tests asserting allow_always
+    if (process.env.FAKE_ACP_PERMISSION_ANSWER) writeFileSync(process.env.FAKE_ACP_PERMISSION_ANSWER, String(chosen ?? "cancelled"));
+    onPermissionAnswered?.(typeof chosen === "string" && chosen.startsWith("allow"));
     return;
   }
   if (!msg.method) return;
@@ -752,6 +755,9 @@ function handle(msg: any) {
               : { kind: "execute", rawInput: { command: "echo hi" }, title: "echo hi" },
             options: [
               { optionId: "allow-once", kind: "allow_once" },
+              // Grok offers a session-wide allow on some requests and omits
+              // it on others; the driver must cope with both.
+              ...(process.env.FAKE_ACP_ALLOW_ALWAYS ? [{ optionId: "allow-always", kind: "allow_always" }] : []),
               { optionId: "reject", kind: "reject_once" },
             ],
           },
