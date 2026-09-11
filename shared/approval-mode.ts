@@ -17,6 +17,19 @@ export function supportsApprovalMode(driverKind: string | undefined, mode: Appro
   return ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"].includes(driverKind ?? "");
 }
 
+/** A provider switch under an elevated level breaks the grant's premise:
+ * Full/Custom was chosen for one engine's tool semantics and must not
+ * silently transfer to another. The server refuses exactly these requests;
+ * the model picker uses the same predicate to warn before dispatching. */
+export function providerSwitchBreaksElevation(
+  mode: ApprovalMode,
+  fromDriverKind: string | undefined,
+  toDriverKind: string | undefined,
+): boolean {
+  if (mode !== "full" && mode !== "custom") return false;
+  return !supportsApprovalMode(toDriverKind, mode) || fromDriverKind !== toDriverKind;
+}
+
 export function hasNativeAutoReview(driverKind: string | undefined): boolean {
   return ["codex", "claudeAgent", "cursorAgent", "grokAgent"].includes(driverKind ?? "");
 }

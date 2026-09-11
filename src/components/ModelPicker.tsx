@@ -13,6 +13,8 @@ import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
 import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { approvalModeFor, providerSwitchBreaksElevation } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
@@ -257,6 +259,9 @@ export function ModelPicker({
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // A provider pick the server would refuse while the bot runs elevated:
+  // parked here until the person confirms the atomic downgrade + switch.
+  const [pendingSwitch, setPendingSwitch] = useState<{ instance: InstanceInfo; model: string } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const refreshingRef = useRef(false);
   const lastClaudeIdRef = useRef<string | null>(null);
@@ -353,6 +358,14 @@ export function ModelPicker({
 
   const pick = (instance: InstanceInfo, model: string) => {
     if (bot.busy) return;
+    // Bot-level switches under Full/Custom are refused by the server unless
+    // approval drops in the same request — confirm, then send both together
+    // so the new provider never runs elevated. Thread-level switches keep
+    // the direct dispatch; the server answers those with its own message.
+    if (!threadId && providerSwitchBreaksElevation(approvalModeFor(bot), active?.driverKind, instance.driverKind)) {
+      setPendingSwitch({ instance, model });
+      return;
+    }
     const sameInstance = instance.instanceId === selection.instanceId;
     const nextSelection: ModelSelection = {
       instanceId: instance.instanceId,
@@ -364,6 +377,21 @@ export function ModelPicker({
       botId: bot.id,
       threadId,
       selection: nextSelection,
+    });
+    setOpen(false);
+  };
+
+  const confirmPendingSwitch = () => {
+    const pending = pendingSwitch;
+    setPendingSwitch(null);
+    if (!pending) return;
+    dispatch({
+      type: "updateBot",
+      botId: bot.id,
+      patch: {
+        approvalMode: "ask",
+        modelSelection: { instanceId: pending.instance.instanceId, model: pending.model },
+      },
     });
     setOpen(false);
   };
@@ -701,6 +729,17 @@ export function ModelPicker({
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingSwitch !== null}
+        title={t("model.providerSwitch.title")}
+        body={t("model.providerSwitch.body", {
+          from: active?.displayName ?? selection.instanceId,
+          to: pendingSwitch?.instance.displayName ?? "",
+        })}
+        confirmLabel={t("model.providerSwitch.confirm")}
+        onCancel={() => setPendingSwitch(null)}
+        onConfirm={confirmPendingSwitch}
+      />
     </div>
   );
 }
