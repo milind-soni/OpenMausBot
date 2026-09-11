@@ -123,6 +123,18 @@ data class ToolActivity(
     val setup: Boolean? = null,
 )
 
+/**
+ * The thread an activity chip opened — "Opened thread #Title on Scout" — so
+ * the phone can go there. Newer computers only; a chip without one is just a
+ * receipt.
+ */
+@Serializable
+data class ThreadRef(
+    val botId: String,
+    val threadId: String,
+    val title: String,
+)
+
 @Serializable
 data class Sender(
     val botId: String,
@@ -150,6 +162,7 @@ data class Message(
     val text: String? = null,
     val card: OptionCard? = null,
     val tool: ToolActivity? = null,
+    val threadRef: ThreadRef? = null,
     val parentId: String? = null,
     val from: Sender? = null,
     val reactions: List<Reaction>? = null,
@@ -218,6 +231,18 @@ data class ModelSelection(
     val effort: String? = null,
 )
 
+/**
+ * The bot that opened a thread, on itself or on a teammate. Absent — which is
+ * every thread from an older computer — means the person opened it.
+ */
+@Serializable
+data class ThreadOpener(
+    val botId: String,
+    val name: String,
+    val delegationId: String? = null,
+    val at: Double,
+)
+
 @Serializable
 data class BotTask(
     val threadId: String,
@@ -231,7 +256,14 @@ data class BotTask(
     val autoApprove: Boolean? = null,
     val alwaysAllow: List<String>? = null,
     val projectId: String? = null,
+    val openedBy: ThreadOpener? = null,
+    /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
+    val routineRunId: String? = null,
 )
+
+/** The thread list's quiet second line, worded as the desktop words it. */
+val BotTask.openedByLabel: String?
+    get() = openedBy?.let { "opened by ${it.name}" }
 
 @Serializable
 data class Bot(

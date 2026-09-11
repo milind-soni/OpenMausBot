@@ -75,13 +75,17 @@ const SCREEN_TOUCHING_TOOLS = new Set([
   "zoom",
 ]);
 
-/** The same tool reaches the poke site under three spellings: the Claude
- * driver's `mcp__computer__click`, Codex's bare `click`, and pi's
- * `computer_click` (server_tool, lowercased). A server prefix is stripped
+// Keep legacy MCP namespaces accepted; desktop server__tool names follow
+// MCP_NAME in mcp-registry.ts (lowercase letters, digits, underscores, hyphens).
+const TOOL_NAMESPACE = /^(?:mcp__.+?|[a-z][a-z0-9_-]{0,31})__/;
+
+/** The same tool reaches the poke site as `mcp__computer__click`,
+ * `computer__click`, bare `click`, or pi's `computer_click`.
+ * A single-underscore server prefix is stripped
  * at most once, so pi's `computer_computer_exec` lands on `computer_exec`
  * — still a shell — and never on a bare `exec`. */
 export function screenTouchingTool(toolName: string): boolean {
-  const bare = toolName.toLowerCase().replace(/^mcp__.+?__/, "");
+  const bare = toolName.toLowerCase().replace(TOOL_NAMESPACE, "");
   return SCREEN_TOUCHING_TOOLS.has(bare) || SCREEN_TOUCHING_TOOLS.has(bare.replace(/^(?:computer|browser)_/, ""));
 }
 
@@ -108,8 +112,8 @@ export function screenSurfaceForTool(toolName: string): "browser" | "computer" {
   // The computer server's browser_click/fill act inside the desktop, not
   // in agent-browser. Keep the server identity before stripping prefixes.
   if (name.startsWith("mcp__computer__") || name.startsWith("computer_")) return "computer";
-  if (name.startsWith("mcp__browser__")) return "browser";
-  const bare = name.replace(/^mcp__.+?__/, "");
+  if (name.startsWith("mcp__browser__") || name.startsWith("browser__")) return "browser";
+  const bare = name.replace(TOOL_NAMESPACE, "");
   // Codex reports bare names. These two belong to computer-proxy; the
   // standalone browser now uses the unambiguous agent_browser_* names.
   if (bare === "browser_click" || bare === "browser_fill") return "computer";

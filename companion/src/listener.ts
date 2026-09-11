@@ -116,6 +116,15 @@ export const searchPath = (): string =>
     .filter(Boolean)
     .join(delimiter);
 
+/** The macOS app executable chooses GUI or CLI mode from its environment.
+ * Finder-launched sidecars have no shell hints, so explicitly request the CLI.
+ * https://tailscale.com/docs/reference/tailscale-cli?tab=macos */
+export const tailscaleEnvironment = (): NodeJS.ProcessEnv => ({
+  ...process.env,
+  PATH: searchPath(),
+  TAILSCALE_BE_CLI: "1",
+});
+
 /** Ask the Tailscale CLI where it thinks we are.
  *
  * Every failure is survivable — not installed, not logged in, not running all
@@ -157,7 +166,7 @@ async function refreshTailnetNameOnce(
           // Generous, and still a bound: the alternative is a subprocess
           // deciding how much memory this process uses.
           maxBuffer: 16 * 1024 * 1024,
-          env: { ...process.env, PATH: searchPath() },
+          env: tailscaleEnvironment(),
         },
         (error, stdout) => {
           if (error) {
@@ -171,7 +180,9 @@ async function refreshTailnetNameOnce(
             onAttempt?.(cli, trimmed ? `ok: ${trimmed}` : "ran, but no MagicDNS name in status");
             resolve(trimmed);
           } catch {
-            onAttempt?.(cli, "ran, but its output was not JSON");
+            onAttempt?.(cli, /Tailscale GUI failed to start/i.test(stdout)
+              ? "exited successfully in GUI mode instead of CLI mode"
+              : "exited successfully, but status output was not JSON");
             resolve(null);
           }
         },

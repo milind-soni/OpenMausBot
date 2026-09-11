@@ -38,6 +38,84 @@ final class StoreTests: XCTestCase {
         }
     }
 
+    func testBackgroundLiveTailStillNeedsItsInitialPage() throws {
+        var state = try hydrated()
+        let threadId = "background-thread"
+        state.bots[0].tasks = [BotTask(threadId: threadId, title: "Background", createdAt: 1)]
+        let latest = message("latest", at: 3)
+        state.apply(.message(threadId: threadId, message: latest))
+
+        XCTAssertEqual(state.transcript(forThread: threadId).map(\.id), ["latest"])
+        XCTAssertFalse(state.hasLoadedPage(forThread: threadId), "A live tail does not contain the initial history.")
+        state.merge(ThreadPage(messages: [message("old", at: 1), message("recent", at: 2)], hasMore: true),
+                    intoThread: threadId)
+        XCTAssertTrue(state.hasLoadedPage(forThread: threadId))
+        XCTAssertEqual(state.transcript(forThread: threadId).map(\.id), ["old", "recent", "latest"])
+        XCTAssertEqual(state.hasMore[threadId], true)
+    }
+
+    func testBackgroundPatchDoesNotCountAsAPageAndEmptyLegacyPageDoes() {
+        var state = CompanionState()
+        state.apply(.messagePatch(threadId: "thread", message: message("patched")))
+        XCTAssertFalse(state.hasLoadedPage(forThread: "thread"))
+        state.merge(ThreadPage(messages: []), intoThread: "thread")
+        XCTAssertTrue(state.hasLoadedPage(forThread: "thread"))
+        XCTAssertEqual(state.hasMore["thread"], false)
+        XCTAssertEqual(state.transcript(forThread: "thread").map(\.id), ["patched"])
+
+        state.merge(ThreadPage(messages: [], hasMore: true), intoThread: "thread")
+        state.merge(ThreadPage(messages: []), intoThread: "thread")
+        XCTAssertEqual(state.hasMore["thread"], true, "An unspecified landing-window boundary preserves known scrollback.")
+    }
+
+    func testMetadataOnlyFleetDoesNotCountAsLoadedButEmptyTranscriptsDo() throws {
+        var source = try fleet()
+        source.bots[0].messages = nil
+        source.groups[0].messages = nil
+        var state = CompanionState()
+        state.hydrate(source)
+        XCTAssertFalse(state.hasLoadedPage(forThread: source.bots[0].threadId))
+        XCTAssertFalse(state.hasLoadedPage(forThread: source.groups[0].threadId))
+
+        source.bots[0].messages = []
+        source.groups[0].messages = []
+        source.bots[0].hasMore = nil
+        source.groups[0].hasMore = nil
+        state.hydrate(source)
+        XCTAssertTrue(state.hasLoadedPage(forThread: source.bots[0].threadId))
+        XCTAssertTrue(state.hasLoadedPage(forThread: source.groups[0].threadId))
+    }
+
+    func testNewOwnerFramesOnlyCountAsLoadedWhenTheyContainAPage() throws {
+        var source = try fleet()
+        var bot = source.bots.removeFirst()
+        var room = source.groups.removeFirst()
+        bot.messages = nil
+        room.messages = nil
+        var state = CompanionState()
+        state.apply(.bot(bot))
+        state.apply(.room(room))
+        XCTAssertFalse(state.hasLoadedPage(forThread: bot.threadId))
+        XCTAssertFalse(state.hasLoadedPage(forThread: room.threadId))
+
+        bot.messages = []
+        room.messages = []
+        state.apply(.bot(bot))
+        state.apply(.room(room))
+        XCTAssertTrue(state.hasLoadedPage(forThread: bot.threadId))
+        XCTAssertTrue(state.hasLoadedPage(forThread: room.threadId))
+
+        state = CompanionState()
+        state.apply(.bot(bot))
+        state.apply(.room(room))
+        XCTAssertTrue(state.hasLoadedPage(forThread: bot.threadId))
+        XCTAssertTrue(state.hasLoadedPage(forThread: room.threadId))
+        state.apply(.botDeleted(botId: bot.id))
+        state.apply(.roomDeleted(groupId: room.id))
+        XCTAssertFalse(state.hasLoadedPage(forThread: bot.threadId))
+        XCTAssertFalse(state.hasLoadedPage(forThread: room.threadId))
+    }
+
     func testSidebarSectionsGroupBotsAndChannelsInNaturalOrder() throws {
         let source = try fleet()
         var researchBot = try XCTUnwrap(source.bots.first)
@@ -226,6 +304,34 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(state.visibleTranscript(forThread: "thread-a").map(\.id), ["root-a", "alternative-a"])
         XCTAssertEqual(state.visibleTranscript(forThread: "thread-b").map(\.id), ["root-b"])
         XCTAssertNil(bot.projected(forThread: "not-owned"))
+    }
+
+    func testRoutineExecutionsAreHiddenOnlyFromTheThreadPicker() throws {
+        var bot = try XCTUnwrap(try fleet().bots.first)
+        bot.threadId = "results"
+        bot.tasks = [
+            BotTask(threadId: "legacy", title: "Routine: old run", createdAt: 1),
+            BotTask(threadId: "results", title: "Brief results", createdAt: 2, busy: false),
+            BotTask(threadId: "run-thread", title: "Brief", createdAt: 3, busy: true,
+                    activity: "waiting-on-you", approvalMode: "ask", routineRunId: "run-1"),
+        ]
+        var approval = Message(id: "approval", role: .bot, kind: .options, at: 4)
+        approval.card = OptionCard(title: "Approve?", subtitle: "Read", options: ["Approve", "Deny"], requestId: "request")
+        var state = CompanionState()
+        state.apply(.bot(bot))
+        state.merge(ThreadPage(messages: [approval], activeLeafId: "approval"), intoThread: "run-thread")
+
+        XCTAssertEqual(bot.visibleTasks.map(\.threadId), ["legacy", "results"])
+        XCTAssertEqual(state.bot(bot.id)?.tasks?.count, 3)
+        let execution = try XCTUnwrap(state.bot(forThread: "run-thread"))
+        XCTAssertEqual(execution.threadId, "run-thread")
+        XCTAssertEqual(execution.currentTaskBusy, true)
+        XCTAssertEqual(execution.approvalMode, "ask")
+        XCTAssertEqual(state.visibleTranscript(forThread: "run-thread").map(\.id), ["approval"])
+        XCTAssertEqual(state.pendingApprovals.map(\.threadId), ["run-thread"])
+
+        bot.tasks = nil
+        XCTAssertTrue(bot.visibleTasks.isEmpty)
     }
 
     func testColdBackgroundPageCarriesItsOwnBranchHead() {

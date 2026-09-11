@@ -97,7 +97,7 @@ struct NeedsYouIsland: View {
                             ChatAvatarView(chat: shown.chat, size: 120, state: MausState.forChat(shown.chat, in: session.state), animated: attentionLive, comets: attentionLive)
                         }
                         .buttonStyle(.plain)
-                        .task(id: shown.chat.id) {
+                        .task(id: shown.chat.conversationID) {
                             attentionLive = true
                             try? await Task.sleep(for: .seconds(30))
                             attentionLive = false

@@ -485,6 +485,13 @@ export function TeamLibraryPanel({
                   {pending.kind === "package" && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Plug size={13} />{pending.apps.length} connections</span>}
                 </div>
               )}
+              {Boolean(pending.skills?.length) && (
+                <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+                  <div className="font-medium text-ink">Included skills — disabled on import</div>
+                  <p className="mt-1 break-words">{pending.skills?.join(", ")}</p>
+                  <p className="mt-1">Review each skill in its bot profile before enabling it. Imported instructions do not run automatically.</p>
+                </div>
+              )}
               <div className="mt-6 text-[12px] font-medium text-ink-secondary">Team members</div>
               <div className="mt-2 grid grid-cols-1 gap-x-10 md:grid-cols-2">
                 {pending.members.map((member, index) => (

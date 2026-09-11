@@ -109,6 +109,7 @@ import com.openmausbot.companion.core.Dictation
 import com.openmausbot.companion.core.DisplayedMessageAttachment
 import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
+import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.TranscriptRow
 import com.openmausbot.companion.core.target
 import com.openmausbot.companion.core.transcriptRows
@@ -145,6 +146,8 @@ fun ChatScreen(
      * push and drop it after a pop that removed the chat.
      */
     retainsDraft: (chatId: String) -> Boolean = { false },
+    /** An "Opened thread" chip pointing at another bot pushes that chat. */
+    onOpenChat: (Chat) -> Unit = {},
 ) {
     val session = LocalCompanion.current.session
     val state by session.state.collectAsState()
@@ -164,7 +167,7 @@ fun ChatScreen(
             // Resolve the owner without changing the task named by the destination.
             val resolved = (destination as? Destination.Thread)?.let { resolution.chat.target }
             LaunchedEffect(resolved) { if (resolved != null) onResolved(resolved) }
-            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, retainsDraft, onResolved)
+            LoadedChat(resolution.chat, state, onBack, onOpenComputer, onOpenOverview, retainsDraft, onResolved, onOpenChat)
         }
     }
 }
@@ -196,6 +199,7 @@ private fun LoadedChat(
     onOpenOverview: (String) -> Unit,
     retainsDraft: (chatId: String) -> Boolean,
     onSelectTask: (ChatTarget) -> Unit,
+    onOpenChat: (Chat) -> Unit,
 ) {
     // This screen's selected task, independent of the desktop's selection.
     val threadId = chat.threadId
@@ -209,6 +213,10 @@ private fun LoadedChat(
     val chatDrafts = environment.chatDrafts
     val haptics = rememberHaptics()
     val scope = rememberCoroutineScope()
+    var threadOpenJob by remember { mutableStateOf<Job?>(null) }
+    DisposableEffect(threadId) {
+        onDispose { threadOpenJob?.cancel() }
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Words this computer is holding until the running turn settles.
     val queuedSends = state.pendingQueued[threadId].orEmpty()
@@ -392,6 +400,17 @@ private fun LoadedChat(
         preferredName = attachment.name,
         cacheResult = true,
     )
+
+    // A chip that opened a thread on this bot switches this screen in place,
+    // the way a thread row does; one that opened a thread on a teammate pushes
+    // that chat.
+    fun openThread(ref: ThreadRef) {
+        threadOpenJob?.cancel()
+        threadOpenJob = scope.launch {
+            val bot = session.openThread(ref) ?: return@launch
+            if (bot.id == chatId) onSelectTask(ChatTarget.Bot(bot.id, bot.threadId)) else onOpenChat(Chat.BotChat(bot))
+        }
+    }
     val focusedMessageId by session.focusedMessageId.collectAsState()
 
     val dictationListening by dictation.isListening.collectAsState()
@@ -823,8 +842,9 @@ private fun LoadedChat(
                                     endsRun = TranscriptLayout.endsRowRun(transcript, index),
                                     openLink = ::openLink,
                                     openAttachment = ::openAttachment,
+                                    openThread = ::openThread,
                                 )
-                                is TranscriptRow.ActivityRun -> ActivityRunChip(message.items)
+                                is TranscriptRow.ActivityRun -> ActivityRunChip(message.items, ::openThread)
                             }
                         }
                     }

@@ -21,15 +21,17 @@ The launcher prepares these cases:
   The real `propose_routine` MCP handler creates the card using credentials
   captured from a running fixture turn. The fake model does not decide to call
   the tool, and the launcher does not confirm the card.
-- **Manual inbox check** is created through the routine API and run once for
-  Pepper. Its next scheduled occurrence is an hour later.
+- **Manual inbox check** is created through the routine API and run twice for
+  Pepper. Both fresh executions report into **Fleet health reports**, inside
+  the **OMB management** folder. Its next scheduled occurrence is an hour later.
 - **Provider failure example** is created for **Miso** and run once. Miso's
   isolated fake engine deliberately exits early, producing a failure receipt.
 - **Automatic scheduled check** is scheduled for Pepper about twelve seconds
   after creation. The real scheduler must dispatch it without clicking Run now.
 
 The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
-`misoId`, `scheduledRoutineId`, temporary `dataDir`, and persistent `logPath`.
+`misoId`, `scheduledRoutineId`, `manualRoutineId`, `resultsThreadId`,
+`resultsFolderId`, temporary `dataDir`, and persistent `logPath`.
 
 ## Real UI checks
 
@@ -66,6 +68,29 @@ The final startup JSON includes the server `url`, `previewUrl`, `pepperId`,
 7. Open bot settings → Routines. It must use the same routine editor and central
    logs, without creating a second definition or competing history page.
    Confirm that the chat's model header and Ask composer retain their positions.
+8. Expand Pepper's threads. **OMB management** contains one **Fleet health
+   reports** thread, not separate sidebar entries for the two executions.
+   Right-click the folder (or use its actions menu) → **Mark folder as read**.
+   Its unread dots clear without selecting a conversation or resolving any
+   pending approvals. Open the results thread: both dated reports remain.
+9. Use a report's **Open run** to inspect its fresh execution transcript, then
+   **Back to results**. **Run logs** retains the full execution history.
+   A user follow-up sent in a completed execution makes it an ordinary visible
+   thread; marking the older run seen must not hide that conversation again.
+10. In the routine editor, **Post results to** offers visible threads grouped by
+    folder or **Create a dedicated results thread**. Save to Fleet health
+    reports, reload, and confirm the selection persists. In quick create,
+    **More options** must preserve the chosen destination. Changing the owning
+    bot, including via Call/Team goal selectors, must reset a foreign destination.
+    Run a new routine twice: both reports use the chosen thread, while Run logs
+    links to two different executions. The dedicated default similarly reuses
+    one results thread for future runs.
+
+Existing chat-created routines keep reporting to their source conversation
+unless the user chooses another destination. Historical runs keep the destination
+they started with. If that destination is deleted, their execution threads become
+visible so results and approvals remain reachable; future runs can create a new
+results destination. No existing user conversation is silently deleted or filed.
 
 An unconfirmed proposal is not an active routine. A run marked **Waiting** is
 not necessarily asking the user for approval: its attention text can explain
@@ -86,15 +111,16 @@ pnpm control:omb messages --bot BOT_ID --task THREAD_ID --limit 20 --url http://
 Use only the printed fixture server URL. The browser interaction checklist is
 not automatically asserted by the launcher. On Ctrl-C, the launcher writes
 `<logPath>.json` containing setup mutation evidence and the final `/api/routines`
-snapshot, closes Vite and the exact child server, and removes only its temporary
+snapshot (or a separately labelled `persisted` snapshot if Ctrl-C already stopped
+the API), closes Vite and the exact child server, and removes only its temporary
 data. The server log and adjacent JSON remain. Close the dedicated browser tab;
 never kill processes by name or delete a broad temporary root.
 
 ## Automated regressions
 
 ```sh
-pnpm exec vitest run server/routines.test.ts server/routines-startup.test.ts server/routine-delegation.e2e.test.ts server/drivers/agents-proxy.test.ts
-pnpm exec vitest run src/components/routines/RoutineViews.test.ts src/components/bot-settings/RoutinesSection.test.ts src/components/RoutineRunCard.test.ts src/lib/computer-panel-view.test.ts src/state/store.test.ts
+pnpm exec vitest run server/routines.test.ts server/routines-startup.test.ts server/routine-results.e2e.test.ts server/routine-delegation.e2e.test.ts server/drivers/agents-proxy.test.ts
+pnpm exec vitest run src/components/routines/RoutineViews.test.ts src/components/routines/ResultsDestination.test.ts src/components/bot-settings/RoutinesSection.test.ts src/components/RoutineRunCard.test.ts src/components/BotProjects.test.ts src/lib/folder-read.test.ts src/lib/computer-panel-view.test.ts src/state/store.test.ts
 ```
 
 The delegation integration tests launch their own shared-control fixtures.
@@ -104,3 +130,9 @@ routine refusing a stale approved handoff. They print retained server-log and
 JSON evidence paths. These complement the scheduler, proposal and renderer
 tests; they do not prove real-provider tool selection, actual desktop work, or
 packaged Electron behavior.
+
+The results integration fixture additionally proves fresh provider contexts,
+saved destination snapshots, dated result cards, approval links, deleted-thread
+fallback, and continued user conversations staying visible. Native decoding and
+thread-list tests retain hidden execution records for direct navigation and
+approvals while omitting them from ordinary iOS/Android thread pickers.

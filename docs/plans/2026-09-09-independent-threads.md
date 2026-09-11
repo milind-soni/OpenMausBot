@@ -38,8 +38,13 @@ native folder navigation is a follow-up, not silently claimed as implemented.
 
 ## Execution and resource ownership
 
-Each bot can run up to three direct threads at once. A thread waiting for a
-human approval occupies a slot. Native provider sessions were already keyed
+Each bot defaults to three direct threads at once. Settings → General → Parallel
+threads can set the per-bot limit from one to ten. Extra messages wait above
+the composer, off the transcript, until that bot has a free slot; they can be
+cancelled. The existing queue batches follow-ups within each waiting thread
+and drains waiting threads in order. It is in-memory, not restart-durable.
+Raising the limit releases queued work; lowering it never stops active turns.
+A thread waiting for a human approval occupies a slot. Native provider sessions were already keyed
 by thread; the harness now keeps dispatch, permission responses, interruption,
 queues, unread state, and background events on that same identity.
 

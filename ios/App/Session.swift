@@ -170,7 +170,10 @@ final class Session: ObservableObject {
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
-           let url = Bundle.main.url(forResource: "StorePreview", withExtension: "json"),
+           let url = Bundle.main.url(
+               forResource: arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               withExtension: "json"
+           ),
            let data = try? Data(contentsOf: url),
            let fleet = try? JSONDecoder().decode(Fleet.self, from: data) {
             let preview = Connection(
@@ -1559,7 +1562,7 @@ final class Session: ObservableObject {
 
     /// A pinned background thread may not be in a fresh fleet snapshot.
     func loadThreadIfNeeded(_ threadId: String) async {
-        guard let client, state.messages[threadId] == nil else { return }
+        guard let client, !state.hasLoadedPage(forThread: threadId) else { return }
         do {
             let page = try await client.messages(threadId: threadId)
             state.merge(page, intoThread: threadId)
@@ -1638,12 +1641,14 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription; return nil }
     }
 
-    func renameTask(_ task: BotTask, for bot: Bot, title: String) async {
-        guard let client else { return }
+    @discardableResult
+    func renameTask(_ task: BotTask, for bot: Bot, title: String) async -> Bool {
+        guard let client else { return false }
         do {
             try await client.renameTask(botId: bot.id, threadId: task.threadId, title: title)
             await refresh()
-        } catch { actionError = error.localizedDescription }
+            return true
+        } catch { actionError = error.localizedDescription; return false }
     }
 
     @discardableResult
@@ -1656,30 +1661,36 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription; return nil }
     }
 
-    func createTask(for room: Room, title: String?) async {
-        guard let client else { return }
-        do { state.apply(.room(try await client.createTask(groupId: room.id, title: title))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func createTask(for room: Room, title: String?) async -> Bool {
+        guard let client else { return false }
+        do { state.apply(.room(try await client.createTask(groupId: room.id, title: title))); return true }
+        catch { actionError = error.localizedDescription; return false }
     }
 
-    func switchTask(_ task: BotTask, for room: Room) async {
-        guard let client, task.threadId != room.threadId else { return }
-        do { state.apply(.room(try await client.switchTask(groupId: room.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func switchTask(_ task: BotTask, for room: Room) async -> Bool {
+        guard task.threadId != room.threadId else { return true }
+        guard let client else { return false }
+        do { state.apply(.room(try await client.switchTask(groupId: room.id, threadId: task.threadId))); return true }
+        catch { actionError = error.localizedDescription; return false }
     }
 
-    func renameTask(_ task: BotTask, for room: Room, title: String) async {
-        guard let client else { return }
+    @discardableResult
+    func renameTask(_ task: BotTask, for room: Room, title: String) async -> Bool {
+        guard let client else { return false }
         do {
             try await client.renameTask(groupId: room.id, threadId: task.threadId, title: title)
             await refresh()
-        } catch { actionError = error.localizedDescription }
+            return true
+        } catch { actionError = error.localizedDescription; return false }
     }
 
-    func deleteTask(_ task: BotTask, for room: Room) async {
-        guard let client else { return }
-        do { state.apply(.room(try await client.deleteTask(groupId: room.id, threadId: task.threadId))) }
-        catch { actionError = error.localizedDescription }
+    @discardableResult
+    func deleteTask(_ task: BotTask, for room: Room) async -> Bool {
+        guard let client else { return false }
+        do { state.apply(.room(try await client.deleteTask(groupId: room.id, threadId: task.threadId))); return true }
+        catch { actionError = error.localizedDescription; return false }
     }
 
     // MARK: - Agent profile
@@ -1919,6 +1930,61 @@ final class Session: ObservableObject {
 
     func consumeNotificationChat() { notificationChat = nil }
 
+    // MARK: - Thread chips
+
+    /// A tapped "Opened thread #Title on Scout" chip. Lands on that thread by
+    /// the route a thread row uses, which only changes what this phone is
+    /// looking at — a bot mid-turn keeps working where it was. A thread the
+    /// computer no longer has still lands on the bot, with a notice, rather
+    /// than nowhere.
+    ///
+    /// Returns the thread to select in place when the chip's bot is the one
+    /// already on screen. Any other bot is pushed the way a notification is,
+    /// and nil comes back.
+    func openThread(_ ref: ThreadRef, shownBotId: String?) async -> String? {
+        guard !Task.isCancelled else { return nil }
+        guard let client else {
+            actionError = "Pair this device with your computer to open that thread."
+            return nil
+        }
+        let generation = streamGeneration
+        let connectionID = client.connection.id
+        let requestIsCurrent = {
+            !Task.isCancelled && self.streamGeneration == generation && self.client?.connection.id == connectionID
+        }
+        actionError = nil
+        do {
+            var bot = state.bot(ref.botId)
+            if bot == nil {
+                try await hydrate(using: client)
+                guard requestIsCurrent() else { return nil }
+                bot = state.bot(ref.botId)
+            }
+            guard var selected = bot else { throw APIError.status(code: 404, message: "That agent no longer exists.") }
+            if selected.threadId != ref.threadId {
+                do {
+                    selected = try await client.switchTask(botId: selected.id, threadId: ref.threadId)
+                    guard requestIsCurrent() else { return nil }
+                    state.apply(.bot(selected))
+                } catch APIError.status(code: 404, message: _) {
+                    guard requestIsCurrent() else { return nil }
+                    // The thread may be gone (deleted since the chip was
+                    // written). The bot's current thread, and a word about
+                    // it, beats a dead tap.
+                    actionError = "That thread is no longer on your computer."
+                }
+            }
+            guard requestIsCurrent() else { return nil }
+            if selected.id == shownBotId { return selected.threadId }
+            notificationChat = .bot(selected)
+        } catch is CancellationError {
+        } catch {
+            guard requestIsCurrent() else { return nil }
+            actionError = error.localizedDescription
+        }
+        return nil
+    }
+
     func react(to message: Message, in threadId: String, emoji: String) async {
         guard let client else { return }
         do {
@@ -2026,9 +2092,18 @@ enum Chat: Identifiable, Hashable {
         }
     }
 
+    /// Owner identity remains available for bot APIs. Navigation and activity
+    /// lists must distinguish two conversations belonging to the same bot.
+    var conversationID: String {
+        switch self {
+        case let .bot(bot): return "bot:\(bot.id):\(bot.threadId)"
+        case let .room(room): return "room:\(room.id):\(room.threadId)"
+        }
+    }
+
     static func == (left: Chat, right: Chat) -> Bool {
         switch (left, right) {
-        case let (.bot(a), .bot(b)): return a.id == b.id
+        case let (.bot(a), .bot(b)): return a.id == b.id && a.threadId == b.threadId
         case let (.room(a), .room(b)): return a.id == b.id
         default: return false
         }
@@ -2039,6 +2114,7 @@ enum Chat: Identifiable, Hashable {
         case let .bot(bot):
             hasher.combine(0)
             hasher.combine(bot.id)
+            hasher.combine(bot.threadId)
         case let .room(room):
             hasher.combine(1)
             hasher.combine(room.id)
@@ -2056,6 +2132,13 @@ enum Chat: Identifiable, Hashable {
         switch self {
         case let .bot(bot): return bot.name
         case let .room(room): return room.name
+        }
+    }
+
+    var threadTitle: String {
+        switch self {
+        case let .bot(bot): return bot.tasks?.first { $0.threadId == bot.threadId }?.displayTitle ?? "Untitled thread"
+        case let .room(room): return room.tasks?.first { $0.threadId == room.threadId }?.displayTitle ?? "Conversation"
         }
     }
 

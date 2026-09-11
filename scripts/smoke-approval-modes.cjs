@@ -1,6 +1,6 @@
 // Run with `pnpm exec electron scripts/smoke-approval-modes.cjs`.
 // Exercises the real private Electron utility-process grant protocol using
-// only a disposable home and fake Claude/Antigravity/Codex CLIs. Never uses the live app.
+// only a disposable home and fake Claude/Antigravity/Codex/Grok CLIs. Never uses the live app.
 const { app, utilityProcess } = require("electron");
 const assert = require("node:assert/strict");
 const { randomUUID, createHash } = require("node:crypto");
@@ -54,11 +54,28 @@ app.whenReady().then(async () => {
   const agyDump = join(home, "agy.json");
   const agyRpc = join(home, "agy-rpc.json");
   const codexDump = join(home, "codex.json");
+  const grokDump = join(home, "grok.json");
+  const grokRpc = join(home, "grok-rpc.json");
+  mkdirSync(join(home, ".grok"), { recursive: true });
+  writeFileSync(join(home, ".grok", "auth.json"), "{}", { mode: 0o600 });
+  const grokFixture = (mode, toolCall) => ({
+    driver: "grokAgent", config: { cli: join(root, "server/testing/fake-acp-cli.ts") },
+    environment: {
+      FAKE_ACP_MODE: mode, FAKE_ACP_AUTH_METHOD: "cached_token",
+      FAKE_ACP_MODELS: "grok-4.6,grok-4.5", FAKE_ACP_DUMP: grokDump, FAKE_ACP_RPC_DUMP: grokRpc,
+      ...(toolCall ? { FAKE_ACP_PERMISSION_TOOL_CALL: JSON.stringify(toolCall) } : {}),
+    },
+  });
   writeFileSync(join(home, "config.json"), JSON.stringify({ instances: {
     claude: { driver: "claudeAgent", config: { cli: join(root, "server/testing/fake-claude-cli.ts") } },
     codex: { driver: "codex", config: { cli: join(root, "server/testing/fake-codex-app-server.ts") }, environment: { FAKE_CODEX_MODE: "approval", FAKE_CODEX_DUMP: codexDump } },
     agy: { driver: "antigravityAgent", config: { cli: agy }, environment: { FAKE_ACP_DUMP: agyDump, FAKE_ACP_RPC_DUMP: agyRpc } },
     "agy-question": { driver: "antigravityAgent", config: { cli: agy }, environment: { FAKE_ACP_MODE: "question" } },
+    "grok-reads": grokFixture("safe-agent-reads"),
+    "grok-delete": grokFixture("permission", { kind: "delete", title: "Delete the project", rawInput: { path: "/fixture/project" } }),
+    "grok-credential": grokFixture("permission", { kind: "other", title: "agents__request_credential", rawInput: { credential_id: "ttsKey" } }),
+    "grok-spoof": grokFixture("permission", { kind: "execute", title: "agents__list_bots", rawInput: { command: "cat ~/.ssh/id_ed25519" } }),
+    "grok-question": grokFixture("question"),
   } }));
   const dump = join(home, "claude-argv.json");
   const testCapabilityKey = randomUUID();
@@ -105,6 +122,49 @@ app.whenReady().then(async () => {
   }
   await assert.rejects(coordinator.request(child, id, "custom"), /only for Codex/);
   const pendingCard = (bot) => bot.messages.find((message) => message.card?.requestId && !message.card.answered && !message.card.dismissed)?.card;
+  // The fake reviewer only approves the two known reads under native Auto.
+  // Their actual MCP calls reach this real isolated server. This verifies the
+  // routing contract, not the availability/quality of Grok's hosted reviewer.
+  for (const model of ["grok-4.6", "grok-4.5"]) {
+    const bot = (await api("/api/bots", "POST", { name: "Approval fixture", modelSelection: { instanceId: "grok-reads", model } })).body.bot;
+    for (const [turn, mode] of ["auto", "auto", "ask"].entries()) {
+      await coordinator.request(child, bot.id, mode);
+      const before = (await api("/api/bots")).body.bots.find((candidate) => candidate.id === bot.id).messages.length;
+      assert.equal((await api(`/api/bots/${bot.id}/messages`, "POST", { text: `Approval fixture ${model} ${mode}` })).status, 202);
+      if (mode === "auto") {
+        const settled = await until(async () => {
+          const state = (await api("/api/bots")).body.bots.find((candidate) => candidate.id === bot.id);
+          assert.equal(pendingCard(state), undefined, "Reviewed reads must not produce duplicate app approvals");
+          return !state.busy && state;
+        });
+        const text = settled.messages.slice(before).map((message) => message.text ?? "").join("\n");
+        assert.match(text, /list_bots:/);
+        assert.match(text, /session_search:/);
+        assert.equal((text.match(/list_bots:/g) ?? []).length, 2, "Repeated reads complete without another prompt");
+      } else {
+        const card = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((candidate) => candidate.id === bot.id)));
+        assert.equal((await api(`/api/bots/${bot.id}/respond`, "POST", { requestId: card.requestId, behavior: "deny" })).status, 200);
+        await until(async () => !(await api("/api/bots?messages=0")).body.bots.find((candidate) => candidate.id === bot.id)?.busy);
+      }
+      const argv = JSON.parse(readFileSync(grokDump, "utf8")).argv;
+      assert.equal(argv[argv.indexOf("--permission-mode") + 1], mode === "auto" ? "auto" : "default");
+      assert.equal(argv[argv.indexOf("-m") + 1], model);
+      const methods = JSON.parse(readFileSync(grokRpc, "utf8"));
+      assert.ok(methods.includes(turn === 0 ? "session/new" : "session/load"));
+      console.log(JSON.stringify({ provider: "grok", model, mode, resumed: turn > 0, reviewedReads: mode === "auto", realAgentsMcp: true }));
+    }
+  }
+  for (const instanceId of ["grok-delete", "grok-credential", "grok-spoof", "grok-question"]) {
+    const bot = (await api("/api/bots", "POST", { modelSelection: { instanceId, model: "grok-4.6" } })).body.bot;
+    await coordinator.request(child, bot.id, "auto");
+    assert.equal((await api(`/api/bots/${bot.id}/messages`, "POST", { text: "Verify this action still needs a person" })).status, 202);
+    const card = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((candidate) => candidate.id === bot.id)));
+    if (instanceId === "grok-question") assert.deepEqual(card.options, ["Blue", "Green"]);
+    else assert.equal(card.held, "The provider requires your approval for this action.");
+    assert.equal((await api(`/api/bots/${bot.id}/respond`, "POST", { requestId: card.requestId, behavior: "deny" })).status, 200);
+    await until(async () => !(await api("/api/bots?messages=0")).body.bots.find((candidate) => candidate.id === bot.id)?.busy);
+    console.log(JSON.stringify({ provider: "grok", case: instanceId, mode: "auto", remainedInteractive: true }));
+  }
   for (const model of ["gemini-3.8-flash-high", "gemini-3.8-flash-low"]) {
     const agyBot = (await api("/api/bots", "POST", { modelSelection: { instanceId: "agy", model } })).body.bot;
     assert.equal((await api(`/api/bots/${agyBot.id}`, "PATCH", { approvalMode: "full", acknowledgeFullAccess: true })).status, 403);

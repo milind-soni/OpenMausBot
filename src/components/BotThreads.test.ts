@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { StoreProvider, type Bot, type Group } from "@/state/store";
 import { BotThreadList, GroupThreadList } from "./Sidebar";
 import { GroupTaskPicker, TaskPicker } from "./TaskPicker";
-import { workingFolderLabel } from "./ChatView";
+import { workingFolderLabel } from "./ComposerTray";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
@@ -46,20 +46,49 @@ describe("sidebar bot threads", () => {
   });
 
   it("groups folder threads under one bot while keeping loose threads and empty folders reachable", () => {
-    const projectBot = { ...bot, projects: [{ id: "research", name: "Research" }, { id: "empty", name: "Ideas" }],
+    const projectBot = { ...bot, projects: [{ id: "research", name: "Research", emoji: "🧪" }, { id: "empty", name: "Ideas" }],
       tasks: bot.tasks!.map((task) => ({ ...task, ...(task.threadId === "working" ? { projectId: "research" } : {}) })) };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: projectBot, selected: true })));
     expect(markup).toContain('data-sidebar-project="research"');
     expect(markup).toContain('aria-label="Research threads"');
-    expect(markup).toContain('aria-label="Research settings"');
+    expect(markup).toContain('aria-label="Actions for Research folder"');
+    expect(markup).toContain('aria-label="Change Research folder icon"');
+    expect(markup).toContain('data-sidebar-folder-row="research" draggable="true"');
+    // Native buttons do not inherit their parent's drag gesture in Chromium.
+    // Dragging from the label must start the same row-owned folder drag.
+    expect(markup).toContain('<button type="button" data-sidebar-folder-label="research" draggable="true"');
+    expect(markup).toContain("🧪");
+    expect(markup).toContain("lucide-folder");
     expect(markup).toContain('aria-label="New thread in Research"');
-    expect(markup).toContain('aria-label="Choose folder for new thread"');
+    expect(markup).not.toContain('aria-label="Choose folder for new thread"');
+    const folderToggle = markup.match(/<button[^>]*aria-label="Collapse Research threads"[^>]*>/)?.[0];
+    expect(folderToggle).toContain("focus-visible:ring-1");
+    expect(folderToggle).not.toContain("hover:bg-");
+    expect(markup.indexOf('aria-label="Collapse Research threads"')).toBeLessThan(markup.indexOf('data-sidebar-folder-label="research"'));
     expect(markup).toContain("Threads");
     expect(markup).toContain("No threads yet");
     expect(markup).not.toContain("disabled");
     expect(markup).not.toContain("test");
-    expect(markup).toContain("data-thread-selection-mark");
+    expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
     expect(markup).toContain('aria-label="Actions for Quick question"');
+  });
+
+  it("keeps internal routine execution out of ordinary folders while showing the results conversation", () => {
+    const routineBot: Bot = {
+      ...bot, projects: [{ id: "daily", name: "Daily work" }],
+      tasks: [
+        ...bot.tasks!,
+        { threadId: "routine-result", title: "Daily digest results", projectId: "daily", createdAt: 4, unread: true },
+        { threadId: "routine-execution", title: "Internal daily digest execution", projectId: "daily", createdAt: 5, routineRunId: "run-daily", unread: true, busy: true, activity: "waiting-on-you" },
+      ],
+    };
+    for (const query of ["", "daily"]) {
+      const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: routineBot, selected: true, query })));
+      expect(markup).toContain('data-sidebar-thread-row="routine-result"');
+      expect(markup).toContain("Daily digest results");
+      expect(markup).not.toContain("routine-execution");
+      expect(markup).not.toContain("Internal daily digest execution");
+    }
   });
 
   it("exposes group history through the same nested thread rows and All threads picker", () => {

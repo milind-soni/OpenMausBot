@@ -9,7 +9,7 @@ import { CodexDeviceAuthController, codexDevicePrompt } from "./codex-device-aut
 // Every subprocess uses this script and a disposable HOME. No real Codex
 // process, provider network call, or user's credentials are involved.
 const FAKE = `#!/usr/bin/env node
-import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const home = process.env.HOME;
 const mode = process.env.FAKE_AUTH_MODE || 'success';
@@ -45,6 +45,18 @@ if (args.join(' ') === 'login status') {
     }, 80);
     else if (mode === 'crash') setTimeout(() => { console.error('access_token=secret-token'); process.exit(1); }, 50);
     else { if (mode === 'ignore-term') process.on('SIGTERM', () => {}); setInterval(() => {}, 1000); }
+  }
+} else if (args.join(' ') === 'logout') {
+  if (mode === 'logout-fails') { console.error('error: could not remove credentials secret-token'); process.exit(1); }
+  if (mode === 'logout-hang' || mode === 'logout-ignore-term') {
+    if (mode === 'logout-ignore-term') process.on('SIGTERM', () => {});
+    writeFileSync(join(home, 'logout-pid'), String(process.pid));
+    setInterval(() => {}, 1000);
+  }
+  else {
+    const had = existsSync(join(home, 'authenticated'));
+    if (mode !== 'logout-lies') try { unlinkSync(join(home, 'authenticated')); } catch {}
+    console.error(had ? 'Successfully logged out' : 'Not logged in'); process.exit(0);
   }
 } else process.exit(4);
 `;
@@ -114,6 +126,109 @@ describe("Codex server-owned device authentication", () => {
     writeFileSync(join(home, ".omb-fake-codex-login-approved"), "approve fixture only\n");
     await expect.poll(async () => (await controller.get(start.flowId!)).phase).toBe("succeeded");
     expect(readFileSync(join(home, ".omb-fake-codex-authenticated"), "utf8")).toContain("not a credential");
+  });
+
+  describe("sign-out", () => {
+    const signedIn = () => writeFileSync(join(home, "authenticated"), "fake fixture only");
+
+    it("removes the stored sign-in, confirms it is gone, and frees the home for a new sign-in", async () => {
+      signedIn();
+      const controller = create("success");
+      await controller.signOut();
+      expect(existsSync(join(home, "authenticated"))).toBe(false);
+      expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["logout"], ["login", "status"]]);
+      expect(calls().every((call) => call.home === home && call.codexHome === join(home, ".codex"))).toBe(true);
+      const start = await controller.start();
+      expect(start).toMatchObject({ phase: "waiting", userCode: "0CSG-0IXIM" });
+    });
+
+    it("refuses to pull a sign-in away while a browser is completing it", async () => {
+      const controller = create("waiting");
+      await controller.start();
+      await expect(controller.signOut()).rejects.toThrow("sign-in in progress");
+      // A sibling instance on the same credential home is refused as well.
+      await expect(create("waiting").signOut()).rejects.toThrow("sign-in is running");
+      expect(calls().map((call) => call.args)).not.toContainEqual(["logout"]);
+      await controller.cancel();
+    });
+
+    it("reports a failed logout without repeating the CLI's output", async () => {
+      signedIn();
+      const failure = await create("logout-fails").signOut().catch((error: Error) => error.message);
+      expect(failure).toContain("could not remove the sign-in");
+      expect(failure).not.toContain("secret-token");
+      expect(existsSync(join(home, "authenticated"))).toBe(true);
+    });
+
+    it("fails closed when Codex still reports a login after logout", async () => {
+      signedIn();
+      await expect(create("logout-lies").signOut()).rejects.toThrow("still reports a sign-in");
+      expect(calls().map((call) => call.args)).toEqual([["login", "status"], ["logout"], ["login", "status"]]);
+    });
+
+    it("stops a hung logout and releases the credential home", async () => {
+      signedIn();
+      const controller = create("logout-hang", { startupTimeoutMs: 1000 });
+      await expect(controller.signOut()).rejects.toThrow("could not remove the sign-in");
+      // The lock is released: a later sign-out on the same home proceeds.
+      await expect(create("success").signOut()).resolves.toBeUndefined();
+    });
+
+    it.skipIf(process.platform === "win32")("forcibly stops a logout that ignores graceful termination", async () => {
+      signedIn();
+      const controller = create("logout-ignore-term", { startupTimeoutMs: 1500 });
+      let outcome = "pending";
+      const pending = controller.signOut().then(() => { outcome = "succeeded"; }, () => { outcome = "failed"; });
+      let pid: number | undefined;
+      try {
+        await expect.poll(() => existsSync(join(home, "logout-pid")), { timeout: 2500 }).toBe(true);
+        pid = Number(readFileSync(join(home, "logout-pid"), "utf8"));
+        await expect.poll(() => outcome, { timeout: 4000 }).toBe("failed");
+        expect(alive(pid)).toBe(false);
+        await expect(create("success").signOut()).resolves.toBeUndefined();
+      } finally {
+        if (pid !== undefined && alive(pid)) process.kill(-pid, "SIGKILL");
+        await pending;
+      }
+    });
+
+    it("disposal stops an in-progress logout before returning", async () => {
+      signedIn();
+      const controller = create("logout-hang", { startupTimeoutMs: 10_000 });
+      const pending = controller.signOut().catch(() => {});
+      let pid: number | undefined;
+      try {
+        await expect.poll(() => existsSync(join(home, "logout-pid")), { timeout: 2500 }).toBe(true);
+        pid = Number(readFileSync(join(home, "logout-pid"), "utf8"));
+        await controller.dispose();
+        expect(alive(pid)).toBe(false);
+        await expect(create("success").signOut()).resolves.toBeUndefined();
+      } finally {
+        if (pid !== undefined && alive(pid)) {
+          if (process.platform === "win32") process.kill(pid, "SIGKILL");
+          else process.kill(-pid, "SIGKILL");
+        }
+        await pending;
+      }
+    });
+
+    it("names a missing CLI and a removed provider plainly", async () => {
+      await expect(create("success", { cli: join(home, "missing-codex") }).signOut()).rejects.toThrow("not installed on this server");
+      const controller = create("success");
+      await controller.dispose();
+      await expect(controller.signOut()).rejects.toThrow("provider was removed");
+    });
+
+    it.each(["api", "unknown-status"])("preserves credentials when the current mode is %s", async (mode) => {
+      await expect(create(mode).signOut()).rejects.toThrow("did not confirm a ChatGPT sign-in");
+      expect(calls().map((call) => call.args)).toEqual([["login", "status"]]);
+      expect(calls().map((call) => call.args)).not.toContainEqual(["logout"]);
+    });
+
+    it("does not mutate credentials when already signed out", async () => {
+      await expect(create("success").signOut()).resolves.toBeUndefined();
+      expect(calls().map((call) => call.args)).toEqual([["login", "status"]]);
+    });
   });
 
   it("does not replace a working ChatGPT login", async () => {
@@ -203,9 +318,10 @@ describe("Codex server-owned device authentication", () => {
   });
 
   it("expires and reaps an unattended flow", async () => {
-    const controller = create("waiting", { lifetimeMs: 350 });
+    // Long enough for two fake-CLI spawns on a loaded machine, short enough to expire promptly.
+    const controller = create("waiting", { lifetimeMs: 1500 });
     const start = await controller.start();
-    await expect.poll(async () => (await controller.get(start.flowId!)).phase).toBe("expired");
+    await expect.poll(async () => (await controller.get(start.flowId!)).phase, { timeout: 5000 }).toBe("expired");
     await controller.cancel();
     expect(alive(Number(readFileSync(join(home, "pid"), "utf8")))).toBe(false);
   });

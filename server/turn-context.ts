@@ -50,6 +50,29 @@ const FRESH_PREAMBLE =
 const EXTERNAL_UPDATE_PREAMBLE =
   "[This conversation received an update outside your provider session. The complete current history follows so you can use that update in your next response:]";
 
+const RECOVERED_PREAMBLE =
+  "[Your previous session for this conversation could not be resumed, so this is a new session. The conversation so far:]";
+
+/** The turn a cursor-resuming driver falls back to when the provider refuses
+ * its session before reading the prompt (server/resume-recovery.ts): the
+ * active branch replayed inline, ending in the user's message. Undefined
+ * when there is nothing to replay — the bare text is then the whole turn. */
+export function buildRecoveryText(input: {
+  text: string;
+  transcript: Array<{ role: "user" | "assistant"; text: string }>;
+}): string | undefined {
+  if (input.transcript.length === 0) return undefined;
+  return [
+    RECOVERED_PREAMBLE,
+    "",
+    ...input.transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
+    "",
+    "[Now reply to the user's latest message:]",
+    "",
+    input.text,
+  ].join("\n");
+}
+
 export function buildTurnContext(input: TurnContextInput): {
   turnText: string;
   /** false when the native session must not be resumed */

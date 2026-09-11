@@ -781,6 +781,25 @@ describe("Store change stream", () => {
     ]);
   });
 
+  it("createTask records which bot opened a thread, and the record survives a reload", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const opener = store.createBot();
+    const own = store.createTask(bot.id, "By a person")!;
+    expect(own).not.toHaveProperty("openedBy");
+    const opened = store.createTask(bot.id, "By a bot", false, undefined, { botId: opener.id, name: opener.name, at: 7 })!;
+    expect(opened.openedBy).toEqual({ botId: opener.id, name: opener.name, at: 7 });
+    // a bot must never move what the person is looking at
+    expect(store.bot(bot.id)!.threadId).toBe(own.threadId);
+    // the handoff id arrives after the thread exists (it needs the thread id)
+    expect(store.setTaskOpenedBy(bot.id, opened.threadId, { botId: opener.id, name: opener.name, delegationId: "d-1", at: 7 })!.openedBy)
+      .toEqual({ botId: opener.id, name: opener.name, delegationId: "d-1", at: 7 });
+    expect(store.setTaskOpenedBy(bot.id, "no-such-thread", { botId: opener.id, name: opener.name, at: 7 })).toBeNull();
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, opened.threadId)?.openedBy).toEqual({ botId: opener.id, name: opener.name, delegationId: "d-1", at: 7 });
+    expect(reloaded.taskByThread(bot.id, own.threadId)).not.toHaveProperty("openedBy");
+  });
+
   it("every bot write emits a bot event carrying only the id (the wire shape is the caller's)", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -900,8 +919,14 @@ describe("Store redacts bot-authored secrets on write", () => {
     const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: `Your key is ${key}` });
     expect(reply.text).not.toContain(key);
     expect(reply.text).toContain("«redacted");
-    const chip = store.appendMessage(bot.threadId, { role: "bot", kind: "activity", tool: { name: `Bash: export TOKEN=${key}`, ok: true } });
+    const chip = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "activity",
+      tool: { name: `Bash: export TOKEN=${key}`, ok: true, summary: `export TOKEN=${key}` },
+    });
     expect(chip.tool?.name).not.toContain(key);
+    expect(chip.tool?.summary).not.toContain(key);
+    expect(chip.tool?.summary).toContain("«redacted");
     const card = store.appendMessage(bot.threadId, {
       role: "bot",
       kind: "options",

@@ -8,13 +8,12 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
-import { EngineGroupLabel } from "./EngineGroupLabel";
-import { ProviderMark } from "./ProviderIcons";
-import { splitEngineRail } from "@/lib/engine-rail";
+import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { EngineSetup, needsCli, needsSignIn } from "./EngineSetup";
+import { EngineSetup, EngineUpdateNotice } from "./EngineSetup";
 import { AddClaudeAccount, ClaudeAccountSettings } from "./ClaudeAccountSettings";
+import { CodexAccountSettings } from "./CodexAccountSettings";
 
 interface ProbeResult {
   ok: boolean;
@@ -251,82 +250,82 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
   };
 
   return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 text-[13px]">
-        <span className={cn("size-1.5 shrink-0 rounded-full", instance.cli ? "bg-accent" : "bg-raised-hover")} />
-        <ProviderMark driverKind={instance.driverKind} size={14} />
-        <span className="shrink-0 text-ink">{instance.displayName}</span>
-        {instance.cli ? (
-          <span className="truncate font-mono text-[11.5px] text-accent" title={instance.cli}>
-            {instance.cli}
-          </span>
-        ) : (
-          instance.cliDefault && (
-            <span className="truncate text-[11px] text-ink-secondary">{instance.cliDefault} · default</span>
-          )
-        )}
-        {instance.snapshot.version && (
-          <span className="shrink-0 text-[11px] text-ink-secondary" title={instance.snapshot.version}>
-            {instance.snapshot.version}
-          </span>
-        )}
-        <span className="flex-1" />
-        {instance.driverKind === "claudeAgent" && (
-          <button
-            onClick={updateClaude}
-            disabled={switching || updating}
-            className="flex shrink-0 items-center gap-1 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
-          >
-            {updating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-            {updating ? t("engines.updating") : t("engines.updateClaude")}
-          </button>
-        )}
-        {instance.cli && (
-          <button
-            onClick={reset}
-            disabled={switching || updating}
-            className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
-          >
-            {switching ? t("engines.resetting") : t("engines.reset")}
-          </button>
-        )}
-        <button
-          onClick={() => setOpen((v) => !v)}
-          disabled={updating}
-          aria-expanded={open}
-          className={cn(
-            "shrink-0 rounded-lg border border-hairline/40 px-3 py-1 text-[12px]",
-            open ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
-            "disabled:opacity-50",
-          )}
-        >
-          {t("engines.setCli")}
-        </button>
-      </div>
-      {updatedVersion && (
-        <div role="status" className="mt-1 text-[12px] text-success">{t("engines.claudeUpdated", { version: updatedVersion })}</div>
-      )}
-      {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
+    <EngineCard instance={instance}>
+      {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+      {instance.snapshot.update && <EngineUpdateNotice update={instance.snapshot.update} instance={instance} className="mt-3" />}
       {instance.claudeAccount && <ClaudeAccountSettings instance={instance} />}
-      {(instance.authentication?.method === "device-code" || instance.authentication?.method === "paste-code") && (
-        needsCli(instance) || needsSignIn(instance)
-          ? <EngineSetup instance={instance} className="mt-3" />
-          : instance.snapshot.authenticated && (
-            <p className="mt-2 flex items-center gap-1.5 text-[12px] text-success">
-              <Check size={13} />
-              {instance.authentication.method === "paste-code" ? t("engineSetup.claude.connectedAccount") : t("engineSetup.device.connectedAccount")}
-            </p>
+      {engineReady(instance) && instance.snapshot.authenticated === true && (
+        instance.authentication?.method === "device-code"
+          ? <CodexAccountSettings instance={instance} />
+          : instance.authentication?.method === "paste-code" && !instance.claudeAccount && (
+            <p className="flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{t("engineSetup.claude.connectedAccount")}</p>
           )
       )}
-      {open && (
-        <CustomPicker
-          instance={instance}
-          cliDefault={instance.cliDefault}
-          onClose={() => setOpen(false)}
-          onSaved={refreshInstances}
-        />
-      )}
-    </div>
+      <details className="mt-3 rounded-xl border border-hairline/40 px-3 py-2.5">
+        <summary className="cursor-pointer text-[12px] font-medium text-ink-secondary hover:text-ink">{t("engines.library.advanced")}</summary>
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("engines.footer")}</p>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[13px]">
+          {instance.cli ? (
+            <span className="w-full break-all font-mono text-[11.5px] text-ink-secondary" title={instance.cli}>
+              {instance.cli}
+            </span>
+          ) : (
+            instance.cliDefault && (
+              <span className="break-all font-mono text-[11px] text-ink-secondary">{instance.cliDefault}</span>
+            )
+          )}
+          {instance.snapshot.version && (
+            <span className="break-all text-[11px] text-ink-secondary" title={instance.snapshot.version}>
+              {instance.snapshot.version}
+            </span>
+          )}
+          <span className="flex-1" />
+          {instance.driverKind === "claudeAgent" && (
+            <button
+              onClick={updateClaude}
+              disabled={switching || updating}
+              className="flex shrink-0 items-center gap-1 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+            >
+              {updating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+              {updating ? t("engines.updating") : t("engines.updateClaude")}
+            </button>
+          )}
+          {instance.cli && (
+            <button
+              onClick={reset}
+              disabled={switching || updating}
+              className="shrink-0 text-[11.5px] text-ink-secondary hover:text-ink disabled:opacity-50"
+            >
+              {switching ? t("engines.resetting") : t("engines.reset")}
+            </button>
+          )}
+          <button
+            onClick={() => setOpen((v) => !v)}
+            disabled={updating}
+            aria-expanded={open}
+            className={cn(
+              "shrink-0 rounded-lg border border-hairline/40 px-3 py-1 text-[12px]",
+              open ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+              "disabled:opacity-50",
+            )}
+          >
+            {t("engines.setCli")}
+          </button>
+        </div>
+        {updatedVersion && (
+          <div role="status" className="mt-1 text-[12px] text-success">{t("engines.claudeUpdated", { version: updatedVersion })}</div>
+        )}
+        {error && <div role="alert" className="mt-1 text-[12px] text-danger">{error}</div>}
+        {open && (
+          <CustomPicker
+            instance={instance}
+            cliDefault={instance.cliDefault}
+            onClose={() => setOpen(false)}
+            onSaved={refreshInstances}
+          />
+        )}
+      </details>
+    </EngineCard>
   );
 }
 
@@ -338,29 +337,16 @@ export function EnginesSettings() {
   const rows = state.instances.filter((i) => i.cli !== undefined || i.cliDefault !== undefined || i.snapshot.state === "unavailable");
 
   return (
-    <div className="flex flex-col gap-5">
-      {rows.length === 0 && (
-        <div className="text-[13px] text-ink-secondary">{t("engines.none")}</div>
-      )}
-      {(() => {
-        const { subscription, custom } = splitEngineRail(rows);
-        return (
-          <>
-            {subscription.length > 0 && <EngineGroupLabel>{t("engines.cloud")}</EngineGroupLabel>}
-            {subscription.map((i) => (
-              <EngineRow key={i.instanceId} instance={i} />
-            ))}
-            <AddClaudeAccount />
-            {custom.length > 0 && <EngineGroupLabel className="pt-1">{t("engines.local")}</EngineGroupLabel>}
-            {custom.map((i) => (
-              <EngineRow key={i.instanceId} instance={i} />
-            ))}
-          </>
-        );
-      })()}
-      <div className="text-[12px] leading-relaxed text-ink-secondary">
-        {t("engines.footer")}
+    <div className="flex min-w-0 flex-col gap-6 pb-2">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 basis-60">
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("settings.engines.title")}</h1>
+          <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-secondary">{t("engines.library.intro")}</p>
+        </div>
+        <RefreshEngines />
       </div>
+      <EngineSections instances={rows} renderEngine={(instance) => <EngineRow instance={instance} />} />
+      <div className="border-t border-hairline/40 pt-4"><AddClaudeAccount /></div>
     </div>
   );
 }

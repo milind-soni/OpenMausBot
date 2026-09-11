@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   CirclePower,
+  ClipboardPaste,
   FlaskConical,
   Loader2,
   Pencil,
@@ -14,6 +15,7 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { updateMcpServers } from "@/lib/mcp-servers";
 import { api } from "@/state/store";
 
 export interface McpServerListing {
@@ -96,7 +98,35 @@ export function McpServersPanel() {
   const [error, setError] = useState<string | McpMessage | null>(null);
   const [notice, setNotice] = useState<(McpMessage & { stateKey?: LocaleKey }) | null>(null);
   const [probe, setProbe] = useState<Record<string, ProbeResult>>({});
+  const [importOpen, setImportOpen] = useState(false);
+  const [importText, setImportText] = useState("");
   const loadGeneration = useRef(0);
+
+  // Paste-to-add: the same block Claude Code, Cursor and Claude Desktop
+  // write. The server applies the form's rules and adds them switched off.
+  const importServers = async () => {
+    if (!importText.trim()) return;
+    const generation = ++loadGeneration.current;
+    setBusy("import");
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await api("/api/mcp/servers/import", {
+        method: "POST",
+        body: JSON.stringify({ json: importText }),
+      });
+      updateMcpServers(result.servers ?? []);
+      if (generation !== loadGeneration.current) return;
+      setServers(result.servers ?? []);
+      setNotice({ key: "mcp.imported", params: { names: (result.added ?? []).join(", ") } });
+      setImportText("");
+      setImportOpen(false);
+    } catch (cause) {
+      if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      if (generation === loadGeneration.current) setBusy(null);
+    }
+  };
 
   const load = useCallback(() => {
     const generation = ++loadGeneration.current;
@@ -104,7 +134,10 @@ export function McpServersPanel() {
     setError(null);
     return api("/api/mcp/servers")
       .then((result) => {
-        if (generation === loadGeneration.current) setServers(result.servers ?? []);
+        if (generation === loadGeneration.current) {
+          setServers(result.servers ?? []);
+          updateMcpServers(result.servers ?? []);
+        }
       })
       .catch((cause) => {
         if (generation === loadGeneration.current) setError(cause instanceof Error ? cause.message : String(cause));
@@ -116,6 +149,7 @@ export function McpServersPanel() {
 
   useEffect(() => {
     void load();
+    return () => { loadGeneration.current += 1; };
   }, [load]);
 
   const closeEditor = () => {
@@ -155,6 +189,7 @@ export function McpServersPanel() {
         },
       );
       setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
       setNotice({ key: editing === "new" ? "mcp.saved" : "mcp.updated", params: { name } });
       closeEditor();
     } catch (cause) {
@@ -174,6 +209,7 @@ export function McpServersPanel() {
         body: JSON.stringify({ enabled: !server.enabled }),
       });
       setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
       setNotice({
         key: "mcp.toggled",
         params: { name: server.name },
@@ -216,6 +252,7 @@ export function McpServersPanel() {
     try {
       const result = await api(`/api/mcp/servers/${server.name}`, { method: "DELETE" });
       setServers(result.servers ?? []);
+      updateMcpServers(result.servers ?? []);
       setProbe((current) => {
         const next = { ...current };
         delete next[server.name];
@@ -253,6 +290,18 @@ export function McpServersPanel() {
               type="button"
               disabled={busy !== null}
               onClick={() => {
+                setImportOpen((open) => !open);
+                setError(null);
+                setNotice(null);
+              }}
+              className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[12.5px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40"
+            >
+              <ClipboardPaste size={14} /> {t("mcp.import")}
+            </button>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => {
                 setEditing("new");
                 setDraft(EMPTY_DRAFT);
                 setError(null);
@@ -264,6 +313,44 @@ export function McpServersPanel() {
             </button>
           </div>
         </div>
+
+        {importOpen && (
+          <div className="mt-4 rounded-2xl border border-hairline/60 bg-card p-4 sm:p-5">
+            <div className="text-[14px] font-medium text-ink">{t("mcp.import")}</div>
+            <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{t("mcp.importHint")}</p>
+            <textarea
+              autoFocus
+              aria-label={t("mcp.import")}
+              value={importText}
+              onChange={(event) => setImportText(event.target.value)}
+              spellCheck={false}
+              rows={8}
+              placeholder={'{\n  "mcpServers": {\n    "notes": { "command": "npx", "args": ["-y", "@example/notes-mcp"], "env": { "NOTES_TOKEN": "…" } }\n  }\n}'}
+              className="mt-3 w-full resize-y rounded-lg border border-hairline/60 bg-raised px-3 py-2.5 font-mono text-[12px] leading-relaxed text-ink outline-none focus:border-accent"
+            />
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={busy === "import"}
+                onClick={() => {
+                  setImportOpen(false);
+                  setImportText("");
+                }}
+                className="rounded-lg px-3 py-2 text-[12.5px] text-ink-secondary hover:text-ink"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={busy !== null || !importText.trim()}
+                onClick={() => void importServers()}
+                className="rounded-lg bg-accent px-3 py-2 text-[12.5px] font-medium text-accent-ink disabled:opacity-40"
+              >
+                {t("mcp.importAction")}
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="mt-4 rounded-xl border border-hairline/50 bg-raised/35 px-4 py-3 text-[12px] leading-relaxed text-ink-secondary">
           {t("mcp.trustNotice")}

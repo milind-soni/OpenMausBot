@@ -9,6 +9,8 @@
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized | late-request
 //   FAKE_CODEX_DUMP   path to write {pid, argv, env, calls, decision} as JSON
+//   FAKE_CODEX_ACCOUNT_EMAIL  synthetic ChatGPT identity (default ada@example.test)
+//   FAKE_CODEX_ACCOUNT_MODE   chatgpt (default) | api-key | none | unsupported | error | hang
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { readFileSync, writeFileSync } from "node:fs";
@@ -35,7 +37,17 @@ let decision: unknown = null;
 let experimentalApi = false;
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
-const notify = (method: string, params: unknown) => out({ jsonrpc: "2.0", method, params });
+let nativeThreadId = "codex-thread-1";
+const nativeTurnId = "turn-1";
+const notify = (method: string, params: any) => out({
+  jsonrpc: "2.0", method,
+  params: {
+    threadId: nativeThreadId,
+    ...(method.startsWith("turn/") ? {} : { turnId: nativeTurnId }),
+    ...params,
+    ...(params.turn ? { turn: { id: nativeTurnId, ...params.turn } } : {}),
+  },
+});
 
 const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
@@ -106,6 +118,23 @@ process.stdin.on("data", (chunk) => {
         experimentalApi = msg.params?.capabilities?.experimentalApi === true;
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
+      case "account/read": {
+        dump();
+        const accountMode = process.env.FAKE_CODEX_ACCOUNT_MODE;
+        if (accountMode === "hang") break;
+        if (accountMode === "unsupported" || accountMode === "error") {
+          out({ jsonrpc: "2.0", id: msg.id, error: {
+            code: accountMode === "unsupported" ? -32601 : -32000,
+            message: "Offline fixture account read unavailable",
+          } });
+          break;
+        }
+        const account = accountMode === "none" || mode === "logged-out" ? null
+          : accountMode === "api-key" ? { type: "apiKey" }
+          : { type: "chatgpt", email: process.env.FAKE_CODEX_ACCOUNT_EMAIL ?? "ada@example.test", planType: "pro" };
+        out({ jsonrpc: "2.0", id: msg.id, result: { account, requiresOpenaiAuth: true } });
+        break;
+      }
       case "model/list":
         if (msg.params?.cursor === "page-2") {
           out({
@@ -175,7 +204,7 @@ process.stdin.on("data", (chunk) => {
       case "thread/resume":
         if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported") {
+        } else if (mode === "resume" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported") {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -1, message: "no such thread" } });
@@ -197,6 +226,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "turn/start": {
+        nativeThreadId = msg.params?.threadId ?? nativeThreadId;
         if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
           break;
@@ -226,7 +256,7 @@ process.stdin.on("data", (chunk) => {
           writeFileSync(process.env.FAKE_CODEX_STATE, String(launched + 1));
           if (launched < quota) {
             if (process.env.FAKE_CODEX_PARTIAL_FAILS) {
-              out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+              out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
               notify("item/agentMessage/delta", { itemId: "m1", delta: "half an answer" });
               notify("turn/completed", { turn: { status: "failed", error: { message: "provider overloaded, try again" } } });
               break;
@@ -239,7 +269,31 @@ process.stdin.on("data", (chunk) => {
             break;
           }
         }
-        out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
+        if (mode === "early-turn-events") finishTurn();
+        out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+        if (mode === "early-turn-events") break;
+        if (mode === "helper-events") {
+          // Interleave child and stale-parent traffic with the active parent.
+          // A child completion must not kill the process or answer for the parent.
+          for (const scope of [
+            { threadId: "helper-thread", turnId: "helper-turn" },
+            { threadId: nativeThreadId, turnId: "previous-turn" },
+            { threadId: null, turnId: null },
+          ]) {
+            notify("item/agentMessage/delta", { ...scope, delta: "FOREIGN answer" });
+            notify("item/reasoning/textDelta", { ...scope, delta: "FOREIGN reasoning" });
+            notify("item/started", { ...scope, item: { id: "foreign-tool", type: "commandExecution", command: "FOREIGN command" } });
+            notify("item/completed", { ...scope, item: { type: "agentMessage", text: "FOREIGN final" } });
+            notify("thread/tokenUsage/updated", { ...scope, tokenUsage: { total: { inputTokens: 999, outputTokens: 999 } } });
+            notify("error", { ...scope, message: "FOREIGN error" });
+            notify("turn/completed", { ...scope, turn: { id: scope.turnId, status: "completed" } });
+            notify("turn/completed", { ...scope, turn: { id: scope.turnId, status: "failed" } });
+          }
+          // This request proves that the parent is still able to do work after
+          // the child finished. Wait for the real adapter approval response.
+          out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: "echo parent continues" } });
+          break;
+        }
         const command = mode === "windows-command"
           ? [
               "\"C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",

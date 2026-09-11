@@ -53,7 +53,7 @@ const out = lines.map((line) => {
   if (/^sha512:\s+/.test(line)) {
     return `sha512: ${sha512(join(releaseDir, firstUrl))}`;
   }
-  if (/^releaseDate:/.test(line)) {
+  if (line.startsWith("releaseDate:")) {
     return `releaseDate: '${new Date().toISOString()}'`;
   }
   return line;

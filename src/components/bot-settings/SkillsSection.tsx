@@ -6,10 +6,11 @@
 // used" line on every row (learned skills have no triggers to show), and a
 // read-only click-through view of a skill's full text.
 import { BookOpen, Trash2 } from "lucide-react";
+import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type Bot } from "@/state/store";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
 
@@ -29,7 +30,7 @@ interface StagedSkillSummary {
 
 export function SkillsSection({ bot }: { bot: Bot }) {
   const { state } = useStore();
-  const featureEnabled = skillRecorderEnabled(state.config);
+  const featureEnabled = skillAuthoringEnabled(state.config);
   const [skills, setSkills] = useState<ManagedSkill[]>([]);
   const [staged, setStaged] = useState<StagedSkillSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -204,9 +205,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           <div className="text-[15px] font-medium text-ink">Learned skills</div>
         </div>
         <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
-          {featureEnabled
-            ? "Use /learn to create a skill, or /learn update <name> to revise one. Every change waits for your review."
-            : "Skill authoring is off, but skills you already enabled stay under your control here."}
+          {featureEnabled ? t("skills.learned.hintOn") : t("skills.learned.hintOff")}
         </div>
 
         <form

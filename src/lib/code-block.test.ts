@@ -1,9 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   countLines,
+  downloadSnippetFile,
   formatLineCount,
+  getCodeFileExtension,
   getLanguageDisplayName,
+  getSnippetFileName,
 } from "./code-block";
 
 describe("getLanguageDisplayName", () => {
@@ -87,5 +90,101 @@ describe("formatLineCount", () => {
     expect(formatLineCount(0)).toBe("0 lines");
     expect(formatLineCount(2)).toBe("2 lines");
     expect(formatLineCount(42)).toBe("42 lines");
+  });
+});
+
+describe("getCodeFileExtension", () => {
+  it("maps common language identifiers to their standard file extensions", () => {
+    expect(getCodeFileExtension("ts")).toBe("ts");
+    expect(getCodeFileExtension("typescript")).toBe("ts");
+    expect(getCodeFileExtension("tsx")).toBe("tsx");
+    expect(getCodeFileExtension("js")).toBe("js");
+    expect(getCodeFileExtension("jsx")).toBe("jsx");
+    expect(getCodeFileExtension("py")).toBe("py");
+    expect(getCodeFileExtension("python")).toBe("py");
+    expect(getCodeFileExtension("sh")).toBe("sh");
+    expect(getCodeFileExtension("bash")).toBe("sh");
+    expect(getCodeFileExtension("zsh")).toBe("zsh");
+    expect(getCodeFileExtension("json")).toBe("json");
+    expect(getCodeFileExtension("sql")).toBe("sql");
+    expect(getCodeFileExtension("rs")).toBe("rs");
+    expect(getCodeFileExtension("rust")).toBe("rs");
+    expect(getCodeFileExtension("go")).toBe("go");
+    expect(getCodeFileExtension("html")).toBe("html");
+    expect(getCodeFileExtension("css")).toBe("css");
+    expect(getCodeFileExtension("md")).toBe("md");
+    expect(getCodeFileExtension("markdown")).toBe("md");
+    expect(getCodeFileExtension("yaml")).toBe("yaml");
+    expect(getCodeFileExtension("yml")).toBe("yaml");
+    expect(getCodeFileExtension("dockerfile")).toBe("dockerfile");
+  });
+
+  it("normalizes case and surrounding whitespace", () => {
+    expect(getCodeFileExtension("  PYTHON  ")).toBe("py");
+    expect(getCodeFileExtension("TS")).toBe("ts");
+    expect(getCodeFileExtension(" JSON ")).toBe("json");
+  });
+
+  it("falls back to 'txt' for omitted, empty, or unknown long identifiers", () => {
+    expect(getCodeFileExtension("")).toBe("txt");
+    expect(getCodeFileExtension("   ")).toBe("txt");
+    expect(getCodeFileExtension(null)).toBe("txt");
+    expect(getCodeFileExtension(undefined)).toBe("txt");
+    expect(getCodeFileExtension("averylongunknownlanguageidentifier")).toBe("txt");
+    expect(getCodeFileExtension("../../file")).toBe("txt");
+  });
+
+  it("uses valid short alphanumeric identifiers directly as extension", () => {
+    expect(getCodeFileExtension("zig")).toBe("zig");
+    expect(getCodeFileExtension("lua")).toBe("lua");
+    expect(getCodeFileExtension("r")).toBe("r");
+  });
+});
+
+describe("downloadSnippetFile", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it.each([false, true])("cleans up a text download even when clicking fails (%s)", async (fails) => {
+    vi.useFakeTimers();
+    const click = vi.fn(() => { if (fails) throw new Error("Download blocked"); });
+    const link = { href: "", download: "", click, remove: vi.fn() };
+    const appendChild = vi.fn();
+    vi.stubGlobal("document", { createElement: vi.fn(() => link), body: { appendChild } });
+    const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:snippet");
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const code = 'print("hello ✓")\n';
+    if (fails) expect(() => downloadSnippetFile("snippet.py", code)).toThrow("Download blocked");
+    else downloadSnippetFile("snippet.py", code);
+    expect(link.download).toBe("snippet.py");
+    expect(link.href).toBe("blob:snippet");
+    expect(appendChild).toHaveBeenCalledWith(link);
+    expect(click).toHaveBeenCalledOnce();
+    expect(link.remove).toHaveBeenCalledOnce();
+    const blob = create.mock.calls[0][0] as Blob;
+    expect(await blob.text()).toBe(code);
+    expect(blob.type).toBe("text/plain;charset=utf-8");
+    expect(revoke).not.toHaveBeenCalled();
+    vi.runAllTimers();
+    expect(revoke).toHaveBeenCalledWith("blob:snippet");
+  });
+});
+
+describe("getSnippetFileName", () => {
+  it("generates correct default filenames based on language", () => {
+    expect(getSnippetFileName("python")).toBe("snippet.py");
+    expect(getSnippetFileName("ts")).toBe("snippet.ts");
+    expect(getSnippetFileName("json")).toBe("snippet.json");
+    expect(getSnippetFileName("sql")).toBe("snippet.sql");
+    expect(getSnippetFileName("")).toBe("snippet.txt");
+    expect(getSnippetFileName(null)).toBe("snippet.txt");
+  });
+
+  it("preserves standalone filenames like dockerfile and makefile", () => {
+    expect(getSnippetFileName("dockerfile")).toBe("dockerfile");
+    expect(getSnippetFileName("makefile")).toBe("makefile");
   });
 });

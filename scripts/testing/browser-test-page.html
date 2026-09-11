@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>OpenMausBot browser test</title>
+<style>
+  body { font: 18px system-ui; background: #faf9f6; color: #282923; padding: 50px; }
+  h1 { font-size: 42px; letter-spacing: -2px; }
+  input, textarea, button { font: inherit; padding: 12px; border: 1px solid #ccc; border-radius: 10px; margin: 5px; }
+  button { background: #242721; color: white; }
+  p { color: #666; }
+  textarea { display: block; width: 360px; }
+  dialog { border: 1px solid #ccc; border-radius: 12px; }
+</style>
+<h1>A browser for your bots.</h1>
+<p>Isolated live-view test. No real accounts or credentials.</p>
+<form id="greeting">
+  <input id="name" aria-label="Test name" placeholder="Your name" autocomplete="off">
+  <button>Say hello</button>
+</form>
+<p><output id="result" aria-live="polite">Ready</output></p>
+<textarea aria-label="Test notes" placeholder="Test Enter, arrows, Backspace and Delete here" rows="2"></textarea>
+<button id="open-dialog" type="button">Open dialog</button>
+<p><output id="dialog-result">Dialog not opened</output></p>
+<dialog id="test-dialog">
+  <p>Press Escape to close this remote page dialog.</p>
+  <form method="dialog"><button>Close dialog</button></form>
+</dialog>
+<script>
+  document.querySelector('#greeting').addEventListener('submit', (event) => {
+    event.preventDefault();
+    document.querySelector('#result').textContent = 'Hello, ' + document.querySelector('#name').value;
+  });
+  const dialog = document.querySelector('#test-dialog');
+  document.querySelector('#open-dialog').addEventListener('click', () => {
+    document.querySelector('#dialog-result').textContent = 'Dialog open';
+    dialog.showModal();
+  });
+  dialog.addEventListener('close', () => { document.querySelector('#dialog-result').textContent = 'Dialog closed'; });
+</script>
+</html>

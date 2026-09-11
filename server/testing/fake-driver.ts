@@ -51,7 +51,7 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
         if (opts.failCreate) throw new Error(opts.failCreate);
         const listeners = new Set<RuntimeEventListener>();
         const emit = (event: RuntimeEvent) => {
-          for (const l of [...listeners]) l(event);
+          for (const l of Array.from(listeners)) l(event);
         };
         const instance: ProviderInstance = {
           instanceId: input.instanceId,

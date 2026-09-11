@@ -35,6 +35,7 @@ export type BotPatch = Partial<
     | "approvePeerComms"
     | "composio"
     | "browser"
+    | "mcpServers"
     | "modelSelection"
   >
 > & { computer?: Bot["computer"] | null; acknowledgeLocalAuto?: boolean; confirmFullAccess?: boolean };

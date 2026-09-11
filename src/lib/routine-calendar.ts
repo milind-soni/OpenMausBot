@@ -66,6 +66,33 @@ export function fromLocalDateAndTime(date: string, time: string, originalAt?: nu
   return new Date(`${date}T${time}`).getTime();
 }
 
+/** Start a new interval at least one full cadence from now, on a clean minute boundary. */
+export function nextIntervalAnchor(now: number, everyMinutes: number): number {
+  return Math.ceil((now + everyMinutes * 60_000) / 60_000) * 60_000;
+}
+
+export function intervalAnchorForSave(
+  now: number,
+  everyMinutes: number,
+  current?: { everyMinutes: number; anchorAt: number },
+): number {
+  return current?.everyMinutes === everyMinutes
+    ? current.anchorAt
+    : nextIntervalAnchor(now, everyMinutes);
+}
+
+/** The next cadence point, retaining the original phase when editing. */
+export function nextIntervalForSave(
+  now: number,
+  everyMinutes: number,
+  current?: { everyMinutes: number; anchorAt: number },
+): number {
+  const anchor = intervalAnchorForSave(now, everyMinutes, current);
+  if (anchor > now) return anchor;
+  const intervalMs = everyMinutes * 60_000;
+  return anchor + (Math.floor((now - anchor) / intervalMs) + 1) * intervalMs;
+}
+
 export function snapMinutes(minutes: number, increment = CALENDAR_SLOT_MINUTES): number {
   return Math.max(0, Math.min(24 * 60 - increment, Math.round(minutes / increment) * increment));
 }
@@ -137,8 +164,7 @@ export function scheduleAt(schedule: RoutineSchedule, occurrenceAt: number, next
   if (schedule.type === "once") return { type: "once", at: nextAt };
   if (schedule.type === "interval") {
     return {
-      type: "interval",
-      everyMinutes: schedule.everyMinutes,
+      ...schedule,
       anchorAt: schedule.anchorAt + (nextAt - occurrenceAt),
     };
   }

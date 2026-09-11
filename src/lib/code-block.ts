@@ -148,3 +148,161 @@ export function countLines(code?: string | null): number {
 export function formatLineCount(count: number): string {
   return count === 1 ? "1 line" : `${count} lines`;
 }
+
+/** Known file extension mappings for language identifiers. */
+const KNOWN_EXTENSIONS: Record<string, string> = {
+  // JavaScript & TypeScript
+  js: "js",
+  javascript: "js",
+  jsx: "jsx",
+  ts: "ts",
+  typescript: "ts",
+  tsx: "tsx",
+  node: "js",
+
+  // Web & Styling
+  html: "html",
+  htm: "html",
+  css: "css",
+  scss: "scss",
+  sass: "sass",
+  less: "less",
+  json: "json",
+  jsonc: "json",
+  json5: "json5",
+  xml: "xml",
+  svg: "svg",
+  md: "md",
+  markdown: "md",
+  mdx: "mdx",
+  yaml: "yaml",
+  yml: "yaml",
+  toml: "toml",
+
+  // Shell & Scripts
+  sh: "sh",
+  bash: "sh",
+  zsh: "zsh",
+  shell: "sh",
+  ps1: "ps1",
+  powershell: "ps1",
+  fish: "fish",
+
+  // Systems & General Purpose
+  c: "c",
+  cpp: "cpp",
+  "c++": "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  cs: "cs",
+  csharp: "cs",
+  "c#": "cs",
+  rs: "rs",
+  rust: "rs",
+  go: "go",
+  golang: "go",
+  py: "py",
+  python: "py",
+  rb: "rb",
+  ruby: "rb",
+  php: "php",
+  java: "java",
+  kt: "kt",
+  kotlin: "kt",
+  swift: "swift",
+  dart: "dart",
+  r: "r",
+  lua: "lua",
+
+  // Query & Data
+  sql: "sql",
+  graphql: "graphql",
+  gql: "graphql",
+  proto: "proto",
+  protobuf: "proto",
+
+  // Dev & Infra
+  docker: "dockerfile",
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+  make: "makefile",
+  diff: "diff",
+  wasm: "wasm",
+};
+
+/**
+ * Resolves the appropriate file extension for a code block language identifier.
+ *
+ * @param lang - Raw language identifier from markdown fence (e.g. "ts", "python", "sh").
+ * @returns File extension without leading dot (e.g. "ts", "py", "sh"), defaulting to "txt" if unknown or omitted.
+ *
+ * @example
+ * ```ts
+ * getCodeFileExtension("python"); // "py"
+ * getCodeFileExtension("ts");     // "ts"
+ * getCodeFileExtension("");       // "txt"
+ * ```
+ */
+export function getCodeFileExtension(lang?: string | null): string {
+  if (!lang || !lang.trim()) {
+    return "txt";
+  }
+
+  const normalized = lang.trim().toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(KNOWN_EXTENSIONS, normalized)) {
+    return KNOWN_EXTENSIONS[normalized] ?? "txt";
+  }
+
+  // If identifier is simple alphanumeric and short (<= 8 chars), use it directly
+  if (/^[a-z0-9_-]{1,8}$/.test(normalized)) {
+    return normalized;
+  }
+
+  return "txt";
+}
+
+/**
+ * Returns a clean default filename for saving a code snippet based on its language.
+ *
+ * @param lang - Raw language identifier from markdown fence.
+ * @returns Default filename such as "snippet.py" or "snippet.ts".
+ *
+ * @example
+ * ```ts
+ * getSnippetFileName("python"); // "snippet.py"
+ * getSnippetFileName("ts");     // "snippet.ts"
+ * getSnippetFileName(null);     // "snippet.txt"
+ * ```
+ */
+export function getSnippetFileName(lang?: string | null): string {
+  const ext = getCodeFileExtension(lang);
+  return ext === "dockerfile" || ext === "makefile" ? ext : `snippet.${ext}`;
+}
+
+/**
+ * Triggers a client-side file download for source code content.
+ * Safely handles browser environment checks and cleans up created Object URLs.
+ *
+ * @param filename - Name of the file to save (e.g. "snippet.py").
+ * @param code - Content of the code snippet.
+ */
+export function downloadSnippetFile(filename: string, code: string): void {
+  if (typeof document === "undefined" || typeof URL === "undefined") {
+    return;
+  }
+
+  const blob = new Blob([code], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  try {
+    document.body.appendChild(link);
+    link.click();
+  } finally {
+    link.remove();
+    // Chromium may consume the Blob after the click task. The browser owns
+    // save/cancel feedback; a click is not evidence that the file was saved.
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}

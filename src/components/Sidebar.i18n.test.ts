@@ -37,8 +37,6 @@ function renderRow(value: Bot): string {
         bot: value,
         density: "comfortable",
         onMenu: () => {},
-        onArchive: () => {},
-        archiveDisabled: false,
       }),
     ),
   );
@@ -66,7 +64,7 @@ describe("sidebar rows", () => {
     expect(markup).not.toContain("Chief of Staff");
 
     setLocale("ja");
-    expect(renderRow(bot())).toContain('aria-label="Atlas をアーカイブ"');
+    expect(renderRow(bot())).toContain(`aria-label="${t("sidebar.bot.actions", { name: "Atlas" })}"`);
   });
 });
 

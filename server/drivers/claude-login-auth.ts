@@ -97,6 +97,7 @@ const NOT_AVAILABLE = "This sign-in is no longer available. Start sign-in again.
 
 export class ClaudeLoginController {
   private flow: Flow | null = null;
+  private logoutChild: ChildProcess | null = null;
   private disposed = false;
   private readonly options: ClaudeLoginOptions;
 
@@ -193,6 +194,9 @@ export class ClaudeLoginController {
     if (this.flow?.status.phase === "waiting") this.finish(this.flow, "cancelled", "Claude sign-in cancelled.");
     await this.flow?.stopping;
     if (this.flow?.terminationFailed) throw new Error(this.flow.status.message);
+    if (this.logoutChild && !await this.stopChild(this.logoutChild)) {
+      throw new Error("Claude Code could not be stopped on this server. Ask the server administrator to stop the account command before trying again.");
+    }
   }
 
   async dispose(): Promise<void> {
@@ -201,13 +205,93 @@ export class ClaudeLoginController {
     this.flow = null;
   }
 
+  /** Remove the sign-in Claude Code stores for this server account (its
+   * configuration directory) so a different subscription can sign in. A
+   * sign-in in progress is never pulled away underneath the browser
+   * completing it, and the CLI's own status is the verdict, as for sign-in. */
+  async signOut(): Promise<void> {
+    if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing out.");
+    if (this.flow?.status.phase === "waiting") throw new Error("Finish or cancel the Claude sign-in in progress before signing out.");
+    await this.flow?.stopping;
+    if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing out.");
+    const env = this.options.environment();
+    const home = env.HOME || env.USERPROFILE || homedir();
+    if (!isAbsolute(home) || (env.CLAUDE_CONFIG_DIR && !isAbsolute(env.CLAUDE_CONFIG_DIR))) {
+      throw new Error("Use an absolute HOME and CLAUDE_CONFIG_DIR path for this server's Claude provider before signing out.");
+    }
+    const homeKey = canonicalPath(resolve(env.CLAUDE_CONFIG_DIR || join(home, ".claude")));
+    if (authenticatingHomes.has(homeKey)) {
+      throw new Error("A Claude sign-in is running for this server account. Finish or cancel it before signing out.");
+    }
+    authenticatingHomes.add(homeKey);
+    try {
+      await this.logout(env);
+      if (this.disposed) throw new Error("This provider was removed. Refresh Settings before signing out.");
+      const status = await this.authStatus(env);
+      if (status === "in") throw new Error("Claude Code still reports a sign-in on this server. Update Claude Code and check its auth status before trying again.");
+      if (status === "unknown") throw new Error("Claude Code could not confirm the sign-out on this server. Update Claude Code and check its auth status before trying again.");
+    } finally {
+      // A command the OS could not stop may still change credentials. Keep
+      // this home reserved until that exact child actually exits.
+      const child = this.logoutChild;
+      if (child && child.exitCode === null && child.signalCode === null) {
+        child.once("close", () => authenticatingHomes.delete(homeKey));
+      } else authenticatingHomes.delete(homeKey);
+    }
+  }
+
+  /** `claude auth logout`, bounded and non-interactive. Its output stays
+   * here; the status command afterwards decides whether it worked. */
+  private logout(env: NodeJS.ProcessEnv): Promise<void> {
+    return new Promise((resolveDone, rejectDone) => {
+      if (this.disposed) {
+        rejectDone(new Error("This provider was removed. Refresh Settings before signing out."));
+        return;
+      }
+      let child: ReturnType<typeof spawnCli>;
+      try {
+        child = spawnCli(this.options.cli, ["auth", "logout"], { env: { ...env, NO_COLOR: "1" }, stdio: ["pipe", "pipe", "pipe"] });
+      } catch {
+        rejectDone(new Error("Claude Code could not start on this server. Install or update the configured Claude CLI, then try again."));
+        return;
+      }
+      this.logoutChild = child;
+      child.stdin.end();
+      child.stdout.on("data", () => {});
+      child.stderr.on("data", () => {});
+      // A hung CLI must not hold the credential-home lock forever.
+      const timer = setTimeout(() => {
+        void this.stopChild(child).catch(() => false).then((stopped) => {
+          if (!stopped) rejectDone(new Error("Claude Code could not be stopped on this server. Ask the server administrator to stop the account command before trying again."));
+        });
+      }, this.options.startupTimeoutMs ?? 30_000);
+      timer.unref();
+      child.once("error", (error: NodeJS.ErrnoException) => {
+        clearTimeout(timer);
+        rejectDone(new Error(error.code === "ENOENT"
+          ? "Claude Code is not installed on this server. Install it on the server, then try again."
+          : "Claude Code could not start on this server. Check the configured CLI path and its executable permissions."));
+      });
+      child.once("close", () => {
+        clearTimeout(timer);
+        if (this.logoutChild === child) this.logoutChild = null;
+        resolveDone();
+      });
+    });
+  }
+
   private signedIn(env: NodeJS.ProcessEnv): Promise<boolean> {
+    return this.authStatus(env).then((status) => status === "in");
+  }
+
+  /** `claude auth status --json`: signed in, signed out, or not answered. */
+  private authStatus(env: NodeJS.ProcessEnv): Promise<"in" | "out" | "unknown"> {
     return new Promise((resolveStatus) => {
       let child: ReturnType<typeof spawnCli>;
       try {
         child = spawnCli(this.options.cli, ["auth", "status", "--json"], { env: { ...env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
       } catch {
-        resolveStatus(false);
+        resolveStatus("unknown");
         return;
       }
       let stdout = "";
@@ -217,20 +301,21 @@ export class ClaudeLoginController {
       child.stderr.on("data", () => {});
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
-        resolveStatus(false);
+        resolveStatus("unknown");
       }, 8_000);
       timer.unref();
       child.once("error", () => {
         clearTimeout(timer);
-        resolveStatus(false);
+        resolveStatus("unknown");
       });
-      child.once("close", () => {
+      child.once("close", (code) => {
         clearTimeout(timer);
         try {
           const status: unknown = JSON.parse(stdout);
-          resolveStatus(typeof status === "object" && status !== null && Reflect.get(status, "loggedIn") === true);
+          const loggedIn = typeof status === "object" && status !== null ? Reflect.get(status, "loggedIn") : undefined;
+          resolveStatus(code === 0 && loggedIn === true ? "in" : code === 1 && loggedIn === false ? "out" : "unknown");
         } catch {
-          resolveStatus(false);
+          resolveStatus("unknown");
         }
       });
     });
@@ -318,7 +403,7 @@ export class ClaudeLoginController {
       else flow.completion.reject(new Error(message ?? "Claude sign-in did not finish."));
       flow.completion = undefined;
     }
-    flow.stopping = this.stopChild(flow)
+    flow.stopping = this.stopChild(flow.child)
       .catch(() => false)
       .then((stopped) => {
         const release = () => authenticatingHomes.delete(flow.homeKey);
@@ -335,8 +420,7 @@ export class ClaudeLoginController {
     if (phase === "succeeded") void this.options.onAuthenticated?.().catch(() => {});
   }
 
-  private async stopChild(flow: Flow): Promise<boolean> {
-    const child = flow.child;
+  private async stopChild(child: ChildProcess | null): Promise<boolean> {
     if (!child || (await killCliTree(child, this.options.terminateTimeoutMs ?? 1500))) return true;
     if (process.platform !== "win32" && child.pid) {
       try {

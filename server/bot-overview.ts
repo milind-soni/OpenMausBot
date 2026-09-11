@@ -14,6 +14,20 @@ export interface BotOverview {
   reaches: string[];
   wont: string[];
   recent: Array<{ at: number; summary: string }>;
+  /** Optional setup ideas, each pointing at the relevant settings section.
+   * These are customization suggestions, not requirements for chatting. */
+  setup: SetupStep[];
+}
+
+export type SetupStepId = "identity" | "soul" | "folder" | "apps" | "schedule";
+export type SetupStepSection = "identity" | "soul" | "access" | "routines";
+
+export interface SetupStep {
+  id: SetupStepId;
+  label: string;
+  done: boolean;
+  /** Bot-settings section for this customization. */
+  section?: SetupStepSection;
 }
 
 export interface OverviewFacts {
@@ -251,5 +265,35 @@ export function buildBotOverview(facts: OverviewFacts): BotOverview {
     reaches: reachesLines(facts),
     wont: wontLines(facts),
     recent: facts.recent,
+    setup: setupSteps(facts),
   };
+}
+
+const DEFAULT_BOT_NAMES = /^(new bot|bot|untitled)(\s*\d+)?$/i;
+
+/** Optional customization ideas. Every step is derived from the same facts
+ * the sentences use, so "done" here can never disagree with "Can reach". */
+export function setupSteps(facts: OverviewFacts): SetupStep[] {
+  const named = facts.bot.name.trim() !== "" && !DEFAULT_BOT_NAMES.test(facts.bot.name.trim());
+  const described = facts.bot.title.trim() !== "" || facts.bot.description.trim() !== "";
+  const apps = facts.connectedApps;
+  const routines = facts.routines.some((routine) => routine.enabled);
+  const webhooks = facts.webhooks.some((webhook) => webhook.enabled);
+  const steps: SetupStep[] = [
+    { id: "identity", label: "Give it a name and a role", done: named && described, section: "identity" },
+    { id: "soul", label: "Write its standing instructions", done: (facts.bot.soul ?? "").trim() !== "", section: "soul" },
+    { id: "folder", label: "Choose a working folder", done: Boolean(facts.bot.cwd), section: "access" },
+  ];
+  // Apps only count as a step when this bot could use them at all; a
+  // bot on an engine without connected apps is not "missing" them.
+  if (couldUseApps(facts)) {
+    steps.push({
+      id: "apps",
+      label: "Connect the apps it needs",
+      done: apps.authoritative && apps.services.length > 0,
+      section: "access",
+    });
+  }
+  steps.push({ id: "schedule", label: "Add a schedule or a trigger", done: routines || webhooks, section: "routines" });
+  return steps;
 }

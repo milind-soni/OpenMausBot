@@ -88,7 +88,8 @@ describe("approval mode selector", () => {
   });
 
   it("explains Auto fallbacks and does not elevate unknown providers", () => {
-    expect(approvalModeOptionsFor("grokAgent").find((option) => option.mode === "auto")?.description).toContain("behaves like Ask");
+    expect(approvalModeOptionsFor("grokAgent").find((option) => option.mode === "auto")?.description).toContain("provider reviews routine actions");
+    expect(approvalModeOptionsFor("customAgent").find((option) => option.mode === "auto")?.description).toContain("behaves like Ask");
     expect(approvalModeOptionsFor("customAgent").map((option) => option.mode)).toEqual(["ask", "auto"]);
   });
 

@@ -39,6 +39,10 @@ export function gatedLocalComputer(
     args: ["--experimental-strip-types", SPAWNED_PROXIES.localComputer],
     env: {
       ...connection.env,
+      // In a packaged desktop process execPath is Electron, not node. Without
+      // this the MCP client relaunches OMB, whose single-instance handler
+      // focuses the user's window, instead of starting the headless gate.
+      ELECTRON_RUN_AS_NODE: "1",
       OMB_CUA_COMMAND: connection.command,
       OMB_CUA_ARGS: JSON.stringify(connection.args),
       OMB_CONTROL_URL: control.url,
@@ -349,7 +353,7 @@ export function readCuaConnection({
     }
   }
 
-  for (const file of [...new Set(candidates)]) {
+  for (const file of new Set(candidates)) {
     try {
       const raw = JSON.parse(readFileSync(file, "utf8"));
       if (platform === "linux") {

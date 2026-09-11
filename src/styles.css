@@ -1,5 +1,43 @@
 @import "tailwindcss";
 
+/* Inline mentions keep the surrounding font metrics, including in the
+   textarea mirror. No padding/border/font-weight changes that shift the caret. */
+.mention-highlight {
+  --mention-color: var(--color-ink-secondary);
+
+  color: color-mix(in srgb, var(--mention-color) 30%, var(--color-ink));
+  background: color-mix(in srgb, var(--mention-color) 24%, var(--color-inset));
+  border-radius: 3px;
+  text-decoration: underline;
+  text-decoration-color: var(--mention-color);
+  text-underline-offset: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.mention-editor-mirror {
+  /* Match the native textarea's direction independently for each paragraph. */
+  unicode-bidi: plaintext;
+  padding: 4px;
+  font-size: 15px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: var(--color-ink);
+}
+.mention-editor textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--color-ink);
+}
+.mention-editor textarea::selection {
+  color: var(--color-ink);
+  background: var(--color-raised-hover);
+}
+@media (forced-colors: active) {
+  .mention-editor-mirror { display: none; }
+  .mention-editor textarea { color: CanvasText; caret-color: CanvasText; }
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    SKINS
 
@@ -35,6 +73,15 @@
   --color-panel: #111111;
   --color-raised: #2f2f2f;
   --color-raised-hover: #3d3d3d;
+  /* the composer pill. Every skin but Daylight paints it in `raised`; there
+     it is the page colour with a hairline ring, so it needs a tone (and a
+     ring, transparent everywhere else) of its own. */
+  --color-composer: #2f2f2f;
+  --color-composer-ring: transparent;
+  /* popover and right-click menus. Same story as the composer: every skin
+     but Daylight paints them in `card`, which there is the bot's bubble and
+     a shade too grey for a menu. */
+  --color-menu: #262626;
   --color-card: #262626;
   --color-inset: #191919;
   /* a control ON a card. The dark skins take their `raised` value, so this
@@ -67,6 +114,9 @@
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
   --color-danger-ink: #ffffff;
+  /* ink carried by the user's own bubble. A hex rather than the ink token so
+     the contrast check can measure it; every dark skin repeats its ink here. */
+  --color-bubble-user-ink: #fcfcfc;
   --color-success-ink: #072114;
   --color-scrollbar: #3d3d3d;
   /* second speed line of the mascot — contrasts against the app ground */
@@ -89,7 +139,10 @@
   --color-panel: #111111;
   --color-raised: #2f2f2f;
   --color-raised-hover: #3d3d3d;
+  --color-composer: #2f2f2f;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #262626;
+  --color-menu: #262626;    /* = card: unchanged */
   --color-inset: #191919;
   --color-control: #2f2f2f;       /* = raised: Midnight is unchanged */
   --color-hairline: #333333;
@@ -100,6 +153,7 @@
   --color-accent-text: #7fc0ff;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #5a5a5a;
+  --color-bubble-user-ink: #fcfcfc;   /* = ink: unchanged */
   --color-success: #38d591;
   --color-danger: #ff5667;
   --color-danger-ink: #ffffff;
@@ -129,7 +183,10 @@
   --color-panel: #fbf8f2;         /* sidebar */
   --color-raised: #ffffff;        /* content — raised means lighter here */
   --color-raised-hover: #f2e9dc;  /* warm beige doubles as the hover fill */
+  --color-composer: #ffffff;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #ffffff;
+  --color-menu: #ffffff;    /* = card: unchanged */
   --color-inset: #f5f1eb;         /* inset surfaces pick the rail tone back up */
   --color-control: #ece4d6;       /* raised is white here and so is a card, so
                                      a control needs its own tone: 1.26:1 on a
@@ -146,6 +203,7 @@
   --color-focus: #96551f;         /* the ring rides the accent, not Grok blue */
   --color-accent-ink: #ffffff;
   --color-bubble-user: #f2e9dc;   /* your own messages in the badge beige */
+  --color-bubble-user-ink: #1a1a18;   /* = ink: unchanged */
 
   --color-success: #3f6b47;
   --color-danger: #a33a32;
@@ -185,7 +243,10 @@
   --color-panel: #171410;         /* sidebar */
   --color-raised: #262019;        /* raised means warmer, not just lighter */
   --color-raised-hover: #322b21;
+  --color-composer: #262019;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #1e1a14;
+  --color-menu: #1e1a14;    /* = card: unchanged */
   --color-inset: #0b0a08;         /* inset sinks below the ground */
   --color-control: #262019;       /* = raised: Foundry is unchanged */
   --color-hairline: #3d3529;      /* visible on purpose — this UI has edges */
@@ -200,6 +261,7 @@
   --color-focus: #e0a44c;         /* the ring rides the accent, not Grok blue */
   --color-accent-ink: #1c150c;    /* 7.4:1 on the brass fill */
   --color-bubble-user: #2a2318;   /* your own messages, one step out of the card */
+  --color-bubble-user-ink: #f4efe4;   /* = ink: unchanged */
 
   --color-success: #57b078;
   --color-danger: #e0685e;        /* a lamp, not a paint chip */
@@ -240,7 +302,10 @@
   --color-panel: #ecf4f3;
   --color-raised: #ffffff;
   --color-raised-hover: #cfe4e1;
+  --color-composer: #ffffff;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #ffffff;
+  --color-menu: #ffffff;    /* = card: unchanged */
   --color-inset: #d5e8e5;
   --color-control: #c3dcd9;       /* Lagoon's surfaces climb white → panel →
                                      app → inset → hover in small steps, so a
@@ -260,6 +325,7 @@
   --color-focus: #0d5f5a;         /* the ring rides the accent, not Grok blue */
   --color-accent-ink: #ffffff;
   --color-bubble-user: #cfe4e1;
+  --color-bubble-user-ink: #14201f;   /* = ink: unchanged */
 
   --color-success: #2f6b4f;
   --color-danger: #a8382f;
@@ -286,7 +352,10 @@
   --color-panel: #181a1d;
   --color-raised: #2a2d32;
   --color-raised-hover: #353941;
+  --color-composer: #2a2d32;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #22252a;
+  --color-menu: #22252a;    /* = card: unchanged */
   --color-inset: #0d0e10;
   --color-control: #2a2d32;
   --color-hairline: #3b4048;
@@ -300,6 +369,7 @@
   --color-focus: #8fb4df;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #30343a;
+  --color-bubble-user-ink: #f2f4f7;   /* = ink: unchanged */
 
   --color-success: #63b58a;
   --color-danger: #dd6b73;
@@ -326,7 +396,10 @@
   --color-panel: #f5f6f8;
   --color-raised: #ffffff;
   --color-raised-hover: #e1e6ed;
+  --color-composer: #ffffff;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #ffffff;
+  --color-menu: #ffffff;    /* = card: unchanged */
   --color-inset: #e6e9ee;
   --color-control: #d3d9e1;
   --color-hairline: #b4bbc5;
@@ -340,6 +413,7 @@
   --color-focus: #2c5680;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #e1e6ed;
+  --color-bubble-user-ink: #1d2229;   /* = ink: unchanged */
 
   --color-success: #2f704f;
   --color-danger: #a83d48;
@@ -365,7 +439,10 @@
   --color-panel: #19161c;
   --color-raised: #2b2630;
   --color-raised-hover: #37303d;
+  --color-composer: #2b2630;    /* = raised: unchanged */
+  --color-composer-ring: transparent;
   --color-card: #231f27;
+  --color-menu: #231f27;    /* = card: unchanged */
   --color-inset: #0d0b0f;
   --color-control: #2b2630;
   --color-hairline: #403847;
@@ -379,6 +456,7 @@
   --color-focus: #c49bd2;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #332b38;
+  --color-bubble-user-ink: #f4eff6;   /* = ink: unchanged */
 
   --color-success: #6fad83;
   --color-danger: #db727a;
@@ -394,10 +472,81 @@
   --radius-xl: 12px;
 }
 
+/* ── Daylight ─────────────────────────────────────────────────────────────
+   Midnight's twin. Midnight was pixel-sampled from the upstream app's dark
+   theme; this is the same sampling of its light one, so the two are the only
+   skins here that copy a palette rather than compose one.
+
+   Its structural quirk is the user's own bubble: near-black on a near-white
+   page, the one place a light skin carries inverted ink. That is what
+   --color-bubble-user-ink exists for — see the rule at the bottom of the
+   file. Everything else is a short ladder of greys: page #fcfcfc, sidebar
+   #f7f7f7, selected row #e1e1e1.
+   ───────────────────────────────────────────────────────────────────────── */
+[data-skin="daylight"] {
+  --code-color-scheme: light;
+  --color-app: #fcfcfc;           /* the thread */
+  --color-panel: #f7f7f7;         /* sidebar, one step down from the thread */
+  --color-raised: #e1e1e1;
+  --color-raised-hover: #d7d7d7;  /* the selected row */
+  --color-card: #eeeeee;          /* what a bot says */
+  --color-inset: #e6e6e6;         /* the search field */
+  --color-control: #dedede;       /* a chip on a card */
+  /* Sampled at #efefef, which is what the eye reads on the divider — but a
+     hairline that faint fails this repo's own gate (1.5:1 against the page)
+     and every border is drawn at /40 on top of that. #d0d0d0 is the lightest
+     grey that still passes; see scripts/check-skin-contrast.mjs. */
+  --color-hairline: #d0d0d0;
+
+  --color-ink: #0d0d0d;
+  --color-ink-secondary: #575757;
+
+  /* The upstream blue is #1084fe, which carries white at 3.1:1 — fine for the
+     unread dot it is mostly used for, not for a filled button's label. The
+     fill is darkened until white clears AA; the dot keeps reading as blue. */
+  --color-accent: #0b62c4;
+  --color-accent-border: #1084fe;
+  --color-accent-text: #0b5cb8;
+  --color-focus: #0b62c4;
+  --color-accent-ink: #ffffff;
+  /* The composer is the page with a ring around it, not a grey slab —
+     the one surface where this skin departs from `raised`. */
+  --color-composer: #fcfcfc;
+  --color-composer-ring: #e4e4e4;
+  --color-menu: #fcfcfc;          /* menus sit on the page tone, not the bubble */
+  --color-bubble-user: #070707;   /* your own messages, inverted */
+  --color-bubble-user-ink: #fcfcfc;
+
+  --color-success: #1f7a4d;
+  --color-danger: #c02b3a;
+  --color-danger-ink: #ffffff;
+  --color-success-ink: #ffffff;
+  --color-warning: #8a5a00;
+  --color-scrollbar: #c4c4c4;
+  --color-maus-line: #5f5f5f;
+
+  --font-sans: "Inter", -apple-system, blinkmacsystemfont, "SF Pro Text",
+    "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 14px;
+}
+
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
    re-tokenizing. Scope the scheme to code; native controls keep their styling. */
 .chat-md .shiki {
   color-scheme: var(--code-color-scheme);
+}
+
+/* Plain-text message bodies (user turns, webhook tasks, error fallbacks) are
+   written in whatever language the person used, which is independent of the
+   UI language. `plaintext` resolves direction per line from its own first
+   strong character, so a pasted block that mixes an Arabic sentence with an
+   English stack trace lays each line out correctly instead of letting the
+   first line decide for all of them — which is what a single dir="auto"
+   would do. `start` then follows that per-line direction. */
+.chat-text {
+  unicode-bidi: plaintext;
+  text-align: start;
 }
 
 html,
@@ -1043,6 +1192,37 @@ body {
 }
 .bg-success {
   color: var(--color-success-ink);
+}
+/* Same mechanism, one skin deeper: Daylight paints the user's own bubble in
+   near-black on a near-white page, and the `text-ink` the composer and the
+   thread hardcode would be black on black. */
+.bg-bubble-user {
+  color: var(--color-bubble-user-ink);
+}
+
+/* Daylight's inverted bubble is a dark surface, including its editor,
+   quoted replies and attachment controls. Keep their normal semantic tokens
+   together; overriding only the parent's color leaves explicit child ink dark.
+   Stop at a nested skin so the picker previews retain their own palettes. */
+@scope ([data-skin="daylight"]) to ([data-skin]) {
+  .bg-bubble-user {
+    --color-ink: #fcfcfc;
+    --color-ink-secondary: #c4c4c4;
+    --color-panel: #111111;
+    --color-inset: #191919;
+    --color-raised: #2f2f2f;
+    --color-raised-hover: #3d3d3d;
+    --color-control: #2f2f2f;
+    --color-hairline: #666666;
+    --color-accent: #7fc0ff;
+    --color-accent-text: #7fc0ff;
+    --color-accent-ink: #070707;
+    --color-focus: #7fc0ff;
+    --color-danger: #ff7788;
+    --color-danger-ink: #070707;
+    --color-success: #63b58a;
+    --color-success-ink: #070707;
+  }
 }
 
 /* Disabled buttons.

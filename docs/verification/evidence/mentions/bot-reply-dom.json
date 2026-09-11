@@ -1,0 +1,92 @@
+{
+  "channelDark": [
+    {
+      "name": "@Atlas",
+      "palette": "#377FE6"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    },
+    {
+      "name": "@調査担当",
+      "palette": "#E78531"
+    },
+    {
+      "name": "@Atlas",
+      "palette": "#377FE6"
+    },
+    {
+      "name": "@調査担当",
+      "palette": "#E78531"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    },
+    {
+      "name": "@everyone",
+      "palette": ""
+    }
+  ],
+  "channelLight": [
+    {
+      "name": "@Atlas",
+      "palette": "#377FE6"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    },
+    {
+      "name": "@調査担当",
+      "palette": "#E78531"
+    },
+    {
+      "name": "@Atlas",
+      "palette": "#377FE6"
+    },
+    {
+      "name": "@調査担当",
+      "palette": "#E78531"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    },
+    {
+      "name": "@everyone",
+      "palette": ""
+    }
+  ],
+  "dmRendererPreview": [
+    {
+      "name": "@Atlas",
+      "palette": "#377FE6"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    },
+    {
+      "name": "@調査担当",
+      "palette": "#E78531"
+    },
+    {
+      "name": "@Atlas",
+      "palette": "#377FE6"
+    },
+    {
+      "name": "@調査担当",
+      "palette": "#E78531"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    },
+    {
+      "name": "@Juniper",
+      "palette": "#D94B52"
+    }
+  ]
+}

@@ -25,8 +25,8 @@ data and configuration, never as a fork.
 
 ## Contributions
 
-- Outside `enterprise/`: sign off your commits (`git commit -s`), which is the
-  [Developer Certificate of Origin](https://developercertificate.org/). CI checks it.
+- Outside `enterprise/`: contribute under Apache 2.0. No DCO sign-off or CLA is
+  required. Submit only code you wrote or have the right to contribute.
 - Inside `enterprise/`: sign the [Contributor License Agreement](CLA.md) once, by
   commenting on your pull request. It lets the project keep that folder under
   its own license while still accepting your work.

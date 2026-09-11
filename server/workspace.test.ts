@@ -5,19 +5,33 @@ import { existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync 
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { DATA_DIR } from "./config.ts";
+import { closeMessageDb, recallMemory } from "./message-db.ts";
+
 import {
+  appendMemoryLog,
   ensureWorkspace,
   ensureTaskWorkspace,
+  listMemoryLogs,
+  readMemoryLog,
   isMemoryTopicName,
   listMemoryTopics,
   loadMemory,
   memorySystemPrompt,
   readMemoryFile,
   readMemoryTopic,
+  searchMemoryFiles,
+  syncMemoryIndex,
   workspaceDir,
+  writeMemoryTopic,
   writeMemoryFile,
   updateMemory,
-  MEMORY_FILE_MAX_BYTES,
+  memoryDate,
+  memoryEntry,
+  memoryLineCount,
+  memorySourceLabel,
+  MEMORY_CONSOLIDATE_HINT,
+  MEMORY_REFUSAL_RECENT_ENTRIES,
   MEMORY_MAX_BYTES,
   MEMORY_MAX_LINES,
   WORKSPACES_DIR,
@@ -28,6 +42,10 @@ const BOT = "bot-workspace-test";
 
 describe("workspace", () => {
   beforeEach(() => {
+    // the search index lives in the messages database, beside the files
+    // it mirrors; wiping the workspaces without it would leave stale rows
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
     rmSync(WORKSPACES_DIR, { recursive: true, force: true });
     rmSync(TASK_WORKSPACES_DIR, { recursive: true, force: true });
   });
@@ -125,21 +143,105 @@ describe("workspace", () => {
   });
 
   it("applies independent memory appends and targeted edits to the latest file without losing updates", () => {
-    expect(updateMemory(BOT, { action: "append", text: "- Preferred package manager: npm" }).ok).toBe(true);
-    const snapshot = readMemoryFile(BOT).text;
-    expect(updateMemory(BOT, { action: "append", text: "- Shipping day: Friday" }).ok).toBe(true);
-    expect(updateMemory(BOT, { action: "replace", oldText: snapshot, text: "- Preferred package manager: pnpm" })).toMatchObject({ ok: true });
-    expect(readMemoryFile(BOT).text).toBe("- Preferred package manager: pnpm\n- Shipping day: Friday");
-    const beforeConflict = readMemoryFile(BOT).text;
-    expect(updateMemory(BOT, { action: "replace", oldText: snapshot, text: "- Preferred package manager: yarn" })).toMatchObject({ ok: false, code: "conflict" });
-    expect(readMemoryFile(BOT).text).toBe(beforeConflict);
-    expect(updateMemory(BOT, { action: "remove", oldText: "- Shipping day: Friday" })).toMatchObject({ ok: true });
-    expect(readMemoryFile(BOT).text).toBe("- Preferred package manager: pnpm\n");
-    // Human editor writes remain the canonical file the next tool update reads.
-    writeMemoryFile(BOT, "- Edited by the user");
-    expect(updateMemory(BOT, { action: "append", text: "- Another thread's fact" })).toMatchObject({
-      ok: true, text: "- Edited by the user\n- Another thread's fact", truncated: false,
+    const now = new Date(2026, 8, 10, 12);
+    const opts = { source: 'chat "Setup"', now };
+    expect(updateMemory(BOT, { action: "append", text: "- Preferred package manager: npm" }, opts)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Preferred package manager: npm',
     });
+    const first = readMemoryFile(BOT).text;
+    expect(first).toBe('- 2026-09-10 · from chat "Setup" · Preferred package manager: npm\n');
+    expect(updateMemory(BOT, { action: "append", text: "Shipping day: Friday" }, opts).ok).toBe(true);
+    // a fragment replace keeps the entry's original date and marks the day it changed
+    const later = { source: 'chat "Setup"', now: new Date(2026, 8, 12, 12) };
+    expect(updateMemory(BOT, { action: "replace", oldText: "manager: npm", text: "manager: pnpm" }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Preferred package manager: pnpm · updated 2026-09-12',
+    });
+    expect(readMemoryFile(BOT).text).toBe(
+      '- 2026-09-10 · from chat "Setup" · Preferred package manager: pnpm · updated 2026-09-12\n' +
+      '- 2026-09-10 · from chat "Setup" · Shipping day: Friday\n',
+    );
+    const beforeConflict = readMemoryFile(BOT).text;
+    expect(updateMemory(BOT, { action: "replace", oldText: "manager: npm", text: "manager: yarn" }, later)).toMatchObject({ ok: false, code: "conflict" });
+    expect(readMemoryFile(BOT).text).toBe(beforeConflict);
+    // removing a whole entry takes its line with it
+    expect(updateMemory(BOT, { action: "remove", oldText: '- 2026-09-10 · from chat "Setup" · Shipping day: Friday' })).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).toBe('- 2026-09-10 · from chat "Setup" · Preferred package manager: pnpm · updated 2026-09-12\n');
+    // Human editor writes remain the canonical file the next tool update reads,
+    // and a file left without a final newline gets exactly one before the entry.
+    writeMemoryFile(BOT, "- Edited by the user");
+    expect(updateMemory(BOT, { action: "append", text: "Another thread's fact" }, opts)).toMatchObject({
+      ok: true, text: '- Edited by the user\n- 2026-09-10 · from chat "Setup" · Another thread\'s fact\n', truncated: false,
+    });
+  });
+
+  it("formats an entry as one dated, sourced line and keeps fenced blocks whole", () => {
+    const now = new Date(2026, 8, 10, 12);
+    expect(memoryDate(now)).toBe("2026-09-10");
+    expect(memoryEntry("  - The user's name is Ada  ", { source: 'chat "Follow-up"', now })).toBe('- 2026-09-10 · from chat "Follow-up" · The user\'s name is Ada');
+    // no source: the thread could not be named, the date still rides
+    expect(memoryEntry("Deploys on Fridays", { now })).toBe("- 2026-09-10 · Deploys on Fridays");
+    // a multi-line note folds onto one line; a title with the separator in it is scrubbed
+    expect(memoryEntry("first line\n   second line", { source: 'chat "A · B"', now })).toBe('- 2026-09-10 · from chat "A - B" · first line second line');
+    const fenced = memoryEntry("Deploy command:\n```sh\nrailway up\n```", { now });
+    expect(fenced).toBe("- 2026-09-10 · Deploy command:\n```sh\nrailway up\n```");
+  });
+
+  it("names an entry's source by room, then thread title, then thread id", () => {
+    expect(memorySourceLabel({ room: { name: "Launch" }, task: { title: "ignored" }, threadId: "t1" })).toBe('room "Launch"');
+    expect(memorySourceLabel({ task: { title: "Follow-up" }, threadId: "t1" })).toBe('chat "Follow-up"');
+    expect(memorySourceLabel({ task: { title: "" }, threadId: "t1" })).toBe("thread t1");
+    expect(memorySourceLabel({ threadId: "t1" })).toBe("thread t1");
+    // a long title is shortened before it is quoted, so the quote still closes
+    expect(memorySourceLabel({ task: { title: "t".repeat(80) }, threadId: "t1" })).toBe(`chat "${"t".repeat(60)}…"`);
+    expect(memoryEntry("fact", { source: memorySourceLabel({ room: { name: "A · B" }, threadId: "t" }), now: new Date(2026, 8, 10, 12) }))
+      .toBe('- 2026-09-10 · from room "A - B" · fact');
+  });
+
+  it("replace re-attaches the original prefix when the model retypes the whole entry", () => {
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(BOT, { action: "append", text: "Timezone: IST" }, { source: 'chat "Setup"', now });
+    updateMemory(BOT, { action: "append", text: "Hand-written line stays" }, { source: 'chat "Setup"', now });
+    writeMemoryFile(BOT, `${readMemoryFile(BOT).text}- undated note from the person\n`);
+    const later = { source: 'room "Ops"', now: new Date(2026, 8, 11, 12) };
+    // whole line, no prefix in the new text
+    expect(updateMemory(BOT, { action: "replace", oldText: '- 2026-09-10 · from chat "Setup" · Timezone: IST', text: "- Timezone: CET" }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Timezone: CET · updated 2026-09-11',
+    });
+    // whole line, the model copied a prefix of its own: the original one wins, and the mark is not doubled
+    expect(updateMemory(BOT, { action: "replace", oldText: "Timezone: CET · updated 2026-09-11", text: '- 2026-09-11 · from room "Ops" · Timezone: UTC' }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-10 · from chat "Setup" · Timezone: UTC · updated 2026-09-11',
+    });
+    // an undated, hand-written line is replaced as plain text, nothing dated onto it
+    expect(updateMemory(BOT, { action: "replace", oldText: "undated note", text: "undated fact" }, later)).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).toBe(
+      '- 2026-09-10 · from chat "Setup" · Timezone: UTC · updated 2026-09-11\n' +
+      '- 2026-09-10 · from chat "Setup" · Hand-written line stays\n' +
+      "- undated fact from the person\n",
+    );
+  });
+
+  it("supersede strikes the old entry through with the day it stopped being true and appends the new one", () => {
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(BOT, { action: "append", text: "Office: Berlin" }, { source: 'chat "Setup"', now });
+    writeMemoryFile(BOT, `${readMemoryFile(BOT).text}- Old hand-written office: Paris\nplain paragraph\n`);
+    const later = { source: 'chat "Move"', now: new Date(2026, 8, 20, 12) };
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Berlin", text: "Office: Lisbon" }, later)).toMatchObject({
+      ok: true, entry: '- 2026-09-20 · from chat "Move" · Office: Lisbon',
+    });
+    expect(updateMemory(BOT, { action: "supersede", oldText: "office: Paris", text: "office: Porto" }, later).ok).toBe(true);
+    expect(updateMemory(BOT, { action: "supersede", oldText: "plain paragraph", text: "plain fact" }, later).ok).toBe(true);
+    expect(readMemoryFile(BOT).text).toBe(
+      '- 2026-09-10 · from chat "Setup" · ~~Office: Berlin~~ · superseded 2026-09-20\n' +
+      "- ~~Old hand-written office: Paris~~ · superseded 2026-09-20\n" +
+      "~~plain paragraph~~ · superseded 2026-09-20\n" +
+      '- 2026-09-20 · from chat "Move" · Office: Lisbon\n' +
+      '- 2026-09-20 · from chat "Move" · office: Porto\n' +
+      '- 2026-09-20 · from chat "Move" · plain fact\n',
+    );
+    // a struck entry is not struck again, and a passage spanning lines is refused
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Berlin", text: "Office: Rome" }, later)).toMatchObject({ ok: false, code: "conflict" });
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Porto\n- 2026-09-20", text: "x" }, later)).toMatchObject({ ok: false, code: "invalid" });
+    expect(updateMemory(BOT, { action: "supersede", oldText: "Office: Lisbon" }, later)).toMatchObject({ ok: false, code: "invalid" });
   });
 
   it("rejects ambiguous, invalid and over-budget memory changes without changing saved notes", () => {
@@ -151,8 +253,55 @@ describe("workspace", () => {
     expect(updateMemory(BOT, { action: "append", text: " " })).toMatchObject({ ok: false, code: "invalid" });
     expect(updateMemory(BOT, { action: "replace", oldText: "", text: "replacement" })).toMatchObject({ ok: false, code: "invalid" });
     expect(updateMemory(BOT, { action: "remove", oldText: "repeated", text: "unexpected" })).toMatchObject({ ok: false, code: "invalid" });
-    expect(updateMemory(BOT, { action: "append", text: "é".repeat(MEMORY_FILE_MAX_BYTES / 2) })).toMatchObject({ ok: false, code: "too-large" });
+    expect(updateMemory(BOT, { action: "append", text: "é".repeat(MEMORY_MAX_BYTES) })).toMatchObject({ ok: false, code: "over-budget" });
     expect(readMemoryFile(BOT).text).toBe("repeated repeated");
+  });
+
+  it("refuses a write that would leave the file over the load budget, with the counts and the newest entries", () => {
+    const now = new Date(2026, 8, 10, 12);
+    const entries = Array.from({ length: MEMORY_MAX_LINES }, (_, i) => `- fact ${i}`);
+    writeMemoryFile(BOT, `${entries.join("\n")}\n`);
+    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES);
+    expect(readMemoryFile(BOT).truncated).toBe(false);
+    const refused = updateMemory(BOT, { action: "append", text: "one fact too many" }, { source: 'chat "Full"', now });
+    expect(refused).toMatchObject({
+      ok: false, code: "over-budget", lines: MEMORY_MAX_LINES + 1, budget: { lines: MEMORY_MAX_LINES, bytes: MEMORY_MAX_BYTES },
+      recent: entries.slice(-MEMORY_REFUSAL_RECENT_ENTRIES),
+    });
+    expect(refused.ok ? "" : refused.error).toContain(`would be ${MEMORY_MAX_LINES + 1} lines`);
+    expect(refused.ok ? "" : refused.error).toContain(MEMORY_CONSOLIDATE_HINT);
+    expect(refused.ok ? "" : refused.error).toContain("do not retry the same append");
+    // nothing landed
+    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES);
+    // bytes are refused the same way, on a file with few lines
+    writeMemoryFile(BOT, `- ${"x".repeat(MEMORY_MAX_BYTES - 100)}\n`);
+    const bytes = updateMemory(BOT, { action: "append", text: "y".repeat(200) }, { now });
+    expect(bytes).toMatchObject({ ok: false, code: "over-budget", lines: 2 });
+    expect(!bytes.ok && bytes.code === "over-budget" ? bytes.bytes : 0).toBeGreaterThan(MEMORY_MAX_BYTES);
+    // an over-budget file the person grew by hand can still be consolidated:
+    // a change that makes it smaller goes through, one that grows it does not
+    writeMemoryFile(BOT, `${entries.join("\n")}\n- fact ${MEMORY_MAX_LINES}\n- fact ${MEMORY_MAX_LINES + 1}\n`);
+    expect(readMemoryFile(BOT).truncated).toBe(true);
+    expect(updateMemory(BOT, { action: "replace", oldText: "- fact 0", text: "- facts 0 and 1 merged, longer than before" }, { now })).toMatchObject({ ok: false, code: "over-budget" });
+    expect(updateMemory(BOT, { action: "remove", oldText: `- fact ${MEMORY_MAX_LINES + 1}` }, { now })).toMatchObject({ ok: true });
+    expect(updateMemory(BOT, { action: "replace", oldText: "- fact 0", text: "- f0" }, { now })).toMatchObject({ ok: true });
+    expect(memoryLineCount(readMemoryFile(BOT).text)).toBe(MEMORY_MAX_LINES + 1);
+  });
+
+  it("tells the bot how far over budget a hand-grown file is, and how to fix it, when the prompt cuts it", () => {
+    const dir = ensureWorkspace(BOT);
+    const lines = Array.from({ length: MEMORY_MAX_LINES + 50 }, (_, i) => `- fact ${i}`);
+    writeFileSync(join(dir, "MEMORY.md"), `${lines.join("\n")}\n`);
+    const memory = loadMemory(BOT);
+    expect(memory).toMatchObject({ truncated: true, lines: MEMORY_MAX_LINES + 50 });
+    const managed = memorySystemPrompt(BOT, { managedWrites: true });
+    expect(managed).toContain(`[MEMORY.md is ${MEMORY_MAX_LINES + 50} lines and ${memory!.bytes} bytes; only the first ${MEMORY_MAX_LINES} lines / ${MEMORY_MAX_BYTES} bytes are shown above`);
+    expect(managed).toContain("Consolidate it now with memory_update");
+    expect(managed).not.toContain("was cut off here — trim it");
+    expect(memorySystemPrompt(BOT)).toContain("Trim it with your file tools");
+    // a file of exactly the budget with a final newline is not over it
+    writeFileSync(join(dir, "MEMORY.md"), `${lines.slice(0, MEMORY_MAX_LINES).join("\n")}\n`);
+    expect(loadMemory(BOT)?.truncated).toBe(false);
   });
 
   it("requires explicit remove to delete a memory passage", () => {
@@ -164,6 +313,97 @@ describe("workspace", () => {
     }
     expect(updateMemory(BOT, { action: "remove", oldText: "unique fact" })).toMatchObject({ ok: true });
     expect(readMemoryFile(BOT).text).toBe("Keep this .");
+  });
+
+  it("redacts secrets on every server-side memory write, tool and editor alike", () => {
+    const key = `sk-ant-api03-${"a".repeat(40)}`;
+    const now = new Date(2026, 8, 10, 12);
+    const appended = updateMemory(BOT, { action: "append", text: `Anthropic key is ${key}, call with Bearer ${"b".repeat(32)}` }, { source: 'chat "Keys"', now });
+    expect(appended.ok).toBe(true);
+    // the echo and the file agree, and neither holds the secret
+    const entry = appended.ok ? appended.entry! : "";
+    expect(entry).not.toContain(key);
+    expect(entry).not.toContain("b".repeat(32));
+    expect(entry).toContain("«redacted");
+    expect(readMemoryFile(BOT).text).toBe(`${entry}\n`);
+    expect(readMemoryFile(BOT).text).toContain('- 2026-09-10 · from chat "Keys" · Anthropic key is «redacted');
+    // a replacement's text is scrubbed the same way
+    expect(updateMemory(BOT, { action: "replace", oldText: "Anthropic key", text: `Anthropic key ${key} still` }, { now })).toMatchObject({ ok: true });
+    expect(readMemoryFile(BOT).text).not.toContain(key);
+    // the Settings editor path writes the whole file through the same scrub
+    writeMemoryFile(BOT, `# Memory\n- token: ghp_${"c".repeat(36)}\n`);
+    expect(readMemoryFile(BOT).text).not.toContain("c".repeat(36));
+    expect(readMemoryFile(BOT).text).toContain("«redacted");
+  });
+
+  it("appends timestamped lines to today's log file, scrubbed, private, and outside the prompt", () => {
+    const now = new Date(2026, 8, 10, 14, 3);
+    const first = appendMemoryLog(BOT, "shipped 0.1.70 with token ghp_" + "d".repeat(36), { source: 'chat "Deploy"', now });
+    expect(first).toMatchObject({ ok: true, file: "memory/log/2026-09-10.md" });
+    expect(first.ok ? first.line : "").toBe('- 14:03 · from chat "Deploy" · shipped 0.1.70 with token «redacted 40 chars»');
+    expect(appendMemoryLog(BOT, "rollback\ndone", { now: new Date(2026, 8, 10, 15, 30) }).ok).toBe(true);
+    expect(readMemoryLog(BOT, "2026-09-10.md")).toBe(
+      '- 14:03 · from chat "Deploy" · shipped 0.1.70 with token «redacted 40 chars»\n- 15:30 · rollback done\n',
+    );
+    appendMemoryLog(BOT, "next day", { now: new Date(2026, 8, 11, 9, 0) });
+    expect(listMemoryLogs(BOT)).toEqual(["2026-09-10.md", "2026-09-11.md"]);
+    const dir = workspaceDir(BOT);
+    if (process.platform !== "win32") {
+      expect(statSync(join(dir, "memory", "log")).mode & 0o777).toBe(0o700);
+      expect(statSync(join(dir, "memory", "log", "2026-09-10.md")).mode & 0o777).toBe(0o600);
+    }
+    // logs are not topics: the prompt's topic pointers and the topic list ignore them
+    expect(listMemoryTopics(BOT)).toEqual([]);
+    expect(loadMemory(BOT)).toBeNull();
+    expect(memorySystemPrompt(BOT)).not.toContain("shipped 0.1.70");
+    expect(appendMemoryLog(BOT, "  ")).toMatchObject({ ok: false, code: "invalid" });
+    expect(readMemoryLog(BOT, "../MEMORY.md")).toBeNull();
+    expect(readMemoryLog("never-ran", "2026-09-10.md")).toBeNull();
+  });
+
+  it("makes every memory file searchable for its own bot only, in step with server writes and hand edits", () => {
+    const now = new Date(2026, 8, 10, 12);
+    updateMemory(BOT, { action: "append", text: "The site audit covers broken links monthly" }, { source: 'chat "Audit"', now });
+    appendMemoryLog(BOT, "audit run, three broken links found", { now });
+    writeMemoryTopic(BOT, "deploys.md", "railway up from main\n");
+    // each server-side write indexed as it happened — the raw index, before
+    // any search-time sync pass could paper over a missed one
+    expect(recallMemory("broken links audit", BOT).map((hit) => hit.file).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-10.md"]);
+    expect(recallMemory("railway", BOT).map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    // another bot with the same words: never a hit for this one
+    updateMemory("other-bot", { action: "append", text: "broken links audit belongs to the other bot" }, { now });
+    const hits = searchMemoryFiles(BOT, "broken links audit");
+    expect(hits.map((hit) => hit.file).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-10.md"]);
+    expect(hits.find((hit) => hit.file === "MEMORY.md")?.snippet).toContain("The site [audit] covers [broken] [links]");
+    expect(searchMemoryFiles(BOT, "other bot")).toEqual([]);
+    expect(searchMemoryFiles("other-bot", "broken links").map((hit) => hit.file)).toEqual(["MEMORY.md"]);
+    expect(searchMemoryFiles(BOT, "railway").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    // the bot's own file tools rewrite a topic file behind the server's back:
+    // the next search notices by size and mtime, without a watcher
+    const dir = workspaceDir(BOT);
+    writeFileSync(join(dir, "memory", "deploys.md"), "fly deploy from main, railway retired\n");
+    writeFileSync(join(dir, "memory", "hosting.md"), "hand-written topic about railway\n");
+    expect(searchMemoryFiles(BOT, "fly deploy").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    expect(searchMemoryFiles(BOT, "railway").map((hit) => hit.file).sort()).toEqual(["memory/deploys.md", "memory/hosting.md"]);
+    // a deleted file drops out; the seed alone is never a hit
+    rmSync(join(dir, "memory", "hosting.md"));
+    writeFileSync(join(dir, "MEMORY.md"), readFileSync(join(dir, "MEMORY.md"), "utf8").replace(/.*audit.*\n/, ""));
+    syncMemoryIndex(BOT);
+    expect(searchMemoryFiles(BOT, "hand-written")).toEqual([]);
+    expect(searchMemoryFiles(BOT, "broken links audit").map((hit) => hit.file)).toEqual(["memory/log/2026-09-10.md"]);
+    rmSync(join(dir, "MEMORY.md"));
+    ensureWorkspace(BOT);
+    expect(searchMemoryFiles(BOT, "durable notes")).toEqual([]);
+    // a bot that never ran has nothing, not an error
+    expect(searchMemoryFiles("never-ran", "anything")).toEqual([]);
+  });
+
+  it("writeMemoryTopic keeps the name gate, the scrub and the modes", () => {
+    expect(() => writeMemoryTopic(BOT, "../MEMORY.md", "x")).toThrow("invalid topic name");
+    writeMemoryTopic(BOT, "keys.md", `token: xoxb-${"e".repeat(30)}\n`);
+    expect(readMemoryTopic(BOT, "keys.md")).toContain("«redacted");
+    expect(readMemoryTopic(BOT, "keys.md")).not.toContain("e".repeat(30));
+    if (process.platform !== "win32") expect(statSync(join(workspaceDir(BOT), "memory", "keys.md")).mode & 0o777).toBe(0o600);
   });
 
   it("accepts plain single-segment topic names and nothing else", () => {
@@ -226,6 +466,19 @@ describe("workspace", () => {
     const withMemory = memorySystemPrompt(BOT);
     expect(withMemory).toContain("Your memory (MEMORY.md):");
     expect(withMemory).toContain("railway up");
+  });
+
+  it("routes facts, procedures and short-lived notes to the right place, in both write modes", () => {
+    for (const prompt of [memorySystemPrompt(BOT), memorySystemPrompt(BOT, { managedWrites: true })]) {
+      expect(prompt).toContain("MEMORY.md is for facts that hold in every session");
+      expect(prompt).toContain("Write each one as a plain statement of fact, never as an instruction to yourself — an imperative is read back as a directive next session.");
+      expect(prompt).toContain("A procedure for one kind of task belongs in a memory/<topic>.md file or a skill, not here.");
+      expect(prompt).toContain("Anything that will be stale within a week belongs in the conversation, not in memory.");
+      expect(prompt).toContain("When a fact applies only from a date, or stops applying on one, say so in the entry.");
+      // the topic folder is the bot's own, not a placeholder
+      expect(prompt).toContain(`pointers to files in ${JSON.stringify(join(workspaceDir(BOT), "memory"))}`);
+      expect(prompt).not.toContain("<topicDir>");
+    }
   });
 
   it("opts concurrent agents into targeted memory updates while retaining legacy guidance", () => {

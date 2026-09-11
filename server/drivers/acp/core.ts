@@ -53,6 +53,7 @@ import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 // packaged server dir entirely. See server/proxy-paths.ts.
 const COMPUTER_PROXY_PATH = SPAWNED_PROXIES.computer;
 import { appendNative } from "../native.ts";
+import { commandSummary } from "../../tool-summary.ts";
 import { SPAWNED_PROXIES } from "../../proxy-paths.ts";
 
 export interface AcpConfig {
@@ -727,6 +728,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 itemType: "tool",
                 itemId: u.toolCallId,
                 title: String(u.rawInput?.command ?? u.title ?? "tool").slice(0, 80),
+                summary: commandSummary(u.rawInput),
               });
               break;
             }

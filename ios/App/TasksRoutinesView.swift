@@ -14,7 +14,7 @@ struct TasksRoutinesView: View {
             Section {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Thread = one conversation and result", systemImage: "bubble.left.and.text.bubble.right")
-                    Label("Routine = a schedule that creates a fresh thread", systemImage: "calendar.badge.clock")
+                    Label("Routine = scheduled work with one results thread", systemImage: "calendar.badge.clock")
                 }
                 .font(.subheadline)
             } footer: {
@@ -365,9 +365,9 @@ private struct RoutineEditorView: View {
                     Text("Schedule")
                 } footer: {
                     if kind == .interval {
-                        Text("Each occurrence creates a fresh thread. If the previous run is still active, the next occurrence is skipped instead of queued.")
+                        Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. If the previous run is still active, the next occurrence is skipped instead of queued.")
                     } else {
-                        Text("Each occurrence creates a fresh thread. No cron syntax is used.")
+                        Text("Each occurrence starts with fresh context. Results collect in one thread, and full run logs remain available. No cron syntax is used.")
                     }
                 }
 

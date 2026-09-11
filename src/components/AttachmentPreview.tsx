@@ -108,6 +108,7 @@ export function safeDownloadFilename(value: string | null | undefined): string {
   const basename = (value ?? "").split(/[\\/]/).at(-1) ?? "";
   const cleaned = basename
     .normalize("NFC")
+    // oxlint-disable-next-line no-control-regex -- strips control and bidi characters from a filename
     .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "")
     .replace(/[<>:"|?*]/g, "_")
     .trim()

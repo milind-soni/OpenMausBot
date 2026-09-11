@@ -3,13 +3,17 @@
 // English, so a partial pack can ship the day it has one string.
 import { en, locales, type LocaleKey, type LocalePack } from "@/locales";
 
-/** "de-AT" → "de-at" if registered, else "de", else "en". Pure, for tests. */
+/** "zh-Hant-TW" → exact tag, then "zh-hant", then "zh", then "en". Pure, for tests. */
 export function resolveLocale(tag: string | undefined, available: ReadonlySet<string>): string {
   if (!tag) return "en";
-  const lower = tag.toLowerCase();
-  if (available.has(lower)) return lower;
-  const base = lower.split("-")[0] ?? "";
-  return available.has(base) ? base : "en";
+  let candidate = tag.toLowerCase();
+  while (candidate) {
+    if (available.has(candidate)) return candidate;
+    const separator = candidate.lastIndexOf("-");
+    if (separator < 0) break;
+    candidate = candidate.slice(0, separator);
+  }
+  return "en";
 }
 
 /** Switch the active language (a future settings picker calls this too).

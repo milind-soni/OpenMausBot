@@ -11,7 +11,7 @@ export function supportsApprovalMode(driverKind: string | undefined, mode: Appro
 }
 
 export function hasNativeAutoReview(driverKind: string | undefined): boolean {
-  return ["codex", "claudeAgent", "cursorAgent"].includes(driverKind ?? "");
+  return ["codex", "claudeAgent", "cursorAgent", "grokAgent"].includes(driverKind ?? "");
 }
 
 /** A native reviewer has already declined to decide, or Auto has no native

@@ -1,12 +1,12 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Info, Loader2, Mic } from "lucide-react";
 import { MausAvatar } from "./Avatar";
 import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { EngineSetup } from "./EngineSetup";
-import { ProviderMark } from "./ProviderIcons";
+import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
 import { PhoneSetupFlow } from "./PhoneSetupFlow";
-import type { InstanceInfo } from "@/state/store";
+import { useStore } from "@/state/store";
 import { brand } from "../lib/brand";
 import { t } from "@/lib/i18n";
 
@@ -15,106 +15,14 @@ import { t } from "@/lib/i18n";
 // phone setup that can always be resumed from Settings → Remote access.
 // Every check is skippable — onboarding must never brick the app.
 
-type InstanceRow = InstanceInfo;
-
-function StatusRow({
-  ok,
-  warn,
-  title,
-  detail,
-  mark,
-  children,
-}: {
-  ok: boolean;
-  warn?: boolean;
-  title: string;
-  detail?: string;
-  mark?: ReactNode;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="flex items-start gap-3 rounded-xl bg-card p-3.5">
-      <span
-        className={`mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full ${
-          ok ? "bg-success/15 text-success" : warn ? "bg-warning/15 text-warning" : "bg-raised text-ink-secondary"
-        }`}
-      >
-        {ok ? <Check size={14} /> : <AlertTriangle size={13} />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2 text-[14px] font-medium text-ink">
-          {mark}
-          <span className="min-w-0 truncate">{title}</span>
-        </div>
-        {detail && <div className="mt-0.5 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</div>}
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/** One engine on the setup screen: what it's called, what the harness
- * found, and the one-liner to show when it's good to go. Ready states get
- * a sentence; anything the user has to act on gets the shared setup UI, so
- * the instructions come from the driver and are correct for this platform. */
-interface EngineEntry {
-  instance: InstanceRow;
-  label: string;
-  readyNote: string;
-}
-
-function engineReady(instance: InstanceRow): boolean {
-  return (
-    instance.snapshot.state === "available" &&
-    (instance.access === "custom" || instance.snapshot.authenticated !== false)
-  );
-}
-
-function engineTitle({ instance, label }: EngineEntry): string {
-  const version = instance?.snapshot.version ? ` · ${instance.snapshot.version.split(" ")[0]}` : "";
-  return `${label}${version}`;
-}
-
-/** A ready engine needs no attention: a small tile in the grid, so five
- * engines don't read as one long list where the good news and the setup
- * work look the same. */
-function ReadyTile(entry: EngineEntry) {
-  return (
-    <div className="flex items-start gap-2.5 rounded-xl bg-card p-3">
-      <ProviderMark driverKind={entry.instance.driverKind} size={17} />
-      <div className="min-w-0">
-        <div className="truncate text-[13.5px] font-medium text-ink">{engineTitle(entry)}</div>
-        <div className="mt-0.5 text-[12px] leading-snug text-ink-secondary">{entry.readyNote}</div>
-      </div>
-    </div>
-  );
-}
-
-/** An engine that still needs installing or signing in keeps the full-width
- * row: the command box and terminal button need the room. */
-function SetupRow(entry: EngineEntry) {
-  return (
-    <StatusRow
-      ok={false}
-      warn
-      title={engineTitle(entry)}
-      mark={<ProviderMark driverKind={entry.instance.driverKind} size={16} />}
-    >
-      <EngineSetup
-        instance={entry.instance}
-        className="mt-0.5"
-        intent={entry.instance.access === "custom" ? "inject" : "cloud"}
-      />
-    </StatusRow>
-  );
-}
-
 export function Onboarding({ onDone }: { onDone: () => void }) {
   const { capabilities } = useDesktopCapabilities();
+  const { state, refreshInstances } = useStore();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [instances, setInstances] = useState<InstanceRow[] | null>(null);
+  const [checkedEngines, setCheckedEngines] = useState(false);
+  const instances = state.instances;
   const [perms, setPerms] = useState<{ mic: string } | null>(null);
   const valid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
@@ -137,21 +45,13 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (step !== 1) return;
     let active = true;
-    let latestRequest = 0;
-    const refresh = () => {
-      const request = ++latestRequest;
-      fetch("/api/instances")
-        .then((r) => r.json())
-        .then((d) => active && request === latestRequest && setInstances(d.instances ?? []))
-        .catch(() => active && request === latestRequest && setInstances([]));
-    };
-    refresh();
-    window.addEventListener("focus", refresh);
+    // Setup actions and focus refreshes already update this shared list. A
+    // second onboarding-only snapshot otherwise stays stale after sign-in.
+    void refreshInstances().finally(() => { if (active) setCheckedEngines(true); });
     return () => {
       active = false;
-      window.removeEventListener("focus", refresh);
     };
-  }, [step]);
+  }, [step, refreshInstances]);
 
   useEffect(() => {
     if (step === 2 && capabilities.dictation.available) {
@@ -172,27 +72,16 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
     onDone();
   };
 
-  const engines: EngineEntry[] = (instances ?? [])
-    .filter((instance) => instance.install)
-    .map((instance) => ({
-      instance,
-      label: instance.displayName,
-      readyNote:
-        instance.access === "custom"
-          ? t("onboarding.engines.readyLocal")
-          : t("onboarding.engines.readyCloud"),
-    }));
-  const readyEngines = engines.filter((e) => engineReady(e.instance));
-  const setupEngines = engines.filter((e) => !engineReady(e.instance));
+  const engines = instances.filter((instance) => instance.install);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-app p-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-app p-3 sm:p-8">
       {/* the engines step lays tiles out two across, so it gets more room —
           but never more than the window: the panel caps at the viewport and
           the engine list scrolls inside it, so the header and Continue stay
           put and nothing runs into the edges */}
       <div
-        className={`flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel p-8 ${step === 1 ? "max-w-[680px]" : step === 3 ? "max-w-[620px]" : "max-w-[460px]"}`}
+        className={`flex max-h-full w-full flex-col rounded-2xl border border-hairline/40 bg-panel p-5 sm:p-8 ${step === 1 ? "max-w-[800px]" : step === 3 ? "max-w-[620px]" : "max-w-[460px]"}`}
       >
         {step === 0 && (
           <div className="flex flex-col items-center">
@@ -242,40 +131,29 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
         {step === 1 && (
           <div className="flex min-h-0 flex-col">
-            <h1 className="text-[18px] font-semibold text-ink">{t("onboarding.engines.title")}</h1>
-            <p className="mt-1 text-[13.5px] text-ink-secondary">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h1 className="text-[24px] font-semibold tracking-tight text-ink">{t("onboarding.engines.title")}</h1>
+              <RefreshEngines />
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">
               {t("onboarding.engines.intro")}
             </p>
-            <div className="mt-4 flex min-h-0 flex-col gap-2.5 overflow-y-auto pr-1 [scrollbar-width:thin]">
-              {!instances ? (
+            <div className="mt-6 min-h-0 overflow-y-auto pr-1 [scrollbar-width:thin]">
+              {!checkedEngines && !engines.length ? (
                 <div className="flex items-center gap-2 py-6 text-ink-secondary">
                   <Loader2 size={16} className="animate-spin" /> {t("common.checking")}
                 </div>
               ) : (
-                <>
-                  {readyEngines.length > 0 && (
-                    <>
-                      <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("onboarding.engines.ready")}</div>
-                      <div className="grid grid-cols-2 gap-2.5">
-                        {readyEngines.map((e) => (
-                          <ReadyTile key={e.label} {...e} />
-                        ))}
-                      </div>
-                    </>
-                  )}
-                  {setupEngines.length > 0 && (
-                    <>
-                      <div className={`text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary ${readyEngines.length ? "mt-2" : ""}`}>
-                        {t("onboarding.engines.needsSetup")}
-                      </div>
-                      {setupEngines.map((e) => (
-                        <SetupRow key={e.label} {...e} />
-                      ))}
-                    </>
-                  )}
-                </>
+                <EngineSections instances={engines} renderEngine={(instance) => (
+                  <EngineCard instance={instance}>
+                    {engineReady(instance) ? (
+                      <p className="text-[13px] text-ink-secondary">{t(instance.access === "custom" ? "onboarding.engines.readyLocal" : "onboarding.engines.readyCloud")}</p>
+                    ) : <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} unframed />}
+                  </EngineCard>
+                )} />
               )}
             </div>
+            <p className="mt-5 flex shrink-0 items-center gap-2 border-t border-hairline/40 pt-4 text-[12px] text-ink-secondary"><Info size={14} className="shrink-0" />{t("engines.library.later")}</p>
             <button
               onClick={() => setStep(capabilities.dictation.available ? 2 : 3)}
               className="mt-5 w-full shrink-0 rounded-lg bg-accent py-2.5 text-[15px] font-medium text-white"

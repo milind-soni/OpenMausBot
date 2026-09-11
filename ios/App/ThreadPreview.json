@@ -1,0 +1,84 @@
+{
+  "bots": [
+    {
+      "id": "preview-pepper",
+      "threadId": "preview-gmail",
+      "name": "Pepper",
+      "title": "Personal assistant",
+      "description": "Helps with email and everyday plans.",
+      "notifications": false,
+      "color": "purple",
+      "unread": true,
+      "busy": true,
+      "modelSelection": { "instanceId": "preview", "model": "preview" },
+      "createdAt": 1789088400000,
+      "projects": [
+        { "id": "email", "name": "Email", "emoji": "✉️" }
+      ],
+      "tasks": [
+        {
+          "threadId": "preview-gmail",
+          "title": "Triage Gmail",
+          "createdAt": 1789088400000,
+          "projectId": "email",
+          "modelSelection": { "instanceId": "preview", "model": "preview" },
+          "busy": true,
+          "activity": "working",
+          "unread": false
+        },
+        {
+          "threadId": "preview-icloud",
+          "title": "Triage iCloud",
+          "createdAt": 1789088460000,
+          "projectId": "email",
+          "modelSelection": { "instanceId": "preview", "model": "preview" },
+          "busy": false,
+          "activity": "idle",
+          "unread": true
+        },
+        {
+          "threadId": "preview-weekend",
+          "title": "Plan weekend",
+          "createdAt": 1789088520000,
+          "modelSelection": { "instanceId": "preview", "model": "preview" },
+          "busy": false,
+          "activity": "queued",
+          "unread": false,
+          "openedBy": {
+            "botId": "preview-pepper",
+            "name": "Pepper",
+            "at": 1789088520000
+          }
+        },
+        {
+          "threadId": "preview-routine",
+          "title": "Internal routine execution",
+          "createdAt": 1789088580000,
+          "projectId": "email",
+          "routineRunId": "preview-routine-run",
+          "busy": false,
+          "unread": false
+        }
+      ],
+      "activeLeafId": "preview-gmail-reply",
+      "messages": [
+        {
+          "id": "preview-gmail-user",
+          "role": "user",
+          "kind": "text",
+          "at": 1789088400000,
+          "text": "Help me triage Gmail while keeping iCloud in a separate thread."
+        },
+        {
+          "id": "preview-gmail-reply",
+          "parentId": "preview-gmail-user",
+          "role": "bot",
+          "kind": "text",
+          "at": 1789088430000,
+          "text": "I’m reviewing Gmail here. Your iCloud conversation has its own context."
+        }
+      ]
+    }
+  ],
+  "groups": []
+}

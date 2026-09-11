@@ -37,6 +37,12 @@ struct ChatView: View {
     @State private var showingFileImporter = false
     @State private var selectedPhotos: [PhotosPickerItem] = []
     @State private var attachments: [PendingMessageAttachment] = []
+    private struct ComposerSnapshot {
+        var text = ""
+        var attachments: [PendingMessageAttachment] = []
+        var error: String?
+    }
+    @State private var threadDrafts: [String: ComposerSnapshot] = [:]
     @State private var preparingAttachments = false
     @State private var sendingMessage = false
     @State private var attachmentError: String?
@@ -45,6 +51,7 @@ struct ChatView: View {
     @State private var filePreview: FilePreviewItem?
     @State private var fileDownloadTask: Task<Void, Never>?
     @State private var fileDownloadRequestID: UUID?
+    @State private var threadOpenTask: Task<Void, Never>?
     @State private var acceptsNextHardwareLineBreak = false
     /// A Steer is done when there is nothing left waiting, or when the turn
     /// it was fighting has ended — whichever the engine reaches first. Both
@@ -196,10 +203,11 @@ struct ChatView: View {
                                         chat: current,
                                         message: message,
                                         endsRun: endsRun(at: index, in: transcript),
-                                        openLink: openLink
+                                        openLink: openLink,
+                                        openThread: openThread
                                     )
                                 case let .activityRun(items):
-                                    ActivityRunChip(items: items)
+                                    ActivityRunChip(items: items, openThread: openThread)
                                 }
                             }
                             .id(row.id)
@@ -366,9 +374,9 @@ struct ChatView: View {
         .onChange(of: selectedThreadWasRemoved) { _, removed in
             if removed { dismiss() }
         }
-        .onChange(of: session.state.messages[threadId] == nil) { _, missing in
+        .onChange(of: session.state.hasLoadedPage(forThread: threadId)) { _, loaded in
             let requestedThread = threadId
-            if missing { Task { await session.loadThreadIfNeeded(requestedThread) } }
+            if !loaded { Task { await session.loadThreadIfNeeded(requestedThread) } }
         }
         .onChange(of: current.unread) { _, unread in
             // A message can arrive while this chat is already on screen. The
@@ -377,15 +385,30 @@ struct ChatView: View {
             let readChat = current
             if unread { Task { await session.markRead(readChat) } }
         }
-        .onChange(of: threadId) { _, _ in
+        .onChange(of: threadId) { previous, next in
+            dictation.stop()
+            threadDrafts[previous] = ComposerSnapshot(text: draft, attachments: attachments, error: attachmentError)
+            let restored = threadDrafts.removeValue(forKey: next) ?? ComposerSnapshot()
+            draft = restored.text
+            attachments = restored.attachments
+            attachmentError = restored.error
+            selectedPhotos = []
+            acceptsNextHardwareLineBreak = false
+            showCommandHUD = false
+            showingPlus = false
             // The local task picker changed threads. A download
             // started in the previous task must not open a sheet (or surface
             // its error) in the new one when the network reply arrives late.
             resetFilePreview()
+            cancelThreadOpen()
+        }
+        .onChange(of: session.connection?.id) { _, _ in
+            cancelThreadOpen()
         }
         .onDisappear {
             dictation.stop()
             resetFilePreview()
+            cancelThreadOpen()
         }
         .onChange(of: steerSettled) { _, settled in
             if settled { steering = false }
@@ -540,7 +563,7 @@ struct ChatView: View {
                 Color.clear.frame(width: 60, height: 60)
             }
             Button {
-                if case .bot = current { showingProfile = true }
+                if current.supportsTasks { showingTasks = true }
                 else { showingPlus = true }
             } label: {
                 HStack(spacing: 6) {
@@ -548,13 +571,13 @@ struct ChatView: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(Color.primary)
                         .lineLimit(1)
-                    if !current.subtitle.isEmpty {
-                        Text(current.subtitle)
+                    if current.supportsTasks || !current.subtitle.isEmpty {
+                        Text(current.supportsTasks ? current.threadTitle : current.subtitle)
                             .font(.system(size: 13))
                             .foregroundStyle(Color.secondary)
                             .lineLimit(1)
                     }
-                    Image(systemName: current.isBot ? "gearshape" : "ellipsis")
+                    Image(systemName: current.supportsTasks ? "chevron.down" : "ellipsis")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundStyle(Color.secondary)
                 }
@@ -565,7 +588,10 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .glassCapsule()
-            .accessibilityLabel(current.isBot ? "Open \(current.name) settings" : "Open \(current.name) thread options")
+            .disabled(preparingAttachments || sendingMessage)
+            .accessibilityLabel(current.supportsTasks ? "Switch thread: \(current.threadTitle)" : "Open \(current.name) thread options")
+            .accessibilityHint("Choose a conversation or start a new thread")
+            .accessibilityIdentifier("thread-switcher")
         }
         .padding(.top, -4)
     }
@@ -842,8 +868,17 @@ struct ChatView: View {
             )
             sendingMessage = false
             guard sent else {
-                attachmentError = session.actionError ?? "Couldn't send this message. Try again."
+                let failure = session.actionError ?? "Couldn't send this message. Try again."
+                if threadId == chatAtSend.threadId { attachmentError = failure }
+                else { threadDrafts[chatAtSend.threadId]?.error = failure }
                 session.actionError = nil
+                return
+            }
+            if threadId != chatAtSend.threadId {
+                if threadDrafts[chatAtSend.threadId]?.text == draftAtSend { threadDrafts[chatAtSend.threadId]?.text = "" }
+                if threadDrafts[chatAtSend.threadId]?.attachments.map(\.id) == outgoingAttachments.map(\.id) {
+                    threadDrafts[chatAtSend.threadId]?.attachments = []
+                }
                 return
             }
             // HUD commands expand `/diff` into a longer prompt. Compare with
@@ -862,7 +897,9 @@ struct ChatView: View {
 
     private func importPhotos(_ items: [PhotosPickerItem]) async {
         guard !preparingAttachments, !sendingMessage else { return }
-        let available = AttachmentPolicy.maximumItems - attachments.count
+        let importingThread = threadId
+        let existingAttachments = attachments
+        let available = AttachmentPolicy.maximumItems - existingAttachments.count
         guard items.count <= available else {
             selectedPhotos = []
             attachmentError = "Send up to \(AttachmentPolicy.maximumItems) items at a time."
@@ -911,13 +948,15 @@ struct ChatView: View {
                     mime: mime,
                     kind: .image
                 )
-                try AttachmentPolicy.validate(attachments + imported + [candidate])
+                try AttachmentPolicy.validate(existingAttachments + imported + [candidate])
                 imported.append(candidate)
             }
-            attachments.append(contentsOf: imported)
+            if threadId == importingThread { attachments.append(contentsOf: imported) }
+            else { threadDrafts[importingThread, default: ComposerSnapshot()].attachments.append(contentsOf: imported) }
             Haptics.selection()
         } catch {
-            attachmentError = error.localizedDescription
+            if threadId == importingThread { attachmentError = error.localizedDescription }
+            else { threadDrafts[importingThread]?.error = error.localizedDescription }
         }
     }
 
@@ -932,7 +971,9 @@ struct ChatView: View {
 
     private func importFiles(_ urls: [URL]) async {
         guard !preparingAttachments, !sendingMessage else { return }
-        let available = AttachmentPolicy.maximumItems - attachments.count
+        let importingThread = threadId
+        let existingAttachments = attachments
+        let available = AttachmentPolicy.maximumItems - existingAttachments.count
         guard urls.count <= available else {
             attachmentError = "Send up to \(AttachmentPolicy.maximumItems) items at a time."
             return
@@ -945,18 +986,20 @@ struct ChatView: View {
         do {
             var imported: [PendingMessageAttachment] = []
             for url in urls {
-                let usedBytes = (attachments + imported).reduce(0) { $0 + $1.data.count }
+                let usedBytes = (existingAttachments + imported).reduce(0) { $0 + $1.data.count }
                 let remainingBytes = max(0, AttachmentPolicy.maximumTotalBytes - usedBytes)
                 let candidate = try await Task.detached(priority: .userInitiated) {
                     try Self.readImportedFile(url, remainingBytes: remainingBytes)
                 }.value
-                try AttachmentPolicy.validate(attachments + imported + [candidate])
+                try AttachmentPolicy.validate(existingAttachments + imported + [candidate])
                 imported.append(candidate)
             }
-            attachments.append(contentsOf: imported)
+            if threadId == importingThread { attachments.append(contentsOf: imported) }
+            else { threadDrafts[importingThread, default: ComposerSnapshot()].attachments.append(contentsOf: imported) }
             Haptics.selection()
         } catch {
-            attachmentError = error.localizedDescription
+            if threadId == importingThread { attachmentError = error.localizedDescription }
+            else { threadDrafts[importingThread]?.error = error.localizedDescription }
         }
     }
 
@@ -1002,6 +1045,24 @@ struct ChatView: View {
         return PendingMessageAttachment(
             id: UUID(), data: data, name: name, mime: mime, kind: kind
         )
+    }
+
+    /// A chip that opened a thread on this bot switches this screen in
+    /// place; one that opened a thread on a teammate pushes that chat.
+    private func openThread(_ ref: ThreadRef) {
+        cancelThreadOpen()
+        let shownBotId: String? = current.isBot ? current.id : nil
+        threadOpenTask = Task {
+            let openedThreadId = await session.openThread(ref, shownBotId: shownBotId)
+            guard !Task.isCancelled else { return }
+            threadOpenTask = nil
+            if let openedThreadId { selectedThreadId = openedThreadId }
+        }
+    }
+
+    private func cancelThreadOpen() {
+        threadOpenTask?.cancel()
+        threadOpenTask = nil
     }
 
     private func openLink(_ url: URL, from message: Message) -> OpenURLAction.Result {
@@ -1239,6 +1300,7 @@ struct ChatView: View {
                             .font(.system(size: 17))
                             .padding(.vertical, 11)
                             .focused($composerFocused)
+                            .accessibilityIdentifier("message-input")
                             .submitLabel(.send)
                             // Partial transcripts rebuild from a frozen base;
                             // prevent competing edits without dimming the text.
@@ -1327,6 +1389,8 @@ struct MessageRow: View {
     /// Last bubble of a run from the same side: the one that gets the tail.
     var endsRun = true
     let openLink: (URL, Message) -> OpenURLAction.Result
+    /// Where an "Opened thread" chip goes; nil leaves the chip a receipt.
+    var openThread: ((ThreadRef) -> Void)? = nil
     @EnvironmentObject private var session: Session
     @State private var editingText = ""
     @State private var showingEdit = false
@@ -1455,7 +1519,7 @@ struct MessageRow: View {
                 TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
             }
         case .activity:
-            ActivityChip(tool: message.tool)
+            ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
         case .screen:
             ScreenShot(threadId: chat.threadId, message: message)
         case .unknown:
@@ -1658,14 +1722,33 @@ struct TextBubble: View {
 /// transcript and they are context, not content.
 struct ActivityChip: View {
     let tool: ToolActivity?
+    /// The thread this chip opened, when it opened one.
+    var threadRef: ThreadRef? = nil
+    var openThread: ((ThreadRef) -> Void)? = nil
 
     var body: some View {
         if let tool {
-            SkillExecutionReceiptView(
+            let receipt = SkillExecutionReceiptView(
                 skillName: tool.name,
                 status: tool.ok.map { $0 ? "success" : "error" } ?? "running"
             )
             .padding(.leading, 2)
+
+            if let threadRef, let openThread {
+                // The receipt's own button has nothing to expand here, so the
+                // whole chip is the link to the thread it names.
+                Button {
+                    Haptics.selection()
+                    openThread(threadRef)
+                } label: {
+                    receipt.allowsHitTesting(false)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(tool.name)
+                .accessibilityHint("Opens the thread")
+            } else {
+                receipt
+            }
         }
     }
 }

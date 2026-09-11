@@ -48,6 +48,13 @@ describe("project thread grouping", () => {
     expect(groupThreadTasks(tasks, projects, "report").flatMap((group) => group.tasks.map((task) => task.threadId))).toEqual(["3", "1"]);
     expect(groupThreadTasks(tasks, projects, "missing")).toEqual([]);
   });
+  it("retains persisted folder order and icons without changing thread membership", () => {
+    const reversed = [{ ...projects[1]!, emoji: "🏠" }, projects[0]!];
+    const grouped = groupThreadTasks(tasks, reversed, "");
+    expect(grouped.map((group) => group.project.id)).toEqual(["personal", "work", ""]);
+    expect(grouped[0]?.project.emoji).toBe("🏠");
+    expect(grouped[0]?.tasks.map((task) => task.threadId)).toEqual(["2"]);
+  });
 });
 
 describe("task picker copy", () => {

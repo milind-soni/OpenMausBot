@@ -1646,6 +1646,62 @@ class Session(
         if (_focusedMessageId.value == messageId) _focusedMessageId.value = null
     }
 
+    /**
+     * A tapped "Opened thread #Title on Scout" chip. Lands on that thread by
+     * the route a thread row uses, which only changes what this phone is
+     * looking at — a bot mid-turn keeps working where it was. A thread the
+     * computer no longer has still lands on the bot, with a notice, rather
+     * than nowhere.
+     *
+     * @return the bot pinned to the thread, or to its current thread when the
+     *   thread is gone; null when opening fails or the connection changes.
+     */
+    suspend fun openThread(ref: ThreadRef): Bot? {
+        currentCoroutineContext().ensureActive()
+        val activeClient = client
+        if (activeClient == null) {
+            _actionError.value = "Pair this phone with your computer to open that thread."
+            return null
+        }
+        _actionError.value = null
+        return try {
+            var bot = _state.value.bot(ref.botId)
+            if (bot == null) {
+                val fleet = hydrateFn(activeClient, 50)
+                currentCoroutineContext().ensureActive()
+                if (client !== activeClient) return null
+                _state.update { it.hydrate(fleet) }
+                notificationSink.setBadge(_state.value.unreadCount)
+                bot = _state.value.bot(ref.botId)
+            }
+            var selected = bot
+                ?: throw APIError.Status(404, "That agent no longer exists.")
+            if (selected.threadId != ref.threadId) {
+                try {
+                    selected = activeClient.switchTask(selected.id, ref.threadId)
+                    currentCoroutineContext().ensureActive()
+                    if (client !== activeClient) return null
+                    _state.update { it.apply(Frame.Bot(selected)) }
+                } catch (error: APIError.Status) {
+                    currentCoroutineContext().ensureActive()
+                    if (client !== activeClient) return null
+                    if (error.code != 404) throw error
+                    // The thread may be gone (deleted since the chip was
+                    // written). The bot's current thread, and a word about it,
+                    // beats a dead tap.
+                    _actionError.value = THREAD_GONE_MESSAGE
+                }
+            }
+            selected.forTask(selected.threadId) ?: selected
+        } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            currentCoroutineContext().ensureActive()
+            if (client !== activeClient) return null
+            _actionError.value = error.message
+            null
+        }
+    }
+
     suspend fun createTask(forBot: Bot, title: String?): Bot? {
         val activeClient = client ?: return null
         return try {
@@ -2040,6 +2096,7 @@ class Session(
             "This phone couldn't read its saved connection just now."
         const val SPENT_QR_MESSAGE =
             "That pairing code was already used. Start pairing again on your computer and rescan the new QR code."
+        const val THREAD_GONE_MESSAGE = "That thread is no longer on your computer."
 
         /** High-entropy QR token — distinct from a retryable six-digit code. */
         fun isQrCredential(credential: String): Boolean =

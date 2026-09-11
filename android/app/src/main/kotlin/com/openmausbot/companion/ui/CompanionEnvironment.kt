@@ -130,6 +130,10 @@ class CompanionEnvironment(
     val openCloudDesktop: (URI) -> String?,
     /** Inbound share copied off the sending app's Intent. */
     val shareInbox: ShareInbox,
+    /** Whether [com.openmausbot.companion.lifecycle.AlwaysOnConnectionService] is enabled. */
+    val alwaysOnEnabled: StateFlow<Boolean>,
+    /** Flips the always-on setting and starts/stops the service to match. */
+    val onToggleAlwaysOn: () -> Unit,
 )
 
 val LocalCompanion = staticCompositionLocalOf<CompanionEnvironment> {

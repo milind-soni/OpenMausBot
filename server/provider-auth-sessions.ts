@@ -2,7 +2,7 @@
 // the admin session that started it. Never put its device code on global SSE.
 import type { ProviderAuthenticationStart, ProviderInstance } from "./contracts.ts";
 
-type LoginInstance = Pick<ProviderInstance, "instanceId" | "startAuthentication" | "getAuthentication" | "completeAuthentication" | "cancelAuthentication">;
+type LoginInstance = Pick<ProviderInstance, "instanceId" | "startAuthentication" | "getAuthentication" | "completeAuthentication" | "cancelAuthentication" | "signOut">;
 type Flow = {
   instance: LoginInstance;
   owner: string;
@@ -17,6 +17,10 @@ const failure = (message: string, status: number) => Object.assign(new Error(mes
 
 export class ProviderAuthSessions {
   private readonly flows = new Map<string, Flow>();
+
+  get active(): boolean {
+    return [...this.flows.values()].some((flow) => flow.busy || (!flow.revoked && flow.expiresAt > Date.now()));
+  }
 
   async start(instance: LoginInstance, owner: string): Promise<ProviderAuthenticationStart> {
     if (!instance.startAuthentication) throw failure("Account setup is unavailable for this provider.", 404);
@@ -86,6 +90,27 @@ export class ProviderAuthSessions {
     flow.busy = true;
     try { await flow.instance.cancelAuthentication?.(); }
     finally { flow.busy = false; flow.expiresAt = 0; }
+  }
+
+  /** Remove the server's stored sign-in for this provider. A login another
+   * admin is still completing must not be pulled away underneath them, and
+   * nobody may start one while the credential is being removed. */
+  async signOut(instance: LoginInstance, owner: string): Promise<void> {
+    if (!instance.signOut) throw failure("Sign-out is unavailable for this provider.", 404);
+    const existing = this.flows.get(instance.instanceId);
+    if (existing && (existing.busy || (existing.owner !== owner && existing.expiresAt > Date.now() && !existing.revoked))) {
+      throw failure("A sign-in is in progress. Finish or cancel it in the browser that started it, or wait for it to expire.", 409);
+    }
+    // Reserve the slot like a starting flow: start() answers 409 until we finish.
+    const flow: Flow = { instance, owner, flowId: null, expiresAt: Date.now() + 60_000, busy: true, starting: false, revoked: false };
+    this.flows.set(instance.instanceId, flow);
+    try {
+      // This owner's own leftover flow is theirs to abandon.
+      if (existing) await existing.instance.cancelAuthentication?.();
+      await instance.signOut();
+    } finally {
+      if (this.flows.get(instance.instanceId) === flow) this.flows.delete(instance.instanceId);
+    }
   }
 
   revokeOwner(owner: string): void {

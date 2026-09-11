@@ -88,7 +88,7 @@ function eventName(req: IncomingMessage): string | undefined {
   )?.trim() || undefined;
 }
 
-export function createWebhookIngressHandler(manager: WebhookManager) {
+export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (req.method === "GET" && url.pathname === "/health") {
@@ -98,7 +98,9 @@ export function createWebhookIngressHandler(manager: WebhookManager) {
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
     if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
 
+    let release: (() => void) | undefined;
     try {
+      release = claimRequest?.();
       const pathSecret = match[2] ? decodeURIComponent(match[2]) : "";
       const secret = pathSecret || bearerSecret(req);
       // Reject bad capability URLs before buffering or parsing attacker input.
@@ -136,6 +138,8 @@ export function createWebhookIngressHandler(manager: WebhookManager) {
         });
       }
       return json(res, status, { error: message });
+    } finally {
+      release?.();
     }
   };
 }
@@ -160,11 +164,11 @@ export function advertisedWebhookBase(raw: string): string {
 
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; publicBaseUrl?: string },
+  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
-  const server = createServer(createWebhookIngressHandler(manager));
+  const server = createServer(createWebhookIngressHandler(manager, options.claimRequest));
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => reject(error);
     server.once("error", onError);

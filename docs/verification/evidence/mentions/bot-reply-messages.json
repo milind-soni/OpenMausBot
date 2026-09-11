@@ -1,0 +1,153 @@
+{
+  "channel": {
+    "id": "2ee9e176-5270-4211-9968-af5baa0eef39",
+    "name": "Design review",
+    "memberIds": [
+      "b230497a-074d-48e4-acee-caa187801268",
+      "091fa543-75a2-4070-9d11-ada74913ce8b",
+      "044924fe-bf6c-45b9-89ae-5c8e5646fc83",
+      "a822e390-dd3c-4184-ad15-a107919a12c5"
+    ],
+    "bulletin": "",
+    "defaultResponder": {
+      "kind": "member",
+      "botId": "b230497a-074d-48e4-acee-caa187801268"
+    },
+    "section": null,
+    "directMessage": false,
+    "working": false,
+    "busyBotId": null,
+    "activeTaskId": "203675be-7ee0-4c15-aa4e-cad37837dff5",
+    "tasks": [
+      {
+        "taskId": "203675be-7ee0-4c15-aa4e-cad37837dff5",
+        "title": "@Atlas Please ask the team to review.",
+        "createdAt": 1788791339528,
+        "active": true
+      }
+    ]
+  },
+  "taskId": "203675be-7ee0-4c15-aa4e-cad37837dff5",
+  "messages": [
+    {
+      "id": "85b0a503-0b8c-4d39-8072-255bee664c33",
+      "at": 1788791379440,
+      "role": "user",
+      "kind": "text",
+      "text": "@Atlas Please ask the team to review."
+    },
+    {
+      "id": "43f084a1-dd3a-4767-a4fd-3d39a5812e7d",
+      "at": 1788791379695,
+      "role": "bot",
+      "kind": "text",
+      "text": "@Juniper please review. @調査担当 確認してください。 @Atlas final check.\n\nReverse: @調査担当 then @Juniper.\n\nPlain prefixes: @調査担当者 @everyone調査. Neutral: @everyone.",
+      "from": {
+        "botId": "044924fe-bf6c-45b9-89ae-5c8e5646fc83",
+        "name": "Atlas",
+        "color": "blue"
+      }
+    },
+    {
+      "id": "2418b6f9-6184-4fd8-a49c-942a3e520c9c",
+      "at": 1788791379700,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "044924fe-bf6c-45b9-89ae-5c8e5646fc83",
+        "name": "Atlas",
+        "color": "blue"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    },
+    {
+      "id": "2f612158-90ba-4c93-a37d-79f0838d11c3",
+      "at": 1788791379876,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "b230497a-074d-48e4-acee-caa187801268",
+        "name": "調査担当",
+        "color": "orange"
+      }
+    },
+    {
+      "id": "d910fcb0-fe28-4cf0-beb0-9662b3eb3f5c",
+      "at": 1788791379877,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "b230497a-074d-48e4-acee-caa187801268",
+        "name": "調査担当",
+        "color": "orange"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    },
+    {
+      "id": "83fd838f-a0a3-430b-a426-d3109b046a4e",
+      "at": 1788791380067,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "091fa543-75a2-4070-9d11-ada74913ce8b",
+        "name": "Juniper",
+        "color": "red"
+      }
+    },
+    {
+      "id": "17a9952a-bdf7-4eb7-abf7-8acfdac86f65",
+      "at": 1788791380068,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "091fa543-75a2-4070-9d11-ada74913ce8b",
+        "name": "Juniper",
+        "color": "red"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    },
+    {
+      "id": "f34824e5-3555-4a33-89b9-57cbb07490c4",
+      "at": 1788791380268,
+      "role": "bot",
+      "kind": "text",
+      "text": "hello from fake claude",
+      "from": {
+        "botId": "a822e390-dd3c-4184-ad15-a107919a12c5",
+        "name": "Otto",
+        "color": "green"
+      }
+    },
+    {
+      "id": "f4eff0c9-8a43-4453-8b0a-4d10c6b3c6bc",
+      "at": 1788791380269,
+      "role": "bot",
+      "kind": "activity",
+      "from": {
+        "botId": "a822e390-dd3c-4184-ad15-a107919a12c5",
+        "name": "Otto",
+        "color": "green"
+      },
+      "tool": {
+        "name": "Bash",
+        "ok": true,
+        "spoken": "running a command"
+      }
+    }
+  ],
+  "hasMore": false
+}

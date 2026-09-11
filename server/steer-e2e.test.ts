@@ -137,6 +137,10 @@ posixOnly("mid-turn steering e2e", () => {
       expect(steered.steered).toBe(true);
       // one turn, not two: exactly one reply
       expect(bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.startsWith("reply to:"))).toHaveLength(1);
+      // the tool chip keeps its command after the result settles it — the
+      // completion patch replaces the whole tool object
+      const chip = bot.messages.find((m: any) => m.kind === "activity" && m.tool?.name === "Bash");
+      expect(chip.tool).toMatchObject({ ok: true, summary: "echo hi" });
     },
     40_000,
   );

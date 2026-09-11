@@ -12,7 +12,7 @@
 // reply carries the FULL prompt and whose gate file gives a deterministic
 // busy window — no sleeps anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -121,7 +121,11 @@ case "$*" in
   *" container inspect "*) name=$(cat "$FAKE_DOCKER_DIR/container.name"); sed "s|__NAME__|$name|g" "$FAKE_DOCKER_DIR/container.json.tpl" ;;
   *" image inspect "*) cat "$FAKE_DOCKER_DIR/image.json" ;;
   *" exec "*"--version"*) echo "cua-driver ${CUA_DRIVER_VERSION}" ;;
-  *" exec "*"--screenshot-out-file"*) echo "{}" ;;
+  *" exec "*"--screenshot-out-file"*)
+    : > "$FAKE_DOCKER_DIR/capture-started"
+    while [ -f "$FAKE_DOCKER_DIR/hold-capture" ]; do sleep 0.05; done
+    if [ -f "$FAKE_DOCKER_DIR/fail-capture" ]; then echo "fixture capture failed" >&2; exit 1; fi
+    echo "{}" ;;
   *" exec "*"health_report"*) echo '{"schema_version":"1","overall":"ok","checks":[]}' ;;
   *" exec "*"get_desktop_state"*) echo "{}" ;;
   *" exec "*"base64"*) cat "$FAKE_DOCKER_DIR/screenshot.b64" ;;
@@ -175,6 +179,15 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
 
     writeFileSync(join(fakeBin, "docker"), FAKE_DOCKER, { mode: 0o755 });
     chmodSync(join(fakeBin, "docker"), 0o755);
+    // Only the viewer's local listening socket is simulated; no SSH network
+    // or real VPS is contacted. The provider owns and closes this child.
+    writeFileSync(join(fakeBin, "ssh"), `#!${process.execPath}
+import { createServer } from 'node:net';
+const args = process.argv.slice(2);
+const forward = args[args.indexOf('-L') + 1];
+const port = Number(forward.split(':')[1]);
+createServer(socket => socket.end()).listen(port, '127.0.0.1');
+`, { mode: 0o755 });
     writeFileSync(join(fakeBin, "image.json"), imageInspectJson());
     writeFileSync(join(fakeBin, "container.json.tpl"), containerInspectTemplate());
     const png = Buffer.concat([
@@ -232,6 +245,69 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
     await waitForExit(child, { signal: "SIGTERM" });
     await removeTempDir(home);
   });
+
+  it("shares a canceled preview with retries and opens control without racing destructive actions", async () => {
+    expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud", cloudBackend: "vps" });
+    const fixtureDir = dirname(dockerLog);
+    const hold = join(fixtureDir, "hold-capture");
+    const started = join(fixtureDir, "capture-started");
+    const failed = join(fixtureDir, "fail-capture");
+    const captures = () => readFileSync(dockerLog, "utf8").split("\n").filter(line => line.includes("--screenshot-out-file")).length;
+    const path = `/api/bots/${bot.id}/computer`;
+    let retries: Array<Promise<{ status: number; body: any }>> = [];
+    try {
+      writeFileSync(hold, "hold");
+      rmSync(started, { force: true });
+      const before = captures();
+      const cancel = new AbortController();
+      const first = fetch(`${BASE}${path}/screenshot`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: "{}", signal: cancel.signal,
+      });
+      await until(async () => existsSync(started), "the pending preview");
+      cancel.abort();
+      await expect(first).rejects.toThrow();
+      retries = [api("POST", `${path}/screenshot`, {}), api("POST", `${path}/screenshot`, {})];
+
+      // These must still exclude the capture even after its HTTP client left.
+      for (const action of ["provision", "sleep", "remove"]) {
+        const blocked = await api("POST", `${path}/${action}`, {});
+        expect(blocked.status, action).toBe(409);
+        expect(blocked.body.error).toMatch(/preview.*refreshing/);
+      }
+      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(409);
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "other-vps" } })).status).toBe(409);
+
+      // A preview is not a computer change: opening the existing viewer is
+      // safe, and cannot be rejected merely because a frame is slow.
+      expect((await api("POST", `${path}/control`, { action: "take" })).status).toBe(200);
+      const joined = await api("POST", `${path}/join`, {});
+      expect(joined.status, JSON.stringify(joined.body)).toBe(200);
+      expect(joined.body.joinUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/vnc\.html#/);
+      expect(captures() - before).toBe(1);
+      rmSync(hold, { force: true });
+      for (const result of await Promise.all(retries)) {
+        expect(result.status).toBe(200);
+        expect(result.body).toMatchObject({ format: "png", png: expect.any(String) });
+      }
+      expect(captures() - before).toBe(1);
+
+      // A failed capture must also release its reservation for later retries.
+      writeFileSync(failed, "fail");
+      const failure = await api("POST", `${path}/screenshot`, {});
+      expect(failure.status).toBe(500);
+      expect(failure.body.error).toMatch(/fixture capture failed/);
+      rmSync(failed, { force: true });
+      expect((await api("POST", `${path}/screenshot`, {})).status).toBe(200);
+    } finally {
+      rmSync(hold, { force: true });
+      rmSync(failed, { force: true });
+      await Promise.allSettled(retries);
+      await api("POST", `${path}/viewer-close`, {});
+      await api("POST", `${path}/control`, { action: "release" });
+    }
+  }, 30_000);
 
   it(
     "mounts the VPS computer on the turn, tells the model, reuses without provisioning, and clears the claim",

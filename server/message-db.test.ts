@@ -6,17 +6,19 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import {
-  closeMessageDb,
+import { closeMessageDb,
   deleteThread,
+  indexMemoryFile,
+  indexedMemoryFiles,
   insertMessage,
   readMessageText,
+  recallMemory,
+  removeMemoryFile,
   readThread,
   recallMessages,
   searchMessages,
   setActiveLeaf,
-  updateMessage,
-} from "./message-db.ts";
+  updateMessage, describeMissingFts5 } from "./message-db.ts";
 import { withPeerProvenance } from "./peer-provenance.ts";
 import { Store, type Message } from "./store.ts";
 import type { ModelSelection } from "./contracts.ts";
@@ -199,6 +201,29 @@ describe("message-db", () => {
     expect(readMessageText("dm", "m-bot")!.peer).toBeUndefined();
   });
 
+  it("memory recall ranks one bot's files, names the file, and never shows another bot's", () => {
+    indexMemoryFile("bot-a", "MEMORY.md", "- 2026-09-01 · from chat \"Audit\" · the site audit covers broken links monthly\n", { mtimeMs: 1000.7, bytes: 70 });
+    indexMemoryFile("bot-a", "memory/log/2026-09-01.md", "- 10:00 · audit run, three broken links found\n", { mtimeMs: 2000, bytes: 44 });
+    indexMemoryFile("bot-a", "memory/deploys.md", "railway up from main\n", { mtimeMs: 3000, bytes: 21 });
+    indexMemoryFile("bot-b", "MEMORY.md", "- broken links are bot-b's secret audit\n", { mtimeMs: 4000, bytes: 40 });
+    const hits = recallMemory("broken links audit", "bot-a");
+    expect(hits.map((hit) => hit.file).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-01.md"]);
+    expect(hits.find((hit) => hit.file === "MEMORY.md")?.snippet).toContain("[audit] covers [broken] [links]");
+    expect(hits.find((hit) => hit.file === "MEMORY.md")?.at).toBe(1000);
+    // the other bot's file is not a lower result; it is no result
+    expect(recallMemory("broken links audit", "bot-b").map((hit) => hit.file)).toEqual(["MEMORY.md"]);
+    expect(recallMemory("secret", "bot-a")).toEqual([]);
+    expect(recallMemory("", "bot-a")).toEqual([]);
+    // an upsert re-indexes in place; a removal takes the FTS rows with it
+    indexMemoryFile("bot-a", "memory/deploys.md", "fly deploy from main\n", { mtimeMs: 5000, bytes: 21 });
+    expect(recallMemory("railway", "bot-a")).toEqual([]);
+    expect(recallMemory("fly deploy", "bot-a").map((hit) => hit.file)).toEqual(["memory/deploys.md"]);
+    expect(indexedMemoryFiles("bot-a")).toEqual(expect.arrayContaining([{ path: "memory/deploys.md", mtimeMs: 5000, bytes: 21 }]));
+    removeMemoryFile("bot-a", "memory/deploys.md");
+    expect(recallMemory("fly deploy", "bot-a")).toEqual([]);
+    expect(indexedMemoryFiles("bot-a").map((file) => file.path).sort()).toEqual(["MEMORY.md", "memory/log/2026-09-01.md"]);
+  });
+
   it("recall indexes rows that predate the index", () => {
     // simulate a database written before messages_fts existed
     insertMessage("t-old", msg("m1", "legacy row about the quarterly forecast"));
@@ -271,5 +296,19 @@ describe("message-db", () => {
     expect(path.at(-1)?.text).toBe("edited");
     // both branches survive in the tree
     expect(reloaded.messagesFor(bot.threadId).filter((m) => m.parentId === first.parentId)).toHaveLength(2);
+  });
+});
+
+describe("describeMissingFts5", () => {
+  it("turns SQLite's bare module error into one that names the fix", () => {
+    const described = describeMissingFts5(new Error("no such module: fts5"));
+    expect(described?.message).toMatch(/Node 24/);
+    expect(described?.message).toContain(process.version);
+    expect(described?.message).toContain("no such module: fts5");
+  });
+
+  it("leaves every other error alone", () => {
+    expect(describeMissingFts5(new Error("database is locked"))).toBeNull();
+    expect(describeMissingFts5("disk I/O error")).toBeNull();
   });
 });

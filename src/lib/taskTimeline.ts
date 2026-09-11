@@ -1,3 +1,5 @@
+import { redactSecretsInText } from "../../server/redact.js";
+
 /** The persisted message fields this pure projection needs. Keeping this
  * structural avoids pulling the renderer's TSX store into server tests. */
 export interface TimelineMessage {
@@ -5,7 +7,7 @@ export interface TimelineMessage {
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
   text?: string;
-  tool?: { name: string; ok?: boolean };
+  tool?: { name: string; summary?: string; ok?: boolean };
   png?: string;
   at: number;
 }
@@ -16,6 +18,8 @@ export interface TimelineEvent {
   label: string;
   state: "running" | "complete" | "failed" | "observed";
   kind: "task" | "tool" | "screen" | "result";
+  /** Recorded command preview, not reconstructed input or tool output. */
+  command?: string;
 }
 
 /** Turn an already-persisted transcript into a compact, honest timeline. It
@@ -39,7 +43,8 @@ export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
       events.push({
         id: message.id,
         at: message.at,
-        label: failed ? message.tool.name.replace(/^error:\s*/i, "") : message.tool.name,
+        label: redactSecretsInText(failed ? message.tool.name.replace(/^error:\s*/i, "") : message.tool.name),
+        ...(message.tool.summary ? { command: redactSecretsInText(message.tool.summary) } : {}),
         // An activity is appended at tool start and patched with its outcome.
         // Until that patch arrives, do not imply that the action succeeded.
         state: failed ? "failed" : message.tool.ok === true ? "complete" : "running",
@@ -52,4 +57,12 @@ export function timelineEvents(messages: TimelineMessage[]): TimelineEvent[] {
     }
   }
   return events;
+}
+
+/** Export only the displayed activity, never chat text or raw provider data.
+ * Apply the shared scrub again for older persisted messages. */
+export function runLogText(events: TimelineEvent[]): string {
+  return redactSecretsInText(events.map((event) =>
+    `[${new Date(event.at).toISOString()}] ${event.state} · ${event.label}${event.command ? `\n  ${event.command}` : ""}`,
+  ).join("\n"));
 }

@@ -107,7 +107,11 @@ describe("routine delegation through the isolated harness", () => {
     evidence.push({ deniedHandoffResumed: true, transcript });
   }, 45_000);
 
-  it("charges a logical wake once while a full bot retries after unrelated completions", async () => {
+  it.each([
+    { capacity: 3, resume: "completion" },
+    { capacity: 1, resume: "raise" },
+  ])("charges a logical wake once at capacity $capacity, then resumes on $resume", async ({ capacity, resume }) => {
+    await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: capacity } });
     writeFileSync(join(fixture.info.dataDir, "gate-peer"), "hold the delegated peer");
     const run = await start();
     await delegate(run.threadId);
@@ -118,7 +122,7 @@ describe("routine delegation through the isolated harness", () => {
     // The source thread is idle, but startTurn's later bot-wide admission
     // check rejects its wake. Keep that condition deterministic across drains.
     const occupiedThreads: string[] = [];
-    for (let index = 0; index < 3; index++) {
+    for (let index = 0; index < capacity; index++) {
       const { task } = await api("POST", `/api/bots/${source.id}/tasks`, { title: `Occupied ${index}` });
       occupiedThreads.push(task.threadId);
       await api("POST", `/api/bots/${source.id}/messages`, { threadId: task.threadId, text: "Hold this task open." });
@@ -141,10 +145,15 @@ describe("routine delegation through the isolated harness", () => {
       expect((await runState(run.id)).status).toBe("waiting");
     }
 
-    finish(occupiedThreads[0]);
+    if (resume === "raise") await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: capacity + 1 } });
+    else finish(occupiedThreads[0]);
     await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
     expect((await runState(run.id)).output).toContain("[A delegated task just completed]");
-    evidence.push({ busyRetriesPreservedWakeBudget: true, runId: run.id, transcript: await messages(run.threadId) });
+    if (resume === "raise") {
+      const bot = (await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === source.id);
+      expect(bot.tasks.find((task: any) => task.threadId === occupiedThreads[0]).busy).toBe(true);
+    }
+    evidence.push({ busyRetriesPreservedWakeBudget: true, capacity, resume, runId: run.id, transcript: await messages(run.threadId) });
   }, 60_000);
 
   it("resumes a new user's delegation on a completed routine's execution thread", async () => {

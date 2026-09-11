@@ -107,6 +107,25 @@ class TaskRulesTest {
     }
 
     @Test
+    fun `thread pickers hide only marked bot executions and preserve direct switching`() {
+        val legacy = task("legacy", "Routine: old run")
+        val results = task("results", "Brief results")
+        val execution = task("run-thread").copy(routineRunId = "run-1", busy = true)
+        val subject = bot(listOf(legacy, results, execution), current = "results", busy = true)
+
+        assertEquals(listOf(legacy, results), TaskRules.tasks(subject))
+        assertEquals(listOf(legacy, results), TaskRules.tasks(Chat.BotChat(subject)))
+        assertEquals(3, subject.tasks?.size)
+        assertTrue(TaskRules.canCreate(subject))
+        assertTrue(TaskRules.canSwitch(execution, subject))
+        assertFalse(TaskRules.canDelete(results, subject.copy(tasks = listOf(results, execution))))
+
+        // The wire type is shared, but routine execution markers are bot-only.
+        val group = Chat.RoomChat(room().copy(tasks = listOf(legacy, execution)))
+        assertEquals(listOf(legacy, execution), TaskRules.tasks(group))
+    }
+
+    @Test
     fun `room tasks use the same navigation rules as bot tasks`() {
         val tasks = listOf(task("t1"), task("t2"))
         val room = Chat.RoomChat(room().copy(threadId = "t1", tasks = tasks))

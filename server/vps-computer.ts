@@ -54,6 +54,17 @@ const MANAGED_VPS_CONTAINER_NAME = /^openmausbot-vps-[a-z0-9]{1,12}-[a-f0-9]{12}
 const IMAGE_ID = /^sha256:[a-f0-9]{64}$/i;
 const PIDS_LIMIT = 512;
 const SCREENSHOT_PATH = "/tmp/openmausbot-vps-preview.png";
+// The Cua XFCE base includes Pillow in its existing Python environment. Keep
+// this panel-only conversion in the transfer exec: no extra SSH round trip,
+// image rebuild, driver settings change, or second temporary image. Older
+// containers without Pillow can still return the original PNG.
+const SCREENSHOT_TRANSFER = `/opt/venv/bin/python -I -c 'import base64, io, sys
+from PIL import Image
+with Image.open(sys.argv[1]) as image:
+    image.thumbnail((1280, 1280))
+    output = io.BytesIO()
+    image.convert("RGB").save(output, format="JPEG", quality=70)
+sys.stdout.write(base64.b64encode(output.getvalue()).decode("ascii"))' "$1" 2>/dev/null || { base64 < "$1" | tr -d "\\n"; }`;
 const INTERNAL_VIEWER_PORT = 6901;
 const VIEWER_VERSION = "1";
 const lifecycleLocks = new Map<string, Promise<void>>();
@@ -81,6 +92,10 @@ const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
 // pattern as container-computer's screenshotStatusCache, and the same TTL.
 const STATUS_CACHE_TTL_MS = 10_000;
 const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>();
+const SCREENSHOT_BUDGET_MS = 45_000;
+const SCREENSHOT_CLEANUP_BUDGET_MS = 10_000;
+type VpsScreenshot = { png: string; format: "png" | "jpeg" };
+const pendingScreenshots = new Map<string, Promise<VpsScreenshot>>();
 const viewerConnections = new Map<string, { privateIp: string; password: string }>();
 const desktopTunnels = new Map<
   string,
@@ -620,6 +635,9 @@ export async function vpsComputerStatus(
   const key = vpsLockKey(cfg, botId);
   const cacheable = runner === defaultRunner && key !== null;
   if (cacheable) {
+    // A capture already checks this exact target. Let it finish instead of
+    // opening another six SSH connections while its readiness check is cold.
+    await pendingScreenshots.get(key)?.catch(() => {});
     const cached = statusCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.status;
   }
@@ -1240,13 +1258,33 @@ export async function vpsComputerScreenshot(
   cfg: AppConfig,
   botId: string,
   runner: VpsCommandRunner = defaultRunner,
-): Promise<{ png: string; format: "png" | "jpeg" }> {
+): Promise<VpsScreenshot> {
   cfg = snapshotVpsConfig(cfg);
   const alias = vpsSshAlias(cfg);
   if (!alias) throw Object.assign(new Error("VPS is not configured"), { status: 409 });
   const key = `${alias}:${vpsContainerName(botId)}`;
+  const pending = pendingScreenshots.get(key);
+  if (pending) return pending;
   const cacheable = runner === defaultRunner;
-  return withVpsLifecycleLock(key, async () => {
+  const deadline = Date.now() + SCREENSHOT_BUDGET_MS;
+  const workDeadline = deadline - SCREENSHOT_CLEANUP_BUDGET_MS;
+  let budgetExpired = false;
+  const timeoutError = () => Object.assign(new Error("The VPS screen preview timed out. Retry the preview when the connection recovers."), { status: 504 });
+  // Clamp each command and wait through the runner's termination grace,
+  // rather than racing its promise and releasing the lock before cleanup.
+  const boundedRunner: VpsCommandRunner = async (args, options = {}) => {
+    const remaining = workDeadline - Date.now() - COMMAND_TIMEOUT_KILL_GRACE_MS;
+    if (remaining <= 0) { budgetExpired = true; throw timeoutError(); }
+    try {
+      const result = await runner(args, { ...options, timeoutMs: Math.min(options.timeoutMs ?? 120_000, remaining) });
+      if (Date.now() >= workDeadline) { budgetExpired = true; throw timeoutError(); }
+      return result;
+    } catch (error) {
+      if (Date.now() >= workDeadline - COMMAND_TIMEOUT_KILL_GRACE_MS) budgetExpired = true;
+      throw budgetExpired ? timeoutError() : error;
+    }
+  };
+  const capture = withVpsLifecycleLock(key, async () => {
     // Same shape as containerComputerScreenshot's screenshotStatusCache: the
     // poller runs every few seconds, and re-verifying the whole container
     // between frames multiplied every frame's SSH cost.
@@ -1254,12 +1292,17 @@ export async function vpsComputerScreenshot(
     const status =
       cached && cached.expiresAt > Date.now()
         ? cached.status
-        : await computeVpsComputerStatus(cfg, botId, runner);
+        : await computeVpsComputerStatus(cfg, botId, boundedRunner);
+    // Status converts transport errors into displayable state. A deadline is
+    // still a timeout, not evidence that this container became incompatible.
+    if (budgetExpired) {
+      if (cacheable) statusCache.delete(key);
+      throw timeoutError();
+    }
     if (!status.ready) {
       if (cacheable) statusCache.delete(key);
       throw Object.assign(new Error(status.problem ?? "The VPS computer is not ready"), { status: 409 });
     }
-    if (cacheable) statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
     const containerRef = status.container_id ?? status.container_name;
     // The ref goes straight into docker argv, and a cached status is one
     // more step removed from the inspect that produced it — revalidate the
@@ -1267,8 +1310,9 @@ export async function vpsComputerScreenshot(
     if (!CONTAINER_ID.test(containerRef) && !CONTAINER_NAME.test(containerRef)) {
       throw Object.assign(new Error("the VPS container reference is malformed"), { status: 409 });
     }
+    let frame: VpsScreenshot;
     try {
-      await runner(
+      await boundedRunner(
         vpsDockerArgs(
           alias,
           cuaExecArgs(
@@ -1278,29 +1322,39 @@ export async function vpsComputerScreenshot(
         ),
         { timeoutMs: 30_000 },
       );
-      const encoded = (await runner(vpsDockerArgs(alias, [
+      const encoded = (await boundedRunner(vpsDockerArgs(alias, [
         "exec",
         "-u",
         "cua",
         "-e",
         "HOME=/home/cua",
         containerRef,
-        "base64",
-        "-w0",
+        "sh",
+        "-c",
+        SCREENSHOT_TRANSFER,
+        "openmausbot-preview",
         SCREENSHOT_PATH,
       ]), { timeoutMs: 30_000 })).stdout.trim();
       const checked = wholeScreenshot(Buffer.from(encoded, "base64"));
       if (!checked.ok) throw Object.assign(new Error("Cua Driver returned an incomplete VPS screenshot"), { status: 502 });
-      return { png: encoded, format: checked.mime === "image/jpeg" ? "jpeg" : "png" };
+      frame = { png: encoded, format: checked.mime === "image/jpeg" ? "jpeg" : "png" };
     } catch (error) {
       // The failure may mean the world changed (container stopped, link
       // dropped); a cached "ready" would keep the poller failing for a TTL.
       if (cacheable) statusCache.delete(key);
       throw error;
     } finally {
-      await runner(vpsDockerArgs(alias, ["exec", "-u", "cua", containerRef, "rm", "-f", SCREENSHOT_PATH]), {
-        timeoutMs: 10_000,
+      const cleanupMs = Math.min(5_000, deadline - Date.now() - COMMAND_TIMEOUT_KILL_GRACE_MS);
+      if (cleanupMs > 0) await runner(vpsDockerArgs(alias, ["exec", "-u", "cua", containerRef, "rm", "-f", SCREENSHOT_PATH]), {
+        timeoutMs: cleanupMs,
       }).catch(() => {});
     }
+    // Start the TTL after transfer and cleanup; a slow but healthy frame must
+    // not return with its own readiness cache already expired.
+    if (cacheable) statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
+    return frame;
   });
+  pendingScreenshots.set(key, capture);
+  try { return await capture; }
+  finally { if (pendingScreenshots.get(key) === capture) pendingScreenshots.delete(key); }
 }

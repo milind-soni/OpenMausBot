@@ -108,7 +108,7 @@ posixOnly("routine failure notification wiring", () => {
   });
 
   it(
-    "emits one routine-failed notification for the detached task and no generic done notification",
+    "emits one routine-failed notification linking the results card and no generic done notification",
     async () => {
       const listed = await api("GET", "/api/bots");
       const bot = listed.body.bots[0];
@@ -157,8 +157,17 @@ posixOnly("routine failure notification wiring", () => {
         expect(receipt).toMatchObject({
           status: "failed",
           botId: bot.id,
-          threadId: frame.notification.threadId,
+          resultsThreadId: frame.notification.threadId,
         });
+        expect(receipt.threadId).not.toBe(frame.notification.threadId);
+        const report = await api("GET", `/api/threads/${frame.notification.threadId}/messages?limit=20`);
+        expect(report.status).toBe(200);
+        expect(report.body.messages.find((message: any) => message.routineRun?.runId === receipt.id)?.routineRun)
+          .toMatchObject({ status: "failed", executionThreadId: receipt.threadId });
+        const currentBot = (await api("GET", "/api/bots")).body.bots.find((candidate: any) => candidate.id === bot.id);
+        expect(currentBot.tasks.find((task: any) => task.threadId === receipt.resultsThreadId).routineRunId).toBeUndefined();
+        expect(currentBot.tasks.find((task: any) => task.threadId === receipt.threadId))
+          .toMatchObject({ routineRunId: receipt.id, unread: false });
 
         // A unique bot patch is an SSE ordering barrier: by the time it is
         // observed, every notification emitted by the failed turn is already
@@ -172,7 +181,7 @@ posixOnly("routine failure notification wiring", () => {
           stream.frames
             .filter(
               (candidate) =>
-                candidate.kind === "notify" && candidate.notification?.threadId === frame.notification.threadId,
+                candidate.kind === "notify" && candidate.notification?.botId === bot.id,
             )
             .map((candidate) => candidate.notification.kind),
         ).toEqual(["routine-failed"]);

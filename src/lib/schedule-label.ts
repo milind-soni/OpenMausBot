@@ -33,10 +33,30 @@ export function intervalLabel(minutes: number): string {
   return `Every ${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
 }
 
+function intervalRestrictions(schedule: Extract<RoutineSchedule, { type: "interval" }>): string[] {
+  const details: string[] = [];
+  if (schedule.weekdays && schedule.weekdays.length < 7) {
+    details.push(schedule.weekdays.join(",") === "1,2,3,4,5"
+      ? "weekdays"
+      : schedule.weekdays.map((day) => DAY_NAMES[day]).join(", "));
+  }
+  if (schedule.window) {
+    const wallTime = (time: string) => {
+      const [hour, minute] = time.split(":").map(Number);
+      return niceTime(new Date(2000, 0, 1, hour, minute).getTime());
+    };
+    details.push(`${wallTime(schedule.window.start)}–${wallTime(schedule.window.end)}`);
+  }
+  if (schedule.endsAt != null) {
+    details.push(`until ${new Date(schedule.endsAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}`);
+  }
+  return details;
+}
+
 export function scheduleLabel(schedule: RoutineSchedule | { type: "once"; at: number } | { type: "daily"; time: string; weekdays: number[] }): string {
   if (schedule.type === "once") return `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
   if (schedule.type === "interval") {
-    return `${intervalLabel(schedule.everyMinutes)} · starting ${niceDate(schedule.anchorAt)}, ${niceTime(schedule.anchorAt)}`;
+    return [intervalLabel(schedule.everyMinutes), ...intervalRestrictions(schedule)].join(" · ");
   }
   const days = schedule.weekdays;
   const label = days.length === 7
@@ -57,9 +77,10 @@ export function scheduleSentence(schedule: RoutineSchedule): string {
     // Replace "N min" with "N minutes" (avoid replacing if already "minutes")
     const withMinutes = lowercase.replace(/(\d+) min(?!ute)/g, "$1 minutes");
     // Replace "1 hr" with "1 hour" and "N hr" with "N hours" (but leave "every hour" unchanged)
-    return withMinutes.replace(/(\d+) hr(?!our)/g, (_match, num) => {
+    const cadence = withMinutes.replace(/(\d+) hr(?!our)/g, (_match, num) => {
       return num === "1" ? "1 hour" : `${num} hours`;
     });
+    return [cadence, ...intervalRestrictions(schedule)].join(" · ");
   }
   if (schedule.type === "once") {
     return `once on ${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;

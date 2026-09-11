@@ -1,7 +1,6 @@
-# Sign-off and licensing checks for outside pull requests (LICENSING.md):
-# a DCO sign-off on every commit, and the CLA when enterprise/ changes.
-# Both run on pull_request_target so they can comment and set statuses on
-# fork pull requests; neither checks out or executes pull-request code.
+# CLA checks for outside pull requests that change enterprise/ (LICENSING.md).
+# Runs on pull_request_target so it can comment and set statuses on fork pull
+# requests; it never checks out or executes pull-request code.
 name: contributors
 
 on:
@@ -13,22 +12,6 @@ on:
 permissions: {}
 
 jobs:
-  dco:
-    name: DCO sign-off
-    if: github.event_name == 'pull_request_target' && !contains(fromJSON('["OWNER","MEMBER"]'), github.event.pull_request.author_association)
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      # The base branch is checked out (trusted); the pull request's commits
-      # are fetched as refs and only their metadata is read.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - run: git fetch --no-tags origin "pull/${{ github.event.pull_request.number }}/head:refs/remotes/pr/head"
-      - run: node scripts/check-dco.mjs "origin/${{ github.event.pull_request.base.ref }}" refs/remotes/pr/head
-
   cla:
     name: CLA for enterprise/ changes
     if: >-
@@ -65,6 +48,6 @@ jobs:
             OpenMausBot Enterprise License (see LICENSING.md). Before it can be merged,
             please sign the [CLA](https://github.com/milind-soni/OpenMausBot/blob/main/CLA.md)
             by commenting exactly: **I have read the CLA Document and I hereby sign the CLA**.
-            Changes outside `enterprise/` need only a DCO sign-off (`git commit -s`).
+            Changes outside `enterprise/` do not require a CLA or DCO sign-off.
           custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
           custom-allsigned-prcomment: 'Thank you: the CLA is signed for everyone who changed `enterprise/` here.'

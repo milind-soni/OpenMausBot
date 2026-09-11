@@ -12,7 +12,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 afterEach(() => vi.unstubAllGlobals());
 
-function render(authenticated: boolean): string {
+function render(authenticated: boolean, options: { email?: string; signOut?: boolean; assigned?: boolean } = {}): string {
   vi.stubGlobal("window", {});
   vi.stubGlobal("navigator", { userAgent: "Linux" });
   fixture.instances = [{
@@ -20,11 +20,12 @@ function render(authenticated: boolean): string {
     driverKind: "codexAgent",
     displayName: "Codex",
     cliDefault: "codex",
-    snapshot: { state: "available", authenticated },
+    snapshot: { state: "available", authenticated, ...(options.email ? { account: { email: options.email } } : {}) },
     models: { default: "model", options: [] },
-    authentication: { method: "device-code" },
+    authentication: { method: "device-code", ...(options.signOut ? { signOut: true } : {}) },
     install: { signInCommand: "codex login" },
   }];
+  fixture.bots = options.assigned ? [{ modelSelection: { instanceId: "codex" } } as Bot] : [];
   return renderToStaticMarkup(createElement(EnginesSettings));
 }
 
@@ -37,6 +38,65 @@ describe("Settings → Engines → Codex", () => {
     const html = render(true);
     expect(html).toContain("ChatGPT connected on this server");
     expect(html).not.toContain("Connect ChatGPT");
+    expect(html).not.toContain("Sign out of ChatGPT");
+  });
+
+  it("names the connected account and offers sign-out only when the server supports it", () => {
+    const html = render(true, { email: "ada@example.test", signOut: true });
+    expect(html).toContain("ada@example.test");
+    expect(html).toContain("Sign out of ChatGPT");
+    expect(html).toContain("Stop running Codex tasks before switching accounts");
+    expect(html).toContain("Check account");
+    expect(html).not.toContain("Connect ChatGPT");
+    expect(html).not.toContain("codex logout");
+    expect(render(true, { email: "ada@example.test" })).not.toContain("Sign out of ChatGPT");
+    expect(render(false, { signOut: true })).not.toContain("Sign out of ChatGPT");
+  });
+
+  it("names affected bots without promising to cancel their running tasks", () => {
+    const html = render(true, { signOut: true, assigned: true });
+    expect(html).toContain("1 bot(s) use this Codex connection");
+    expect(html).toContain("Running tasks are not cancelled by signing out");
+    expect(html).not.toContain("will pause");
+    expect(render(true, { signOut: true })).not.toContain("bot(s) use this Codex connection");
+  });
+});
+
+describe("Settings → Engines → setup cards", () => {
+  it("preserves one-click server installs and updates inside engine cards", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    fixture.instances = [{
+      instanceId: "kimi", displayName: "Kimi", driverKind: "kimiAgent", cliDefault: "kimi",
+      snapshot: { state: "unavailable" }, models: { default: "model", options: [] },
+      install: { server: { package: "kimi-fixture" }, command: { linux: "npm install -g kimi-fixture" } },
+    }];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Install Kimi on this server");
+    fixture.instances[0].snapshot = {
+      state: "available", authenticated: true,
+      update: { title: "Kimi update available", message: "A newer version is available.", command: "npm install -g kimi-fixture@latest" },
+    };
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("Update Kimi on this server");
+    expect(html).not.toContain("Install Kimi on this server");
+  });
+
+  it("exposes managed Antigravity setup and keeps custom engines free of cloud sign-in", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    fixture.instances = [{
+      instanceId: "agy", displayName: "Antigravity", driverKind: "antigravityAgent", cliDefault: "agy",
+      snapshot: { state: "available", authenticated: false }, models: { default: "model", options: [] },
+      install: { managed: { label: "Install Antigravity", downloadBytes: 10 } },
+    }];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("Sign in with Google");
+    expect(html).toContain("Set up");
+    expect(html).toContain("CLI path and updates");
+    fixture.instances[0].access = "custom";
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("Sign in with Google");
   });
 });
 
@@ -93,6 +153,30 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(markup).toContain("Use PowerShell for this command.");
     expect(markup).toContain("Normal Claude configuration");
     expect(markup).toMatch(/placeholder="Normal Claude configuration"[^>]*value=""/);
+  });
+
+  it("offers Claude sign-out only for a signed-in account the server can sign out", () => {
+    const hosted = { ...claude(true), authentication: { method: "paste-code" as const, signOut: true } };
+    const html = renderClaude(hosted);
+    expect(html).toContain("Sign out of Claude");
+    expect(html).toContain("different Claude subscription");
+    expect(html).not.toContain("claude auth logout");
+    expect(renderClaude(claude(true))).not.toContain("Sign out of Claude");
+    expect(renderClaude({ ...claude(false), authentication: { method: "paste-code" as const, signOut: true } })).not.toContain("Sign out of Claude");
+    expect(renderClaude(hosted, true)).toContain("1 bot(s) use this account");
+    expect(renderClaude(hosted, true)).toContain("Running tasks are not cancelled by signing out");
+    expect(html).toContain("Stop running Claude tasks before switching accounts");
+    expect(html).not.toContain("pause");
+  });
+
+  it("names the workspace API key instead of a person and offers no sign-out for it", () => {
+    const keyed = claude(true);
+    keyed.snapshot = { state: "available", authenticated: true, account: { method: "api-key" } };
+    keyed.authentication = { method: "paste-code", signOut: true };
+    const html = renderClaude(keyed);
+    expect(html).toContain("workspace API key");
+    expect(html).not.toContain("work@example.test");
+    expect(html).not.toContain("Sign out of Claude");
   });
 
   it("protects the default and assigned accounts and explains credential preservation", () => {

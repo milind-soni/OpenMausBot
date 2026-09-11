@@ -16,7 +16,7 @@ object TaskRules {
 
     /** The line that tells a task apart from a routine. */
     const val CONTEXT_FOOTER =
-        "A thread is one conversation and result. Routines create fresh threads on a schedule."
+        "A thread is one conversation and result. Each routine keeps its results in one thread."
 
     /** The agent's job, or what this sheet is for when it has none. */
     fun subtitle(bot: Bot): String = bot.title.ifEmpty { "Agent threads" }
@@ -26,7 +26,8 @@ object TaskRules {
         is Chat.RoomChat -> "Group threads"
     }
 
-    fun tasks(bot: Bot): List<BotTask> = bot.tasks.orEmpty()
+    /** Filter navigation only; full task state still resolves run logs and approvals. */
+    fun tasks(bot: Bot): List<BotTask> = bot.tasks.orEmpty().filter { it.routineRunId == null }
 
     fun tasks(chat: Chat): List<BotTask> = when (chat) {
         is Chat.BotChat -> tasks(chat.bot)
@@ -40,7 +41,7 @@ object TaskRules {
     fun isCurrent(task: BotTask, chat: Chat): Boolean = task.threadId == chat.threadId
 
     /** New desktops expose independent task activity; older ones serialize the bot. */
-    private fun independent(bot: Bot): Boolean = tasks(bot).any { it.busy != null }
+    private fun independent(bot: Bot): Boolean = bot.tasks.orEmpty().any { it.busy != null }
 
     fun canCreate(bot: Bot): Boolean = independent(bot) || bot.busy != true
 

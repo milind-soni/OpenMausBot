@@ -9,6 +9,9 @@ const execute = promisify(execFile);
 const MAX_FRAME = 3 * 1024 * 1024;
 const MAX_BUFFER = 4 * 1024 * 1024;
 const HEARTBEAT_MS = 10_000;
+// The native press resolver supplies the virtual key codes and Enter/Tab text
+// that its raw input_keyboard relay omits. Keep unknown keys literal.
+const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 
 export class BrowserLiveError extends Error {
   readonly status: number;
@@ -270,20 +273,22 @@ export class BrowserLive {
     if (!viewer.port) throw new BrowserLiveError("The browser stream is not connected.", 409);
     let command: ObjectValue;
     const { type, eventType, ...fields } = message;
+    const key = String(fields.code || fields.key);
     const shortcut = Number(fields.modifiers) > 0 && !["Alt", "Control", "Meta", "Shift"].includes(String(fields.key))
       && !(fields.modifiers === 8 && text(fields.key, 64) && [...fields.key].length === 1);
-    if (type === "input_keyboard" && eventType === "keyUp" && shortcut) return; // press already releases the chord.
+    // press already released the key. Match raw held keys, not the modifiers
+    // on keyUp: they may have changed, or blur may flush releases with zero.
+    if (type === "input_keyboard" && eventType === "keyUp" && !viewer.pressedKeys.has(key)) return;
     if (type === "input_mouse") command = { action: "input_mouse", type: eventType, ...fields };
     else if (eventType === "char") command = { action: "keyboard", subaction: "insertText", text: fields.text };
-    else if (eventType === "keyDown" && shortcut) {
-      // The native input_keyboard handler omits CDP modifiers. Its press
-      // action resolves chords and awaits the complete key-down/up pair.
+    else if (eventType === "keyDown" && (shortcut || DISCRETE_KEYS.has(String(fields.key)))) {
+      // press resolves virtual key codes, required text and modifiers, and
+      // acknowledges the complete key-down/up pair before hand-back.
       const modifiers = fields.modifiers as number;
       const chord = [[1, "Alt"], [2, "Control"], [4, "Meta"], [8, "Shift"]] as const;
       command = { action: "press", key: [...chord.filter(([bit]) => modifiers & bit).map(([, key]) => key), fields.key].join("+") };
     } else command = { action: "input_keyboard", type: eventType, key: fields.key,
       ...(fields.code === undefined ? {} : { code: fields.code }), ...(fields.text === undefined ? {} : { text: fields.text }) };
-    const key = String(fields.code || fields.key);
     if (command.action === "input_keyboard" && eventType === "keyDown") {
       if (viewer.pressedKeys.size >= 64 && !viewer.pressedKeys.has(key)) throw new BrowserLiveError("Too many keys are held. Restart the browser before continuing.", 409);
       viewer.pressedKeys.add(key);
@@ -304,7 +309,7 @@ export class BrowserLive {
         chunks.push(chunk);
       }
       if (object(JSON.parse(Buffer.concat(chunks).toString("utf8")))?.success !== true) throw new Error("input failed");
-      if (command.action === "input_keyboard" && eventType === "keyUp") viewer.pressedKeys.delete(key);
+      if (command.action === "press" || (command.action === "input_keyboard" && eventType === "keyUp")) viewer.pressedKeys.delete(key);
       if (type === "input_mouse" && eventType === "mouseReleased") viewer.pressedButtons.delete(String(fields.button));
     } catch { throw new BrowserLiveError("The browser could not confirm this input. Restart the browser before continuing.", 503); }
   }

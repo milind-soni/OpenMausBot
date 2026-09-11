@@ -12,6 +12,7 @@ function fixture() {
     getAuthentication: vi.fn(async () => auth),
     cancelAuthentication: vi.fn(async () => {}),
     completeAuthentication: vi.fn(async () => {}),
+    signOut: vi.fn(async () => {}),
   };
   return { sessions: new ProviderAuthSessions(), instance, auth };
 }
@@ -129,5 +130,40 @@ describe("provider login ownership", () => {
     await sessions.start(instance, "owner");
     sessions.clear();
     await expect(sessions.status("codex", "owner", "random-flow")).rejects.toMatchObject({ status: 404 });
+  });
+});
+
+describe("provider sign-out", () => {
+  it("never pulls away a sign-in another admin is completing", async () => {
+    const { sessions, instance } = fixture();
+    await sessions.start(instance, "owner");
+    await expect(sessions.signOut(instance, "other")).rejects.toMatchObject({ status: 409 });
+    expect(instance.signOut).not.toHaveBeenCalled();
+    // The admin who started the flow may abandon it and sign out.
+    await sessions.signOut(instance, "owner");
+    expect(instance.cancelAuthentication).toHaveBeenCalledOnce();
+    expect(instance.signOut).toHaveBeenCalledOnce();
+    await expect(sessions.status("codex", "owner", "random-flow")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("holds new sign-ins until the credential is removed", async () => {
+    const { sessions, instance } = fixture();
+    let done!: () => void;
+    instance.signOut.mockImplementation(() => new Promise<void>((resolve) => { done = resolve; }));
+    const signingOut = sessions.signOut(instance, "owner");
+    await expect(sessions.start(instance, "other")).rejects.toMatchObject({ status: 409 });
+    await expect(sessions.signOut(instance, "other")).rejects.toMatchObject({ status: 409 });
+    done();
+    await signingOut;
+    await expect(sessions.start(instance, "other")).resolves.toMatchObject({ phase: "waiting" });
+  });
+
+  it("releases the slot when the provider's sign-out fails and needs provider support", async () => {
+    const { sessions, instance } = fixture();
+    instance.signOut.mockRejectedValueOnce(new Error("Codex could not remove the sign-in on this server."));
+    await expect(sessions.signOut(instance, "owner")).rejects.toThrow("could not remove");
+    await expect(sessions.start(instance, "owner")).resolves.toMatchObject({ phase: "waiting" });
+    const { signOut: _unsupported, ...plain } = instance;
+    await expect(sessions.signOut(plain, "owner")).rejects.toMatchObject({ status: 404 });
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, luminance } from "./brand";
+import { accentInk, applyBrand, bootstrapBrand, brand, brandVars, DEFAULT_BRAND, iconType, luminance } from "./brand";
 
 describe("brand", () => {
   it("derives readable ink for light and dark accents", () => {
@@ -46,5 +46,13 @@ describe("brand", () => {
     expect(status.source).toBe("file");
     expect(brand().name).toBe("Reliable Platform");
     applyBrand({ brand: DEFAULT_BRAND, source: "default", file: "" });
+  });
+});
+
+describe("the tab icon", () => {
+  it("declares the type a data URI carries and nothing for a URL", () => {
+    expect(iconType("data:image/png;base64,AAAA")).toBe("image/png");
+    expect(iconType("data:image/svg+xml;base64,AAAA")).toBe("image/svg+xml");
+    expect(iconType("https://agentada.cc/icon.png")).toBe("");
   });
 });

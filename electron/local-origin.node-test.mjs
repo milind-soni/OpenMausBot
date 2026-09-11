@@ -31,4 +31,11 @@ test("localOnly answers the local page and refuses a remote one by name", async 
   const local = from("http://127.0.0.1:8799/");
   sync(local);
   assert.equal(local.returnValue, "ok");
+
+  const openExternal = lo.localOnly("desktop:open-external", async (_event, url) => `opened:${url}`);
+  assert.equal(await openExternal(local, "https://example.com"), "opened:https://example.com");
+  assert.throws(
+    () => openExternal(remote, "https://example.com"),
+    /desktop:open-external is only available while using the local server/,
+  );
 });

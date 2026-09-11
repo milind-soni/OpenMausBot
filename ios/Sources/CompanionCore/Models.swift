@@ -106,6 +106,15 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// The thread an activity chip opened — "Opened thread #Title on Scout" —
+/// so the phone can go there. Newer computers only; a chip without one is
+/// just a receipt.
+public struct ThreadRef: Codable, Hashable, Sendable {
+    public var botId: String
+    public var threadId: String
+    public var title: String
+}
+
 /// A credential request created by the desktop for one paused task.
 ///
 /// The phone may fill this request only through the QR-pinned HPKE transport.
@@ -184,6 +193,7 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var card: OptionCard?
     public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
+    public var threadRef: ThreadRef?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?
@@ -224,6 +234,22 @@ public struct ModelSelection: Codable, Hashable, Sendable {
     }
 }
 
+/// The bot that opened a thread, on itself or on a teammate. Absent — which
+/// is every thread from an older computer — means the person opened it.
+public struct ThreadOpener: Codable, Hashable, Sendable {
+    public var botId: String
+    public var name: String
+    public var delegationId: String?
+    public var at: Double
+}
+
+/// A folder within one bot, in the order saved by the desktop.
+public struct BotProject: Codable, Hashable, Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    public var emoji: String?
+}
+
 public struct BotTask: Codable, Hashable, Sendable {
     public var threadId: String
     public var title: String
@@ -238,6 +264,14 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var autoApprove: Bool?
     public var alwaysAllow: [String]?
     public var projectId: String?
+    public var openedBy: ThreadOpener?
+    /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
+    public var routineRunId: String?
+
+    /// The thread list's quiet second line, worded as the desktop words it.
+    public var openedByLabel: String? {
+        openedBy.map { "opened by \($0.name)" }
+    }
 }
 
 public struct Bot: Codable, Hashable, Identifiable, Sendable {
@@ -281,10 +315,16 @@ public struct Bot: Codable, Hashable, Identifiable, Sendable {
     /// older harness included) means the shipped `cursor` silhouette.
     public var mascotBody: String?
     public var tasks: [BotTask]?
+    public var projects: [BotProject]?
     public var messages: [Message]?
     public var activeLeafId: String?
     /// Paged responses only: there is more transcript above what you got.
     public var hasMore: Bool?
+
+    /// Routine results are ordinary tasks; only their per-run executions are hidden.
+    public var visibleTasks: [BotTask] {
+        (tasks ?? []).filter { $0.routineRunId == nil }
+    }
 
     /// Older computers only send the profile default. Newer ones snapshot
     /// each thread's model independently, including the thread open here.

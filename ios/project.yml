@@ -18,6 +18,17 @@ packages:
   CompanionCore:
     path: .
 
+schemes:
+  OpenMausCompanion:
+    build:
+      targets:
+        OpenMausCompanion: all
+        OpenMausCompanionUITests: [test]
+    test:
+      config: Debug
+      targets:
+        - OpenMausCompanionUITests
+
 targets:
   OpenMausCompanion:
     type: application
@@ -119,6 +130,22 @@ targets:
             ts.net:
               NSIncludesSubdomains: true
               NSExceptionAllowsInsecureHTTPLoads: true
+
+  # Native navigation coverage uses bundled synthetic data and no pairing.
+  OpenMausCompanionUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: OpenMausCompanion
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app.uitests
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: OpenMausCompanion
 
   # The system share sheet can send a link, text, image, or document straight
   # to a paired bot without first opening the containing app. Connection

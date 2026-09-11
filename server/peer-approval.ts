@@ -214,7 +214,7 @@ export function resolvePeerComms(
 /** Drop every approval waiting on a bot that no longer exists (or is being
  * deleted), denying it so the caller's turn doesn't wait out the timeout. */
 export function cancelPeerApprovalsFor(botId: string): void {
-  for (const [requestId, pending] of [...pendingComms]) {
+  for (const [requestId, pending] of Array.from(pendingComms)) {
     if (pending.fromBotId !== botId && pending.toBotId !== botId) continue;
     pendingComms.delete(requestId);
     clearTimeout(pending.timer);

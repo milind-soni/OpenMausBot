@@ -130,9 +130,8 @@ export function parseMcpServerMutation(
       command: parsed.data.command,
       args: parsed.data.args ?? [],
       env,
-      // A newly added command is inert until the person has tested and
-      // explicitly enabled it. Existing file-authored entries keep today's
-      // enabled-by-default behavior through parseStoredMcpServer.
+      // A newly added command is inert until explicitly enabled. File-authored
+      // entries keep enabled-by-default behavior through parseStoredMcpServer.
       enabled: existing ? (parsed.data.enabled ?? existing.enabled) : false,
     },
   };
@@ -150,4 +149,70 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       enabled: parsed.server.enabled,
     }];
   });
+}
+
+/**
+ * Turn a pasted config block into servers this registry can store. Accepts
+ * the {"mcpServers": {...}} shape Claude Code, Cursor and Claude Desktop
+ * write, a bare {name: entry} map, or a single {name, command, ...} entry.
+ * Names are slugged into the registry's format; every entry goes through the
+ * same rules as the form and lands disabled until explicitly enabled.
+ */
+export function parseMcpServersImport(
+  text: string,
+): { ok: true; servers: Record<string, StoredMcpServer> } | { ok: false; error: string } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: "That is not valid JSON." };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, error: 'Expected an object like {"mcpServers": {"name": {"command": "npx", "args": [...]}}}.' };
+  }
+  const root = parsed as Record<string, unknown>;
+  let entries: Record<string, unknown>;
+  if (root.mcpServers && typeof root.mcpServers === "object" && !Array.isArray(root.mcpServers)) {
+    entries = root.mcpServers as Record<string, unknown>;
+  } else if (typeof root.command === "string" || typeof root.url === "string") {
+    const name = typeof root.name === "string" ? root.name : "";
+    if (!name) return { ok: false, error: 'A single server needs a "name".' };
+    const { name: _omit, ...rest } = root;
+    entries = { [name]: rest };
+  } else {
+    entries = root;
+  }
+  const names = Object.keys(entries);
+  if (names.length === 0) return { ok: false, error: "No servers found in that JSON." };
+  if (names.length > MAX_MCP_SERVERS) {
+    return { ok: false, error: `Import at most ${MAX_MCP_SERVERS} servers at once.` };
+  }
+  const servers: Record<string, StoredMcpServer> = {};
+  for (const rawName of names) {
+    const entry = entries[rawName];
+    const name = slugMcpName(rawName);
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return { ok: false, error: `"${rawName}" is not a server entry.` };
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.url === "string" || record.type === "http" || record.type === "sse") {
+      return { ok: false, error: `"${rawName}" is a remote (url) server; only command servers can be added here so far.` };
+    }
+    // The command is an executable path, not a shell line; spaces are valid
+    // in paths on every supported platform. The probe reports missing files.
+    if (Object.hasOwn(servers, name)) return { ok: false, error: `"${rawName}" appears twice.` };
+    const result = parseMcpServerMutation(name, {
+      command: record.command,
+      args: record.args,
+      env: record.env,
+    });
+    if (!result.ok) return { ok: false, error: `"${rawName}": ${result.error}` };
+    servers[name] = result.server;
+  }
+  return { ok: true, servers };
+}
+
+function slugMcpName(raw: string): string {
+  const slug = raw.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+  return /^[a-z]/.test(slug) ? slug : slug ? `mcp-${slug}`.slice(0, 32) : "";
 }

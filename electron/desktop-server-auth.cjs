@@ -6,7 +6,7 @@ const DESKTOP_MUTATION_HEADER = "X-OpenMausBot-Desktop-Owner";
  * webRequest hook cannot see Node fetch, so both paths use this one header
  * contract rather than relying on where a request happened to originate. */
 function desktopServerHeaders(headers, { packaged, token }) {
-  const next = { ...(headers ?? {}) };
+  const next = { ...headers };
   if (!packaged) return next;
   if (typeof token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
     throw new Error("invalid desktop mutation capability");

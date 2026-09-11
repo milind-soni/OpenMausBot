@@ -31,10 +31,44 @@ export interface SteerStore {
 interface QueueEntry {
   /** Keep ownership pinned even when the selected task changes. */
   botId: string;
-  items: Array<{ messageId: string; text: string; prompt: string; replyToId?: string; sendId?: string }>;
+  items: Array<{
+    messageId: string;
+    text: string;
+    prompt: string;
+    replyToId?: string;
+    sendId?: string;
+    reason?: "capacity";
+    /** The words were queued by a bot already running unattended (a
+     * thread it opened on itself). The drained turn must inherit that:
+     * a queue is a delay, not a person sitting down at the keyboard. */
+    unattended?: boolean;
+  }>;
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
+const listeners = new Set<() => void>();
+const changed = () => {
+  for (const listener of listeners) {
+    try { listener(); }
+    catch { console.warn("steer-queue: change listener failed"); }
+  }
+};
+
+/** Public pending chips only: never expose provider prompts or reply context. */
+export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
+  Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>> {
+  return Object.fromEntries([...queues]
+    .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
+    .map(([threadId, entry]) => [threadId, entry.items.map((item) => ({
+      queueId: item.messageId, text: item.text, ...(item.reason ? { reason: item.reason } : {}),
+    }))]));
+}
+
+/** Publish changes synchronously so every client can restore/cancel the queue. */
+export function onSteeredQueueChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
 
 export interface QueuedSteer {
   id: string;
@@ -45,7 +79,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -58,9 +92,26 @@ export function queueSteeredMessage(
     prompt: options.prompt ?? text,
     replyToId: options.replyToId,
     sendId: options.sendId,
+    reason: options.reason,
+    unattended: options.unattended,
   });
   queues.set(threadId, entry);
+  changed();
   return { id };
+}
+
+/** Where a thread stands among this bot's threads waiting for a free slot:
+ * 1 for the next to start. The drain visits queues in insertion order, so
+ * insertion order is the line. Null when nothing of this bot's is waiting
+ * on that thread. */
+export function queuedThreadPosition(botId: string, threadId: string): number | null {
+  let position = 0;
+  for (const [candidate, entry] of queues) {
+    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity")) continue;
+    position += 1;
+    if (candidate === threadId) return position;
+  }
+  return null;
 }
 
 /** Drain every queue whose task is idle: append the held lines (leaf is now
@@ -78,6 +129,7 @@ export function drainSteeredMessages(
     prompt: string,
     userMessage: Message,
     excludeIds: string[],
+    unattended: boolean,
   ) => void | Promise<void>,
   isBlocked?: (botId: string, threadId: string) => boolean,
 ): void {
@@ -89,12 +141,14 @@ export function drainSteeredMessages(
     if (!bot) {
       // the bot or task was deleted while messages waited
       queues.delete(threadId);
+      changed();
       continue;
     }
     if (bot.busy || isBlocked?.(entry.botId, threadId)) continue;
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
     queues.delete(threadId);
+    changed();
     const appended: Message[] = [];
     for (const item of entry.items) {
       // queueId is the pending-chip identity from the 202; append still
@@ -123,6 +177,9 @@ export function drainSteeredMessages(
       prompt,
       last,
       appended.map((message) => message.id),
+      // one unattended line makes the whole drained turn unattended: a
+      // person's words in the same queue cannot re-attend a bot's own
+      entry.items.some((item) => item.unattended === true),
     );
   }
 }
@@ -132,11 +189,11 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string } | null {
+): { id: string; text: string; replyToId?: string; reason?: "capacity" } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
-  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId } : null;
+  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}) } : null;
 }
 
 /** Drop one waiting send owned by this bot so it never drains. The queue id
@@ -150,6 +207,7 @@ export function cancelSteeredMessage(botId: string, messageId: string, expectedT
     if (items.length === entry.items.length) continue;
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { botId: entry.botId, items });
+    changed();
     return true;
   }
   return false;

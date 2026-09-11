@@ -75,3 +75,14 @@ describe("brand.json", () => {
     expect(status.notice).toMatch(/accent/);
   });
 });
+
+describe("the brand's favicon", () => {
+  it("accepts a small data URI or an https URL and refuses anything else", async () => {
+    const { brandSchema } = await import("./brand.ts");
+    expect(brandSchema.safeParse({ name: "Agent Ada", favicon: "data:image/png;base64,iVBORw0KGgo=" }).success).toBe(true);
+    expect(brandSchema.safeParse({ name: "Agent Ada", favicon: "https://agentada.cc/icon.png" }).success).toBe(true);
+    expect(brandSchema.safeParse({ name: "Agent Ada", favicon: "http://agentada.cc/icon.png" }).success).toBe(false);
+    expect(brandSchema.safeParse({ name: "Agent Ada", favicon: "/icon.png" }).success).toBe(false);
+    expect(brandSchema.safeParse({ name: "Agent Ada", favicon: `data:image/png;base64,${"A".repeat(130_000)}` }).success).toBe(false);
+  });
+});

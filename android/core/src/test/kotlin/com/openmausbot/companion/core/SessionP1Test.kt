@@ -4,17 +4,24 @@ import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 
@@ -231,6 +238,134 @@ class SessionP1Test {
     }
 
     @Test
+    fun threadChipSwitchesByTheTaskRouteAndLandsOnTheBotWhenTheThreadIsGone() = runTest {
+        val scout = bot("scout", "task-1", "task-1", "task-2")
+        val switched = scout.copy(threadId = "task-2")
+        val session = session { Fleet(listOf(scout), emptyList()) }
+        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(switched)}}"""))
+
+        val opened = session.openThread(ThreadRef("scout", "task-2", "Task 2"))
+
+        assertEquals("task-2", opened?.threadId)
+        assertEquals("task-2", session.state.value.bot("scout")?.threadId)
+        assertEquals("POST /api/bots/scout/tasks/task-2", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertNull(session.actionError)
+
+        // The chip's thread was deleted after the chip was written: land on
+        // the bot's current thread and say so, never nowhere.
+        server.enqueue(json("""{"error":"Task not found."}""", code = 404))
+        val fallback = session.openThread(ThreadRef("scout", "task-9", "Gone"))
+        assertEquals("task-2", fallback?.threadId)
+        assertEquals("POST /api/bots/scout/tasks/task-9", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertEquals(Session.THREAD_GONE_MESSAGE, session.actionError)
+
+        // A thread the bot is already on needs no request at all.
+        session.actionError = null
+        assertEquals("task-2", session.openThread(ThreadRef("scout", "task-2", "Task 2"))?.threadId)
+        assertEquals(2, server.requestCount)
+
+        assertNull(session.openThread(ThreadRef("nobody", "task-1", "Nope")))
+        assertEquals("That agent no longer exists.", session.actionError)
+    }
+
+    @Test
+    fun threadChipDoesNotNavigateOnAuthenticationServerOrUnreadableResponseErrors() = runTest {
+        val scout = bot("scout", "task-1", "task-1", "task-2")
+        val session = session { Fleet(listOf(scout), emptyList()) }
+        for (code in listOf(401, 403, 409, 500)) {
+            server.enqueue(json("""{"error":"Switch failed: $code"}""", code = code))
+            assertNull(session.openThread(ThreadRef("scout", "task-2", "Task 2")))
+            assertEquals("Switch failed: $code", session.actionError)
+            assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        }
+        server.enqueue(json("not json"))
+        assertNull(session.openThread(ThreadRef("scout", "task-2", "Task 2")))
+        assertTrue(session.actionError != Session.THREAD_GONE_MESSAGE)
+
+        // A successful retry clears the error from the failed tap.
+        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(scout.copy(threadId = "task-2"))}}"""))
+        assertEquals("task-2", session.openThread(ThreadRef("scout", "task-2", "Task 2"))?.threadId)
+        assertNull(session.actionError)
+    }
+
+    @Test
+    fun threadChipDiscardsAHydrationFromThePreviousComputer() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val session = session(otherComputer = true) {
+            started.complete(Unit)
+            release.await()
+            Fleet(listOf(bot("scout", "task-1", "task-1")), emptyList())
+        }
+        val opening = async { session.openThread(ThreadRef("scout", "task-1", "Task 1")) }
+        started.await()
+        session.switchComputer("other")
+        runCurrent()
+        assertEquals("other", session.connection.value?.id)
+        release.complete(Unit)
+
+        assertNull(opening.await())
+        assertTrue(session.state.value.bots.isEmpty())
+        assertNull(session.actionError)
+    }
+
+    @Test
+    fun threadChipDiscardsSwitchSuccessAndFailureFromThePreviousComputer() = runTest {
+        val scout = bot("scout", "task-1", "task-1", "task-2")
+        for (code in listOf(200, 404, 500)) {
+            val session = session(otherComputer = true) { Fleet(listOf(scout), emptyList()) }
+            session.openThread(ThreadRef("scout", "task-1", "Task 1"))
+            val started = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            server.dispatcher = object : Dispatcher() {
+                override fun dispatch(request: RecordedRequest): MockResponse {
+                    started.complete(Unit)
+                    runBlocking { release.await() }
+                    return if (code == 200) json("""{"bot":${CompanionJson.encodeToString(scout.copy(threadId = "task-2"))}}""")
+                    else json("""{"error":"Old computer error"}""", code = code)
+                }
+            }
+            val opening = async { session.openThread(ThreadRef("scout", "task-2", "Task 2")) }
+            try {
+                started.await()
+                session.switchComputer("other")
+                runCurrent()
+                assertEquals("other", session.connection.value?.id)
+            } finally {
+                release.complete(Unit)
+            }
+            assertNull(opening.await())
+            assertTrue(session.state.value.bots.isEmpty())
+            assertNull(session.actionError)
+        }
+    }
+
+    @Test
+    fun threadChipCancellationDoesNotNavigateOrReportADeletedThread() = runTest {
+        val scout = bot("scout", "task-1", "task-1", "task-2")
+        val session = session { Fleet(listOf(scout), emptyList()) }
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                started.complete(Unit)
+                runBlocking { release.await() }
+                return json("""{"error":"Task not found."}""", code = 404)
+            }
+        }
+        val opening = async { session.openThread(ThreadRef("scout", "task-2", "Task 2")) }
+        try {
+            started.await()
+            opening.cancel()
+        } finally {
+            release.complete(Unit)
+        }
+        assertFailsWith<CancellationException> { opening.await() }
+        assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        assertNull(session.actionError)
+    }
+
+    @Test
     fun roomTaskNotificationSwitchesTheChannelAndFallsBackWhenTheTaskIsGone() = runTest {
         val room = room("room-1", "room-task-1", "room-task-1", "room-task-2")
         val switched = room.copy(
@@ -374,6 +509,7 @@ class SessionP1Test {
     }
 
     private suspend fun TestScope.session(
+        otherComputer: Boolean = false,
         hydrate: suspend () -> Fleet = { Fleet(emptyList(), emptyList()) },
     ): Session {
         val connection = requireNotNull(Connection.parse(server.url("/").toString()))
@@ -383,6 +519,13 @@ class SessionP1Test {
                 override suspend fun load(): Connection = connection
                 override suspend fun save(connection: Connection) = Unit
                 override suspend fun clear() = Unit
+                override suspend fun loadRegistry() = ConnectionRegistryRestore(
+                    ConnectionRegistry(
+                        if (otherComputer) listOf(connection, connection.copy(id = "other")) else listOf(connection),
+                        connection.id,
+                    ),
+                    migratedLegacyConnection = false,
+                )
             },
             tokenStore = object : TokenStore {
                 override suspend fun save(connectionId: String, token: String) = Unit

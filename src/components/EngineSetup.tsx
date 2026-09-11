@@ -151,11 +151,67 @@ export function CommandRow({
   );
 }
 
+/** One click installs or updates the engine on the machine running the
+ * server, as the server's own user, into the app's own folder. The terminal
+ * command stays behind a disclosure for people who prefer it. */
+function ServerEngineInstall({ instance, mode, command }: { instance: InstanceInfo; mode: "install" | "update"; command: string | null }) {
+  const { refreshInstances, refreshModels } = useStore();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setDone(false);
+    setError(null);
+    try {
+      await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
+      setDone(true);
+      // The install has happened even if the status refresh fails.
+      await refreshInstances().catch(() => {});
+      await refreshModels(instance.instanceId).catch(() => {});
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-2">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void run()}
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:cursor-wait disabled:opacity-70"
+      >
+        {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        {busy
+          ? t("engineSetup.serverInstalling")
+          : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: instance.displayName })}
+      </button>
+      {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.serverInstalled")}</p>}
+      {error && <p role="alert" className="whitespace-pre-wrap text-[11.5px] leading-relaxed text-danger">{error}</p>}
+      {command && (
+        <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[11.5px] text-ink-secondary">
+          <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
+          <CommandRow command={command} actionLabel={t(mode === "update" ? "engineSetup.openUpdate" : "engineSetup.openInstall")} compact />
+        </details>
+      )}
+    </div>
+  );
+}
+
 export function EngineUpdateNotice({
   update,
+  instance,
   className,
 }: {
   update: NonNullable<InstanceInfo["snapshot"]["update"]>;
+  /** When given and the server can update this engine itself, the notice
+   * offers a button instead of a terminal command. */
+  instance?: InstanceInfo;
   className?: string;
 }) {
   return (
@@ -170,7 +226,9 @@ export function EngineUpdateNotice({
           <p className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">{update.message}</p>
         </div>
       </div>
-      <CommandRow command={update.command} actionLabel={t("engineSetup.openUpdate")} compact />
+      {instance?.install?.server
+        ? <ServerEngineInstall instance={instance} mode="update" command={update.command} />
+        : <CommandRow command={update.command} actionLabel={t("engineSetup.openUpdate")} compact />}
     </div>
   );
 }
@@ -306,11 +364,14 @@ export function EngineSetup({
   instance,
   className,
   intent = "cloud",
+  unframed = false,
 }: {
   instance: InstanceInfo;
   className?: string;
   /** `inject` installs the CLI but deliberately skips cloud sign-in. */
   intent?: "cloud" | "inject";
+  /** The containing engine disclosure already supplies the card surface. */
+  unframed?: boolean;
 }) {
   const install = instance.install;
   const installCommand = installCommandFor(install);
@@ -332,6 +393,8 @@ export function EngineSetup({
       : t("engineSetup.terminalSignIn")
     : intent === "inject"
       ? t("engineSetup.injectDesc")
+      : install?.server
+        ? t("engineSetup.serverInstallDesc")
       : install?.managed
         ? t("engineSetup.managedDesc")
       : signInCommand
@@ -342,7 +405,7 @@ export function EngineSetup({
   // token) and intentionally have no install descriptor.
   if (!install) {
     return (
-      <div className={cn("rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+      <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
         <div className="text-[13px] font-semibold text-ink">{t("engineSetup.notReady", { name: instance.displayName })}</div>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
           {instance.snapshot.reason ?? t("engineSetup.noReason")}
@@ -352,7 +415,7 @@ export function EngineSetup({
   }
 
   return (
-    <div className={cn("rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
+    <div className={cn(!unframed && "rounded-xl border border-hairline/40 bg-control/30 p-3", className)}>
       <div className="flex items-start gap-2.5">
         <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-inset text-ink-secondary">
           {signInOnly ? <LogIn size={14} /> : <Download size={14} />}
@@ -373,6 +436,8 @@ export function EngineSetup({
         <CodexDeviceSignIn key={instance.instanceId} instanceId={instance.instanceId} />
       ) : pasteSignIn ? (
         <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} />
+      ) : install.server && !signInOnly ? (
+        <ServerEngineInstall instance={instance} mode="install" command={installCommand} />
       ) : install.managed ? (
         <ManagedEngineSetup instance={instance} signInOnly={signInOnly} />
       ) : command ? (
@@ -386,7 +451,7 @@ export function EngineSetup({
         </p>
       )}
 
-      {!signInOnly && install.needsNode && (
+      {!signInOnly && install.needsNode && !install.server && (
         <p className="mt-2 text-[11px] leading-relaxed text-ink-secondary/70">
           {/* the sentence is one catalog entry; {npm} marks where the code
               chip goes, so a translator can move it */}

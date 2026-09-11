@@ -2,12 +2,11 @@
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
 import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { mountPreview, parkUntilSignal, REPO_ROOT, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const fixture = await launchVerificationServer();
-let ui: Awaited<ReturnType<typeof createServer>> | undefined;
+let ui: MountedPreview | undefined;
 try {
   for (const name of ["Settings Atlas", "Settings Juniper"]) {
     await runControlOmb(["new-bot", "--name", name, "--url", fixture.info.url]);
@@ -27,35 +26,24 @@ try {
     const result = installSkill(${JSON.stringify(atlas.id)}, 'fixture:settings', [{path:'SKILL.md',content:'---\\nname: fixture-check\\ndescription: Check fixture settings reliably\\n---\\nRead the fixture state and summarize it.\\n'}]);
     if ('error' in result) throw new Error(result.error);
     setSkillEnabled(${JSON.stringify(atlas.id)}, 'fixture-check', true);
-  `], { cwd: fileURLToPath(new URL("..", import.meta.url)), env: { ...process.env, OMB_DATA_DIR: fixture.info.dataDir } });
+  `], { cwd: REPO_ROOT, env: { ...process.env, OMB_DATA_DIR: fixture.info.dataDir } });
 
-  ui = await createServer({
-    root: fileURLToPath(new URL("..", import.meta.url)),
-    server: { host: "127.0.0.1", port: 0, proxy: { "/api": { target: fixture.info.url } } },
-    plugins: [{ name: "isolated-bot-settings", configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url === "/__bot-settings.html") {
-          void server.transformIndexHtml(req.url, '<html><head><title>Isolated Bot Settings</title></head><body><div id="root"></div><script type="module" src="/src/testing/bot-settings.tsx"></script></body></html>')
-            .then((html) => { res.setHeader("content-type", "text/html"); res.end(html); }).catch(next);
-          return;
-        }
-        const match = req.url?.match(/^\/__fixture\/drift\/([\w-]+)$/);
-        if (match && req.method === "POST" && ids.has(match[1]!)) {
-          writeFileSync(join(fixture.info.dataDir, "bots", match[1]!, "SOUL.md"), "Outside edit from isolated settings fixture.", { mode: 0o600 });
-          res.setHeader("content-type", "application/json");
-          res.end('{"ok":true}');
-          return;
-        }
-        next();
-      });
-    } }],
+  ui = await mountPreview(fixture, {
+    entry: "/src/testing/bot-settings.tsx", route: "/__bot-settings.html", title: "Isolated Bot Settings",
+    extraRoutes: [{
+      // An outside edit of a bot's standing instructions, inside the fixture home only.
+      path: /^\/__fixture\/drift\/([\w-]+)$/, method: "POST",
+      handler(_req, res, match) {
+        const botId = match![1]!;
+        res.setHeader("content-type", "application/json");
+        if (!ids.has(botId)) { res.writeHead(404).end('{"error":"unknown fixture bot"}'); return; }
+        writeFileSync(join(fixture.info.dataDir, "bots", botId, "SOUL.md"), "Outside edit from isolated settings fixture.", { mode: 0o600 });
+        res.end('{"ok":true}');
+      },
+    }],
   });
-  await ui.listen();
-  console.log(JSON.stringify({ ...fixture.info, previewUrl: `${ui.resolvedUrls!.local[0]}__bot-settings.html` }));
-  await new Promise<void>((resolve) => {
-    process.once("SIGINT", resolve);
-    process.once("SIGTERM", resolve);
-  });
+  console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl }));
+  await parkUntilSignal();
 } finally {
   await ui?.close();
   await fixture.close();

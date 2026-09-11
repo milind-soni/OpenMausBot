@@ -40,9 +40,33 @@ class TaskIsolationTest {
         val old = CompanionJson.decodeFromString<BotTask>("""{"threadId":"a","title":"A","createdAt":1}""")
         assertNull(old.busy)
         assertNull(old.modelSelection)
+        assertNull(old.routineRunId)
         val legacy = bot.copy(threadId = "a", tasks = listOf(old))
         assertEquals(legacy.modelSelection, legacy.forTask("a")?.modelSelection)
         assertEquals(true, legacy.forTask("a")?.busy)
+    }
+
+    @Test
+    fun routineExecutionMarkerPreservesDirectNavigationAndPendingApprovals() {
+        val execution = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"run-thread","title":"Brief","createdAt":3,"routineRunId":"run-1","busy":true,"activity":"waiting-on-you","approvalMode":"ask"}""",
+        )
+        assertEquals("run-1", execution.routineRunId)
+        val card = Message("approval", Message.Role.BOT, Message.Kind.OPTIONS, 4.0,
+            card = OptionCard("Approve?", "Read", listOf("Approve", "Deny"), requestId = "request"))
+        val state = CompanionState(
+            bots = listOf(bot.copy(tasks = listOf(taskB, execution))),
+            messages = mapOf("run-thread" to listOf(card)),
+        )
+        val opened = (state.chat(ChatTarget.Bot("bot", "run-thread")) as Chat.BotChat).bot
+        assertEquals("run-thread", opened.threadId)
+        assertEquals(true, opened.busy)
+        assertEquals("waiting-on-you", opened.activity)
+        assertEquals("ask", opened.approvalMode)
+        assertEquals(2, state.bot("bot")?.tasks?.size)
+        assertEquals("run-thread", state.botForThread("run-thread")?.threadId)
+        assertEquals(listOf(card), state.visibleTranscript("run-thread"))
+        assertEquals(listOf("run-thread"), state.pendingApprovals.map(PendingApproval::threadId))
     }
 
     @Test

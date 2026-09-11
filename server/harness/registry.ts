@@ -5,6 +5,7 @@
 // compatible — do not remove it); dispose tears an instance down without
 // touching its siblings.
 import { findCliCandidates } from "../env-path.ts";
+import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import type {
   AnyProviderDriver,
   InstanceConfigMap,
@@ -28,6 +29,12 @@ export interface ShadowInstance {
 export type RegistryEntry =
   | { instanceId: InstanceId; live: ProviderInstance; shadow?: undefined }
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
+
+/** The driver's install descriptor plus what this machine can do about it. */
+function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
+  const server = install ? serverInstallFor(install, npmPresent) : null;
+  return server ? { ...install, server } : install;
+}
 
 /** The `cli` field off a driver's default config, when it has one — the
  * placeholder an override input shows when nothing is set. */
@@ -54,8 +61,15 @@ export class ProviderRegistry {
    * from their own config; this map only reports what was configured */
   private cliByInstance = new Map<InstanceId, string>();
   private driversByKind: Map<string, AnyProviderDriver>;
+  /** Where Settings-driven npm installs go; the data directory by default. */
+  private readonly enginesBaseDir: string | undefined;
+  /** Whether npm is on this machine; injectable because the PATH scan also
+   * looks in standard install locations, which tests cannot empty. */
+  private readonly npmPresent: () => boolean;
 
-  constructor(drivers: readonly AnyProviderDriver[]) {
+  constructor(drivers: readonly AnyProviderDriver[], options: { enginesBaseDir?: string; npmAvailable?: () => boolean } = {}) {
+    this.enginesBaseDir = options.enginesBaseDir;
+    this.npmPresent = options.npmAvailable ?? npmAvailable;
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
   }
 
@@ -141,10 +155,20 @@ export class ProviderRegistry {
     return true;
   }
 
+  /** A driver's own installer (a managed download) first; otherwise the
+   * app's npm prefix, when the driver's install one-liner is an npm package
+   * and npm is on PATH. False means Settings has nothing to offer here. */
   async installRuntime(instanceId: InstanceId): Promise<boolean> {
-    const instance = this.get(instanceId);
-    if (!instance?.installRuntime) return false;
-    await instance.installRuntime();
+    const entry = this.byId.get(instanceId);
+    if (!entry) return false;
+    if (entry.live?.installRuntime) {
+      await entry.live.installRuntime();
+      return true;
+    }
+    const driver = this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
+    const server = serverInstallFor(driver?.install, this.npmPresent());
+    if (!server) return false;
+    await installNpmEngine(server.package, { baseDir: this.enginesBaseDir, cli: cliDefaultOf(driver) });
     return true;
   }
 
@@ -186,6 +210,7 @@ export class ProviderRegistry {
       candidatesByName.set(name, found);
       return found;
     };
+    const npmPresent = this.npmPresent();
     return Promise.all(
       this.entries().map(async (entry) => {
         const driver = this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
@@ -199,7 +224,7 @@ export class ProviderRegistry {
             capabilities: { computerMcp: false, agentsMcp: false, localComputerMcp: false },
             // an unknown driver has no driver record, hence no install path
             access: driver?.metadata.access ?? "subscription",
-            install: driver?.install,
+            install: withServerInstall(driver?.install, npmPresent),
             cli: entry.shadow.cli,
             cliDefault: cliDefaultOf(driver),
             // a shadow is exactly the "your CLI is broken, pick another"
@@ -233,7 +258,7 @@ export class ProviderRegistry {
             approvalReview: inst.reviewPermission !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: driver?.install,
+          install: withServerInstall(driver?.install, npmPresent),
           authentication: inst.startAuthentication
             ? {
                 method: inst.getAuthentication && inst.completeAuthentication
@@ -241,6 +266,8 @@ export class ProviderRegistry {
                   : inst.getAuthentication
                     ? "device-code" as const // a code to enter at the provider's page (Codex)
                     : "browser" as const, // a link and a callback URL (managed engines)
+                // the browser may remove the stored sign-in to switch accounts
+                signOut: inst.signOut !== undefined,
               }
             : undefined,
           cli: this.cliByInstance.get(inst.instanceId),

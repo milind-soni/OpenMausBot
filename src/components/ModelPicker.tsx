@@ -589,7 +589,7 @@ export function ModelPicker({
                       {pane === "main" ? (
                         <>
                           {railInstance.snapshot.update && (
-                            <EngineUpdateNotice update={railInstance.snapshot.update} className="mx-1 mb-2" />
+                            <EngineUpdateNotice update={railInstance.snapshot.update} instance={railInstance} className="mx-1 mb-2" />
                           )}
                           <EngineGroupLabel className="px-2 pb-1 pt-0.5">
                             {query

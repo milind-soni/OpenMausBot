@@ -114,7 +114,7 @@ describe("browser viewer protocol boundary", () => {
     expect(parseBrowserLiveAction({ type: "tab-new" })).toEqual({ type: "command", args: ["tab", "new"] });
     expect(parseBrowserLiveAction({ type: "tab-select", tabId: "t2" })).toEqual({ type: "command", args: ["tab", "t2"] });
     for (const url of ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "--cdp=9222", "https://a:secret@example.com", "https://example.com\n--headed", "http:\\example.com"]) expect(() => parseBrowserLiveAction({ type: "navigate", url })).toThrow();
-    for (const body of [{ type: "eval", script: "1" }, { type: "tab-close", tabId: "--all" }, { type: "tab-select", tabId: 1 }, { type: "config", port: 1 }]) expect(() => parseBrowserLiveAction(body)).toThrow();
+    for (const body of [{ type: "eval", script: "1" }, { type: "press", key: "Control+a" }, { type: "tab-close", tabId: "--all" }, { type: "tab-select", tabId: 1 }, { type: "config", port: 1 }]) expect(() => parseBrowserLiveAction(body)).toThrow();
   });
   it("bounds input coordinates, text and modifiers, and strips arbitrary CDP fields", () => {
     expect(parseBrowserLiveAction({ type: "input_mouse", eventType: "mousePressed", x: 12, y: 20, button: "left", clickCount: 1, method: "Runtime.evaluate" })).toEqual({ type: "input", message: { type: "input_mouse", eventType: "mousePressed", x: 12, y: 20, button: "left", clickCount: 1, deltaX: 0, deltaY: 0, modifiers: 0 } });
@@ -289,6 +289,86 @@ describe("authenticated browser viewer relay", () => {
       { action: "keyboard", subaction: "insertText", text: "--cdp=secret\nhello" }, { action: "press", key: "Control+a" },
     ]);
   });
+  it.each(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"])("uses an acknowledged native press for %s without a duplicate key release", async (key) => {
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key, code: key });
+    await a.action({ type: "input_keyboard", eventType: "keyUp", key, code: key });
+    expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([{ action: "press", key }]);
+    await a.action({ type: "release" });
+    expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
+  });
+  it.each([
+    { key: "a", code: "KeyA", modifiers: 2, chord: "Control+a" },
+    { key: "a", code: "KeyA", modifiers: 4, chord: "Meta+a" },
+    { key: "Tab", code: "Tab", modifiers: 8, chord: "Shift+Tab" },
+    { key: "ArrowLeft", code: "ArrowLeft", modifiers: 3, chord: "Alt+Control+ArrowLeft" },
+  ])("does not resend $chord when its modifiers change before keyUp", async ({ key, code, modifiers, chord }) => {
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key, code, modifiers });
+    await a.action({ type: "input_keyboard", eventType: "keyUp", key, code, modifiers: 0 });
+    expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([{ action: "press", key: chord }]);
+  });
+  it("preserves printable text and releases raw held keys even if modifiers change", async () => {
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "+", code: "Equal", text: "+", modifiers: 8 });
+    await a.action({ type: "input_keyboard", eventType: "keyUp", key: "=", code: "Equal", modifiers: 2 });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", code: "KeyA", text: "a" });
+    await a.action({ type: "input_keyboard", eventType: "keyUp", key: "a", code: "KeyA" });
+    expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([
+      { action: "input_keyboard", type: "keyDown", key: "+", code: "Equal", text: "+" },
+      { action: "input_keyboard", type: "keyUp", key: "=", code: "Equal" },
+      { action: "input_keyboard", type: "keyDown", key: "a", code: "KeyA", text: "a" },
+      { action: "input_keyboard", type: "keyUp", key: "a", code: "KeyA" },
+    ]);
+    await a.action({ type: "release" });
+    expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
+  });
+  it("keeps unknown raw key names literal instead of interpreting them as chords or commands", async () => {
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Control+a", command: "eval", script: "private" });
+    expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([
+      { action: "input_keyboard", type: "keyDown", key: "Control+a" },
+    ]);
+  });
+  it("handles repeated discrete keyDowns once each and does not mark them held", async () => {
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Backspace", code: "Backspace" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Backspace", code: "Backspace" });
+    await a.action({ type: "release" });
+    expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([
+      { action: "press", key: "Backspace" }, { action: "press", key: "Backspace" },
+    ]);
+    expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
+  });
+  it("clears a formerly raw held key after an acknowledged repeat becomes a shortcut", async () => {
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", code: "KeyA", text: "a" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", code: "KeyA", modifiers: 2 });
+    await a.action({ type: "input_keyboard", eventType: "keyUp", key: "a", code: "KeyA", modifiers: 0 });
+    await a.action({ type: "release" });
+    expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([
+      { action: "input_keyboard", type: "keyDown", key: "a", code: "KeyA", text: "a" }, { action: "press", key: "Control+a" },
+    ]);
+    expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
+  });
+  it("still requires restart when a held modifier has not been released after a chord", async () => {
+    runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
+    const a = await open(); await a.action({ type: "take" });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Shift", code: "ShiftLeft", modifiers: 8 });
+    await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Tab", code: "Tab", modifiers: 8 });
+    await a.action({ type: "input_keyboard", eventType: "keyUp", key: "Tab", code: "Tab", modifiers: 8 });
+    await a.action({ type: "release" });
+    await expect(runtime.withAgentAction("profile-a", async () => true)).rejects.toThrow("Restart");
+  });
+  it("keeps uncertain discrete key presses behind the existing restart barrier and hides raw failures", async () => {
+    runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
+    const a = await open(); await a.action({ type: "take" });
+    nativeInput.mockImplementationOnce(async () => Response.json({ success: false, error: "password=private" }));
+    await expect(a.action({ type: "input_keyboard", eventType: "keyDown", key: "Enter" })).rejects.toThrow("could not confirm this input");
+    expect(JSON.parse(nativeInput.mock.calls[0]![1].body)).toEqual({ action: "press", key: "Enter" });
+    await a.action({ type: "release" });
+    await expect(runtime.withAgentAction("profile-a", async () => true)).rejects.toThrow("Restart");
+  });
   it("releases Shift-only printable keys even when keyUp contains no text", async () => {
     const a = await open(); await a.action({ type: "take" });
     await a.action({ type: "input_keyboard", eventType: "keyDown", key: "A", code: "KeyA", text: "A", modifiers: 8 });
@@ -319,12 +399,15 @@ describe("authenticated browser viewer relay", () => {
     await a.action({ type: "release" });
     await expect(runtime.withAgentAction("profile-a", async () => true)).resolves.toBe(true);
   });
-  it.each(["release", "disconnect"])("does not admit bot work on %s until native human input is confirmed", async (ending) => {
+  it.each(["release", "disconnect"].flatMap((ending) => [
+    { ending, name: "pasted text", body: { type: "input_keyboard", eventType: "char", text: "private" } },
+    { ending, name: "discrete press", body: { type: "input_keyboard", eventType: "keyDown", key: "Enter" } },
+  ]))("does not admit bot work on $ending until native $name is confirmed", async ({ ending, body }) => {
     runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
     const a = await open(); await a.action({ type: "take" });
     let finish!: (value: Response) => void;
     nativeInput.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
-    const input = a.action({ type: "input_keyboard", eventType: "char", text: "private" });
+    const input = a.action(body);
     await vi.waitFor(() => expect(nativeInput).toHaveBeenCalled());
     if (ending === "release") await a.action({ type: "release" }); else a.socket.close();
     await expect(runtime.withAgentAction("profile-a", async () => true)).rejects.toThrow("paused");

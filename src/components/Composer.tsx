@@ -1,3 +1,4 @@
+import { ComposerTray } from "./ComposerTray";
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
@@ -22,6 +23,7 @@ import {
   type FailedComposerSend,
 } from "@/lib/drafts";
 import { BotAvatar } from "./Avatar";
+import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { ApprovalModeSelector } from "./ApprovalModeSelector";
@@ -50,7 +52,7 @@ import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
 } from "./ComposerQueuedMessages";
-import { skillRecorderEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import {
   composerSlashTrigger,
   goalTextFromComposer,
@@ -242,7 +244,7 @@ export function Composer({
       description: t("composer.command.goalDesc"),
     });
     if (
-      skillRecorderEnabled(state.config) &&
+      skillAuthoringEnabled(state.config) &&
       (group ? (members ?? []).some(supportsAgents) : supportsAgents(bot))
     ) {
       available.push({
@@ -274,7 +276,7 @@ export function Composer({
     if (!mention || mention.start === dismissedAt) return [];
     const pool: MentionChoice[] = group
       ? [
-          { id: "__everyone__", name: "everyone" },
+          ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
           ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
         ]
       : state.bots
@@ -292,16 +294,6 @@ export function Composer({
     () => setHighlight(0),
     [mention?.start, mention?.query, slash?.start, slash?.query],
   );
-
-  // one line at rest, then grow with the draft — hard cap at six lines
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    const line = parseFloat(getComputedStyle(el).lineHeight) || 24;
-    const cap = line * 6;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, cap)}px`;
-  }, [text]);
 
   const pickMention = (peer: MentionChoice) => {
     if (!mention) return;
@@ -795,7 +787,8 @@ export function Composer({
             data-composer-backdrop
             className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
           />
-        <div className="relative z-[1] flex items-end gap-1 rounded-3xl bg-raised px-2 py-1.5">
+        <div className="relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
+        <div className="flex items-end gap-1">
           <input
             ref={fileInput}
             type="file"
@@ -864,8 +857,12 @@ export function Composer({
               )}
             </div>
           )}
-          <textarea
-          ref={inputRef}
+          <MentionTextarea
+          inputRef={inputRef}
+          peers={group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)}
+          everyone={Boolean(group && !group.dm)}
+          // the message is composed in the writer's language, not the UI's
+          dir="auto"
           rows={1}
           value={text}
           onChange={(e) => {
@@ -955,7 +952,7 @@ export function Composer({
                   : t("composer.placeholder.bot", { name: bot?.name ?? "" })
           }
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
-            className="max-h-[9rem] min-h-6 min-w-0 flex-1 resize-none overflow-y-auto self-center bg-transparent px-1 py-1 text-[15px] leading-6 text-ink placeholder:text-ink-secondary focus:outline-none"
+            className="block max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-[15px] leading-6 placeholder:text-ink-secondary focus:outline-none"
           />
           <div className="flex items-center gap-1">
           {/* Stop stays a stop. Stop-then-steer is named beside the queued
@@ -1014,6 +1011,8 @@ export function Composer({
           </button>
           )}
           </div>
+        </div>
+        {bot && !group && !remoteClient && !locked && <ComposerTray bot={bot} />}
         </div>
         </div>
       </div>

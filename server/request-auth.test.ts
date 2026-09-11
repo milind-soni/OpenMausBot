@@ -87,6 +87,11 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("keeps full backups, credentials and replacement behind admin scope", () => {
+    for (const path of ["status", "export", "upload", "preview", "restore", "client-state", "download/123"]) {
+      for (const method of ["GET", "POST", "DELETE"]) expect(requiredScope(method, `/api/workspace-backup/${path}`)).toBe("admin");
+    }
+  });
   it("is default deny: chat, approvals, rooms, attachments, routines and own session are client; everything else admin", () => {
     for (const [method, path] of [
       ["POST", "/api/bots/x/messages"], ["POST", "/api/bots/x/respond"], ["POST", "/api/threads/t/respond"],
@@ -324,6 +329,15 @@ describe("resolveRequestAuth", () => {
     ["GET", "/api/instances/codex/auth/status?flowId=private-device-flow"],
     ["POST", "/api/instances/codex/auth/start"],
     ["POST", "/api/instances/codex/auth/cancel"],
+    ["POST", "/api/instances/codex/auth/sign-out"],
+    ["POST", "/api/instances/claude-work/auth/sign-out"],
+    ["GET", "/api/usage?from=2026-09-01&to=2026-09-30"],
+    ["GET", "/api/usage.csv?from=2026-09-01&to=2026-09-30"],
+    ["POST", "/api/keys/test"],
+    ["GET", "/api/fleet"],
+    ["POST", "/api/fleet/workspaces"],
+    ["DELETE", "/api/fleet/workspaces/acme"],
+    ["POST", "/api/fleet/upgrade"],
     ["POST", "/api/instances/antigravity/auth/complete"],
   ])("requires admin for server Settings: %s %s", (method, path) => {
     expect(requiredScope(method, path.split("?")[0]!)).toBe("admin");

@@ -1,7 +1,8 @@
 // The raw event inspector: what a thread's turns actually looked like on
 // the wire, for the moment a bot misbehaves and the chat view can't say
-// why. Two lenses over the same thread:
+// why. Three lenses over the same thread:
 //
+//   Run log — readable, redacted activity from the visible conversation.
 //   Events — the harness's normalized RuntimeEvent stream: turns, tool
 //            items, requests, token usage, errors. Follows live over SSE.
 //   Raw    — the provider's own protocol messages, verbatim (the native
@@ -11,18 +12,22 @@
 // under ~/.openmausbot (server/harness/bus.ts, server/drivers/native.ts).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bug, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
-import { useStore, type Bot } from "@/state/store";
+import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { formatTime, toRows, type InspectorEntry, type InspectorPage, type InspectorRow } from "@/lib/inspector";
 import { openLiveEvents } from "@/lib/live-events";
 import type { RuntimeEvent } from "../../server/contracts.ts";
+import { RunLog } from "./RunLog";
+import { timelineEvents } from "@/lib/taskTimeline";
+import { t } from "@/lib/i18n";
 
-type Lens = "events" | "raw";
+type Lens = "run" | "events" | "raw";
 
 export function InspectorPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const threadId = bot.threadId;
-  const [lens, setLens] = useState<Lens>("events");
+  const [lens, setLens] = useState<Lens>("run");
+  const activity = useMemo(() => timelineEvents(visibleMessages(bot)), [bot]);
   const [page, setPage] = useState<InspectorPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
@@ -181,7 +186,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const total = lens === "raw" ? (page?.total.native ?? 0) : (page?.total.runtime ?? 0);
 
   return (
-    <aside className="animate-panel-in flex h-full w-[460px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside aria-label="Inspector" className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel lg:static lg:z-auto lg:w-[min(460px,45vw)] lg:shrink-0">
       <div className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <Bug size={16} className="text-ink-secondary" /> Inspector
@@ -197,29 +202,46 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
       </div>
 
       <div className="flex items-center gap-2 border-b border-hairline/40 px-4 pb-3">
-        <div className="flex rounded-lg bg-inset p-0.5">
-          {(["events", "raw"] as const).map((l) => (
+        <div role="tablist" aria-label={t("inspector.views")} className="flex rounded-lg bg-inset p-0.5" onKeyDown={(event) => {
+          const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+          const current = tabs.indexOf(document.activeElement as HTMLButtonElement);
+          const next = event.key === "ArrowRight" ? (current + 1) % tabs.length
+            : event.key === "ArrowLeft" ? (current + tabs.length - 1) % tabs.length
+              : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+          if (next < 0) return;
+          event.preventDefault();
+          tabs[next].focus();
+          tabs[next].click();
+        }}>
+          {(["run", "events", "raw"] as const).map((l) => (
             <button
               key={l}
+              type="button"
+              role="tab"
+              id={`inspector-tab-${l}`}
+              aria-selected={lens === l}
+              aria-controls={`inspector-panel-${l}`}
+              tabIndex={lens === l ? 0 : -1}
               onClick={() => setLens(l)}
               className={cn(
                 "rounded-md px-2.5 py-1 text-[12px] font-medium capitalize",
                 lens === l ? "bg-raised text-ink" : "text-ink-secondary hover:text-ink",
               )}
             >
-              {l}
+              {l === "run" ? t("inspector.run.title") : l}
             </button>
           ))}
         </div>
-        <span className="ml-auto text-[11px] text-ink-secondary">
+        {lens !== "run" && <span className="ml-auto text-[11px] text-ink-secondary">
           {page ? (shown < total ? `last ${shown} of ${total}` : `${shown} entries`) : "loading…"}
-        </span>
-        <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
+        </span>}
+        {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title="Reload from disk">
           <RefreshCw size={14} />
-        </button>
+        </button>}
       </div>
 
-      <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11.5px]">
+      <div role="tabpanel" id={`inspector-panel-${lens}`} aria-labelledby={`inspector-tab-${lens}`} tabIndex={0} className="flex min-h-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60">
+      {lens === "run" ? <RunLog key={threadId} events={activity} /> : <div ref={listRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto font-mono text-[11.5px]">
         {error && <div className="px-4 py-3 text-danger">couldn't load: {error}</div>}
         {page && rows.length === 0 && !error && (
           <div className="px-4 py-6 text-ink-secondary">
@@ -229,6 +251,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
         {rows.map((row) => (
           <Row key={row.key} row={row} open={expanded.has(row.key)} onToggle={() => toggle(row.key)} />
         ))}
+      </div>}
       </div>
     </aside>
   );

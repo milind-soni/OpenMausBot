@@ -1,52 +1,38 @@
-import {
-  CalendarClock,
-  CheckCircle2,
-  CircleAlert,
-  ExternalLink,
-  Loader2,
-  XCircle,
-} from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { routineDateTime } from "@/lib/routine-display";
+import { t } from "@/lib/i18n";
 import type { RoutineRunCardData } from "../../shared/routine-run";
 import type { Message } from "@/state/store";
 
 const DETAIL_LIMIT = 280;
 
 const COPY = {
-  queued: { label: "Queued", tone: "text-ink-secondary", border: "border-hairline/45" },
-  running: { label: "Running", tone: "text-accent", border: "border-accent/30" },
-  waiting: { label: "Waiting", tone: "text-warning", border: "border-warning/35" },
-  completed: { label: "Completed", tone: "text-success", border: "border-success/30" },
-  failed: { label: "Failed", tone: "text-danger", border: "border-danger/35" },
-  cancelled: { label: "Cancelled", tone: "text-ink-secondary", border: "border-hairline/45" },
-  missed: { label: "Missed", tone: "text-danger", border: "border-danger/35" },
+  queued: { label: "Queued", tone: "text-ink-secondary" },
+  running: { label: "Running", tone: "text-accent" },
+  waiting: { label: "Waiting", tone: "text-warning" },
+  completed: { label: "Completed", tone: "text-ink-secondary" },
+  failed: { label: "Failed", tone: "text-danger" },
+  cancelled: { label: "Cancelled", tone: "text-ink-secondary" },
+  missed: { label: "Missed", tone: "text-danger" },
 } satisfies Record<
   RoutineRunCardData["status"],
-  { label: string; tone: string; border: string }
+  { label: string; tone: string }
 >;
 
 const GOAL_COPY = {
   completed: COPY.completed,
-  "needs-input": { label: "Needs your input", tone: "text-warning", border: "border-warning/35" },
-  blocked: { label: "Blocked", tone: "text-danger", border: "border-danger/35" },
-  "limit-reached": { label: "Turn limit reached", tone: "text-warning", border: "border-warning/35" },
-  paused: { label: "Paused", tone: "text-warning", border: "border-warning/35" },
-  stopped: { label: "Stopped", tone: "text-ink-secondary", border: "border-hairline/45" },
+  "needs-input": { label: "Needs your input", tone: "text-warning" },
+  blocked: { label: "Blocked", tone: "text-danger" },
+  "limit-reached": { label: "Turn limit reached", tone: "text-warning" },
+  paused: { label: "Paused", tone: "text-warning" },
+  stopped: { label: "Stopped", tone: "text-ink-secondary" },
   failed: COPY.failed,
 } satisfies Record<
   NonNullable<RoutineRunCardData["goalStatus"]>,
-  { label: string; tone: string; border: string }
+  { label: string; tone: string }
 >;
-
-function goalVisualStatus(run: RoutineRunCardData): RoutineRunCardData["status"] {
-  if (run.goalStatus === "needs-input") return "waiting";
-  if (run.goalStatus === "blocked" || run.goalStatus === "limit-reached" || run.goalStatus === "failed") {
-    return "failed";
-  }
-  if (run.goalStatus === "stopped") return "cancelled";
-  return run.status;
-}
 
 function compactDetail(value: string | undefined): string {
   const clean = value?.replace(/\s+/g, " ").trim() ?? "";
@@ -62,25 +48,6 @@ export function hasRoutineExecutionTask(
   return Boolean(
     executionThreadId && tasks?.some((task) => task.threadId === executionThreadId),
   );
-}
-
-function StatusIcon({ status }: { status: RoutineRunCardData["status"] }) {
-  const className = "size-4 shrink-0";
-  switch (status) {
-    case "running":
-      return <Loader2 aria-hidden="true" className={cn(className, "animate-spin text-accent")} />;
-    case "waiting":
-      return <CalendarClock aria-hidden="true" className={cn(className, "text-warning")} />;
-    case "completed":
-      return <CheckCircle2 aria-hidden="true" className={cn(className, "text-success")} />;
-    case "failed":
-    case "missed":
-      return <CircleAlert aria-hidden="true" className={cn(className, "text-danger")} />;
-    case "cancelled":
-      return <XCircle aria-hidden="true" className={cn(className, "text-ink-secondary")} />;
-    default:
-      return <CalendarClock aria-hidden="true" className={cn(className, "text-ink-secondary")} />;
-  }
 }
 
 export function RoutineRunCard({
@@ -105,7 +72,6 @@ export function RoutineRunCard({
   }
 
   const copy = run.goalStatus ? GOAL_COPY[run.goalStatus] : COPY[run.status];
-  const visualStatus = goalVisualStatus(run);
   const detail = compactDetail(
     run.status === "failed" || run.status === "missed"
       ? (run.error ?? run.summary)
@@ -116,23 +82,25 @@ export function RoutineRunCard({
   return (
     <section
       aria-label={`${run.routineName} routine run: ${copy.label}`}
-      className={cn(
-        "w-full max-w-[680px] rounded-2xl border bg-card px-3.5 py-3 shadow-sm",
-        copy.border,
-      )}
+      className="w-full max-w-[680px] rounded-xl border border-hairline/45 bg-card px-4 py-3"
     >
       <div className="flex items-start gap-3">
-        <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-inset">
-          <StatusIcon status={visualStatus} />
-        </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <h3 className="truncate text-[13.5px] font-semibold text-ink">{run.routineName}</h3>
-            <span aria-live="polite" className={cn("text-[11.5px] font-medium", copy.tone)}>
+            <h3 className="truncate text-[14px] font-semibold text-ink">{run.routineName}</h3>
+            <span aria-live="polite" className={cn("inline-flex items-center gap-1 text-[11.5px] font-semibold", copy.tone)}>
+              {run.status === "running" && !run.goalStatus && <Loader2 aria-hidden="true" className="size-3 animate-spin" />}
               {copy.label}
             </span>
           </div>
-          {detail && <p className="mt-1 line-clamp-2 text-[12.5px] leading-relaxed text-ink-secondary">{detail}</p>}
+          <time dateTime={new Date(run.scheduledFor ?? message.at).toISOString()} className="mt-0.5 block text-[11.5px] text-ink-secondary">
+            {routineDateTime(run.scheduledFor ?? message.at)}
+          </time>
+          {detail && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">{detail}</p>}
+          {run.status === "completed" && run.summary && run.summary.length > DETAIL_LIMIT && <details className="mt-2 text-[12px] text-ink-secondary">
+            <summary className="cursor-pointer font-medium text-ink-secondary hover:text-ink">{t("routines.results.showReport")}</summary>
+            <p className="mt-2 whitespace-pre-wrap leading-relaxed">{run.summary}</p>
+          </details>}
         </div>
         {onOpen && run.executionThreadId && (
           <button
@@ -140,14 +108,14 @@ export function RoutineRunCard({
             onClick={onOpen}
             aria-label={`${actionLabel} for ${run.routineName}`}
             className={cn(
-              "flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] font-medium transition-colors",
-              run.status === "waiting"
+              "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent",
+              run.goalStatus === "needs-input"
                 ? "bg-warning/15 text-warning hover:bg-warning/25"
-                : "bg-raised text-ink-secondary hover:bg-raised-hover hover:text-ink",
+                : "text-ink-secondary hover:bg-inset hover:text-ink",
             )}
           >
             {actionLabel}
-            <ExternalLink aria-hidden="true" size={12} />
+            <ArrowRight aria-hidden="true" size={13} />
           </button>
         )}
       </div>

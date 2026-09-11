@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
@@ -114,6 +115,8 @@ internal class WiringScene(
         shareTranscript = { _, _ -> null },
         openCloudDesktop = { null },
         shareInbox = ShareInbox(),
+        alwaysOnEnabled = MutableStateFlow(false),
+        onToggleAlwaysOn = {},
     )
 
     private object SilentDiscovery : CompanionDiscovery {

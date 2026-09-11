@@ -74,9 +74,9 @@ export function loadBundledSkills(root = process.env.OMB_SKILLS_DIR || join(proc
   return skills;
 }
 
-/** User-authored skills are hot-loaded on each turn so a just-recorded skill
- * works without restarting the desktop app. One hand-edited broken folder is
- * isolated instead of taking down every bot turn. */
+/** User skills are hot-loaded on each turn so a skill that was just enabled
+ * or hand-authored works without restarting the desktop app. One broken
+ * folder is isolated instead of taking down every bot turn. */
 export function loadUserSkills(root: string): BundledSkill[] {
   if (!existsSync(root)) return [];
   let names: string[];
@@ -91,8 +91,8 @@ export function loadUserSkills(root: string): BundledSkill[] {
       const skill = loadSkillDirectory(join(root, name));
       if (skill) skills.push(skill);
     } catch {
-      // The recorder always writes atomically validated folders, but people
-      // are free to edit them later. A malformed edit disables only itself.
+      // Skills the app writes are validated first, but people are free to
+      // hand-edit the folders later. A malformed edit disables only itself.
     }
   }
   return skills;

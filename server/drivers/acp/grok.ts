@@ -216,9 +216,13 @@ const support: AcpSupport = {
   // and BEFORE `stdio` (`grok agent -m slug stdio`). Putting -m first is
   // accepted as a TUI option and then ignored, so ACP session/new keeps
   // [models].default (grok-4.6) and oMLX never sees a request.
+  // Auto selects Grok's native classifier; if its feature gate is disabled,
+  // residual requests still ask. Never replace it with bypassPermissions.
+  // Verified: grok 1.0.3 --help and xai-org/grok-build@37949780,
+  // crates/codegen/xai-grok-pager-bin/src/main.rs:1259-1273.
   spawnArgs: (config, turn) => [
     "--permission-mode",
-    config.fullAuto ? "bypassPermissions" : "default",
+    config.fullAuto ? "bypassPermissions" : turn.approvalMode === "auto" ? "auto" : "default",
     "agent",
     ...(turn.model ? ["-m", turn.model] : []),
     // long form on purpose: `--effort` is documented as an alias, and an

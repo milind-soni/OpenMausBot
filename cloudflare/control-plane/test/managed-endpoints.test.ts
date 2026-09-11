@@ -294,6 +294,7 @@ describe("Cloudflare API response contracts", () => {
   it("does not rebind the Worker fetch receiver", async () => {
     let receiver: unknown = "not-called";
     const fetcher: CloudflareFetch = function (this: unknown) {
+      // oxlint-disable-next-line typescript/no-this-alias -- the test records the receiver
       receiver = this;
       return Promise.resolve(jsonResult([]));
     };

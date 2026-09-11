@@ -2,8 +2,8 @@
 
 This agreement covers contributions to the `enterprise/` directory of the
 OpenMausBot repository, which is licensed under the OpenMausBot Enterprise
-License rather than Apache 2.0. Contributions anywhere else need only a
-Developer Certificate of Origin sign-off (see [LICENSING.md](LICENSING.md)).
+License rather than Apache 2.0. Contributions anywhere else do not require
+this agreement or a DCO sign-off (see [LICENSING.md](LICENSING.md)).
 
 You sign by commenting on your pull request:
 

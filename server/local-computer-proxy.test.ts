@@ -3,7 +3,11 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createInterface } from "node:readline";
-import { delimiter, dirname } from "node:path";
+import { createRequire } from "node:module";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
+import { delimiter, dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { gatedLocalComputer } from "./local-computer.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -27,7 +31,7 @@ readline.createInterface({input: process.stdin}).on("line", (line) => {
 `;
 
 describe("local computer proxy (isolated child and control endpoint)", () => {
-  it("keeps discovery lease-free, refuses contention and outages, and drains the final gated frame", async () => {
+  it.each(["node", "electron"])("%s: keeps discovery lease-free, refuses contention and outages, and drains the final gated frame", async (runtime) => {
     let held = true;
     let unavailable = false;
     let reads = 0;
@@ -40,16 +44,39 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
       response.end(JSON.stringify({ held, helpOpen: false, ...(held ? { blockedReason: reason } : {}) }));
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const connection = gatedLocalComputer({
+    const original = {
       command: process.execPath,
       args: ["-e", FAKE_DRIVER, "--", "two words; not a shell"],
       env: { CUA_FIXTURE_MARKER: "preserved-driver-env" },
-      platform: "darwin", scope: "local-computer",
-    }, { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "isolated-control-token" });
+      platform: "darwin" as const, scope: "local-computer" as const,
+    };
+    const control = { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/control`, token: "isolated-control-token" };
+    let connection = gatedLocalComputer(original, control);
+    const home = mkdtempSync(join(tmpdir(), "omb-cua-launch-"));
     let child: ChildProcess | undefined;
     try {
+      if (runtime === "electron") {
+        // Build the real descriptor INSIDE Electron: in a Node-only test
+        // process.execPath hides a missing ELECTRON_RUN_AS_NODE flag. Never
+        // load the user's app, daemon, or data, and fail before spawning a
+        // malformed descriptor (which would launch a GUI).
+        const electron = createRequire(import.meta.url)("electron") as string;
+        const moduleUrl = new URL("./local-computer.ts", import.meta.url).href;
+        const bootstrap = spawnSync(electron, ["--input-type=module", "-e", `
+          const { gatedLocalComputer } = await import(${JSON.stringify(moduleUrl)});
+          const { original, control } = JSON.parse(process.env.OMB_FIXTURE_CONNECTION);
+          process.stdout.write(JSON.stringify(gatedLocalComputer(original, control)));
+        `], {
+          env: { ...process.env, HOME: home, USERPROFILE: home, ELECTRON_RUN_AS_NODE: "1", OMB_FIXTURE_CONNECTION: JSON.stringify({ original, control }) },
+          encoding: "utf8", timeout: 10_000,
+        });
+        expect(bootstrap.status, bootstrap.stderr).toBe(0);
+        connection = JSON.parse(bootstrap.stdout);
+        expect(pathToFileURL(connection.command).href).toBe(pathToFileURL(electron).href);
+      }
+      expect(connection.env.ELECTRON_RUN_AS_NODE).toBe("1");
       child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env,
-        OMB_EXTRA_PATH: dirname(process.execPath), PATH: "",
+        HOME: home, USERPROFILE: home, OMB_EXTRA_PATH: dirname(process.execPath), PATH: "",
       }, stdio: ["pipe", "pipe", "pipe"] });
       const input = createInterface({ input: child.stdout! });
       const replies = new Map<number, (value: any) => void>();
@@ -94,6 +121,7 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
     } finally {
       if (child && child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
       await new Promise<void>((resolve) => server.close(() => resolve()));
+      rmSync(home, { recursive: true, force: true });
     }
   });
 

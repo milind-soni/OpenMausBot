@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildBotOverview, connectedAppsFacts, soulLead, type OverviewFacts } from "./bot-overview.ts";
+import { buildBotOverview, connectedAppsFacts, setupSteps, soulLead, type OverviewFacts } from "./bot-overview.ts";
 
 function baseFacts(overrides: Partial<OverviewFacts> = {}): OverviewFacts {
   return {
@@ -261,5 +261,44 @@ describe("connectedAppsFacts", () => {
     expect(await connectedAppsFacts(false, "unconfigured", read)).toEqual({ configured: false, authoritative: true, services: [] });
     expect(await connectedAppsFacts(false, "unreadable", read)).toEqual({ configured: false, authoritative: false, services: [] });
     expect(reads).toBe(0);
+  });
+});
+
+describe("setupSteps", () => {
+  it("lists optional setup ideas without inspecting conversation history", () => {
+    const steps = setupSteps(baseFacts({ bot: { ...baseFacts().bot, name: "New bot", title: "", description: "" } }));
+    expect(steps.map((step) => [step.id, step.done])).toEqual([
+      ["identity", false],
+      ["soul", false],
+      ["folder", false],
+      ["schedule", false],
+    ]);
+    // no apps step: this bot's engine has no connected-apps tools
+    expect(steps.find((step) => step.id === "apps")).toBeUndefined();
+    expect(steps.every((step) => step.section)).toBe(true);
+  });
+
+  it("marks steps done from the same facts the sentences use", () => {
+    const facts = baseFacts({
+      bot: { ...baseFacts().bot, name: "Kiwi", title: "Tracker", soul: "Be brief.", cwd: "/work", composio: true },
+      engine: { composioMcp: true },
+      connectedApps: { configured: true, authoritative: true, services: ["gmail"] },
+      routines: [{ id: "r1", name: "Digest", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, nextRunAt: null }],
+    });
+    expect(setupSteps(facts).every((step) => step.done)).toBe(true);
+    expect(setupSteps(facts).map((step) => step.id)).toContain("apps");
+    expect(buildBotOverview(facts).setup).toEqual(setupSteps(facts));
+  });
+
+  it("does not count an unverified app inventory or a paused routine as done", () => {
+    const facts = baseFacts({
+      bot: { ...baseFacts().bot, composio: true },
+      engine: { composioMcp: true },
+      connectedApps: { configured: true, authoritative: false, services: ["gmail"] },
+      routines: [{ id: "r1", name: "Digest", enabled: false, schedule: { type: "daily", time: "09:00", weekdays: [1] }, nextRunAt: null }],
+    });
+    const byId = Object.fromEntries(setupSteps(facts).map((step) => [step.id, step.done]));
+    expect(byId.apps).toBe(false);
+    expect(byId.schedule).toBe(false);
   });
 });

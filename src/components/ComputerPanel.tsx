@@ -25,12 +25,13 @@ import {
   Smartphone,
   X,
 } from "lucide-react";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, ApiError, useStore, type Bot } from "@/state/store";
 import type { CloudBackend } from "../../server/contracts.ts";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
+import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
@@ -251,6 +252,7 @@ export function ComputerPanel({
   const [boxState, setBoxState] = useState<string | null>(null);
   const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);
   const [previewError, setPreviewError] = useState<Error | string | null>(null);
+  const [previewRefreshing, setPreviewRefreshing] = useState(false);
   const [previewRetry, setPreviewRetry] = useState(0);
   const [vmFrame, setVmFrame] = useState<string | null>(null);
   // The Local VM's interactive noVNC viewer (passworded, autoconnect). The
@@ -612,6 +614,8 @@ export function ComputerPanel({
   const pageVisible = usePageVisible();
   const live = state.screens[bot.id];
   const latestLive = useRef({ frame: live, at: 0 });
+  const previewBusy = useRef(bot.busy);
+  useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
   useEffect(() => {
     if (!cloudPreviewReady) {
       latestLive.current = { frame: live, at: 0 };
@@ -623,20 +627,27 @@ export function ComputerPanel({
       latestLive.current.at = Date.now();
       setPolledFrame(live);
       setPreviewError(null);
+      setPreviewRefreshing(false);
     }
   }, [live, cloudPreviewReady]);
 
   useEffect(() => {
-    if (panelView !== "computer" || !cloudPreviewReady || viewerOpen || !pageVisible) return;
+    if (panelView !== "computer" || !cloudPreviewReady || viewerOpen || !pageVisible || pending || controlPending) return;
     let inFlight = false;
+    let lastAttemptAt = -Infinity;
+    let retryDelay: number | null = null;
+    let contentionSince: number | null = null;
     const controller = new AbortController();
     setPreviewError(null);
+    setPreviewRefreshing(true);
     const shoot = async () => {
-      if (inFlight) return;
+      if (inFlight || controller.signal.aborted) return;
+      if (Date.now() - lastAttemptAt < (retryDelay ?? (previewBusy.current ? 4000 : 30_000))) return;
       // Resume polling if a busy bot stops publishing frames. A single old
       // SSE event is not evidence of a working stream for the whole turn.
-      if (bot.busy && Date.now() - latestLive.current.at < 10_000) return;
+      if (previewBusy.current && Date.now() - latestLive.current.at < 10_000) return;
       inFlight = true;
+      retryDelay = null;
       const startedAt = Date.now();
       try {
         const { png, format } = await api(`/api/bots/${bot.id}/computer/screenshot`, {
@@ -647,24 +658,41 @@ export function ComputerPanel({
           if (typeof png !== "string" || !png.trim()) throw new LocalizedPanelError("computer.err.emptyFrame");
           setPolledFrame({ png, mime: format === "jpeg" ? "image/jpeg" : "image/png" });
           setPreviewError(null);
+          setPreviewRefreshing(false);
+          contentionSince = null;
         }
       } catch (e) {
         if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
-          setPreviewError(e instanceof Error && e.name === "TimeoutError"
-            ? new LocalizedPanelError("computer.err.frameTimeout")
-            : e instanceof Error ? e : new LocalizedPanelError("computer.err.screenUnavailable"));
+          // A canceled client request can leave its capture running on the
+          // host. Contention is temporary, not a disconnected computer.
+          if (e instanceof ApiError && isRemoteScreenshotContention(e)) {
+            retryDelay = 1000;
+            contentionSince ??= Date.now();
+            const prolonged = Date.now() - contentionSince >= 10_000;
+            setPreviewError(prolonged ? e : null);
+            setPreviewRefreshing(!prolonged);
+          } else {
+            contentionSince = null;
+            setPreviewRefreshing(false);
+            setPreviewError(e instanceof Error && e.name === "TimeoutError"
+              ? new LocalizedPanelError("computer.err.frameTimeout")
+              : e instanceof Error ? e : new LocalizedPanelError("computer.err.screenUnavailable"));
+          }
         }
       } finally {
         inFlight = false;
+        lastAttemptAt = Date.now();
       }
     };
     void shoot();
-    const timer = setInterval(shoot, bot.busy ? 4000 : 30_000);
+    // Read the current cadence without aborting a capture on every busy
+    // transition. Only connection/action changes replace its generation.
+    const timer = setInterval(shoot, 1000);
     return () => {
       controller.abort();
       clearInterval(timer);
     };
-  }, [panelView, cloudPreviewReady, bot.id, cloudBackend, viewerOpen, pageVisible, bot.busy, previewRetry]);
+  }, [panelView, cloudPreviewReady, bot.id, cloudBackend, viewerOpen, pageVisible, pending, controlPending, previewRetry]);
 
   // Local VM preview comes directly from Cua Driver through the harness. It
   // does not use the password-protected noVNC viewer or cloud endpoints.
@@ -1086,18 +1114,21 @@ export function ComputerPanel({
         <div className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
           {cloudPreviewReady || (bot.computer === "cloud" && phase === "starting") ? (
             <CloudScreenPreview
-              key={`${bot.id}:${cloudBackend}:${previewRetry}`}
+              key={`${bot.id}:${cloudBackend}`}
               src={frameSrc}
               name={bot.name}
               error={panelErrorText(previewError)}
+              refreshing={previewRefreshing}
+              retry={previewRetry}
               starting={phase === "starting"}
               opening={pending === "join"}
               disabled={controlPending}
               onOpen={() => void openDesktop()}
-              onRetry={() => {
+              onRetry={(discardFrame) => {
                 latestLive.current.at = 0;
-                setPolledFrame(null);
+                if (discardFrame) setPolledFrame(null);
                 setPreviewError(null);
+                setPreviewRefreshing(true);
                 setPreviewRetry((n) => n + 1);
               }}
             />

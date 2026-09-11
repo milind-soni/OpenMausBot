@@ -133,8 +133,10 @@ export interface Message {
    * call mode never has to re-derive it from the raw tool name, and absent
    * for chips not worth interrupting the ear for. */
   /** `setup` marks an error the user fixes by installing or configuring
-   * something — the UI offers setup instead of a retry that cannot work. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean };
+   * something — the UI offers setup instead of a retry that cannot work.
+   * `summary` is the call's input on one redacted line (the shell command)
+   * where the driver only names the tool in `name`. */
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string };
   /** user messages sent INTO a running turn (capabilities.queueing): the
    * model saw it mid-turn, so the transcript marks it — a reader should
    * know the reply above it may already account for this line */
@@ -175,8 +177,9 @@ export interface Message {
    * letting it read as ordinary room conversation. `unattended` records that
    * nobody was watching the bot that posted it. */
   peerPost?: { unattended?: boolean };
-  /** Set on the user-role line another bot delivered with ask_bot into this
-   * bot's own conversation. The text opens with the provenance note, but a
+  /** Set on the user-role line another bot delivered into this bot's own
+   * conversation — with ask_bot, or as the first line of a thread it opened
+   * with start_thread. The text opens with the provenance note, but a
    * reader that windows into the message (recall snippets, a renderer) never
    * sees the opening — this is the same fact where it cannot be cut off.
    * `unattended` records that nobody was watching the bot that asked. */
@@ -186,6 +189,10 @@ export interface Message {
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
    * bot⇄bot channel where the exchange is mirrored. */
   comm?: { groupId: string; withBotId: string; withName: string; withColor: string };
+  /** thread chips: "Opened thread #Title on @X" in the opener's chat,
+   * linking to the thread a bot started with start_thread. Carries the
+   * title so the chip still reads after a rename or a deletion. */
+  threadRef?: { botId: string; threadId: string; title: string };
   /** user messages sent while the bot was mid-turn, waiting in the
    * steer-queue to auto-send on settle. Cleared when the drain consumes
    * them; a true stranded by a restart is inert because the client only
@@ -256,6 +263,15 @@ export interface GroupRecord {
 export interface BotProjectRecord {
   id: string;
   name: string;
+  emoji?: string;
+}
+
+// Unicode's complete emoji sequences include flags, skin tones and ZWJ
+// combinations. Also allow unqualified single symbols (e.g. ♥), but not
+// standalone components such as a digit, skin tone or regional indicator.
+const projectEmojiPattern = new RegExp("^(?!\\p{Emoji_Component}$)(?:\\p{RGI_Emoji}|[\\p{Emoji}--\\p{Emoji_Component}])$", "v");
+export function isProjectEmoji(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 64 && projectEmojiPattern.exec(value)?.[0] === value;
 }
 
 /** One task = one conversation with its own context.
@@ -266,12 +282,30 @@ export interface BotProjectRecord {
  * transcript, and — the part that actually matters — its own provider
  * session. Sharing resume cursors between tasks would resume the other
  * task's session and quietly undo the whole thing. */
+/** Which bot started a thread with start_thread, and under which handoff.
+ * Absent on every thread a person opened. This is the only record that lets
+ * a bot see (list_threads) or close (close_thread) a thread on a teammate:
+ * a peer's other threads stay invisible to it. */
+export interface TaskOpenedBy {
+  botId: string;
+  name: string;
+  /** the ledger id the opener tracks the thread's result under (peer
+   * threads only — a thread a bot opens on itself has no handoff) */
+  delegationId?: string;
+  at: number;
+}
+
 export interface TaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
+  /** Detached routine execution, reachable through its visible results card. */
+  routineRunId?: string;
+  /** Set when a bot, not a person, opened this thread. Persisted with the
+   * task so the sidebar and a backup keep the attribution. */
+  openedBy?: TaskOpenedBy;
   /** Defaults are copied when a task is created; older records fall back
    * to the bot until migration seeds their model selection. */
   modelSelection?: ModelSelection;
@@ -304,6 +338,7 @@ export interface TaskRecord {
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "rewound", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "routineRunId",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
@@ -323,7 +358,8 @@ export interface TaskUsage {
 
 /** Everything the BOT authored is scrubbed of content-shaped secrets before
  * it is stored: its reply text, a tool title (an ACP engine's title can be
- * the whole command line), a permission card's summary. What the user typed
+ * the whole command line) and the command beside it, a permission card's
+ * summary. What the user typed
  * is theirs and stays as typed. Stored, not just displayed: the transcript
  * is replayed into every rebuild, and a leaked key would otherwise be
  * permanent. */
@@ -331,7 +367,10 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
   if (message.role !== "bot") return message;
   const out = { ...message };
   if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
-  if (out.tool?.name) out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
+  if (out.tool?.name) {
+    out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
+    if (out.tool.summary) out.tool.summary = redactSecretsInText(out.tool.summary);
+  }
   if (out.routineRun) {
     const routineRun = { ...out.routineRun };
     routineRun.routineName = redactSecretsInText(routineRun.routineName);
@@ -603,6 +642,10 @@ export interface BotRecord {
   /** Whether this bot gets the app's built-in browser (the Browser tab of
    * the computer panel). On unless switched off. */
   browser?: boolean;
+  /** Which of the app-wide MCP servers (config.mcpServers) this bot mounts,
+   * by name. Absent = every enabled server, the pre-existing behavior; an
+   * empty list = none. Names that no longer exist are ignored. */
+  mcpServers?: string[];
   /** Id of a named browser profile from config.browserProfiles; absent = the
    * bot's own private session. */
   browserProfile?: string;
@@ -907,7 +950,7 @@ export class Store {
       // Folders are organizational only. Preserve existing thread model
       // snapshots while discarding the unshipped folder-default setting.
       if (b.projects?.some((project) => "modelSelection" in project)) {
-        b.projects = b.projects.map(({ id, name }) => ({ id, name }));
+        b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
       }
       if (!b.tasks?.length) {
@@ -1000,7 +1043,7 @@ export class Store {
   }
 
   private emit(change: StoreChange) {
-    for (const listener of [...this.listeners]) {
+    for (const listener of Array.from(this.listeners)) {
       try {
         listener(change);
       } catch (error) {
@@ -1820,11 +1863,12 @@ export class Store {
     return this.bot(botId)?.projects?.find((project) => project.id === projectId);
   }
 
-  createProject(botId: string, name: string): BotProjectRecord | null {
+  createProject(botId: string, name: string, emoji?: string | null): BotProjectRecord | null {
     const bot = this.bot(botId);
-    if (!bot || !name.trim()) return null;
+    if (!bot || !name.trim() || (emoji != null && !isProjectEmoji(emoji))) return null;
     const project: BotProjectRecord = {
       id: newId(), name: name.trim().slice(0, 80),
+      ...(emoji == null ? {} : { emoji }),
     };
     bot.projects = [...(bot.projects ?? []), project];
     this.saveBots();
@@ -1832,13 +1876,28 @@ export class Store {
     return project;
   }
 
-  patchProject(botId: string, projectId: string, patch: Partial<Pick<BotProjectRecord, "name">>): BotProjectRecord | null {
+  patchProject(botId: string, projectId: string, patch: { name?: string; emoji?: string | null }): BotProjectRecord | null {
     const project = this.project(botId, projectId);
-    if (!project || (patch.name !== undefined && !patch.name.trim())) return null;
+    if (!project || (patch.name !== undefined && !patch.name.trim()) || (patch.emoji != null && !isProjectEmoji(patch.emoji))) return null;
     if (patch.name !== undefined) project.name = patch.name.trim().slice(0, 80);
+    if (patch.emoji === null) delete project.emoji;
+    else if (patch.emoji !== undefined) project.emoji = patch.emoji;
     this.saveBots();
     this.emit({ type: "bot", botId });
     return project;
+  }
+
+  /** The stored array is the sidebar order; only a full owned permutation is valid. */
+  reorderProjects(botId: string, projectIds: string[]): BotProjectRecord[] | null {
+    const bot = this.bot(botId);
+    const projects = bot?.projects ?? [];
+    if (!bot || projectIds.length !== projects.length || new Set(projectIds).size !== projects.length) return null;
+    const byId = new Map(projects.map((project) => [project.id, project]));
+    if (projectIds.some((id) => !byId.has(id))) return null;
+    bot.projects = projectIds.map((id) => byId.get(id)!);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return bot.projects;
   }
 
   /** Removing an organizational label never removes its conversations. */
@@ -1922,7 +1981,7 @@ export class Store {
 
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true, projectId?: string): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
@@ -1931,6 +1990,7 @@ export class Store {
       title: title?.trim().slice(0, 80) || UNTITLED_THREAD,
       createdAt: Date.now(),
       ...(projectId ? { projectId } : {}),
+      ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
       approvalMode: approvalModeFor(bot),
@@ -1944,6 +2004,20 @@ export class Store {
     if (activate) {
       this.mirrorActiveTask(bot, task);
     }
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  /** Attach (or complete) the opener record after the thread exists — the
+   * handoff id is only known once the thread it targets has an id, so a
+   * peer-opened thread is created first and stamped second. Never reachable
+   * from the HTTP task PATCH: openedBy is not a TASK_PATCH_FIELD. */
+  setTaskOpenedBy(botId: string, threadId: string, openedBy: TaskOpenedBy): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    task.openedBy = structuredClone(openedBy);
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;
@@ -1979,10 +2053,12 @@ export class Store {
     if (!bot || !bot.tasks || bot.tasks.length < 2) return null;
     if (!bot.tasks.some((t) => t.threadId === threadId)) return null;
     bot.tasks = bot.tasks.filter((t) => t.threadId !== threadId);
-    this.deleteThreadRecord(threadId);
-    if (bot.threadId === threadId) {
-      this.mirrorActiveTask(bot, bot.tasks[0]!);
+    const visible = bot.tasks.find((task) => !task.routineRunId)
+      ?? this.createTask(botId, undefined, bot.threadId === threadId)!;
+    if (bot.threadId === threadId || this.taskByThread(botId, bot.threadId)?.routineRunId) {
+      this.mirrorActiveTask(bot, visible);
     }
+    this.deleteThreadRecord(threadId);
     bot.unread = bot.tasks.some((task) => task.unread);
     this.refreshBotActivity(bot);
     this.saveBots();

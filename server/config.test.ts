@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -6,6 +6,7 @@ import type { JsonValue } from "./schema.ts";
 
 import { customMcpServers,
   DATA_DIR,
+  ensureDirs,
   instanceConfigs,
   isValidSshAlias,
   loadBrowserProfileIdAliases,
@@ -16,9 +17,10 @@ import { customMcpServers,
   parseStoredConfig,
   persistableInstanceConfigs,
   roomTurnTimeoutMinutes,
+  maxConcurrentBotThreads,
   showToolCallsEnabled,
   saveConfig,
-  skillRecorderEnabled,
+  skillAuthoringEnabled,
   builtInBrowserEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
@@ -33,6 +35,28 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("defaults to three parallel threads and validates a configurable maximum of ten", () => {
+    expect(maxConcurrentBotThreads({})).toBe(3);
+    expect(parseStoredConfig({ threads: { maxConcurrentPerBot: 10 } })).toEqual({ threads: { maxConcurrentPerBot: 10 } });
+    expect(maxConcurrentBotThreads(parseConfigPatch({ threads: { maxConcurrentPerBot: 1 } }))).toBe(1);
+    for (const value of [0, -1, 11, 1.5, "10", null]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: value } })).toThrow("threads.maxConcurrentPerBot");
+    }
+  });
+
+  it("keeps avatar providers and credentials separate, normalizing a router endpoint", () => {
+    const parsed = parseConfigPatch({ imageGen: {
+      provider: "custom", key: "openai-kept", customApiKey: "router-only",
+      customUrl: "http://127.0.0.1:4000/v1/", customModel: " local/image ",
+    } });
+    expect(parsed.imageGen).toEqual({ provider: "custom", key: "openai-kept", customApiKey: "router-only", customUrl: "http://127.0.0.1:4000/v1", customModel: "local/image" });
+    expect(parseStoredConfig({ imageGen: { key: "legacy" } }).imageGen).toEqual({ key: "legacy" });
+    expect(() => parseConfigPatch({ imageGen: { provider: "unknown" } })).toThrow("provider");
+    expect(() => parseConfigPatch({ imageGen: { customUrl: "https://user:secret@router.example/v1" } })).toThrow("customUrl");
+    const childEnv = { OMB_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
+    stripWorkspaceCredentialEnv(childEnv);
+    expect(childEnv).not.toHaveProperty("OMB_CUSTOM_IMAGE_KEY");
+  });
   it("persists a custom domain but excludes it from generic config patches", () => {
     expect(parseStoredConfig({ customDomain: "https://bots.example.com" })).toEqual({ customDomain: "https://bots.example.com" });
     expect(parseConfigPatch({ customDomain: "https://unverified.example.com", language: "en" })).toEqual({ language: "en" });
@@ -333,15 +357,20 @@ describe("configuration boundaries", () => {
     expect(localVmMaxInstances({ localVm: { maxInstances: 3 } })).toBe(3);
   });
 
-  it("keeps experimental features off by default and accepts an explicit opt-in", () => {
-    expect(skillRecorderEnabled({})).toBe(false);
-    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({
-      features: { skillRecorder: true },
+  it("keeps skill authoring on by default with an explicit opt-out, and the browser off by default", () => {
+    expect(skillAuthoringEnabled({})).toBe(true);
+    expect(skillAuthoringEnabled({ features: {} })).toBe(true);
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: true } })).toBe(true);
+    expect(parseConfigPatch({ features: { skillAuthoring: false } })).toEqual({
+      features: { skillAuthoring: false },
     });
-    expect(skillRecorderEnabled({ features: { skillRecorder: true } })).toBe(true);
+    expect(skillAuthoringEnabled({ features: { skillAuthoring: false } })).toBe(false);
+    // the pre-rename flag is dropped as a no-op rather than rejected, so a
+    // stale client's PATCH cannot fail the request or re-enable anything
+    expect(parseConfigPatch({ features: { skillRecorder: true } })).toEqual({ features: {} });
     // the built-in browser is an independent explicit opt-in
     expect(builtInBrowserEnabled({})).toBe(false);
-    expect(builtInBrowserEnabled({ features: { skillRecorder: true } })).toBe(false);
+    expect(builtInBrowserEnabled({ features: { skillAuthoring: true } })).toBe(false);
     expect(parseConfigPatch({ features: { browser: false } })).toEqual({ features: { browser: false } });
     expect(builtInBrowserEnabled({ features: { browser: false } })).toBe(false);
     expect(builtInBrowserEnabled({ features: { browser: true } })).toBe(true);
@@ -358,8 +387,8 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({
       browserProfiles: [{ id: "work", name: "Work" }, { id: "work", name: "Work again" }],
     })).toThrow(/browserProfiles.*id.*duplicated/i);
-    expect(() => parseConfigPatch({ features: { skillRecorder: "yes" } })).toThrow(
-      "features.skillRecorder",
+    expect(() => parseConfigPatch({ features: { skillAuthoring: "yes" } })).toThrow(
+      "features.skillAuthoring",
     );
   });
 
@@ -377,6 +406,31 @@ describe("configuration boundaries", () => {
 
   it.each(["one-per-bot", "windows", 1, null])("rejects an invalid Local VM mode: %j", (mode) => {
     expect(() => parseConfigPatch({ localVm: { mode } })).toThrow("localVm.mode");
+  });
+});
+
+describe("saving the newer sections", () => {
+  it("persists the Anthropic key, the spend limit and the price list, section by section", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ xai: { key: "xai-fixture" } }));
+    try {
+      saveConfig({ anthropic: { key: "sk-ant-fixture" } });
+      saveConfig({ budgets: { monthlyUsd: 25, warnAtPercent: 70 } });
+      saveConfig({ billing: { currency: "EUR", prices: { default: { inputPerMillion: 1, outputPerMillion: 2 } } } });
+      // a later save of one section leaves the others alone, and replaces the price list whole
+      saveConfig({ billing: { prices: { "gpt-5": { inputPerMillion: 3, outputPerMillion: 4 } } } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk).toMatchObject({
+        xai: { key: "xai-fixture" },
+        anthropic: { key: "sk-ant-fixture" },
+        budgets: { monthlyUsd: 25, warnAtPercent: 70 },
+        billing: { currency: "EUR", prices: { "gpt-5": { inputPerMillion: 3, outputPerMillion: 4 } } },
+      });
+      expect(disk.billing.prices.default).toBeUndefined();
+    } finally {
+      rmSync(path, { force: true });
+    }
   });
 });
 
@@ -401,6 +455,15 @@ describe("default fleet", () => {
       OPENAI_COMPAT_API_KEY: "secret",
       OPENAI_COMPAT_URL: "https://models.example.test/v1",
     });
+  });
+
+  it("hands a saved Anthropic key only to Claude instances, as the variable the CLI reads", () => {
+    const map = instanceConfigs({ anthropic: { key: "sk-ant-fixture", url: "https://anthropic-proxy.example.test" } });
+    expect(map.claude.environment).toEqual({ ANTHROPIC_API_KEY: "sk-ant-fixture", ANTHROPIC_BASE_URL: "https://anthropic-proxy.example.test" });
+    expect(map.codex.environment).toEqual({});
+    expect(map.openaiCompat.environment).toEqual({});
+    expect(instanceConfigs({ anthropic: { url: "https://only-a-url.example.test" } }).claude.environment).toEqual({});
+    expect(parseConfigPatch({ anthropic: { key: "sk-ant-new" } })).toEqual({ anthropic: { key: "sk-ant-new" } });
   });
 
   it("preserves a per-instance OpenAI-compatible URL override", () => {
@@ -602,6 +665,72 @@ describe("credential env narrowing", () => {
       instances: { computer: { driver: "boxAgent", environment: { MY_FLAG: "1" } } },
     };
     expect(instanceConfigs(cfg).computer.environment).toEqual({ MY_FLAG: "1", BOX_TOKEN: "SECRET-BOX" });
+  });
+});
+
+describe("legacy feature flag migration", () => {
+  const path = join(DATA_DIR, "config.json");
+  const readDisk = () => JSON.parse(readFileSync(path, "utf8"));
+
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+  });
+  afterEach(() => {
+    rmSync(path, { force: true });
+  });
+
+  it("carries a legacy skillRecorder opt-in over to skillAuthoring once, at startup", () => {
+    writeFileSync(path, JSON.stringify({ profile: { name: "Ada" }, features: { skillRecorder: true, browser: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ profile: { name: "Ada" }, features: { browser: false, skillAuthoring: true } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(true);
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
+    // a second boot finds nothing left to migrate and leaves the file alone
+    const written = readFileSync(path, "utf8");
+    ensureDirs();
+    expect(readFileSync(path, "utf8")).toBe(written);
+  });
+
+  it("keeps a legacy opt-out off and removes the old key", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(false);
+  });
+
+  it("lets an explicit skillAuthoring value win over the legacy key", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: true, skillAuthoring: false } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    expect(skillAuthoringEnabled(loadConfig())).toBe(false);
+  });
+
+  it("treats a non-boolean legacy value as off and a null features block as absent", () => {
+    writeFileSync(path, JSON.stringify({ features: { skillRecorder: "yes" } }));
+    ensureDirs();
+    expect(readDisk()).toEqual({ features: { skillAuthoring: false } });
+    const nulled = JSON.stringify({ features: null });
+    writeFileSync(path, nulled);
+    ensureDirs();
+    expect(readFileSync(path, "utf8")).toBe(nulled);
+  });
+
+  it("leaves a config without the legacy key untouched", () => {
+    for (const disk of [{ profile: { name: "Ada" } }, { features: {} }, { features: { skillAuthoring: true } }]) {
+      const raw = JSON.stringify(disk);
+      writeFileSync(path, raw);
+      ensureDirs();
+      expect(readFileSync(path, "utf8")).toBe(raw);
+    }
+  });
+
+  it("does not create a config file or throw on a fresh or unreadable install", () => {
+    ensureDirs();
+    expect(() => readFileSync(path, "utf8")).toThrow();
+    writeFileSync(path, "{not json");
+    expect(() => ensureDirs()).not.toThrow();
+    expect(readFileSync(path, "utf8")).toBe("{not json");
   });
 });
 
@@ -882,6 +1011,15 @@ describe("customMcpServers", () => {
 
   it("returns {} when the section is absent", () => {
     expect(customMcpServers({} as Parameters<typeof customMcpServers>[0])).toEqual({});
+  });
+
+  it("narrows to a bot's own list when one is given, and to nothing for an empty list", () => {
+    const all = cfg({ notes: { command: "a" }, linear: { command: "b" }, off: { command: "c", enabled: false } });
+    expect(Object.keys(customMcpServers(all))).toEqual(["notes", "linear"]);
+    expect(Object.keys(customMcpServers(all, ["linear", "gone"]))).toEqual(["linear"]);
+    expect(customMcpServers(all, [])).toEqual({});
+    // a bot's list never re-enables a server the workspace switched off
+    expect(customMcpServers(all, ["off"])).toEqual({});
   });
 
   it("skips disabled entries silently", () => {

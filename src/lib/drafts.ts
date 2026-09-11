@@ -286,6 +286,22 @@ export function restoreComposerDraft(id: string, draft: DraftRestore): void {
   for (const listener of restoreListeners.get(id) ?? []) listener(draft);
 }
 
+/** Puts prepared text into a thread's composer without sending it: after a
+ * blank line when the person has already typed something, never in its
+ * place. Attachments and channel mode stay. It writes through the restore
+ * path, so a mounted Composer updates live and an unmounted one finds the
+ * text on return; the edit mark keeps a late failed send from replacing it. */
+export function appendComposerDraft(id: string, text: string): void {
+  const store = getStore();
+  const current = getDraft(store, id);
+  markDraftEdited(id);
+  restoreComposerDraft(id, {
+    text: current ? `${current}\n\n${text}` : text,
+    attachments: getDraftAttachments(store, id),
+    channelMode: getDraftChannelMode(store, id),
+  });
+}
+
 /** Append completed uploads directly to the keyed durable draft. This is
  * safe after the Composer that started the upload has unmounted. */
 export function appendDraftAttachments(id: string, additions: Attachment[]): void {

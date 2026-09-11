@@ -657,6 +657,93 @@ describe("ACP turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  it.each(["grok-4.6", "grok-4.5", "local-model"])(
+    "keeps native Grok Auto when selecting and resuming %s",
+    async (model) => {
+      await create(GrokAgentDriver);
+      const agents = { command: "node", args: ["/fixture/agents-proxy.mjs"], env: {} };
+      for (const resumeCursor of [undefined, "fake-acp-session"]) {
+        const dump = join(scratch, `grok-auto-${resumeCursor ? "resume" : "new"}.json`);
+        const threadId = `t-grok-auto-${model}-${resumeCursor ? "resume" : "new"}`;
+        process.env.FAKE_ACP_DUMP = dump;
+        const { turnId } = await instance.adapter.sendTurn({
+          threadId,
+          text: "read the roster",
+          model,
+          effort: "high",
+          approvalMode: "auto",
+          resumeCursor,
+          integrations: {
+            agents,
+            custom: { agents: { command: "must-not-shadow-agents", args: [], env: {} } },
+          },
+        });
+        await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        const seen = JSON.parse(readFileSync(dump, "utf8"));
+        expect(seen.argv).toEqual([
+          "--permission-mode", "auto",
+          "agent", "-m", model, "--reasoning-effort", "high", "stdio",
+        ]);
+        const sessionMethod = resumeCursor ? "session/load" : "session/new";
+        const sent = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8")
+          .trim().split("\n").map((line) => JSON.parse(line))
+          .find((entry) => entry.dir === "out" && entry.msg.method === sessionMethod);
+        expect(sent.msg.params.mcpServers).toEqual([{ name: "agents", ...agents, env: [] }]);
+        expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
+          { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: model } },
+        ]);
+        expect(recorder.events.find((e) => e.type === "session.started" && e.turnId === turnId))
+          .toMatchObject({ model });
+      }
+    },
+  );
+
+  it.each([
+    ["ask", true, "default"],
+    ["full", true, "bypassPermissions"],
+    ["custom", true, "default"],
+    ["auto", false, "auto"],
+  ] as const)("Grok %s with agents mounted=%s overrides a legacy full-auto setting", async (approvalMode, mounted, nativeMode) => {
+    instance = await GrokAgentDriver.create({
+      instanceId: "grok-mode-override",
+      displayName: "Grok",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: true },
+    });
+    recorder = recordEvents(instance.adapter);
+    const dump = join(scratch, "grok-mode-override.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: "t-grok-mode-override",
+      text: "continue",
+      approvalMode,
+      resumeCursor: "fake-acp-session",
+      integrations: mounted ? { agents: { command: "node", args: [], env: {} } } : undefined,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual([
+      "--permission-mode", nativeMode, "agent", "stdio",
+    ]);
+  });
+
+  it("keeps residual Grok Auto permissions interactive", async () => {
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({
+      threadId: "t-grok-auto-permission",
+      text: "run the command",
+      approvalMode: "auto",
+      integrations: { agents: { command: "node", args: [], env: {} } },
+    });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
+    expect(recorder.events.some((e) => e.type === "request.resolved")).toBe(false);
+    await instance.adapter.respondToRequest("t-grok-auto-permission", opened.requestId!, { behavior: "deny" });
+    expect(await recorder.until((e) => e.type === "request.resolved"))
+      .toMatchObject({ behavior: "deny", source: "user" });
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
   it("grok fails closed when the CLI advertises no cached_token (needs login)", async () => {
     await create(GrokAgentDriver, "no-auth");
     await instance.adapter.sendTurn({ threadId: "t-auth", text: "go" });

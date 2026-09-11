@@ -45,12 +45,16 @@ jobs:
         # timeout.
         run: node --input-type=commonjs -e "require('electron')"
       - run: pnpm typecheck
+      - run: pnpm lint
       - name: Run tests
         run: pnpm test
       - run: pnpm check:electron
       - name: Verify native approval mode transitions
         if: matrix.os == 'macos-latest'
         run: pnpm exec electron scripts/smoke-approval-modes.cjs
+      - name: Verify app permissions and guarded display capture
+        if: matrix.os == 'macos-latest'
+        run: node scripts/smoke-app-permissions.mjs
       - name: Verify paired phone authorization against packaged harness
         if: matrix.os == 'macos-latest'
         run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
@@ -126,6 +130,44 @@ jobs:
       - run: pnpm control-plane:check
       - run: pnpm control-plane:test
       - run: pnpm control-plane:dry-run
+
+  ui-smoke:
+    # Advisory, outside the required `test` matrix: the renderer recipe in
+    # docs/verification/chat-ui.md run by a machine. It downloads the pinned
+    # agent-browser release (digest verified) and its Chrome, drives the real
+    # <App/> against the isolated fake-engine fixture, and keeps the screenshot.
+    name: renderer smoke (control-omb ui, Ubuntu 24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Let Chrome build its sandbox on this runner
+        # Ubuntu 24.04's AppArmor profile blocks unprivileged user namespaces,
+        # so the downloaded Chrome for Testing dies with "No usable sandbox".
+        # This is Chrome's own documented fix for 23.10+; a developer machine
+        # needs nothing, and the sandbox itself stays on.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Drive the real renderer through control-omb ui
+        env:
+          OMB_UI_E2E: "1"
+          OMB_UI_EVIDENCE_DIR: .omb-scratch/verify-evidence
+        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts
+      - name: Upload the renderer screenshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: control-omb-ui-chat-screenshot
+          path: .omb-scratch/verify-evidence/chat-ui.png
+          if-no-files-found: warn
+          retention-days: 7
 
   package-linux:
     name: package + smoke (Ubuntu 24.04 x64)

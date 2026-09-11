@@ -4,6 +4,7 @@ import {
   listMcpServers,
   mcpServerNameError,
   parseMcpServerMutation,
+  parseMcpServersImport,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
 
@@ -69,4 +70,53 @@ describe("custom MCP registry", () => {
     });
   });
 
+});
+
+describe("parseMcpServersImport", () => {
+  // The block every other agent tool shares: Claude Code, Cursor and Claude
+  // Desktop all write {"mcpServers": {name: {command, args, env}}}. Pasting
+  // it here should just work, with the same rules as the form.
+  it("reads the standard mcpServers block, disabled until explicitly enabled", () => {
+    const result = parseMcpServersImport(JSON.stringify({
+      mcpServers: {
+        notes: { command: "npx", args: ["-y", "@example/notes-mcp"], env: { NOTES_TOKEN: "t" } },
+        "Linear Tasks": { command: "linear-mcp" },
+      },
+    }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(Object.keys(result.servers)).toEqual(["notes", "linear-tasks"]);
+    expect(result.servers.notes).toEqual({ command: "npx", args: ["-y", "@example/notes-mcp"], env: { NOTES_TOKEN: "t" }, enabled: false });
+    expect(result.servers["linear-tasks"]).toEqual({ command: "linear-mcp", args: [], env: {}, enabled: false });
+  });
+
+  it("accepts a bare map, one server, or a single entry with a name", () => {
+    const bare = parseMcpServersImport('{"fs": {"command": "mcp-fs", "args": ["/tmp"]}}');
+    expect(bare.ok && Object.keys(bare.servers)).toEqual(["fs"]);
+    const single = parseMcpServersImport('{"name": "fs", "command": "mcp-fs"}');
+    expect(single.ok && Object.keys(single.servers)).toEqual(["fs"]);
+  });
+
+  it("imports executable paths with spaces without treating them as shell commands", () => {
+    for (const command of ["/Applications/Fixture Tools/mcp", "C:\\Program Files\\Fixture\\mcp.exe"]) {
+      expect(parseMcpServersImport(JSON.stringify({ constructor: { command, enabled: true } }))).toEqual({
+        ok: true, servers: { constructor: { command, args: [], env: {}, enabled: false } },
+      });
+    }
+  });
+
+  it("rejects colliding normalized names and invalid late entries without returning a partial import", () => {
+    expect(parseMcpServersImport(JSON.stringify({ "Notes App": { command: "notes" }, "notes-app": { command: "other" } })))
+      .toMatchObject({ ok: false, error: expect.stringMatching(/twice/) });
+    expect(parseMcpServersImport(JSON.stringify({ good: { command: "notes" }, bad: { command: "other", env: { TOKEN: true } } })))
+      .toMatchObject({ ok: false });
+  });
+
+  it("refuses remote servers, reserved names, and junk", () => {
+    expect(parseMcpServersImport('{"mcpServers": {"web": {"url": "https://x.example/mcp"}}}')).toMatchObject({ ok: false, error: expect.stringMatching(/remote|url/i) });
+    expect(parseMcpServersImport('{"mcpServers": {"computer": {"command": "x"}}}')).toMatchObject({ ok: false, error: expect.stringMatching(/reserved/i) });
+    expect(parseMcpServersImport('{"mcpServers": {"ok": {"command": "x", "env": {"OMB_TOKEN": "1"}}}}')).toMatchObject({ ok: false });
+    expect(parseMcpServersImport("not json")).toMatchObject({ ok: false, error: expect.stringMatching(/JSON/i) });
+    expect(parseMcpServersImport("[]")).toMatchObject({ ok: false });
+  });
 });

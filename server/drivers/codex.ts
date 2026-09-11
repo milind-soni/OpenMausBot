@@ -33,9 +33,11 @@ import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
 import { classifyError, computeBackoff, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
+import { commandSummary } from "../tool-summary.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
+import { codexAccountEmail } from "./codex-identity.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -503,7 +505,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const active = new Map<string, Turn>();
 
     const emit = (event: RuntimeEvent) => {
-      for (const l of [...listeners]) l(event);
+      for (const l of Array.from(listeners)) l(event);
     };
     const base = (threadId: string, turnId: string) => ({
       eventId: newEventId(),
@@ -589,6 +591,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         });
 
       let abandoned = false;
+      let codexThreadId: string | null = null;
+      let codexTurnId: string | null = null;
+      let startingNativeTurn = false;
+      const earlyNotifications: any[] = [];
       const state = {
         settled: false,
         lastText: "",
@@ -629,6 +635,20 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           rpcPending.set(id, {
             resolve: (v) => {
               clearTimeout(timer);
+              if (method === "turn/start") {
+                if (typeof v?.turn?.id !== "string" || !v.turn.id) {
+                  reject(new Error("Codex did not return a native turn id"));
+                  return;
+                }
+                // Bind synchronously: a single stdout chunk can contain the
+                // response, streamed events, completion and a late request.
+                codexTurnId = v.turn.id;
+                startingNativeTurn = false;
+                for (const notification of earlyNotifications.splice(0)) {
+                  if (state.settled) break;
+                  handleNotification(notification);
+                }
+              }
               resolve(v);
             },
             reject: (e) => {
@@ -649,7 +669,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const settle = async (ok: boolean, stopReason: string | null) => {
         if (state.settled) return;
         state.settled = true;
-        for (const finish of [...asks.values()]) finish("deny", "OpenMausBot: the turn ended", "system");
+        for (const finish of Array.from(asks.values())) finish("deny", "OpenMausBot: the turn ended", "system");
         for (const p of rpcPending.values()) p.reject(new Error("turn settled"));
         rpcPending.clear();
         const complete = () => {
@@ -787,6 +807,30 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const handleNotification = (msg: any) => {
         const p = msg.params ?? {};
+        // An app-server also emits notifications for native helper threads.
+        // Only this request's parent may write its transcript/usage or settle
+        // its run. Requests still use the approval broker above, including
+        // helper requests; ignoring child *notifications* must not grant tools.
+        const connectionError = msg.method === "error" &&
+          !("threadId" in p) && !("turnId" in p);
+        if (!connectionError) {
+          if (!codexThreadId || p.threadId !== codexThreadId) return;
+          if (!codexTurnId) {
+            // Some servers stream before acknowledging turn/start. Retain a
+            // bounded prefix, then filter against the authoritative response.
+            if (startingNativeTurn) {
+              if (earlyNotifications.length >= 1024) {
+                void settle(false, "too_many_events_before_turn_start");
+              } else {
+                earlyNotifications.push(msg);
+              }
+            }
+            return;
+          }
+          const eventTurnId = msg.method === "turn/started" || msg.method === "turn/completed"
+            ? p.turn?.id : p.turnId;
+          if (eventTurnId !== codexTurnId) return;
+        }
         switch (msg.method) {
           // token-level chat text; the item/completed frame follows with the
           // whole message, so its delta is only a fallback when none streamed
@@ -816,7 +860,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                     : item.type === "webSearch"
                       ? "web_search"
                       : null;
-            if (title) emit({ ...base(threadId, turnId), type: "item.started", itemType: "tool", itemId: item.id, title });
+            if (title) {
+              emit({
+                ...base(threadId, turnId),
+                type: "item.started",
+                itemType: "tool",
+                itemId: item.id,
+                title,
+                summary: item.type === "commandExecution" ? commandSummary({ command: item.command }) : undefined,
+              });
+            }
             break;
           }
           case "item/completed": {
@@ -1014,7 +1067,6 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         // on start AND resume so Codex owns their lifetime through compaction.
         // Removed bot rules are cleared without dropping native configured rules.
         const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
-        let codexThreadId: string | null = null;
         let startedModel: string | null = null;
         if (cursor) {
           try {
@@ -1070,7 +1122,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
           ...(turn.images ?? []).map((image) => ({ type: "localImage" as const, path: image.path })),
         ];
-        const startTurn = () => request("turn/start", {
+        const startTurn = () => {
+          startingNativeTurn = true;
+          return request("turn/start", {
             threadId: codexThreadId,
             input: turnInput,
             ...approvalParams.turn,
@@ -1085,6 +1139,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // thread rather than the current one.
             ...(turn.effort ? { effort: turn.effort } : {}),
           });
+        };
         try {
           await startTurn();
         } catch (error) {
@@ -1154,11 +1209,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         resolve(!err && /^logged in\b/im.test(`${stdout}\n${stderr ?? ""}`)),
       );
     });
+    // Display identity only, so Settings can say whose ChatGPT account the
+    // bots run on; the status command above stays the authority on sign-in.
+    const email = authenticated ? await codexAccountEmail(config.cli, env) : null;
     // childEnv drops OPENAI_API_KEY on purpose — turns run on the ChatGPT login
     return {
       state: "available",
       version,
       authenticated,
+      ...(email ? { account: { email } } : {}),
       update: codexAstraUpdate(version, models, config.cli),
       billing: "subscription",
     };
@@ -1176,6 +1235,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     startAuthentication: () => authentication.start(),
     getAuthentication: (flowId) => authentication.get(flowId),
     cancelAuthentication: () => authentication.cancel(),
+    signOut: () => authentication.signOut(),
     snapshot,
     adapter: {
       provider: DRIVER_KIND,

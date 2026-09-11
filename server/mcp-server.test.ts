@@ -330,6 +330,63 @@ describe("MCP tool execution", () => {
     expect(result.hits).toHaveLength(1);
   });
 
+  it("rewinds a thread by editing an earlier message, and refuses while busy", async () => {
+    // The composer rewind. It forks the conversation and answers again,
+    // which is the only mapped way to make the harness REBUILD context
+    // rather than resume the provider's own session.
+    const busyFetcher = vi.fn(async () => ({ bots: [{ id: "bot-1", busy: true }] }));
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "say that again",
+    }, busyFetcher)).rejects.toThrow("let it finish");
+
+    const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return { bots: [{ id: "bot-1", busy: false }] };
+      if (path === "/api/bots/bot-1/messages/m-9/edit") {
+        expect(options?.method).toBe("POST");
+        expect(JSON.parse(String(options?.body))).toEqual({ text: "say that again" });
+        return { ok: true, message: { id: "m-new", role: "user", text: "say that again" } };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    const result: any = await handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "say that again",
+    }, fetcher);
+    expect(result).toMatchObject({ success: true, botId: "bot-1", message: { id: "m-new" } });
+  });
+
+  it("edits inside a named task only when that task is idle and owned", async () => {
+    const bot = {
+      id: "bot-1", busy: true, threadId: "task-1",
+      tasks: [{ threadId: "task-1", busy: true }, { threadId: "task-2", busy: false }],
+    };
+    const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === "/api/bots?messages=0") return { bots: [bot] };
+      if (path === "/api/bots/bot-1/messages/m-9/edit") {
+        expect(JSON.parse(String(options?.body))).toEqual({ text: "again", threadId: "task-2" });
+        return { ok: true, message: { id: "m-new" } };
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    // the bot is busy on task-1, but task-2 is idle: the edit lands there
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "again", task_id: "task-2",
+    }, fetcher)).resolves.toMatchObject({ success: true });
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "again", task_id: "task-1",
+    }, fetcher)).rejects.toThrow("let it finish");
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "again", task_id: "task-9",
+    }, fetcher)).rejects.toThrow("does not belong");
+  });
+
+  it("will not rewind to an empty message", async () => {
+    const fetcher = vi.fn();
+    await expect(handleToolCall("edit_bot_message", {
+      bot_id: "bot-1", message_id: "m-9", text: "   ",
+    }, fetcher as never)).rejects.toThrow("text is required");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("requires an exact available model and refuses changes while busy", async () => {
     const busyFetcher = vi.fn(async () => ({ bots: [{ id: "bot-1", busy: true }] }));
     await expect(handleToolCall("set_bot_model", {
