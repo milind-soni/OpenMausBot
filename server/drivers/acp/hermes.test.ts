@@ -5,10 +5,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import {
+  HERMES_ACP_MODELS_TIMEOUT_ENV,
   HERMES_CONFIG_MODEL_ID,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL,
   bindHermesScreenshotCompat,
+  fetchHermesAcpModels,
   hermesAcpModelId,
   hermesConfiguredModel,
 } from "./hermes.ts";
@@ -216,4 +218,75 @@ describe("hermesAcpModelId", () => {
   it("returns null for a bare word that names no provider", () => {
     expect(hermesAcpModelId("gpt-5")).toBeNull();
 });
+});
+
+describe("fetchHermesAcpModels probe deadline", () => {
+  const dirs: string[] = [];
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) await removeTempDir(d);
+  });
+
+  // Minimal ACP CLI: answers initialize at once, then session/new after
+  // FAKE_SESSION_DELAY_MS with a two-model catalog. Plain JS in a .ts file so
+  // the node shebang runs it on every supported runtime.
+  const FAKE_CLI_SOURCE = `#!/usr/bin/env node
+let buf = "";
+const delay = Number(process.env.FAKE_SESSION_DELAY_MS || "0");
+const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
+process.stdin.on("data", (chunk) => {
+  buf += String(chunk);
+  let nl;
+  while ((nl = buf.indexOf("\\n")) >= 0) {
+    const line = buf.slice(0, nl);
+    buf = buf.slice(nl + 1);
+    let msg;
+    try { msg = JSON.parse(line); } catch { continue; }
+    if (msg.method === "initialize") {
+      reply(msg.id, { protocolVersion: 1 });
+    } else if (msg.method === "session/new") {
+      setTimeout(() => reply(msg.id, {
+        models: { availableModels: [
+          { modelId: "openrouter:qwen/qwen3.8-max", name: "OpenRouter · Qwen 3.8 Max" },
+          { modelId: "openrouter:beta", name: "  " },
+          { modelId: "", name: "dropped" },
+        ] },
+      }), delay);
+    }
+  }
+});
+`;
+
+  const CATALOG = [
+    { id: "openrouter:qwen/qwen3.8-max", label: "OpenRouter · Qwen 3.8 Max", custom: true },
+    { id: "openrouter:beta", label: "openrouter:beta", custom: true },
+  ];
+
+  function fakeCli(env: Record<string, string>): { cli: string; env: Record<string, string> } {
+    const home = mkdtempSync(join(tmpdir(), "omb-hermes-probe-"));
+    dirs.push(home);
+    const cli = join(home, "fake-hermes.ts");
+    writeFileSync(cli, FAKE_CLI_SOURCE, { mode: 0o755 });
+    // The spawn gets exactly this env, so PATH has to survive for the
+    // script's /usr/bin/env node shebang to resolve.
+    return { cli, env: { PATH: process.env.PATH ?? "", HOME: home, ...env } };
+  }
+
+  it("returns the advertised catalog when session/new answers inside the deadline", async () => {
+    const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "150", [HERMES_ACP_MODELS_TIMEOUT_ENV]: "2000" });
+    await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual(CATALOG);
+  });
+
+  it("returns [] when session/new outlives the deadline, without waiting for it", async () => {
+    const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "2000", [HERMES_ACP_MODELS_TIMEOUT_ENV]: "150" });
+    const started = Date.now();
+    await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual([]);
+    expect(Date.now() - started).toBeLessThan(1500);
+  });
+
+  it("ignores an invalid timeout override and falls back to the 15s default", async () => {
+    const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "150", [HERMES_ACP_MODELS_TIMEOUT_ENV]: "not-a-number" });
+    // Resolving at all before any realistic default proves the override was
+    // rejected; a 0/NaN deadline would have returned [] immediately.
+    await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual(CATALOG);
+  });
 });
