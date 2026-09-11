@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -100,6 +100,35 @@ it("refuses fresh work instead of evicting unexpired retry identities at capacit
   expect(reloaded.enqueueWebhook({ ...input, deliveryId: "event-0" })).toEqual({ id: "run-0" });
   expect(() => reloaded.enqueueWebhook(input)).toThrow("retry history is full");
   expect(reloaded.listRuns()).toEqual([]);
+});
+
+it("restores pruned run history when the webhook disk commit fails at the retention limit", () => {
+  const h = harness();
+  h.manager.enqueueWebhook(input);
+  const disk = JSON.parse(readFileSync(h.options.file, "utf8"));
+  disk.runs = Array.from({ length: 2_000 }, (_, index) => ({
+    ...disk.runs[0], id: `history-${index}`, deliveryId: `history-${index}`, status: "completed",
+  }));
+  writeFileSync(h.options.file, JSON.stringify(disk));
+  const manager = new RoutineManager(h.options);
+  const before = manager.listRuns();
+  const saved = join(h.dir, "saved-routines.json");
+  renameSync(h.options.file, saved);
+  mkdirSync(h.options.file); // Fail the real atomic rename, after save() prunes.
+  expect(() => manager.enqueueWebhook({ ...input, deliveryId: "next" })).toThrow();
+  expect(manager.listRuns()).toEqual(before);
+  expect(manager.webhookRunReceipt(input.webhookId, "next")).toBeNull();
+  rmSync(h.options.file, { recursive: true });
+  renameSync(saved, h.options.file);
+
+  manager.create({ name: "Unrelated save", prompt: "No work", botId: "bot", enabled: false,
+    schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() },
+  });
+  expect(new RoutineManager(h.options).listRuns()).toEqual(before);
+  const accepted = manager.enqueueWebhook({ ...input, deliveryId: "next" });
+  expect(manager.listRuns()).toHaveLength(2_000);
+  expect(manager.listRuns().some((run) => run.id === "history-0")).toBe(false);
+  expect(new RoutineManager(h.options).webhookRunReceipt(input.webhookId, "next")).toEqual({ id: accepted.id });
 });
 
 it.each(["capacity", "disk", "routine-write"] as const)("a rejected %s admission does not detach the scheduler's live runs", async (failure) => {

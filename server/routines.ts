@@ -1180,13 +1180,14 @@ export class RoutineManager {
       throw Object.assign(new Error("Webhook retry history is full; try again later"), { status: 429 });
     }
     receipts.push({ webhookId: input.webhookId, deliveryId: input.deliveryId, runId: run.id, acceptedAt: this.now() });
+    const previousRuns = this.runs.slice();
     this.runs.push(run);
     this.webhookRunReceipts = receipts;
     try { this.save(); }
     catch (error) {
-      // tick() may be awaiting a provider with references to other runs. Undo
-      // only this synchronous append, not those live objects or their array.
-      this.runs.splice(this.runs.indexOf(run), 1);
+      // Restore pruned history too, retaining the live run objects that tick()
+      // may be awaiting rather than replacing them with cloned snapshots.
+      this.runs = previousRuns;
       this.webhookRunReceipts = previousReceipts;
       throw error;
     }
