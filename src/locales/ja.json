@@ -1384,5 +1384,8 @@
   "remote.signInAccess.empty": "まだ誰もいません。アドレスを追加するか、会社全員なら @yourcompany.com を追加してください。",
   "remote.signInAccess.invalid": "メールアドレス、またはそのドメイン全員を表す @domain を入力してください。",
   "remote.signInAccess.note": "変更はすぐに反映されます。削除すると新しいサインインはできなくなります。既存のデバイスは上でサインアウトするまで残ります。",
-  "remote.signInAccess.error": "保存できませんでした: {error}"
+  "remote.signInAccess.error": "保存できませんでした: {error}",
+  "room.incoming.summary": "仕事の受信 · {count}グループ",
+  "room.incoming.description": "選んだグループから、この部屋の指定メンバーへの依頼を許可します。受けたメンバーが議論を進め、成果は依頼者へ自動で返ります。",
+  "room.incoming.discussion": "下流への依頼や受けた仕事の完了前に、メンバーと議論する"
 }

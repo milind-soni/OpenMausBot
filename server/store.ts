@@ -124,6 +124,8 @@ export interface SecretRequestCardData {
 }
 
 export interface Message {
+  /** Durable delivery identity, kept out of the visible message body. */
+  roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
@@ -238,6 +240,9 @@ export interface GroupTaskRecord {
  * it as part of its system prompt. */
 export interface GroupRecord {
   id: string;
+  /** Explicit incoming work routes; grants addressed turns, never history access. */
+  incomingGroupIds?: string[];
+  requireRoomDiscussion?: boolean;
   /** The active task's thread. Direct-message channels remain single-threaded. */
   threadId: ThreadId;
   /** User-created channels have independent tasks, newest first. */
@@ -1137,7 +1142,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "incomingGroupIds" | "requireRoomDiscussion">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     Object.assign(group, patch);

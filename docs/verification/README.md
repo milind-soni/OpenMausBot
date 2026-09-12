@@ -134,6 +134,12 @@ sent mentions, multiline scrolling and responsive wrapping in real chat views.
 The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
+The [addressed room work recipe](room-handoffs.md) checks opt-in routes,
+recipient-only execution, cancellation and return routing. The
+[discussion recipe](room-discussion.md) and [three-layer organization](room-pyramid.md)
+exercise discussion, member assignment and downstream branching through the
+shared control surface and the real injected agents MCP proxy.
+
 ## Evidence
 
 The [Japanese desktop font recipe](japanese-desktop.md) checks real Firefox and

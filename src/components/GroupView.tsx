@@ -179,7 +179,9 @@ const Transcript = memo(function Transcript({
   const memberOf = (id?: string) => members.find((b) => b.id === id);
   // Several bots working at once turn a room into a wall of chips; fold the
   // finished ones the same way a 1:1 chat does.
-  const items = useMemo(() => groupActivityRuns(messages), [messages]);
+  // Hidden tool steps must not consume a new speaker's name label.
+  const items = useMemo(() => groupActivityRuns(messages.filter(message =>
+    message.kind !== "activity" || roomActivityVisible(message, showToolCalls))), [messages, showToolCalls]);
   const newestMessageId = messages.at(-1)?.id;
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const focus = state.focusMessage;
@@ -1171,6 +1173,31 @@ export function GroupView({ group }: { group: Group }) {
       </div>
 
       {findOpen && <ChatFindBar threadId={group.threadId} onClose={() => setFindOpen(false)} />}
+
+      {!remoteClient && !group.dm && !setupPending && (
+        <details className="mx-5 mb-2 rounded-lg border border-hairline/40 bg-panel px-3 py-2 text-[12.5px]">
+          <summary className="cursor-pointer text-ink-secondary">{t("room.incoming.summary", { count: group.incomingGroupIds?.length ?? 0 })}</summary>
+          <p className="mt-2 text-ink-secondary">{t("room.incoming.description")}</p>
+          <label className="mt-3 mb-2 flex items-center gap-2 text-ink">
+            <input type="checkbox" checked={group.requireRoomDiscussion ?? false}
+              onChange={event => dispatch({ type: "patchGroup", groupId: group.id, patch: { requireRoomDiscussion: event.target.checked } })} />
+            {t("room.incoming.discussion")}
+          </label>
+          <div className="mt-2 flex max-h-36 flex-col gap-2 overflow-y-auto">
+            {state.groups.filter(candidate => candidate.id !== group.id && !candidate.dm).map(candidate => (
+              <label key={candidate.id} className="flex min-w-0 items-center gap-2 text-ink">
+                <input type="checkbox" checked={group.incomingGroupIds?.includes(candidate.id) ?? false}
+                  onChange={event => dispatch({ type: "patchGroup", groupId: group.id, patch: {
+                    incomingGroupIds: event.target.checked
+                      ? [...(group.incomingGroupIds ?? []), candidate.id]
+                      : (group.incomingGroupIds ?? []).filter(id => id !== candidate.id),
+                  } })} />
+                <span className="truncate">{candidate.name}</span>
+              </label>
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* Bulletin: one pinned line; click to edit */}
       {!setupPending && <div className="w-full px-5">

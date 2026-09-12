@@ -1,0 +1,810 @@
+{
+  "verifiedAt": "2026-09-12T03:16:44.736Z",
+  "upstreamBase": "2f91c462926bee70242c42a4e3443b19d0a13a0c",
+  "mode": "scripted provider through real server and injected agents MCP proxy",
+  "counts": {
+    "rooms": 5,
+    "bots": 15,
+    "providerTurns": 45,
+    "work": 5,
+    "discussion": 7,
+    "assignment": 10
+  },
+  "rooms": [
+    {
+      "id": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "name": "経営会議",
+      "members": [
+        {
+          "id": "3c339920-b4de-49c4-a29d-751747f3f919",
+          "name": "ミナト"
+        },
+        {
+          "id": "fec2bbd5-0ce8-428c-a150-226ed9c3d4df",
+          "name": "アオイ"
+        },
+        {
+          "id": "e5ed9959-e0ed-42db-990f-87e65bc47abf",
+          "name": "ユイ"
+        }
+      ]
+    },
+    {
+      "id": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "name": "開発部",
+      "members": [
+        {
+          "id": "d5a78f9e-766b-41a8-a39d-bc50e3742f8d",
+          "name": "レン"
+        },
+        {
+          "id": "f2b50c32-554c-4399-a59d-5c115c37554e",
+          "name": "リツ"
+        },
+        {
+          "id": "d24278e4-9945-4564-b5c6-1d237fddaecc",
+          "name": "マコ"
+        }
+      ]
+    },
+    {
+      "id": "0c06f092-f998-4d33-8771-fa960120b97d",
+      "name": "営業部",
+      "members": [
+        {
+          "id": "588009d9-b98e-490d-ad64-c3dcb8e8d015",
+          "name": "コウ"
+        },
+        {
+          "id": "c7f464cc-1cc0-41ef-a965-dcbbb6507c02",
+          "name": "サキ"
+        },
+        {
+          "id": "50f7638f-999b-497f-9120-ed7ab29dd3ef",
+          "name": "トワ"
+        }
+      ]
+    },
+    {
+      "id": "ec6c7832-5b3c-4609-ad74-6721c2a0a249",
+      "name": "実装チーム",
+      "members": [
+        {
+          "id": "08c01ac1-f61b-4007-b7dc-1ca92db67181",
+          "name": "ソラ"
+        },
+        {
+          "id": "9f3e693e-d96e-430b-8064-4c7838cff271",
+          "name": "ヒナ"
+        },
+        {
+          "id": "6e814307-d639-48f1-8982-f4d0c865b801",
+          "name": "ナギ"
+        }
+      ]
+    },
+    {
+      "id": "239ed4ef-aaf9-43b9-bace-1d889e5b9708",
+      "name": "QAチーム",
+      "members": [
+        {
+          "id": "93883387-c852-4070-8c8d-cfe281c5eda4",
+          "name": "レオ"
+        },
+        {
+          "id": "32a61812-a269-4b6a-9cfc-d33aacc0c9d1",
+          "name": "メイ"
+        },
+        {
+          "id": "c7c91731-aa02-4039-986d-32a5ccd02bc9",
+          "name": "ハル"
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "id": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "groupId": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "botId": "3c339920-b4de-49c4-a29d-751747f3f919",
+      "kind": "work",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "0ffa3a8d-d6c0-4df7-9e2a-92be53ad0c55",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "groupId": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "botId": "3c339920-b4de-49c4-a29d-751747f3f919",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "fec2bbd5-0ce8-428c-a150-226ed9c3d4df",
+        "e5ed9959-e0ed-42db-990f-87e65bc47abf"
+      ]
+    },
+    {
+      "id": "8c36beb3-edea-4a96-80a2-a48c10cd925b",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "groupId": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "botId": "3c339920-b4de-49c4-a29d-751747f3f919",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "fec2bbd5-0ce8-428c-a150-226ed9c3d4df",
+        "e5ed9959-e0ed-42db-990f-87e65bc47abf"
+      ]
+    },
+    {
+      "id": "f36012d8-c7e8-4e18-87df-a3c8188ad6c5",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "groupId": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "botId": "fec2bbd5-0ce8-428c-a150-226ed9c3d4df",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "490887a3-e188-4e20-837a-af3526f6b81e",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "groupId": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "botId": "e5ed9959-e0ed-42db-990f-87e65bc47abf",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "11ab9f67-ba52-46d5-8e05-d375168345dc",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "f36012d8-c7e8-4e18-87df-a3c8188ad6c5",
+      "groupId": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "botId": "d5a78f9e-766b-41a8-a39d-bc50e3742f8d",
+      "kind": "work",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "4df43c11-006f-43b0-84bf-c19411914797",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "490887a3-e188-4e20-837a-af3526f6b81e",
+      "groupId": "0c06f092-f998-4d33-8771-fa960120b97d",
+      "botId": "588009d9-b98e-490d-ad64-c3dcb8e8d015",
+      "kind": "work",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "87b55bdd-8255-45e4-9767-171a65d40a0c",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "11ab9f67-ba52-46d5-8e05-d375168345dc",
+      "groupId": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "botId": "d5a78f9e-766b-41a8-a39d-bc50e3742f8d",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "f2b50c32-554c-4399-a59d-5c115c37554e",
+        "d24278e4-9945-4564-b5c6-1d237fddaecc"
+      ]
+    },
+    {
+      "id": "3e2003ad-91a4-4d5e-98a7-2dc3f1afed3c",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "4df43c11-006f-43b0-84bf-c19411914797",
+      "groupId": "0c06f092-f998-4d33-8771-fa960120b97d",
+      "botId": "588009d9-b98e-490d-ad64-c3dcb8e8d015",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "c7f464cc-1cc0-41ef-a965-dcbbb6507c02",
+        "50f7638f-999b-497f-9120-ed7ab29dd3ef"
+      ]
+    },
+    {
+      "id": "d1985252-511d-42eb-a941-eb5fc5d13fbb",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "11ab9f67-ba52-46d5-8e05-d375168345dc",
+      "groupId": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "botId": "d5a78f9e-766b-41a8-a39d-bc50e3742f8d",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "f2b50c32-554c-4399-a59d-5c115c37554e",
+        "d24278e4-9945-4564-b5c6-1d237fddaecc"
+      ]
+    },
+    {
+      "id": "14322134-911f-44db-841a-f7e9b1372020",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "4df43c11-006f-43b0-84bf-c19411914797",
+      "groupId": "0c06f092-f998-4d33-8771-fa960120b97d",
+      "botId": "c7f464cc-1cc0-41ef-a965-dcbbb6507c02",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "c05111a1-07ca-4310-938c-2ac1752b0c1b",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "4df43c11-006f-43b0-84bf-c19411914797",
+      "groupId": "0c06f092-f998-4d33-8771-fa960120b97d",
+      "botId": "50f7638f-999b-497f-9120-ed7ab29dd3ef",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "f86eaf02-d93f-44d9-82f0-2842aa03b4aa",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "11ab9f67-ba52-46d5-8e05-d375168345dc",
+      "groupId": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "botId": "f2b50c32-554c-4399-a59d-5c115c37554e",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "87458a4b-c093-4c2c-9bac-5b3052a2302b",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "11ab9f67-ba52-46d5-8e05-d375168345dc",
+      "groupId": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "botId": "d24278e4-9945-4564-b5c6-1d237fddaecc",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "da53666d-11ae-49d6-ba2c-499dbfabfbb5",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "f86eaf02-d93f-44d9-82f0-2842aa03b4aa",
+      "groupId": "ec6c7832-5b3c-4609-ad74-6721c2a0a249",
+      "botId": "08c01ac1-f61b-4007-b7dc-1ca92db67181",
+      "kind": "work",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "ec3747e8-43f0-4b25-96e0-dfe989fc20fb",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "87458a4b-c093-4c2c-9bac-5b3052a2302b",
+      "groupId": "239ed4ef-aaf9-43b9-bace-1d889e5b9708",
+      "botId": "93883387-c852-4070-8c8d-cfe281c5eda4",
+      "kind": "work",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "bf5c8d31-221e-4af4-ba26-395a27c2b2b3",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "da53666d-11ae-49d6-ba2c-499dbfabfbb5",
+      "groupId": "ec6c7832-5b3c-4609-ad74-6721c2a0a249",
+      "botId": "08c01ac1-f61b-4007-b7dc-1ca92db67181",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "9f3e693e-d96e-430b-8064-4c7838cff271",
+        "6e814307-d639-48f1-8982-f4d0c865b801"
+      ]
+    },
+    {
+      "id": "467ae67c-7a2d-4f96-af99-08264e942437",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "ec3747e8-43f0-4b25-96e0-dfe989fc20fb",
+      "groupId": "239ed4ef-aaf9-43b9-bace-1d889e5b9708",
+      "botId": "93883387-c852-4070-8c8d-cfe281c5eda4",
+      "kind": "discussion",
+      "status": "completed",
+      "participants": [
+        "32a61812-a269-4b6a-9cfc-d33aacc0c9d1",
+        "c7c91731-aa02-4039-986d-32a5ccd02bc9"
+      ]
+    },
+    {
+      "id": "45c51d22-b123-46d9-852b-fbcba2d00ce2",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "da53666d-11ae-49d6-ba2c-499dbfabfbb5",
+      "groupId": "ec6c7832-5b3c-4609-ad74-6721c2a0a249",
+      "botId": "9f3e693e-d96e-430b-8064-4c7838cff271",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "aff903d0-45f0-406c-9446-f57a93f7a93a",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "da53666d-11ae-49d6-ba2c-499dbfabfbb5",
+      "groupId": "ec6c7832-5b3c-4609-ad74-6721c2a0a249",
+      "botId": "6e814307-d639-48f1-8982-f4d0c865b801",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "19ba03da-7f3e-43d9-b0d9-0a36a046eaf2",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "ec3747e8-43f0-4b25-96e0-dfe989fc20fb",
+      "groupId": "239ed4ef-aaf9-43b9-bace-1d889e5b9708",
+      "botId": "32a61812-a269-4b6a-9cfc-d33aacc0c9d1",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    },
+    {
+      "id": "ecac1577-102c-4377-a015-1d3f5558abf1",
+      "rootId": "f98945ec-65f5-4c04-aea8-a8a2b9e325a2",
+      "parentId": "ec3747e8-43f0-4b25-96e0-dfe989fc20fb",
+      "groupId": "239ed4ef-aaf9-43b9-bace-1d889e5b9708",
+      "botId": "c7c91731-aa02-4039-986d-32a5ccd02bc9",
+      "kind": "assignment",
+      "status": "completed",
+      "participants": []
+    }
+  ],
+  "transcripts": [
+    {
+      "name": "経営会議",
+      "id": "47a0e446-4327-4f3c-9ced-3f04446d64c9",
+      "messages": [
+        {
+          "id": "7e88fd44-2b4b-48fc-9da8-739d721b8cdc",
+          "at": 1789182984095,
+          "speaker": "Fixture user",
+          "text": "@ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案を再検討して方針を決めてください。その後、アオイに開発部レンへの依頼と結果確認、ユイに営業部コウへの依頼と結果確認をassign_room_memberで分担。開発部でも2巡議論の後、リツが実装チームのソラへ、マコがQAチームのレオへ依頼します。最下層と営業部は1巡議論後に各既存メンバーへ成果物作成を分担。計画だけで終わらず架空CSVサンプル・検査表・FAQ・チェックリストを作成。結果を各担当が確認して責任者へ戻し、最後に経営会議で統合してください。役割・経路は各グループの掲示にあります。実データやコード変更は不要です。"
+        },
+        {
+          "id": "85a9cab9-b057-4f0f-b551-a758022bea9b",
+          "at": 1789182984547,
+          "speaker": "ミナト",
+          "text": "経営会議仮案。各担当の意見を求めます。"
+        },
+        {
+          "id": "83d888bb-1668-459e-ab02-fcb7b25b7554",
+          "at": 1789182984571,
+          "speaker": "ミナト",
+          "text": "【議論】@アオイ @ユイ\n経営会議第1巡。修正案を検討"
+        },
+        {
+          "id": "fb7e661c-1984-408c-b527-6ad3bd3f8b05",
+          "at": 1789182984995,
+          "speaker": "アオイ",
+          "text": "アオイ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "2306195f-ba6a-41dc-8139-60555b0613e1",
+          "at": 1789182985491,
+          "speaker": "ユイ",
+          "text": "ユイ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "4aaf595f-5086-4357-a996-f9eda70830f3",
+          "at": 1789182986699,
+          "speaker": "ミナト",
+          "text": "経営会議修正案。懸念を受けて条件を限定します。再確認してください。"
+        },
+        {
+          "id": "009c0589-f94c-4488-ad4c-4a83f921f499",
+          "at": 1789182986873,
+          "speaker": "ミナト",
+          "text": "【議論】@アオイ @ユイ\n経営会議第2巡。修正案を検討"
+        },
+        {
+          "id": "5bb51b7f-13ea-417c-8d77-2dd0601f4bb8",
+          "at": 1789182987394,
+          "speaker": "アオイ",
+          "text": "アオイ再検討。修正により懸念が解消しました。境界条件も追加して合意します。"
+        },
+        {
+          "id": "1bcbb2f1-604b-40e3-8549-31c40656f6c8",
+          "at": 1789182987917,
+          "speaker": "ユイ",
+          "text": "ユイ再検討。修正により懸念が解消しました。境界条件も追加して合意します。"
+        },
+        {
+          "id": "8c5d073e-bbe4-4fae-9b51-a970d105e48a",
+          "at": 1789182988810,
+          "speaker": "ミナト",
+          "text": "経営会議決定。懸念を反映し2名に別々の責任を割り当てました。"
+        },
+        {
+          "id": "cafc119c-7269-44dc-a094-1192e6ff7874",
+          "at": 1789182988922,
+          "speaker": "ミナト",
+          "text": "@アオイ 経営会議決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "0566023c-5952-4342-8b57-947ea0c65611",
+          "at": 1789182989349,
+          "speaker": "アオイ",
+          "text": "アオイ担当として下層へ依頼しました。"
+        },
+        {
+          "id": "1914358e-f3e5-472d-80fa-72cdf3b21b67",
+          "at": 1789182989426,
+          "speaker": "ミナト",
+          "text": "@ユイ 経営会議決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "4ea50552-188b-460c-a5c8-fd48e1a81e7f",
+          "at": 1789182989923,
+          "speaker": "ユイ",
+          "text": "ユイ担当として下層へ依頼しました。"
+        },
+        {
+          "id": "ce3dcbef-9754-4323-bd5a-09dfe1de42bb",
+          "at": 1789182995077,
+          "speaker": "コウ",
+          "text": "@ユイ\n\n営業部統合報告。両担当の成果を確認しました。"
+        },
+        {
+          "id": "29a30ab7-0fb3-440c-b8ac-01b66441a26f",
+          "at": 1789182995802,
+          "speaker": "ユイ",
+          "text": "ユイ成果。下層の結果をレビューして責任者へ報告します。"
+        },
+        {
+          "id": "3e3b0f2c-f3b6-476a-81e9-c1d4854a8333",
+          "at": 1789183002739,
+          "speaker": "レン",
+          "text": "@アオイ\n\n開発部統合報告。両担当の成果を確認しました。"
+        },
+        {
+          "id": "d46523ad-82a1-4e0c-b23f-bfa5d8da98a8",
+          "at": 1789183003461,
+          "speaker": "アオイ",
+          "text": "アオイ成果。下層の結果をレビューして責任者へ報告します。"
+        },
+        {
+          "id": "fbe06e07-55e2-4d2d-9e0a-60dd4ed04518",
+          "at": 1789183004235,
+          "speaker": "ミナト",
+          "text": "経営会議統合報告。両担当の成果を確認しました。"
+        }
+      ]
+    },
+    {
+      "name": "開発部",
+      "id": "673fc188-cde9-4ff4-bbcf-11862e27fa8a",
+      "messages": [
+        {
+          "id": "762cb5d5-e081-4371-9c46-42da0e38b55a",
+          "at": 1789182989429,
+          "speaker": "アオイ",
+          "text": "@レン 経営会議決定を具体化した依頼。CSV設計と受入条件。仮案は直接書込み・件数の事前確認のみ。リツは処理の簡素さ、マコは途中失敗と件数変化の危険を検討。2巡目で修正案を相互確認して決定する。"
+        },
+        {
+          "id": "ea81bddf-b03b-485c-958d-cbb722c3ed1f",
+          "at": 1789182990042,
+          "speaker": "レン",
+          "text": "開発部仮案。各担当の意見を求めます。"
+        },
+        {
+          "id": "397ffa8b-30da-4a40-a256-d70e8e90cd80",
+          "at": 1789182990195,
+          "speaker": "レン",
+          "text": "【議論】@リツ @マコ\n開発部第1巡。修正案を検討"
+        },
+        {
+          "id": "386187cd-8982-48d8-ba0a-8aba977cdb20",
+          "at": 1789182990664,
+          "speaker": "リツ",
+          "text": "リツ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "439181d2-3cbd-4541-b02d-344606a810f9",
+          "at": 1789182991149,
+          "speaker": "マコ",
+          "text": "マコ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "a193ca75-5117-4e22-9802-32eebf38da78",
+          "at": 1789182991952,
+          "speaker": "レン",
+          "text": "開発部修正案。懸念を受けて条件を限定します。再確認してください。"
+        },
+        {
+          "id": "a299f549-fac9-44b7-bb45-476f52103950",
+          "at": 1789182992037,
+          "speaker": "レン",
+          "text": "【議論】@リツ @マコ\n開発部第2巡。修正案を検討"
+        },
+        {
+          "id": "66058ad0-bb44-4421-8717-bd476365dd74",
+          "at": 1789182992630,
+          "speaker": "リツ",
+          "text": "リツ再検討。修正により懸念が解消しました。境界条件も追加して合意します。"
+        },
+        {
+          "id": "eea68583-b4e6-42d8-98dc-191110d9c1c0",
+          "at": 1789182993139,
+          "speaker": "マコ",
+          "text": "マコ再検討。修正により懸念が解消しました。境界条件も追加して合意します。"
+        },
+        {
+          "id": "c53ef05f-ec00-40f5-a3c2-8c9ca2e153ae",
+          "at": 1789182994195,
+          "speaker": "レン",
+          "text": "開発部決定。懸念を反映し2名に別々の責任を割り当てました。"
+        },
+        {
+          "id": "889253d7-e7ed-4632-959a-afece308d0b4",
+          "at": 1789182994338,
+          "speaker": "レン",
+          "text": "@リツ 開発部決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "51b784ea-3018-4b95-88bb-aa27e0f8015e",
+          "at": 1789182994894,
+          "speaker": "リツ",
+          "text": "リツ担当として下層へ依頼しました。"
+        },
+        {
+          "id": "e7083812-1628-4d85-8550-5c78055ef513",
+          "at": 1789182995088,
+          "speaker": "レン",
+          "text": "@マコ 開発部決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "53572f9f-60be-4154-80c1-b0239704716b",
+          "at": 1789182995622,
+          "speaker": "マコ",
+          "text": "マコ担当として下層へ依頼しました。"
+        },
+        {
+          "id": "2fd43132-0f4f-4477-9c92-4de0632bfce8",
+          "at": 1789182999672,
+          "speaker": "ソラ",
+          "text": "@リツ\n\n実装チーム統合報告。両担当の成果を確認しました。"
+        },
+        {
+          "id": "39cac409-1b8a-44ff-aff0-6b25e3d1d004",
+          "at": 1789183000502,
+          "speaker": "リツ",
+          "text": "リツ成果。下層の結果をレビューして責任者へ報告します。"
+        },
+        {
+          "id": "70a23cea-50c7-45ef-bb62-b6a265ecc98a",
+          "at": 1789183001206,
+          "speaker": "レオ",
+          "text": "@マコ\n\nQAチーム統合報告。両担当の成果を確認しました。"
+        },
+        {
+          "id": "b61e5810-e523-46a8-9709-ba4d6b7ad8ab",
+          "at": 1789183001890,
+          "speaker": "マコ",
+          "text": "マコ成果。下層の結果をレビューして責任者へ報告します。"
+        },
+        {
+          "id": "eb59036a-2e6e-403d-84d0-87531e2b4722",
+          "at": 1789183002666,
+          "speaker": "レン",
+          "text": "開発部統合報告。両担当の成果を確認しました。"
+        }
+      ]
+    },
+    {
+      "name": "営業部",
+      "id": "0c06f092-f998-4d33-8771-fa960120b97d",
+      "messages": [
+        {
+          "id": "043a4477-1443-4f9c-81f7-2f36d59f807a",
+          "at": 1789182989942,
+          "speaker": "ユイ",
+          "text": "@コウ 経営会議決定を具体化した依頼。公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。"
+        },
+        {
+          "id": "d98a1c43-4ac6-4928-bbe7-150243aa1df5",
+          "at": 1789182990465,
+          "speaker": "コウ",
+          "text": "営業部仮案。各担当の意見を求めます。"
+        },
+        {
+          "id": "0fb8dbb7-9df9-4e99-bd3e-dd3ad76da8c5",
+          "at": 1789182990719,
+          "speaker": "コウ",
+          "text": "【議論】@サキ @トワ\n営業部第1巡。修正案を検討"
+        },
+        {
+          "id": "99cf1be0-f285-41e1-877c-138351d0902d",
+          "at": 1789182991201,
+          "speaker": "サキ",
+          "text": "サキ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "7e1acff8-9fb8-4852-a15a-6774bf6f27d8",
+          "at": 1789182991641,
+          "speaker": "トワ",
+          "text": "トワ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "ec71e323-19e4-4b35-8787-d9231ebf5a11",
+          "at": 1789182992696,
+          "speaker": "コウ",
+          "text": "営業部決定。懸念を反映し2名に別々の責任を割り当てました。"
+        },
+        {
+          "id": "89d65380-685e-4e2c-b3e4-9af708a6cbd9",
+          "at": 1789182992807,
+          "speaker": "コウ",
+          "text": "@サキ 営業部決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "ccfdf053-9820-466e-b27b-40bc48388313",
+          "at": 1789182993318,
+          "speaker": "サキ",
+          "text": "サキ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。"
+        },
+        {
+          "id": "f0c92c89-4ae9-4c8c-84c4-d4fee1f2cc1e",
+          "at": 1789182993580,
+          "speaker": "コウ",
+          "text": "@トワ 営業部決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "e33e4f01-1bcf-4baf-8b6f-0ee61509cf09",
+          "at": 1789182994155,
+          "speaker": "トワ",
+          "text": "トワ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。"
+        },
+        {
+          "id": "4a1e81e3-1c60-4aa6-b4ed-a5e87a76d64e",
+          "at": 1789182995051,
+          "speaker": "コウ",
+          "text": "営業部統合報告。両担当の成果を確認しました。"
+        }
+      ]
+    },
+    {
+      "name": "実装チーム",
+      "id": "ec6c7832-5b3c-4609-ad74-6721c2a0a249",
+      "messages": [
+        {
+          "id": "a6feeed9-26b7-421b-a804-f020590aeaa9",
+          "at": 1789182995094,
+          "speaker": "リツ",
+          "text": "@ソラ 開発部決定を具体化した依頼。出力形式とサンプルを議論。決定後ヒナに架空データ3行のCSV本文、ナギにそのCSVのカンマ・引用符の検査表を作成依頼。ナギはヒナの成果を読んで検査する。"
+        },
+        {
+          "id": "70ca7179-f7f3-4697-b8bf-21565f0393eb",
+          "at": 1789182995641,
+          "speaker": "ソラ",
+          "text": "実装チーム仮案。各担当の意見を求めます。"
+        },
+        {
+          "id": "acef2b87-061a-465f-bf45-f1a3750b0688",
+          "at": 1789182995849,
+          "speaker": "ソラ",
+          "text": "【議論】@ヒナ @ナギ\n実装チーム第1巡。修正案を検討"
+        },
+        {
+          "id": "1c5bf6e1-d22f-4418-940d-f12f99ad1c60",
+          "at": 1789182996359,
+          "speaker": "ヒナ",
+          "text": "ヒナ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "8298c6e0-5a90-487a-aea4-974a88efb008",
+          "at": 1789182996779,
+          "speaker": "ナギ",
+          "text": "ナギ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "59e80938-cc4e-416f-ba3b-d06a2f75f545",
+          "at": 1789182997583,
+          "speaker": "ソラ",
+          "text": "実装チーム決定。懸念を反映し2名に別々の責任を割り当てました。"
+        },
+        {
+          "id": "db4fda9d-0310-40af-9d6a-7c134d98740f",
+          "at": 1789182997633,
+          "speaker": "ソラ",
+          "text": "@ヒナ 実装チーム決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "671de229-f3a0-434d-87bf-65e77c3ec7ff",
+          "at": 1789182998061,
+          "speaker": "ヒナ",
+          "text": "ヒナ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。"
+        },
+        {
+          "id": "e7db4240-8744-4e65-a91c-f2aa35eb785f",
+          "at": 1789182998148,
+          "speaker": "ソラ",
+          "text": "@ナギ 実装チーム決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "c9e968b1-4f65-4b8a-8e27-c39be2202e59",
+          "at": 1789182998595,
+          "speaker": "ナギ",
+          "text": "ナギ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。"
+        },
+        {
+          "id": "177e55bc-37b7-4923-84ad-71ec3e3970c1",
+          "at": 1789182999479,
+          "speaker": "ソラ",
+          "text": "実装チーム統合報告。両担当の成果を確認しました。"
+        }
+      ]
+    },
+    {
+      "name": "QAチーム",
+      "id": "239ed4ef-aaf9-43b9-bace-1d889e5b9708",
+      "messages": [
+        {
+          "id": "85adb313-eaca-487a-b829-85915a65f245",
+          "at": 1789182995844,
+          "speaker": "マコ",
+          "text": "@レオ 開発部決定を具体化した依頼。受入試験を議論。決定後メイに0件・上限ちょうど・上限超過の3ケース表、ハルに生成中の件数変化・途中失敗・権限なしの3ケース表を作成依頼。入力条件と期待結果を必ず記載する。"
+        },
+        {
+          "id": "b1065f17-282d-487a-8aba-5e5f75d5e1d6",
+          "at": 1789182996403,
+          "speaker": "レオ",
+          "text": "QAチーム仮案。各担当の意見を求めます。"
+        },
+        {
+          "id": "6f8c8e00-ffa7-40d6-99ae-9d5b64a543cc",
+          "at": 1789182996609,
+          "speaker": "レオ",
+          "text": "【議論】@メイ @ハル\nQAチーム第1巡。修正案を検討"
+        },
+        {
+          "id": "c94143b3-989b-426a-b985-94a939bfac45",
+          "at": 1789182997051,
+          "speaker": "メイ",
+          "text": "メイ懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "85ec0cc1-4886-441d-8c94-f856d8b3923b",
+          "at": 1789182997516,
+          "speaker": "ハル",
+          "text": "ハル懸念。仮案に条件不足があるため修正を提案します。"
+        },
+        {
+          "id": "492bef82-4b94-430c-8a94-f61760fcf387",
+          "at": 1789182998402,
+          "speaker": "レオ",
+          "text": "QAチーム決定。懸念を反映し2名に別々の責任を割り当てました。"
+        },
+        {
+          "id": "0735bdc2-a880-4988-9ce0-82341550976b",
+          "at": 1789182998649,
+          "speaker": "レオ",
+          "text": "@メイ QAチーム決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "fed560e2-fca5-4416-87ea-dd10724ed81f",
+          "at": 1789182999155,
+          "speaker": "メイ",
+          "text": "メイ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。"
+        },
+        {
+          "id": "e2ed1255-2ede-4687-9d6b-9371707b2142",
+          "at": 1789182999426,
+          "speaker": "レオ",
+          "text": "@ハル QAチーム決定に基づく担当業務。実行してください"
+        },
+        {
+          "id": "2e29261f-ac88-4416-88eb-3604dbec6075",
+          "at": 1789183000064,
+          "speaker": "ハル",
+          "text": "ハル成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。"
+        },
+        {
+          "id": "5572cac5-3b69-4e03-b7c6-07e6ebf9f060",
+          "at": 1789183000998,
+          "speaker": "レオ",
+          "text": "QAチーム統合報告。両担当の成果を確認しました。"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Responses are scripted; no current-base GLM-5.3 quality or cost claim.",
+    "Terminal scheduler states do not prove semantic artifact correctness.",
+    "Before screenshots use the unmodified upstream renderer with the same fixture data; they do not demonstrate pre-change execution of the workflow."
+  ]
+}

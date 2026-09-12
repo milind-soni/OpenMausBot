@@ -15,6 +15,16 @@ import { installedChrome, UI_MUTATING } from "../scripts/testing/control-omb-ui.
 import { removeTempDir } from "./testing/cleanup.ts";
 
 describe("control-omb command mapping", () => {
+  it("requires an explicit room route target and keeps dry-run from clearing grants", async () => {
+    const invoke = vi.fn(async () => ({ success: true }));
+    const env = { OPENMAUSBOT_URL: "http://127.0.0.1:18799" };
+    await runControlOmb(["room-routes", "--channel", "engineering", "--from", "planning,planning"], { env, callTool: invoke });
+    expect(invoke).toHaveBeenCalledWith("update_channel", { channel_id: "engineering", incoming_group_ids: ["planning", "planning"] }, expect.any(Function));
+    invoke.mockClear();
+    await runControlOmb(["room-routes", "--channel", "engineering", "--from", "", "--dry-run"], { env, callTool: invoke });
+    expect(invoke).not.toHaveBeenCalled();
+    await expect(runControlOmb(["room-routes", "--channel", "engineering", "--from", "planning"], { env: {}, callTool: invoke })).rejects.toThrow();
+  });
   it("treats unhealthy doctor and non-settled waits as command failures", () => {
     expect(controlResultSucceeded("doctor", { ok: true })).toBe(true);
     expect(controlResultSucceeded("doctor", { ok: false })).toBe(false);

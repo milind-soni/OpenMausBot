@@ -357,6 +357,39 @@ const ROUTINE_FIELDS_SCHEMA = {
 
 const TOOLS = [
   {
+    name: "assign_room_member",
+    description: "After this group's discussion and decision, assign a concrete responsibility to an EXISTING member of this same group. This does not add or move members. The assigned member speaks here, can send its own downstream work to named agents in other groups, reviews returned outcomes and reports to you. Use for splitting a decision among multiple owners, or execution at a leaf team. Supply the decision, acceptance criteria and the member's responsibility. Call once per owner, then END your turn immediately; automatic results will resume you. Do not send acknowledgements as assignments.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      member_id: { type: "string" }, message: { type: "string", minLength: 1, maxLength: 4000 },
+      request_key: { type: "string" }, rework: { type: "boolean" },
+    }, required: ["member_id", "message", "request_key"] },
+  },
+  {
+    name: "discuss_room",
+    description: "Convene a bounded discussion in your CURRENT group before deciding or delegating. Use currentRoom.members from list_room_targets to select 1-4 other members. Give a concrete proposal and ask them to challenge tradeoffs. Members speak in order, seeing preceding opinions; you resume afterward to accept/reject their suggestions, resolve disagreements and state your decision. Finish your turn after calling; never poll. Only after you resume may you send the resulting brief downstream. Reuse request_key for identical retries.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      member_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, uniqueItems: true },
+      topic: { type: "string", minLength: 1, maxLength: 4000 },
+      request_key: { type: "string" },
+    }, required: ["member_ids", "topic", "request_key"] },
+  },
+  {
+    name: "list_room_targets",
+    description: "List your current group's discussion members and whether discussion is required, plus other groups accepting work and exact agent IDs. No destination history is exposed. Use before discuss_room or send_room_message.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "send_room_message",
+    description: "Send an addressed work request from this group to a named agent in another group. Only that agent starts a turn, in the destination group's context. The sender need not belong to that group; its owner must enable the incoming route. Copy group_id and bot_id from list_room_targets. This is asynchronous: finish your turn after sending. Results return to this exact conversation and wake you automatically. Never wait or poll in the sending turn. Reuse request_key only to retry the SAME request. Do not send results back with this tool; automatic returns do that. An ancestor group cannot be called again.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      group_id: { type: "string", description: "Destination group ID." },
+      bot_id: { type: "string", description: "Addressed member ID in that group." },
+      message: { type: "string", maxLength: 4000, description: "Self-contained task, at most 4000 characters. Only this text is forwarded." },
+      request_key: { type: "string", description: "Unique assignment key using letters, digits, underscores or hyphens. Reuse for identical retries." },
+      rework: { type: "boolean", description: "Set true only for concrete additional work required from an agent who already completed your assignment. Never use for acknowledgements, approvals or reporting results; finish your reply instead." },
+    }, required: ["group_id", "bot_id", "message", "request_key"] },
+  },
+  {
     name: "list_bots",
     description:
       "List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
@@ -735,9 +768,14 @@ const TOOLS = [
 });
 
 const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
-const AVAILABLE_TOOLS = SKILL_AUTHORING_ENABLED
+const AUTHORING_TOOLS = SKILL_AUTHORING_ENABLED
   ? TOOLS
   : TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
+const AVAILABLE_TOOLS = process.env.OMB_ROOM_DISCUSSION === "1"
+  ? AUTHORING_TOOLS.filter(tool => tool.name === "list_room_targets")
+  : process.env.OMB_ROOM_HANDOFF === "1"
+  ? AUTHORING_TOOLS.filter(tool => ["list_room_targets", "send_room_message", "discuss_room", "assign_room_member"].includes(tool.name))
+  : AUTHORING_TOOLS;
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -845,6 +883,28 @@ function recallSpeaker(hit: Json): string {
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "assign_room_member") {
+    const r = await api("/api/internal/assign-room-member", { method: "POST", body: JSON.stringify({
+      memberId: args.member_id, message: args.message, requestKey: args.request_key, rework: args.rework,
+    }) });
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
+  if (name === "discuss_room") {
+    const r = await api("/api/internal/discuss-room", { method: "POST", body: JSON.stringify({
+      memberIds: args.member_ids, topic: args.topic, requestKey: args.request_key,
+    }) });
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
+  if (name === "list_room_targets") {
+    const r = await api("/api/internal/room-targets");
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
+  if (name === "send_room_message") {
+    const r = await api("/api/internal/send-room-message", { method: "POST", body: JSON.stringify({
+      groupId: args.group_id, toBotId: args.bot_id, message: args.message, requestKey: args.request_key, rework: args.rework,
+    }) });
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
     const bots = (r.bots as Array<Json>) ?? [];

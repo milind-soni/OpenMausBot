@@ -1949,5 +1949,8 @@
   "backup.skipDrafts": "Continue without restoring drafts",
   "backup.skipDraftsHint": "Keep this browser’s current drafts and preferences. This does not undo the workspace restore.",
   "backup.serverBusy": "A workspace backup operation is already running.",
-  "backup.checkStatus": "Checking backup availability…"
+  "backup.checkStatus": "Checking backup availability…",
+  "room.incoming.summary": "Incoming work · {count} groups",
+  "room.incoming.description": "Allow these groups to send work to a named member here. The addressed member leads the work and can convene a discussion. Results return to the sender automatically.",
+  "room.incoming.discussion": "Discuss with members before delegating or concluding incoming work"
 }

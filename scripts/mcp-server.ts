@@ -298,6 +298,8 @@ export const TOOLS: McpToolDefinition[] = [
       type: "object",
       properties: {
         channel_id: { type: "string", description: "The ID of the channel." },
+        incoming_group_ids: { type: "array", items: { type: "string" }, maxItems: 100, description: "Groups allowed to send addressed work here. Duplicates are normalized. Empty disables incoming requests." },
+        require_room_discussion: { type: "boolean", description: "Require member discussion before cross-room delegation or concluding incoming work." },
         name: { type: "string" },
         member_ids: { type: "array", items: { type: "string" }, minItems: 1, uniqueItems: true },
         section: { type: ["string", "null"], description: "Null clears the section." },
@@ -954,6 +956,14 @@ export async function handleToolCall(
       const patch: Record<string, unknown> = {};
       if (args.name !== undefined) patch.name = stringArg(args, "name", { max: 100 });
       if (args.member_ids !== undefined) patch.memberIds = stringArrayArg(args, "member_ids");
+      if (args.require_room_discussion !== undefined) {
+        if (typeof args.require_room_discussion !== "boolean") throw new ToolInputError("require_room_discussion must be boolean");
+        patch.requireRoomDiscussion = args.require_room_discussion;
+      }
+      if (args.incoming_group_ids !== undefined) {
+        if (!Array.isArray(args.incoming_group_ids) || args.incoming_group_ids.length > 100 || args.incoming_group_ids.some(id => typeof id !== "string" || !/^[\w-]+$/.test(id))) throw new ToolInputError("incoming_group_ids must be an array of group IDs");
+        patch.incomingGroupIds = [...new Set(args.incoming_group_ids)];
+      }
       if (args.section !== undefined) patch.section = args.section === null ? null : stringArg(args, "section", { max: 60 });
       if (args.bulletin !== undefined) patch.bulletin = stringArg(args, "bulletin", { trim: false, allowEmpty: true, max: 12_000 });
       if (args.default_responder !== undefined) patch.defaultResponder = normalizeResponder(args.default_responder);

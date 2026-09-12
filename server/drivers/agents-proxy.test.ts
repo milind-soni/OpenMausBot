@@ -336,7 +336,11 @@ describe("agents-proxy MCP surface", () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
-    expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+        "assign_room_member",
+        "discuss_room",
+        "list_room_targets",
+      "send_room_message",
       "list_bots",
       "list_rooms",
       "ask_bot",
@@ -363,6 +367,8 @@ describe("agents-proxy MCP surface", () => {
       "skill_manage",
     ]);
     const ask = list.result.tools.find((tool: { name: string }) => tool.name === "ask_bot");
+    const roomWork = list.result.tools.find((tool: { name: string }) => tool.name === "send_room_message");
+    expect(roomWork.inputSchema.properties.message).toMatchObject({ type: "string", maxLength: 4000 });
     const delegate = list.result.tools.find((tool: { name: string }) => tool.name === "delegate_bot");
     const wait = list.result.tools.find((tool: { name: string }) => tool.name === "wait_delegation");
     const credential = list.result.tools.find((tool: { name: string }) => tool.name === "request_credential");
