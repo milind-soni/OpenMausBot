@@ -1,10 +1,11 @@
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { isManagedApiInstance, ProviderManager, requiresExplicitBaseUrl } from "./ProviderManager";
 
 describe("ProviderManager", () => {
   it("renders without requiring StoreProvider context", () => {
-    const html = renderToStaticMarkup(<ProviderManager />);
+    const html = renderToStaticMarkup(createElement(ProviderManager));
     expect(html).toContain("AI Providers");
     expect(html).toContain("Add provider");
   });
