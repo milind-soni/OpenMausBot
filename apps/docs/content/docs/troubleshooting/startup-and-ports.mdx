@@ -15,9 +15,9 @@ The Electron app starts a local harness and serves the interface from the same m
 
 On macOS, packaged logs are under `~/Library/Logs/OpenMausBot`. On Windows they are under the OpenMausBot log directory in `%APPDATA%`.
 
-## Development port overrides
+## Port overrides and fallback
 
-Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
+`OMB_PORT` sets the preferred port for a source-run harness (and `OMB_WEBHOOK_PORT` the preferred webhook port). If the preferred port is unavailable, the harness walks forward to the next free port and logs the resolved value, unless `OMB_DESKTOP_PARENT=1` is set — packaged desktop children must stay on the port the parent chose and will exit if it is busy.
 
 ## Isolate a test profile
 
