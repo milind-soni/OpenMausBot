@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -42,6 +42,8 @@ export function ProviderManager() {
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const refreshRequests = useRef(new Map<string, number>());
+  const refreshSequence = useRef(0);
 
   const loadInstances = useCallback(async () => {
     const { instances: next } = await api("/api/instances") as { instances: InstanceInfo[] };
@@ -57,15 +59,22 @@ export function ProviderManager() {
   }, [loadInstances]);
 
   const refreshManagedModels = async (instanceId: string) => {
+    const requestId = ++refreshSequence.current;
+    refreshRequests.current.set(instanceId, requestId);
     setRefreshingId(instanceId);
     setError(null);
     try {
       const { instances: next } = await api(`/api/instances/${encodeURIComponent(instanceId)}/refresh-models`, { method: "POST" }) as { instances: InstanceInfo[] };
-      setInstances(next);
+      if (refreshRequests.current.get(instanceId) === requestId) setInstances(next);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (refreshRequests.current.get(instanceId) === requestId) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
-      setRefreshingId(null);
+      if (refreshRequests.current.get(instanceId) === requestId) {
+        refreshRequests.current.delete(instanceId);
+        setRefreshingId(null);
+      }
     }
   };
 
@@ -128,11 +137,7 @@ export function ProviderManager() {
         }),
       });
       await loadInstances();
-      try {
-        await refreshManagedModels(instanceId);
-      } catch {
-        // The connection is persisted; discovery remains opportunistic.
-      }
+      await refreshManagedModels(instanceId);
       setStatus(`${trimmedName} added. Refresh models when the endpoint is available.`);
       setOpen(false);
       setApiKey("");
