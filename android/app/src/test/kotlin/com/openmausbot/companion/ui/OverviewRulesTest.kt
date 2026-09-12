@@ -13,4 +13,9 @@ class OverviewRulesTest {
     fun `the title names the bot`() {
         assertEquals("What Maus does", OverviewRules.title("Maus"))
     }
+
+    @Test
+    fun `the checklist header counts progress the way iOS does`() {
+        assertEquals("Finish setting up · 3 of 5 done", OverviewRules.setupHeader(3, 5))
+    }
 }

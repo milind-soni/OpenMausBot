@@ -374,6 +374,16 @@ public struct BotOverviewRecent: Codable, Hashable, Sendable {
     public var summary: String
 }
 
+/// One step of a bot's setup checklist. `section` names the desktop
+/// settings section that finishes it; the phone shows the step but cannot
+/// open that section, so it is informational here.
+public struct BotOverviewSetupStep: Codable, Hashable, Sendable {
+    public var id: String
+    public var label: String
+    public var done: Bool
+    public var section: String?
+}
+
 /// A read-only summary of one bot: who it is, what it does, what it can
 /// reach, what it won't do, and its recent activity. No settings and no
 /// transcript — this is the shape a phone is allowed to poll for.
@@ -383,6 +393,14 @@ public struct BotOverview: Codable, Hashable, Sendable {
     public var reaches: [String]
     public var wont: [String]
     public var recent: [BotOverviewRecent]
+    /// Absent from desktops older than the checklist.
+    public var setup: [BotOverviewSetupStep]?
+
+    /// The steps still open, in the order a person would do them. Empty when
+    /// the desktop sent no checklist or everything is done.
+    public var remainingSetup: [BotOverviewSetupStep] {
+        (setup ?? []).filter { !$0.done }
+    }
 }
 
 public struct GroupResponder: Codable, Hashable, Sendable {

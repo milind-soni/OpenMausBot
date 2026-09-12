@@ -22,5 +22,36 @@
       "at": 1788642361925,
       "summary": "soul: 0 → 29 bytes"
     }
+  ],
+  "setup": [
+    {
+      "id": "identity",
+      "label": "Give it a name and a job title",
+      "done": true,
+      "section": "identity"
+    },
+    {
+      "id": "soul",
+      "label": "Write its standing instructions",
+      "done": true,
+      "section": "soul"
+    },
+    {
+      "id": "folder",
+      "label": "Pick a working folder",
+      "done": false,
+      "section": "access"
+    },
+    {
+      "id": "schedule",
+      "label": "Give it a schedule or a trigger",
+      "done": true,
+      "section": "routines"
+    },
+    {
+      "id": "talk",
+      "label": "Send it a first message",
+      "done": false
+    }
   ]
 }

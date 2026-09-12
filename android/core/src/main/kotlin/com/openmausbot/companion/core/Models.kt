@@ -1084,6 +1084,19 @@ data class BotOverviewWho(val name: String, val title: String, val blurb: String
 @Serializable
 data class BotOverviewRecent(val at: Double, val summary: String)
 
+/**
+ * One step of a bot's setup checklist. [section] names the desktop settings
+ * section that finishes it; the phone cannot open that section, so it is
+ * informational here.
+ */
+@Serializable
+data class BotOverviewSetupStep(
+    val id: String,
+    val label: String,
+    val done: Boolean,
+    val section: String? = null,
+)
+
 @Serializable
 data class BotOverview(
     val who: BotOverviewWho,
@@ -1091,4 +1104,10 @@ data class BotOverview(
     val reaches: List<String> = emptyList(),
     val wont: List<String> = emptyList(),
     val recent: List<BotOverviewRecent> = emptyList(),
-)
+    /** Absent from desktops older than the checklist. */
+    val setup: List<BotOverviewSetupStep>? = null,
+) {
+    /** The steps still open, in order; empty without a checklist or when all are done. */
+    val remainingSetup: List<BotOverviewSetupStep>
+        get() = setup.orEmpty().filter { !it.done }
+}

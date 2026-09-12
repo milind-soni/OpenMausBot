@@ -17,6 +17,14 @@ object OverviewRules {
     const val EMPTY_RECENT: String = "No changes recorded yet."
     const val FAILED: String = "Couldn't load the overview."
 
+    /** "Finish setting up · 3 of 5 done" — the checklist header, as iOS words it. */
+    fun setupHeader(done: Int, total: Int): String = "Finish setting up · $done of $total done"
+
+    const val SETUP_ACTION: String = "Set up with the bot"
+    const val SETUP_SENT: String = "Sent — see the chat"
+    const val SETUP_FOOTER: String =
+        "The bot interviews you in the chat and fills these in itself. Folders, apps and instructions are changed on your computer."
+
     const val WHO: String = "Who"
     const val DOES: String = "Does"
     const val REACHES: String = "Can reach"

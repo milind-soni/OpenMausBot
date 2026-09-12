@@ -442,6 +442,21 @@ class DecodingTest {
         assertEquals("File bugs.", overview.who.soulLead)
         assertTrue(overview.does.isNotEmpty())
         assertTrue(overview.wont.isNotEmpty())
+        // the setup checklist: five steps for a bot whose engine has no
+        // connected-apps tools; "talk" happens in the chat, so no section
+        assertEquals(listOf("identity", "soul", "folder", "schedule", "talk"), overview.setup?.map { it.id })
+        assertEquals(listOf("folder", "talk"), overview.remainingSetup.map { it.id })
+        assertEquals(null, overview.setup?.last()?.section)
+        assertEquals("identity", overview.setup?.first()?.section)
+    }
+
+    @Test
+    fun anOverviewWithoutAChecklistStillDecodes() {
+        val overview = CompanionJson.decodeFromString<BotOverview>(
+            """{"who":{"name":"A","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[]}""",
+        )
+        assertEquals(null, overview.setup)
+        assertTrue(overview.remainingSetup.isEmpty())
     }
 
     @Test

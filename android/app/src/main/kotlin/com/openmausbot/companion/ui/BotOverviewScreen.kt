@@ -9,10 +9,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.R
 import com.openmausbot.companion.core.BotOverview
+import com.openmausbot.companion.core.Chat
 import kotlinx.coroutines.launch
 
 /**
@@ -112,7 +118,13 @@ fun BotOverviewScreen(botId: String, onBack: () -> Unit) {
                     ) {
                         CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
                     }
-                    current != null -> OverviewBody(current)
+                    current != null -> OverviewBody(
+                        overview = current,
+                        onSetup = {
+                            val bot = state.bot(botId) ?: return@OverviewBody
+                            scope.launch { session.send("/setup", Chat.BotChat(bot)) }
+                        },
+                    )
                     failed -> FormSection(header = null) {
                         Text(OverviewRules.FAILED, color = secondaryTint)
                     }
@@ -123,7 +135,36 @@ fun BotOverviewScreen(botId: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun OverviewBody(overview: BotOverview) {
+private fun OverviewBody(overview: BotOverview, onSetup: () -> Unit) {
+    // The setup checklist the desktop's Overview opens with. The steps point
+    // at desktop settings sections a phone cannot open, so they read as a
+    // list here; the one thing a phone can do is hand the setup to the bot
+    // itself (`ios/App/BotOverviewView.swift`).
+    val steps = overview.setup
+    val remaining = overview.remainingSetup
+    var setupSent by remember(overview) { mutableStateOf(false) }
+    if (steps != null && remaining.isNotEmpty()) {
+        FormSection(header = OverviewRules.setupHeader(steps.size - remaining.size, steps.size)) {
+            steps.forEach { step ->
+                IconNote(
+                    text = step.label,
+                    icon = if (step.done) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+                    tint = if (step.done) MaterialTheme.colorScheme.primary else secondaryTint,
+                )
+            }
+            TextButton(
+                onClick = {
+                    setupSent = true
+                    onSetup()
+                },
+                enabled = !setupSent,
+            ) {
+                Text(if (setupSent) OverviewRules.SETUP_SENT else OverviewRules.SETUP_ACTION)
+            }
+            Text(OverviewRules.SETUP_FOOTER, color = secondaryTint, fontSize = 12.sp)
+        }
+    }
+
     FormSection(header = OverviewRules.WHO) {
         Text(overview.who.name, fontWeight = FontWeight.SemiBold)
         if (overview.who.title.isNotBlank()) {

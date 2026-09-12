@@ -75,6 +75,19 @@ final class DecodingTests: XCTestCase {
         XCTAssertFalse(overview.does.isEmpty)
         XCTAssertFalse(overview.wont.isEmpty)
         XCTAssertFalse(overview.recent.isEmpty)
+        // the setup checklist: five steps for a bot whose engine has no
+        // connected-apps tools; "talk" happens in the chat, so no section
+        XCTAssertEqual(overview.setup?.map(\.id), ["identity", "soul", "folder", "schedule", "talk"])
+        XCTAssertEqual(overview.remainingSetup.map(\.id), ["folder", "talk"])
+        XCTAssertNil(overview.setup?.last?.section)
+        XCTAssertEqual(overview.setup?.first?.section, "identity")
+    }
+
+    func testAnOverviewWithoutAChecklistStillDecodes() throws {
+        let data = Data(#"{"who":{"name":"A","title":"","blurb":"","soulLead":""},"does":[],"reaches":[],"wont":[],"recent":[]}"#.utf8)
+        let overview = try JSONDecoder().decode(BotOverview.self, from: data)
+        XCTAssertNil(overview.setup)
+        XCTAssertTrue(overview.remainingSetup.isEmpty)
     }
 
     func testStorePreviewRemainsADecodableFleet() throws {

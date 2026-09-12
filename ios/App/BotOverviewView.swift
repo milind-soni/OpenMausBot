@@ -12,10 +12,44 @@ struct BotOverviewView: View {
     @State private var overview: BotOverview?
     @State private var loading = false
     @State private var failed = false
+    @State private var setupSent = false
 
     var body: some View {
         List {
             if let overview {
+                // The setup checklist the desktop's Overview opens with. The
+                // steps point at desktop settings sections a phone cannot
+                // open, so they read as a list here; the one thing a phone
+                // can do is hand the setup to the bot itself.
+                let remaining = overview.remainingSetup
+                if let steps = overview.setup, !remaining.isEmpty {
+                    Section {
+                        ForEach(steps, id: \.id) { step in
+                            Label {
+                                Text(step.label)
+                                    .strikethrough(step.done)
+                                    .foregroundStyle(step.done ? .secondary : .primary)
+                            } icon: {
+                                Image(systemName: step.done ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(step.done ? Color.accentColor : Color.secondary)
+                            }
+                        }
+                        Button {
+                            Task {
+                                await session.send("/setup", to: .bot(bot))
+                                setupSent = true
+                            }
+                        } label: {
+                            Label(setupSent ? "Sent — see the chat" : "Set up with the bot", systemImage: "sparkles")
+                        }
+                        .disabled(setupSent)
+                    } header: {
+                        Text("Finish setting up · \(steps.count - remaining.count) of \(steps.count) done")
+                    } footer: {
+                        Text("The bot interviews you in the chat and fills these in itself. Folders, apps and instructions are changed on your computer.")
+                    }
+                }
+
                 Section("Who") {
                     Text(overview.who.name).font(.headline)
                     if !overview.who.title.isEmpty {
