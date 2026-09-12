@@ -9,7 +9,7 @@ const idleTimeoutMs = () => {
   const raw = process.env.OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS;
   if (!raw) return DEFAULT_IDLE_TIMEOUT_MS;
   const value = Number(raw);
-  return Number.isSafeInteger(value) && value >= 1_000 ? value : DEFAULT_IDLE_TIMEOUT_MS;
+  return Number.isSafeInteger(value) && value >= 1_000 && value <= 2_147_483_647 ? value : DEFAULT_IDLE_TIMEOUT_MS;
 };
 const DEFAULT_MODELS: ModelCatalog = {
   default: "meta-llama/llama-3.3-70b-instruct",

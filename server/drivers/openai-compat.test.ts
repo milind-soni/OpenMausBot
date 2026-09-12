@@ -493,10 +493,11 @@ describe("OpenAICompatDriver", () => {
       const encoder = new TextEncoder();
       vi.stubGlobal(
         "fetch",
-        vi.fn(async (input: string | URL | Request) => {
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
           if (String(input).endsWith("/models")) {
             return new Response(JSON.stringify({ data: [] }), { status: 200 });
           }
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
           return new Response(stream, {
             status: 200,
             headers: { "content-type": "text/event-stream" },
@@ -517,18 +518,17 @@ describe("OpenAICompatDriver", () => {
 
       // Chunk 1 at t=0s
       controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"start "}}]}\n\n'));
-      await vi.advanceTimersByTimeAsync(50_000);
+      await vi.advanceTimersByTimeAsync(100_000);
 
-      // Chunk 2 at t=50s (resets idle timer)
+      // Chunk 2 at t=100s (resets idle timer)
       controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"middle "}}]}\n\n'));
-      await vi.advanceTimersByTimeAsync(50_000);
+      await vi.advanceTimersByTimeAsync(100_000);
 
-      // Chunk 3 at t=100s (resets idle timer)
+      // Chunk 3 at t=200s (resets idle timer)
       controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"end"}}]}\n\n'));
-      await vi.advanceTimersByTimeAsync(50_000);
+      await vi.advanceTimersByTimeAsync(100_000);
 
-      // Total time elapsed: 150s (> 120s absolute timeout limit)
-      // Chunk 4 at t=150s finishing stream
+      // Total 300s exceeds both the old 120s limit and the new 180s idle limit.
       controller!.enqueue(encoder.encode('data: [DONE]\n\n'));
       controller!.close();
 
@@ -537,6 +537,7 @@ describe("OpenAICompatDriver", () => {
 
       const item = recorder.events.find((e) => e.type === "item.completed");
       expect(item).toMatchObject({ text: "start middle end" });
+      expect(vi.getTimerCount()).toBe(0);
 
       recorder.stop();
       await inst.dispose();
@@ -544,5 +545,27 @@ describe("OpenAICompatDriver", () => {
       vi.useRealTimers();
     }
   });
-});
 
+  it("omits provider routing when none is configured", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }));
+      sentBody = JSON.parse(String(init?.body));
+      return new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\ndata: [DONE]\n');
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-no-provider", displayName: "No provider", enabled: true,
+      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY" }, environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    try {
+      await inst.adapter.sendTurn({ threadId: "thread-np", text: "prompt", model: "vendor/model" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(sentBody).not.toBeNull();
+      expect(sentBody).not.toHaveProperty("provider");
+    } finally {
+      recorder.stop();
+      await inst.dispose();
+    }
+  });
+});
