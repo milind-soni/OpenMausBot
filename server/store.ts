@@ -1368,7 +1368,7 @@ export class Store {
     if (!state) {
       const tail = mdb.readThreadTail(threadId, messagesFile(threadId), limit);
       const legacyRows = tail.hasMore !== undefined && tail.messages.some((m) => m.parentId === undefined);
-      if (tail.hasMore === undefined || legacyRows) {
+      if (tail.hasMore !== true || legacyRows) {
         state = this.cacheThread(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
       } else {
         return {

@@ -266,11 +266,9 @@ export function readThread(threadId: string, legacyFile: string): ThreadRows {
 }
 
 export interface ThreadTailRows extends ThreadRows {
-  /** Present only for a genuine bounded read: `true` means older rows exist
-   * beyond what's returned. Absent when the caller got the complete thread
-   * anyway (fewer than `limit` rows in the DB, or a one-time legacy import,
-   * which always reads the whole file) — that result can be cached as a
-   * full load, same as readThread(). */
+  /** `true` means older rows exist beyond this page; `false` means the SQL
+   * read returned the complete thread. Absent for a full legacy import.
+   * Both false and absent results can be cached as a full load. */
   hasMore?: boolean;
 }
 

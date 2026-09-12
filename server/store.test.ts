@@ -61,6 +61,26 @@ describe("Store", () => {
     expect(whole.hasMore).toBe(false);
   });
 
+  it("caches a complete tail but never caches a zero-message page as an empty thread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "keep this" });
+    const read = vi.spyOn(mdb, "readThread");
+    try {
+      const fresh = new Store(selection);
+      expect(fresh.messagesTail(bot.threadId, 10)).toMatchObject({ hasMore: false });
+      read.mockClear();
+      expect(fresh.messagesFor(bot.threadId)).toHaveLength(1);
+      expect(read).not.toHaveBeenCalled();
+
+      const zeroPage = new Store(selection);
+      expect(zeroPage.messagesTail(bot.threadId, 0)).toMatchObject({ messages: [], hasMore: true });
+      expect(zeroPage.messagesFor(bot.threadId)[0]?.text).toBe("keep this");
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("dismisses an open options card when the user talks, and leaves live asks", () => {
     const store = new Store(selection);
     const bot = store.createBot();
