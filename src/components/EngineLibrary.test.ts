@@ -59,7 +59,8 @@ describe("engine library", () => {
       expect(tree.type).toBe("div");
       // This parent/key contract prevents native disclosure state and React
       // form drafts from being discarded when authentication changes.
-      const card = tree.props.children[0].find((node: { key: string }) => node.key === "claude");
+      const grid = tree.props.children[0];
+      const card = grid.props.children.find((node: { key: string }) => node.key === "claude");
       expect(card.type).toBe("div");
       expect(card.props.children.type).toBe(EngineCard);
       const html = renderToStaticMarkup(tree);
