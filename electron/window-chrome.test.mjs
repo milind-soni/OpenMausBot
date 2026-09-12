@@ -10,8 +10,10 @@ describe("window chrome", () => {
     });
   });
 
-  it("keeps Windows controls in the native title bar, outside app content", () => {
-    expect(windowChromeOptions("win32")).toEqual({});
+  it("hides the native title bar on Windows; caption buttons are renderer-drawn", () => {
+    expect(windowChromeOptions("win32")).toEqual({
+      titleBarStyle: "hidden",
+    });
   });
 
   it("keeps Linux window chrome native", () => {

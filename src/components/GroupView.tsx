@@ -43,7 +43,7 @@ import { QuestionCard } from "./QuestionCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
 import { groupActivityRuns } from "@/lib/activity-runs";
 import { ActivityRun } from "./ActivityRun";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { useDesktopCapabilities, useCaptionChrome } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
 import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
@@ -903,6 +903,9 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
 export function GroupView({ group }: { group: Group }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  // Same Windows caption handling as ChatView: drag on the header, shift the
+  // right-hand controls below the renderer-drawn caption buttons.
+  const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1120,17 +1123,23 @@ export function GroupView({ group }: { group: Group }) {
       )}
       {/* Header: static member avatars; a ring + dot marks the working bot. */}
       <div
+        style={headerDragStyle}
         className={cn(
           "flex items-center justify-between px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2" style={headerNoDragStyle}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div
+          className="flex items-center gap-1.5"
+          // The caption buttons sit over the header's right end; drop this
+          // control row 16px (visual only) below the 26px overlay.
+          style={controlsShiftStyle}
+        >
           <button
             type="button"
             onClick={() => setFindOpen((open) => !open)}

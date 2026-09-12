@@ -170,7 +170,8 @@ function desktopCapabilities({
       // this computer's users
       homeDir: remote ? "" : homeDir,
     },
-    windowChrome: isMac ? "mac-inset" : "native",
+    windowChrome:
+      isMac ? "mac-inset" : hostPlatform === "win32" ? "win-caption" : "native",
     screenPreview,
     dictation,
     localComputer,

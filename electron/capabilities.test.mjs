@@ -41,7 +41,17 @@ describe("desktop capabilities", () => {
     });
   });
 
-  it.each(["win32", "freebsd"])("fails closed on %s", (platform) => {
+  it("reports the renderer-caption window chrome on Windows", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      env: { DISPLAY: ":0" },
+      localConnection: { mode: "embedded" },
+    });
+
+    expect(capabilities.windowChrome).toBe("win-caption");
+  });
+
+  it.each(["freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,
       env: { DISPLAY: ":0" },

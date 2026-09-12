@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { Bell, ChevronLeft, ImagePlus, Loader2, Trash2, X } from "lucide-react";
 
 import { api, useStore, type Bot } from "@/state/store";
+import { cn } from "@/lib/cn";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { VoiceSettings } from "./VoiceSettings";
 import { Switch } from "./SettingsPrimitives";
 import { BotAvatar } from "./Avatar";
@@ -15,6 +17,8 @@ type RemoteProfilePatch = Partial<
 
 export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
+  // Docked flush under the Windows caption corner: drop the header 16px.
+  const { padClass } = useCaptionChrome();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -70,7 +74,7 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
 
   return (
     <aside className="animate-panel-in relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <button
           onClick={close}
           aria-label="Collapse remote agent settings"

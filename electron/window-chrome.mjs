@@ -1,12 +1,15 @@
 /**
- * Keep custom inset chrome only where the platform owns a stable inset model.
- * Windows' titleBarOverlay sits on top of renderer content, so every new page
- * must otherwise remember to reserve its width. Native Windows/Linux chrome
- * keeps caption controls outside the app layout and cannot cover actions.
+ * Windows hides the native title bar entirely: titleBarStyle "hidden" without
+ * a titleBarOverlay removes the caption buttons too, so the renderer draws
+ * them (WindowCaptionButtons.tsx) with the app's own colors and hover states.
+ * The WCO overlay API cannot style hover, which is why it is not used.
  */
 export function windowChromeOptions(platform) {
   if (platform === "darwin") {
     return { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 16 } };
+  }
+  if (platform === "win32") {
+    return { titleBarStyle: "hidden" };
   }
   return {};
 }

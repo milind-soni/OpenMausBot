@@ -29,6 +29,7 @@ import { api, ApiError, useStore, type Bot } from "@/state/store";
 import type { CloudBackend } from "../../server/contracts.ts";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
@@ -153,6 +154,8 @@ export function ComputerPanel({
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
 }) {
+  // Docked flush under the Windows caption corner: drop the header 16px.
+  const { padClass } = useCaptionChrome();
   // The panel is a fixed column by default; a drag handle on its left edge
   // makes it wide enough to actually read a page in the Browser tab.
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
@@ -1019,7 +1022,7 @@ export function ComputerPanel({
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40"
       />
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <button
           onClick={() => {
             // Keep the panel/modal states exclusive at this entry point. That
