@@ -38,6 +38,9 @@ jobs:
 
           p = Path('server/config.ts')
           s = p.read_text()
+          if 'providerConnectionApiKeyEnv' in s:
+              print('provider config mutation support already applied')
+              raise SystemExit(0)
 
           schema_anchor = '''const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);'''
           schema_insert = '''const instanceConfigMapSchema = z.record(z.string(), instanceConfigSchema);\n\nconst providerConnectionIdSchema = z.string().regex(/^api-[a-z0-9][a-z0-9._-]{0,76}$/);\nconst providerConnectionSchema = z.object({\n  displayName: z.string().trim().min(1).max(80).refine((value) => !/\\p{Cc}/u.test(value), "Name cannot contain control characters"),\n  apiKey: z.string().min(1).max(4096).refine((value) => !/\\p{Cc}/u.test(value), "API key cannot contain control characters"),\n  url: z.string().trim().max(2048).url().refine((value) => /^https?:\\/\\//i.test(value), "Base URL must use http or https"),\n  model: z.string().trim().max(200).refine((value) => !/[\\r\\n\\0]/.test(value), "Model cannot contain control characters").optional(),\n  provider: z.string().trim().max(200).refine((value) => !/[\\r\\n\\0]/.test(value), "Provider cannot contain control characters").optional(),\n}).strict();\nconst providerConnectionsPatchSchema = z.record(z.string(), providerConnectionSchema).superRefine((value, ctx) => {\n  const entries = Object.entries(value);\n  if (entries.length > 50) ctx.addIssue({ code: "custom", message: "Too many provider connections" });\n  for (const [instanceId] of entries) {\n    const parsed = providerConnectionIdSchema.safeParse(instanceId);\n    if (!parsed.success) ctx.addIssue({ code: "custom", message: `Invalid provider connection id: ${instanceId}` });\n  }\n});\nconst providerConnectionDeletesSchema = z.array(providerConnectionIdSchema).max(50);\n\nfunction providerConnectionApiKeyEnv(instanceId: string): string {\n  return `OPENMAUSBOT_API_${instanceId.slice(4).replace(/[^a-z0-9]+/gi, "_").toUpperCase()}_KEY`;\n}'''
@@ -86,6 +89,7 @@ jobs:
           ]) {
             if (!s.includes(needle)) throw new Error(`missing provider config invariant: ${needle}`);
           }
+          if (!s.includes('instances: true')) throw new Error('generic config patch must continue to omit instances');
           console.log('provider config invariants present');
           JS
 
@@ -101,9 +105,10 @@ jobs:
           git add server/config.ts
           git diff --cached --check
           git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo "provider config patch already present"
+            exit 0
+          fi
           git diff --cached -- server/config.ts
           git commit -m "fix(server): secure provider connection config mutations [provider-config-patched]"
           git push origin HEAD:feat/universal-provider-accounts
-
-          # Keep this workflow observable until its single patch commit lands.
-          echo "provider config patch committed and pushed"
