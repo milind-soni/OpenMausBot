@@ -35,7 +35,23 @@ describe("resolveSurface", () => {
       expect(resolveSurface({ destination, browserOn: true })).toMatchObject({ computer: destination, browser: true, pinned: null });
       expect(resolveSurface({ destination, browserOn: false })).toMatchObject({ computer: destination, browser: false });
     }
-    expect(resolveSurface({ destination: "off", browserOn: true })).toMatchObject({ computer: "off", browser: true });
+  });
+
+  it("Off mounts no computer and no browser, and says which setting did it", () => {
+    const plan = resolveSurface({ destination: "off", browserOn: true });
+    expect(plan).toMatchObject({ computer: "off", browser: false, pinned: null, clearPin: false });
+    expect(plan.note).toMatch(/"Works on" setting is Off/);
+    expect(plan.note).toMatch(/no computer and no built-in browser/);
+    // the same whether or not a browser could have been mounted
+    expect(resolveSurface({ destination: "off", browserOn: false })).toEqual(plan);
+    // nothing mounted, so the surface paragraph stays silent and only the
+    // note tells the model why it has no screen
+    expect(surfacePrompt({ computer: null, browser: false }, { note: plan.note })).toBe(plan.note);
+  });
+
+  it("Off ignores a task pin, the way every explicit destination does", () => {
+    expect(resolveSurface({ destination: "off", pinnedSurface: "browser", browserOn: true, available: { browser: true } }))
+      .toMatchObject({ computer: "off", browser: false, pinned: null, clearPin: false });
   });
 
   it("an explicit destination ignores the task's pin", () => {

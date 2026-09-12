@@ -35,9 +35,11 @@ import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
 import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
+import { OptionCard } from "./OptionCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 
 import { ApprovalCard } from "./ApprovalCard";
+import { QuestionCard } from "./QuestionCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
 import { groupActivityRuns } from "@/lib/activity-runs";
 import { ActivityRun } from "./ActivityRun";
@@ -225,15 +227,27 @@ const Transcript = memo(function Transcript({
           // a member can hit a permission ask mid-turn; without this the
           // card never rendered here and the bot waited out its timeout.
           // `tool` distinguishes a permission from a QUESTION — a question
-          // only accepts an "answer", so routing it here would offer an
-          // Allow the broker rejects
+          // only accepts an "answer", so routing it to the approval box
+          // would offer an Allow the broker rejects. A structured ask is
+          // one of those questions, and answers in its own card.
           m.kind === "secret" && m.secret && m.from?.botId ? (
             <SecretRequestCard botId={m.from.botId} threadId={group.threadId} message={m} />
           ) : m.kind === "connector" && m.connector && m.from?.botId ? (
             <ConnectorCard botId={m.from.botId} threadId={group.threadId} message={m} />
+          ) : m.kind === "options" && m.card?.requestId && m.card.questionRequest ? (
+            <div className="flex justify-start">
+              <QuestionCard threadId={group.threadId} bot={memberOf(m.from?.botId)} message={m} />
+            </div>
           ) : m.kind === "options" && m.card?.requestId && m.card.tool ? (
             <div className="flex justify-start">
               <ApprovalCard bot={memberOf(m.from?.botId)} message={m} />
+            </div>
+          ) : m.kind === "options" && m.card && m.from?.botId ? (
+            // a QUESTION from a member. Without this branch the card fell
+            // through to null: invisible on screen, and the asking bot sat
+            // there until its 15-minute timeout answered for you
+            <div className="flex justify-start">
+              <OptionCard botId={m.from.botId} threadId={group.threadId} groupId={group.id} message={m} />
             </div>
           ) : m.kind === "goal.run" ? (
             <div className="flex justify-start">

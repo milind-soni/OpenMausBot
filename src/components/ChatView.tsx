@@ -39,7 +39,8 @@ import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_U
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
-import { stateForBot } from "@/lib/mascot";
+import { normalizeState, stateForBot } from "@/lib/mascot";
+import { peerLine, type PeerLine } from "@/lib/peer-message";
 import { showWorkingDots } from "@/lib/turn-tail";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -50,6 +51,7 @@ import { askText, nameIsCommand, runSteps, runSummary, showRun, skillPrompt, ski
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
+import { QuestionCard } from "./QuestionCard";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
@@ -283,11 +285,16 @@ function Bubble({
 }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const user = message.role === "user";
+  // A user-role line another bot delivered (ask_bot, delegate_bot,
+  // start_thread) is that bot speaking, not the person: it takes the
+  // bot side of the chat under the peer's name, with the model-facing
+  // provenance note stripped from what the reader sees.
+  const peer = peerLine(message);
+  const user = message.role === "user" && !peer;
   const mentionPeers = useMemo(() => state.bots.filter((peer) => peer.id !== bot.id), [state.bots, bot.id]);
   const [expanded, setExpanded] = useState(false);
   const [viewRaw, setViewRaw] = useState(false);
-  const text = message.text ?? "";
+  const text = peer ? peer.body : (message.text ?? "");
   const webhookView = user ? webhookMessageView(text) : null;
   const attachments = user && !webhookView ? splitTranscriptAttachments(text) : null;
   const visibleText = webhookView?.task ?? attachments?.display ?? text;
@@ -312,6 +319,7 @@ function Bubble({
 
   return (
     <div className={cn("group flex w-full flex-col", user ? "animate-msg-in items-end" : "items-start")}>
+      {peer && <PeerLabel peer={peer} />}
       <div className={cn("flex w-full items-center gap-1.5", user ? "justify-end" : "justify-start")}>
         {/* editing rewinds the thread, so it waits for the turn to end —
             same rule as the version switcher below */}
@@ -448,7 +456,7 @@ function Bubble({
             <div className="flex flex-col gap-0.5 self-end pb-0.5">
               {text && <CopyButton text={text} />}
               {text && <RawToggleAction active={viewRaw} onToggle={() => setViewRaw((r) => !r)} />}
-              {message.kind === "text" && text && (
+              {message.kind === "text" && text && !peer && (
                 <SpeakButton text={text} botId={bot.id} messageId={message.id} voiceId={bot.voice} />
               )}
               {isLastBotText && !bot.busy && onRegenerate && (
@@ -523,6 +531,36 @@ function Bubble({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Who wrote a relayed line and how it arrived, above the bubble — the
+ * same shape as a room's cluster label. Looked up by id, then by name for
+ * rows that predate Message.peerAsk; a peer since renamed or deleted still
+ * shows the name the line carries. */
+function PeerLabel({ peer }: { peer: PeerLine }) {
+  const { state } = useStore();
+  const author =
+    state.bots.find((b) => b.id === peer.botId) ?? state.bots.find((b) => b.name === peer.name);
+  const how =
+    peer.delivery === "delegate_bot"
+      ? t("chat.peer.delegated")
+      : peer.delivery === "start_thread"
+        ? t("chat.peer.openedThread")
+        : t("chat.peer.asked");
+  return (
+    <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
+      <BotAvatar
+        bot={author ?? { name: peer.name, color: "blue" }}
+        state={normalizeState(author?.mascotExpression) ?? "happy"}
+        size={16}
+        motion="none"
+        motionKey={0}
+        animated={false}
+      />
+      <span className="text-[11px] font-medium text-ink-secondary">{peer.name}</span>
+      <span className="text-[11px] text-ink-secondary/70">· {how}</span>
     </div>
   );
 }
@@ -721,8 +759,12 @@ const MessagesList = memo(function MessagesList({
             case "connector":
               return m.connector ? <ConnectorCard botId={bot.id} threadId={bot.threadId} message={m} /> : null;
             case "options":
-              // a live permission ask gets the approval box; questions keep
-              // the list card. The first-run quiz drops out once they talk.
+              // a live permission ask gets the approval box; a structured
+              // ask gets the question box; anything else keeps the list
+              // card. The first-run quiz drops out once they talk.
+              if (m.card?.requestId && m.card.questionRequest) {
+                return <QuestionCard threadId={bot.threadId} bot={bot} message={m} />;
+              }
               if (m.card?.requestId && m.card.tool) {
                 return <ApprovalCard bot={bot} message={m} />;
               }
@@ -814,9 +856,10 @@ function PinnedBanner({
 }) {
   const pinned = messages.find((m) => m.id === pinnedId);
   if (!pinned || pinned.kind !== "text") return null;
+  const pinnedPeer = peerLine(pinned);
   const sender =
-    pinned.role === "user" ? t("chat.you") : (pinned.from?.name ?? bot.name);
-  const text = (pinned.text ?? "").replace(/\s+/g, " ").trim();
+    pinned.role === "user" ? (pinnedPeer?.name ?? t("chat.you")) : (pinned.from?.name ?? bot.name);
+  const text = (pinnedPeer?.body ?? pinned.text ?? "").replace(/\s+/g, " ").trim();
   if (!text) return null;
   return (
     <div className="w-full px-5">
@@ -942,7 +985,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     [bot.id, bot.threadId, dispatch],
   );
   const lastUserMessage = useMemo(
-    () => [...messages].reverse().find((m) => m.role === "user" && m.kind === "text"),
+    () => [...messages].reverse().find((m) => m.role === "user" && m.kind === "text" && !peerLine(m)),
     [messages],
   );
   const lastUserMessageHasAttachments = useMemo(() => {

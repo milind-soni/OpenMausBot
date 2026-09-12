@@ -60,6 +60,20 @@ export function workspaceDir(botId: string): string {
   return join(WORKSPACES_DIR, botId);
 }
 
+/** File locations, not file contents or wider tool permissions. Threads keep
+ * independent working directories; the same bot can find its earlier output
+ * without assuming that a file absent from the current directory was lost. */
+export function workspaceLocationsPrompt(botId: string, cwd: string | undefined, botCwd?: string): string {
+  return "\n\nFile locations for this bot (absolute paths): " + JSON.stringify({
+    currentWorkingFolder: cwd ?? "Provider default; inspect the working directory before using relative paths",
+    sharedBotFolder: workspaceDir(botId),
+    otherThreadFiles: join(TASK_WORKSPACES_DIR, botId),
+    ...(botCwd ? { configuredProjectFolder: botCwd } : {}),
+  }) + ". Different conversations can have different working folders. For an existing file, use the exact path from the conversation; if missing here, check this bot's listed folders before saying it is gone or recreating it." +
+    " Follow an explicitly requested destination. Otherwise put new task output in the current working folder and report its absolute path so another thread or room can use it." +
+    " Do not move old files, edit another active thread's work, or read another bot's private folders without authorization. These paths do not grant additional access.";
+}
+
 /** Lines as a person counts them: a file that ends in a newline has no
  * extra empty line after it. Every budget check and every "N lines"
  * message uses this one count. */

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -260,14 +261,32 @@ export function hermesConfiguredModel(
  * Failure is non-fatal and returns [] — a catalog probe must never be the
  * reason an agent becomes unselectable.
  */
-async function fetchHermesAcpModels(
+export const HERMES_ACP_MODELS_TIMEOUT_ENV = "HERMES_ACP_MODELS_TIMEOUT_MS";
+/** Overall deadline for the initialize + session/new catalog probe. A Hermes
+ * install with several authenticated providers answers `initialize` in about
+ * a second but needs ~6-7s for `session/new`, whose result carries the model
+ * list — the old 5s cap killed the probe every time on exactly the installs
+ * that have a catalog worth showing. */
+export const HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS = 15_000;
+
+function hermesAcpModelsTimeoutMs(env: Record<string, string | undefined>): number {
+  const raw = env[HERMES_ACP_MODELS_TIMEOUT_ENV];
+  if (raw === undefined) return HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
+}
+
+export async function fetchHermesAcpModels(
   cli: string,
   env: Record<string, string | undefined>,
 ): Promise<{ id: string; label: string; custom: true }[]> {
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cli, ["acp"], { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv });
+      const resolved = resolveCli(cli, ["acp"], env);
+      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
     } catch {
       return resolve([]);
     }
@@ -294,7 +313,7 @@ async function fetchHermesAcpModels(
       }
       resolve(out);
     };
-    timer = setTimeout(() => done([]), 5_000);
+    timer = setTimeout(() => done([]), hermesAcpModelsTimeoutMs(env));
     child.once("error", () => done([]));
     child.once("close", () => {
       if (hardKillTimer) clearTimeout(hardKillTimer);

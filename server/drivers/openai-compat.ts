@@ -4,6 +4,13 @@ import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 
 const DRIVER_KIND = "openai-compat";
+const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
+const idleTimeoutMs = () => {
+  const raw = process.env.OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS;
+  if (!raw) return DEFAULT_IDLE_TIMEOUT_MS;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 1_000 && value <= 2_147_483_647 ? value : DEFAULT_IDLE_TIMEOUT_MS;
+};
 const DEFAULT_MODELS: ModelCatalog = {
   default: "meta-llama/llama-3.3-70b-instruct",
   options: [
@@ -143,7 +150,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       httpErrorLabel: "upstream",
       missingKeyError: `no API key — set ${config.apiKeyEnv} or add it to the instance config`,
       unavailableReason: `no API key — set ${config.apiKeyEnv} or add it to the instance config`,
-      timeoutMs: 120_000,
+      timeoutMs: idleTimeoutMs(),
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,

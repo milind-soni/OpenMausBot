@@ -1,5 +1,5 @@
-// Setup mode: the coaching block a bot gets when it has not been set up yet,
-// or when the user asks for it with /setup. The bot interviews the user, says
+// Setup mode: optional coaching when the user asks for it with /setup.
+// An empty profile is not a request to interview the user. The bot says
 // what it intends, and then configures itself only through proposal cards
 // (propose_profile, propose_routine, skill_manage, request_credential) — so
 // nothing changes without the user's approval. Mirrors skill-learn.ts:
@@ -31,11 +31,10 @@ export function expandSetupTurnText(userText: string): string {
     : "Set yourself up. Ask me what you need to know, then propose your configuration.";
 }
 
-/** A bot with neither standing instructions nor a description has not been
- * set up. /setup re-enters the mode for a configured bot. */
+/** Only an explicit setup request enters coaching. Existing/blank bots must
+ * still do ordinary work, including delegated and scheduled requests. */
 export function setupModeActive(input: { soul?: string; description?: string; text: string }): boolean {
-  const blank = !(input.soul ?? "").trim() && !(input.description ?? "").trim();
-  return blank || parseSetupCommand(input.text) !== null;
+  return parseSetupCommand(input.text) !== null;
 }
 
 // skill_manage is only ever mounted alongside the other agent tools when
@@ -52,7 +51,7 @@ function folderClause(cwd: string | undefined): string {
 
 function buildSetupPrompt(profileAside: string, cwd?: string): string {
   return (
-    "\n\nThis bot has not been set up yet, or the user asked you to set yourself up. Your job this conversation is to set yourself up from what the user tells you." +
+    "\n\nThe user explicitly asked you to set yourself up. For this setup request, help configure the bot from what the user tells you." +
     ` First ask at most four questions that change what you would build: what the job is, when it should happen (on demand, on a schedule, or when something arrives), which apps or accounts it touches, and ${folderClause(cwd)}.` +
     " Then, before any tool call, tell the user in plain language what you intend: who you will be, what you will do and when, where you will work, what you will need from them, and what you will not do. Wait for a yes." +
     " When they say yes, first send one message that lists the cards you are about to raise, then make the tool calls — the cards must appear after that message, never before it. After the tool calls add at most one short line and do not repeat the list." +

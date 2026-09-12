@@ -107,6 +107,12 @@ describe("independent bot threads", () => {
     expect(updated.bots[0]?.tasks?.[1]).toEqual(bot.tasks?.[1]);
   });
 
+  it("does not persist request-only model scope on a task", () => {
+    const updated = reducer(start(), { type: "updateTask", botId: bot.id, threadId: "first", patch: { modelSelection: bot.modelSelection, updateBotDefault: true } });
+    expect(updated.bots[0]?.tasks?.[0]).not.toHaveProperty("updateBotDefault");
+    expect(updated.bots[0]?.tasks?.[1]).toEqual(bot.tasks?.[1]);
+  });
+
   it("pins send, stop, edit, approval and queued-message actions before navigation", () => {
     const actions: Action[] = [
       { type: "send", botId: bot.id, text: "Go" }, { type: "interrupt", botId: bot.id },
@@ -128,6 +134,72 @@ describe("independent bot threads", () => {
     const read = reducer(patched, { type: "select", id: bot.id });
     expect(read.bots[0]?.unread).toBe(true);
     expect(read.bots[0]?.tasks?.[1]?.unread).toBe(true);
+  });
+
+  it("drops deleted-thread approvals before a slim deletion frame is followed by its transcript", () => {
+    const approval: Message = { id: "old-approval", role: "bot", kind: "options", at: 2,
+      card: { title: "Enable skill?", subtitle: "Review this skill", options: ["Enable", "Deny"],
+        requestId: "old-request", tool: "stage_skill" } };
+    let state: ReturnType<typeof reducer> = { ...start(), bots: [{ ...bot, messages: [approval], activeLeafId: approval.id }] };
+    const { messages: _messages, ...slim } = bot;
+    const deletion = { ...slim, threadId: "second", activeLeafId: "replacement", tasks: bot.tasks!.slice(1) };
+    state = reducer(state, { type: "botPatched", bot: deletion });
+    expect(state.bots[0]?.threadId).toBe("second");
+    expect(state.bots[0]?.messages).toEqual([]);
+    expect(state.bots[0]?.activeLeafId).toBeNull();
+    expect(state.bots[0]?.awaitingThreadSnapshot).toBe(true);
+    const replacement: Message = { id: "replacement", role: "user", kind: "text", text: "Keep this conversation", at: 3 };
+    const response = { ...deletion, messages: [replacement] };
+    state = reducer(state, { type: "botPatched", bot: response });
+    expect(state.bots[0]?.messages).toEqual([replacement]);
+    expect(state.bots[0]?.activeLeafId).toBe(replacement.id);
+    expect(state.bots[0]?.awaitingThreadSnapshot).toBe(false);
+    // A delayed HTTP duplicate must not undo a later server patch.
+    const edited = { ...replacement, text: "Newer state" };
+    state = reducer(state, { type: "messagePatched", threadId: "second", message: edited });
+    state = reducer(state, { type: "botPatched", bot: response });
+    expect(state.bots[0]?.messages).toEqual([edited]);
+  });
+
+  it("replays replacement-thread events received between deletion and the replacement snapshot", () => {
+    const { messages: _messages, ...slim } = bot;
+    const deletion = { ...slim, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1) };
+    let state = reducer(start(), { type: "botPatched", bot: deletion });
+    const reply: Message = { id: "second-reply", role: "bot", kind: "text", text: "Still working", at: 3, parentId: null };
+    state = reducer(state, { type: "messageAdded", threadId: "second", message: reply });
+    state = reducer(state, { type: "botPatched", bot: { ...deletion, messages: [] } });
+    expect(state.bots[0]?.messages).toEqual([reply]);
+    expect(state.bots[0]?.activeLeafId).toBe(reply.id);
+    expect(state.backgroundThreadEvents.second).toBeUndefined();
+  });
+
+  it("switches atomically when a deletion's full snapshot arrives first", () => {
+    const full = { ...bot, threadId: "second", activeLeafId: null, tasks: bot.tasks!.slice(1), messages: [] };
+    let state = reducer(start(), { type: "botPatched", bot: full });
+    const { messages: _messages, ...slim } = full;
+    state = reducer(state, { type: "botPatched", bot: slim });
+    expect(state.bots[0]).toMatchObject({ threadId: "second", messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
+  });
+
+  it("does not replay old background approvals over the replacement snapshot", () => {
+    const stale: Message = { id: "approval", role: "bot", kind: "options", at: 2,
+      card: { title: "Review", subtitle: "Old state", options: ["Enable", "Deny"], requestId: "request", tool: "stage_skill" } };
+    const settled = { ...stale, card: { ...stale.card!, answered: "deny", dismissed: true } };
+    const full = { ...bot, threadId: "second", activeLeafId: stale.id, tasks: bot.tasks!.slice(1), messages: [settled] };
+    const before = { ...start(), backgroundThreadEvents: { second: [{ type: "messagePatched" as const, threadId: "second", message: stale }] } };
+    const state = reducer(before, { type: "botPatched", bot: full });
+    expect(state.bots[0]?.messages).toEqual([settled]);
+    expect(state.backgroundThreadEvents.second).toBeUndefined();
+  });
+
+  it("does not undo navigation when a deleted thread's replacement snapshot arrives late", () => {
+    const third = { threadId: "third", title: "Third", createdAt: 3 };
+    const { messages: _messages, ...slim } = bot;
+    const deletion = { ...slim, threadId: "second", activeLeafId: null, tasks: [...bot.tasks!.slice(1), third] };
+    let state = reducer(start(), { type: "botPatched", bot: deletion });
+    state = reducer(state, { type: "taskSwitched", bot: { ...deletion, threadId: "third", messages: [] } });
+    state = reducer(state, { type: "botPatched", bot: { ...deletion, messages: bot.messages } });
+    expect(state.bots[0]).toMatchObject({ threadId: "third", messages: [], awaitingThreadSnapshot: false });
   });
 
   it("folds background messages racing a switch snapshot without changing the original conversation", () => {

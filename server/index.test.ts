@@ -3408,6 +3408,11 @@ describe("harness HTTP API", () => {
         const rejected = await isolatedApi("PATCH", `/api/bots/${seeded.id}/model`, targetSelection);
         expect(rejected.status, seeded.approvalMode).toBe(400);
         expect(rejected.body.error).toMatch(/requires choosing Ask first/i);
+        const scoped = await isolatedApi("PATCH", `/api/bots/${seeded.id}/tasks/${seeded.threadId}`, {
+          modelSelection: targetSelection, updateBotDefault: true, approvalMode: "ask",
+        });
+        expect(scoped.status, seeded.approvalMode).toBe(400);
+        expect(scoped.body.error).toMatch(/Choose Ask in bot settings/i);
         const unchanged = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
           (candidate: { id: string }) => candidate.id === seeded.id,
         );
@@ -3415,6 +3420,7 @@ describe("harness HTTP API", () => {
           approvalMode: seeded.approvalMode,
           modelSelection: seeded.modelSelection,
         });
+        expect(unchanged.tasks.find((task: { threadId: string }) => task.threadId === seeded.threadId).modelSelection).toEqual(seeded.modelSelection);
       }
 
       // A loopback-capable bot must not escape a restrictive Custom config
@@ -5498,7 +5504,50 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("coaches a blank bot to set itself up, and stops once it has a description", async () => {
+  it("Works on: Off withholds the browser and tells the model why", async () => {
+    // The report behind this: a bot set to Off reached for a browser anyway,
+    // because Off withheld only the computer. The dispatched prompt is the
+    // proof the model was told, and the settings preview must say the same.
+    const bot = (await api("POST", "/api/bots", { name: "Orbit" })).body.bot;
+    try {
+      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).status).toBe(200);
+
+      const previewIds = async () =>
+        (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections
+          .map((section: { id: string }) => section.id);
+      const previewText = async () =>
+        (await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections
+          .map((section: { text: string }) => section.text).join("");
+
+      // Auto says nothing about Works on; the section is only there when the
+      // setting actually withholds something.
+      expect(await previewIds()).not.toContain("plan");
+
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
+      const ids = await previewIds();
+      expect(ids).toContain("plan");
+      expect(ids).not.toContain("browser");
+      const text = await previewText();
+      expect(text).toContain("\"Works on\" setting is Off");
+      expect(text).toContain("no computer and no built-in browser");
+
+      // and the same sentence reaches a real turn, not only the preview
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "open a browser and check my calendar" })).status).toBe(202);
+      const dispatched = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
+      expect(dispatched).toContain("\"Works on\" setting is Off");
+      expect(dispatched).not.toContain("browser_navigate");
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      await api("PATCH", "/api/config", { features: { browser: false } });
+    }
+  });
+
+  it("does not coach an ordinary request even when the bot profile is blank", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Blank" })).body.bot;
     try {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
@@ -5508,11 +5557,11 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
       let system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
       expect(system.startsWith("You are Blank, a personal bot in OpenMausBot.")).toBe(true);
-      expect(system).toContain("This bot has not been set up yet");
+      expect(system).not.toContain("Wait for a yes");
       expect(system).toContain("propose_profile");
 
       const preview = await api("GET", `/api/bots/${bot.id}/system-prompt`);
-      expect(preview.body.sections.map((s: { id: string }) => s.id)).toContain("setup");
+      expect(preview.body.sections.map((s: { id: string }) => s.id)).not.toContain("setup");
 
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       // Interrupt requests a stop; the child can still be shutting down.
@@ -5525,7 +5574,7 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello again" })).status).toBe(202);
       system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
-      expect(system).not.toContain("This bot has not been set up yet");
+      expect(system).not.toContain("Wait for a yes");
       expect((await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections.map((s: { id: string }) => s.id)).not.toContain("setup");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
@@ -5548,7 +5597,7 @@ describe("harness HTTP API", () => {
       // soul first, setup block right after it
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
       expect(soulEnd).toBeGreaterThan(0);
-      expect(system.slice(soulEnd).startsWith("\n\nThis bot has not been set up yet")).toBe(true);
+      expect(system.slice(soulEnd).startsWith("\n\nThe user explicitly asked you to set yourself up")).toBe(true);
       // the literal /setup never reaches the model — extract the user text the
       // way promptText() in fake-claude-cli.ts does, joining text parts if the
       // content is an array of blocks rather than a plain string
@@ -5662,7 +5711,9 @@ describe("harness HTTP API", () => {
     expect(saved.body.features).toEqual({ browser: false, skillAuthoring: false, showToolCalls: false });
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-    expect(disk.features).toEqual({ skillAuthoring: false });
+    // Earlier browser coverage may have persisted its own toggle. Opting out
+    // of skill authoring must preserve those sibling settings, not erase them.
+    expect(disk.features).toEqual({ ...untouched.features, skillAuthoring: false });
 
     // the opt-out survives patches to sibling flags
     const tools = await api("PATCH", "/api/config", { features: { showToolCalls: true } });

@@ -58,6 +58,11 @@ if (process.env.FAKE_PI_DUMP) {
   }
 }
 
+// Explicit model refresh is a short-lived command, separate from RPC mode.
+if (argv[0] === "update" && argv.includes("--models")) {
+  process.exit(mode === "update-error" ? 1 : 0);
+}
+
 // exit-early: die before saying anything — a failed spawn surfaces as a
 // runtime.error + failed turn, never a hang.
 if (mode === "exit-early") {

@@ -38,6 +38,7 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
@@ -85,6 +86,10 @@ desktop app or controlling the user's computer.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [people invitation fixture](people.md) checks hosted workspace sign-in,
+roles and device revocation through the real HTTP API with a stubbed email
+service. It does not drive the People settings UI through `control-omb`.
+
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.
 
@@ -122,6 +127,10 @@ retry against an offline Claude CLI confined to a disposable home.
 The [provider recovery recipe](provider-recovery.md) verifies real Grok image
 transport and Claude authentication against loopback APIs, plus scoped thread
 approvals and provider safety errors in an isolated desktop UI.
+
+The [skill approval lifecycle recipe](skill-approval-lifecycle.md) checks Deny,
+missing staged records and active-thread deletion in two isolated app windows,
+including the surviving conversation and sending again without deleting the bot.
 
 The [Codex account recipe](codex-account.md) checks account switching against an
 offline Codex CLI whose identity is synthetic and whose credential directory is empty.

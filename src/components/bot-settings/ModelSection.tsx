@@ -18,7 +18,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
             <div>
               <div className="text-[15px] font-medium text-ink">Default model</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                For new threads. Existing threads keep their own model choices.
+                For groups and new threads. Also updates the selected idle thread; other existing threads keep their model.
               </div>
             </div>
           }
@@ -38,7 +38,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
                 we could not keep for a thread that had already been sent
                 one. Sending nothing is true on every engine. */}
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              How hard new threads think{bot.modelSelection.effort ? "" : " (Default: no level is sent)"}
+              How hard this bot thinks in groups and new threads{bot.modelSelection.effort ? "" : " (Default: no level is sent)"}
             </div>
           </div>
         }
