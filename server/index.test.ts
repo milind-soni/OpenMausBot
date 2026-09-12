@@ -973,6 +973,17 @@ describe("harness HTTP API", () => {
     expect(body.static).toBe(true);
   });
 
+  it("keys the session cookie on the bound port", async () => {
+    // The logout handler clears the session cookie by name, proving the cookie
+    // is computed from the port the server actually bound rather than a stale
+    // configured value. A future port-fallback loop must not key cookies on a
+    // port the instance never bound (cookies are not port-scoped).
+    const res = await fetch(`${BASE}/api/auth/logout`, { method: "POST" });
+    expect(res.status).toBe(200);
+    const setCookie = res.headers.get("set-cookie") ?? "";
+    expect(setCookie).toContain(`omb_session_${PORT}_`);
+  });
+
   it("refuses a second live server that shares the same data directory", async () => {
     const contenderPort = await freePortBlock([0]);
     let contenderStderr = "";
