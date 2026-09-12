@@ -343,7 +343,7 @@ import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageAgentAsMember, parseBotPac
 import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
-import { memberTurnSelection } from "./member-turn.ts";
+import { memberTurnSelection, roomSpeakerSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
@@ -5968,12 +5968,15 @@ async function runGroupMemberTurn(
   }
   revokeInternalCapabilitiesForThread(threadId);
   spoken.add(botId);
-  const preparedApprovalMode = approvalModeForTurn(bot, false);
-  const preparedSelection = { ...bot.modelSelection };
+  // Rooms have no model belt. Speak with the bot's visible 1:1 picker, not
+  // the bot-default that only seeds brand-new threads.
+  const speaker = store.projectBotForTask(bot.id, bot.threadId) ?? bot;
+  const preparedApprovalMode = approvalModeForTurn(speaker, false);
+  const preparedSelection = roomSpeakerSelection(bot, (id, taskId) => store.projectBotForTask(id, taskId));
   const preparedComposio = bot.composio;
-  const instance = registry.get(bot.modelSelection.instanceId);
+  const instance = registry.get(preparedSelection.instanceId);
   const userName = cfg.profile?.name?.trim() || "User";
-  if (providerInstancesChanging.has(bot.modelSelection.instanceId)) {
+  if (providerInstancesChanging.has(preparedSelection.instanceId)) {
     onDispatchError?.(`${bot.name}'s provider account is being updated — try again shortly`);
     return true;
   }
@@ -6101,12 +6104,13 @@ async function runGroupMemberTurn(
     ? readyGroup.threadId === threadId
     : Boolean(readyGroup && store.groupTaskByThread(readyGroup.id, threadId));
   if (!readyGroup || !stillOwnsThread || !readyGroup.memberIds.includes(readyBot.id)) return false;
+  const readySpeaker = store.projectBotForTask(readyBot.id, readyBot.threadId) ?? readyBot;
   const setupChanged =
     registry.get(preparedSelection.instanceId) !== instance ||
-    approvalModeForTurn(readyBot, false) !== preparedApprovalMode ||
-    readyBot.modelSelection.instanceId !== preparedSelection.instanceId ||
-    readyBot.modelSelection.model !== preparedSelection.model ||
-    readyBot.modelSelection.effort !== preparedSelection.effort ||
+    approvalModeForTurn(readySpeaker, false) !== preparedApprovalMode ||
+    readySpeaker.modelSelection.instanceId !== preparedSelection.instanceId ||
+    readySpeaker.modelSelection.model !== preparedSelection.model ||
+    readySpeaker.modelSelection.effort !== preparedSelection.effort ||
     readyBot.composio !== preparedComposio;
   if (setupChanged) {
     if (setupRetry === 0) {
@@ -6425,13 +6429,13 @@ async function runGroupMemberTurn(
         threadId,
         text,
         images: turnImages,
-        approvalMode: approvalModeForTurn(readyBot, false),
+        approvalMode: approvalModeForTurn(readySpeaker, false),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
         cwd,
         integrations,
-        ...memberTurnSelection(readyBot.modelSelection),
+        ...memberTurnSelection(readySpeaker.modelSelection),
       }), () => abandoned || Boolean(isCancelled?.()), async () => {
         // Stop may have landed while the adapter was authenticating, before
         // it had an active process for the first interrupt to reach. Now that
@@ -13181,6 +13185,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (current.approvalGrant) return json(res, 409, { error: "the bot's approval mode is still being confirmed" });
         const checked = checkedModelSelection(body.modelSelection, { selection: current.modelSelection, busy: threadBusy(current.id, current.threadId) }, body.requireAvailableModel === true);
         if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        // Room turns follow the visible 1:1 picker. Changing that thread
+        // while the bot is speaking in a room is the same as changing the
+        // in-flight engine.
+        if (store.bot(current.id)?.threadId === current.threadId && activeGroupTurnForBot(current.id)) {
+          const groupChecked = checkedModelSelection(checked.selection, { selection: current.modelSelection, busy: true });
+          if (!groupChecked.ok) return json(res, groupChecked.status, { error: groupChecked.error });
+        }
         patch.modelSelection = checked.selection;
       }
       if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
