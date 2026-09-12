@@ -130,7 +130,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (!stream) {
       const json = await response.json() as CompletionJson;
       const message = json.choices?.[0]?.message;
-      if (message?.tool_calls) throw new Error("provider returned tool calls, but this OpenAI-compatible driver does not support tool execution yet");
+      if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+        throw new Error("provider returned tool calls, but this OpenAI-compatible driver does not support tool execution yet");
+      }
       return {
         text: typeof message?.content === "string" ? message.content : "",
         reasoning: options.reasoning && typeof message?.reasoning_content === "string"
@@ -168,7 +170,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             continue;
           }
           const delta = chunk.choices?.[0]?.delta;
-          if (delta?.tool_calls) throw new Error("provider returned tool calls, but this OpenAI-compatible driver does not support tool execution yet");
+          if (Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0) {
+            throw new Error("provider returned tool calls, but this OpenAI-compatible driver does not support tool execution yet");
+          }
           const reasoningDelta = options.reasoning && typeof delta?.reasoning_content === "string"
             ? delta.reasoning_content
             : "";
