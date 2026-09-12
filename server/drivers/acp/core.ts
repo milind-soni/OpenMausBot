@@ -94,6 +94,9 @@ export interface AcpSupport {
   /** Whether models behind this ACP harness can consume a referenced image.
    * Most coding agents can open local files; opt out for text-only agents. */
   images?: boolean;
+  /** Narrow compatibility exception for a CLI with verified native image
+   * transport but a defective initialize capability (never a path fallback). */
+  acceptsUnadvertisedImages?(initializeResult: unknown): boolean;
   /** Message shown when the CLI is present but not signed in. */
   loginNote: string;
   /** How a user installs this harness's CLI; surfaced by the setup UI. */
@@ -901,7 +904,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
 
             const images = turn.images ?? [];
-            const runtimeAcceptsImages = init?.agentCapabilities?.promptCapabilities?.image === true;
+            const runtimeAcceptsImages = init?.agentCapabilities?.promptCapabilities?.image === true ||
+              support.acceptsUnadvertisedImages?.(init) === true;
             if (images.length && support.images === true && !runtimeAcceptsImages) {
               throw new Error(
                 `${support.displayName} is configured for image attachments, but this installed runtime does not advertise ACP image input. Update the ${support.displayName} CLI or send the message without an image.`,

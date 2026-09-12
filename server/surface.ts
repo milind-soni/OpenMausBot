@@ -52,12 +52,15 @@ export function surfaceOfComputerKind(kind: "box" | "vps" | "vm" | "local" | nul
 const NO_BROWSER_NOTE =
   " This bot is set to work in the built-in browser, but the built-in browser is switched off in App Settings, so you have no browser and no computer this turn — say so instead of guessing.";
 
+const OFF_NOTE =
+  " This bot's \"Works on\" setting is Off, so no computer and no built-in browser are mounted this turn: you cannot open a page, click, or type on any screen. If the user asks for something that needs one, tell them Works on is Off in this bot's settings — never claim you are opening a browser you do not have.";
+
 /** Decide what a turn mounts from the bot's destination, the task's pin
- * and what is actually reachable. Explicit choices are strict: a computer
- * destination keeps whatever browser the bot has (the prompt tells the
- * model which to use), a browser destination mounts only the browser. Auto
- * follows the task's pin while the pinned place still exists, and otherwise
- * re-resolves the way it always has. */
+ * and what is actually reachable. Explicit choices are strict: Off mounts
+ * neither surface, a computer destination keeps whatever browser the bot
+ * has (the prompt tells the model which to use), a browser destination
+ * mounts only the browser. Auto follows the task's pin while the pinned
+ * place still exists, and otherwise re-resolves the way it always has. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
@@ -67,6 +70,16 @@ export function resolveSurface(input: {
   available?: Partial<Record<Surface, boolean>>;
 }): SurfacePlan {
   const { destination, browserOn } = input;
+  // Off is the whole answer: no computer and no browser. It used to withhold
+  // only the computer, which left a bot set to Off holding the built-in
+  // browser — the one surface the setting most obviously reads as forbidding,
+  // and the one people then watched it reach for. The overview ("Can't use a
+  // computer.") and the settings prompt preview already described Off this
+  // way; the dispatch was the odd one out. A bot that should keep the browser
+  // and nothing else has its own destination: Browser.
+  if (destination === "off") {
+    return { computer: "off", browser: false, pinned: null, clearPin: false, note: OFF_NOTE };
+  }
   if (destination === "browser") {
     return browserOn
       ? { computer: "off", browser: true, pinned: null, clearPin: false, note: "" }

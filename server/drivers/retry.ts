@@ -4,6 +4,7 @@
 // (429/5xx/overloaded/reset) gets up to MAX_ATTEMPTS tries, an auth or
 // request-shape problem never does.
 import type { ProviderErrorCode } from "../contracts.ts";
+import { isProviderSafetyBlock } from "../../shared/provider-safety.ts";
 
 export const RETRY_MAX_ATTEMPTS = 3;
 
@@ -91,6 +92,8 @@ const messageOf = (err: FailureInput): string => {
  */
 export function classifyError(err: FailureInput): ErrorClassification {
   const text = messageOf(err);
+  // A surrounding HTTP 5xx/429 must not replay a provider safety block.
+  if (isProviderSafetyBlock(text)) return { transient: false, reason: "provider_safety" };
   if (err && "exitCode" in err) {
     const { exitCode: code } = err;
     if (code !== null && code < 0) return { transient: false, reason: "interrupted" };

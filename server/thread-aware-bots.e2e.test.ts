@@ -550,10 +550,25 @@ describe("close_thread", () => {
       expect(closed.status).toBe(200);
       expect(closed.body).toMatchObject({ closed: true, title: "QA: PR #78", botName: "Quinn" });
       expect((await messages(opened.body.threadId)).some((message) => message.tool?.name === "Closed by @Parker")).toBe(true);
+      // the close is stamped on the task — that is what the sidebar folds on — and list_threads says closed
+      expect((await taskOf(qa.id, opened.body.threadId)).closedBy).toMatchObject({ botId: pm.id, name: "Parker" });
+      const listed = (await api("GET", "/api/internal/threads", undefined, token)).body.threads as any[];
+      expect(listed.find((row) => row.threadId === opened.body.threadId)).toMatchObject({ state: "closed" });
+      // closing again is a quiet no-op: same answer, no second chip
+      expect((await close(opened.body.threadId)).body).toMatchObject({ closed: true, alreadyClosed: true });
+      expect((await messages(opened.body.threadId)).filter((message) => message.tool?.name === "Closed by @Parker")).toHaveLength(1);
       // Parker's own second thread closes too; the one it speaks in does not
       const own = (await api("POST", `/api/bots/${pm.id}/tasks`, { title: "Notes" })).body.task.threadId as string;
       expect((await close(own)).status).toBe(200);
+      expect((await taskOf(pm.id, own)).closedBy).toMatchObject({ name: "Parker" });
       expect((await close(pm.threadId)).status).toBe(400);
+      // a new turn in a closed thread reopens it
+      rmSync(join(gates, `${own}.gate`), { force: true });
+      rmSync(join(gates, `${own}.json`), { force: true });
+      expect((await api("POST", `/api/bots/${pm.id}/messages`, { text: "One more thing.", threadId: own })).status).toBe(202);
+      await expect.poll(async () => (await taskOf(pm.id, own))?.busy, { timeout: 15_000 }).toBe(true);
+      expect(await taskOf(pm.id, own)).not.toHaveProperty("closedBy");
+      release(own);
       // a running thread is refused: Quinn, speaking in its own thread, cannot close the one it speaks in,
       // nor a sibling thread of its own while a turn is held open there
       const asQuinn = await mintedToken(qa.id, qa.threadId);

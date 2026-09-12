@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { SidebarThreadRow, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 describe("sidebar thread visibility", () => {
   const tasks = Array.from({ length: 10 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}`, ...(index > 7 ? { projectId: "research" } : {}) }));
@@ -63,5 +63,44 @@ describe("threads a bot opened", () => {
     const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
     const opened = [...rows, { threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" as const, busy: false }];
     expect(visibleSidebarThreads(opened, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "qa"]);
+  });
+});
+
+describe("threads a bot closed", () => {
+  const openedBy = { botId: "pm", name: "Parker", at: 5 };
+  const closedBy = { botId: "pm", name: "Parker", at: 9 };
+  const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"], current = false) => renderToStaticMarkup(createElement(SidebarThreadRow, {
+    task, current, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+  }));
+  it("folds closed threads out of the default list without spending the six recent rows on them", () => {
+    // newest first: three helper threads the PM opened and closed sit on top of the person's own
+    const helpers = Array.from({ length: 3 }, (_, index) => ({ threadId: `h${index}`, title: `Helper ${index}`, openedBy, closedBy }));
+    const own = Array.from({ length: 8 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
+    expect(visibleSidebarThreads([...helpers, ...own], "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5"]);
+    // show all and search still list them — closing is never a deletion
+    expect(visibleSidebarThreads([...helpers, ...own], "0", "", [], true)).toHaveLength(11);
+    expect(visibleSidebarThreads([...helpers, ...own], "0", "helper 1").map((task) => task.threadId)).toEqual(["h1"]);
+  });
+  it("keeps a closed thread on screen while the person is in it or it has something new", () => {
+    const rows = [
+      { threadId: "current", title: "Reading it", closedBy },
+      { threadId: "unread", title: "Answered again", closedBy, unread: true },
+      { threadId: "busy", title: "Picked back up", closedBy, busy: true },
+      { threadId: "quiet", title: "Done", closedBy },
+    ];
+    expect(visibleSidebarThreads(rows, "current").map((task) => task.threadId)).toEqual(["current", "unread", "busy"]);
+  });
+  it("says who closed it under the title, dims the row, and says Closed in the tooltip", () => {
+    expect(threadByline({ openedBy, closedBy: { ...closedBy, name: "Scout" } })).toBe("closed by Scout");
+    expect(threadByline({ openedBy })).toBe("opened by Parker");
+    expect(threadByline({})).toBeNull();
+    const markup = render({ threadId: "h", title: "Helper 1", openedBy, closedBy });
+    expect(markup).toContain("closed by Parker");
+    expect(markup).not.toContain("opened by");
+    expect(markup).toContain('title="Helper 1 · Closed"');
+    expect(markup).toContain("text-ink-secondary/70");
+    // a live status outranks the closed note; the selected row is not dimmed
+    expect(render({ threadId: "h", title: "Helper 1", closedBy, busy: true })).toContain('title="Helper 1 · Working"');
+    expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain("text-ink-secondary/70");
   });
 });

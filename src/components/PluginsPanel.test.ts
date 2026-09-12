@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  connectedAppsMayDisconnect,
+  botsMissingConnectedApps,
+  hasUsableConnectedApps,
   connectedInventoryCopy,
   connectorActionLabel,
   disconnectAccountConfirmation,
@@ -12,11 +13,54 @@ import {
   type ConnectorStatus,
 } from "./PluginsPanel";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
+import type { Bot, InstanceInfo } from "@/state/store";
 
-describe("connected-app remote permissions", () => {
-  it("allows pairing and status remotely but keeps revocation on the host", () => {
-    expect(connectedAppsMayDisconnect(false)).toBe(true);
-    expect(connectedAppsMayDisconnect(true)).toBe(false);
+// Narrow fixtures: the helper reads four fields and nothing else, so the
+// casts keep the test about the rule rather than about Bot's full shape.
+const engine = (instanceId: string, composioMcp: boolean) =>
+  ({ instanceId, capabilities: { composioMcp } }) as unknown as InstanceInfo;
+const bot = (id: string, fields: Partial<Bot> = {}) =>
+  ({ id, name: id, modelSelection: { instanceId: "claude" }, ...fields }) as unknown as Bot;
+
+describe("connected apps a bot cannot see", () => {
+  const instances = [engine("claude", true), engine("grok", false)];
+
+  it("only offers grants after catalog and inventory confirm a usable account", () => {
+    const active = { calendar: { connected: true, pending: false, status: "ACTIVE" } };
+    expect(hasUsableConnectedApps(true, "ready", false, active)).toBe(true);
+    expect(hasUsableConnectedApps(false, "ready", false, active)).toBe(false);
+    expect(hasUsableConnectedApps(true, "loading", false, active)).toBe(false);
+    expect(hasUsableConnectedApps(true, "error", false, active)).toBe(false);
+    expect(hasUsableConnectedApps(true, "ready", true, active)).toBe(false);
+    expect(hasUsableConnectedApps(true, "ready", false, { calendar: { connected: false, pending: false, status: "EXPIRED" } })).toBe(false);
+  });
+
+  it("names the bots whose own grant is off, and only those", () => {
+    const bots = [
+      bot("allowed"),
+      bot("off", { composio: false }),
+      bot("also-off", { composio: false }),
+    ];
+    expect(botsMissingConnectedApps(bots, instances).map((b) => b.id)).toEqual(["off", "also-off"]);
+  });
+
+  it("treats an absent grant as allowed, the way every turn does", () => {
+    // `composio !== false` is the server's rule; undefined must not be
+    // reported as switched off or the notice nags about working bots.
+    expect(botsMissingConnectedApps([bot("fresh"), bot("explicit", { composio: true })], instances)).toEqual([]);
+  });
+
+  it("leaves out a bot whose engine could never mount the tools", () => {
+    // Its switch is disabled, so pointing the person at it moves the dead
+    // end instead of ending it.
+    const bots = [bot("grok-bot", { composio: false, modelSelection: { instanceId: "grok" } as Bot["modelSelection"] })];
+    expect(botsMissingConnectedApps(bots, instances)).toEqual([]);
+    // an engine the workspace no longer has is the same case
+    expect(botsMissingConnectedApps([bot("orphan", { composio: false, modelSelection: { instanceId: "gone" } as Bot["modelSelection"] })], instances)).toEqual([]);
+  });
+
+  it("leaves out hidden bots, which the person cannot act on from here", () => {
+    expect(botsMissingConnectedApps([bot("ghost", { composio: false, hidden: true })], instances)).toEqual([]);
   });
 });
 

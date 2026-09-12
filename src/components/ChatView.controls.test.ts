@@ -19,7 +19,7 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("./DesktopCapabilities", () => ({
-  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } }, ready: true }),
+  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: (props: ComponentProps<typeof ModelPicker>) => {
@@ -31,7 +31,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView } = await import("./ChatView");
+const { ChatView, ErrorRow } = await import("./ChatView");
 afterAll(() => vi.unstubAllGlobals());
 
 const bot: Bot = {
@@ -43,6 +43,26 @@ const bot: Bot = {
 };
 
 describe("thread control placement", () => {
+  it("keeps the composer inert until the deleted thread's replacement transcript arrives", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, awaitingThreadSnapshot: true } }));
+    expect(markup).toMatch(/<textarea[^>]*disabled=""[^>]*aria-busy="true"/);
+    expect(markup).not.toContain("Finish group setup");
+  });
+  it("offers scoped Full access only when the bot already has it and the local trusted bridge exists", () => {
+    const fullBot = { ...bot, busy: false, approvalMode: "full" as const };
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).not.toContain("Use bot’s Full access for this thread");
+    window.ogb = { approvals: { setMode: vi.fn() } } as unknown as NonNullable<Window["ogb"]>;
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).toContain("Use bot’s Full access for this thread");
+    expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("Use bot’s Full access for this thread");
+    delete window.ogb;
+  });
+
+  it("explains provider safety errors without offering an ineffective Retry", () => {
+    const markup = renderToStaticMarkup(createElement(ErrorRow, { message: "Blocked by our safety systems", onRetry: () => {} }));
+    expect(markup).toContain("Full access controls tool approvals, not provider safety checks");
+    expect(markup).not.toContain("<button");
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }))).toContain("<button");
+  });
   it.each([
     "شغّل الاختبارات\nThen run typecheck\nوبعدها ارفع الفرع",
     "שלום עולם\nThen run typecheck\nתודה רבה",

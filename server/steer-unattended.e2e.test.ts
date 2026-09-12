@@ -49,18 +49,20 @@ const threadMessages = async (threadId: string): Promise<Array<{ kind: string; c
 
 /** The broker's bind candidates, as server/drivers/claude.ts derives them —
  * duplicated rather than imported because DATA_DIR there is fixed at import
- * time from this process's HOME, not the fixture's. */
-function brokerCandidates(threadId: string): string[] {
+ * time from this process's HOME, not the fixture's. botId is folded into
+ * both the deterministic and fallback paths (#1017/#1102) so this must stay
+ * in lockstep with permissionSocketPath/brokerSocketCandidates there. */
+function brokerCandidates(threadId: string, botId: string): string[] {
   const dataDir = join(home, ".openmausbot");
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
-  const digest = createHash("sha256").update(threadId).digest("hex").slice(0, 4);
-  const scope = createHash("sha256").update(`${dataDir}\0${child.pid}\0${threadId}`).digest("hex").slice(0, 16);
+  const digest = createHash("sha256").update(`${botId}\0${threadId}`).digest("hex").slice(0, 4);
+  const scope = createHash("sha256").update(`${dataDir}\0${child.pid}\0${botId}\0${threadId}`).digest("hex").slice(0, 16);
   return [join(dataDir, `perm-${prefix}${digest}.sock`), join(tmpdir(), `omb-perm-${scope}.sock`)];
 }
 
-async function connectBroker(threadId: string): Promise<Socket> {
-  await expect.poll(() => brokerCandidates(threadId).some((path) => existsSync(path)), { timeout: 20_000 }).toBe(true);
-  for (const path of brokerCandidates(threadId)) {
+async function connectBroker(threadId: string, botId: string): Promise<Socket> {
+  await expect.poll(() => brokerCandidates(threadId, botId).some((path) => existsSync(path)), { timeout: 20_000 }).toBe(true);
+  for (const path of brokerCandidates(threadId, botId)) {
     if (!existsSync(path)) continue;
     const socket = await new Promise<Socket | null>((resolve) => {
       const conn = connect(path);
@@ -69,7 +71,7 @@ async function connectBroker(threadId: string): Promise<Socket> {
     });
     if (socket) return socket;
   }
-  throw new Error(`no broker socket among ${brokerCandidates(threadId).join(", ")}`);
+  throw new Error(`no broker socket among ${brokerCandidates(threadId, botId).join(", ")}`);
 }
 
 /** Raise one permission ask and report whether the harness answered it. */
@@ -178,7 +180,7 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
       timeout: 20_000,
     }).toBe(true);
 
-    const conn = await connectBroker(runThreadId);
+    const conn = await connectBroker(runThreadId, bot.id);
     try {
       // the bot's own loopback POST into its running turn — no session, no
       // desktop capability, the way a shell inside the turn would send it

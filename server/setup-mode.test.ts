@@ -1,4 +1,4 @@
-// Setup mode: a blank bot, or a /setup message, turns on a coaching block
+// Setup mode: only a /setup message turns on a coaching block
 // that makes the bot interview the user and configure itself through cards.
 import { describe, expect, it } from "vitest";
 
@@ -38,13 +38,16 @@ describe("expandSetupTurnText", () => {
 });
 
 describe("setupModeActive", () => {
-  it("is on for a blank bot regardless of the message", () => {
-    expect(setupModeActive({ soul: "", description: "", text: "hello" })).toBe(true);
-    expect(setupModeActive({ soul: "  \n", description: undefined, text: "hello" })).toBe(true);
-    expect(setupModeActive({ text: "hello" })).toBe(true);
+  it("does not turn an ordinary request into onboarding for a blank bot", () => {
+    for (const text of ["hello", "Summarize this report", "Run the daily check", "A teammate asked you to review this diff"]) {
+      expect(setupModeActive({ soul: "", description: "", text })).toBe(false);
+      expect(setupModeActive({ soul: "  \n", description: undefined, text })).toBe(false);
+      expect(setupModeActive({ text })).toBe(false);
+    }
   });
 
-  it("is off once either field is set, unless the message is /setup", () => {
+  it("requires /setup whether or not the profile has been filled in", () => {
+    expect(setupModeActive({ text: "/setup" })).toBe(true);
     expect(setupModeActive({ soul: "Be brief.", description: "", text: "hello" })).toBe(false);
     expect(setupModeActive({ soul: "", description: "Files bugs.", text: "hello" })).toBe(false);
     expect(setupModeActive({ soul: "Be brief.", description: "Files bugs.", text: "/setup" })).toBe(true);

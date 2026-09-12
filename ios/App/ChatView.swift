@@ -1417,7 +1417,13 @@ struct MessageRow: View {
         case .text:
             TextBubble(message: message, chat: chat, tailed: endsRun, openLink: openLink)
         case .options:
-            CardView(chat: chat, message: message)
+            // A structured ask draws its own card: its answers are the
+            // model's questions, not an allow/deny a tap could stand for.
+            if message.card?.questions.isEmpty == false {
+                QuestionCardView(chat: chat, message: message)
+            } else {
+                CardView(chat: chat, message: message)
+            }
         case .secret:
             if let secret = message.secret {
                 CredentialRequestCardView(chat: chat, message: message, secret: secret)

@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.74",
+  "version": "0.1.75",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -117,13 +117,5 @@
     "vite": "^7.1.0",
     "vitest": "^4.1.10",
     "wrangler": "4.123.0"
-  },
-  "pnpm": {
-    "supportedArchitectures": {
-      "cpu": [
-        "arm64",
-        "x64"
-      ]
-    }
   }
 }

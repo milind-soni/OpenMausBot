@@ -424,35 +424,148 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("aborts when the idle period elapses between stream chunks", async () => {
+    vi.useFakeTimers();
+    try {
+      let controller: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+
+      const encoder = new TextEncoder();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).endsWith("/models")) {
+            return new Response(JSON.stringify({ data: [] }), { status: 200 });
+          }
+          init?.signal?.addEventListener("abort", () => {
+            try {
+              controller.error(init.signal?.reason ?? new DOMException("Aborted", "AbortError"));
+            } catch {}
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }),
+      );
+
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-idle-timeout-fail",
+        displayName: "Idle Timeout Fail",
+        enabled: true,
+        config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+        environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+
+      await inst.adapter.sendTurn({ threadId: "thread-idle-fail", text: "prompt", model: "vendor/model" });
+
+      // First chunk arrives immediately
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"part 1"}}]}\n\n'));
+
+      // Advance clock past idle timeout without any new chunks
+      await vi.advanceTimersByTimeAsync(185_000);
+
+      const completed = await recorder.until((e) => e.type === "turn.completed");
+      expect(completed).toMatchObject({ ok: false, stopReason: "interrupted" });
+
+      recorder.stop();
+      await inst.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not abort after 120s if the stream continues receiving active chunks (renewable idle timeout)", async () => {
+    vi.useFakeTimers();
+    try {
+      let controller: ReadableStreamDefaultController<Uint8Array>;
+      const stream = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c;
+        },
+      });
+
+      const encoder = new TextEncoder();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          if (String(input).endsWith("/models")) {
+            return new Response(JSON.stringify({ data: [] }), { status: 200 });
+          }
+          init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }),
+      );
+
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-idle-timeout-renew",
+        displayName: "Idle Timeout Renew",
+        enabled: true,
+        config: { url: "https://example.test/v1", apiKeyEnv: "TEST_KEY" },
+        environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+
+      await inst.adapter.sendTurn({ threadId: "thread-idle-renew", text: "prompt", model: "vendor/model" });
+
+      // Chunk 1 at t=0s
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"start "}}]}\n\n'));
+      await vi.advanceTimersByTimeAsync(100_000);
+
+      // Chunk 2 at t=100s (resets idle timer)
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"middle "}}]}\n\n'));
+      await vi.advanceTimersByTimeAsync(100_000);
+
+      // Chunk 3 at t=200s (resets idle timer)
+      controller!.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"end"}}]}\n\n'));
+      await vi.advanceTimersByTimeAsync(100_000);
+
+      // Total 300s exceeds both the old 120s limit and the new 180s idle limit.
+      controller!.enqueue(encoder.encode('data: [DONE]\n\n'));
+      controller!.close();
+
+      const completed = await recorder.until((e) => e.type === "turn.completed");
+      expect(completed).toMatchObject({ ok: true });
+
+      const item = recorder.events.find((e) => e.type === "item.completed");
+      expect(item).toMatchObject({ text: "start middle end" });
+      expect(vi.getTimerCount()).toBe(0);
+
+      recorder.stop();
+      await inst.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("omits provider routing when none is configured", async () => {
     let sentBody: any = null;
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const url = String(input);
-        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
-        sentBody = JSON.parse(String(init?.body));
-        return new Response(
-          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
-          { status: 200, headers: { "content-type": "text/event-stream" } },
-        );
-      }),
-    );
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }));
+      sentBody = JSON.parse(String(init?.body));
+      return new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\ndata: [DONE]\n');
+    }));
     const inst = await OpenAICompatDriver.create({
-      instanceId: "test-no-provider",
-      displayName: "No provider",
-      enabled: true,
-      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY" },
-      environment: { TEST_KEY: "secret" },
+      instanceId: "test-no-provider", displayName: "No provider", enabled: true,
+      config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "TEST_KEY" }, environment: { TEST_KEY: "secret" },
     });
     const recorder = recordEvents(inst.adapter);
-
-    await inst.adapter.sendTurn({ threadId: "thread-np", text: "prompt", model: "vendor/model" });
-    await recorder.until((e) => e.type === "turn.completed");
-
-    expect(sentBody).not.toBeNull();
-    expect("provider" in sentBody).toBe(false);
-    recorder.stop();
-    await inst.dispose();
+    try {
+      await inst.adapter.sendTurn({ threadId: "thread-np", text: "prompt", model: "vendor/model" });
+      await recorder.until((event) => event.type === "turn.completed");
+      expect(sentBody).not.toBeNull();
+      expect(sentBody).not.toHaveProperty("provider");
+    } finally {
+      recorder.stop();
+      await inst.dispose();
+    }
   });
 });

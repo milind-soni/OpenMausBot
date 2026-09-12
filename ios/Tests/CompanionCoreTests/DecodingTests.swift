@@ -530,6 +530,33 @@ final class DecodingTests: XCTestCase {
         }
     }
 
+    func testDecodesAThreadABotClosedAndOneStillOpen() throws {
+        // close_thread stamps who closed a thread; an open thread — and every
+        // thread from an older computer — has no stamp and decodes as open.
+        let closed = try JSONDecoder().decode(BotTask.self, from: Data("""
+        {"threadId":"t2","title":"Ship it","createdAt":1,
+         "openedBy":{"botId":"pm","name":"Parker","at":2},
+         "closedBy":{"botId":"pm","name":"Parker","at":9}}
+        """.utf8))
+        XCTAssertEqual(closed.closedBy?.botId, "pm")
+        XCTAssertEqual(closed.closedBy?.name, "Parker")
+        XCTAssertEqual(closed.closedBy?.at, 9)
+        XCTAssertTrue(closed.isClosed)
+        XCTAssertEqual(closed.bylineLabel, "closed by Parker", "closed outranks opened on the one byline")
+
+        let open = try JSONDecoder().decode(
+            BotTask.self,
+            from: Data(#"{"threadId":"t1","title":"","createdAt":1,"openedBy":{"botId":"pm","name":"Parker","at":2}}"#.utf8)
+        )
+        XCTAssertNil(open.closedBy)
+        XCTAssertFalse(open.isClosed)
+        XCTAssertEqual(open.bylineLabel, "opened by Parker")
+        XCTAssertNil(try JSONDecoder().decode(BotTask.self, from: Data(#"{"threadId":"t1","title":"","createdAt":1}"#.utf8)).bylineLabel)
+        for task in try decode(Fleet.self, "bots-paged").bots.flatMap({ $0.tasks ?? [] }) {
+            XCTAssertFalse(task.isClosed, task.threadId)
+        }
+    }
+
     func testAThreadOpenedByABotSaysSoInTheList() throws {
         // Same words as the desktop's thread list, so a person reading both
         // screens reads one sentence.

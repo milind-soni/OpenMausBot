@@ -19,7 +19,14 @@ extension Bot {
     /// Saved folder order and server thread order are preserved. Missing
     /// folders leave their threads accessible in the unfiled group.
     /// A folder-name search keeps all of that folder's visible threads.
-    public func threadGroups(matching query: String = "") -> [BotThreadGroup] {
+    ///
+    /// Threads a bot closed are folded away by default, the way the desktop
+    /// sidebar folds them: a PM bot that opened ten helper threads and closed
+    /// them must not leave ten rows behind. They are never gone — a search
+    /// or `includingClosed` (the manage sheet) lists them, and a closed
+    /// thread that is running, unread, or open here stays in the list.
+    public func threadGroups(matching query: String = "", includingClosed: Bool = false) -> [BotThreadGroup] {
+        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let threads: [BotTask]
         if tasks == nil {
             // Older computers have one conversation but no task metadata.
@@ -29,8 +36,10 @@ extension Bot {
                 modelSelection: modelSelection, busy: busy, unread: unread,
                 approvalMode: approvalMode, autoApprove: autoApprove, alwaysAllow: alwaysAllow
             )]
-        } else {
+        } else if includingClosed || !search.isEmpty {
             threads = visibleTasks
+        } else {
+            threads = visibleTasks.filter { !$0.isClosed || $0.demandsAttention || $0.threadId == threadId }
         }
 
         var projectIDs = Set<String>()
@@ -46,7 +55,6 @@ extension Bot {
             groups.append(BotThreadGroup(project: nil, tasks: unfiled))
         }
 
-        let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !search.isEmpty else { return groups }
         return groups.compactMap { group in
             if group.project?.name.localizedStandardContains(search) == true { return group }

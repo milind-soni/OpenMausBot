@@ -99,6 +99,35 @@ describe("readThreadEvents", () => {
     expect(page.total).toEqual({ runtime: 3, native: 2 });
   });
 
+  // A structured ask replays with the model's own questions on it. A card
+  // built from a half-decoded one would offer options that were never
+  // offered, so a malformed payload is dropped whole rather than trimmed.
+  it("keeps a structured ask's questions and drops a malformed one", () => {
+    const eventsDir = tmp();
+    const nativeDir = tmp();
+    const base = {
+      provider: "claude",
+      threadId: "t1",
+      type: "request.opened",
+      requestType: "question",
+      tool: "AskUserQuestion",
+      summary: "Which framework?",
+    };
+    const question = { question: "Which framework?", header: "Stack", options: [{ label: "React" }] };
+    writeFileSync(
+      join(eventsDir, "t1.ndjson"),
+      line({ ...base, eventId: "rich", createdAt: "1", questions: [question] }) +
+        // an option with no label is not the contract
+        line({ ...base, eventId: "bad-option", createdAt: "2", questions: [{ question: "q", options: [{ hint: "x" }] }] }) +
+        // neither is a question that is not a record
+        line({ ...base, eventId: "bad-question", createdAt: "3", questions: ["Which framework?"] }),
+    );
+    writeFileSync(join(nativeDir, "t1.ndjson"), "");
+    const page = readThreadEvents({ eventsDir, nativeDir, threadId: "t1" });
+    expect(page.entries.map((entry) => (entry.data as { eventId?: string }).eventId)).toEqual(["rich"]);
+    expect(page.entries[0]!.data).toMatchObject({ questions: [question] });
+  });
+
   it("rejects malformed retry telemetry while retaining a valid retry event", () => {
     const eventsDir = tmp();
     const nativeDir = tmp();

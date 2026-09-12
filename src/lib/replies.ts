@@ -1,5 +1,6 @@
 import type { Message } from "@/state/store";
 import { t } from "./i18n";
+import { peerLine } from "./peer-message";
 
 export function replySnippet(text: string, limit = 160): string {
   const clean = text
@@ -13,5 +14,6 @@ export function replySnippet(text: string, limit = 160): string {
   return `${clean.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 export function replyAuthor(message: Message, fallback?: string): string {
-  return message.role === "user" ? t("chat.you") : (message.from?.name ?? fallback ?? t("chat.assistant"));
+  if (message.role === "user") return peerLine(message)?.name ?? t("chat.you");
+  return message.from?.name ?? fallback ?? t("chat.assistant");
 }

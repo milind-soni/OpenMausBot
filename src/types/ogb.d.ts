@@ -114,7 +114,7 @@ const __APP_VERSION__: string;
         setMode(
           botId: string,
           mode: import("../../shared/approval-mode").ApprovalMode,
-          options?: { acknowledgeLocalAuto?: boolean },
+          options?: { acknowledgeLocalAuto?: boolean; threadId?: string },
         ): Promise<import("../state/store").Bot>;
       };
       localControl: {

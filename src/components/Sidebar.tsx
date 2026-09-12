@@ -30,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, type AppState, type Bot, type Group } from "@/state/store";
+import { peerLine } from "@/lib/peer-message";
 
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -111,6 +112,8 @@ function preview(bot: Bot): string {
   if (last.kind === "options" && last.card) return last.card.title;
   if (last.kind === "activity" && last.tool) return last.tool.name;
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
+  const peer = peerLine(last);
+  if (peer) return `${peer.name}: ${peer.body}`;
   return last.text ?? "";
 }
 

@@ -106,6 +106,16 @@ app.whenReady().then(async () => {
     return { status: response.status, body: await response.json() };
   };
   await until(() => api("/api/health").catch(() => null));
+  const verifyUi = () => require("./testing/approval-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,
+    grant: (botId, mode, options) => coordinator.request(child, botId, mode, options),
+  });
+  if (process.argv.includes("--skill-ui-only")) {
+    await require("./testing/skill-approval-ui-smoke.cjs")({ root, home, url: `http://127.0.0.1:${port}`, api, until,
+      capability: (botId, threadId) => api("/api/testing/internal-capability", "POST", { botId, threadId, skillAuthoring: true }, { "x-openmausbot-test-capability": testCapabilityKey }),
+    });
+    return;
+  }
+  if (process.argv.includes("--ui-only")) { await verifyUi(); return; }
   const created = await api("/api/bots", "POST", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
   assert.equal(created.status, 201);
   const id = created.body.bot.id;
@@ -121,6 +131,40 @@ app.whenReady().then(async () => {
     console.log(JSON.stringify({ mode, native, privateGrant: true, turnSettled: true }));
   }
   await assert.rejects(coordinator.request(child, id, "custom"), /only for Codex/);
+  // Existing conversations retain their snapshot when the bot default
+  // changes. Only an explicit private desktop grant may upgrade one thread.
+  for (const [instanceId, model] of [["claude", "claude-sonnet-5"], ["codex", "gpt-6-astra"], ["grok-reads", "grok-4.6"], ["agy", "gemini-3.8-flash-high"]]) {
+    const scoped = (await api("/api/bots", "POST", { name: "Existing thread", modelSelection: { instanceId, model } })).body.bot;
+    await coordinator.request(child, scoped.id, "ask");
+    const old = (await api(`/api/bots/${scoped.id}/tasks`, "POST", { title: "Existing Ask thread" })).body.task;
+    const other = (await api(`/api/bots/${scoped.id}/tasks`, "POST", { title: "Leave this thread alone" })).body.task;
+    assert.ok(old?.threadId && other?.threadId);
+    await assert.rejects(coordinator.request(child, scoped.id, "full", { threadId: old.threadId }), /bot settings/);
+    await coordinator.request(child, scoped.id, "full");
+    const readScoped = async () => (await api("/api/bots?messages=0")).body.bots.find((bot) => bot.id === scoped.id);
+    await until(async () => (await readScoped()).approvalMode === "full");
+    if (instanceId === "claude") {
+      assert.equal((await api(`/api/bots/${scoped.id}/tasks/${other.threadId}`, "PATCH", { approvalMode: "edits" })).status, 200);
+      await api(`/api/bots/${scoped.id}/tasks/${other.threadId}`, "PATCH", { approvalMode: "ask", modelSelection: { instanceId: "codex", model: "gpt-6-astra" } });
+      await assert.rejects(coordinator.request(child, scoped.id, "full", { threadId: other.threadId }), /bot's provider/);
+      assert.equal((await api(`/api/bots/${scoped.id}/tasks/${other.threadId}`, "PATCH", { approvalMode: "edits" })).status, 400);
+    }
+    assert.equal((await readScoped()).tasks.find((task) => task.threadId === old.threadId).approvalMode, "ask");
+    assert.equal((await api(`/api/bots/${scoped.id}/tasks/${old.threadId}`, "PATCH", { approvalMode: "full" })).status, 403);
+    await coordinator.request(child, scoped.id, "full", { threadId: old.threadId });
+    await until(async () => (await readScoped()).tasks.find((task) => task.threadId === old.threadId).approvalMode === "full");
+    assert.equal((await readScoped()).tasks.find((task) => task.threadId === other.threadId).approvalMode, "ask");
+    await assert.rejects(coordinator.request(child, scoped.id, "full", { threadId: "missing-thread" }), /bot settings/);
+    const sent = await api(`/api/bots/${scoped.id}/messages`, "POST", { text: "Verify existing thread Full", threadId: old.threadId });
+    assert.equal(sent.status, 202);
+    await until(async () => !(await readScoped()).tasks.find((task) => task.threadId === old.threadId).busy);
+    const source = instanceId === "claude" ? dump : instanceId === "codex" ? codexDump : instanceId === "agy" ? agyDump : grokDump;
+    const seen = JSON.parse(readFileSync(source, "utf8"));
+    if (instanceId === "claude") assert.equal(seen.argv[seen.argv.indexOf("--permission-mode") + 1], "bypassPermissions");
+    if (instanceId === "grok-reads") assert.equal(seen.argv[seen.argv.indexOf("--permission-mode") + 1], "bypassPermissions");
+    if (instanceId === "codex") assert.equal(seen.calls.find((call) => call.method === "turn/start").params.approvalPolicy, "never");
+    console.log(JSON.stringify({ provider: instanceId, existingThread: "full", otherThread: "ask", privateGrant: true, turnSettled: true }));
+  }
   const pendingCard = (bot) => bot.messages.find((message) => message.card?.requestId && !message.card.answered && !message.card.dismissed)?.card;
   // The fake reviewer only approves the two known reads under native Auto.
   // Their actual MCP calls reach this real isolated server. This verifies the
@@ -208,7 +252,10 @@ app.whenReady().then(async () => {
   // The test-only capability drives the real peer dispatch route without
   // introducing another fake-agent workflow or weakening production auth.
   const peerTarget = (await api("/api/bots", "POST", { modelSelection: { instanceId: "agy", model: "gemini-3.8-flash-high" } })).body.bot;
+  await coordinator.request(child, peerTarget.id, "ask");
+  const peerThread = (await api(`/api/bots/${peerTarget.id}/tasks`, "POST", { title: "Existing delegated conversation" })).body.task;
   await coordinator.request(child, peerTarget.id, "full");
+  await coordinator.request(child, peerTarget.id, "full", { threadId: peerThread.threadId });
   assert.equal((await api(`/api/bots/${id}`, "PATCH", { approvePeerComms: false })).status, 200);
   const capability = await api("/api/testing/internal-capability", "POST", { botId: id, threadId: created.body.bot.threadId }, { "x-openmausbot-test-capability": testCapabilityKey });
   assert.equal(capability.status, 201);
@@ -226,10 +273,11 @@ app.whenReady().then(async () => {
   assert.equal(peerCalls.find((call) => call.params.configId === "mode")?.params.value, "yolo");
   console.log(JSON.stringify({ provider: "antigravity", mode: "full", peerInitiated: true, native: "yolo", autoApproved: true, humanApproved: false }));
 
-  // Revoking the receiving bot's grant must restore prompts on the resumed
+  // Revoking the receiving thread's grant must restore prompts on the resumed
   // delegated session, even when the sender itself has Full access.
   await coordinator.request(child, id, "full");
   await coordinator.request(child, peerTarget.id, "ask");
+  assert.equal((await api(`/api/bots/${peerTarget.id}/tasks/${peerThread.threadId}`, "PATCH", { approvalMode: "ask" })).status, 200);
   const askPeerRequest = api("/api/internal/ask-bot", "POST", { toBotId: peerTarget.id, message: "Ask target must not inherit sender Full" }, { authorization: `Bearer ${capability.body.token}` });
   void askPeerRequest.catch(() => {});
   const peerCard = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((bot) => bot.id === peerTarget.id)));
@@ -252,6 +300,9 @@ app.whenReady().then(async () => {
   const customCalls = JSON.parse(readFileSync(codexDump, "utf8")).calls;
   assert.equal(customCalls.find((call) => call.method === "turn/start")?.params.approvalsReviewer, "auto_review");
   console.log(JSON.stringify({ provider: "codex", mode: "custom", peerInitiated: true, effectiveMode: "auto", nativeApprovalShown: true }));
+  if (process.argv.includes("--ui")) {
+    await verifyUi();
+  }
   console.log("Approval smoke passed; HTTP elevation rejected, private grant and resumed mode transitions verified.");
 }).catch((error) => {
   console.error(error);

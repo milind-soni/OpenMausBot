@@ -3,6 +3,13 @@ import { describe, expect, it } from "vitest";
 import { BACKOFF_BASE_MS, RETRY_MAX_ATTEMPTS, classifyError, computeBackoff } from "./retry.ts";
 
 describe("classifyError", () => {
+  it("does not retry a provider safety block even inside a 503 or rate-limit error", () => {
+    for (const text of ["HTTP 503: blocked by our safety systems", "429: safety monitoring paused this task"]) {
+      expect(classifyError({ text })).toEqual({ transient: false, reason: "provider_safety" });
+      expect(classifyError({ exitCode: 1, stderr: text })).toEqual({ transient: false, reason: "provider_safety" });
+    }
+    expect(classifyError({ text: "503: checking deployment safety" }).reason).toBe("server_error");
+  });
   it("calls provider rate limits transient", () => {
     expect(classifyError(new Error("xAI HTTP 429: Too Many Requests"))).toEqual({
       transient: true,

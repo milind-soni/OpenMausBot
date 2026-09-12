@@ -8,7 +8,7 @@ function plainObject(value) {
   return value && typeof value === "object" && !Array.isArray(value);
 }
 
-function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto = false) {
+function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto = false, threadId) {
   if (typeof requestId !== "string" || !REQUEST_ID.test(requestId)) {
     throw new Error("invalid trusted approval-mode request id");
   }
@@ -19,12 +19,16 @@ function trustedApprovalModeRequest(requestId, botId, mode, acknowledgeLocalAuto
   if (typeof acknowledgeLocalAuto !== "boolean") {
     throw new Error("invalid local Auto acknowledgement");
   }
+  if (threadId !== undefined && (typeof threadId !== "string" || !BOT_ID.test(threadId) || (mode !== "full" && mode !== "custom"))) {
+    throw new Error("invalid thread for trusted approval mode");
+  }
   return {
     type: "approval-trusted-mode-set",
     requestId,
     botId,
     mode,
     ...(acknowledgeLocalAuto ? { acknowledgeLocalAuto: true } : {}),
+    ...(threadId !== undefined ? { threadId } : {}),
   };
 }
 
@@ -104,8 +108,8 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
   const usedRequestIds = new Set();
   const latestRequestByBot = new Map();
 
-  function nextMessage(botId, mode, acknowledgeLocalAuto = false) {
-    const message = trustedApprovalModeRequest(randomId(), botId, mode, acknowledgeLocalAuto);
+  function nextMessage(botId, mode, acknowledgeLocalAuto = false, threadId) {
+    const message = trustedApprovalModeRequest(randomId(), botId, mode, acknowledgeLocalAuto, threadId);
     if (usedRequestIds.has(message.requestId)) {
       throw new Error("Trusted approval-mode request id was reused");
     }
@@ -128,7 +132,7 @@ function createTrustedApprovalModeCoordinator({ randomId, timeoutMs = 10_000 } =
     }
     let message;
     try {
-      message = nextMessage(botId, mode, options.acknowledgeLocalAuto ?? false);
+      message = nextMessage(botId, mode, options.acknowledgeLocalAuto ?? false, options.threadId);
     } catch (error) {
       return Promise.reject(error);
     }

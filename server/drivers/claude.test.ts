@@ -25,6 +25,7 @@ import {
   createPermissionBroker,
   parseClaudeCliVersion,
   permissionSocketPath,
+  readClaudeAuthSettings,
   type ClaudeConfig,
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -161,8 +162,19 @@ describe("ClaudeDriver.decodeConfig", () => {
   });
 
   it("gives each collision test a distinct broker pipe path", () => {
-    const paths = COLLISION_THREAD_IDS.map(permissionSocketPath);
+    const paths = COLLISION_THREAD_IDS.map((threadId) => permissionSocketPath(threadId));
     expect(new Set(paths).size).toBe(COLLISION_THREAD_IDS.length);
+  });
+
+  it("gives two bots distinct broker pipes even if they ever share a threadId (#1017)", () => {
+    // A delegated child turn should never be able to collide with its
+    // parent's still-open broker on the shared driver-level socket table —
+    // whatever the reason a threadId is reused, namespacing by bot rules
+    // the collision out by construction.
+    const sharedThreadId = "t-shared-by-parent-and-child";
+    const parentPath = permissionSocketPath(sharedThreadId, "bot-chief");
+    const childPath = permissionSocketPath(sharedThreadId, "bot-cliff");
+    expect(parentPath).not.toBe(childPath);
   });
 
   it("disposes its account controller while a logout is running", async () => {
@@ -500,6 +512,115 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
+  it("turns Claude's own AskUserQuestion into a question card, not an approval", async () => {
+    // The CLI routes AskUserQuestion through --permission-prompt-tool like
+    // any other tool use. Left as a permission it offers Deny / Always allow
+    // / Allow once over a question, and answering it "allow" throws the
+    // answer away — so the ask has to arrive as a question with its options.
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-structured-ask", text: "go" });
+    const conn = await connectSocket(permissionSocketPath("t-structured-ask"));
+    try {
+      conn.write(JSON.stringify({
+        t: "ask",
+        kind: "question",
+        id: "structured-ask",
+        tool: "AskUserQuestion",
+        input: {
+          questions: [{
+            question: "Which model should this bot run on?",
+            header: "Model",
+            options: [{ label: "Opus 5", description: "What it had before." }, { label: "Sonnet 5" }],
+          }],
+        },
+      }) + "\n");
+      const opened = await recorder.until((e) => e.type === "request.opened") as {
+        requestType: string;
+        summary: string;
+        requestId: string;
+        questions?: { question: string; header?: string; options: { label: string }[] }[];
+        choices?: string[];
+      };
+      expect(opened.requestType).toBe("question");
+      expect(opened.summary).toBe("Which model should this bot run on?");
+      expect(opened.questions?.[0]).toMatchObject({ question: "Which model should this bot run on?", header: "Model" });
+      // flat labels too, so the phone companions can still answer
+      expect(opened.choices).toEqual(["Opus 5", "Sonnet 5"]);
+      expect(
+        await instance.adapter.respondToRequest("t-structured-ask", opened.requestId, {
+          behavior: "answer",
+          message: "The user answered your questions.\n\nQ: Which model should this bot run on?\nA: Opus 5",
+        }),
+      ).toBe("answered");
+    } finally {
+      conn.destroy();
+    }
+  });
+
+  it("never lets a PERMISSION take its buttons or its summary from a nested questions[]", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-lbl", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-lbl"));
+    // A permission ask whose arguments happen to carry `questions`. The
+    // companion renders card.options AS the decision and maps every label
+    // that is not "Allow" to a denial, so model-authored labels here mean
+    // both buttons deny while "Always allow" writes a real grant first.
+    conn.write(
+      JSON.stringify({
+        t: "ask",
+        id: "ask-lbl",
+        tool: "mcp__x__wire",
+        input: {
+          questions: [{ question: "Send the payroll export?", options: [{ label: "Yes" }, { label: "No" }] }],
+          to: "acct-9",
+          amount: 4200,
+        },
+      }) + "\n",
+    );
+
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission" });
+    expect((opened as { choices?: string[] }).choices).toBeUndefined();
+    // and the arguments a person is actually deciding on are still shown
+    expect((opened as { summary: string }).summary).toContain("acct-9");
+    expect((opened as { summary: string }).summary).toContain("4200");
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-lbl");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("still shows an unknown permission tool's raw arguments — they are the whole decision", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-raw", text: "go" });
+    await recorder.until((e) => e.type === "session.started");
+
+    const conn = await connectSocket(permissionSocketPath("t-perm-raw"));
+    conn.write(
+      JSON.stringify({ t: "ask", id: "ask-raw", tool: "mcp__x__wire", input: { amount: 4200, to: "acct-9" } }) + "\n",
+    );
+
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", summary: '{"amount":4200,"to":"acct-9"}' });
+    expect((opened as { choices?: string[] }).choices).toBeUndefined();
+
+    conn.end();
+    await instance.adapter.interruptTurn("t-perm-raw");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
+  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
+    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
+    // and a thread with no turn at all is the same answer
+    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
+    await instance.adapter.interruptTurn("t-perm-2");
+    await recorder.until((e) => e.type === "turn.completed");
+  });
+
   it("sends attached images as native blocks before text without logging their bytes", async () => {
     await create();
     const dump = join(scratch, "dump-images.json");
@@ -796,6 +917,63 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv).not.toContain("--strict-mcp-config");
     expect(seen.argv).not.toContain("--setting-sources");
+  });
+
+  it("preserves only the selected account's auth settings in a private file", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    const settings = { apiKeyHelper: "echo synthetic-helper-key", env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:9", ANTHROPIC_AUTH_TOKEN: "synthetic-token", OMB_TTS_KEY: "must-not-leak" }, hooks: { SessionStart: [{ command: "must-not-run" }] }, permissions: { defaultMode: "bypassPermissions" } };
+    writeFileSync(join(account, "settings.json"), JSON.stringify(settings));
+    const dump = join(scratch, "account.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { configDir: account });
+    await instance.adapter.sendTurn({ threadId: "t-auth-settings", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.settings).toEqual({ apiKeyHelper: settings.apiKeyHelper, env: { ANTHROPIC_BASE_URL: settings.env.ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN: "synthetic-token" } });
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+    expect(JSON.stringify(seen.argv)).not.toContain("synthetic");
+    const settingsPath = seen.argv[seen.argv.indexOf("--settings") + 1];
+    if (process.platform !== "win32") expect(seen.settingsMode).toBe(0o600);
+    const log = readFileSync(join(NATIVE_DIR, "t-auth-settings.ndjson"), "utf8");
+    expect(log).not.toContain("synthetic-token");
+    expect(log).not.toContain(settings.apiKeyHelper);
+    await instance.dispose();
+    expect(existsSync(settingsPath)).toBe(false);
+  });
+
+  it("restarts a retained session when the selected account's auth changes", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    const path = join(account, "settings.json");
+    writeFileSync(path, JSON.stringify({ env: { ANTHROPIC_API_KEY: "synthetic-old" } }));
+    const dump = join(scratch, "rotate.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { configDir: account });
+    const first = await instance.adapter.sendTurn({ threadId: "t-auth-rotate", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const before = JSON.parse(readFileSync(dump, "utf8"));
+    writeFileSync(path, JSON.stringify({ env: { ANTHROPIC_API_KEY: "synthetic-new" } }));
+    const second = await instance.adapter.sendTurn({ threadId: "t-auth-rotate", text: "again" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const after = JSON.parse(readFileSync(dump, "utf8"));
+    expect(after.pid).not.toBe(before.pid);
+    expect(after.settings.env.ANTHROPIC_API_KEY).toBe("synthetic-new");
+  });
+
+  it("does not mix a personal helper/endpoint with an explicitly configured OMB connection", async () => {
+    const account = join(scratch, "account");
+    mkdirSync(account);
+    writeFileSync(join(account, "settings.json"), JSON.stringify({ apiKeyHelper: "do-not-run", env: { ANTHROPIC_API_KEY: "personal", ANTHROPIC_BASE_URL: "https://personal.invalid" } }));
+    const dump = join(scratch, "explicit.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, ANTHROPIC_API_KEY: "workspace-key" }, { configDir: account });
+    await instance.adapter.sendTurn({ threadId: "t-auth-explicit", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.settings).toBe(null);
+    expect(seen.env.ANTHROPIC_API_KEY).toBe("workspace-key");
+    expect(seen.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(readClaudeAuthSettings({ HOME: scratch, CLAUDE_CONFIG_DIR: join(scratch, "other-account") })).toEqual({});
+    writeFileSync(join(account, "settings.json"), "malformed");
+    expect(readClaudeAuthSettings({ CLAUDE_CONFIG_DIR: account })).toEqual({});
   });
 
   it("withholds a flag from a CLI that predates it, instead of failing every turn", async () => {

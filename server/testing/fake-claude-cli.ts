@@ -37,7 +37,8 @@
 //                      Sonnet 4.5: init reports the mode it actually runs in.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -214,6 +215,9 @@ const playTurn = (prompt: JsonValue) => {
       }
     }
     const systemPromptPath = argAfter("--append-system-prompt-file");
+    const settingsPath = argAfter("--settings");
+    const settings = settingsPath ? JSON.parse(readFileSync(settingsPath, "utf8")) : null;
+    const settingsMode = settingsPath ? statSync(settingsPath).mode & 0o777 : null;
     let systemPrompt: string | null = null;
     if (systemPromptPath) {
       try {
@@ -224,7 +228,7 @@ const playTurn = (prompt: JsonValue) => {
     }
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
     );
   }
 
@@ -273,6 +277,16 @@ const playTurn = (prompt: JsonValue) => {
   if (mode === "resume-dies-after-init" && argv.includes("--resume")) {
     process.stderr.write("fake-claude: simulated crash after accepting the resumed session\n");
     process.exit(3);
+  }
+
+  if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
+    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt).then(text => {
+      out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+      out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
+    }).catch(error => {
+      out({ type: "result", is_error: true, result: String(error), stop_reason: "error" });
+    }).finally(() => { turnRunning = false; finishIfDone(); });
+    return;
   }
 
   if (mode === "hang") {

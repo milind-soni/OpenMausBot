@@ -112,7 +112,8 @@ export function PermissionsSection({
       <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Approval level</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
-          Choose how much this bot can do before it stops to ask you.
+          Default for new threads, routines and delegated work. Existing threads keep their own level;
+          change it from that thread’s composer.
         </div>
         <div className="mt-3">
           <ApprovalModeSelector

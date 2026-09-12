@@ -64,6 +64,9 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       openedBy: "openedBy" in task && task.openedBy
         ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at }
         : undefined,
+      closedBy: "closedBy" in task && task.closedBy
+        ? { botId: task.closedBy.botId, name: task.closedBy.name, at: task.closedBy.at }
+        : undefined,
       activeLeafId: store.activeLeaf(task.threadId),
       messages: store.messagesFor(task.threadId).map((message) => ({
         id: message.id, role: message.role, text: messageText(message), at: message.at,
@@ -176,6 +179,11 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         // rather than a bot id that resolves to a stranger.
         const opener = task.openedBy && botIds.get(task.openedBy.botId);
         if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at };
+        // A closed thread stays closed after import — the pile the person
+        // tidied does not come back as a pile — with the closer remapped
+        // the same way, or absent when it was a stranger.
+        const closer = task.closedBy && botIds.get(task.closedBy.botId);
+        if (task.closedBy && closer) record.closedBy = { botId: closer, name: task.closedBy.name, at: task.closedBy.at };
         return record;
       });
       // Own the task IDs before writing their transcripts, so rollback also

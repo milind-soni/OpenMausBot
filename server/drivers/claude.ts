@@ -44,6 +44,13 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import {
+  ASK_USER_QUESTION_TOOL,
+  askQuestionSummary,
+  parseAskQuestions,
+  questionChoices,
+  type AskQuestion,
+} from "../../shared/ask-question.ts";
 
 /** Whether `claude` has been signed in.
  *
@@ -187,6 +194,32 @@ function claudeEnvironment(
  * project's `.mcp.json`. */
 function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
   return env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1";
+}
+
+/** Retain the selected CLI account's authentication without importing its
+ * hooks, permissions, MCP servers or personal instructions. Explicit OMB
+ * connections/local endpoints own their entire routing + credential pair. */
+export function readClaudeAuthSettings(
+  env: NodeJS.ProcessEnv,
+  instanceEnvironment: NodeJS.ProcessEnv = {},
+): { env?: Record<string, string>; apiKeyHelper?: string } {
+  if (CLAUDE_ACCOUNT_ENV_KEYS.some((key) => instanceEnvironment[key])) return {};
+  try {
+    const settings = JSON.parse(readFileSync(join(resolveClaudeConfigDir(undefined, env), "settings.json"), "utf8"));
+    const authEnv: Record<string, string> = {};
+    for (const key of CLAUDE_ACCOUNT_ENV_KEYS) {
+      if (!key.endsWith("_FILE_DESCRIPTOR") && typeof settings?.env?.[key] === "string") {
+        authEnv[key] = settings.env[key];
+      }
+    }
+    return {
+      ...(Object.keys(authEnv).length ? { env: authEnv } : {}),
+      ...(typeof settings?.apiKeyHelper === "string" && settings.apiKeyHelper.trim()
+        ? { apiKeyHelper: settings.apiKeyHelper } : {}),
+    };
+  } catch {
+    return {};
+  }
 }
 
 /** MCP servers the bot's own project declares in `<cwd>/.mcp.json`.
@@ -448,12 +481,22 @@ function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: 
     : { behavior: "deny", message: "OpenMausBot: the turn ended" };
 }
 
+/** The structured questions behind an ask, when it is one. Claude's own
+ * AskUserQuestion carries them; everything else answers null and keeps the
+ * plain summary/choices card. */
+function askQuestions(ask: Ask): AskQuestion[] | null {
+  return ask.tool === ASK_USER_QUESTION_TOOL ? parseAskQuestions(ask.input) : null;
+}
+
 /** One human-readable line for an ask — what the card subtitle shows. */
 function askSummary(ask: Ask): string {
+  const questions = askQuestions(ask);
+  if (questions) return askQuestionSummary(questions).slice(0, 300);
   return askInputSummary(ask.input) ?? ask.tool ?? "tool";
 }
 
-export function permissionSocketPath(threadId: string) {
+
+export function permissionSocketPath(threadId: string, botId?: string) {
   // A readable prefix alone is not unique: ids that agree on their first
   // characters ("t-perm-dup-1", "t-perm-dup-2") would share a socket. POSIX
   // hides that — a new broker's listen replaces the socket FILE, so the name
@@ -463,8 +506,16 @@ export function permissionSocketPath(threadId: string) {
   // id so distinct threads get distinct sockets; the tag stays at 8 chars
   // total because the POSIX path already brushes the 104-byte sun_path
   // limit under deep tmp home dirs.
+  //
+  // botId is folded into the digest too (#1017): the driver's session/broker
+  // maps are a single process-wide table keyed on threadId alone, so a
+  // delegated child turn whose threadId ever coincides with its still-open
+  // parent's (or any other bot's) would otherwise collide on the exact same
+  // socket. Namespacing by bot makes that collision structurally impossible
+  // regardless of how two turns end up sharing a threadId.
+  const key = botId ? `${botId}\0${threadId}` : threadId;
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
-  const digest = createHash("sha256").update(threadId).digest("hex").slice(0, 4);
+  const digest = createHash("sha256").update(key).digest("hex").slice(0, 4);
   return brokerSocketPath(DATA_DIR, `${prefix}${digest}`);
 }
 
@@ -475,11 +526,11 @@ export function permissionSocketPath(threadId: string) {
  * longer than its small `sun_path` limit; a deep test HOME or long username
  * can otherwise make every approval silently unavailable. The proxy learns
  * the actual bound path from its argv, so either fallback is transparent. */
-export function brokerSocketCandidates(threadId: string): string[] {
-  const base = permissionSocketPath(threadId);
+export function brokerSocketCandidates(threadId: string, botId?: string): string[] {
+  const base = permissionSocketPath(threadId, botId);
   if (process.platform !== "win32") {
     const scope = createHash("sha256")
-      .update(`${DATA_DIR}\0${process.pid}\0${threadId}`)
+      .update(`${DATA_DIR}\0${process.pid}\0${botId ?? ""}\0${threadId}`)
       .digest("hex")
       .slice(0, 16);
     return [base, join(tmpdir(), `omb-perm-${scope}.sock`)];
@@ -575,7 +626,12 @@ export async function createPermissionBroker(opts: {
             // `always` rides to the proxy, which hands the CLI's own suggested
             // permission rules back as updatedPermissions: Claude remembers
             // the allow for the session, the harness remembers nothing.
-            conn.write(JSON.stringify({ t: "answer", id: askId, behavior, message, ...(always ? { always: true } : {}) }) + "\n");
+            // `source` travels with the answer too: a proxy that cannot tell
+            // the human's words from a timeout note would file the timeout
+            // note as the human's words.
+            conn.write(
+              JSON.stringify({ t: "answer", id: askId, behavior, message, source, ...(always ? { always: true } : {}) }) + "\n",
+            );
           } catch {}
           opts.onResolve({ ...ask, behavior, source });
         };
@@ -954,7 +1010,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const retryState = new Map<string, { attempt: number; cancelled: boolean }>();
 
     const sendTurn = async (turn: SendTurnInput) => {
-      const { threadId } = turn;
+      const { threadId, botId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       // A bot-level mode is authoritative for this turn. In particular, an
       // old provider instance may still be configured with
@@ -1125,7 +1181,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Keep ask_user available even in Full access. Native bypass skips
       // permission prompts, not questions requiring a person's answer.
       let broker: Awaited<ReturnType<typeof createPermissionBroker>> | undefined;
-      const socketPath = permissionSocketPath(threadId);
+      const socketPath = permissionSocketPath(threadId, botId);
       if (permissionMode !== "bypassPermissions") {
         args.push("--permission-prompt-tool", "mcp__ogb__approve");
       }
@@ -1145,6 +1201,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
 
       const env = environment(turnModel);
+      const authSettings = isolated && !injected.injected
+        ? readClaudeAuthSettings(env, input.environment) : {};
+      const authSettingsPath = mcpConfigPath && Object.keys(authSettings).length
+        ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
+      if (authSettingsPath) args.push("--settings", authSettingsPath);
       // Our approvals and browser credentials expire at the user-turn
       // boundary. Native background workers cannot outlive that boundary;
       // parallel bot work must use the harness's durable delegate_bot path.
@@ -1152,7 +1213,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const cwd = turn.cwd ?? homedir();
       // Everything that shapes the process, minus session/turn-specific temp
       // paths. Their contents are represented directly in the key instead.
-      const privateFileFlags = new Set(["--mcp-config"]);
+      const privateFileFlags = new Set(["--mcp-config", "--settings"]);
       const keyArgs = args.filter((a, i) => !privateFileFlags.has(a) && !privateFileFlags.has(args[i - 1] ?? ""));
       const argsKey = JSON.stringify({
         args: keyArgs,
@@ -1164,6 +1225,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         model: injected.model ?? null,
         base: env.ANTHROPIC_BASE_URL ?? null,
         configDir: env.CLAUDE_CONFIG_DIR ?? null,
+        // Rotating an account's key/helper must not reuse the old process.
+        auth: createHash("sha256").update(JSON.stringify({
+          settings: authSettings,
+          env: Object.fromEntries(CLAUDE_ACCOUNT_ENV_KEYS.map((key) => [key, env[key]])),
+        })).digest("hex"),
       });
 
       // Reuse the live process when it is idle, unchanged, and is the session
@@ -1240,7 +1306,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           // event can scope approvals to real desktop-control tools only
           const askTools = new Map<string, string | undefined>();
           broker = await createPermissionBroker({
-            socketPaths: brokerSocketCandidates(threadId),
+            socketPaths: brokerSocketCandidates(threadId, botId),
             isActive: () => Boolean(sessions.get(threadId)?.turn),
             onAsk: (ask) => {
               const eventTurnId = sessions.get(threadId)?.turn?.turnId ?? turnId;
@@ -1253,6 +1319,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 permissionMode === "auto" && nativeMode !== null
                   ? nativeMode === "auto" ? "active" : "inactive"
                   : undefined;
+              const questions = askQuestions(ask);
               emit({
                 ...base(threadId, eventTurnId),
                 type: "request.opened",
@@ -1268,7 +1335,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                   typeof ask.tool === "string" && controlsHost && ask.tool.startsWith("mcp__computer")
                     ? "local-computer"
                     : undefined,
-                choices: Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+                questions: questions ?? undefined,
+                // A structured ask still offers flat labels, for the phone
+                // companions and any client that predates the question card.
+                choices: questions
+                  ? questionChoices(questions)
+                  : Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
               });
             },
             onResolve: (resolved) => {
@@ -1298,6 +1370,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // Write once, only after the broker has selected its real endpoint.
         if (mcpConfigPath) {
           writeFileSync(mcpConfigPath, JSON.stringify({ mcpServers }), { mode: 0o600 });
+        }
+        if (authSettingsPath) {
+          writeFileSync(authSettingsPath, JSON.stringify(authSettings), { mode: 0o600 });
         }
         if (sessionId) args.push("--resume", sessionId);
         else args.push("--session-id", newSessionId!);
