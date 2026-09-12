@@ -225,7 +225,7 @@ const Transcript = memo(function Transcript({
         const m = item.message;
         const user = m.role === "user";
         const attachments = user && m.text ? splitTranscriptAttachments(m.text) : null;
-        const newCluster = !prev || prev.role !== m.role || prev.from?.botId !== m.from?.botId || newDay;
+        const newCluster = !prev || prev.role !== m.role || prev.from?.botId !== m.from?.botId || Boolean(prev.comm) || newDay;
         const routineOwner = m.kind === "routine.run" ? memberOf(m.from?.botId) : undefined;
         const routineExecutionThreadId = m.routineRun?.executionThreadId;
         const routineTarget = routineOwner && hasRoutineExecutionTask(routineOwner.tasks, routineExecutionThreadId)
@@ -375,7 +375,7 @@ const Transcript = memo(function Transcript({
                 {dayLabel(m.at)} {formatTime(m.at)}
               </div>
             )}
-            {!user && m.from && newCluster && (
+            {!user && m.from && newCluster && !(m.kind === "activity" && m.comm) && (
               <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} />
             )}
             {row}
