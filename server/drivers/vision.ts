@@ -1,7 +1,10 @@
 // Unified Vision Engine — combines all model providers through freellmapi
-// with optional DeepSeek direct and RLM harness support
+// with optional DeepSeek direct and local RLM harness support. `rlm:*`
+// models are served here, not upstream: create() composes the recursive
+// reasoning harness (server/rlm.ts) over the same endpoint.
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
+import { createRlmRouteInstance, RLM_HELPER_CANDIDATES, rlmRootModelFor } from "./rlm.ts";
 
 const DRIVER_KIND = "vision";
 
@@ -125,10 +128,11 @@ export const VisionDriver: ProviderDriver<VisionConfig> = {
     if (apiKey) void fetchModels();
 
     // The freellmapi handles model routing via model name prefixes
-    // Models prefixed with "direct:" go to DeepSeek, "rlm:" goes to RLM harness
-    // Others go through freellmapi which routes to OpenRouter/other providers
+    // Models prefixed with "direct:" go to DeepSeek; `rlm:*` entries never
+    // reach the wire — sendTurn matches them and serves the turn with the
+    // local RLM harness (below). Everything else goes through freellmapi.
 
-    return createOpenAIChatRuntime({
+    const runtime = createOpenAIChatRuntime({
       input,
       driverKind: DRIVER_KIND,
       apiKey,
@@ -137,7 +141,8 @@ export const VisionDriver: ProviderDriver<VisionConfig> = {
       refreshModels: fetchModels,
       requestBody: (model, messages, stream) => ({
         // freellmapi handles routing based on model name:
-        // direct:* -> DeepSeek, rlm:* -> RLM, others -> OpenRouter via freellmapi
+        // direct:* -> DeepSeek, rlm:* -> the local harness below,
+        // others -> OpenRouter via freellmapi
         model,
         messages,
         stream,
@@ -159,5 +164,21 @@ export const VisionDriver: ProviderDriver<VisionConfig> = {
         }),
       },
     });
+
+    const rlmModel = rlmRootModelFor(catalog);
+    if (rlmModel === "auto" && !RLM_HELPER_CANDIDATES.some((id) => id !== "auto" && catalog.options.some((option) => option.id === id))) {
+      // No concrete helper model anywhere in the catalog and no explicit
+      // rlm:<model> route: the local harness would have nothing to call.
+      return runtime;
+    }
+    return createRlmRouteInstance(
+      {
+        instanceId: input.instanceId,
+        displayName: input.displayName,
+        endpoint: { url: config.url, apiKey },
+        model: rlmModel,
+      },
+      runtime,
+    );
   },
 };

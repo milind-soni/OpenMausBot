@@ -455,6 +455,7 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
@@ -4621,7 +4622,11 @@ async function startTurn(
     rewound,
     fresh,
     externallyUpdated: Boolean(externalContextMarker),
-    replaysNatively: instance.driverKind === "grok",
+    // grok and vision are transcript-replay drivers: history rides
+    // SendTurnInput.transcript (vision's RLM harness then exposes it to the
+    // model only as sandbox data), so the turn text is never wrapped with a
+    // replay block.
+    replaysNatively: instance.driverKind === "grok" || instance.driverKind === "vision",
   });
   // Snapshot the cursor alongside the context decision. An external result
   // can arrive during async computer/setup work and clear the task cursor;
