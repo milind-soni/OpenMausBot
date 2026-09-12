@@ -4,7 +4,6 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ProviderMark } from "./ProviderIcons";
-import { ProviderManager } from "./ProviderManager";
 
 export function engineReady(instance: InstanceInfo): boolean {
   return instance.snapshot.state === "available" &&
@@ -26,8 +25,6 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
   const subtitle = email ?? (instance.access === "custom"
     ? t("engines.library.custom")
     : providers[instance.driverKind] ?? instance.driverKind);
-  // Some CLIs return their executable name rather than a version. Do not show
-  // duplicated labels such as “Grok · grok”; retain the raw value in details.
   const version = instance.snapshot.version?.match(/\d+\.\d+(?:\.\d+)?(?:[-+][\w.-]+)?/)?.[0];
   return (
     <details data-engine-card={instance.instanceId} className="group/engine min-w-0 rounded-2xl border border-hairline/40 bg-card transition-colors open:col-span-full open:border-hairline/70 hover:border-hairline/70">
@@ -61,15 +58,13 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
   );
 }
 
-export function EngineSections({ instances, renderEngine }: {
+export function EngineSections({ instances, renderEngine, topContent }: {
   instances: InstanceInfo[];
   renderEngine: (instance: InstanceInfo) => ReactNode;
+  topContent?: ReactNode;
 }) {
-  // Flat, instance-keyed siblings keep forms and sign-in state alive when a
-  // refreshed status moves a card between groups. Separate section parents
-  // would remount it and discard unsaved input.
   return <div className="flex min-w-0 flex-col gap-5">
-    <ProviderManager />
+    {topContent}
     <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
       {[true, false].flatMap((ready) => {
         const rows = instances.filter((instance) => engineReady(instance) === ready);
