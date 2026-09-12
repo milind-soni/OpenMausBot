@@ -64,8 +64,8 @@ export function EngineSections({ instances, renderEngine }: {
   renderEngine: (instance: InstanceInfo) => ReactNode;
 }) {
   return <div className="flex min-w-0 flex-col gap-5">
-    <ProviderManager />
     <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
+      <div className="col-span-full"><ProviderManager /></div>
       {[true, false].flatMap((ready) => {
         const rows = instances.filter((instance) => engineReady(instance) === ready);
         if (!rows.length) return [];
