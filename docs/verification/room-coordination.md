@@ -17,6 +17,8 @@ The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
 Receipts remain visible when tool calls are hidden. Files are not copied between
 computers: briefs must include accessible absolute paths or the required content.
+Returned reports stay available to subsequent model turns behind the compact
+receipt, subject to the bounded retention and fresh peer/section access checks.
 
 ## Repeatable checks
 
@@ -30,6 +32,8 @@ actual injected agents MCP proxy with a scripted provider. It checks same-room
 multi-recipient consultation, cross-room work and return, busy peers, cancellation,
 provider failure, thread pinning, section changes, peer revocation, explicit
 approvals and validation. It does not claim model judgment or artifact correctness.
+Follow-up checks cover retained report context and withholding after peer access
+is revoked, without mirroring a second visible transcript.
 Unit checks cover bounded depth/fan-out, idempotent retry, original request
 retention, automatic return, cancellation and restart without replay.
 

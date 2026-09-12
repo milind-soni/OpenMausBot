@@ -184,6 +184,28 @@ it("consults multiple existing members and returns once, with no discussion prer
   for (const old of ["discuss_room", "assign_room_member", "delegate_bot", "ask_bot", "start_thread"]) expect(tools).not.toContain(old);
 }), 45_000);
 
+it.each([false, true])("retains reports behind compact receipts for later turns, unless access is revoked (%s)", revoked => withRooms(async f => {
+  const report = "Nora executed python3 -m unittest: 3 tests passed.";
+  const firstSteps = f.plan[f.sender.id].steps;
+  f.plan[f.sender.id] = { turns: [
+    { steps: firstSteps, reply: "Assigned" },
+    { reply: "Reviewed downstream outcome" },
+    { reply: "Follow-up answered", expectContextIncludes: [revoked ? "Teammate result withheld" : report] },
+  ] };
+  f.plan[f.target.id].reply = report;
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const receipt = (await f.messages(f.source.activeTaskId)).find((m: any) => m.roomRequest?.phase === "result");
+  expect(receipt.kind).toBe("activity");
+  expect(receipt.text).toBeUndefined();
+  if (revoked) await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  await f.cli("send-channel", "--channel", f.source.id, "--text", "Did the reviewer actually run tests? Do not start new work.");
+  expect((await f.wait()).status).toBe("settled");
+  const followup = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);
+  expect(followup.turnIndex).toBe(2);
+  expect(JSON.stringify(followup.prompt).includes(report)).toBe(!revoked);
+  expect(f.nodes()).toHaveLength(2);
+}), 45_000);
+
 it("waits for busy peers and then completes without the user relaying messages", () => withRooms(async f => {
   f.plan[f.target.id].delayMs = 1500;
   f.savePlan(); await f.cli("send", "--bot", f.target.id, "--text", "Independent work");
