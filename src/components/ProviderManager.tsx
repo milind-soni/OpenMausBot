@@ -2,14 +2,18 @@ import { useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { providerConnectionPresets, type ProviderPresetId } from "../../server/providers/catalog";
+import { providerConnectionPresets, type ProviderPresetId, validateProviderBaseUrl } from "../../server/providers/catalog";
 
 function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "provider";
 }
 
-function isApiInstance(instance: InstanceInfo): boolean {
-  return instance.driverKind === "openai-compat";
+export function isManagedApiInstance(instance: Pick<InstanceInfo, "instanceId" | "driverKind">): boolean {
+  return instance.driverKind === "openai-compat" && instance.instanceId.startsWith("api-");
+}
+
+export function requiresExplicitBaseUrl(provider: ProviderPresetId): boolean {
+  return providerConnectionPresets().find((item) => item.id === provider)?.requiresBaseUrl ?? false;
 }
 
 const accountProviders: Record<string, string> = {
@@ -38,8 +42,8 @@ export function ProviderManager() {
   const [error, setError] = useState<string | null>(null);
 
   const preset = useMemo(() => providerConnectionPresets().find((item) => item.id === provider)!, [provider]);
-  const apiInstances = state.instances.filter(isApiInstance);
-  const accountInstances = state.instances.filter((instance) => !isApiInstance(instance) && accountProviders[instance.driverKind]);
+  const apiInstances = state.instances.filter(isManagedApiInstance);
+  const accountInstances = state.instances.filter((instance) => !isManagedApiInstance(instance) && accountProviders[instance.driverKind]);
 
   const resetForm = () => {
     setOpen(false);
@@ -58,8 +62,8 @@ export function ProviderManager() {
       setError("Connection name and API key are required.");
       return;
     }
-    if (provider === "nvidia-nim" && !baseUrl.trim()) {
-      setError("NVIDIA NIM needs the base URL of your deployment.");
+    if (requiresExplicitBaseUrl(provider) && !baseUrl.trim()) {
+      setError(`${preset.displayName} needs a base URL for this connection.`);
       return;
     }
 
@@ -68,9 +72,12 @@ export function ProviderManager() {
     let instanceId = baseId;
     for (let suffix = 2; existing.has(instanceId); suffix += 1) instanceId = `${baseId}-${suffix}`;
 
-    const url = (baseUrl.trim() || preset.baseUrl).replace(/\/+$/, "");
-    if (!/^https?:\/\//i.test(url)) {
-      setError("Base URL must start with http:// or https://.");
+    const rawUrl = baseUrl.trim() || preset.baseUrl;
+    let url: string;
+    try {
+      url = validateProviderBaseUrl(rawUrl);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
       return;
     }
 
@@ -95,9 +102,9 @@ export function ProviderManager() {
       try {
         await refreshModels(instanceId);
       } catch {
-        // The connection is already persisted; model discovery is opportunistic.
+        // The connection is persisted; discovery is deliberately opportunistic.
       }
-      setStatus(`${trimmedName} added. Its model list will refresh when the provider is available.`);
+      setStatus(`${trimmedName} added. Refresh models when the endpoint is available.`);
       setOpen(false);
       setApiKey("");
     } catch (e) {
@@ -108,6 +115,7 @@ export function ProviderManager() {
   };
 
   const removeConnection = async (instance: InstanceInfo) => {
+    if (!isManagedApiInstance(instance)) return;
     if (!window.confirm(`Remove the API connection “${instance.displayName}”?`)) return;
     setBusy(true);
     setError(null);
@@ -169,7 +177,7 @@ export function ProviderManager() {
           </label>
           <label className="text-[12px] text-ink-secondary sm:col-span-2">
             Base URL {preset.requiresBaseUrl ? "(required)" : "(optional)"}
-            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink" placeholder={preset.baseUrl} />
+            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} className="mt-1 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink" placeholder={preset.requiresBaseUrl ? "https://.../v1" : preset.baseUrl} />
           </label>
           <div className="flex flex-wrap items-center justify-end gap-2 sm:col-span-2">
             <button type="button" onClick={resetForm} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50">Cancel</button>
@@ -180,7 +188,7 @@ export function ProviderManager() {
         </div>
       )}
 
-      {status && <div role="status" className="mt-3 flex items-center gap-1.5 text-[12px] text-success"><Check size={13} />{status}</div>}
+      {status && <div role="status" className="mt-3 flex items-center gap-1.5 text-success"><Check size={13} />{status}</div>}
       {error && <div role="alert" className="mt-3 text-[12px] text-danger">{error}</div>}
 
       <div className="mt-5 space-y-2">
@@ -191,7 +199,7 @@ export function ProviderManager() {
           <div key={instance.instanceId} className="flex flex-wrap items-center gap-3 rounded-xl border border-hairline/30 bg-panel px-3 py-2.5">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] font-semibold text-ink">{instance.displayName}</div>
-              <div className="truncate text-[11px] text-ink-secondary">{instance.snapshot.state} · Model discovery available</div>
+              <div className="truncate text-[11px] text-ink-secondary">{instance.snapshot.state} · {instance.models.options.length ? `${instance.models.options.length} models discovered` : "No models discovered"}</div>
             </div>
             <button type="button" onClick={() => refreshModels(instance.instanceId)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><RefreshCw size={12} /> Refresh models</button>
             <button type="button" onClick={() => removeConnection(instance)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-danger/80 hover:bg-danger/10 disabled:opacity-50"><Trash2 size={12} /> Remove</button>
