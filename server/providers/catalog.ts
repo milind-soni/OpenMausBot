@@ -45,7 +45,7 @@ export type ProviderConnectionInstanceConfig = {
   };
 };
 
-const SAFE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._()\-]{0,79}$/u;
+const SAFE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._()-]{0,79}$/u;
 const URL_SCHEMA = z.string().trim().url().refine((value) => /^https?:\/\//i.test(value), "URL must use http or https");
 
 const PRESETS: readonly ProviderConnectionPreset[] = [
@@ -116,7 +116,10 @@ function normalizeBaseUrl(value: string): string {
 
 function assertSafeSecret(value: string): void {
   if (!value.trim()) throw new Error("API key is required");
-  if (/[\u0000-\u001f\u007f]/.test(value)) throw new Error("API key contains invalid control characters");
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x1f || code === 0x7f) throw new Error("API key contains invalid control characters");
+  }
 }
 
 export function slugifyProviderConnectionName(name: string): string {
