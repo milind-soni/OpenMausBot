@@ -446,7 +446,12 @@ const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // for this server, the paired sessions, and the cookie the served UI uses.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
 const sessions = new SessionRegistry({ file: join(DATA_DIR, "sessions.json") });
-const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
+// Assigned after the server binds: a future port-fallback path must key the
+// session cookie on the port the instance actually bound, not the configured
+// start port. Cookies are not port-scoped, so the name is the only thing
+// separating two instances in the same browser profile. Every consumer runs
+// inside a request handler, which only executes after the server is listening.
+let SESSION_COOKIE: string;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
@@ -14845,6 +14850,9 @@ restoreSteeredMessages();
 restoreChannelMessages();
 
 server.listen(PORT, "127.0.0.1", () => {
+  // The cookie name must match the port the server actually bound. A future
+  // fallback loop may relocate PORT; request handlers read this at call time.
+  SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
   followupsReady = true;
   drainQueuedSends();
