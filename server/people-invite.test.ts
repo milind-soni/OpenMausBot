@@ -13,10 +13,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub, type ControlPlaneStub } from "./testing/control-plane-stub.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
-const PORT = 29000 + Math.floor(Math.random() * 3000);
+let port: number;
 const HOST = "acme.agentada.test";
 const ADA = "ada@example.test";
 const BOB = "bob@acme.test";
@@ -45,7 +46,7 @@ function send(path: string, init: CallInit, headers: Record<string, string>): Pr
     const req = httpRequest(
       {
         hostname: "127.0.0.1",
-        port: PORT,
+        port,
         path,
         method: init.method ?? (payload ? "POST" : "GET"),
         headers: { ...headers, ...(payload ? { "content-type": "application/json" } : {}), ...init.headers },
@@ -65,6 +66,7 @@ function send(path: string, init: CallInit, headers: Record<string, string>): Pr
       },
     );
     req.on("error", reject);
+    req.setTimeout(5_000, () => req.destroy(new Error("people fixture request timed out")));
     if (payload) req.write(payload);
     req.end();
   });
@@ -72,7 +74,7 @@ function send(path: string, init: CallInit, headers: Record<string, string>): Pr
 
 /** The box itself: a loopback Host and Origin, nothing forwarded. This is the
  * owner, the way `openmausbot` on the server or a bootstrap script talks. */
-const owner = (path: string, init: CallInit = {}) => send(path, init, { host: `127.0.0.1:${PORT}`, origin: `http://127.0.0.1:${PORT}` });
+const owner = (path: string, init: CallInit = {}) => send(path, init, { host: `127.0.0.1:${port}`, origin: `http://127.0.0.1:${port}` });
 
 /** A browser somewhere else, reaching the server through its proxy. */
 const remote = (path: string, init: CallInit = {}) =>
@@ -95,6 +97,7 @@ async function signIn(email: string, label: string): Promise<{ reply: Reply; coo
 const as = (cookie: string) => (path: string, init: CallInit = {}) => remote(path, { ...init, headers: { cookie, ...init.headers } });
 
 beforeAll(async () => {
+  port = await freePortBlock([0, 1]);
   stub = await startControlPlaneStub();
   home = mkdtempSync(join(tmpdir(), "omb-people-invite-"));
   const staticDir = join(home, "static");
@@ -110,8 +113,8 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(PORT + 1),
+      OMB_PORT: String(port),
+      OMB_WEBHOOK_PORT: String(port + 1),
       OMB_STATIC_DIR: staticDir,
       OMB_PUBLIC_URL: `https://${HOST}`,
       OMB_ENVIRONMENT_LABEL: "acme",
@@ -120,11 +123,16 @@ beforeAll(async () => {
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  child.stdout?.resume();
+  let spawnError: Error | undefined;
+  child.on("error", (error) => { spawnError = error; });
   child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
+    if (spawnError) throw spawnError;
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error(`fixture exited:\n${stderr}`);
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1_000) });
       if (res.ok) return;
     } catch {
       /* not up yet */
@@ -135,9 +143,9 @@ beforeAll(async () => {
 }, 30_000);
 
 afterAll(async () => {
-  await waitForExit(child, { signal: "SIGTERM" });
-  await stub.close();
-  await removeTempDir(home);
+  if (child) await waitForExit(child, { signal: "SIGTERM" });
+  if (stub) await stub.close();
+  if (home) await removeTempDir(home);
 });
 
 describe("adding people to a hosted workspace", () => {

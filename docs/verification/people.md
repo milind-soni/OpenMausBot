@@ -17,7 +17,7 @@
 pnpm exec vitest run server/people-invite.test.ts server/email-signin.test.ts src/components/PeopleSection.test.ts src/lib/session.test.ts
 ```
 
-`people-invite.test.ts` boots the real server with no sign-in list and a
+`server/people-invite.test.ts` boots the real server with no sign-in list and a
 stubbed control plane, then walks the card's own requests: the owner adds the
 first admin, the admin signs in with the emailed code and invites a member,
 the member's link serves the sign-in page, the member gets a chat-only cookie
