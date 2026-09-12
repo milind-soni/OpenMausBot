@@ -3,6 +3,7 @@ import {
   allocateProviderInstanceId,
   normalizeProviderConnectionInput,
   providerConnectionPresets,
+  validateProviderBaseUrl,
 } from "./catalog.js";
 
 describe("provider connection catalog", () => {
@@ -35,12 +36,25 @@ describe("provider connection catalog", () => {
     expect(result.instanceConfig.environment.OPENMAUSBOT_API_API_OPENAI_PERSONAL_KEY).toBe("sk-test");
   });
 
-  it("requires a base URL for NVIDIA NIM", () => {
+  it("requires a base URL for NVIDIA NIM and custom endpoints", () => {
     expect(() => normalizeProviderConnectionInput({
       provider: "nvidia-nim",
       name: "Local NIM",
       apiKey: "token",
     })).toThrow(/requires the base URL/i);
+    expect(() => normalizeProviderConnectionInput({
+      provider: "custom-openai-compatible",
+      name: "Custom",
+      apiKey: "token",
+    })).toThrow(/requires a base URL/i);
+  });
+
+  it("accepts HTTPS and loopback HTTP but rejects remote HTTP and URL credentials", () => {
+    expect(validateProviderBaseUrl("https://api.example.com/v1")).toBe("https://api.example.com/v1");
+    expect(validateProviderBaseUrl("http://localhost:8000/v1")).toBe("http://localhost:8000/v1");
+    expect(() => validateProviderBaseUrl("http://api.example.com/v1")).toThrow(/HTTPS/i);
+    expect(() => validateProviderBaseUrl("https://user:pass@example.com/v1")).toThrow(/credentials/i);
+    expect(() => validateProviderBaseUrl("https://example.com/v1?token=secret")).toThrow(/query/i);
   });
 
   it("allocates collision-safe ids", () => {
