@@ -11,6 +11,8 @@ const DEFAULT_MODELS: ModelCatalog = {
     { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B (Groq)", custom: true },
   ],
 };
+const EMPTY_MODELS: ModelCatalog = { default: "", options: [] };
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 export interface OpenAICompatConfig {
   url: string;
@@ -29,12 +31,23 @@ function isOpenRouterUrl(url: string): boolean {
   }
 }
 
+function normalizeApiUrl(value: string): string {
+  const url = new URL(value);
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("provider URL must not contain credentials, query parameters, or fragments");
+  }
+  const loopback = LOOPBACK_HOSTS.has(url.hostname.toLowerCase());
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error("provider API URLs must use HTTPS; HTTP is allowed only for loopback endpoints");
+  }
+  return url.toString().replace(/\/+$/, "");
+}
+
 function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
   const envUrl = process.env.OPENAI_COMPAT_URL;
   return {
-    url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
-      .replace(/\/+$/, ""),
+    url: normalizeApiUrl(typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1"),
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
       ? config.apiKeyEnv
       : "OPENAI_COMPAT_API_KEY",
@@ -42,8 +55,6 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
     model: typeof config.model === "string" && config.model
       ? config.model
       : process.env.OPENAI_COMPAT_MODEL || undefined,
-    // An explicit empty override disables inherited routing for an isolated
-    // connection (CLI setup uses this). Absent still inherits the global pin.
     provider: typeof config.provider === "string"
       ? config.provider || undefined
       : process.env.OPENAI_COMPAT_PROVIDER || undefined,
@@ -75,7 +86,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
   defaultConfig: () => decodeConfig({}),
 
   async create(input) {
-    const { config } = input;
+    const config = { ...input.config, url: normalizeApiUrl(input.config.url) };
     const apiKey =
       config.key ??
       input.environment[config.apiKeyEnv] ??
@@ -83,22 +94,29 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       process.env[config.apiKeyEnv] ??
       process.env.OPENAI_COMPAT_API_KEY ??
       "";
+    const managedApiConnection = input.instanceId.startsWith("api-");
     let catalog: ModelCatalog = config.model
       ? {
           default: config.model,
-          options: DEFAULT_MODELS.options.some((model) => model.id === config.model)
-            ? DEFAULT_MODELS.options
-            : [{ id: config.model, label: config.model, custom: true }, ...DEFAULT_MODELS.options],
+          options: managedApiConnection
+            ? [{ id: config.model, label: config.model, custom: true }]
+            : DEFAULT_MODELS.options.some((model) => model.id === config.model)
+              ? DEFAULT_MODELS.options
+              : [{ id: config.model, label: config.model, custom: true }, ...DEFAULT_MODELS.options],
         }
-      : DEFAULT_MODELS;
+      : managedApiConnection ? EMPTY_MODELS : DEFAULT_MODELS;
 
     const fetchModels = async () => {
       if (!apiKey) return;
       try {
         const response = await fetch(`${config.url}/models`, {
           headers: { authorization: `Bearer ${apiKey}` },
+          redirect: "manual",
           signal: AbortSignal.timeout(8_000),
         });
+        if (response.status >= 300 && response.status < 400) {
+          throw new Error("provider model discovery redirected; request refused");
+        }
         if (!response.ok) return;
         const json = await response.json() as { data?: Array<{ id?: unknown; name?: unknown }> } | Array<{ id?: unknown; name?: unknown }>;
         const rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
@@ -120,7 +138,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         }
         catalog = { default: config.model ?? options[0].id, options };
       } catch {
-        // Catalog refresh is opportunistic; keep the seeded options.
+        // Catalog refresh is opportunistic; keep the last known catalog.
       }
     };
     if (apiKey) void fetchModels();
