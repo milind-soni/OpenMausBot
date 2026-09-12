@@ -104,3 +104,6 @@ jobs:
           git diff --cached -- server/config.ts
           git commit -m "fix(server): secure provider connection config mutations [provider-config-patched]"
           git push origin HEAD:feat/universal-provider-accounts
+
+          # Keep this workflow observable until its single patch commit lands.
+          echo "provider config patch committed and pushed"
