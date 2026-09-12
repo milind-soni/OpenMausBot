@@ -65,11 +65,11 @@ describe("webhook-only ingress", () => {
     expect((await fetch(`${ingress.baseUrl}/api/bots`)).status).toBe(404);
   });
 
-  it("accepts capability URLs and deduplicates retries", async () => {
+  it("accepts bearer credentials and deduplicates retries", async () => {
     const credential = webhookCredential(ingress.baseUrl, endpointId, secret);
-    const send = () => fetch(credential.url, {
+    const send = () => fetch(credential.endpointUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": "delivery-1", "x-github-event": "push" },
+      headers: { authorization: `Bearer ${credential.secret}`, "content-type": "application/json", "idempotency-key": "delivery-1", "x-github-event": "push" },
       body: JSON.stringify({ ref: "main", id: "event-in-body" }),
     });
     const first = await send();
@@ -82,10 +82,10 @@ describe("webhook-only ingress", () => {
     expect(queued[0]?.prompt).toContain("Event: push");
   });
 
-  it("also accepts a bearer secret without putting it in the URL", async () => {
+  it("also accepts the compatibility secret header", async () => {
     const response = await fetch(`${ingress.baseUrl}/hooks/${endpointId}`, {
       method: "POST",
-      headers: { authorization: `Bearer ${secret}`, "content-type": "application/x-www-form-urlencoded" },
+      headers: { "x-openmaus-secret": secret, "content-type": "application/x-www-form-urlencoded" },
       body: "ticket=42&priority=high",
     });
     expect(response.status).toBe(202);
@@ -95,9 +95,9 @@ describe("webhook-only ingress", () => {
   it("does not deduplicate separate requests that reuse a generic payload id", async () => {
     const credential = webhookCredential(ingress.baseUrl, endpointId, secret);
     const before = queued.length;
-    const send = () => fetch(credential.url, {
+    const send = () => fetch(credential.endpointUrl, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: `Bearer ${credential.secret}`, "content-type": "application/json" },
       body: JSON.stringify({ id: "shared-record", task: "Handle this update" }),
     });
     expect((await send()).status).toBe(202);
@@ -108,9 +108,10 @@ describe("webhook-only ingress", () => {
   it("captures a verification event without queueing work", async () => {
     const created = manager.create({ name: "Verify", prompt: "", botId: "maus-1", enabled: false, verificationPending: true });
     const before = queued.length;
-    const response = await fetch(webhookCredential(ingress.baseUrl, created.webhook.endpointId, created.secret).url, {
+    const credential = webhookCredential(ingress.baseUrl, created.webhook.endpointId, created.secret);
+    const response = await fetch(credential.endpointUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-webhook-event": "support.created" },
+      headers: { authorization: `Bearer ${credential.secret}`, "content-type": "application/json", "x-webhook-event": "support.created" },
       body: JSON.stringify({ task: "Triage ticket 42" }),
     });
     expect(response.status).toBe(202);
@@ -122,21 +123,32 @@ describe("webhook-only ingress", () => {
   it("rejects invalid credentials, malformed JSON and oversized bodies", async () => {
     const unauthorized = await fetch(`${ingress.baseUrl}/hooks/${endpointId}/wrong`, { method: "POST", body: "{}" });
     expect(unauthorized.status).toBe(401);
+    expect((await fetch(`${ingress.baseUrl}/hooks/${endpointId}/${secret}`, { method: "POST", body: "{}" })).status).toBe(401);
 
-    const malformed = await fetch(`${ingress.baseUrl}/hooks/${endpointId}/${secret}`, {
+    const malformed = await fetch(`${ingress.baseUrl}/hooks/${endpointId}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
       body: "{",
     });
     expect(malformed.status).toBe(400);
 
-    const oversized = await fetch(`${ingress.baseUrl}/hooks/${endpointId}/${secret}`, {
+    const oversized = await fetch(`${ingress.baseUrl}/hooks/${endpointId}`, {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: { authorization: `Bearer ${secret}`, "content-type": "text/plain" },
       body: "x".repeat(MAX_WEBHOOK_BODY_BYTES + 1),
     });
     expect(oversized.status).toBe(413);
     expect(manager.listAttempts().filter((attempt) => attempt.webhookId === manager.list().find((webhook) => webhook.endpointId === endpointId)?.id && attempt.outcome === "rejected").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("accepts old capability URLs only when explicitly enabled", async () => {
+    const legacy = await listenWebhookIngress(manager, { port: 0, legacyPathSecrets: true });
+    try {
+      const response = await fetch(`${legacy.baseUrl}/hooks/${endpointId}/${secret}`, { method: "POST", body: "legacy" });
+      expect(response.status).toBe(202);
+    } finally {
+      await new Promise<void>((resolve) => legacy.server.close(() => resolve()));
+    }
   });
 });
 

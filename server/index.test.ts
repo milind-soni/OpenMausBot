@@ -1024,6 +1024,20 @@ describe("harness HTTP API", () => {
     expect(spa.headers.get("content-type")).toBe("text/html");
     expect(await spa.text()).toContain("Packaged OpenMausBot");
 
+    for (const response of [root, asset, spa]) {
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+      expect(response.headers.get("content-security-policy")).toContain("object-src 'none'");
+    }
+
+    if (process.platform === "win32") {
+      const outside = join(home, "outside-static.txt");
+      writeFileSync(outside, "outside static root");
+      const escaped = await fetch(`${BASE}/${outside.replaceAll("\\", "/")}`);
+      expect(escaped.status).toBe(404);
+      expect(await escaped.text()).not.toContain("outside static root");
+    }
+
     const unknownApi = await api("GET", "/api/not-a-real-route");
     expect(unknownApi.status).toBe(404);
     expect(unknownApi.body.error).toContain("/api/not-a-real-route");
@@ -2203,7 +2217,7 @@ describe("harness HTTP API", () => {
       expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
       const provisioned = await api("POST", `/api/bots/${bot.id}/computer/provision`, {});
       expect(provisioned.status).toBe(500);
-      expect(provisioned.body.error).toMatch(/fixture refused create/);
+      expect(provisioned.body).toMatchObject({ error: "unexpected server error", errorId: expect.any(String) });
       expect(boxRouteCalls).toContainEqual({ method: "POST", path: "/boxes" });
     } finally {
       if (botId) await api("DELETE", `/api/bots/${botId}`);
@@ -2574,7 +2588,7 @@ describe("harness HTTP API", () => {
       managedBoxCreateMode = "ambiguous";
       const ambiguousCreate = await api("POST", `/api/bots/${ambiguousBot.id}/computer/provision`, {});
       expect(ambiguousCreate.status).toBe(500);
-      expect(ambiguousCreate.body.error).toMatch(/provider outcome is unknown/i);
+      expect(ambiguousCreate.body).toMatchObject({ error: "unexpected server error", errorId: expect.any(String) });
       const ambiguousDelete = await api("DELETE", `/api/bots/${ambiguousBot.id}`);
       expect(ambiguousDelete.status).toBe(409);
       expect(ambiguousDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
@@ -2600,7 +2614,7 @@ describe("harness HTTP API", () => {
       managedBoxCreateMode = "fail-rename";
       const rememberedCreate = await api("POST", `/api/bots/${rememberedBot.id}/computer/provision`, {});
       expect(rememberedCreate.status).toBe(500);
-      expect(rememberedCreate.body.error).toMatch(/rename unavailable/i);
+      expect(rememberedCreate.body).toMatchObject({ error: "unexpected server error", errorId: expect.any(String) });
       const rememberedDelete = await api("DELETE", `/api/bots/${rememberedBot.id}`);
       expect(rememberedDelete.status).toBe(409);
       expect(rememberedDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
@@ -7632,16 +7646,17 @@ describe("harness HTTP API", () => {
     });
     expect(created.status).toBe(201);
     expect(created.body.ingress).toMatchObject({ available: true, baseUrl: WEBHOOK_BASE });
-    expect(created.body.credential.url).toMatch(new RegExp(`^${WEBHOOK_BASE}/hooks/wh_`));
+    expect(created.body.credential.endpointUrl).toMatch(new RegExp(`^${WEBHOOK_BASE}/hooks/wh_`));
+    expect(created.body.credential).not.toHaveProperty("url");
 
     const listed = await api("GET", "/api/webhooks");
     expect(listed.body.webhooks).toHaveLength(1);
     expect(listed.body.attempts).toEqual([]);
     expect(JSON.stringify(listed.body)).not.toContain(created.body.credential.secret);
 
-    const deliver = () => fetch(created.body.credential.url, {
+    const deliver = () => fetch(created.body.credential.endpointUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", "idempotency-key": "build-42" },
+      headers: { authorization: `Bearer ${created.body.credential.secret}`, "content-type": "application/json", "idempotency-key": "build-42" },
       body: JSON.stringify({ status: "failed", build: 42 }),
     });
     const first = await deliver();
@@ -7664,7 +7679,7 @@ describe("harness HTTP API", () => {
 
     const rotated = await api("POST", `/api/webhooks/${created.body.webhook.id}/rotate`);
     expect(rotated.status).toBe(200);
-    expect(rotated.body.credential.url).not.toBe(created.body.credential.url);
+    expect(rotated.body.credential.secret).not.toBe(created.body.credential.secret);
     expect((await deliver()).status).toBe(401);
 
     expect((await api("DELETE", `/api/webhooks/${created.body.webhook.id}`)).status).toBe(200);
@@ -8152,6 +8167,10 @@ describe("bot memory API", () => {
       mkdirSync(botsFile);
       const failed = await api("PATCH", `/api/bots/${bot.id}`, { soul: "new", browser: false, browserProfile: null });
       expect(failed.status).toBe(500);
+      expect(failed.body).toEqual({
+        error: "unexpected server error",
+        errorId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      });
       const current = (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === bot.id);
       expect(current.browser).toBe(false);
       expect(current.browserProfile).toBeUndefined();

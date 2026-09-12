@@ -36,6 +36,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Audit dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pnpm audit
+          pnpm audit --prod
       - name: Validate locale catalogs
         if: matrix.os == 'ubuntu-latest'
         run: pnpm i18n:check

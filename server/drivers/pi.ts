@@ -425,9 +425,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
   metadata: { displayName: "pi", supportsMultipleInstances: true, access: "custom" },
   install: {
     command: {
-      darwin: "npm install -g @earendil-works/pi-coding-agent",
-      linux: "npm install -g @earendil-works/pi-coding-agent",
-      win32: "npm install -g @earendil-works/pi-coding-agent",
+      darwin: "npm install -g @earendil-works/pi-coding-agent@0.85.1",
+      linux: "npm install -g @earendil-works/pi-coding-agent@0.85.1",
+      win32: "npm install -g @earendil-works/pi-coding-agent@0.85.1",
     },
     needsNode: true,
     docsUrl: "https://pi.dev",

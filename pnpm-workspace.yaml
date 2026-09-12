@@ -5,6 +5,9 @@ packages:
   - "."
   - "apps/docs"
   - "cloudflare/control-plane"
+overrides:
+  fast-uri: 3.1.6
+  "@xmldom/xmldom": 0.8.15
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary

@@ -1,6 +1,6 @@
 # Optional all-Podman self-hosting image; the existing Dockerfile is unchanged.
 # Build both server and renderer from this checkout, never mix release artifacts.
-FROM node:24.15.0-bookworm-slim AS build
+FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d AS build
 WORKDIR /src
 RUN npm install -g pnpm@10.33.0
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
@@ -11,10 +11,17 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm build:server && pnpm exec vite build
 
-FROM node:24.15.0-bookworm-slim
+FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d
 RUN test "$(uname -m)" = x86_64 \
     || { echo 'The Podman self-hosting image currently requires Linux x86_64.' >&2; exit 1; }
-RUN apt-get update \
+ARG DEBIAN_SNAPSHOT=20260907T000000Z
+RUN printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} bookworm-updates main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} bookworm-security main" \
+    > /etc/apt/sources.list \
+    && rm -f /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 1001 --create-home --home-dir /data --shell /bin/bash maus

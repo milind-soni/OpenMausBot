@@ -153,9 +153,9 @@ describe("PiDriver config + install", () => {
   it("publishes the npm installer on every platform and points docs at pi.dev", () => {
     expect(PiDriver.install).toMatchObject({
       command: {
-        darwin: "npm install -g @earendil-works/pi-coding-agent",
-        linux: "npm install -g @earendil-works/pi-coding-agent",
-        win32: "npm install -g @earendil-works/pi-coding-agent",
+        darwin: "npm install -g @earendil-works/pi-coding-agent@0.85.1",
+        linux: "npm install -g @earendil-works/pi-coding-agent@0.85.1",
+        win32: "npm install -g @earendil-works/pi-coding-agent@0.85.1",
       },
       docsUrl: "https://pi.dev",
       needsNode: true,

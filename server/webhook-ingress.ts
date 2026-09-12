@@ -88,7 +88,11 @@ function eventName(req: IncomingMessage): string | undefined {
   )?.trim() || undefined;
 }
 
-export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void) {
+export function createWebhookIngressHandler(
+  manager: WebhookManager,
+  claimRequest?: () => () => void,
+  legacyPathSecrets = false,
+) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (req.method === "GET" && url.pathname === "/health") {
@@ -101,10 +105,10 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
     let release: (() => void) | undefined;
     try {
       release = claimRequest?.();
-      const pathSecret = match[2] ? decodeURIComponent(match[2]) : "";
-      const secret = pathSecret || bearerSecret(req);
-      // Reject bad capability URLs before buffering or parsing attacker input.
-      if (!manager.authorize(match[1], secret)) {
+      const pathSecret = match[2];
+      const secret = pathSecret && legacyPathSecrets ? decodeURIComponent(pathSecret) : bearerSecret(req);
+      // Reject legacy capability URLs and bad credentials before buffering attacker input.
+      if ((pathSecret && !legacyPathSecrets) || !manager.authorize(match[1], secret)) {
         manager.recordRejected(match[1], 401, "Invalid webhook URL or secret", {
           contentType: header(req, "content-type"),
           eventName: eventName(req),
@@ -164,11 +168,17 @@ export function advertisedWebhookBase(raw: string): string {
 
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void },
+  options: {
+    host?: string;
+    port: number;
+    publicBaseUrl?: string;
+    claimRequest?: () => () => void;
+    legacyPathSecrets?: boolean;
+  },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
-  const server = createServer(createWebhookIngressHandler(manager, options.claimRequest));
+  const server = createServer(createWebhookIngressHandler(manager, options.claimRequest, options.legacyPathSecrets));
   await new Promise<void>((resolve, reject) => {
     const onError = (error: Error) => reject(error);
     server.once("error", onError);
@@ -195,6 +205,5 @@ export function webhookCredential(baseUrl: string, endpointId: string, secret: s
   return {
     endpointUrl,
     secret,
-    url: `${endpointUrl}/${encodeURIComponent(secret)}`,
   };
 }

@@ -4,7 +4,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { z } from "zod";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
@@ -400,7 +400,8 @@ const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
 const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 // Behind a proxy or tunnel, the base URL senders should use (docs/self-hosting.md).
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
-const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+const WEBHOOK_LEGACY_PATH_SECRETS = process.env.OMB_WEBHOOK_LEGACY_PATH_SECRETS === "1";
+const STATIC_DIR = process.env.OMB_STATIC_DIR ? resolve(process.env.OMB_STATIC_DIR) : null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -411,6 +412,10 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
   ".woff2": "font/woff2",
 };
+const STATIC_HEADERS = {
+  "content-security-policy": "default-src 'self'; base-uri 'none'; connect-src 'self' https: wss:; frame-ancestors 'none'; img-src 'self' data: blob: https:; media-src 'self' blob:; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:",
+  "x-content-type-options": "nosniff",
+} as const;
 
 ensureDirs();
 // The desktop parent owns the primary lease and delegates one private child
@@ -5827,8 +5832,10 @@ let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
-    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
+    port: WEBHOOK_PORT,
+    publicBaseUrl: WEBHOOK_PUBLIC_URL,
     claimRequest: () => workspaceMaintenance.request(),
+    legacyPathSecrets: WEBHOOK_LEGACY_PATH_SECRETS,
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
   console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
@@ -8373,18 +8380,19 @@ const claudeUpdatesInFlight = new Set<string>();
  * nothing to serve so the caller can answer 404. */
 function serveStatic(res: ServerResponse, path: string): boolean {
   if (!STATIC_DIR) return false;
-  const safe = path === "/" ? "/index.html" : path.replace(/\.\./g, "");
-  const file = join(STATIC_DIR, safe);
+  const file = resolve(STATIC_DIR, path === "/" ? "index.html" : path.slice(1));
+  const fromRoot = relative(STATIC_DIR, file);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) return false;
   try {
     const data = readFileSync(file);
-    res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+    res.writeHead(200, { ...STATIC_HEADERS, "content-type": MIME[extname(file)] ?? "application/octet-stream" });
     res.end(data);
     return true;
   } catch {
     // SPA fallback
     try {
       const data = readFileSync(join(STATIC_DIR, "index.html"));
-      res.writeHead(200, { "content-type": "text/html" });
+      res.writeHead(200, { ...STATIC_HEADERS, "content-type": "text/html" });
       res.end(data);
       return true;
     } catch {
@@ -14750,6 +14758,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
     const status = (e as any)?.status ?? 500;
+    if (status === 500) {
+      const errorId = randomUUID();
+      console.error(`[http ${errorId}] ${method} ${path}:`, e);
+      return json(res, status, { error: "unexpected server error", errorId });
+    }
     return json(res, status, { error: e instanceof Error ? e.message : String(e) });
   } finally {
     releaseWorkspaceRequest?.();

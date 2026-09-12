@@ -211,7 +211,8 @@ docker compose pull omb && docker compose up -d
 
 That uses the image CI publishes on every `main` push
 (`ghcr.io/milind-soni/openmausbot`, tagged `latest`, `sha-…` and `v…`).
-To build from your checkout instead: `docker compose up -d --build`.
+To build from your checkout instead:
+`OMB_IMAGE=openmausbot:local docker compose up -d --build`.
 
 Then sign the engine CLIs in **inside the container** (their logins live on
 the `data` volume, so they survive restarts and image upgrades) and mint a
@@ -224,9 +225,11 @@ docker compose exec omb node dist-server/openmausbot.js pair # prints a code, a 
 
 Open the link (`https://<DOMAIN>/pair#code=…`) in a browser and it is
 paired; see "Using it from your computer" for what a session is. Webhook
-URLs (`https://<DOMAIN>/hooks/wh_…`) work without a session, and that is the
-base the app prints on new hooks because the stack sets
-`OMB_WEBHOOK_PUBLIC_URL`.
+endpoints (`https://<DOMAIN>/hooks/wh_…`) use their own bearer secret instead
+of a session, and that is the base the app prints on new hooks because the
+stack sets `OMB_WEBHOOK_PUBLIC_URL`. Old URLs containing the secret are
+rejected unless `OMB_WEBHOOK_LEGACY_PATH_SECRETS=1` is temporarily set for
+migration.
 
 What the stack does, so you can adapt it:
 
@@ -243,7 +246,7 @@ What the stack does, so you can adapt it:
   commented out, if you want a second wall in front of pairing.
 
 Upgrade with `docker compose pull omb && docker compose up -d` (or
-`git pull && docker compose up -d --build`). State (chats, routines,
+`git pull && OMB_IMAGE=openmausbot:local docker compose up -d --build`). State (chats, routines,
 engine logins, paired sessions) is on the `data` volume; back that up.
 
 ## From source

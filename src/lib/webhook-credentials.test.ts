@@ -17,11 +17,10 @@ function memoryStore() {
 const credential = {
   endpointUrl: "http://127.0.0.1:8800/hooks/wh_demo",
   secret: "whsec_demo",
-  url: "http://127.0.0.1:8800/hooks/wh_demo/whsec_demo",
 };
 
 describe("webhook credential storage", () => {
-  it("keeps a one-time private URL available after the panel remounts", () => {
+  it("keeps a one-time credential available after the panel remounts", () => {
     const store = memoryStore();
     saveWebhookCredential(store, "hook-1", credential);
     expect(loadWebhookCredentials(store)).toEqual({ "hook-1": credential });
@@ -33,5 +32,13 @@ describe("webhook credential storage", () => {
     expect(loadWebhookCredentials(store)).toEqual({ "hook-1": credential });
     removeWebhookCredential(store, "hook-1");
     expect(loadWebhookCredentials(store)).toEqual({});
+  });
+
+  it("drops legacy capability URLs from loaded credentials", () => {
+    const store = memoryStore();
+    store.setItem("omb-webhook-credentials", JSON.stringify({
+      "hook-1": { ...credential, url: `${credential.endpointUrl}/${credential.secret}` },
+    }));
+    expect(loadWebhookCredentials(store)).toEqual({ "hook-1": credential });
   });
 });
