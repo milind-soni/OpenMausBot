@@ -58,7 +58,7 @@ import {
   withDesktopCompanionAccess,
   withoutDesktopCompanionAccess,
 } from "./desktop-companion-client.mjs";
-import { isKnownSkin } from "./skin-overlay.cjs";
+import { isKnownSkin, skinChrome } from "./skin-overlay.cjs";
 import { readSecureCredentials } from "./secure-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
 import {
@@ -1863,11 +1863,20 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
   });
 }));
 
-// The renderer owns the skin. Native Windows/Linux chrome is intentionally
-// outside that surface; acknowledge the renderer handshake without creating
-// a frameless caption overlay that can cover page controls.
-ipcMain.handle("desktop:skin", (_event, skin) => {
+// The renderer owns the skin. Sync the frameless caption-button overlay and
+// window background to the same colours so the buttons sit on the app header.
+ipcMain.handle("desktop:skin", (event, skin) => {
   if (!isKnownSkin(skin)) return false;
+  try {
+    const { color, symbolColor } = skinChrome(skin);
+    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (win && !win.isDestroyed()) {
+      if (process.platform === "win32" && typeof win.setTitleBarOverlay === "function") {
+        win.setTitleBarOverlay({ color, symbolColor, height: 32 });
+      }
+      try { win.setBackgroundColor(color); } catch {}
+    }
+  } catch {}
   return true;
 });
 
