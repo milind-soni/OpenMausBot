@@ -53,7 +53,6 @@ Use only mapped, tested commands:
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Usage ledger](usage-ledger.md)
 - [Spend cap and sell prices](spend-cap.md)
-- [Adding people to a hosted workspace](people.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
@@ -86,6 +85,10 @@ desktop app or controlling the user's computer.
 
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
+
+The [people invitation fixture](people.md) checks hosted workspace sign-in,
+roles and device revocation through the real HTTP API with a stubbed email
+service. It does not drive the People settings UI through `control-omb`.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.

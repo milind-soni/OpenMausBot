@@ -48,11 +48,13 @@ function send(path: string, init: CallInit, headers: Record<string, string>): Pr
         hostname: "127.0.0.1",
         port,
         path,
+        signal: AbortSignal.timeout(5_000),
         method: init.method ?? (payload ? "POST" : "GET"),
         headers: { ...headers, ...(payload ? { "content-type": "application/json" } : {}), ...init.headers },
       },
       (res) => {
         let raw = "";
+        res.on("error", reject);
         res.on("data", (chunk) => (raw += chunk));
         res.on("end", () => {
           let body: unknown = raw;
@@ -66,7 +68,6 @@ function send(path: string, init: CallInit, headers: Record<string, string>): Pr
       },
     );
     req.on("error", reject);
-    req.setTimeout(5_000, () => req.destroy(new Error("people fixture request timed out")));
     if (payload) req.write(payload);
     req.end();
   });
