@@ -3,6 +3,16 @@ import { MAUS_COLORS, type MausColor } from "./mascot";
 export type MentionPeer = { name: string; hidden?: boolean; color?: MausColor };
 export type MentionRange = { start: number; end: number; color?: string };
 
+/** Filter the composer's mention roster without silently truncating it.
+ * Large rooms stay fully reachable; the picker itself owns scrolling. */
+export function mentionChoicesForQuery<T extends { name: string }>(pool: readonly T[], query: string): T[] {
+  const normalized = query.trim().toLowerCase();
+  // "@Scout " is a completed tag, not a new search. Closing here lets Enter
+  // send instead of selecting the same bot again.
+  if (query.endsWith(" ") && pool.some((choice) => choice.name.toLowerCase() === normalized)) return [];
+  return pool.filter((choice) => !normalized || choice.name.toLowerCase().includes(normalized));
+}
+
 /** Display word-start, longest-name matches without coloring Unicode prefixes.
  * Keep offsets in the original string so casing and Unicode remain intact. */
 export function mentionRanges(text: string, peers: readonly MentionPeer[], everyone = false): MentionRange[] {

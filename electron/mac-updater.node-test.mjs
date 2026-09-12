@@ -177,7 +177,7 @@ test("native validation errors after ZIP transfer remain visible and clean up st
   await download;
   assert.equal(h.state().status, "error");
   assert.equal(h.state().retryable, false);
-  assert.match(h.state().message, /signature validation failed.*Quit and reopen/);
+  assert.match(h.state().message, /failed verification.*Quit and reopen/);
   assert.equal(h.states.filter((s) => s.status === "error").length, 1);
   assert.equal(h.native.listenerCount("error"), 1);
   assert.equal(h.native.listenerCount("update-downloaded"), 1);

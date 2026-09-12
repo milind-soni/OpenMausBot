@@ -23,6 +23,7 @@ import {
   searchMemoryFiles,
   syncMemoryIndex,
   workspaceDir,
+  workspaceLocationsPrompt,
   writeMemoryTopic,
   writeMemoryFile,
   updateMemory,
@@ -48,6 +49,22 @@ describe("workspace", () => {
     rmSync(DATA_DIR, { recursive: true, force: true });
     rmSync(WORKSPACES_DIR, { recursive: true, force: true });
     rmSync(TASK_WORKSPACES_DIR, { recursive: true, force: true });
+  });
+
+  it("describes current and earlier file locations without moving or exposing their contents", () => {
+    const shared = ensureWorkspace(BOT);
+    const thread = ensureTaskWorkspace(BOT, "thread-first");
+    writeFileSync(join(shared, "old.txt"), "existing private file contents");
+    const prompt = workspaceLocationsPrompt(BOT, thread, '/projects/quoted "folder"');
+    expect(prompt).toContain(JSON.stringify(thread));
+    expect(prompt).toContain(JSON.stringify(shared));
+    expect(prompt).toContain(JSON.stringify(join(TASK_WORKSPACES_DIR, BOT)));
+    expect(prompt).toContain(JSON.stringify('/projects/quoted "folder"'));
+    expect(prompt).not.toContain("existing private file contents");
+    expect(prompt).toContain("Do not move old files");
+    expect(readFileSync(join(shared, "old.txt"), "utf8")).toBe("existing private file contents");
+    expect(existsSync(join(thread, "old.txt"))).toBe(false);
+    expect(workspaceLocationsPrompt(BOT, undefined)).toContain("inspect the working directory");
   });
 
   it("creates distinct private task desks outside shared memory and refuses path traversal", () => {

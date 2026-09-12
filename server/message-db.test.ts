@@ -15,6 +15,7 @@ import { closeMessageDb,
   recallMemory,
   removeMemoryFile,
   readThread,
+  readThreadTail,
   recallMessages,
   searchMessages,
   setActiveLeaf,
@@ -280,6 +281,29 @@ describe("message-db", () => {
 
     // room attribution rides along
     expect(searchMessages("spoke")[0].from).toBe("Scout");
+  });
+
+  it("readThreadTail reads only the newest rows at the SQL boundary, and still imports a legacy file in full", () => {
+    for (let i = 0; i < 5; i++) insertMessage("tail", msg(`m${i}`, `text ${i}`));
+    setActiveLeaf("tail", "m4");
+
+    const page = readThreadTail("tail", legacy("tail"), 2);
+    expect(page.messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(page.hasMore).toBe(true);
+    expect(page.activeLeafId).toBe("m4");
+
+    // asking for exactly what exists (or more): the whole thread, hasMore false
+    expect(readThreadTail("tail", legacy("tail"), 5).hasMore).toBe(false);
+    const roomy = readThreadTail("tail", legacy("tail"), 50);
+    expect(roomy.messages).toHaveLength(5);
+    expect(roomy.hasMore).toBe(false);
+
+    // no rows yet: same one-time legacy import as readThread(), not a partial read
+    writeFileSync(legacy("tail-legacy"), JSON.stringify([msg("a", "one"), msg("b", "two"), msg("c", "three")]));
+    const imported = readThreadTail("tail-legacy", legacy("tail-legacy"), 1);
+    expect(imported.messages.map((m) => m.id)).toEqual(["a", "b", "c"]);
+    expect(imported.hasMore).toBeUndefined();
+    expect(existsSync(legacy("tail-legacy"))).toBe(false);
   });
 
   it("Store round-trips branching through the DB across a restart", () => {

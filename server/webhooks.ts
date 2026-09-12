@@ -67,6 +67,8 @@ export interface WebhookManagerOptions {
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
+  /** The execution store commits this identity together with the queued run. */
+  findRun?: (webhookId: string, deliveryId: string) => { id: string } | null;
 }
 
 export type WebhookManagerEvent =
@@ -444,7 +446,10 @@ export class WebhookManager {
     const requestedDeliveryId = String(event.deliveryId ?? "").trim().slice(0, 200);
     if (requestedDeliveryId) {
       const key = `${trigger.endpointId}:${requestedDeliveryId}`;
-      const duplicate = this.deliveries.find((delivery) => delivery.key === key);
+      const committed = this.options.findRun?.(trigger.id, requestedDeliveryId);
+      const duplicate = committed
+        ? { runId: committed.id }
+        : this.deliveries.find((delivery) => delivery.key === key);
       if (duplicate) {
         this.appendAttempt(trigger, event, {
           outcome: "duplicate",

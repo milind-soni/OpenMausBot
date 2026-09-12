@@ -92,6 +92,7 @@ export function ApprovalCard({
 
   return (
     <div
+      data-tour={settled ? undefined : "approval"}
       className={cn(
         "w-full max-w-[840px] rounded-2xl border bg-card p-4",
         settled ? "border-hairline/30 opacity-70" : "border-accent/40",

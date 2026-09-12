@@ -1,25 +1,24 @@
-/** The four approval levels exposed by the desktop app. */
-export const APPROVAL_MODES = ["ask", "auto", "full", "custom"] as const;
+/** The approval levels exposed by the app. Each one is a provider's own
+ * permission mode, passed through: OpenMausBot never decides a permission
+ * itself (Full access aside, which answers residual prompts because that is
+ * what the person granted). The order is the order the selector shows. */
+export const APPROVAL_MODES = ["ask", "edits", "auto", "full", "custom"] as const;
 
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
-/** Only providers with an implemented permission mapping may expose elevation. */
+/** Only providers with an implemented permission mapping may expose a level.
+ * `edits` (auto-accept edits) exists where the engine has such a mode:
+ * Claude and Grok `acceptEdits`, Antigravity `auto_edit`. Codex's Ask already
+ * runs `workspace-write`, so an edits level would change nothing there. */
 export function supportsApprovalMode(driverKind: string | undefined, mode: ApprovalMode): boolean {
   if (mode === "custom") return driverKind === "codex";
+  if (mode === "edits") return ["claudeAgent", "grokAgent", "antigravityAgent"].includes(driverKind ?? "");
   if (mode !== "full") return true;
   return ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"].includes(driverKind ?? "");
 }
 
 export function hasNativeAutoReview(driverKind: string | undefined): boolean {
   return ["codex", "claudeAgent", "cursorAgent", "grokAgent"].includes(driverKind ?? "");
-}
-
-/** A native reviewer has already declined to decide, or Auto has no native
- * equivalent. Never second-guess that request with the app's heuristic rules.
- * Antigravity and OpenCode Full approve residual ACP tool-permission requests
- * through the app's explicit Full-access grant. Questions remain interactive. */
-export function requiresNativeApproval(driverKind: string, mode: ApprovalMode): boolean {
-  return mode === "auto" || (mode === "full" && ["claudeAgent", "cursorAgent", "grokAgent"].includes(driverKind));
 }
 
 export function isApprovalMode(value: unknown): value is ApprovalMode {

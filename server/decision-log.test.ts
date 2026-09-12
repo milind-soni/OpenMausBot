@@ -22,7 +22,7 @@ const row = (overrides: Partial<DecisionRow> = {}): Omit<DecisionRow, "at"> => (
   tool: "Bash",
   summary: "git status",
   decision: "auto-approved",
-  source: "always-allow",
+  source: "full-access",
   rule: "Bash:git",
   ...overrides,
 });

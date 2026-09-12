@@ -35,6 +35,32 @@ describe("Store", () => {
     expect(bot.modelSelection).toEqual(selection());
   });
 
+  it("messagesTail reads a bounded page via SQL on a fresh Store, and older messages still load in full", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    for (let i = 0; i < 10; i++) {
+      store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `message ${i}` });
+    }
+
+    // a brand-new Store: its in-memory cache has never seen this thread, so
+    // this exercises the SQL LIMIT fast path, not an in-memory slice
+    const reloaded = new Store(selection);
+    const tail = reloaded.messagesTail(bot.threadId, 3);
+    expect(tail.messages.map((m) => m.text)).toEqual(["message 7", "message 8", "message 9"]);
+    expect(tail.hasMore).toBe(true);
+    expect(tail.activeLeafId).toBe(tail.messages.at(-1)!.id);
+
+    // older messages still load in full on the same (now-cached) instance
+    expect(reloaded.messagesFor(bot.threadId).map((m) => m.text)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `message ${i}`),
+    );
+
+    // asking for at least as many messages as exist: the whole thread, hasMore false
+    const whole = new Store(selection).messagesTail(bot.threadId, 100);
+    expect(whole.messages).toHaveLength(10);
+    expect(whole.hasMore).toBe(false);
+  });
+
   it("dismisses an open options card when the user talks, and leaves live asks", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -281,6 +307,22 @@ describe("Store", () => {
       autoApprove: false,
     });
     expect(persisted.find((candidate) => candidate.id === bot.id)).not.toHaveProperty("approvalGrant");
+  });
+
+  it.each(["prepared", "confirmed", "activated", "committed"] as const)("revokes a thread-scoped grant after restart in phase %s", (phase) => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const target = store.createTask(bot.id, "Target")!;
+    store.patchBot(bot.id, { approvalMode: "full", approvalGrant: {
+      requestId: "123e4567-e89b-42d3-a456-426614174000", mode: "full", phase, threadId: target.threadId,
+    } });
+    // Even a crash between writing the thread and clearing the journal
+    // must not leave an unacknowledged elevated conversation executable.
+    store.patchTask(bot.id, target.threadId, { approvalMode: "full" });
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.approvalMode).toBe("ask");
+    expect(reloaded.bot(bot.id)?.approvalGrant).toBeUndefined();
+    expect(reloaded.projectBotForTask(bot.id, target.threadId)?.approvalMode).toBe("ask");
   });
 
   it("normalizes persisted cloud backends without changing valid or absent values", () => {

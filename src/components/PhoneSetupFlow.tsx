@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { t } from "@/lib/i18n";
+import { PhonePreview } from "@/components/onboarding/PhonePreview";
 import {
   ArrowLeft,
   Check,
@@ -918,32 +919,89 @@ export function PhoneSetupFlowView({
   variant,
   onSkip,
   onComplete,
+  compactHeader = false,
 }: {
   controller: PhoneSetupController;
   variant: "settings" | "onboarding";
   onSkip?: () => void;
   onComplete?: () => void;
+  /** The host already shows a title for this step (the welcome tour does),
+   * so the intro drops its own icon and heading and keeps the detail. */
+  compactHeader?: boolean;
 }) {
   const c = controller;
   const actionError = companionAccountActionError(c.account, c.accountError);
   const canSubmitEmail = /^\S+@\S+\.\S+$/.test(c.email.trim());
   const manualCodeMode = phonePairingManualCodeMode(Boolean(c.state?.pairing), c.pairingLink);
 
+  if (c.phase === "intro" && compactHeader) {
+    const points: Array<{ Icon: typeof Smartphone; title: string; detail: string }> = [
+      { Icon: Smartphone, title: t("phone.value.chats"), detail: t("phone.value.chatsDetail") },
+      { Icon: Check, title: t("phone.value.approvals"), detail: t("phone.value.approvalsDetail") },
+      { Icon: ShieldCheck, title: t("phone.value.private"), detail: t("phone.value.privateDetail") },
+    ];
+    return (
+      <div className="flex flex-col">
+        <p className="mt-1 text-[13.5px] leading-relaxed text-ink-secondary">{t("phone.intro.detail")}</p>
+        <div className="mt-4 grid grid-cols-[200px_1fr] items-center gap-6">
+          <PhonePreview />
+          <ul className="flex flex-col gap-3.5">
+            {points.map(({ Icon, title, detail }) => (
+              <li key={title} className="flex items-start gap-3">
+                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-accent/12 text-accent">
+                  <Icon size={14} />
+                </span>
+                <span>
+                  <span className="block text-[13.5px] font-medium text-ink">{title}</span>
+                  <span className="block text-[12px] leading-relaxed text-ink-secondary">{detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <button
+          onClick={c.start}
+          disabled={!c.state || c.busy || c.accountBusy}
+          className="mt-5 w-full rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"
+        >
+          {t("phone.intro.setUp")}
+        </button>
+        {c.error && <p role="alert" className="mt-3 text-[12.5px] text-danger">{c.error}</p>}
+        <button
+          onClick={() => {
+            c.skip();
+            onSkip?.();
+          }}
+          className="mt-3 self-center text-[12.5px] text-ink-secondary hover:text-ink"
+        >
+          {t("phone.intro.notNow")}
+        </button>
+        <p className="mt-1.5 self-center text-[11.5px] text-ink-secondary">{t("phone.intro.resume")}</p>
+      </div>
+    );
+  }
+
   if (c.phase === "intro") {
     return (
-      <div className="flex flex-col items-center text-center">
-        <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
-          <Smartphone size={26} />
-        </div>
-        <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: brand().name })}</h2>
-        <p className="mt-1.5 max-w-[460px] text-[13.5px] leading-relaxed text-ink-secondary">
+      <div className={compactHeader ? "flex flex-col items-start" : "flex flex-col items-center text-center"}>
+        {!compactHeader && (
+          <>
+            <div className="flex size-14 items-center justify-center rounded-2xl bg-accent/12 text-accent">
+              <Smartphone size={26} />
+            </div>
+            <h2 className="mt-4 text-[19px] font-semibold text-ink">{t("phone.intro.title", { app: brand().name })}</h2>
+          </>
+        )}
+        <p className={compactHeader ? "mt-1 text-[13.5px] leading-relaxed text-ink-secondary" : "mt-1.5 max-w-[460px] text-[13.5px] leading-relaxed text-ink-secondary"}>
           {t("phone.intro.detail")}
         </p>
         <ValuePoints />
         <button
           onClick={c.start}
           disabled={!c.state || c.busy || c.accountBusy}
-          className="mt-5 w-full max-w-[320px] rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"
+          className={compactHeader
+            ? "mt-5 w-full rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"
+            : "mt-5 w-full max-w-[320px] rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:opacity-90 disabled:cursor-wait disabled:opacity-40"}
         >
           {variant === "settings"
             ? c.state?.devices.length
@@ -959,11 +1017,11 @@ export function PhoneSetupFlowView({
                 c.skip();
                 onSkip?.();
               }}
-              className="mt-2.5 text-[12.5px] text-ink-secondary hover:text-ink"
+              className={compactHeader ? "mt-3 self-center text-[12.5px] text-ink-secondary hover:text-ink" : "mt-2.5 text-[12.5px] text-ink-secondary hover:text-ink"}
             >
               {t("phone.intro.notNow")}
             </button>
-            <p className="mt-2 text-[11.5px] text-ink-secondary">
+            <p className={compactHeader ? "mt-2 self-center text-[11.5px] text-ink-secondary" : "mt-2 text-[11.5px] text-ink-secondary"}>
               {t("phone.intro.resume")}
             </p>
           </>
@@ -1205,11 +1263,13 @@ export function PhoneSetupFlow({
   variant,
   onSkip,
   onComplete,
+  compactHeader,
 }: {
   profileEmail?: string;
   variant: "settings" | "onboarding";
   onSkip?: () => void;
   onComplete?: () => void;
+  compactHeader?: boolean;
 }) {
   const controller = usePhoneSetupController(profileEmail);
   return (
@@ -1217,8 +1277,7 @@ export function PhoneSetupFlow({
       controller={controller}
       variant={variant}
       onSkip={onSkip}
-      onComplete={onComplete}
-    />
+      onComplete={onComplete} compactHeader={compactHeader} />
   );
 }
 

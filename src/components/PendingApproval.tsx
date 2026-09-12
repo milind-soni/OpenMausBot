@@ -25,6 +25,7 @@ export interface Pending {
   tool: string;
   /** the narrow grant "always allow" writes, computed server-side */
   allowKey?: string;
+  allowSession?: boolean;
   detail: string;
   held?: string;
   heldCode?: string;
@@ -53,6 +54,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       requestId: m.card!.requestId!,
       tool: m.card!.tool!,
       allowKey: m.card!.allowKey,
+      allowSession: m.card!.allowSession,
       detail: m.card!.subtitle,
       held: m.card!.held,
       heldCode: m.card!.heldCode,
@@ -222,7 +224,10 @@ export function PendingApprovalActions({
       behavior,
       message: behavior === "deny" ? "Denied by the user." : undefined,
       reviewedSha256: behavior === "allow" ? reviewedSha256 : undefined,
+      // a harness-native card (peer comms) remembers a grant on the bot; a
+      // provider's card hands the allow to the provider for its session
       alwaysAllow: always && bot && pending.allowKey ? { botId: bot.id, key: pending.allowKey } : undefined,
+      always: always && !pending.allowKey && pending.allowSession ? true : undefined,
     });
 
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
@@ -246,6 +251,15 @@ export function PendingApprovalActions({
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >
           {t("approval.action.alwaysAllow")}
+        </button>
+      )}
+      {!durableRequest && !pending.allowKey && pending.allowSession && (
+        <button
+          onClick={() => decide("allow", true)}
+          title={t("approval.action.alwaysAllowSessionHint")}
+          className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
+        >
+          {t("approval.action.alwaysAllowSession")}
         </button>
       )}
       <button

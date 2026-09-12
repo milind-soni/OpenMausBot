@@ -232,6 +232,9 @@ function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
 /** Codex persists these values on its native thread. Keep them explicit on
  * start, resume, and every turn so switching modes cannot leave a more
  * permissive sandbox/reviewer stuck to the next request. */
+/** Ask and Edits both run Codex's workspace-write sandbox with the person as
+ * reviewer: Codex has no narrower "edits only" mode, so the selector never
+ * offers Edits for it (supportsApprovalMode) and a stray value asks. */
 function namedApprovalParams(mode: Exclude<ApprovalMode, "custom">): CodexApprovalParams {
   if (mode === "full") {
     return {
@@ -597,6 +600,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       const earlyNotifications: any[] = [];
       const state = {
         settled: false,
+        lastError: "",
         lastText: "",
         sawStreamDelta: false,
         // codex reports token usage as a running THREAD total; the harness
@@ -660,10 +664,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         });
 
       let stopping: Promise<boolean> | undefined;
-      const terminate = () => stopping ??= killCliTree(child);
-      const stop = () => {
+      const terminate = () => stopping ??= killCliTree(child).then((stopped) => {
+        if (!stopped) stopping = undefined;
+        return stopped;
+      });
+      let completeStoppedTurn: (() => void) | undefined;
+      const stop = async () => {
         stopRequested = true;
-        return terminate();
+        const stopped = await terminate();
+        if (stopped) completeStoppedTurn?.();
+        return stopped;
       };
 
       const settle = async (ok: boolean, stopReason: string | null) => {
@@ -677,12 +687,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           active.delete(threadId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null, ...(state.usage ? { usage: state.usage } : {}) });
         };
-        if (await stop()) {
-          complete();
-        } else {
+        completeStoppedTurn = complete;
+        if (!(await stop())) {
           emit({ ...base(threadId, turnId), type: "runtime.error", message: "codex did not shut down after termination was requested" });
-          if (child.exitCode !== null || child.signalCode !== null) complete();
-          else child.once("close", complete);
         }
       };
 
@@ -945,7 +952,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           case "turn/completed": {
             const t = p.turn ?? {};
-            void settle(t.status === "completed", t.status === "completed" ? null : (t.error?.message ?? t.status ?? "failed"));
+            const message = typeof t.error?.message === "string" ? t.error.message.slice(0, 400) : "";
+            if (t.status !== "completed" && message && message !== state.lastError) {
+              state.lastError = message;
+              emit({ ...base(threadId, turnId), type: "runtime.error", message,
+                ...(classifyError({ text: message }).reason === "auth" ? { setup: true } : {}),
+              });
+            }
+            void settle(t.status === "completed", t.status === "completed" ? null :
+              (classifyError({ text: message || state.lastError }).reason === "provider_safety" ? "provider_safety" : (message || t.status || "failed")));
             break;
           }
           case "error":
@@ -953,7 +968,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             // {error:{message}} — surface either (agentcal armor)
             {
               const message = p.message ?? p.error?.message;
-              if (message) emit({ ...base(threadId, turnId), type: "runtime.error", message: String(message).slice(0, 400) });
+              if (message) {
+                state.lastError = String(message).slice(0, 400);
+                emit({ ...base(threadId, turnId), type: "runtime.error", message: state.lastError });
+              }
             }
             break;
         }
@@ -1006,6 +1024,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       });
       child.on("close", (code) => {
         if (abandoned) return;
+        if (state.settled) {
+          // Root exit alone cannot release a turn after an uncertain stop.
+          // Recheck its group; an explicit later Stop can also retry this.
+          void stop();
+          return;
+        }
         if (!state.settled) {
           emit({
             ...base(threadId, turnId),
@@ -1187,7 +1211,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             message,
             ...(needsAuth ? { setup: true } : {}),
           });
-          await settle(false, needsAuth ? "auth_required" : "rpc_error");
+          await settle(false, needsAuth ? "auth_required" : verdict.reason === "provider_safety" ? "provider_safety" : "rpc_error");
         }
       }
     };

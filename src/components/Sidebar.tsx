@@ -30,6 +30,7 @@ import {
   X,
 } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, type AppState, type Bot, type Group } from "@/state/store";
+import { peerLine } from "@/lib/peer-message";
 
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
@@ -111,6 +112,8 @@ function preview(bot: Bot): string {
   if (last.kind === "options" && last.card) return last.card.title;
   if (last.kind === "activity" && last.tool) return last.tool.name;
   if (last.kind === "screen") return t("sidebar.preview.screenFrame");
+  const peer = peerLine(last);
+  if (peer) return `${peer.name}: ${peer.body}`;
   return last.text ?? "";
 }
 
@@ -1952,6 +1955,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>{t("sidebar.nav.teamMap")}</span>
           </button>
           <button
+            data-tour="nav-automations"
             onClick={() => dispatch({ type: "showRoutines" })}
             aria-label={density === "icons" ? t("sidebar.nav.automations") : undefined}
             title={density === "icons" ? t("sidebar.nav.automations") : undefined}
@@ -1996,6 +2000,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               },
               {
                 key: "routines",
+                tourId: "nav-automations",
                 label: t("sidebar.nav.automations"),
                 icon: <CalendarDays size={18} />,
                 active: state.activeView === "routines",
@@ -2007,6 +2012,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               },
               {
                 key: "plugins",
+                tourId: "nav-apps",
                 label: t("sidebar.nav.connectedApps"),
                 icon: <Puzzle size={18} />,
                 onSelect: () => dispatch({ type: "togglePlugins", open: true }),

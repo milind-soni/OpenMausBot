@@ -6,6 +6,7 @@
 // ~/.gemini MCP config and could not surface interactive approvals. Official
 // ACP mounts MCP servers per session and uses the same trusted approval cards
 // as OpenMausBot's other ACP engines.
+import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type {
   DriverCreateInput,
   ModelCatalog,
@@ -39,8 +40,12 @@ export const STATIC_ANTIGRAVITY_MODELS: ModelCatalog = {
   ],
 };
 
-export function antigravityPermissionMode(fullAuto: boolean): "yolo" | "default" {
-  return fullAuto ? "yolo" : "default";
+/** Antigravity's own session modes: `yolo` for Full access, `auto_edit` for
+ * auto-accept edits, `default` otherwise (Ask, and Auto, which it has no
+ * reviewer for). */
+export function antigravityPermissionMode(fullAuto: boolean, approvalMode?: ApprovalMode): "yolo" | "auto_edit" | "default" {
+  if (fullAuto) return "yolo";
+  return approvalMode === "edits" ? "auto_edit" : "default";
 }
 
 export function antigravityModelsFromSession(value: unknown): ModelCatalog | null {
@@ -120,8 +125,8 @@ const support: AcpSupport = {
     }
   },
 
-  configureSession: async ({ request, sessionId, config }) => {
-    const wanted = antigravityPermissionMode(config.fullAuto);
+  configureSession: async ({ request, sessionId, config, turn }) => {
+    const wanted = antigravityPermissionMode(config.fullAuto, turn.approvalMode);
     const result = await request("session/set_config_option", {
       sessionId,
       configId: "mode",

@@ -92,7 +92,7 @@ export function UpdateBanner() {
                   ? "Command copied — paste it in the terminal that opened."
                   : "Command copied — paste it in a terminal to finish."
                 : s.retryable === false
-                  ? `Quit and reopen ${brand().name} before trying the update again.`
+                  ? `${friendlyError(s.message?.split(" Quit and reopen ")[0])} Quit and reopen ${brand().name} before trying the update again.`
                   : friendlyError(s.message);
 
   return (

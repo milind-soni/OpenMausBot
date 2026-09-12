@@ -67,6 +67,21 @@
   --animate-msg-in: msg-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-shimmer: shimmer 2s linear infinite;
   --animate-status-pulse: status-pulse 1.6s steps(2, jump-none) infinite;
+  /* onboarding: a block of copy or a row arriving in a beat; `.stagger`
+     spaces siblings out. Rare, first-time motion, so it may run past the
+     300ms UI ceiling. */
+  --animate-rise: rise 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* onboarding: a spotlight card or a first-sight hint scaling in from its
+     anchor. Never from zero; nothing appears from nothing. */
+  --animate-spot-in: spot-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* onboarding: a badge circling a centre. --angle (deg), --radius (px)
+     and --duration are set per element. Linear, because it is constant
+     motion, and GPU-only. */
+  --animate-orbit: orbit var(--duration, 24s) linear infinite;
+  /* onboarding: a surface reacting once to an event (a routine firing) */
+  --animate-ripple: ripple 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+  /* onboarding: a bolt travelling from a webhook address to the bot */
+  --animate-bolt: bolt 0.9s cubic-bezier(0.77, 0, 0.175, 1) infinite;
 
   /* Defaults = Midnight. Kept here so the app is never unstyled. */
   --color-app: #070707;
@@ -658,6 +673,55 @@ body {
   transform-origin: 18px 100%;
   animation: turn-answer-in 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+@keyframes rise {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+@keyframes orbit {
+  from {
+    transform: translate(-50%, -50%) rotate(calc(var(--angle) * 1deg)) translateY(calc(var(--radius) * 1px)) rotate(calc(var(--angle) * -1deg));
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(calc(var(--angle) * 1deg + 360deg)) translateY(calc(var(--radius) * 1px)) rotate(calc(var(--angle) * -1deg - 360deg));
+  }
+}
+/* thinking dots in the onboarding chat scene */
+@keyframes ripple {
+  from { box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-accent) 55%, transparent); }
+  to { box-shadow: 0 0 0 14px color-mix(in oklab, var(--color-accent) 0%, transparent); }
+}
+@keyframes bolt {
+  0% { transform: translateX(-4px) scale(0.9); opacity: 0.2; }
+  40% { transform: translateX(6px) scale(1.05); opacity: 1; }
+  100% { transform: translateX(22px) scale(0.85); opacity: 0; }
+}
+@keyframes spot-in {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+/* Siblings of a `.stagger` group arrive 40ms apart. Each child sets `--i`
+   (its index) inline; the delay is decorative and never blocks input. */
+.stagger > * {
+  animation-delay: calc(var(--stagger, 40ms) * var(--i, 0));
+}
+/* The welcome tour morphs one card between beats with the View Transitions
+   API: the card, the mascot and the title keep their names, so the browser
+   moves and resizes them instead of cross-fading two cards. Everything
+   else cross-fades under the new beat, which rises in on its own. */
+.welcome-card { view-transition-name: welcome-card; }
+.welcome-maus { view-transition-name: welcome-maus; }
+.welcome-title { view-transition-name: welcome-title; }
+::view-transition-group(welcome-card),
+::view-transition-group(welcome-maus),
+::view-transition-group(welcome-title) {
+  animation-duration: 0.42s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.28s;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
 /* "Thinking…" label sheen while the model reasons */
 @keyframes shimmer {
   from { background-position: 200% 50%; }
@@ -687,8 +751,21 @@ body {
   .animate-status-pulse { animation: none; opacity: 0.6; }
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
   .turn-mascot-in, .turn-mascot-out, .turn-answer { animation: none; }
+  .animate-rise, .animate-spot-in { animation: none; }
+  /* orbiting badges hold at their starting angle; the scene places them */
+  .animate-orbit { animation: none; }
+  .animate-ripple, .animate-bolt { animation: none; }
   /* The drawer still moves, it just arrives instantly. */
   aside { transition: none; }
+}
+/* The onboarding preview page flips this to show the reduced variant
+   without touching system settings; the welcome flow also reads it to skip
+   its view transitions. Mirrors the media block above for its own classes. */
+:root[data-reduced-motion="true"] .animate-rise,
+:root[data-reduced-motion="true"] .animate-spot-in,
+:root[data-reduced-motion="true"] .welcome-card * {
+  animation: none !important;
+  transition: none !important;
 }
 
 /* SupaMaus vector motion. The fast horizontal compression is the edge-on

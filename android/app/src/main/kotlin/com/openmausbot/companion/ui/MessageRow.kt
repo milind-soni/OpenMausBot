@@ -398,7 +398,13 @@ private fun MessageContent(
 ) {
     when (message.kind) {
         Message.Kind.TEXT -> TextBubble(chat.threadId, message, endsRun, openLink, openAttachment)
-        Message.Kind.OPTIONS -> CardView(chat, message, haptics)
+        // A structured ask draws its own card: its answers are the model's
+        // questions, not an allow/deny a tap could stand for.
+        Message.Kind.OPTIONS -> if (QuestionCardRules.drawsQuestionCard(message)) {
+            QuestionCardView(chat, message, haptics)
+        } else {
+            CardView(chat, message, haptics)
+        }
         Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
         // A message kind from a newer computer. Almost everything the harness

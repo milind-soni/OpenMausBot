@@ -19,8 +19,10 @@ switching and Stop can be exercised without a real provider or account.
    rows should show Working. Changing the selection must not move messages.
 3. Stop iCloud. Gmail must remain Working; its Stop control still targets Gmail.
 4. In an idle thread, change its model. Select a sibling and return; each
-   should retain its own choice. Model/account/approval controls apply to the
-   visible thread, not all conversations belonging to the bot.
+   should retain its own choice. The model picker defaults to **This bot**:
+   it updates the visible thread plus the default for groups and new threads,
+   not existing siblings. Choose **Only this thread** for an independent
+   model/account/effort override. Approval controls remain thread-scoped.
 5. Rename a thread through its row menu. Remove the Email folder through its
    settings and confirm **Delete folder, keep threads**. Histories and model
    selections must remain, now directly beneath Pepper.

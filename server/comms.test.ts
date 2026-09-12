@@ -550,6 +550,9 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(helperInbound.text).toContain("[Delegated by @Asker");
       expect(helperInbound.text).toContain("delegated task");
       expect(helperInbound.text).toContain("[Reason: followup]");
+      // the author rides on the line itself, not only in its prefix — a
+      // renderer must not show A's handoff as B's user speaking
+      expect(helperInbound.peerAsk).toEqual({ botId: asker.id, name: "Asker" });
       const helperReply = helperBot.messages.findLast(
         (m: any) => m.kind === "text" && m.role === "bot",
       );

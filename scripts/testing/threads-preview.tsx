@@ -6,6 +6,6 @@ import "../../src/styles.css";
 
 // This entry point is served only by the disposable verification launcher.
 setAnalyticsEnabled(false);
-setEmailGateDone("skipped");
+if (!new URLSearchParams(location.search).has("onboarding")) setEmailGateDone("skipped");
 applySkin(readSkin());
 createRoot(document.getElementById("root")!).render(<App />);

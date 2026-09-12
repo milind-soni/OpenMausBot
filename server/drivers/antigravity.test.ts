@@ -207,6 +207,22 @@ createInterface({ input: process.stdin }).on('line', line => {
 });
 
 describe("stopping the runtime before touching its files", () => {
+  it.skipIf(process.platform === "win32")("waits through forced shutdown when the verified runtime ignores TERM", async () => {
+    const fake = fakeRuntime();
+    writeFileSync(fake.executable, `#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nawait import(${JSON.stringify(pathToFileURL(FAKE_ACP).href)});\n`);
+    const runtime = await resolveAntigravityRuntime(fake.executable);
+    vi.stubEnv("FAKE_ACP_AGENT_NAME", "Google Antigravity");
+    vi.stubEnv("FAKE_ACP_AGENT_VERSION", "1.1.1");
+    vi.stubEnv("FAKE_ACP_AUTH_METHOD", "oauth-personal");
+    const spawned = vi.spyOn(procs, "spawnCli");
+    try {
+      await expect(validateAntigravityRuntime(runtime, "agy_acp_server_1.1.1")).resolves.toBeUndefined();
+      expect(spawned.mock.results[0]!.value.signalCode).toBe("SIGKILL");
+    } finally {
+      await Promise.all(spawned.mock.results.map(({ value }) => procs.killCliTree(value, 0)));
+    }
+  }, 10_000);
+
   it("validates a real fake runtime and waits for its process to close before returning", async () => {
     const fake = fakeRuntime();
     const runtime = await resolveAntigravityRuntime(fake.executable);
@@ -600,10 +616,14 @@ describe("Antigravity driver over shared ACP", () => {
     expect(AntigravityDriver.install?.docsUrl).toContain("antigravity-acp");
     if (resolveAntigravityReleaseAsset()) expect(AntigravityDriver.install?.managed?.downloadBytes).toBeGreaterThan(0);
     expect(antigravityPermissionMode(false)).toBe("default");
+    expect(antigravityPermissionMode(false, "ask")).toBe("default");
+    expect(antigravityPermissionMode(false, "auto")).toBe("default");
+    expect(antigravityPermissionMode(false, "edits")).toBe("auto_edit");
     expect(antigravityPermissionMode(true)).toBe("yolo");
+    expect(antigravityPermissionMode(true, "edits")).toBe("yolo");
   });
 
-  it.each(["ask", "auto", "full"] as const)("runs an authenticated %s turn with explicit mode and session-scoped MCP", async (approvalMode) => {
+  it.each(["ask", "edits", "auto", "full"] as const)("runs an authenticated %s turn with explicit mode and session-scoped MCP", async (approvalMode) => {
     ensureDirs();
     const fake = fakeRuntime();
     const dump = join(fake.directory, "dump.json");
@@ -619,7 +639,7 @@ describe("Antigravity driver over shared ACP", () => {
         GOOGLE_API_KEY: "also-must-not-leak",
         FAKE_ACP_AUTH_METHOD: "oauth-personal",
         FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low",
-        FAKE_ACP_MODES: "default,yolo",
+        FAKE_ACP_MODES: "default,yolo,auto_edit",
         FAKE_ACP_DUMP: dump,
       },
       enabled: true,
@@ -649,7 +669,7 @@ describe("Antigravity driver over shared ACP", () => {
     const calls = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
     expect(calls).toEqual([
       { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "model", value: "gemini-3.8-flash-low" } },
-      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "mode", value: approvalMode === "full" ? "yolo" : "default" } },
+      { method: "session/set_config_option", params: { sessionId: "fake-acp-session", configId: "mode", value: approvalMode === "full" ? "yolo" : approvalMode === "edits" ? "auto_edit" : "default" } },
     ]);
     const mcp = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
     expect(mcp).toEqual([{ name: "docs", command: "docs-mcp", args: ["serve"], env: [{ name: "TOKEN", value: "scoped" }] }]);

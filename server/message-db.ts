@@ -10,7 +10,7 @@
 // Legacy JSON thread files import lazily: the first read of a thread with
 // no rows pulls the old file in, after which the DB is the source of
 // truth (the JSON file is left behind as a one-time backup).
-import { chmodSync, closeSync, existsSync, openSync, readFileSync, renameSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -24,6 +24,7 @@ let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
 
 function open(): DatabaseSync {
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const file = DB_FILE();
   // Transcripts can contain private conversations and tool output. Create
   // the database with owner-only permissions and also repair an existing
@@ -51,6 +52,16 @@ function open(): DatabaseSync {
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
     );
+    CREATE TABLE IF NOT EXISTS chat_followups (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      thread_id TEXT NOT NULL,
+      send_id TEXT,
+      status TEXT NOT NULL,
+      payload TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS chat_followups_receipt ON chat_followups(kind, owner_id, thread_id, send_id);
   `);
   ensureRecallIndex(db);
   ensureMemoryIndex(db);
@@ -161,6 +172,78 @@ function db(): DatabaseSync {
   return handle;
 }
 
+export interface FollowupPayload {
+  text: string;
+  prompt?: string;
+  replyToId?: string;
+  sendId?: string;
+  reason?: "capacity";
+  unattended?: boolean;
+  mode?: "chat" | "goal";
+  via?: "api";
+}
+export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
+export interface ChatFollowup {
+  id: string;
+  kind: "bot" | "channel";
+  ownerId: string;
+  threadId: string;
+  status: FollowupStatus;
+  payload: FollowupPayload;
+}
+
+/** A 202/cancel/dispatch claim must reach disk before publishing its result.
+ * Use the existing transcript DB (and backup path), with FULL sync for these
+ * small transactions only; ordinary transcript writes keep their policy. */
+function writeFollowups(write: (connection: DatabaseSync) => void): void {
+  const connection = db();
+  connection.exec("PRAGMA synchronous = FULL");
+  try {
+    connection.exec("BEGIN IMMEDIATE");
+    try { write(connection); connection.exec("COMMIT"); }
+    catch (error) { connection.exec("ROLLBACK"); throw error; }
+  } finally { connection.exec("PRAGMA synchronous = NORMAL"); }
+}
+
+export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
+  writeFollowups((connection) => connection.prepare(
+    "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+  ).run(followup.id, followup.kind, followup.ownerId, followup.threadId, followup.payload.sendId ?? null, JSON.stringify(followup.payload)));
+}
+
+/** Null retires a dispatch whose canonical transcript is already durable.
+ * Cancellation tombstones remain so a retried sendId cannot resurrect it. */
+export function settleChatFollowups(ids: string[], status: FollowupStatus | null): void {
+  if (!ids.length) return;
+  writeFollowups((connection) => {
+    const statement = connection.prepare(status === null
+      ? "DELETE FROM chat_followups WHERE id = ?"
+      : status === "cancelled"
+        ? "UPDATE chat_followups SET status = ?, payload = '{\"text\":\"\"}' WHERE id = ?"
+        : "UPDATE chat_followups SET status = ? WHERE id = ?");
+    for (const id of ids) {
+      if (status === null) statement.run(id);
+      else statement.run(status, id);
+    }
+  });
+}
+
+export function chatFollowups(kind?: ChatFollowup["kind"]): ChatFollowup[] {
+  const rows = (kind
+    ? db().prepare("SELECT * FROM chat_followups WHERE kind = ? ORDER BY rowid").all(kind)
+    : db().prepare("SELECT * FROM chat_followups ORDER BY rowid").all()) as Array<{
+      id: string; kind: ChatFollowup["kind"]; owner_id: string; thread_id: string; status: FollowupStatus; payload: string;
+    }>;
+  return rows.map((row) => ({ id: row.id, kind: row.kind, ownerId: row.owner_id, threadId: row.thread_id,
+    status: row.status, payload: JSON.parse(row.payload) as FollowupPayload }));
+}
+
+export function cancelledChatFollowup(kind: ChatFollowup["kind"], ownerId: string, threadId: string, sendId: string): boolean {
+  return Boolean(db().prepare(
+    "SELECT 1 FROM chat_followups WHERE kind = ? AND owner_id = ? AND thread_id = ? AND send_id = ? AND status = 'cancelled'",
+  ).get(kind, ownerId, threadId, sendId));
+}
+
 const rowToMessage = (row: { json: string }): Message => JSON.parse(row.json) as Message;
 
 export interface ThreadRows {
@@ -178,6 +261,36 @@ export function readThread(threadId: string, legacyFile: string): ThreadRows {
       .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
       .get(threadId) as { active_leaf_id: string | null } | undefined;
     return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null };
+  }
+  return importLegacy(threadId, legacyFile);
+}
+
+export interface ThreadTailRows extends ThreadRows {
+  /** Present only for a genuine bounded read: `true` means older rows exist
+   * beyond what's returned. Absent when the caller got the complete thread
+   * anyway (fewer than `limit` rows in the DB, or a one-time legacy import,
+   * which always reads the whole file) — that result can be cached as a
+   * full load, same as readThread(). */
+  hasMore?: boolean;
+}
+
+/** The newest `limit` rows only, read at the SQL boundary — the fast path
+ * for a display page (startup hydrate, a fresh scrollback view) that never
+ * needs the rest of a long transcript. Falls back to a full legacy import
+ * on first touch, same as readThread(); that read is a one-time migration
+ * cost regardless of how much of the result the caller keeps. */
+export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
+  const rows = db()
+    .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?")
+    .all(threadId, limit + 1) as Array<{ json: string }>;
+  if (rows.length) {
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.length = limit;
+    rows.reverse();
+    const state = db()
+      .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
+      .get(threadId) as { active_leaf_id: string | null } | undefined;
+    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null, hasMore };
   }
   return importLegacy(threadId, legacyFile);
 }
@@ -286,8 +399,11 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
 }
 
 export function deleteThread(threadId: string): void {
-  db().prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
-  db().prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+  writeFollowups((connection) => {
+    connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?").run(threadId);
+    connection.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
+    connection.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+  });
 }
 
 export interface SearchHit {

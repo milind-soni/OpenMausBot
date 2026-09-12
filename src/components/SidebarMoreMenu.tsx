@@ -33,6 +33,7 @@ export function SidebarMoreMenu({
 }) {
   return (
     <SidebarPopoverMenu
+      tourId="tools"
       items={items}
       ariaLabel={label}
       openOnHover
