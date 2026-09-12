@@ -77,6 +77,7 @@ async function fetchSameOrigin(
   input: string,
   init: RequestInit & { headers: Record<string, string> },
 ): Promise<Response> {
+  const initial = new URL(input);
   const origin = originOf(input);
   const first = await fetch(input, { ...init, redirect: "manual" });
   if (first.status < 300 || first.status >= 400) return first;
@@ -84,8 +85,8 @@ async function fetchSameOrigin(
   if (!location) throw new Error("provider returned a redirect without a location");
   const next = new URL(location, input);
   if (next.origin !== origin) throw new Error("provider redirect changed origin; request refused");
-  if (new URL(input).protocol !== "https:" && next.protocol !== "https:") {
-    throw new Error("provider redirect cannot downgrade an API request to HTTP");
+  if (initial.protocol === "https:" && next.protocol !== "https:") {
+    throw new Error("provider redirect cannot downgrade an HTTPS API request to HTTP");
   }
   return fetch(next, { ...init, redirect: "manual" });
 }
