@@ -130,10 +130,15 @@ function runNpm(args: string[], env: NodeJS.ProcessEnv, cwd: string, timeoutMs: 
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      void killCliTree(child);
+      void killCliTree(child).then((stopped) => {
+        rejectRun(new Error(stopped
+          ? "The install took too long and was stopped. Check the server's network connection and try again."
+          : "The install took too long, but npm could not be confirmed stopped. Ask the server administrator to stop the install process before trying again."));
+      });
     }, timeoutMs);
     timer.unref();
     child.once("error", (error: NodeJS.ErrnoException) => {
+      if (timedOut) return; // A failed kill is not a failed npm launch.
       clearTimeout(timer);
       rejectRun(new Error(error.code === "ENOENT"
         ? "npm is not installed on this server. Install Node.js with npm for the user running OpenMausBot, then try again."
@@ -141,10 +146,7 @@ function runNpm(args: string[], env: NodeJS.ProcessEnv, cwd: string, timeoutMs: 
     });
     child.once("close", (code) => {
       clearTimeout(timer);
-      if (timedOut) {
-        rejectRun(new Error("The install took too long and was stopped. Check the server's network connection and try again."));
-        return;
-      }
+      if (timedOut) return; // The whole group must stop, not just npm's root.
       resolveRun({ code, output });
     });
   });

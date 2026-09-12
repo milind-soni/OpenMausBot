@@ -7,6 +7,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
+import { connect, type Socket } from "node:net";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -860,6 +861,8 @@ beforeAll(async () => {
       OMB_SSE_HEARTBEAT_MS: "50",
       FAKE_CLAUDE_MODE: "hang",
       FAKE_CLAUDE_DUMP: fakeClaudeDump,
+      // the real CLI runs Manual for these even when asked for auto
+      FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS: "claude-haiku-4-5",
       OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -3405,6 +3408,11 @@ describe("harness HTTP API", () => {
         const rejected = await isolatedApi("PATCH", `/api/bots/${seeded.id}/model`, targetSelection);
         expect(rejected.status, seeded.approvalMode).toBe(400);
         expect(rejected.body.error).toMatch(/requires choosing Ask first/i);
+        const scoped = await isolatedApi("PATCH", `/api/bots/${seeded.id}/tasks/${seeded.threadId}`, {
+          modelSelection: targetSelection, updateBotDefault: true, approvalMode: "ask",
+        });
+        expect(scoped.status, seeded.approvalMode).toBe(400);
+        expect(scoped.body.error).toMatch(/Choose Ask in bot settings/i);
         const unchanged = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
           (candidate: { id: string }) => candidate.id === seeded.id,
         );
@@ -3412,6 +3420,7 @@ describe("harness HTTP API", () => {
           approvalMode: seeded.approvalMode,
           modelSelection: seeded.modelSelection,
         });
+        expect(unchanged.tasks.find((task: { threadId: string }) => task.threadId === seeded.threadId).modelSelection).toEqual(seeded.modelSelection);
       }
 
       // A loopback-capable bot must not escape a restrictive Custom config
@@ -3777,7 +3786,6 @@ describe("harness HTTP API", () => {
       name: "Mira",
       title: "Project Lead",
       autoApprove: true,
-      autoReview: "enforce",
       alwaysAllow: ["Bash:git"],
       approvePeerComms: true,
       chiefOfStaff: true,
@@ -3804,8 +3812,7 @@ describe("harness HTTP API", () => {
             id: trusted.id,
             threadId: trusted.threadId,
             autoApprove: true,
-            autoReview: "enforce",
-            alwaysAllow: ["Bash"],
+                  alwaysAllow: ["Bash"],
             chiefOfStaff: true,
             approvePeerComms: false,
             composio: true,
@@ -3828,7 +3835,6 @@ describe("harness HTTP API", () => {
     expect(impostor.name).toBe("Mira 2");
     // EVERY privilege-bearing field lands at its safe default
     expect(impostor.autoApprove).toBeUndefined();
-    expect(impostor.autoReview).toBeUndefined();
     expect(impostor.alwaysAllow).toBeUndefined();
     expect(impostor.chiefOfStaff).toBeUndefined();
     expect(impostor.approvePeerComms).toBeUndefined();
@@ -3846,7 +3852,6 @@ describe("harness HTTP API", () => {
       title: "Project Lead",
       threadId: trusted.threadId,
       autoApprove: true,
-      autoReview: "enforce",
       alwaysAllow: ["Bash:git"],
       approvePeerComms: true,
       chiefOfStaff: true,
@@ -4962,18 +4967,6 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("stores only known approval-review modes", async () => {
-    const bot = (await api("POST", "/api/bots")).body.bot;
-    for (const autoReview of ["off", "shadow", "enforce"]) {
-      const response = await api("PATCH", `/api/bots/${bot.id}`, { autoReview });
-      expect(response.status).toBe(200);
-      expect(response.body.bot.autoReview).toBe(autoReview);
-    }
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { autoReview: "always" })).status).toBe(400);
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { autoReview: true })).status).toBe(400);
-    await api("DELETE", `/api/bots/${bot.id}`);
-  });
-
   it("offers an idempotent stop boundary for active local turns", async () => {
     const unsupported = await api("POST", "/api/local-computer/interrupt");
     expect(unsupported).toEqual({
@@ -5389,6 +5382,82 @@ describe("harness HTTP API", () => {
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
   });
 
+  it("cards every ask when Claude's reviewer never started, says so once, and can hand the allow to Claude for the session", async () => {
+    // A bot on Approve for me with Haiku 4.5: the CLI takes `auto`, runs
+    // Manual, and asks about everything. OpenMausBot passes that through —
+    // no rule of its own answers — and says why, once.
+    const bot = (await api("POST", "/api/bots", { name: "Quill" })).body.bot;
+    const conns: Socket[] = [];
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "claude", model: "claude-haiku-4-5" },
+        approvalMode: "auto",
+      })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "count my notes" })).status).toBe(202);
+      // the permission socket the driver handed its proxy, from the MCP
+      // config the fake read back
+      const dump = z.object({
+        mcpConfig: z.object({ mcpServers: z.object({ ogb: z.object({ args: z.array(z.string()) }) }) }),
+      }).parse(await readJsonFileWhenReady(fakeClaudeDump));
+      const socketPath = dump.mcpConfig.mcpServers.ogb.args[1];
+      const raise = async (id: string, command: string) => {
+        const conn = connect(socketPath);
+        conns.push(conn);
+        const answered = new Promise<{ behavior: string; always?: boolean }>((resolve) => {
+          let buf = "";
+          conn.on("data", (chunk) => {
+            buf += chunk;
+            const nl = buf.indexOf("\n");
+            if (nl !== -1) resolve(JSON.parse(buf.slice(0, nl)));
+          });
+        });
+        await new Promise<void>((resolve, reject) => {
+          conn.on("connect", resolve);
+          conn.on("error", reject);
+        });
+        conn.write(JSON.stringify({ t: "ask", id, tool: "Bash", input: { command } }) + "\n");
+        return answered;
+      };
+      type Msg = { kind: string; tool?: { name: string }; card?: { title: string; subtitle: string; requestId?: string; held?: string; heldCode?: string; allowKey?: string; allowSession?: boolean; answered?: string } };
+      const messages = async (): Promise<Msg[]> =>
+        (await api("GET", "/api/bots?messages=40")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id).messages;
+
+      const first = raise("ask-wc", "wc -l notes.md");
+      const card = await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "wc -l notes.md")?.card).toBeTruthy()
+        .then(async () => (await messages()).find((m) => m.card?.subtitle === "wc -l notes.md")!.card!);
+      expect(card.title).toBe("Approval needed");
+      expect(card.heldCode).toBe("approval.held.native");
+      // no app-side grant is offered for a provider's tool; the provider's
+      // own session-wide allow is
+      expect(card.allowKey).toBeUndefined();
+      expect(card.allowSession).toBe(true);
+      expect((await messages()).some((m) => m.tool?.name.startsWith("auto-approved"))).toBe(false);
+      // the person is told once who is asking and why, naming the model
+      const notices = (await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer is not available"));
+      expect(notices).toHaveLength(1);
+      expect(notices[0].tool!.name).toContain("claude-haiku-4-5");
+      expect(notices[0].tool!.name).toContain("asks before each action");
+
+      // "Always allow this session" rides to Claude as `always`
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "allow", always: true })).status).toBe(200);
+      await expect(first).resolves.toMatchObject({ behavior: "allow", always: true });
+
+      const second = raise("ask-ls", "ls memory");
+      await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls memory")?.card?.title).toBe("Approval needed");
+      expect((await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer"))).toHaveLength(1);
+      const secondCard = (await messages()).find((m) => m.card?.subtitle === "ls memory")!.card!;
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: secondCard.requestId, behavior: "allow" })).status).toBe(200);
+      const plain = await second;
+      expect(plain).toMatchObject({ behavior: "allow" });
+      expect(plain).not.toHaveProperty("always");
+    } finally {
+      for (const conn of conns) conn.destroy();
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("mounts the verification skill into a real turn when its trigger appears", async () => {
     // skill authoring is on by default: no opt-in is needed for the turn
     const bot = (await api("POST", "/api/bots", {})).body.bot;
@@ -5435,7 +5504,7 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("coaches a blank bot to set itself up, and stops once it has a description", async () => {
+  it("does not coach an ordinary request even when the bot profile is blank", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Blank" })).body.bot;
     try {
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
@@ -5445,11 +5514,11 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
       let system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
       expect(system.startsWith("You are Blank, a personal bot in OpenMausBot.")).toBe(true);
-      expect(system).toContain("This bot has not been set up yet");
+      expect(system).not.toContain("Wait for a yes");
       expect(system).toContain("propose_profile");
 
       const preview = await api("GET", `/api/bots/${bot.id}/system-prompt`);
-      expect(preview.body.sections.map((s: { id: string }) => s.id)).toContain("setup");
+      expect(preview.body.sections.map((s: { id: string }) => s.id)).not.toContain("setup");
 
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       // Interrupt requests a stop; the child can still be shutting down.
@@ -5462,7 +5531,7 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello again" })).status).toBe(202);
       system = (await readJsonFileWhenReady<{ systemPrompt: string }>(fakeClaudeDump, 15_000)).systemPrompt;
-      expect(system).not.toContain("This bot has not been set up yet");
+      expect(system).not.toContain("Wait for a yes");
       expect((await api("GET", `/api/bots/${bot.id}/system-prompt`)).body.sections.map((s: { id: string }) => s.id)).not.toContain("setup");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
@@ -5485,7 +5554,7 @@ describe("harness HTTP API", () => {
       // soul first, setup block right after it
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
       expect(soulEnd).toBeGreaterThan(0);
-      expect(system.slice(soulEnd).startsWith("\n\nThis bot has not been set up yet")).toBe(true);
+      expect(system.slice(soulEnd).startsWith("\n\nThe user explicitly asked you to set yourself up")).toBe(true);
       // the literal /setup never reaches the model — extract the user text the
       // way promptText() in fake-claude-cli.ts does, joining text parts if the
       // content is an array of blocks rather than a plain string

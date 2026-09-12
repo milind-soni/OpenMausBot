@@ -50,7 +50,6 @@ function makeDerived(overrides: Partial<ReturnType<typeof useBotSettingsDerived>
   return {
     patch: vi.fn(),
     engine: undefined,
-    canAutoReview: false,
     canCoordinate: false,
     canUseConnectedApps: true,
     canUseVps: false,

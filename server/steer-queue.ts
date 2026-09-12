@@ -4,11 +4,11 @@
 // here until the bot settles, then lands in the thread and runs as ONE
 // follow-up turn whose prompt is the queued texts separated by a blank line.
 //
-// The queue is memory-only and is NOT in `messages[]` while the current
+// The durable queue is NOT in `messages[]` while the current
 // turn is running: appending immediately would make the queued line the
 // active leaf, so remaining tool/assistant events of *this* turn would
-// hang off a user line the model has not seen. Restart loses the queue
-// (same as delegations / approvals). The composer shows a pending chip
+// hang off a user line the model has not seen. Restart restores only sends
+// whose dispatch has not begun. The composer shows a pending chip
 // until drain appends the words.
 //
 // Unlike the delegation drain, an interrupted or failed turn does NOT
@@ -18,6 +18,7 @@
 // the feature.
 
 import { newId } from "./contracts.ts";
+import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 /** The slice of Store this module needs — narrow so tests can fake it. */
@@ -46,6 +47,17 @@ interface QueueEntry {
 }
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
+
+export function restoreSteeredMessages(): void {
+  queues.clear();
+  for (const row of chatFollowups("bot")) {
+    if (row.status !== "pending") continue;
+    const entry = queues.get(row.threadId) ?? { botId: row.ownerId, items: [] };
+    if (entry.botId !== row.ownerId) throw new Error("queued task belongs to another bot");
+    entry.items.push({ ...row.payload, messageId: row.id, prompt: row.payload.prompt ?? row.payload.text });
+    queues.set(row.threadId, entry);
+  }
+}
 const listeners = new Set<() => void>();
 const changed = () => {
   for (const listener of listeners) {
@@ -86,7 +98,7 @@ export function queueSteeredMessage(
   // A thread cannot legitimately change owners. Refuse to merge unrelated
   // queues even if a corrupt caller reuses a thread id.
   if (entry.botId !== botId) throw new Error("queued task belongs to another bot");
-  entry.items.push({
+  const item = {
     messageId: id,
     text,
     prompt: options.prompt ?? text,
@@ -94,7 +106,9 @@ export function queueSteeredMessage(
     sendId: options.sendId,
     reason: options.reason,
     unattended: options.unattended,
-  });
+  };
+  saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
+  entry.items.push(item);
   queues.set(threadId, entry);
   changed();
   return { id };
@@ -140,6 +154,7 @@ export function drainSteeredMessages(
       : store.bot(entry.botId);
     if (!bot) {
       // the bot or task was deleted while messages waited
+      settleChatFollowups(entry.items.map((item) => item.messageId), "cancelled");
       queues.delete(threadId);
       changed();
       continue;
@@ -147,6 +162,8 @@ export function drainSteeredMessages(
     if (bot.busy || isBlocked?.(entry.botId, threadId)) continue;
     // committed to draining: the entry leaves the map before anything runs,
     // so a settle racing another settle can never fire the same queue twice
+    const ids = entry.items.map((item) => item.messageId);
+    settleChatFollowups(ids, "dispatching");
     queues.delete(threadId);
     changed();
     const appended: Message[] = [];
@@ -171,7 +188,7 @@ export function drainSteeredMessages(
     // message into one HTML block, which makes that attachment stop being a
     // native image when the combined follow-up is dispatched.
     const prompt = entry.items.map((item) => item.prompt).join("\n\n");
-    void run(
+    const running = run(
       entry.botId,
       threadId,
       prompt,
@@ -181,6 +198,10 @@ export function drainSteeredMessages(
       // person's words in the same queue cannot re-attend a bot's own
       entry.items.some((item) => item.unattended === true),
     );
+    void Promise.resolve(running).then(
+      () => settleChatFollowups(ids, null),
+      () => settleChatFollowups(ids, "interrupted"),
+    ).catch((error) => console.warn("steer-queue: could not settle durable follow-up", error));
   }
 }
 
@@ -199,12 +220,13 @@ export function queuedSteeredMessage(
 /** Drop one waiting send owned by this bot so it never drains. The queue id
  * is stable even if the bot switches away from the task while the request is
  * in flight. Returns false when it was already drained, belongs to another
- * bot, or a restart lost the in-memory auto-run intent. */
+ * bot, or dispatch has already started. */
 export function cancelSteeredMessage(botId: string, messageId: string, expectedThreadId?: string): boolean {
   for (const [threadId, entry] of queues) {
     if (entry.botId !== botId || (expectedThreadId !== undefined && threadId !== expectedThreadId)) continue;
     const items = entry.items.filter((item) => item.messageId !== messageId);
     if (items.length === entry.items.length) continue;
+    settleChatFollowups([messageId], "cancelled");
     if (items.length === 0) queues.delete(threadId);
     else queues.set(threadId, { botId: entry.botId, items });
     changed();

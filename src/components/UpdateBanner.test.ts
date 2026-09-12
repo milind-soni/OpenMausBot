@@ -58,4 +58,13 @@ describe("UpdateBanner", () => {
     expect(html).toContain("Copy the install command and open a terminal.");
     expect(html).not.toContain("Restart to update");
   });
+
+  it("shows the failure cause as well as the required restart without offering a retry", () => {
+    const html = render({ status: "error", retryable: false,
+      message: "Not enough disk space to prepare the update. Free some space, then try again. Quit and reopen OpenMausBot before trying the update again.",
+    });
+    expect(html).toContain("Free some space");
+    expect(html).toContain("Quit and reopen OpenMausBot");
+    expect(html).not.toContain("Try again</button>");
+  });
 });

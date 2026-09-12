@@ -227,6 +227,17 @@ process.stdin.on("data", (chunk) => {
         break;
       case "turn/start": {
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
+        if (mode === "safety-rpc") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "HTTP 503: This task was blocked by our safety systems." } });
+          break;
+        }
+        if (mode === "safety-completion" || mode === "safety-notification") {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          const message = "This task was blocked by our safety systems.";
+          if (mode === "safety-notification") notify("error", { message });
+          notify("turn/completed", { turn: { status: "failed", error: { message } } });
+          break;
+        }
         if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
           break;

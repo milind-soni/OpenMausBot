@@ -6,10 +6,11 @@
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ProviderInstance } from "../contracts.ts";
 import { NATIVE_DIR } from "../config.ts";
@@ -21,6 +22,7 @@ import {
   codexUpdateCommand,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import * as procs from "../procs.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
@@ -1071,6 +1073,37 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
+  it.each([false, true])("keeps ownership after an uncertain stop even when root close arrives (before failure: %s)", async (closeFirst) => {
+    await create();
+    const stopping = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      if (closeFirst && child.exitCode === null && child.signalCode === null) {
+        const closed = once(child, "close");
+        child.kill("SIGKILL");
+        await closed;
+      }
+      return false;
+    });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-uncertain-stop", text: "one" });
+      await recorder.until((event) => event.type === "runtime.error" && event.message.includes("did not shut down"));
+      const child = stopping.mock.calls[0]![0];
+      if (!closeFirst) {
+        const closed = once(child, "close");
+        child.kill("SIGKILL");
+        await closed;
+        await expect.poll(() => stopping.mock.calls.length).toBeGreaterThan(1);
+      }
+      expect(recorder.events.some((event) => event.type === "turn.completed")).toBe(false);
+      expect(instance.adapter.hasSession("t-uncertain-stop")).toBe(true);
+      await expect(instance.adapter.sendTurn({ threadId: "t-uncertain-stop", text: "two" })).rejects.toThrow(/already running/);
+    } finally {
+      stopping.mockRestore();
+      await instance.adapter.interruptTurn("t-uncertain-stop");
+    }
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(instance.adapter.hasSession("t-uncertain-stop")).toBe(false);
+  });
+
   it("a missing binary surfaces as a failed turn, and snapshot says unavailable", async () => {
     instance = await CodexDriver.create({
       instanceId: "codex-missing",
@@ -1177,6 +1210,18 @@ describe("CodexDriver turns (fake app-server)", () => {
       ok: false,
       stopReason: "auth_required",
     });
+  });
+
+  it.each(["safety-rpc", "safety-completion", "safety-notification"])("surfaces %s once without retrying or asking for login", async (mode) => {
+    await create({ mode });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-safety", text: "Deploy my site", approvalMode: "full" });
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    expect(done).toMatchObject({ ok: false, stopReason: "provider_safety" });
+    const errors = recorder.events.filter((e) => e.type === "runtime.error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ message: expect.stringContaining("blocked by our safety systems") });
+    expect(errors[0]).not.toHaveProperty("setup");
+    expect(recorder.events.some((e) => e.type === "turn.retrying")).toBe(false);
   });
 
   it("auto-retries a transient turn/start failure, then completes with one final message", async () => {

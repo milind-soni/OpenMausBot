@@ -57,6 +57,13 @@ public struct OptionCard: Codable, Hashable, Sendable {
     /// Learned skills must show their complete reviewed contents before an
     /// approval button is offered on a compact companion surface.
     public var skillRequest: SkillRequestCardData? = nil
+    /// The model's own questions and options (Claude's `AskUserQuestion`).
+    /// Present only on a structured ask; every other card leaves it nil.
+    public var questionRequest: QuestionRequestCardData? = nil
+    /// What an answered question was answered WITH. `answered` only records
+    /// the behavior once the harness settles a live ask, so without this a
+    /// settled question card would read "answer" instead of the reply.
+    public var answeredText: String? = nil
 
     /// A card is actionable while it is unanswered and still has a request
     /// behind it. Everything else is transcript.
@@ -66,6 +73,14 @@ public struct OptionCard: Codable, Hashable, Sendable {
 
     /// Permission cards carry a tool; questions do not.
     public var isPermission: Bool { tool != nil }
+
+    /// A structured ask draws its own card: the model posed real questions
+    /// with real options, and a flat row of buttons cannot say which
+    /// question a tap answered.
+    public var questions: [AskQuestion] {
+        guard let questionRequest, !questionRequest.questions.isEmpty else { return [] }
+        return questionRequest.questions
+    }
 
     /// The wire API accepts an approval behavior rather than the button's
     /// display text. Treat the one refusal as deny and every other offered

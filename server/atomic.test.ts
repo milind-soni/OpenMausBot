@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { writeFileAtomic } from "./atomic.ts";
+import { renameWithRetry, writeFileAtomic } from "./atomic.ts";
 
 describe("writeFileAtomic", () => {
   let dir: string;
@@ -58,5 +58,54 @@ describe("writeFileAtomic", () => {
     mkdirSync(p);
     expect(() => writeFileAtomic(p, "cannot replace a directory")).toThrow();
     expect(readdirSync(dir)).toEqual(["target"]);
+  });
+});
+
+// Windows refuses a rename onto an existing path while anything else holds a
+// handle to either file, and a virus scanner or the search indexer opening a
+// just-closed file for a few milliseconds is enough. Callers treat a throw here
+// as a failed save, so a transient error used to lose the write.
+describe("renameWithRetry", () => {
+  function failing(times: number, code: string) {
+    let calls = 0;
+    return {
+      get calls() {
+        return calls;
+      },
+      rename: () => {
+        calls += 1;
+        if (calls <= times) throw Object.assign(new Error(`${code}: simulated`), { code });
+      },
+    };
+  }
+
+  it("survives a transient EPERM instead of losing the write", () => {
+    const stub = failing(3, "EPERM");
+    expect(() => renameWithRetry("a.tmp", "a", stub.rename)).not.toThrow();
+    expect(stub.calls).toBe(4);
+  });
+
+  it("retries EACCES and EBUSY the same way", () => {
+    for (const code of ["EACCES", "EBUSY"]) {
+      const stub = failing(1, code);
+      expect(() => renameWithRetry("a.tmp", "a", stub.rename)).not.toThrow();
+      expect(stub.calls).toBe(2);
+    }
+  });
+
+  it("gives up rather than retrying forever", () => {
+    const stub = failing(Number.MAX_SAFE_INTEGER, "EPERM");
+    expect(() => renameWithRetry("a.tmp", "a", stub.rename)).toThrow(/EPERM/);
+    expect(stub.calls).toBe(6); // first attempt plus five backoffs
+  });
+
+  it("does not retry an error that will never clear", () => {
+    // Busy-waiting on a missing directory or a cross-device rename would hide
+    // a real bug behind a delay and still fail.
+    for (const code of ["ENOENT", "EXDEV", "EISDIR"]) {
+      const stub = failing(Number.MAX_SAFE_INTEGER, code);
+      expect(() => renameWithRetry("a.tmp", "a", stub.rename)).toThrow(new RegExp(code));
+      expect(stub.calls).toBe(1);
+    }
   });
 });

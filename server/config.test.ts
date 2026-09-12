@@ -11,6 +11,7 @@ import { customMcpServers,
   isValidSshAlias,
   loadBrowserProfileIdAliases,
   loadConfig,
+  providerReloadKeys,
   localVmMaxInstances,
   localVmMode,
   parseConfigPatch,
@@ -799,6 +800,18 @@ describe("credential env preference", () => {
     expect(loadConfig()).toMatchObject({ customDomain: "", language: "en", profile: { name: "Workspace owner" } });
   });
 
+  it("merges onboarding progress like any other section", () => {
+    saveConfig({ onboarding: { completedAt: "2026-09-09T10:00:00.000Z", version: 1 } });
+    saveConfig({ onboarding: { hintsSeen: ["computer"] } });
+    expect(loadConfig().onboarding).toEqual({
+      completedAt: "2026-09-09T10:00:00.000Z",
+      version: 1,
+      hintsSeen: ["computer"],
+    });
+    expect(() => parseConfigPatch({ onboarding: { hintsSeen: ["x".repeat(61)] } })).toThrow();
+    expect(() => parseConfigPatch({ onboarding: { unknown: true } })).toThrow();
+  });
+
   it("falls back to the config file when the env var is unset (dev mode)", () => {
     writeFileSync(
       join(DATA_DIR, "config.json"),
@@ -1063,5 +1076,13 @@ describe("customMcpServers", () => {
       }),
     );
     expect(Object.keys(out)).toEqual(["keeper"]);
+  });
+});
+
+describe("providerReloadKeys", () => {
+  it("rebuilds the fleet only for sections a driver reads", () => {
+    expect(providerReloadKeys({ claude: { model: "x" }, profile: { name: "me" } })).toEqual(["claude"]);
+    expect(providerReloadKeys({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);
+    expect(providerReloadKeys({ profile: {}, language: "de", tts: {}, features: {} })).toEqual([]);
   });
 });

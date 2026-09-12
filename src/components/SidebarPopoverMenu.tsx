@@ -32,6 +32,8 @@ export interface SidebarMenuItem {
    * place (the update check) keeps it open */
   keepOpen?: boolean;
   onSelect: () => void;
+  /** `data-tour` id, so the guided tour can point at this item */
+  tourId?: string;
 }
 
 /** Opening is quick enough to feel like a hover, closing is slow enough to
@@ -40,11 +42,14 @@ const OPEN_DELAY_MS = 80;
 const CLOSE_DELAY_MS = 250;
 
 export function SidebarPopoverMenu({
+  tourId,
   items,
   ariaLabel,
   openOnHover = false,
   renderTrigger,
 }: {
+  /** `data-tour` id for the trigger button */
+  tourId?: string;
   items: SidebarMenuItem[];
   ariaLabel: string;
   openOnHover?: boolean;
@@ -90,7 +95,10 @@ export function SidebarPopoverMenu({
     if (!open) return;
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && close();
     const onDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) close();
+      if (!(event.target instanceof Node)) return;
+      // the guided tour's card floats outside the menu but is talking about it
+      if (event.target instanceof Element && event.target.closest("[data-tour-card]")) return;
+      if (!rootRef.current?.contains(event.target)) close();
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onDown);
@@ -120,6 +128,7 @@ export function SidebarPopoverMenu({
     >
       <button
         type="button"
+        data-tour={tourId}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
@@ -150,6 +159,7 @@ export function SidebarPopoverMenu({
               <button
                 type="button"
                 role="menuitem"
+                data-tour={item.tourId}
                 disabled={item.disabled}
                 onClick={() => {
                   item.onSelect();

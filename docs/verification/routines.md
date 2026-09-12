@@ -131,6 +131,20 @@ JSON evidence paths. These complement the scheduler, proposal and renderer
 tests; they do not prove real-provider tool selection, actual desktop work, or
 packaged Electron behavior.
 
+Webhook delivery IDs are committed atomically with their execution receipt.
+Retries keep the same run ID for seven days, independently of run-log pruning;
+unfinished work remains deduplicated beyond that window. A full retry ledger
+rejects new work rather than discarding identities that senders may still retry.
+
+```sh
+pnpm exec vitest run server/webhook-idempotency.test.ts server/webhook-restart.e2e.test.ts
+```
+
+The restart test launches a disposable fake-engine server, creates a webhook,
+then exits an owned worker between the execution and ingress commits. It restarts
+that same isolated server and checks that redelivery returns the original run ID
+with one execution. Its retained JSON evidence includes the receipt and transcript.
+
 The results integration fixture additionally proves fresh provider contexts,
 saved destination snapshots, dated result cards, approval links, deleted-thread
 fallback, and continued user conversations staying visible. Native decoding and

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mentionRanges } from "./mentions";
+import { mentionChoicesForQuery, mentionRanges } from "./mentions";
 
 const peers = [{ name: "Atlas" }, { name: "New Bot" }, { name: "New Bot 2" }, { name: "調査担当" }, { name: "Hidden", hidden: true }];
 const matches = (text: string, everyone = false) => mentionRanges(text, peers, everyone).map(({ start, end }) => text.slice(start, end));
@@ -29,5 +29,19 @@ describe("mention display ranges", () => {
   it("does not interpret names as regular expressions or HTML", () => {
     const text = "@A+B and @<img>";
     expect(mentionRanges(text, [{ name: "A+B" }, { name: "<img>" }])).toEqual([{ start: 0, end: 4 }, { start: 9, end: 15 }]);
+  });
+});
+
+describe("mention picker choices", () => {
+  const choices = ["everyone", "One", "Two", "Three", "Four", "Five", "Six"]
+    .map((name, index) => ({ id: String(index), name }));
+
+  it("keeps every room member instead of truncating after everyone plus five bots", () => {
+    expect(mentionChoicesForQuery(choices, "")).toEqual(choices);
+  });
+
+  it("filters before display and closes after a completed exact tag", () => {
+    expect(mentionChoicesForQuery(choices, "si").map((choice) => choice.name)).toEqual(["Six"]);
+    expect(mentionChoicesForQuery(choices, "Six ")).toEqual([]);
   });
 });

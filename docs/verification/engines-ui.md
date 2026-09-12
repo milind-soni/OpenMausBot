@@ -8,8 +8,8 @@ node --experimental-strip-types scripts/verify-engines-ui.ts
 
 Open its printed `previewUrl`. The bottom toolbar switches between the real
 Settings modal and onboarding, applies the app's Midnight/Atelier skins, and
-toggles a synthetic Antigravity connection. Click **Maybe later** on the first
-onboarding step to reach engines. Provider install, sign-in, path-save, and
+toggles a synthetic Antigravity connection. **Onboarding preview** opens the
+welcome flow directly at the engines beat. Provider install, sign-in, path-save, and
 account-management requests are rejected by fixture-only middleware; no real
 provider login or user configuration is involved. A rejected setup request is
 useful for checking error presentation, not evidence that provider auth works.
@@ -20,9 +20,10 @@ recreating a removed fixture directory.
 
 ## Checks
 
-1. At 1280px, both screens group cards into Ready / Needs setup, with two
-   columns, existing provider marks, and the selected skin's colors. At 390px,
-   cards become one column; no horizontal page overflow; onboarding Continue
+1. Settings groups cards into Ready / Needs setup with two columns at 1280px;
+   onboarding uses one compact list with status pills and collapsed setup rows.
+   Both retain provider marks and the selected skin's colors. At 390px,
+   Settings cards become one column; no horizontal page overflow; onboarding Continue
    and Settings Close remain reachable while the engine list scrolls.
 2. Expand Antigravity in Settings, expand **CLI path and updates**, choose
    **Set CLI…**, and enter `/preview/keep-this-draft`. Click **Toggle sample

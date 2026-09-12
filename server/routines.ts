@@ -207,7 +207,19 @@ interface RoutineFile {
   runs: RoutineRun[];
   /** Durable commit receipts for cross-file confirmation recovery. */
   routineRequestReceipts?: RoutineRequestReceipt[];
+  /** Compact delivery identities outlive the independently trimmed run log. */
+  webhookRunReceipts?: WebhookRunReceipt[];
 }
+
+const webhookRunReceiptSchema = z.object({
+  webhookId: z.string().min(1).max(200),
+  deliveryId: z.string().min(1).max(200),
+  runId: z.string().min(1),
+  acceptedAt: z.number().finite().nonnegative(),
+});
+type WebhookRunReceipt = z.infer<typeof webhookRunReceiptSchema>;
+const WEBHOOK_RETRY_WINDOW_MS = 7 * 24 * 60 * 60_000;
+const MAX_WEBHOOK_RECEIPTS = 20_000;
 
 export type RoutineRequestOwner = Pick<RoutineRequestReceipt, "requestId" | "messageId" | "botId" | "threadId">;
 
@@ -698,6 +710,7 @@ export class RoutineManager {
   private routines: Routine[] = [];
   private runs: RoutineRun[] = [];
   private routineRequestReceipts: RoutineRequestReceipt[] = [];
+  private webhookRunReceipts: WebhookRunReceipt[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
 
@@ -758,10 +771,26 @@ export class RoutineManager {
             Number.isFinite(receipt?.appliedAt)
           )
         : [];
+      this.webhookRunReceipts = Array.isArray(disk.webhookRunReceipts)
+        ? disk.webhookRunReceipts.flatMap((receipt) => {
+            const parsed = webhookRunReceiptSchema.safeParse(receipt);
+            return parsed.success ? [parsed.data] : [];
+          })
+        : [];
+      // Upgrade old run logs before history pruning can discard their IDs.
+      const known = new Set(this.webhookRunReceipts.map((r) => JSON.stringify([r.webhookId, r.deliveryId])));
+      for (const run of this.runs) {
+        if (!run.webhookId || !run.deliveryId || run.createdAt < this.now() - WEBHOOK_RETRY_WINDOW_MS) continue;
+        const key = JSON.stringify([run.webhookId, run.deliveryId]);
+        if (known.has(key)) continue;
+        this.webhookRunReceipts.push({ webhookId: run.webhookId, deliveryId: run.deliveryId, runId: run.id, acceptedAt: run.createdAt });
+        known.add(key);
+      }
     } catch {
       this.routines = [];
       this.runs = [];
       this.routineRequestReceipts = [];
+      this.webhookRunReceipts = [];
     }
     // A local process cannot still own these turns after a full restart.
     const recovered: RoutineRun[] = [];
@@ -1099,10 +1128,19 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
-  /** Queue an event-driven job without inventing a calendar schedule. Webhook
-   * definitions live in their own store; the execution receipt deliberately
-   * reuses this manager so busy-bot ordering, task creation and VM routing stay
-   * identical for every unattended job. */
+  /** Look up an accepted delivery independently of run-log retention. */
+  webhookRunReceipt(webhookId: string, deliveryId: string): { id: string } | null {
+    const receipt = this.webhookRunReceipts.find((candidate) =>
+      candidate.webhookId === webhookId && candidate.deliveryId === deliveryId &&
+      candidate.acceptedAt >= this.now() - WEBHOOK_RETRY_WINDOW_MS);
+    if (receipt) return { id: receipt.runId };
+    // Never duplicate work that is still pending, even beyond the retry window.
+    const active = this.runs.find((run) => run.webhookId === webhookId && run.deliveryId === deliveryId &&
+      ["queued", "running", "waiting"].includes(run.status));
+    return active ? { id: active.id } : null;
+  }
+
+  /** Queue webhook work through the same dispatcher as scheduled routines. */
   enqueueWebhook(input: {
     webhookId: string;
     webhookName: string;
@@ -1111,7 +1149,9 @@ export class RoutineManager {
     runOn: RoutineRunOn;
     deliveryId: string;
     receivedAt: number;
-  }): RoutineRun {
+  }): { id: string } {
+    const existing = this.webhookRunReceipt(input.webhookId, input.deliveryId);
+    if (existing) return existing;
     if (this.options.botState(input.botId) === "missing") {
       throw Object.assign(new Error("The assigned MAUS no longer exists"), { status: 410 });
     }
@@ -1132,8 +1172,25 @@ export class RoutineManager {
       attachments: [],
       createdAt: this.now(),
     };
+    const previousReceipts = this.webhookRunReceipts;
+    const receipts = previousReceipts.filter((receipt) =>
+      receipt.acceptedAt >= this.now() - WEBHOOK_RETRY_WINDOW_MS);
+    // Never evict a promised retry identity to admit fresh work.
+    if (receipts.length >= MAX_WEBHOOK_RECEIPTS) {
+      throw Object.assign(new Error("Webhook retry history is full; try again later"), { status: 429 });
+    }
+    receipts.push({ webhookId: input.webhookId, deliveryId: input.deliveryId, runId: run.id, acceptedAt: this.now() });
+    const previousRuns = this.runs.slice();
     this.runs.push(run);
-    this.save();
+    this.webhookRunReceipts = receipts;
+    try { this.save(); }
+    catch (error) {
+      // Restore pruned history too, retaining the live run objects that tick()
+      // may be awaiting rather than replacing them with cloned snapshots.
+      this.runs = previousRuns;
+      this.webhookRunReceipts = previousReceipts;
+      throw error;
+    }
     this.emitRun(run);
     queueMicrotask(() => void this.tick());
     return cloneRun(run);
@@ -1314,9 +1371,11 @@ export class RoutineManager {
 
       // Oldest queued requests have priority. New manual/webhook arrivals
       // must not continually overtake work that has already waited. Snapshot
-      // the queue because each dispatch can asynchronously add/cancel work.
-      for (const run of this.runs.slice()) {
-        if (run.status !== "queued") continue;
+      // IDs retain order across awaits without holding stale objects after
+      // another request rolls back a failed routine-definition write.
+      for (const id of this.runs.map((run) => run.id)) {
+        const run = this.runs.find((candidate) => candidate.id === id);
+        if (!run || run.status !== "queued") continue;
         // A queued interval represents the latest useful check, not a backlog
         // item. If the bot stayed busy across later occurrences, align this
         // scheduled receipt to the newest due point immediately before it can
@@ -1718,6 +1777,7 @@ export class RoutineManager {
       routines: this.routines,
       runs: this.runs,
       routineRequestReceipts: this.routineRequestReceipts,
+      webhookRunReceipts: this.webhookRunReceipts,
     } satisfies RoutineFile, null, 2), { mode: 0o600 });
   }
 }

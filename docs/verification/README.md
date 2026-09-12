@@ -38,7 +38,9 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Chat UI, driven headlessly](chat-ui.md)
+- [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
@@ -62,6 +64,10 @@ entry only after the shared control surface can really drive it.
 
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
+
+The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
+Electron-owned fixture servers, verifies bounded recovery and private access,
+and proves quit cancels recovery without replaying an interrupted fixture turn.
 
 The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
 and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
@@ -110,6 +116,14 @@ responsive layouts, theme contrast, and status refreshes without losing drafts.
 
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
+
+The [provider recovery recipe](provider-recovery.md) verifies real Grok image
+transport and Claude authentication against loopback APIs, plus scoped thread
+approvals and provider safety errors in an isolated desktop UI.
+
+The [skill approval lifecycle recipe](skill-approval-lifecycle.md) checks Deny,
+missing staged records and active-thread deletion in two isolated app windows,
+including the surviving conversation and sending again without deleting the bot.
 
 The [Codex account recipe](codex-account.md) checks account switching against an
 offline Codex CLI whose identity is synthetic and whose credential directory is empty.

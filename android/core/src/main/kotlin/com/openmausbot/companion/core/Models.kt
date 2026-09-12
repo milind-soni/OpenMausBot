@@ -76,9 +76,27 @@ data class OptionCard(
     val allowKey: String? = null,
     /** Learned skills require a complete, hash-bound review before approval. */
     val skillRequest: SkillRequestCardData? = null,
+    /**
+     * The model's own questions and options (Claude's `AskUserQuestion`).
+     * Present only on a structured ask; every other card leaves it null.
+     */
+    val questionRequest: QuestionRequestCardData? = null,
+    /**
+     * What an answered question was answered WITH. `answered` only records the
+     * behavior once the harness settles a live ask, so without this a settled
+     * question card would read "answer" instead of the reply.
+     */
+    val answeredText: String? = null,
 ) {
     val isPending: Boolean get() = requestId != null && answered == null && dismissed != true
     val isPermission: Boolean get() = tool != null
+
+    /**
+     * A structured ask draws its own card: the model posed real questions with
+     * real options, and a flat row of buttons cannot say which question a tap
+     * answered.
+     */
+    val questions: List<AskQuestion> get() = questionRequest?.questions.orEmpty()
 
     fun responseBehavior(choice: String): String = responseBehavior(choice, isPermission)
 

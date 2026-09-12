@@ -8,10 +8,12 @@ export function FullAccessWarning({
   open,
   onCancel,
   onConfirm,
+  scope = "bot",
 }: {
   open: boolean;
   onCancel: () => void;
   onConfirm: () => void;
+  scope?: "bot" | "thread";
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -67,7 +69,9 @@ export function FullAccessWarning({
               Enable Full access?
             </h2>
             <p id="full-access-warning-body" className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">
-              {FULL_ACCESS_WARNING}
+              {scope === "thread"
+                ? "Apply this bot's Full access to this thread only, including work delegated here. It can read, edit and delete files, use the internet, and control its selected computer without asking—even for destructive or sensitive actions. Other existing threads keep their approval levels. Provider safety restrictions, questions and separate OpenMausBot confirmations still apply."
+                : FULL_ACCESS_WARNING}
             </p>
           </div>
         </div>

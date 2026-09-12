@@ -26,6 +26,11 @@ function fakeProcess() {
 }
 
 test("builds only bounded bot-scoped approval-mode requests", () => {
+  assert.equal(trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, "thread-1").threadId, "thread-1");
+  for (const threadId of ["", "../another-thread", null, 42]) {
+    assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full", false, threadId), /invalid thread/);
+  }
+  assert.throws(() => trustedApprovalModeRequest(REQUEST_ID, "bot-1", "ask", false, "thread-1"), /invalid thread/);
   assert.deepEqual(trustedApprovalModeRequest(REQUEST_ID, "bot-1", "full"), {
     type: "approval-trusted-mode-set",
     requestId: REQUEST_ID,

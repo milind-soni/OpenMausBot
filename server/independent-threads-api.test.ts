@@ -304,12 +304,14 @@ describe("independent bot tasks through the isolated control surface", () => {
     // a no-op relative to the task is not a no-op relative to the Group.
     expect((await api("PATCH", `/api/bots/${botId}/model`, selection)).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${botId}`, { modelSelection: selection })).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true })).status).toBe(409);
     expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection).toEqual(selection);
     const profile = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === botId);
     expect(profile.modelSelection.model).toBe(models[0]);
     expect((await api("POST", `/api/groups/${group.id}/interrupt`, {})).status).toBe(200);
     await expect.poll(async () => (await botState(botId)).busy, { timeout: 10_000 }).toBe(false);
-    expect((await api("PATCH", `/api/bots/${botId}/model`, selection)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true })).status).toBe(200);
+    expect((await botState(botId)).modelSelection).toEqual(selection);
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 
@@ -381,7 +383,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["interrupt", "--bot", botId, "--task", taskA]);
   }, 45_000);
 
-  it("keeps an unattended task's approval requirement while a sibling runs attended", async () => {
+  it("runs an unattended task in the bot's own level, still carding what the provider asks, while a sibling runs attended", async () => {
     const created = await tool("create_bot", { name: "Unattended fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     expect((await api("PATCH", `/api/bots/${botId}`, { approvalMode: "auto" })).status).toBe(200);
@@ -401,14 +403,17 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["set-model", "--bot", botId, "--task", attendedTask, "--instance", "claude", "--model", models[1]]);
     await control(["send", "--bot", botId, "--task", attendedTask, "--text", "ATTENDED_ONLY"]);
     const attendedLaunch = await dump(models[1]);
-    expect(unattendedLaunch.argv[unattendedLaunch.argv.indexOf("--permission-mode") + 1]).toBe("default");
+    // Approval levels are the provider's own modes, passed through: a turn a
+    // webhook started runs in the bot's level like any other, and a request
+    // Claude's reviewer leaves for a person is carded, not answered.
+    expect(unattendedLaunch.argv[unattendedLaunch.argv.indexOf("--permission-mode") + 1]).toBe("auto");
     expect(attendedLaunch.argv[attendedLaunch.argv.indexOf("--permission-mode") + 1]).toBe("auto");
 
     const unattendedAnswers = await permission(models[0], "unattended-permission");
     expect((await control(["wait", "--bot", botId, "--task", unattendedTask, "--timeout", "5"])).status).toBe("needs-user");
     const card = (await api("GET", `/api/threads/${unattendedTask}/messages`)).body.messages
       .find((message: any) => message.card?.requestId === "unattended-permission");
-    expect(card.card.heldCode).toMatch(/unattended/);
+    expect(card.card.heldCode).toBe("approval.held.native");
     expect(unattendedAnswers).toEqual([]);
     expect((await botState(botId)).tasks.find((task: any) => task.taskId === attendedTask)?.activity).toBe("working");
     await control(["interrupt", "--bot", botId, "--task", attendedTask]);

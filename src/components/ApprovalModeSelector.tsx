@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Hand, Settings, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Check, FilePen, Hand, Settings, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { approvalModeFor, hasNativeAutoReview, supportsApprovalMode, type ApprovalMode } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
@@ -18,6 +18,7 @@ const APPROVAL_MODE_KEYS: ReadonlyArray<{
   Icon: typeof Hand;
 }> = [
   { mode: "ask", labelKey: "approvalMode.ask.label", chipKey: "approvalMode.ask.chip", descriptionKey: "approvalMode.ask.desc", Icon: Hand },
+  { mode: "edits", labelKey: "approvalMode.edits.label", chipKey: "approvalMode.edits.chip", descriptionKey: "approvalMode.edits.desc", Icon: FilePen },
   { mode: "auto", labelKey: "approvalMode.auto.label", chipKey: "approvalMode.auto.chip", descriptionKey: "approvalMode.auto.desc", Icon: ShieldCheck },
   { mode: "full", labelKey: "approvalMode.full.label", chipKey: "approvalMode.full.chip", descriptionKey: "approvalMode.full.desc", Icon: ShieldAlert },
   { mode: "custom", labelKey: "approvalMode.custom.label", chipKey: "approvalMode.custom.chip", descriptionKey: "approvalMode.custom.desc", Icon: Settings },
@@ -31,7 +32,7 @@ export interface ApprovalModeOption {
   Icon: typeof Hand;
 }
 
-/** The four levels, in the reader's language. A function rather than a
+/** The levels, in the reader's language. A function rather than a
  * constant: it has to answer to the language in effect when it is called. */
 export function approvalModeOptions(): ApprovalModeOption[] {
   return APPROVAL_MODE_KEYS.map(({ mode, labelKey, chipKey, descriptionKey, Icon }) => ({
@@ -49,7 +50,7 @@ export function approvalModeOptionsFor(driverKind: string, trustedModesAvailable
       // Antigravity has no native reviewer. Offer its explicit full-access
       // grant as Auto instead of a second choice that actually behaves as Ask.
       && (driverKind !== "antigravityAgent" || option.mode !== "auto")
-      && (trustedModesAvailable || option.mode === "ask" || option.mode === "auto"))
+      && (trustedModesAvailable || option.mode === "ask" || option.mode === "edits" || option.mode === "auto"))
     .map((option) => {
       if (driverKind === "antigravityAgent" && option.mode === "full") {
         return {

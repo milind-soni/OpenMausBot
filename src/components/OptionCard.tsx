@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { useStore, visibleMessages, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
 
@@ -24,10 +25,13 @@ export function OptionCard({
   botId,
   threadId,
   message,
+  /** set when the card is in a room: the answer belongs to the room's thread */
+  groupId,
 }: {
   botId: string;
   threadId?: string;
   message: Message;
+  groupId?: string;
 }) {
   const { state, dispatch } = useStore();
   const [custom, setCustom] = useState("");
@@ -38,23 +42,27 @@ export function OptionCard({
   // later user message that means they already talked past this quiz.
   if (!card || shouldHideOnboardingCard(message, transcript)) return null;
 
+  const title = card.title;
+  const subtitle = card.subtitle;
+  const options = card.options;
+
   const answer = (text: string) => {
     if (!text.trim()) return;
-    dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim() });
+    dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim(), groupId });
   };
 
   return (
     <div className="w-full max-w-[840px] rounded-2xl border border-hairline/50 bg-card p-4">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="text-[16px] font-semibold text-ink">{card.title}</div>
+          <div className="text-[16px] font-semibold text-ink">{title}</div>
           <div className="mt-0.5 text-[14px] text-ink-secondary">
-            {card.subtitle}
+            {subtitle}
           </div>
         </div>
         <button
           onClick={() =>
-            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id })
+            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id, groupId })
           }
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
         >
@@ -63,7 +71,7 @@ export function OptionCard({
       </div>
 
       <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
-        {card.options.map((opt, i) => (
+        {options.map((opt, i) => (
           <button
             key={opt}
             disabled={!!card.answered}
@@ -75,7 +83,7 @@ export function OptionCard({
               // pure white, the same value as the card underneath, so a
               // hovered or answered row used to be invisible. `raised-hover`
               // is the one tone every skin guarantees stands off a surface.
-              card.answered === opt
+              (card.answeredText ?? card.answered) === opt
                 ? "bg-raised-hover"
                 : "hover:bg-raised-hover/60 disabled:hover:bg-transparent",
             )}
@@ -97,7 +105,7 @@ export function OptionCard({
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && answer(custom)}
-          placeholder="Type your own answer"
+          placeholder={t("onboarding.card.custom")}
           className="mt-3 w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2.5 text-[15px] text-ink placeholder:text-ink-secondary focus:outline-none focus:border-hairline"
         />
       )}

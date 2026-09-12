@@ -9,6 +9,8 @@ import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
 import { t } from "@/lib/i18n";
+import { withTourReset } from "@/lib/guided-tour";
+import { completionPatch } from "@/lib/onboarding";
 import { ApiKeyRow, OpenAiCompatUrl, VpsConnection } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
 import { EnginesSettings } from "./EnginesSettings";
@@ -175,6 +177,60 @@ function AnalyticsRow() {
           setOn(next);
         }}
       />
+    </Card>
+  );
+}
+
+/** Clears the tour's steps and opens it again on the live interface. */
+function ReplayAppTourButton() {
+  const { state, dispatch } = useStore();
+  const [saving, setSaving] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <div>
+      <button
+        disabled={saving}
+        onClick={() => {
+          setSaving(true);
+          setFailed(false);
+          void api("/api/config", {
+            method: "PUT",
+            body: JSON.stringify({ onboarding: {
+              // Upgraded users may have completed only the legacy browser gate.
+              ...(!state.config?.onboarding?.completedAt ? completionPatch().onboarding : {}),
+              hintsSeen: withTourReset(state.config?.onboarding),
+            } }),
+            signal: AbortSignal.timeout(10_000),
+          })
+            .then((config) => {
+              dispatch({ type: "configStatus", config });
+              dispatch({ type: "toggleTour", open: true });
+            })
+            .catch(() => setFailed(true))
+            .finally(() => setSaving(false));
+        }}
+        className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+      >
+        {t("settings.welcome.appTour")}
+      </button>
+      {failed && <p role="alert" className="mt-2 text-[13px] text-danger">{t("onboarding.tour.error")}</p>}
+    </div>
+  );
+}
+
+function ReplayTourRow() {
+  const { dispatch } = useStore();
+  return (
+    <Card title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitle")}>
+      <div className="flex flex-wrap gap-2">
+        <ReplayAppTourButton />
+        <button
+          onClick={() => dispatch({ type: "toggleWelcome", open: true })}
+          className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+        >
+          {t("settings.welcome.replay")}
+        </button>
+      </div>
     </Card>
   );
 }
@@ -572,6 +628,7 @@ export function SettingsModal() {
                 </Card>
                 <ThreadConcurrencySettings />
                 <LanguageRow />
+                {!remoteActive && <ReplayTourRow />}
                 <UpdatesRow />
                 <DiagnosticsRow />
                 <AnalyticsRow />
