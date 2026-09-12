@@ -775,6 +775,42 @@ describe("delegations survive a restart", () => {
     expect(pendingThreads()).toEqual([]);
   });
 
+  it("restores an over-age backlog without expiring the second job when the first occupies its target", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const first = queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "first", depth: 0 }, 1);
+      const second = queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "second", depth: 0 }, 1);
+      vi.setSystemTime(Date.now() + 2 * DELEGATION_TTL_MS);
+      _resetPending();
+      _loadPending();
+      const renewedAt = pendingDelegationInfo(second.id!)!.queuedAt;
+      expect(renewedAt).toBe(Date.now());
+      // The repaired deadline is already durable; restarting again does
+      // not grant another window while this one is still valid.
+      vi.setSystemTime(Date.now() + 60_000);
+      _resetPending();
+      _loadPending();
+      expect(pendingDelegationInfo(second.id!)?.queuedAt).toBe(renewedAt);
+      const ran: string[] = [];
+      const runTarget = (_to: string, message: string) => {
+        ran.push(message);
+        store.patchBot(target.id, { busy: true });
+      };
+      drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, runTarget);
+      await waitFor(() => ran.length === 1 && pendingDelegationInfo(first.id!) === null);
+      expect(findDelegationReceipt(second.id!)).toBeNull();
+      expect(pendingDelegationInfo(second.id!)?.waiting).toBe(true);
+
+      store.patchBot(target.id, { busy: false });
+      releaseDelegationsWaitingOn(target.id);
+      drainDelegations(buses.commsBus, buses.approvalBus, from.threadId, runTarget);
+      await waitFor(() => ran.length === 2 && pendingThreads().length === 0);
+      expect(ran[1]).toContain("second");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("gives a handoff saved before queuedAt existed a fresh 24-hour window, marks it already-announced, and persists the backfill", () => {
     const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(DATA_DIR, { recursive: true });

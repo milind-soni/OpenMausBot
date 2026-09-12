@@ -97,6 +97,52 @@ describe("independent bot tasks through the isolated control surface", () => {
     await session.close();
   });
 
+  it("holds a delegation behind an approval and delivers it once without another user prompt", async () => {
+    const chief = (await tool("create_bot", { name: "Mailbox Chief", instance_id: "claude", model: models[0] })).bot;
+    const peer = (await tool("create_bot", { name: "Mailbox Peer", instance_id: "claude", model: models[1] })).bot;
+    await api("PATCH", `/api/bots/${peer.id}/tasks/${peer.activeTaskId}`, { approvalMode: "ask" });
+    await control(["send", "--bot", peer.id, "--text", "Hold this review until I approve the check."]);
+    const answers = await permission(models[1], "mailbox-approval");
+    await expect.poll(async () => (await botState(peer.id)).activity).toBe("waiting-on-you");
+    await control(["send", "--bot", chief.id, "--text", "Ask the reviewer to check the release notes, then return the result here."]);
+    const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const roster = await internal(token, "GET", "/api/internal/agents");
+    expect(roster.status).toBe(200);
+    expect(roster.body.bots.find((bot: any) => bot.id === peer.id)).toMatchObject({
+      status: "waiting-on-user", statusText: "waiting on the user", busy: true,
+    });
+    const queued = await internal(token, "POST", "/api/internal/delegate-bot", {
+      toBotId: peer.id, message: "MAILBOX_REVIEW: check the release notes.",
+    });
+    expect(queued.body.queued).toBe(true);
+    // Finish only the Chief. Its peer remains parked on the actual approval
+    // broker, and the handoff must be visible once without occupying the Chief.
+    writeFileSync(modelFile(models[0], "gate"), "finish");
+    expect((await control(["wait", "--bot", chief.id, "--timeout", "15"])).status).toBe("settled");
+    await expect.poll(async () => {
+      const current = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
+      return current.messages.filter((message: any) => message.tool?.name?.includes("who's waiting on you")).length;
+    }).toBe(1);
+    expect(answers).toEqual([]);
+    await control(["messages", "--bot", chief.id, "--limit", "10"]);
+    const allowed = await api("POST", `/api/threads/${peer.activeTaskId}/respond`, { requestId: "mailbox-approval", behavior: "allow" });
+    expect(allowed.body.outcome).toBe("allowed-once");
+    await expect.poll(() => answers.some((answer) => answer.id === "mailbox-approval")).toBe(true);
+    writeFileSync(modelFile(models[1], "gate"), "finish");
+    await expect.poll(async () => {
+      const bots = (await api("GET", "/api/bots")).body.bots;
+      const current = bots.find((bot: any) => bot.id === chief.id);
+      return !current.busy && current.messages.some((message: any) =>
+        message.from?.botId === peer.id && message.text?.includes("MAILBOX_REVIEW"));
+    }, { timeout: 20_000 }).toBe(true);
+    const bots = (await api("GET", "/api/bots")).body.bots;
+    const peerState = bots.find((bot: any) => bot.id === peer.id);
+    expect(peerState.messages.filter((message: any) => message.role === "user" && message.text?.includes("MAILBOX_REVIEW"))).toHaveLength(1);
+    expect((await control(["wait", "--bot", peer.id, "--timeout", "15"])).status).toBe("settled");
+    await control(["messages", "--bot", peer.id, "--limit", "10"]);
+    await control(["messages", "--bot", chief.id, "--limit", "15"]);
+  }, 60_000);
+
   it("rejects blank memory replacements, caps new titles, and retains project files after deletion", async () => {
     const created = await tool("create_bot", { name: "Release review fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;

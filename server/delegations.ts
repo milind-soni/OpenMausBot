@@ -53,8 +53,8 @@ interface PendingDelegationItem extends DelegationItem {
   /** The bot that queued this handoff. Stored explicitly because a shared
    * channel's thread is not owned by any single bot. */
   sourceBotId: string;
-  /** When this handoff was queued (epoch ms). It waits for a busy target
-   * for up to DELEGATION_TTL_MS from here, then expires with a receipt. */
+  /** Start of this handoff's current delivery window (epoch ms). Restoring
+   * an already elapsed window starts a fresh one; see _loadPending. */
   queuedAt: number;
   /** This handoff has already posted its "waiting" chip. One chip per
    * handoff, not one per busy period. */
@@ -109,15 +109,11 @@ const MAX_RECEIPTS = 100;
 const RECEIPT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const RESULT_MAX_CHARS = 4_000;
 
-/** How long a queued handoff may wait for its target before it expires.
- * The clock only runs while the handoff actually cannot be delivered:
- * expiry is judged against whether the target can take the turn right now,
- * not against wall-clock age alone, so time the app was closed or asleep
- * does not consume the 24 hours (on boot every bot loads idle, and a missed
- * sweep tick on wake finds a target that may already be free). A busy
- * target is waited for through any number of its own turns; only this
- * bounds the wait, so a handoff to a bot nobody uses cannot hold one of its
- * source thread's MAX_QUEUED_PER_THREAD slots forever. */
+/** A busy handoff's delivery window. An available target may still pick up
+ * an overdue item. At restart, elapsed windows are renewed before any boot
+ * dispatch, so the first recovered job cannot cause the remaining backlog
+ * to expire. This is not an uptime clock: sleep within a running process
+ * still counts, and a non-expired restored window keeps its deadline. */
 export const DELEGATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 let receipts: DelegationReceipt[] = [];
@@ -221,11 +217,12 @@ export function _loadPending(): void {
           typeof item.message !== "string" ||
           !Number.isFinite(item.depth)
         ) return [];
-        // saved before queuedAt existed, or hand-edited/clock-skewed into the
-        // future: either way there is no trustworthy start time, so start
-        // its 24 hours now rather than let a future queuedAt make it
-        // un-expirable or a missing one expire it on the spot.
-        const hasUsableQueuedAt = Number.isFinite(item.queuedAt) && item.queuedAt! <= now;
+        // Restore every elapsed window before boot dispatch. Merely checking
+        // whether the target is idle loses the second old job as soon as the
+        // first recovered job occupies it. Invalid/legacy timestamps get the
+        // same fresh window; valid, unexpired windows keep their deadline.
+        const hasUsableQueuedAt = Number.isFinite(item.queuedAt) && item.queuedAt! <= now &&
+          now - item.queuedAt! < DELEGATION_TTL_MS;
         if (!hasUsableQueuedAt) backfilled = true;
         // A legacy item saved with attempts >= 1 already posted its old
         // "retry n/3" chip under the since-removed bounded-retry scheme; load
@@ -258,9 +255,8 @@ export function _loadPending(): void {
   } catch {
     /* fresh install, or unreadable — start empty */
   }
-  // The backfilled queuedAt only lives in memory until the next queue write.
-  // Persist it now so a restart loop (crash, or repeated boot before
-  // anything else touches the queue) does not keep restarting the window.
+  // Persist repaired/renewed windows before dispatch. A quick restart loop
+  // must retain that still-valid deadline, not renew it on every load.
   if (backfilled) savePending();
   receipts = [];
   try {
@@ -652,13 +648,10 @@ async function processOne(
     return "settled";
   }
   // Past its 24 hours AND the target still cannot take the turn: this is the
-  // only bound on how long a handoff waits. Checked against the same
-  // free/busy test holdWhileTargetBusy uses, and only once that test comes
-  // back "still can't", so downtime before this point (app closed, laptop
-  // asleep) never counts against the 24 hours — a target that is free RIGHT
-  // NOW gets the handoff instead of an expiry receipt. Decided before a wait
-  // is announced, so one item never posts both a waiting chip and an expiry
-  // chip in the same pass.
+  // bound on a busy wait. Use the same free/busy test as holdWhileTargetBusy;
+  // an available target gets even an overdue item. Restart recovery renews
+  // elapsed windows in _loadPending before any target becomes busy. Decide
+  // before announcing a wait so an item cannot post both chips in one pass.
   const canTakeTurn = targetCanTakeTurn(bus, target, item);
   if (!canTakeTurn && isExpired(item, Date.now())) {
     expireDelegation(bus, sourceThreadId, item, sender.id);
