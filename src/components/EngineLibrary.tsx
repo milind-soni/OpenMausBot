@@ -4,6 +4,7 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ProviderMark } from "./ProviderIcons";
+import { ProviderManager } from "./ProviderManager";
 
 export function engineReady(instance: InstanceInfo): boolean {
   return instance.snapshot.state === "available" &&
@@ -58,13 +59,12 @@ export function EngineCard({ instance, children }: { instance: InstanceInfo; chi
   );
 }
 
-export function EngineSections({ instances, renderEngine, topContent }: {
+export function EngineSections({ instances, renderEngine }: {
   instances: InstanceInfo[];
   renderEngine: (instance: InstanceInfo) => ReactNode;
-  topContent?: ReactNode;
 }) {
   return <div className="flex min-w-0 flex-col gap-5">
-    {topContent}
+    <ProviderManager />
     <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
       {[true, false].flatMap((ready) => {
         const rows = instances.filter((instance) => engineReady(instance) === ready);
