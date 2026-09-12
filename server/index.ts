@@ -4167,8 +4167,9 @@ bus.subscribe((event: RuntimeEvent) => {
   if (!event.ok) discardDelegations(commsBus, event.threadId);
   else drainThreadDelegations(event.threadId);
   // A settling bot frees itself as a delegation TARGET too: handoffs that
-  // found it busy earlier were kept queued (bounded retries) on their own
-  // source threads, and this is the moment they get their retry.
+  // found it busy earlier were kept queued — waiting until it's free or the
+  // 24-hour expiry, not counting retries — on their own source threads, and
+  // this is the moment they get re-evaluated.
   const settledBot = store.botByThread(event.threadId);
   if (settledBot) retryDelegationsWaitingOn(settledBot.id);
 });
@@ -9457,7 +9458,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               toBotName: queuedTarget?.name ?? toBotId,
               ...(stillQueued
                 ? {
-                  targetStatus: peerStatus(queuedTarget?.activity, queuedTarget?.busy),
+                  // A deleted target must never read as "available" — peerStatus's
+                  // undefined/undefined fallback is "available", which is wrong here.
+                  targetStatus: queuedTarget ? peerStatus(queuedTarget.activity, queuedTarget.busy) : "unavailable",
                   expiresInMs: Math.max(0, stillQueued.queuedAt + DELEGATION_TTL_MS - Date.now()),
                 }
                 : {}),

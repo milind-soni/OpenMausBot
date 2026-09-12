@@ -61,13 +61,16 @@ function setupBuses(store: Store): BusPair {
 
 /** Poll until `predicate` returns a truthy value or `timeout` elapses.
  * drainDelegations is fire-and-forget (processOne runs as a Promise) so
- * tests need to wait for its async steps to land. */
+ * tests need to wait for its async steps to land. The deadline is computed
+ * from `performance.now()`, not `Date.now()`: `vi.useFakeTimers({ toFake:
+ * ["Date"] })` freezes Date but not performance.now(), so a regression fails
+ * this timeout instead of hanging until Vitest's own test timeout. */
 async function waitFor<T>(predicate: () => T | undefined | false, timeout = 2_000): Promise<T> {
-  const deadline = Date.now() + timeout;
+  const deadline = performance.now() + timeout;
   for (;;) {
     const v = predicate();
     if (v) return v as T;
-    if (Date.now() > deadline) throw new Error("waitFor: timed out");
+    if (performance.now() > deadline) throw new Error("waitFor: timed out");
     await new Promise((r) => setTimeout(r, 25));
   }
 }
@@ -772,7 +775,7 @@ describe("delegations survive a restart", () => {
     expect(pendingThreads()).toEqual([]);
   });
 
-  it("gives a handoff saved before queuedAt existed a fresh 24-hour window", () => {
+  it("gives a handoff saved before queuedAt existed a fresh 24-hour window, marks it already-announced, and persists the backfill", () => {
     const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
     mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(file(), JSON.stringify({
@@ -783,11 +786,40 @@ describe("delegations survive a restart", () => {
     const before = Date.now();
     _loadPending();
     expect(pendingDelegationInfo("legacy-1")?.queuedAt).toBeGreaterThanOrEqual(before);
+    // attempts >= 1 means the old "retry n/3" chip already posted — loading
+    // it must not let it post a second waiting chip on the next drain.
+    const onDisk = JSON.parse(readFileSync(file(), "utf8")) as Record<string, Array<{ id: string; waitAnnounced?: boolean; queuedAt?: number }>>;
+    const loaded = onDisk[from.threadId]!.find((entry) => entry.id === "legacy-1")!;
+    expect(loaded.waitAnnounced).toBe(true);
+    // the backfilled queuedAt is written back immediately, so a restart loop
+    // does not keep restarting the 24-hour window on every boot.
+    expect(loaded.queuedAt).toBeGreaterThanOrEqual(before);
+  });
+
+  it("clamps a future queuedAt (clock moved back, hand-edited file) to now instead of making it un-expirable", () => {
+    const { mkdirSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+    mkdirSync(DATA_DIR, { recursive: true });
+    const future = Date.now() + 10 * 24 * 60 * 60 * 1000;
+    writeFileSync(file(), JSON.stringify({
+      [from.threadId]: [
+        { id: "future-1", sourceBotId: from.id, toBotId: target.id, message: "old", depth: 0, queuedAt: future },
+      ],
+    }));
+    const before = Date.now();
+    _loadPending();
+    const info = pendingDelegationInfo("future-1");
+    expect(info?.queuedAt).toBeGreaterThanOrEqual(before);
+    expect(info?.queuedAt).toBeLessThan(future);
+    const onDisk = JSON.parse(readFileSync(file(), "utf8")) as Record<string, Array<{ id: string; queuedAt?: number }>>;
+    expect(onDisk[from.threadId]!.find((entry) => entry.id === "future-1")!.queuedAt).toBeLessThan(future);
   });
 
   it("expireStaleDelegations expires due handoffs across threads, keeps fresh ones, and reports each once", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
+      // Target stays busy for the whole test: expiry only fires for a
+      // handoff that still cannot be delivered, so age alone must not expire it.
+      store.patchBot(target.id, { busy: true });
       const other = store.createTask(from.id, "Other", false)!.threadId;
       const stale = queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "stale", depth: 0 }, 1);
       const staleOther = queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "stale too", depth: 0 }, 1, other);
@@ -1012,6 +1044,45 @@ describe("busy waits and expiry", () => {
 
       expect(runTarget).not.toHaveBeenCalled();
       expect(findDelegationReceipt(queued.id!)).toMatchObject({ status: "expired" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dispatches an over-age item whose target is idle instead of expiring it — boot-drain case", async () => {
+    // "quit Friday, open Monday": the handoff sat queued past DELEGATION_TTL_MS
+    // while the app was closed. On boot, store.ts resets every bot to idle —
+    // the target is free right now, so downtime must not count against it.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "leftover", depth: 0 }, 1);
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_TTL_MS + 1));
+      // simulate boot: the store reloads every bot as idle
+      store.patchBot(target.id, { busy: false });
+
+      const runTarget = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget);
+      await waitFor(() => runTarget.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
+
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      expect(_pendingCount(from.threadId)).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("expireStaleDelegations does not expire an over-age item whose target is idle, and still returns 0", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      store.patchBot(target.id, { busy: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "leftover", depth: 0 }, 1);
+      vi.setSystemTime(new Date(Date.now() + DELEGATION_TTL_MS + 1));
+      store.patchBot(target.id, { busy: false });
+
+      expect(expireStaleDelegations(commsBus, Date.now())).toBe(0);
+      expect(findDelegationReceipt(queued.id!)).toBeNull();
+      expect(pendingDelegationInfo(queued.id!)).not.toBeNull();
     } finally {
       vi.useRealTimers();
     }

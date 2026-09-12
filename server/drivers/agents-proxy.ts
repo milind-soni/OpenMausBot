@@ -989,8 +989,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       const why = r.targetStatus === "waiting-on-user"
         ? ` ${who} is waiting on the user, so it goes through after they answer.`
         : r.targetStatus === "working" ? ` ${who} is busy with other work.` : "";
-      const hours = Number.isFinite(r.expiresInMs) ? Math.ceil(Number(r.expiresInMs) / 3_600_000) : null;
-      const expiry = hours === null ? "" : ` It expires if not picked up within ${hours} hour${hours === 1 ? "" : "s"}.`;
+      const expiresInMs = Number(r.expiresInMs);
+      const expiry = !Number.isFinite(expiresInMs)
+        ? ""
+        : expiresInMs <= 0
+          ? " It is past its 24-hour limit and will expire the next time it cannot be delivered."
+          : ` It expires if not picked up within ${Math.ceil(expiresInMs / 3_600_000)} hour${Math.ceil(expiresInMs / 3_600_000) === 1 ? "" : "s"}.`;
       return { text: `Task ${taskId} is still queued — ${who} hasn't picked it up yet${waitMs ? ` after ${timeout}s` : ""}.${why}${expiry} Keep working and check again later.` };
     }
     if (r.status === "running") {

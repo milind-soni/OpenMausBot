@@ -68,13 +68,14 @@ Two changes to bot-to-bot handoffs:
 
 **Expiry**
 
-- `isExpired(item, now) = now - item.queuedAt >= DELEGATION_TTL_MS`.
+- `isExpired(item, now) = now - item.queuedAt >= DELEGATION_TTL_MS`. This is necessary but not sufficient: the clock only runs while the handoff actually cannot be delivered. Expiry applies only to a handoff that would otherwise keep waiting — a handoff whose target can take the turn right now is delivered instead, however old it is. Concretely: `store.ts` resets every bot to idle/not-busy at load, so on boot every previously-busy target looks free again, and a stuck handoff from before the app closed gets its turn instead of an expiry receipt; the same applies to a missed hourly-sweep tick firing on wake from sleep. Time the app was closed or asleep therefore never consumes the 24 hours — only time spent genuinely waiting on a busy target does.
+- `targetCanTakeTurn(bus, target, item)` is the single free/busy test — the same one `holdWhileTargetBusy` uses to decide whether to hold — factored out so the expiry decision and the hold decision can never disagree. A deleted target counts as "cannot take the turn": there is nothing to become free, so such an item still expires.
 - `expireDelegation(bus, sourceThreadId, item)` records the receipt, posts the chip, and returns `"settled"`.
   - Receipt: status `"expired"`, result `@<name> was not free to take this for 24 hours`.
   - Chip: `Delegation to @<name> expired — not picked up within 24 hours`, `ok: false`.
 - Checked in three places:
-  1. **At the top of `processOne`**, before the target lookup. Every drain therefore expires stale items first, and the existing `onSettled → wakeUndispatchedDelegation` path wakes the delegating bot with a failure prompt.
-  2. **`expireStaleDelegations(bus, now, onSettled)`** — a new export that walks every queue, expires due items, acknowledges them, persists once, and calls `onSettled(receipt)` for each. It skips any thread currently in `drainingThreads`; that drain will expire the item itself.
+  1. **In `processOne`, after `dropIfUnreachable` and `dropIfThreadGone`, gated on `!targetCanTakeTurn(...)`.** It runs after those reachability checks (so a dropped/reassigned peer reports as dropped, not expired) but before `holdWhileTargetBusy` decides whether to hold or announce a wait — an item is never both expired and wait-announced in the same pass. The same rule, in the same order, is applied again on the post-approval path (`heldAfterApproval`), since approval can itself take up to 24 hours via `approvalAlreadyGranted`. The existing `onSettled → wakeUndispatchedDelegation` path wakes the delegating bot with a failure prompt either way.
+  2. **`expireStaleDelegations(bus, now, onSettled)`** — a new export that walks every queue, expires only items that are both due AND currently unable to be delivered (same `targetCanTakeTurn` test; a deleted target counts as unable), acknowledges them, persists once, and calls `onSettled(receipt)` for each. It skips any thread currently in `drainingThreads`; that drain will expire the item itself. An over-age item whose target is free is left queued — the next drain or `retryDelegationsWaitingOn` delivers it.
   3. **Callers of the sweep in `index.ts`:**
      - once at boot, just before the existing leftover drain over `pendingThreads()`
      - from one hourly `setInterval(...).unref()`

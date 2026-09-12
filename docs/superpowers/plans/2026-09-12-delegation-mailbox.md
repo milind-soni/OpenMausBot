@@ -28,6 +28,9 @@ Each of these was found while reading the code for this plan:
    - The existing boot loop drains every leftover thread, and a drain now expires stale items itself.
    - A sweep placed *before* that loop would wake delegators of stopped routine runs, whose handoffs the loop is about to discard.
 5. **The agents proxy's `check_delegation` rendering prints the new queued fields.** The spec added them to the endpoint but did not name the proxy, and without this the model never sees them.
+6. **`peerStatus` takes `(activity, busy)`, not the single-argument `peerStatus(activity)` the spec described.** A record without an `activity` — or still `idle` while `busy` is set, as older callers and test fixtures write it — falls back to `busy`, so anything that only knew `busy` before this change still reads exactly as it did.
+7. **`expireDelegation` takes an `ownerId` and posts no chip into a thread the delegator no longer owns.** A source thread can outlive the bot that queued the handoff (deletion, reassignment); the receipt is still recorded, but the chip only goes into a thread the current owner can actually see.
+8. **The expiry check sits after the source-ownership check rather than strictly at the top of `processOne`** (and, after the final-review fix for the boot-drain regression, after the `dropIfUnreachable`/`dropIfThreadGone` reachability gates too). Ownership is checked first because an orphaned source thread should report "dropped", not "expired"; the reachability gates now run before expiry so a handoff whose target is free right now — including one whose downtime spans an app restart or laptop sleep — is delivered instead of expired.
 
 ## Global Constraints
 

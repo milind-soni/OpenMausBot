@@ -855,6 +855,23 @@ describe("agents-proxy MCP surface", () => {
     }
   });
 
+  it("check_delegation never says 'within 0 hours' once a queued handoff's expiry has already elapsed", async () => {
+    delegationStatusResponse = {
+      status: "queued",
+      toBotName: "Helper",
+      targetStatus: "working",
+      expiresInMs: 0,
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).not.toContain("within 0 hours");
+      expect(text).toContain("past its 24-hour limit");
+      expect(text).toContain("will expire the next time it cannot be delivered");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+  });
+
   it("memory_update forwards only the configured owner and thread with its capability token", async () => {
     const result = await callTool("memory_update", {
       action: "replace", text: "- New preference", old_text: "- Old preference",
