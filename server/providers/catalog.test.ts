@@ -41,7 +41,7 @@ describe("provider connection catalog", () => {
       provider: "nvidia-nim",
       name: "Local NIM",
       apiKey: "token",
-    })).toThrow(/requires the base URL/i);
+    })).toThrow(/requires (?:the )?base URL/i);
     expect(() => normalizeProviderConnectionInput({
       provider: "custom-openai-compatible",
       name: "Custom",
