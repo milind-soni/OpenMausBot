@@ -10,7 +10,6 @@ import { launchVerificationServer, runControlOmb, type VerificationServer } from
 import { closeBrowserSession, resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { ensureUiBrowser, sessionEnv, UI_TOOLS_DIR, type UiHandle } from "./control-omb-ui.ts";
 import { mountPreview, type MountedPreview } from "./preview-fixture.ts";
-import { startDemoCapture } from "./live-team-demo-capture.ts";
 
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
 const run = enabled ? it : it.skip;
@@ -22,24 +21,6 @@ let handle: UiHandle | undefined;
 let socket: Socket | undefined;
 const extraSockets: Socket[] = [];
 let recording = false;
-const demo = process.env.OMB_UI_DEMO === "1";
-let demoCapture: Awaited<ReturnType<typeof startDemoCapture>> | undefined;
-const beat = async (title: string, description: string, seconds = 3) => {
-  if (!demo) return;
-  await evaluate(`(() => {
-    let caption = document.getElementById('demo-caption');
-    if (!caption) {
-      document.getElementById('root').style.height = 'calc(100% - 100px)';
-      caption = document.createElement('aside'); caption.id = 'demo-caption';
-      caption.style.cssText = 'position:fixed;inset:auto 0 0;height:100px;box-sizing:border-box;padding:18px 40px;background:#111720;border-top:1px solid #34404f;color:#f5f7fa;display:flex;align-items:center;gap:32px;z-index:2147483647;pointer-events:none;font-family:system-ui';
-      caption.innerHTML = '<div style="font-size:12px;letter-spacing:2px;color:#90baff;min-width:160px">LIVE TEAM<br><span style="font-size:10px;letter-spacing:1px;color:#a6afba">ISOLATED DEMO</span></div><div><strong style="font-size:22px;font-weight:600"></strong><p style="font-size:16px;color:#b8c3d1;margin:5px 0 0"></p></div>';
-      document.body.append(caption);
-    }
-    caption.querySelector('strong').textContent = ${JSON.stringify(title)};
-    caption.querySelector('p').textContent = ${JSON.stringify(description)};
-  })()`);
-  if (seconds) await new Promise(resolve => setTimeout(resolve, seconds * 1000));
-};
 const browser = async (...args: string[]) => {
   if (!handle) throw Error("No fixture browser");
   const { stdout } = await exec(handle.binary, [...args, "--json"], { env: sessionEnv(handle), timeout: 60_000, maxBuffer: 4 * 1024 * 1024 }).catch((error) => { throw new Error(error.stdout || error.message); });
@@ -65,7 +46,6 @@ afterAll(async () => {
     writeFileSync(join(evidence, "last-snapshot.json"), JSON.stringify(await ui("snapshot").catch(() => null), null, 2));
     writeFileSync(join(evidence, "drag-events.json"), JSON.stringify(await evaluate("window.__studioDragEvents ?? []").catch(() => null), null, 2));
   }
-  if (demoCapture) { await demoCapture.stop(); demoCapture = undefined; }
   socket?.destroy();
   for (const connection of extraSockets) connection.destroy();
   if (handle) {
@@ -76,7 +56,7 @@ afterAll(async () => {
   await fixture?.close();
 }, 45_000);
 
-run("runs the launch story through real state, sending, request UI, handoffs, results and workstation return", async () => {
+run("assigns tasks, answers questions, follows handoffs and results, and returns from workstations", async () => {
   mkdirSync(evidence, { recursive: true });
   const { binary, chrome } = await ensureUiBrowser();
   fixture = await launchVerificationServer(process.env, undefined, undefined, { binaryPath: binary, executablePath: chrome ?? "" });
@@ -101,11 +81,11 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
     `await import(${JSON.stringify(pathToFileURL(resolve("server/testing/fake-claude-cli.ts")).href)});`,
   ].join("\n"), { mode: 0o700 });
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
-  preview = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__live-team.html", title: "Live Team · isolated fake-engine demo", logLevel: "silent" });
+  preview = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__live-team.html", title: "Live Team · isolated test fixture", logLevel: "silent" });
   handle = { ...fixture.info, home: fixture.info.dataDir, previewUrl: preview.previewUrl, session: `omb-studio-${new URL(fixture.info.url).port}`, binary, chrome, botId: coordinator.id };
   writeFileSync(join(fixture.info.dataDir, "ui.json"), JSON.stringify(handle));
   await browser("open", preview.previewUrl);
-  await browser("set", "viewport", demo ? "1920" : "1440", demo ? "1080" : "1000");
+  await browser("set", "viewport", "1440", "1000");
   await waitText("Coordinator");
   const navigation = await ui("snapshot");
   const toolsRef = Object.entries(navigation.refs).find(([, value]) => (value as any).name === "Tools" && (value as any).role === "button")?.[0];
@@ -118,27 +98,17 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
   await ui("select", "--name", "Room", "--value", "Launch");
   await expect.poll(() => evaluate("document.querySelectorAll('[data-station]').length")).toBe(4);
   // The fixture is labeled in the page title and in the recorded room header.
-  await evaluate("document.querySelector('.studio-eyebrow').textContent = 'Isolated fake-engine demo'");
+  await evaluate("document.querySelector('.studio-eyebrow').textContent = 'Isolated test fixture'");
   await screenshot("studio-four-dark");
-  if (demo) {
-    await beat("Meet your launch team", "Four bots, one shared studio. Every desk reflects actual task state.", 0);
-    const endpoint = JSON.stringify(await browser("get", "cdp-url")).match(/wss?:[^"\s]+/)?.[0];
-    if (!endpoint) throw Error("The fixture browser did not expose its CDP endpoint");
-    demoCapture = await startDemoCapture(endpoint, preview.previewUrl, evidence);
-    await beat("Meet your launch team", "Four bots, one shared studio. Every desk reflects actual task state.", 4);
-  }
-  if (!demo && process.env.OMB_UI_VIDEO === "1") { await browser("record", "start", join(evidence, "launch.webm"), "--fps", "10"); recording = true; }
+  if (process.env.OMB_UI_VIDEO === "1") { await browser("record", "start", join(evidence, "launch.webm"), "--fps", "10"); recording = true; }
   await ui("type", "--name", "Hand your team a brief", "--text", "Prepare tomorrow's launch. Gather evidence, draft the announcement, and propose a launch graphic.");
-  await beat("Start with one brief", "Prepare tomorrow’s launch: evidence, announcement, and a graphic.", 4);
   await evaluate("window.__studioDragEvents = []; for (const type of ['dragstart', 'dragover', 'drop', 'dragend']) document.addEventListener(type, event => window.__studioDragEvents.push({type, types: Array.from(event.dataTransfer.types), tag: event.target.tagName, x: event.clientX, y: event.clientY}));");
   await browser("scrollintoview", `[data-station="${coordinator.id}"] .studio-desk-scene`);
   await ui("drag", "--source", ".studio-drag-slip", "--target", `[data-station="${coordinator.id}"] .studio-desk-scene`);
   await expect.poll(() => evaluate("document.querySelector('.studio-send-review')?.textContent"), { timeout: 5000 }).toContain("Coordinator");
   expect((await studio()).results.total).toBe(0);
-  await beat("Drop it onto the Coordinator", "Review the destination, then send. The drag stages the brief for confirmation.", 4);
   await ui("click", "--name", "Send brief");
   await waitText("Brief sent to Coordinator.");
-  await beat("The Coordinator gets to work", "The brief starts a new task while the studio stays open.", 3);
   const initial = await studio();
   const threadId = initial.stations.find((station: any) => station.botId === coordinator.id).threads[0].threadId;
   expect(threadId).not.toBe(coordinator.threadId);
@@ -156,10 +126,8 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
   await ui("click", "--name", "Refresh studio");
   await expect.poll(() => evaluate(`!!document.querySelector('[data-station="${coordinator.id}"] .studio-hand')`)).toBe(true);
   await screenshot("studio-question");
-  await beat("A raised hand means a real question", "The Coordinator needs your input before continuing.", 4);
   await ui("click", "--name", "Coordinator needs you");
   await waitText("Which tone should the launch announcement use?");
-  await beat("Answer without losing the thread", "Open the question directly from the desk. Choose a warm launch tone.", 5);
   await ui("click", "--name", "A Warm");
   await expect.poll(() => answer).toContain("Warm");
   await ui("click", "--name", "Back to studio");
@@ -170,7 +138,6 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
   await expect.poll(async () => (await studio()).handoffs.total).toBe(3);
   await ui("click", "--name", "Refresh studio");
   await screenshot("studio-queued");
-  await beat("Work is handed to the team", "Researcher, Writer, and Designer each receive a specific request.", 4);
   await evaluate("window.__studioAnimations = []; document.addEventListener('animationstart', event => { if (event.animationName === 'studio-desk-transfer') window.__studioAnimations.push({id: event.target.dataset.motion, at: performance.now(), fromX: event.target.style.getPropertyValue('--from-x'), fromY: event.target.style.getPropertyValue('--from-y')}); });");
   writeFileSync(join(fixture.info.dataDir, threadId + ".gate"), "finish source");
   await expect.poll(async () => (await studio()).handoffs.items.some((item: any) => item.state === "running"), { timeout: 20_000 }).toBe(true);
@@ -178,29 +145,23 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
   await expect.poll(() => evaluate("window.__studioAnimations.some(item => item.id.startsWith('handoff:'))"), { timeout: 5000 }).toBe(true);
   writeFileSync(join(evidence, "motion.json"), JSON.stringify(await evaluate("window.__studioAnimations"), null, 2));
   await screenshot("studio-working");
-  await beat("See who is working on what", "The handoffs are now running. Desk activity follows the server’s task state.", 5);
   await browser("click", ".studio-handoff:nth-of-type(1)");
   await expect.poll(() => evaluate("document.querySelector('.studio-request-text')?.textContent")).toSatisfy((text: string) => briefs.includes(text));
   await screenshot("handoff-request");
-  await beat("Read the exact handoff", "Click a transfer to inspect the request and open its conversation.", 5);
   await ui("click", "--name", "Close");
   writeFileSync(join(fixture.info.dataDir, "probe.gate"), "finish peers");
   await expect.poll(async () => (await studio()).handoffs.items.filter((item: any) => item.state === "completed").length, { timeout: 30_000 }).toBe(3);
   await ui("click", "--name", "Refresh studio");
   await expect.poll(() => evaluate("document.querySelectorAll('[data-result]').length"), { timeout: 20_000 }).toBeGreaterThanOrEqual(4);
   await screenshot("studio-results");
-  if (demo) await browser("scrollintoview", ".studio-results");
-  await beat("Completed work lands on the review shelf", "Open any result to return to its source message.", 5);
   const last = await studio();
   const result = last.results.items[0];
   await expect.poll(() => evaluate(`!!document.querySelector('[data-result="${result.id}"]')`), { timeout: 20_000 }).toBe(true);
   await browser("scrollintoview", `[data-result="${result.id}"]`);
   await browser("click", `[data-result="${result.id}"]`);
   if (result.messageId) await expect.poll(() => evaluate(`!!document.querySelector('[data-mid="${result.messageId}"]')`)).toBe(true);
-  await beat("Open the source behind a result", "Results lead back to the original conversation. Replies here come from the demo engine.", 4);
   await ui("click", "--name", "Back to studio");
   await ui("click", "--name", "Calm mode");
-  await beat("Keep the studio calm", "The same task information, with decorative motion turned off.", 3);
   expect(await evaluate("document.querySelector('.live-team').dataset.calm")).toBe("true");
   await browser("network", "requests", "--clear");
   await ui("click", "--name", "Open Designer computer");
@@ -208,20 +169,9 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
   const network = await browser("network", "requests");
   expect(JSON.stringify(network)).not.toContain("/computer/provision");
   await screenshot("workstation-off");
-  await beat("Check a workstation in watch mode", "This demo’s computer is off. Opening it does not start a machine.", 4);
   await ui("click", "--name", "Back to studio");
   expect(await evaluate("document.querySelector('.studio-toolbar select').value")).toBe("Launch");
   if (recording) { await browser("record", "stop"); recording = false; }
-  if (demo) {
-    await evaluate("document.querySelector('.live-team').scrollTop = 0; document.querySelector('.studio-body').scrollTop = 0");
-    await beat("One place to follow the whole team", "Assign work. Answer questions. Inspect handoffs. Review results.", 5);
-    await screenshot("demo-final");
-    const errors = await browser("errors");
-    writeFileSync(join(evidence, "runtime-errors.json"), JSON.stringify(errors, null, 2));
-    expect(errors).toMatchObject({ errors: [] });
-    await demoCapture!.stop(); demoCapture = undefined;
-    return;
-  }
   // Keyboard assignment retains the draft through a rejected send, then retries once.
   await ui("type", "--name", "Hand your team a brief", "--text", "Keyboard follow-up for the launch.");
   const choices = await ui("snapshot");
@@ -292,16 +242,9 @@ run("runs the launch story through real state, sending, request UI, handoffs, re
   expect(await evaluate("document.querySelector('.studio-search input').value")).toBe("");
   await expect.poll(() => evaluate("document.querySelectorAll('[data-station]').length")).toBe(12);
 
-  // Capture a renderer trace under real SSE metadata traffic from off-page bots.
+  // Restore standard motion and skin after the accessibility checks.
   await browser("set", "media", "light");
   if (await evaluate("!document.querySelector('.studio-header button[aria-pressed]').disabled")) await ui("click", "--name", "Calm mode");
-  await browser("trace", "start");
-  await evaluate("window.__studioPerf = {frames: [], longTasks: []}; window.__studioMeasure = true; new PerformanceObserver(list => window.__studioPerf.longTasks.push(...list.getEntries().map(e => e.duration))).observe({type: 'longtask', buffered: false}); let last; function frame(at) {if (!window.__studioMeasure) return; if(last) window.__studioPerf.frames.push(at-last); last=at; requestAnimationFrame(frame)} requestAnimationFrame(frame);");
-  for (let i = 0; i < 30; i++) await api("PATCH", `/api/bots/${coordinator.id}`, { title: `Coordinator · background update ${i}` });
-  await browser("wait", "3500");
-  const perf = await evaluate("window.__studioMeasure = false; ({...window.__studioPerf, userAgent: navigator.userAgent, visibleDesks: document.querySelectorAll('[data-station]').length, calm: document.querySelector('.live-team').dataset.calm, reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches, viewport: [innerWidth, innerHeight]})");
-  await browser("trace", "stop", join(evidence, "studio-trace.json"));
-  writeFileSync(join(evidence, "performance.json"), JSON.stringify(perf, null, 2));
   await evaluate("document.documentElement.dataset.skin = 'midnight'");
   await screenshot("studio-final");
   writeFileSync(join(evidence, "launch.json"), JSON.stringify({ fixture: { url: fixture.info.url, logPath: fixture.info.logPath }, terminalSnapshot: last, network, platform: process.platform, node: process.version }, null, 2));
