@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Hand, Layers, Network, RefreshCw, Send, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Hand, Layers, Lightbulb, LightbulbOff, Network, RefreshCw, Send, X } from "lucide-react";
 import { api, openThread, useStore } from "@/state/store";
 import type { StudioHandoff, StudioSnapshot, StudioTarget } from "../../../shared/live-team";
-import { stationState, studioPage } from "@/lib/live-team";
+import { isStudioEveningHour, stationState, studioPage } from "@/lib/live-team";
 import { studioMotions, type StudioMotion, type StudioMotionState } from "@/lib/live-team-motion";
-import { readStudioPreferences, saveStudioPreferences, type StudioPreferences } from "@/lib/live-team-preferences";
+import { readStudioPreferences, saveStudioPreferences, type StudioLamps, type StudioPreferences } from "@/lib/live-team-preferences";
 import { activeLocale, t } from "@/lib/i18n";
 import { TeamMapPage } from "../TeamMapPage";
 import { StudioTransfers } from "./StudioTransfers";
@@ -12,9 +12,19 @@ import { StudioHandoffDetail } from "./StudioHandoffDetail";
 import { StudioStation } from "./StudioStation";
 import "./live-team.css";
 
-const freshPreferences: StudioPreferences = { presentation: "map", room: "", calm: false };
+const freshPreferences: StudioPreferences = { presentation: "map", room: "", calm: false, lamps: "auto" };
+const NEXT_LAMPS: Record<StudioLamps, StudioLamps> = { auto: "on", on: "off", off: "auto" };
 /** Access optional browser storage without failing in restricted environments. */
 function storage(): Storage | undefined { try { return window.localStorage; } catch { return undefined; } }
+/** Recomputed on a slow clock so the room drifts into evening without a reload. */
+function useEveningHour(): boolean {
+  const [evening, setEvening] = useState(() => isStudioEveningHour(new Date()));
+  useEffect(() => {
+    const id = setInterval(() => setEvening(isStudioEveningHour(new Date())), 5 * 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return evening;
+}
 /** Navigate the bounded server collections in pages of fifty items. */
 function Pagination({ offset, total, onChange }: { offset: number; total: number; onChange: (offset: number) => void }) {
   if (total <= 50) return null;
@@ -71,6 +81,8 @@ export function LiveTeamStudio({ active, onNavigate }: { active: boolean; onNavi
     return () => { document.removeEventListener("visibilitychange", change); media.removeEventListener("change", reduce); };
   }, []);
   const calm = preferences.calm || reducedMotion || !visible || !active;
+  const evening = useEveningHour();
+  const lampsOn = preferences.lamps === "auto" ? evening : preferences.lamps === "on";
   const room = preferences.room;
   const [refreshKey, setRefreshKey] = useState(0);
   useEffect(() => {
@@ -217,6 +229,7 @@ export function LiveTeamStudio({ active, onNavigate }: { active: boolean; onNavi
       <div className="studio-header-actions">
         <button onClick={() => updatePreferences({ presentation: "map" })}><Network size={16} />{t("studio.map")}</button>
         <button aria-pressed={preferences.calm || reducedMotion} disabled={reducedMotion} onClick={() => updatePreferences({ calm: !preferences.calm })}>{(preferences.calm || reducedMotion) && <Check size={15} />}{t("studio.calm")}</button>
+        <button aria-pressed={lampsOn} title={t(`studio.lamps.${preferences.lamps}`)} onClick={() => updatePreferences({ lamps: NEXT_LAMPS[preferences.lamps] })}>{lampsOn ? <Lightbulb size={16} /> : <LightbulbOff size={16} />}{t("studio.lamps.label")}</button>
         <button aria-label={t("studio.refresh")} onClick={() => setRefreshKey((key) => key + 1)}><RefreshCw size={16} /></button>
       </div>
     </header>
@@ -236,7 +249,7 @@ export function LiveTeamStudio({ active, onNavigate }: { active: boolean; onNavi
         {!snapshot ? <p className="studio-empty">{t("studio.loading")}</p> : !desks.items.length ? <div className="studio-empty"><Layers size={28} /><h2>{query ? t("studio.noMatch") : t("studio.empty")}</h2><p>{t("studio.emptyHint")}</p>{!query && <button onClick={() => dispatch({ type: "toggleNewBot", open: true })}>{t("studio.addBot")}</button>}</div> :
           <div className="studio-desks" data-count={desks.items.length}>{desks.items.map((bot) => {
             const station = snapshot.stations.find((station) => station.botId === bot.id);
-            return <StudioStation key={bot.id} locale={activeLocale()} bot={bot} station={station} status={stationState(bot, station, snapshot, state.instances, stale)} calm={calm || stale} selected={selected === bot.id}
+            return <StudioStation key={bot.id} locale={activeLocale()} bot={bot} station={station} status={stationState(bot, station, snapshot, state.instances, stale)} calm={calm || stale} lampsOn={lampsOn} selected={selected === bot.id}
               onOpen={openBot} onComputer={openComputer}
               onAssign={stage} onTasks={tasks} onAttention={attention} onSelect={selectStation} />;
           })}</div>}

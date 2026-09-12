@@ -13,6 +13,12 @@ export function stationState(bot: Bot, station: StudioStation | undefined, snaps
   return "ready";
 }
 
+/** The room's desk lamps read as "evening" outside a plain 7am-7pm work day, by local clock. */
+export function isStudioEveningHour(date: Date): boolean {
+  const hour = date.getHours();
+  return hour < 7 || hour >= 19;
+}
+
 /** Identity order, rather than live state order, keeps desks from moving during work. */
 export function studioPage<T extends { id: string }>(bots: T[], query: string, page: number, name: (bot: T) => string): { items: T[]; page: number; pages: number; total: number } {
   const needle = query.trim().toLocaleLowerCase();

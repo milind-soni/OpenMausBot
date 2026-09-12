@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { studioPage, stationState } from "./live-team";
+import { isStudioEveningHour, studioPage, stationState } from "./live-team";
 import { studioMotions } from "./live-team-motion";
 import { readStudioPreferences, saveStudioPreferences } from "./live-team-preferences";
 import type { StudioSnapshot } from "../../shared/live-team";
@@ -45,10 +45,18 @@ describe("studio presentation", () => {
   it("scopes preferences by workspace and tolerates denied or corrupt storage", () => {
     const values = new Map<string, string>();
     const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
-    saveStudioPreferences("a", { presentation: "studio", room: "Work", calm: true }, storage);
-    expect(readStudioPreferences("a", storage)).toEqual({ presentation: "studio", room: "Work", calm: true });
+    saveStudioPreferences("a", { presentation: "studio", room: "Work", calm: true, lamps: "on" }, storage);
+    expect(readStudioPreferences("a", storage)).toEqual({ presentation: "studio", room: "Work", calm: true, lamps: "on" });
     expect(readStudioPreferences("b", storage).presentation).toBe("map");
+    expect(readStudioPreferences("b", storage).lamps).toBe("auto");
     expect(readStudioPreferences("a", { getItem: () => "garbage" }).presentation).toBe("map");
-    expect(() => saveStudioPreferences("a", { presentation: "studio", room: "", calm: false }, { setItem: () => { throw Error("denied"); } })).not.toThrow();
+    expect(readStudioPreferences("a", { getItem: () => JSON.stringify({ lamps: "candle" }) }).lamps).toBe("auto");
+    expect(() => saveStudioPreferences("a", { presentation: "studio", room: "", calm: false, lamps: "off" }, { setItem: () => { throw Error("denied"); } })).not.toThrow();
+  });
+  it("reads desk lamps as evening outside a plain 7am-7pm day", () => {
+    expect(isStudioEveningHour(new Date(2024, 0, 1, 6, 59))).toBe(true);
+    expect(isStudioEveningHour(new Date(2024, 0, 1, 7, 0))).toBe(false);
+    expect(isStudioEveningHour(new Date(2024, 0, 1, 18, 59))).toBe(false);
+    expect(isStudioEveningHour(new Date(2024, 0, 1, 19, 0))).toBe(true);
   });
 });

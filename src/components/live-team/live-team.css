@@ -43,8 +43,14 @@
 .studio-task-stack { position: absolute; z-index: 5; left: 66px; top: 127px; width: 50px; height: 44px; background: var(--color-card); border: 1px solid var(--color-hairline); box-shadow: 2px 3px 0 var(--color-inset), 4px 5px 0 var(--color-hairline); border-radius: 4px; transform: rotate(-7deg); display: flex; align-items: center; justify-content: center; gap: 3px; font-size: 11px; }
 .studio-lamp { position: absolute; z-index: 4; left: 17px; top: 78px; width: 30px; height: 68px; border-bottom: 5px solid var(--studio-wood-edge); }
 .studio-lamp span { display: block; position: absolute; width: 4px; height: 46px; background: var(--studio-wood-edge); left: 13px; bottom: 0; transform: rotate(12deg); }
-.studio-lamp i { display: block; position: absolute; left: 0; top: 2px; width: 34px; height: 18px; background: var(--color-ink-secondary); border-radius: 20px 20px 3px 3px; }
+.studio-lamp i { display: block; position: absolute; left: 0; top: 2px; width: 34px; height: 18px; background: var(--color-ink-secondary); border-radius: 20px 20px 3px 3px; transition: background .5s, box-shadow .5s; }
+.studio-desk-scene[data-lamp=true] .studio-lamp i { background: #a98a54; box-shadow: 0 14px 14px -6px #d8b67340; }
 .studio-station[data-state=working] .studio-lamp i { background: #cfa65c; box-shadow: 0 18px 18px -4px #d8b67355; }
+.studio-zzz { position: absolute; z-index: 6; right: -4px; top: -6px; font-size: 11px; font-weight: 650; letter-spacing: .12em; color: var(--color-ink-secondary); animation: studio-zzz 2.6s ease-in-out infinite; }
+@keyframes studio-zzz { 0%, 100% { opacity: .35; transform: translateY(0); } 50% { opacity: .9; transform: translateY(-5px); } }
+.studio-coffee { position: absolute; z-index: 6; left: -8px; top: 55px; color: #a9744f; background: var(--color-card); border: 1px solid var(--color-hairline); border-radius: 50%; padding: 4px; box-shadow: 0 4px 10px #0002; animation: studio-coffee 1.8s ease both; }
+@keyframes studio-coffee { 0% { opacity: 0; transform: translateY(8px) scale(.8); } 18% { opacity: 1; transform: translateY(0) scale(1); } 78% { opacity: 1; } 100% { opacity: 0; transform: translateY(-12px) scale(.9); } }
+.live-team[data-calm=true] .studio-zzz, .live-team[data-calm=true] .studio-coffee { animation: none; display: none; }
 .studio-hand { position: absolute; z-index: 6; left: 4px; top: 13px; width: 44px; height: 44px; border-radius: 50% 50% 4px 50%; background: var(--color-accent); color: var(--color-app); display: grid; place-items: center; box-shadow: 0 3px 12px #0002; }
 .studio-nameplate { text-align: center; margin-top: 3px; padding: 3px 4px; }
 .studio-nameplate > button { display: inline-flex; gap: 6px; align-items: center; justify-content: center; min-height: 44px; max-width: 100%; }
