@@ -3772,9 +3772,29 @@ bus.subscribe((event: RuntimeEvent) => {
         } else {
           settleDirectTurn();
         }
+      } else if (group && speaker) {
+        // Room/goal turns run on a shared thread, but their spend still counts
+        // against the workspace cap and the ledger. Book it under the speaker.
+        const tokens = event.usage ?? lastReported;
+        const speakingBot = store.bot(speaker.botId);
+        const selection = speakingBot?.modelSelection;
+        appendUsage(DATA_DIR, {
+          botId: speaker.botId,
+          botName: speaker.name,
+          threadId: event.threadId,
+          instanceId: selection?.instanceId ?? "unknown",
+          driverKind: (selection && registry.get(selection.instanceId)?.driverKind) ?? "unknown",
+          model: selection?.model ?? "unknown",
+          input: tokens?.input ?? 0,
+          output: tokens?.output ?? 0,
+          ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
+          costUsd: event.cost ?? null,
+          trigger: routineRun
+            ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
+            : turnTriggers.get(event.threadId) ?? { kind: "owner" },
+        });
+        noteSpend(DATA_DIR, event.cost ?? null);
       }
-      const speaker = groupSpeakers.get(event.threadId);
-      const group = store.groupByThread(event.threadId);
       if (speaker && group?.busyBotId === speaker.botId) {
         releaseTurnResources(turnResourceOwners.get(event.threadId));
         groupSpeakers.delete(event.threadId);
@@ -6050,6 +6070,9 @@ async function runGroupMemberTurn(
     releaseTurnResources(resourceOwner);
   };
   try {
+  // A workspace at its monthly spend limit rechecks the cap at execution time
+  // for every room, goal, queued, calendar, and chained-mention turn.
+  assertWithinBudget(cfg, DATA_DIR);
   const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
   const skillAuthoring =
     skillAuthoringEnabled(cfg) &&
@@ -6660,7 +6683,9 @@ async function runGroupMemberTurn(
   }
   return true;
   } catch (error) {
-    if (providerDispatched || !roomSpeaker) throw error;
+    if (providerDispatched) throw error;
+    const isSpendCap = typeof error === "object" && (error as { code?: string }).code === "spend_cap";
+    if (!roomSpeaker && !isSpendCap) throw error;
     const message = error instanceof Error ? error.message : "Local VM setup failed";
     store.appendMessage(threadId, {
       role: "bot", kind: "activity",

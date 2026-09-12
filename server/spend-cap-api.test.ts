@@ -72,4 +72,54 @@ describe("spend cap and prices through real turns", () => {
     expect(raised.budget).toMatchObject({ monthlyUsd: 1, exceeded: false });
     expect(raised.total.turns).toBe(3);
   }, 150_000);
+
+  it("refuses the next room member at execution time once the cap is reached", async () => {
+    const edition = (await (await api("/api/edition")).json()) as { edition: string; features: string[] };
+    expect(edition).toMatchObject({ edition: "enterprise", features: ["billing", "budgets"] });
+
+    // The fake engine reports $0.01 per turn. A $0.01 cap lets the first room
+    // member complete its turn, then blocks the second member inside
+    // runGroupMemberTurn before it can dispatch another provider turn.
+    expect((await put({
+      budgets: { monthlyUsd: 0.01, warnAtPercent: 50 },
+      billing: { currency: "USD", prices: { default: { inputPerMillion: 1000, outputPerMillion: 2000 } } },
+    })).status).toBe(200);
+
+    const first = (await control(["new-bot", "--name", "Room A"])) as { bot: { id: string } };
+    const second = (await control(["new-bot", "--name", "Room B"])) as { bot: { id: string } };
+
+    const roomRes = await api("/api/groups", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Cap room",
+        memberIds: [first.bot.id, second.bot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "everyone" } },
+      }),
+    });
+    expect(roomRes.status).toBe(201);
+    const room = (await roomRes.json()) as { group: { id: string; threadId: string } };
+
+    const sent = await api(`/api/groups/${encodeURIComponent(room.group.id)}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello team" }),
+    });
+    expect(sent.status).toBe(202);
+
+    await control(["wait", "--channel", room.group.id, "--timeout", "30"]);
+
+    const page = (await (await api(`/api/threads/${encodeURIComponent(room.group.threadId)}/messages?limit=20`)).json()) as any;
+    const botTextReplies = page.messages.filter((m: any) => m.role === "bot" && m.kind === "text");
+    expect(botTextReplies).toHaveLength(1);
+
+    const capHit = page.messages.find(
+      (m: any) => m.role === "bot" && m.kind === "activity" && /reached its monthly spend limit/i.test(m.tool?.name ?? ""),
+    );
+    expect(capHit).toBeTruthy();
+
+    const usage = (await (await api("/api/usage")).json()) as any;
+    expect(usage.budget).toMatchObject({ monthlyUsd: 0.01, exceeded: true, warn: true });
+    expect(usage.total.turns).toBe(1);
+  }, 150_000);
 });
