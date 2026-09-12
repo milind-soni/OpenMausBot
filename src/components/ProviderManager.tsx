@@ -188,16 +188,19 @@ export function ProviderManager() {
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">API connections</h3>
         {apiInstances.length === 0 ? (
           <p className="rounded-xl border border-dashed border-hairline/40 px-3 py-4 text-[12px] text-ink-secondary">No API connections yet.</p>
-        ) : apiInstances.map((instance) => (
-          <div key={instance.instanceId} className="flex flex-wrap items-center gap-3 rounded-xl border border-hairline/30 bg-panel px-3 py-2.5">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] font-semibold text-ink">{instance.displayName}</div>
-              <div className="truncate text-[11px] text-ink-secondary">{instance.snapshot.state} · {instance.snapshot.models?.slice(0, 3).map((m) => m.id).join(", ") || "model list not refreshed"}</div>
+        ) : apiInstances.map((instance) => {
+          const models = instance.snapshot.models?.options ?? [];
+          return (
+            <div key={instance.instanceId} className="flex flex-wrap items-center gap-3 rounded-xl border border-hairline/30 bg-panel px-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-semibold text-ink">{instance.displayName}</div>
+                <div className="truncate text-[11px] text-ink-secondary">{instance.snapshot.state} · {models.slice(0, 3).map((m) => m.id).join(", ") || "model list not refreshed"}</div>
+              </div>
+              <button type="button" onClick={() => refreshModels(instance.instanceId)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink"><RefreshCw size={12} /> Refresh models</button>
+              <button type="button" onClick={() => removeConnection(instance)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-danger/80 hover:bg-danger/10 disabled:opacity-50"><Trash2 size={12} /> Remove</button>
             </div>
-            <button type="button" onClick={() => refreshModels(instance.instanceId)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink"><RefreshCw size={12} /> Refresh models</button>
-            <button type="button" onClick={() => removeConnection(instance)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-danger/80 hover:bg-danger/10 disabled:opacity-50"><Trash2 size={12} /> Remove</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="mt-5 space-y-2">
