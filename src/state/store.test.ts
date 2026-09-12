@@ -214,6 +214,21 @@ describe("independent bot threads", () => {
     expect(currentTaskBot(state.bots[0]!).modelSelection.model).toBe("other-model");
   });
 
+  it("adds a background task without rewinding newer navigation or replacing an SSE task update", () => {
+    const original = { ...start(), activeView: "team-map" as const };
+    expect(reducer(original, { type: "newTask", botId: bot.id, background: true })).toBe(original);
+    const navigated = reducer(original, { type: "taskSwitched", bot: { ...bot, threadId: "newer-selection", messages: [], tasks: [...bot.tasks!, { threadId: "newer-selection", title: "Newer", createdAt: 3 }] } });
+    const task = { threadId: "background", title: "Background", createdAt: 2 };
+    const settled = reducer(navigated, { type: "backgroundTaskCreated", botId: bot.id, task });
+    expect(settled.selectedId).toBe(navigated.selectedId);
+    expect(settled.activeView).toBe(navigated.activeView);
+    expect(settled.bots[0]?.threadId).toBe("newer-selection");
+    expect(settled.bots[0]?.messages).toEqual([]);
+    const updated = reducer(settled, { type: "botPatched", bot: { ...settled.bots[0]!, tasks: settled.bots[0]!.tasks!.map((entry) => entry.threadId === task.threadId ? { ...entry, title: "Already updated", busy: true } : entry) } });
+    const retried = reducer(updated, { type: "backgroundTaskCreated", botId: bot.id, task });
+    expect(retried.bots[0]?.tasks?.filter((entry) => entry.threadId === task.threadId)).toEqual([{ ...task, title: "Already updated", busy: true }]);
+  });
+
   it("can start a new thread while another waits and cancels only the pinned queue", () => {
     const opened = reducer(start(), { type: "newTask", botId: bot.id });
     expect(opened.selectedId).toBe(bot.id);

@@ -33,7 +33,7 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /** Gitignored, persistent: the binary and its Chrome download once per checkout. */
 export const UI_TOOLS_DIR = join(ROOT, ".omb-scratch", "verify-tools");
 /** Verbs that change the fixture or the page; they take the explicit handle, never discovery. */
-export const UI_MUTATING = new Set(["click", "type", "press", "flag", "eval"]);
+export const UI_MUTATING = new Set(["click", "type", "select", "drag", "press", "flag", "eval"]);
 
 const ENTRIES = {
   threads: { entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Chat" },
@@ -327,6 +327,46 @@ export async function runControlOmbUi(args: string[]): Promise<unknown> {
     const { target, name } = await resolveTarget(handle, values, verb);
     const data = await agentBrowser(handle.binary, sessionEnv(handle), verb === "click" ? ["click", target] : ["type", target, text as string]);
     return { ok: true, target, ...(name ? { name } : {}), ...data };
+  }
+
+  if (verb === "select") {
+    const values = parse(command, rest, { ...ui, ref: { type: "string" }, name: { type: "string" }, value: { type: "string" } });
+    const handle = loadHandle(values.ui, verb);
+    if (typeof values.value !== "string") throw new ControlOmbError("ui select requires --value VALUE");
+    await requireLiveSession(handle);
+    const { target } = await resolveTarget(handle, values, verb);
+    return { ok: true, ...(await agentBrowser(handle.binary, sessionEnv(handle), ["select", target, values.value])) };
+  }
+
+  if (verb === "drag") {
+    const values = parse(command, rest, { ...ui, source: { type: "string" }, target: { type: "string" } });
+    const handle = loadHandle(values.ui, verb);
+    if (typeof values.source !== "string" || !values.source.trim() || typeof values.target !== "string" || !values.target.trim()) {
+      throw new ControlOmbError("ui drag requires --source SELECTOR and --target SELECTOR");
+    }
+    await requireLiveSession(handle);
+    const env = sessionEnv(handle);
+    // Slow enough for Chromium to deliver its native HTML dragover before release.
+    // The CLI's single drag command can release before the final over event.
+    const locate = async (selector: string) => {
+      const data = await agentBrowser(handle.binary, env, ["get", "box", selector]);
+      const box = (data.box ?? data) as { x: number; y: number; width: number; height: number };
+      if (![box.x, box.y, box.width, box.height].every(Number.isFinite)) throw new ControlOmbError("drag endpoint has no rendered bounds");
+      return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    };
+    const source = await locate(values.source);
+    const target = await locate(values.target);
+    await agentBrowser(handle.binary, env, ["mouse", "move", String(Math.round(source.x)), String(Math.round(source.y))]);
+    await agentBrowser(handle.binary, env, ["mouse", "down"]);
+    try {
+      for (let step = 1; step <= 10; step++) {
+        await agentBrowser(handle.binary, env, ["mouse", "move", String(Math.round(source.x + (target.x - source.x) * step / 10)), String(Math.round(source.y + (target.y - source.y) * step / 10))]);
+        await new Promise((done) => setTimeout(done, 30));
+      }
+      await agentBrowser(handle.binary, env, ["mouse", "move", String(Math.round(target.x + 1)), String(Math.round(target.y))]);
+      await new Promise((done) => setTimeout(done, 100));
+    } finally { await agentBrowser(handle.binary, env, ["mouse", "up"]); }
+    return { ok: true, source: values.source, target: values.target };
   }
 
   if (verb === "press") {

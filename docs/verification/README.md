@@ -96,6 +96,9 @@ default focus, keyboard wrapping and focus return against two disposable bots.
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
 
+The [Live Team studio fixture](live-team.md) checks assignment, handoffs, pending
+questions, results, responsive layouts, and isolated Electron return navigation.
+
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
 

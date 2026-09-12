@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, Crown, Loader2, Network, RefreshCw, Save, X } fro
 
 import { BotAvatar } from "./Avatar";
 import { api, formatTime, useStore, type Bot } from "@/state/store";
+import { t } from "@/lib/i18n";
 import { normalizeState } from "@/lib/mascot";
 import {
   EMPTY_TEAM_MAP_SNAPSHOT,
@@ -305,7 +306,8 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   );
 }
 
-export function TeamMapPage() {
+/** Render the existing relationship map and an optional entry into Live Team. */
+export function TeamMapPage({ onStudio }: { onStudio?: () => void }) {
   const { state } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const [snapshot, setSnapshot] = useState<TeamMapSnapshot>(EMPTY_TEAM_MAP_SNAPSHOT);
@@ -349,6 +351,8 @@ export function TeamMapPage() {
             See every section, who is working, and where tasks are moving.
           </p>
         </div>
+        <div className="flex items-center gap-2">
+        {onStudio && <button onClick={onStudio} className="min-h-11 rounded-lg border border-hairline/50 px-3 text-sm hover:bg-raised">{t("studio.title")}</button>}
         <button
           onClick={() => void refresh(true)}
           disabled={refreshing}
@@ -358,6 +362,7 @@ export function TeamMapPage() {
         >
           <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
         </button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">

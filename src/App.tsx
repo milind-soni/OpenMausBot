@@ -26,10 +26,11 @@ import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsModal } from "@/components/KeyboardShortcutsModal";
 import { LocalVmWorkspace } from "@/components/LocalVmWorkspace";
-import { TeamMapPage } from "@/components/TeamMapPage";
-import { setLocale } from "@/lib/i18n";
+import { LiveTeamStudio } from "@/components/live-team/LiveTeamStudio";
+import { t, setLocale } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 
+/** Coordinate app navigation, retaining studio drafts and focus across conversation visits. */
 function Shell() {
   const { state, dispatch } = useStore();
   const unreadCount =
@@ -42,6 +43,7 @@ function Shell() {
   // turn the aside into a containing block for its fixed descendants (see
   // Sidebar.tsx's className comment).
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [studioOrigin, setStudioOrigin] = useState<{ computerBotId?: string } | null>(null);
   // Apply the configured UI language the moment config arrives or changes;
   // "" follows the system. The epoch bump re-renders extracted strings —
   // t() reads a module variable, so React needs this nudge.
@@ -204,6 +206,7 @@ function Shell() {
     <div className="flex h-full flex-col">
       {/* fixed-position popup, bottom-left — outside the layout flow */}
       <UpdateBanner />
+      {studioOrigin && state.activeView === "chat" && <div className="studio-return-bar"><button onClick={() => { dispatch({ type: "toggleComputer", open: false }); setLocalVmWorkspaceBotId(null); dispatch({ type: "showTeamMap" }); setStudioOrigin(null); }}>{t("studio.back")}</button><span>{t("studio.viewerNote")}</span></div>}
       <div className="relative flex min-h-0 flex-1">
       {!calendarFocus && <button
         type="button"
@@ -229,8 +232,9 @@ function Shell() {
           menuButtonRef.current?.focus();
         }}
       />}
+      <LiveTeamStudio active={state.activeView === "team-map"} onNavigate={(computerBotId) => setStudioOrigin({ computerBotId })} />
       {state.activeView === "team-map" ? (
-        <TeamMapPage />
+        null
       ) : state.activeView === "routines" ? (
         <RoutinesPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
@@ -272,6 +276,7 @@ function Shell() {
             key={bot.id}
             bot={bot}
             onOpenVmWorkspace={openLocalVmWorkspace}
+            observationOnly={studioOrigin?.computerBotId === bot.id}
           />
         )
       )}

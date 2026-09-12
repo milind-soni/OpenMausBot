@@ -146,15 +146,19 @@ function readPanelWidth(): number {
   return PANEL_DEFAULT_WIDTH;
 }
 
+/** Show the selected computer, keeping cloud actions passive until watch mode is cleared. */
 export function ComputerPanel({
   bot,
   onOpenVmWorkspace,
+  observationOnly = false,
 }: {
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
+  observationOnly?: boolean;
 }) {
   // The panel is a fixed column by default; a drag handle on its left edge
   // makes it wide enough to actually read a page in the Browser tab.
+  const [watchOnly, setWatchOnly] = useState(observationOnly);
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
   const onResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -223,6 +227,7 @@ export function ComputerPanel({
     browser?: boolean;
     acknowledgeLocalAuto?: boolean;
   }) => {
+    setWatchOnly(false);
     // Clear old-provider UI in the same render as the optimistic profile
     // change. The resolving effect waits for its PATCH before doing any work.
     setResolvedComputerSelection(null);
@@ -269,7 +274,7 @@ export function ComputerPanel({
   const [viewerOpen, setViewerOpen] = useState(false);
   const [error, setError] = useState<Error | string | null>(null);
   const errorText = panelErrorText(error);
-  const [panelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
+  const [panelView, setPanelView] = useState<ComputerPanelView>(() => observationOnly ? "computer" : readComputerPanelView(bot.id));
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
   // Keep installation reachable before the engine is ready. Actual browser
@@ -303,8 +308,8 @@ export function ComputerPanel({
   };
 
   useEffect(() => {
-    setPanelView(readComputerPanelView(bot.id));
-  }, [bot.id]);
+    setPanelView(observationOnly ? "computer" : readComputerPanelView(bot.id));
+  }, [bot.id, observationOnly]);
 
   // Pause the screenshot poll while this bot's viewer is open; seed from the
   // live viewer so a remount/switch mid-session doesn't wrongly resume it.
@@ -499,7 +504,7 @@ export function ComputerPanel({
             setPhase("vps-incompatible");
             return;
           }
-          if (bot.computer === "cloud") {
+          if (bot.computer === "cloud" && !watchOnly) {
             setPhase("starting");
             return api(`/api/bots/${bot.id}/computer/provision`, { method: "POST" }).then((result) => {
               if (!alive) return;
@@ -553,6 +558,7 @@ export function ComputerPanel({
         });
         const action = resolveBoxPanelAction({
           computer: bot.computer,
+          observationOnly: watchOnly,
           configured: Boolean(status.configured),
           boxState: typeof status.box?.state === "string" ? status.box.state : null,
           canUseCloud: cloudSupported,
@@ -567,7 +573,7 @@ export function ComputerPanel({
           if (action === "show-ready-box" || action === "show-sleeping-box" || action === "show-pending-box") {
             setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
           }
-          setPhase(action);
+          setPhase(watchOnly && bot.computer === "cloud" && action === "show-ready-box" ? "ready" : action);
           return;
         }
         setPhase("starting");
@@ -607,6 +613,7 @@ export function ComputerPanel({
     state.config?.vps?.sshAlias,
     panelView,
     computerSelectionPersisted,
+    watchOnly,
   ]);
 
   // Only frames received during this connection may replace its preview.
@@ -814,6 +821,7 @@ export function ComputerPanel({
   }, [panelView, requestControl, setNativeBrowserControl]);
 
   const controlAction = useCallback(async (action: ComputerControlAction): Promise<boolean> => {
+    if (watchOnly && cloudPreviewReady) return false;
     setControlPending(true);
     setError(null);
     try {
@@ -825,10 +833,11 @@ export function ComputerPanel({
     } finally {
       setControlPending(false);
     }
-  }, [transitionControl]);
+  }, [transitionControl, watchOnly, cloudPreviewReady]);
 
 
   const openDesktop = async () => {
+    if (watchOnly && cloudPreviewReady) return;
     setPending("join");
     setControlPending(true);
     setError(null);
@@ -880,6 +889,7 @@ export function ComputerPanel({
   };
 
   const run = (kind: "sleep" | "provision") => {
+    if (watchOnly) return;
     setPending(kind);
     setError(null);
     api(`/api/bots/${bot.id}/computer/${kind}`, { method: "POST" })
@@ -950,6 +960,7 @@ export function ComputerPanel({
   };
 
   const replaceVpsComputer = async () => {
+    if (watchOnly) return;
     if (!window.confirm(t("computer.confirm.replaceVps", { name: bot.name }))) return;
     setPending("vps-replace");
     setError(null);
@@ -1090,6 +1101,7 @@ export function ComputerPanel({
         </button>
       </div>
 
+      {watchOnly && <div className="px-4 pb-3 text-xs text-ink-secondary"><p>{t("studio.observeComputer")}</p>{bot.computer === "cloud" && <button className="mt-2 min-h-11 rounded-lg border border-hairline px-3 text-ink" onClick={() => setWatchOnly(false)}>{t("studio.startComputer")}</button>}</div>}
       {panelView === "routines" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "maus"} />
@@ -1130,7 +1142,7 @@ export function ComputerPanel({
               retry={previewRetry}
               starting={phase === "starting"}
               opening={pending === "join"}
-              disabled={controlPending}
+              disabled={watchOnly || controlPending}
               onOpen={() => void openDesktop()}
               onRetry={(discardFrame) => {
                 latestLive.current.at = 0;
@@ -1144,7 +1156,7 @@ export function ComputerPanel({
             <button
               type="button"
               onClick={() => void openDesktop()}
-              disabled={controlPending || pending === "join"}
+              disabled={(watchOnly && cloudPreviewReady) || controlPending || pending === "join"}
               className="group relative flex h-full w-full cursor-pointer items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-wait"
               aria-label={t("computer.openLiveDesktopAria", { name: bot.name })}
               title={t("computer.openLiveDesktop")}
@@ -1254,7 +1266,7 @@ export function ComputerPanel({
                 (bot.computer === "cloud" || bot.autoStartVps) && (
                 <button
                   onClick={() => run("provision")}
-                  disabled={pending === "provision"}
+                  disabled={watchOnly || pending === "provision"}
                   className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 >
                   {pending === "provision" && <Loader2 size={13} className="mr-1.5 inline animate-spin" />}
@@ -1265,7 +1277,7 @@ export function ComputerPanel({
                 (bot.computer === "cloud" || bot.autoStartVps) && (
                 <button
                   onClick={() => void replaceVpsComputer()}
-                  disabled={pending === "vps-replace"}
+                  disabled={watchOnly || pending === "vps-replace"}
                   className="mt-1 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50"
                 >
                   {pending === "vps-replace" && <Loader2 size={13} className="mr-1.5 inline animate-spin" />}
@@ -1333,7 +1345,7 @@ export function ComputerPanel({
                 onClick={() =>
                   phase === "vm" || cloudPreviewReady ? void openDesktop() : controlAction("take")
                 }
-                disabled={controlPending || pending === "join"}
+                disabled={(watchOnly && cloudPreviewReady) || controlPending || pending === "join"}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
@@ -1341,7 +1353,7 @@ export function ComputerPanel({
               </button>
               <button
                 onClick={() => controlAction("dismiss-help")}
-                disabled={controlPending}
+                disabled={(watchOnly && cloudPreviewReady) || controlPending}
                 className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {t("computer.dismiss")}
@@ -1358,10 +1370,11 @@ export function ComputerPanel({
             </div>
             <button
               onClick={() => {
+                if (watchOnly && cloudPreviewReady) return;
                 controlAction("release");
                 void window.ogb?.desktopViewer?.close(bot.id);
               }}
-              disabled={controlPending}
+              disabled={(watchOnly && cloudPreviewReady) || controlPending}
               className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-accent py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50"
             >
               <Hand size={14} />
@@ -1410,7 +1423,7 @@ export function ComputerPanel({
                 onClick={() =>
                   void openDesktop()
                 }
-                disabled={controlPending || pending === "join"}
+                disabled={(watchOnly && cloudPreviewReady) || controlPending || pending === "join"}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.takeControlTitle")}
               >
@@ -1421,7 +1434,7 @@ export function ComputerPanel({
             {control.held && (
               <button
                 onClick={() => void openDesktop()}
-                disabled={pending === "join"}
+                disabled={watchOnly || pending === "join"}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Monitor size={14} />}
@@ -1431,7 +1444,7 @@ export function ComputerPanel({
             {(cloudBackend === "vps" || boxState !== "archived") && (
               <button
                 onClick={() => run("sleep")}
-                disabled={pending === "sleep"}
+                disabled={watchOnly || pending === "sleep"}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.sleepTitle")}
               >

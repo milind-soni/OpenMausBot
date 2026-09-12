@@ -824,6 +824,8 @@ export type Action =
   | { type: "select"; id: string }
   | {
       type: "send";
+      /** Called only after the existing send endpoint accepts this send identity. */
+      onSent?: () => void;
       botId: string;
       text: string;
       sendId?: string;
@@ -860,7 +862,8 @@ export type Action =
       /** Local UI recovery hook for voice flows. Never sent to the server. */
       onError?: (message: string) => void;
     }
-  | { type: "newTask"; botId: string; projectId?: string }
+  | { type: "newTask"; botId: string; projectId?: string; background?: boolean; onCreated?: (threadId: string) => void; onError?: () => void }
+  | { type: "backgroundTaskCreated"; botId: string; task: Task }
   | { type: "switchTask"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -1077,6 +1080,7 @@ function optimisticUserMessage(
   };
 }
 
+/** Apply client events while preserving separate state for foreground and background tasks. */
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
     const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
@@ -1753,8 +1757,12 @@ export function reducer(state: AppState, action: Action): AppState {
     case "switchGroupTask":
     case "deleteGroupTask":
       return state;
+    case "backgroundTaskCreated":
+      return updateBot(state, action.botId, (bot) => bot.tasks?.some((task) => task.threadId === action.task.threadId)
+        ? bot
+        : { ...bot, tasks: [action.task, ...(bot.tasks ?? [])] });
     case "newTask":
-      return { ...state, selectedId: action.botId, activeView: "chat" };
+      return action.background ? state : { ...state, selectedId: action.botId, activeView: "chat" };
     case "switchTask": {
       // Older background frames are already represented by the next server
       // snapshot. Only frames racing that request need replaying over it.
@@ -2157,6 +2165,7 @@ const StoreContext = createContext<{
   refreshModels: (instanceId: string) => Promise<void>;
 } | null>(null);
 
+/** Provide app state and dispatch API-backed actions, including inactive task creation. */
 export function StoreProvider({ children }: { children: ReactNode }) {
   const taskWrites = useRef(new Map<string, { botId: string; updatesDefault: boolean; promise: Promise<BotAnnouncement>; execution: Promise<unknown>; patch: TaskUpdatePatch }>()).current;
   const withTaskWrites = (bot: BotAnnouncement): BotAnnouncement => ({
@@ -2472,6 +2481,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   reason: body.reason === "capacity" ? "capacity" : undefined,
                 });
               }
+              action.onSent?.();
             })
             .catch((error) => {
               if (threadId) {
@@ -2802,16 +2812,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "newTask":
         case "switchTask": {
           const revision = (navigation.get(action.botId) ?? 0) + 1;
-          navigation.set(action.botId, revision);
+          if (!(action.type === "newTask" && action.background)) navigation.set(action.botId, revision);
           const ready = action.type === "newTask"
             ? botPatchQueue.flush(action.botId)
             : Promise.resolve();
-          void ready.then(() => api(action.type === "newTask" ? `/api/bots/${action.botId}/tasks` : `/api/bots/${action.botId}/tasks/${action.threadId}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId } : {}) }))
+          void ready.then(() => api(action.type === "newTask" ? `/api/bots/${action.botId}/tasks` : `/api/bots/${action.botId}/tasks/${action.threadId}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, ...(action.background ? { activate: false } : {}) } : {}) }))
             .then((r: any) => {
+              if (action.type === "newTask" && action.background) {
+                if (!r?.bot || !r?.task?.threadId) throw new Error("The new conversation was not returned.");
+                // A delayed background response must not overwrite newer
+                // navigation, profile edits, or task state delivered by SSE.
+                dispatch({ type: "backgroundTaskCreated", botId: action.botId, task: r.task });
+                action.onCreated?.(r.task.threadId);
+                return;
+              }
               if (!r?.bot || navigation.get(action.botId) !== revision) return;
               dispatch({ type: "taskSwitched", bot: r.bot });
+              if (action.type === "newTask") action.onCreated?.(r.task.threadId);
             })
-            .catch(showError);
+            .catch((error) => { showError(error); if (action.type === "newTask") action.onError?.(); });
           break;
         }
         case "renameTask":

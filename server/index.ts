@@ -37,6 +37,8 @@ import {
   type BrowserCleanupWireRequest,
 } from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
+import { buildStudioSnapshot, StudioTurnOutcomes } from "./live-team.ts";
+import { recordStudioResult } from "./message-db.ts";
 import { appendDecision, readDecisions, flushDecisionLog } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import {
@@ -177,7 +179,7 @@ import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.t
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
+import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DelegationWakeBudget, discardDelegations, drainDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, studioPendingDelegations, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -801,6 +803,7 @@ type DirectTurnDispatchClaim = {
 };
 class DirectTurnSetupCancelled extends Error {}
 const directTurnDispatchClaims = new Map<string, DirectTurnDispatchClaim>();
+const studioTurnOutcomes = new StudioTurnOutcomes();
 const directTurnGenerationByThread = new Map<string, string>();
 // Stop revokes credentials before completion, but the receipt must retain its
 // exact provider-turn owner until that completion or explicit failure cleanup.
@@ -876,6 +879,7 @@ function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
 }
 
 async function interruptDirectThread(botId: string, threadId: string): Promise<void> {
+  studioTurnOutcomes.interrupt(threadId);
   const owner = botForThread(botId, threadId);
   cancelDirectTurnDispatch(botId, threadId);
   revokeInternalCapabilitiesForThread(threadId);
@@ -3265,6 +3269,10 @@ bus.subscribe((event: RuntimeEvent) => {
   const completedTurnId = event.type === "turn.completed"
     ? groupGoalCompletionTurnId(event.turnId, goalCoordinatorTurn?.turnId)
     : event.turnId;
+  if (event.type === "turn.started" && event.turnId) studioTurnOutcomes.start(event.threadId, event.turnId);
+  const studioOutcome = event.type === "turn.completed" && completedTurnId
+    ? studioTurnOutcomes.finish(event.threadId, completedTurnId, event.ok, event.stopReason)
+    : undefined;
   if (goalCoordinatorTurn?.discard && retiredProviderTurns.has(event.turnId)) {
     removeGroupGoalCoordinatorTurn(event.threadId, goalCoordinatorTurn);
     return;
@@ -3656,7 +3664,23 @@ bus.subscribe((event: RuntimeEvent) => {
           });
         }
       }
-      if (completedTurnId) store.markTerminalAssistantMessage(event.threadId, completedTurnId);
+      const terminalMessage = completedTurnId ? store.markTerminalAssistantMessage(event.threadId, completedTurnId) : null;
+      const studioBotId = bot?.id ?? groupSpeakers.get(event.threadId)?.botId;
+      if (completedTurnId && studioBotId) {
+        const handoff = delegationWatch.get(event.threadId);
+        try {
+          recordStudioResult({
+            id: `${event.threadId}:${completedTurnId}`, botId: studioBotId, threadId: event.threadId,
+            turnId: completedTurnId, messageId: terminalMessage?.id,
+            status: studioOutcome ?? (event.ok ? "completed" : "failed"),
+            finishedAt: Date.now(), title: store.taskByThread(studioBotId, event.threadId)?.title ?? store.groupByThread(event.threadId)?.name ?? "",
+            handoffId: handoff?.taskId, sourceBotId: handoff?.sourceBotId, sourceThreadId: handoff?.sourceThreadId,
+          });
+        } catch (error) {
+          // Read-model storage must never prevent the existing turn from settling.
+          console.error("studio: could not record terminal metadata", error);
+        }
+      }
       const reply = lastReply.get(event.threadId) ?? "";
       lastReply.delete(event.threadId);
       const lastReported = turnUsage.get(event.threadId);
@@ -3809,6 +3833,7 @@ const delegationWatch = new Map<string, {
   toBotId: string;
   toBotName?: string;
   taskId?: string;
+  sourceMessageId?: string;
   sourceThreadId?: string;
   sourceBotId?: string;
   /** Bind a late peer result to the run that requested it, not later user
@@ -3945,6 +3970,9 @@ function finalizeDelegationWatch(
     recordDelegationReceipt({
       id: watched.taskId,
       sourceThreadId: watched.sourceThreadId,
+      sourceBotId: watched.sourceBotId,
+      sourceMessageId: watched.sourceMessageId,
+      targetThreadId: threadId,
       toBotId: watched.toBotId,
       toBotName: store.bot(watched.toBotId)?.name ?? watched.toBotId,
       status: ok ? "done" : "failed",
@@ -4112,6 +4140,7 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
       : rawText;
     if (targetThreadId) {
       delegationWatch.set(targetThreadId, {
+        sourceMessageId: taskId ? studioPendingDelegations().find((item) => item.id === taskId)?.sourceMessageId : undefined,
         channelId: channel?.id,
         toBotId,
         toBotName: target?.name,
@@ -5436,6 +5465,7 @@ async function interruptRoutineGroupGoal(
 ): Promise<void> {
   const speaker = groupSpeakers.get(threadId);
   const bot = speaker ? store.bot(speaker.botId) : undefined;
+  studioTurnOutcomes.interrupt(threadId);
   cancelGroupTurnOperations(groupId, threadId, outcome);
   revokeInternalCapabilitiesForThread(threadId);
   await (bot ? registry.get(bot.modelSelection.instanceId) : undefined)
@@ -5470,6 +5500,7 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
 
   const groupTurn = activeGroupTurnForBot(bot.id);
   if (groupTurn) {
+    studioTurnOutcomes.interrupt(groupTurn.threadId);
     revokeInternalCapabilitiesForThread(groupTurn.threadId);
     cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
     const results = await Promise.allSettled([
@@ -5551,6 +5582,7 @@ routines = new RoutineManager({
     });
   },
   interruptTurn: async (botId, threadId, runOn) => {
+    studioTurnOutcomes.interrupt(threadId);
     const bot = botForThread(botId, threadId);
     pendingDelegationWakes.delete(threadId);
     discardDelegations(commsBus, threadId);
@@ -10136,6 +10168,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 404, { error: "unknown internal endpoint" });
     }
 
+    if (method === "GET" && path === "/api/team-map/studio") {
+      res.setHeader("cache-control", "no-store");
+      try {
+        const snapshot = buildStudioSnapshot(store, {
+          workspaceId: ENVIRONMENT_ID,
+          running: [...delegationWatch.entries()].flatMap(([threadId, watch]) =>
+            watch.taskId && watch.sourceBotId && watch.sourceThreadId ? [{
+              id: watch.taskId, sourceBotId: watch.sourceBotId, targetBotId: watch.toBotId,
+              sourceThreadId: watch.sourceThreadId, sourceMessageId: watch.sourceMessageId, targetThreadId: threadId, startedAt: watch.startedAtMs ?? 0,
+            }] : []),
+          speakers: [...groupSpeakers].map(([threadId, speaker]) => ({ threadId, botId: speaker.botId })),
+          queues: publicBotQueuedMessages(),
+          computerHelp: store.bots.flatMap((bot) => {
+            const control = computerControl.snapshot(bot.id);
+            return control.helpReason !== null ? [{ botId: bot.id, requestId: computerControl.pendingHelpRequestId(bot.id) ?? "help" }] : [];
+          }),
+        }, url.searchParams);
+        return json(res, 200, snapshot);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Invalid ")) return json(res, 400, { error: error.message });
+        throw error;
+      }
+    }
+
     // Live Team Map metadata. Prompts and replies never leave their
     // transcripts: this projection carries only ids, status relationships,
     // optional delegation labels, and timestamps.
@@ -11458,6 +11514,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // of the task ahead of it.
       for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
       for (const { threadId, instance } of interruptTargets) {
+        studioTurnOutcomes.interrupt(threadId);
         revokeInternalCapabilitiesForThread(threadId);
         await instance?.adapter.interruptTurn(threadId).catch(() => {});
         closeOpenApprovals(threadId);
@@ -13092,6 +13149,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (expectedThreadId !== undefined && busyGroup.threadId !== expectedThreadId) {
           return json(res, 409, { error: `this bot is working in channel ${busyGroup.group.name}` });
         }
+        studioTurnOutcomes.interrupt(busyGroup.threadId);
         cancelGroupTurnOperations(busyGroup.group.id, busyGroup.threadId);
         revokeInternalCapabilitiesForThread(busyGroup.threadId);
         await instance?.adapter.interruptTurn(busyGroup.threadId).catch(() => {});
@@ -13178,7 +13236,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
       }
-      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, true, body.projectId);
+      if (body.activate !== undefined && typeof body.activate !== "boolean") return json(res, 400, { error: "activate must be a boolean" });
+      const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.activate !== false, body.projectId);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });

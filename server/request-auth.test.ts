@@ -87,6 +87,12 @@ describe("request source for the lockout", () => {
 });
 
 describe("scopes", () => {
+  it("gives studio metadata the map read scope without allowing writes or arbitrary subroutes", () => {
+    expect(requiredScope("GET", "/api/team-map")).toBe("client");
+    expect(requiredScope("GET", "/api/team-map/studio")).toBe("client");
+    expect(requiredScope("POST", "/api/team-map/studio")).toBe("admin");
+    expect(requiredScope("GET", "/api/team-map/studio/private")).toBe("admin");
+  });
   it("keeps full backups, credentials and replacement behind admin scope", () => {
     for (const path of ["status", "export", "upload", "preview", "restore", "client-state", "download/123"]) {
       for (const method of ["GET", "POST", "DELETE"]) expect(requiredScope(method, `/api/workspace-backup/${path}`)).toBe("admin");

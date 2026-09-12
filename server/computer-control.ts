@@ -65,6 +65,11 @@ export class ComputerControl {
     this.now = now;
   }
 
+  /** Identity only, for linking the current studio assistance marker. */
+  pendingHelpRequestId(botId: string): string | null {
+    return this.entries.get(botId)?.helpRequestId ?? null;
+  }
+
   snapshot(botId: string): ControlSnapshot {
     const entry = this.entries.get(botId);
     if (!entry) return NO_CONTROL;

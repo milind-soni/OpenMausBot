@@ -18,7 +18,7 @@ const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
 // `ui` verbs never discover anything: each takes the handle its launch printed.
 const MUTATING = new Set([
   "new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit",
-  "ui click", "ui type", "ui press", "ui flag", "ui eval",
+  "ui click", "ui type", "ui select", "ui drag", "ui press", "ui flag", "ui eval",
 ]);
 
 export class ControlOmbError extends Error {
@@ -44,6 +44,8 @@ export const HELP_UI = `renderer (needs a ui launch handle; every verb takes --u
   ui snapshot --ui HANDLE [--interactive]
   ui click --ui HANDLE (--ref @eN | --name NAME)
   ui type --ui HANDLE (--ref @eN | --name NAME) --text TEXT
+  ui select --ui HANDLE (--ref @eN | --name NAME) --value VALUE
+  ui drag --ui HANDLE --source SELECTOR --target SELECTOR
   ui press --ui HANDLE --keys KEYS
   ui screenshot --ui HANDLE --out PATH.png
   ui console --ui HANDLE

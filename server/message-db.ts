@@ -17,12 +17,14 @@ import { DatabaseSync } from "node:sqlite";
 import { DATA_DIR } from "./config.ts";
 import { peerProvenanceAuthor } from "./peer-provenance.ts";
 import type { Message } from "./store.ts";
+import type { StudioResult } from "../shared/live-team.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
 
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
 
+/** Open the private message database and initialize transcript, search, and receipt tables. */
 function open(): DatabaseSync {
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const file = DB_FILE();
@@ -52,6 +54,19 @@ function open(): DatabaseSync {
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
     );
+    CREATE TABLE IF NOT EXISTS studio_turn_receipts (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      finished_at INTEGER NOT NULL,
+      json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS studio_turns_thread ON studio_turn_receipts(thread_id, finished_at DESC);
+    CREATE INDEX IF NOT EXISTS studio_turns_recent ON studio_turn_receipts(finished_at DESC, id);
+    CREATE INDEX IF NOT EXISTS studio_pending_cards ON messages(thread_id, at)
+      WHERE kind = 'options' AND json_extract(json, '$.card.requestId') IS NOT NULL
+      AND json_extract(json, '$.card.answered') IS NULL
+      AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0;
     CREATE TABLE IF NOT EXISTS chat_followups (
       id TEXT PRIMARY KEY,
       kind TEXT NOT NULL,
@@ -396,11 +411,13 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
+/** Remove a thread's transcript, search entries, and persisted studio results. */
 export function deleteThread(threadId: string): void {
   writeFollowups((connection) => {
     connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?").run(threadId);
     connection.prepare("DELETE FROM messages WHERE thread_id = ?").run(threadId);
     connection.prepare("DELETE FROM thread_state WHERE thread_id = ?").run(threadId);
+    connection.prepare("DELETE FROM studio_turn_receipts WHERE thread_id = ?").run(threadId);
   });
 }
 
@@ -661,4 +678,53 @@ export function closeMessageDb(): void {
   } catch {}
   handle = null;
   handlePath = null;
+}
+
+/** A receipt is a projection of a terminal event, never an execution instruction.
+ * The bounded journal avoids opening every transcript whenever the studio refreshes. */
+export function recordStudioResult(result: StudioResult): void {
+  const database = db();
+  database.prepare("INSERT INTO studio_turn_receipts(id, thread_id, bot_id, finished_at, json) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING")
+    .run(result.id, result.threadId, result.botId, result.finishedAt, JSON.stringify(result));
+  database.prepare("DELETE FROM studio_turn_receipts WHERE id IN (SELECT id FROM studio_turn_receipts ORDER BY finished_at DESC, id DESC LIMIT -1 OFFSET 5000)").run();
+}
+
+/** Filter by current thread ownership before counting and paging terminal receipts. */
+export function studioResults(owners: Array<{ threadId: string; botId: string }>, offset = 0, limit = 50): { items: StudioResult[]; total: number } {
+  if (!owners.length) return { items: [], total: 0 };
+  const allowed = JSON.stringify(owners);
+  const where = "(thread_id, bot_id) IN (SELECT json_extract(value, '$.threadId'), json_extract(value, '$.botId') FROM json_each(?))";
+  const total = db().prepare(`SELECT count(*) AS n FROM studio_turn_receipts WHERE ${where}`).get(allowed) as { n: number };
+  const rows = db().prepare(`SELECT json FROM studio_turn_receipts WHERE ${where} ORDER BY finished_at DESC, id DESC LIMIT ? OFFSET ?`)
+    .all(allowed, Math.min(50, Math.max(1, limit)), Math.max(0, offset)) as Array<{ json: string }>;
+  return { items: rows.map((row) => JSON.parse(row.json)), total: total.n };
+}
+
+export interface StudioPendingCard {
+  threadId: string;
+  messageId: string;
+  requestId: string;
+  botId: string | null;
+  tool: string | null;
+  at: number;
+}
+
+/** Page unanswered provider cards within authorized threads, optionally scoped to one bot. */
+export function studioPendingCards(threadIds: string[], offset = 0, limit = 50, botId?: string): { items: StudioPendingCard[]; total: number } {
+  if (!threadIds.length) return { items: [], total: 0 };
+  const allowed = JSON.stringify(threadIds);
+  const where = "thread_id IN (SELECT value FROM json_each(?)) AND kind = 'options' AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0";
+  const filter = botId ? " AND (json_extract(json, '$.from.botId') IS NULL OR json_extract(json, '$.from.botId') = ?)" : "";
+  const args = botId ? [allowed, botId] : [allowed];
+  const total = db().prepare(`SELECT count(*) AS n FROM messages WHERE ${where}${filter}`).get(...args) as { n: number };
+  const items = db().prepare(`SELECT thread_id AS threadId, id AS messageId, at, json_extract(json, '$.card.requestId') AS requestId, json_extract(json, '$.from.botId') AS botId, json_extract(json, '$.card.tool') AS tool FROM messages WHERE ${where}${filter} ORDER BY at, id LIMIT ? OFFSET ?`)
+    .all(...args, Math.min(50, Math.max(1, limit)), Math.max(0, offset)) as unknown as StudioPendingCard[];
+  return { items, total: total.n };
+}
+
+/** Counts are independent of the visible request page, so no raised hand is hidden by pagination. */
+export function studioAttentionCounts(threadIds: string[]): Array<{ threadId: string; botId: string | null; count: number }> {
+  if (!threadIds.length) return [];
+  return db().prepare("SELECT thread_id AS threadId, json_extract(json, '$.from.botId') AS botId, count(*) AS count FROM messages WHERE thread_id IN (SELECT value FROM json_each(?)) AND kind = 'options' AND json_extract(json, '$.card.requestId') IS NOT NULL AND json_extract(json, '$.card.answered') IS NULL AND coalesce(json_extract(json, '$.card.dismissed'), 0) = 0 GROUP BY thread_id, botId")
+    .all(JSON.stringify(threadIds)) as unknown as Array<{ threadId: string; botId: string | null; count: number }>;
 }
