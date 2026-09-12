@@ -3,7 +3,7 @@ import {
   allocateProviderInstanceId,
   normalizeProviderConnectionInput,
   providerConnectionPresets,
-} from "./catalog";
+} from "./catalog.js";
 
 describe("provider connection catalog", () => {
   it("exposes the built-in OpenAI-compatible presets", () => {
