@@ -334,6 +334,7 @@ export async function launchVerificationServer(
   /** A stand-in enterprise layer (the folder shape core loads) and the key
    * it should accept, so a recipe can prove entitled behaviour offline. */
   enterprise?: { dir: string; licenseKey: string },
+  fakeReplies?: readonly string[],
 ): Promise<VerificationServer> {
   if (localVm) {
     const endpoint = new URL(localVm.host);
@@ -402,6 +403,7 @@ export async function launchVerificationServer(
     // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
     if (key.startsWith("FAKE_CLAUDE_") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
   }
+  if (fakeReplies) childEnv.FAKE_CLAUDE_REPLIES = JSON.stringify(fakeReplies);
   // Opt-in live Local VM fixture: keep the temporary home and fake engine,
   // granting only the explicitly selected machine connection and static UI.
   if (localVm) Object.assign(childEnv, {

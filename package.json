@@ -82,10 +82,14 @@
   "dependencies": {
     "@clack/prompts": "1.7.0",
     "@hpke/core": "1.9.0",
+    "@office-kit/pptx": "0.12.0",
+    "@office-kit/pptx-preview": "0.9.1",
     "@trycua/cua-driver": "0.22.1",
     "clsx": "^2.1.1",
+    "fflate": "0.8.3",
     "lucide-react": "^0.539.0",
     "mdast-util-from-markdown": "^2.0.3",
+    "pdfjs-dist": "6.3.289",
     "posthog-js": "^1.415.6",
     "qrcode-terminal": "0.12.0",
     "qrcode.react": "^4.2.0",
@@ -96,6 +100,7 @@
     "shiki": "^4.4.3",
     "tailwind-merge": "^3.3.1",
     "tar": "7.5.22",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "yaml": "^2.9.0",
     "zod": "4.4.3"
   },

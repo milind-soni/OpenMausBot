@@ -74,6 +74,9 @@ and HTTP tailnet endpoint refresh without touching a real Tailscale installation
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
 
+The [file preview fixture](file-preview.md) checks Web PDF, video, workbook, and
+slide previews against message-authorized downloads on an isolated fake engine.
+
 The [live browser fixture](browser-live.md) mounts the real Browser panel with
 an explicitly selected native engine and Chrome in a disposable home, covering
 watching, takeover, input, and profile switching.

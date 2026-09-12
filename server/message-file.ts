@@ -336,6 +336,9 @@ function containedBy(root: string, candidate: string): boolean {
 
 function mimeFor(path: string): string {
   switch (extname(path).toLowerCase()) {
+    case ".mp4": return "video/mp4";
+    case ".webm": return "video/webm";
+    case ".mov": return "video/quicktime";
     case ".md": return "text/markdown; charset=utf-8";
     case ".txt": return "text/plain; charset=utf-8";
     case ".csv": return "text/csv; charset=utf-8";
@@ -348,6 +351,8 @@ function mimeFor(path: string): string {
     case ".jpeg": return "image/jpeg";
     case ".gif": return "image/gif";
     case ".webp": return "image/webp";
+    case ".avif": return "image/avif";
+    case ".bmp": return "image/bmp";
     case ".doc": return "application/msword";
     case ".docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     case ".xls": return "application/vnd.ms-excel";
