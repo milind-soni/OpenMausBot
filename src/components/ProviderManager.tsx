@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { providerConnectionPresets, type ProviderPresetId, validateProviderBaseUrl } from "../../server/providers/catalog";
 
@@ -29,7 +29,8 @@ const accountProviders: Record<string, string> = {
 };
 
 export function ProviderManager() {
-  const { state, refreshInstances, refreshModels } = useStore();
+  const [instances, setInstances] = useState<InstanceInfo[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [provider, setProvider] = useState<ProviderPresetId>("openai");
   const [name, setName] = useState("OpenAI Personal");
@@ -38,12 +39,39 @@ export function ProviderManager() {
   const [model, setModel] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const loadInstances = useCallback(async () => {
+    const { instances: next } = await api("/api/instances") as { instances: InstanceInfo[] };
+    setInstances(next);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    loadInstances()
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [loadInstances]);
+
+  const refreshManagedModels = async (instanceId: string) => {
+    setRefreshingId(instanceId);
+    setError(null);
+    try {
+      const { instances: next } = await api(`/api/instances/${encodeURIComponent(instanceId)}/refresh-models`, { method: "POST" }) as { instances: InstanceInfo[] };
+      setInstances(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshingId(null);
+    }
+  };
+
   const preset = useMemo(() => providerConnectionPresets().find((item) => item.id === provider)!, [provider]);
-  const apiInstances = state.instances.filter(isManagedApiInstance);
-  const accountInstances = state.instances.filter((instance) => !isManagedApiInstance(instance) && accountProviders[instance.driverKind]);
+  const apiInstances = instances.filter(isManagedApiInstance);
+  const accountInstances = instances.filter((instance) => !isManagedApiInstance(instance) && accountProviders[instance.driverKind]);
 
   const resetForm = () => {
     setOpen(false);
@@ -67,7 +95,7 @@ export function ProviderManager() {
       return;
     }
 
-    const existing = new Set(state.instances.map((instance) => instance.instanceId));
+    const existing = new Set(instances.map((instance) => instance.instanceId));
     const baseId = `api-${slug(trimmedName)}`;
     let instanceId = baseId;
     for (let suffix = 2; existing.has(instanceId); suffix += 1) instanceId = `${baseId}-${suffix}`;
@@ -93,16 +121,17 @@ export function ProviderManager() {
               displayName: trimmedName,
               apiKey: trimmedKey,
               url,
+              provider,
               ...(model.trim() ? { model: model.trim() } : {}),
             },
           },
         }),
       });
-      await refreshInstances();
+      await loadInstances();
       try {
-        await refreshModels(instanceId);
+        await refreshManagedModels(instanceId);
       } catch {
-        // The connection is persisted; discovery is deliberately opportunistic.
+        // The connection is persisted; discovery remains opportunistic.
       }
       setStatus(`${trimmedName} added. Refresh models when the endpoint is available.`);
       setOpen(false);
@@ -125,7 +154,7 @@ export function ProviderManager() {
         method: "PATCH",
         body: JSON.stringify({ providerConnectionDeletes: [instance.instanceId] }),
       });
-      await refreshInstances();
+      await loadInstances();
       setStatus(`${instance.displayName} removed.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -181,7 +210,7 @@ export function ProviderManager() {
           </label>
           <div className="flex flex-wrap items-center justify-end gap-2 sm:col-span-2">
             <button type="button" onClick={resetForm} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50">Cancel</button>
-            <button type="button" onClick={addConnection} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12px] font-semibold text-ink disabled:opacity-50">
+            <button type="button" onClick={addConnection} disabled={busy || loading} className="inline-flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12px] font-semibold text-ink disabled:opacity-50">
               {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Save provider
             </button>
           </div>
@@ -193,7 +222,9 @@ export function ProviderManager() {
 
       <div className="mt-5 space-y-2">
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">API connections</h3>
-        {apiInstances.length === 0 ? (
+        {loading ? (
+          <p className="rounded-xl border border-dashed border-hairline/40 px-3 py-4 text-[12px] text-ink-secondary">Loading provider connections…</p>
+        ) : apiInstances.length === 0 ? (
           <p className="rounded-xl border border-dashed border-hairline/40 px-3 py-4 text-[12px] text-ink-secondary">No API connections yet.</p>
         ) : apiInstances.map((instance) => (
           <div key={instance.instanceId} className="flex flex-wrap items-center gap-3 rounded-xl border border-hairline/30 bg-panel px-3 py-2.5">
@@ -201,7 +232,7 @@ export function ProviderManager() {
               <div className="truncate text-[13px] font-semibold text-ink">{instance.displayName}</div>
               <div className="truncate text-[11px] text-ink-secondary">{instance.snapshot.state} · {instance.models.options.length ? `${instance.models.options.length} models discovered` : "No models discovered"}</div>
             </div>
-            <button type="button" onClick={() => refreshModels(instance.instanceId)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><RefreshCw size={12} /> Refresh models</button>
+            <button type="button" onClick={() => refreshManagedModels(instance.instanceId)} disabled={busy || refreshingId === instance.instanceId} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><RefreshCw size={12} className={cn(refreshingId === instance.instanceId && "animate-spin")} /> Refresh models</button>
             <button type="button" onClick={() => removeConnection(instance)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-danger/80 hover:bg-danger/10 disabled:opacity-50"><Trash2 size={12} /> Remove</button>
           </div>
         ))}
