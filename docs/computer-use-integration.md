@@ -24,11 +24,13 @@ Electron main process
   servers get injected into each bot's `--mcp-config`. Same pattern as Claude
   Desktop / Cherry Studio / LibreChat.
 - **Local desktop use = `cua-driver`**. macOS packages the Rust Mach-O in app
-  Resources; Ubuntu x64 packages the certified 0.19.3 ELF plus its cursor-theme
-  sidecar outside ASAR. Both remain paired with the application release. This
-  applies to the Ubuntu 24.04 GNOME/Xorg beta and guarded GNOME/Wayland beta;
-  remote/cloud boxes and the isolated Local VM remain separate providers.
-  NOT Swift — the Swift file everyone remembers
+  Resources; Windows packages the checksummed x64 exe plus the SDK dll outside
+  ASAR (`pnpm build:cua:win`, proven per-build by `smoke:cua-win` on the
+  windows-latest CI leg); Ubuntu x64 packages the certified 0.19.3 ELF plus its
+  cursor-theme sidecar outside ASAR. All remain paired with the application
+  release. This applies to the Ubuntu 24.04 GNOME/Xorg beta and guarded
+  GNOME/Wayland beta; remote/cloud boxes and the isolated Local VM remain
+  separate providers. NOT Swift — the Swift file everyone remembers
   (`examples/embedded-host-macos/ExampleAgentHarness.swift`) is a 165-line
   reference host showing the embedding pattern, not the driver.
 - **Browser use = the app's own Chromium first.** Electron *is* Chromium;

@@ -525,6 +525,34 @@ describe("default fleet", () => {
     expect(map.hermes?.driver).toBe("hermesAgent");
     expect(map.cursor?.driver).toBe("cursorAgent");
     expect(map.openaiCompat?.driver).toBe("openai-compat");
+    expect(map.vision?.driver).toBe("vision");
+  });
+
+  it("carries the saved Vision endpoint into the live default instance", () => {
+    const map = instanceConfigs({
+      vision: { key: "secret", url: "https://proxy.example.test/v1" },
+    });
+    expect(map.vision.config).toEqual({ url: "https://proxy.example.test/v1" });
+    expect(map.vision.environment).toEqual({
+      FREELLMAPI_API_KEY: "secret",
+      VISION_URL: "https://proxy.example.test/v1",
+    });
+  });
+
+  it("preserves a per-instance Vision url override", () => {
+    const map = instanceConfigs({
+      vision: { url: "https://workspace.example.test/v1" },
+      instances: {
+        customVision: {
+          driver: "vision",
+          config: { url: "https://instance.example.test/v1", apiKeyEnv: "CUSTOM_KEY" },
+        },
+      },
+    });
+    expect(map.customVision.config).toEqual({
+      url: "https://instance.example.test/v1",
+      apiKeyEnv: "CUSTOM_KEY",
+    });
   });
 
   it("does not expand a one-off shadow fleet", () => {
@@ -740,6 +768,9 @@ describe("credential env preference", () => {
     "XAI_API_KEY",
     "OPENAI_COMPAT_API_KEY",
     "OPENAI_COMPAT_URL",
+    "FREELLMAPI_API_KEY",
+    "VISION_URL",
+    "VISION_MODEL",
     "OPENAI_COMPAT_MODEL",
     "OPENAI_COMPAT_PROVIDER",
     "BOX_TOKEN",
@@ -996,6 +1027,7 @@ describe("workspace credential env strip", () => {
   it("covers in-process secrets and private app-state paths", () => {
     // These secrets have no per-driver ACP allowlist entry anywhere — they are
     // consumed in-process (Computer driver / voice module), never by a CLI
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("FREELLMAPI_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("BOX_TOKEN");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TTS_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");

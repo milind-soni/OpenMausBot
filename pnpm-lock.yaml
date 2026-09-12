@@ -17,6 +17,9 @@ importers:
       '@trycua/cua-driver':
         specifier: 0.22.1
         version: 0.22.1
+      '@trycua/cua-driver-win32-x64-msvc':
+        specifier: 0.22.1
+        version: 0.22.1
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -5567,8 +5570,7 @@ snapshots:
   '@trycua/cua-driver-win32-arm64-msvc@0.22.1':
     optional: true
 
-  '@trycua/cua-driver-win32-x64-msvc@0.22.1':
-    optional: true
+  '@trycua/cua-driver-win32-x64-msvc@0.22.1': {}
 
   '@trycua/cua-driver@0.22.1':
     dependencies:

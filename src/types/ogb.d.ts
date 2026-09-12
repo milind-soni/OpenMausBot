@@ -201,9 +201,22 @@ const __APP_VERSION__: string;
       saveFile?(filePath: string): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "visionApiKey" | "dictationApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
+      /** Hold-to-dictate streaming STT (Deepgram). The renderer streams mic
+       * audio; the main process owns the WebSocket and the key. */
+      dictation?: {
+        start(): Promise<number>;
+        audio(id: number, chunk: ArrayBuffer): Promise<void>;
+        finish(id: number): Promise<string>;
+        cancel(id: number): Promise<void>;
+        onOpen(cb: (id: number) => void): () => void;
+        onPartial(cb: (id: number, partialText: string) => void): () => void;
+        onError(cb: (id: number, message: string) => void): () => void;
+      };
+      /** Copy dictated text into the system clipboard. Resolves once written. */
+      writeClipboardText?(text: string): Promise<{ written: boolean }>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

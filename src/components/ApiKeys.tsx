@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai" | "vision" | "dictation";
 /** Sections whose key can be tried against the provider from the server. */
 export type TestableProvider = "anthropic" | "openaiCompat" | "xai";
 
@@ -25,14 +25,18 @@ const SECTIONS: Record<
   anthropic: { body: (v) => ({ anthropic: { key: v } }), flag: (c) => c.anthropic?.configured ?? false },
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
+  vision: { body: (v) => ({ vision: { key: v } }), flag: (c) => c.vision?.configured ?? false },
+  dictation: { body: (v) => ({ dictation: { key: v } }), flag: (c) => c.dictation?.configured ?? false },
 };
 
 // Provider keys have no desktop-shell slot yet and go through the server's
 // own 0600 config, the same place they live on a hosted server.
-const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey">> = {
+const ELECTRON_CREDENTIAL: Partial<Record<ConfigSection, "composioApiKey" | "boxToken" | "opencodeGoApiKey" | "visionApiKey" | "dictationApiKey">> = {
   composio: "composioApiKey",
   box: "boxToken",
   opencodeGo: "opencodeGoApiKey",
+  vision: "visionApiKey",
+  dictation: "dictationApiKey",
 };
 
 const CREDENTIALS: Record<
@@ -96,6 +100,22 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.xai.desc",
     href: "https://console.x.ai",
     linkLabelKey: "keys.xai.link",
+    optional: true,
+  },
+  vision: {
+    labelKey: "keys.vision.label",
+    placeholder: "flm-…",
+    descriptionKey: "keys.vision.desc",
+    href: "https://github.com/freellmapi/freellmapi",
+    linkLabelKey: "keys.vision.link",
+    optional: true,
+  },
+  dictation: {
+    labelKey: "keys.dictation.label",
+    placeholder: "dg-…",
+    descriptionKey: "keys.dictation.desc",
+    href: "https://console.deepgram.com",
+    linkLabelKey: "keys.dictation.link",
     optional: true,
   },
 };
@@ -377,6 +397,55 @@ export function VpsConnection() {
           {saving ? <Loader2 size={13} className="animate-spin" /> : !alias.trim() && configured ? t("keys.clear") : <><Check size={13} />{t("common.save")}</>}
         </button>
       </div>
+      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** The Vision engine's base URL: a setting next to its key, so a local
+ * freellmapi proxy and a hosted one are one field away. */
+export function VisionUrl() {
+  const { state, dispatch } = useStore();
+  const saved = state.config?.vision?.url ?? "";
+  const [value, setValue] = useState(saved);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { setValue(saved); }, [saved]);
+  const dirty = value.trim() !== saved;
+
+  const save = () => {
+    if (saving || !dirty) return;
+    setSaving(true);
+    setError(null);
+    api("/api/config", { method: "PUT", body: JSON.stringify({ vision: { url: value.trim() } }) })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  return (
+    <div>
+      <div className="mb-1.5 text-[13px] text-ink-secondary">{t("keys.vision.url")}</div>
+      <div className="flex gap-2">
+        <input
+          type="url"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          placeholder="http://localhost:3001/v1"
+          aria-label={t("keys.vision.url")}
+          spellCheck={false}
+          className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+        />
+        <button
+          onClick={save}
+          disabled={saving || !dirty}
+          className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
+        </button>
+      </div>
+      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">{t("keys.vision.urlHint")}</p>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
     </div>
   );

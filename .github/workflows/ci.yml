@@ -36,6 +36,11 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Smoke the Windows CUA staging (embedded host lifecycle)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pnpm build:cua:win
+          pnpm smoke:cua-win
       - name: Validate locale catalogs
         if: matrix.os == 'ubuntu-latest'
         run: pnpm i18n:check

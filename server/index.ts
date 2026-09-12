@@ -281,6 +281,7 @@ import {
   stageSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
+import { BUILT_IN_PRESETS, fetchPromptsFromSource, presetWire, PROMPT_COLLECTIONS } from "./prompt-presets.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -8181,6 +8182,7 @@ function configStatus() {
     billing: { currency: cfg.billing?.currency ?? "USD", prices: cfg.billing?.prices ?? {} },
     // the base URL is a setting, not a secret; the key stays write-only
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
+    vision: { configured: Boolean(cfg.vision?.key), url: cfg.vision?.url ?? "" },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
@@ -8190,6 +8192,7 @@ function configStatus() {
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
+    dictation: { configured: Boolean(cfg.dictation?.key) },
     tts: tts.describeVoice(cfg),
     imageGen: avatarImageStatus(cfg),
     // not a secret — the sidebar shows it
@@ -12304,7 +12307,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, { ok: true });
     }
 
-    // ── section context: a user-owned team brief ────────────────────────
+    // ── prompt library: read-only catalog, built-ins + GitHub import ────
+    // Read-only on purpose: applying a preset goes through the normal bot
+    // patch (soul cap, history, drift all keep single ownership), so this
+    // endpoint only ever lists. Import mirrors skill imports' GitHub-only,
+    // bounded-fetch policy. See server/prompt-presets.ts.
+    m = path.match(/^\/api\/prompt-library(\/.*)?$/);
+    if (m && method === "GET") {
+      if (m[1]) {
+        const source = decodeURIComponent(m[1].slice(1));
+        if (!source) return json(res, 400, { error: "source must not be empty" });
+        const fetched = await fetchPromptsFromSource(source);
+        if ("error" in fetched) return json(res, 422, { error: fetched.error });
+        return json(res, 200, { presets: fetched.presets.map(presetWire), errors: fetched.errors });
+      }
+      return json(res, 200, { presets: BUILT_IN_PRESETS.map(presetWire), collections: PROMPT_COLLECTIONS });
+    }
     // Bots receive this in their system context, but no agent tool can write
     // it. That keeps one bot from silently changing every teammate's future
     // turns. The section query parameter is required even for General (""),
