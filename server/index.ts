@@ -5905,6 +5905,7 @@ type GroupMemberTurnOutcome =
   | "settled"
   | "provider_failed"
   | "dispatch_failed"
+  | "spend_capped"
   | "stalled"
   | "timed_out"
   | "cancelled"
@@ -6684,7 +6685,7 @@ async function runGroupMemberTurn(
   return true;
   } catch (error) {
     if (providerDispatched) throw error;
-    const isSpendCap = typeof error === "object" && (error as { code?: string }).code === "spend_cap";
+    const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
     if (!roomSpeaker && !isSpendCap) throw error;
     const message = error instanceof Error ? error.message : "Local VM setup failed";
     store.appendMessage(threadId, {
@@ -6693,7 +6694,13 @@ async function runGroupMemberTurn(
       tool: { name: `error: ${message}`, ok: false },
     });
     onDispatchError?.(message);
-    if (orchestration) orchestration.result.outcome = "dispatch_failed";
+    if (orchestration) {
+      // A spend-cap refusal is deterministic: record it as its own
+      // non-retryable outcome (the goal loop treats it as a blocked run,
+      // never as a transient dispatch failure worth a second attempt).
+      orchestration.result.outcome = isSpendCap ? "spend_capped" : "dispatch_failed";
+      if (isSpendCap) orchestration.result.stopReason = message;
+    }
     return false;
   } finally {
     // Covers connector/setup failures, cancellation before dispatch, and all
@@ -6793,6 +6800,8 @@ async function runGroupGoalStep(args: {
       // so costs a turn like any other model call — budget is spent, never
       // stretched, and the cap still holds.
       const outcome = result.outcome;
+      // spend_capped is deliberately absent: a cap refusal is deterministic,
+      // and a retry would just repeat the same spend-limit activity message.
       const transient =
         outcome === "provider_failed" ||
         outcome === "dispatch_failed" ||
@@ -6885,6 +6894,15 @@ async function runGroupGoalOperation(args: {
       finishGroupGoalRun(args.groupId, args.operation, "blocked", `${args.coordinator.name} is not available.`);
       return;
     }
+    if (coordinatorResult.outcome === "spend_capped") {
+      finishGroupGoalRun(
+        args.groupId,
+        args.operation,
+        "blocked",
+        coordinatorResult.stopReason ?? `${args.coordinator.name} hit the workspace spend cap.`,
+      );
+      return;
+    }
     if (coordinatorResult.outcome === "busy") {
       // The lead is the one member the run cannot route around. Blocked, not
       // failed: the goal text is intact and nothing about the team broke.
@@ -6968,6 +6986,15 @@ async function runGroupGoalOperation(args: {
     if (args.operation.cancelled) return;
     if (workerResult.outcome === "unavailable") {
       finishGroupGoalRun(args.groupId, args.operation, "blocked", `${workerBot.name} is not available.`);
+      return;
+    }
+    if (workerResult.outcome === "spend_capped") {
+      finishGroupGoalRun(
+        args.groupId,
+        args.operation,
+        "blocked",
+        workerResult.stopReason ?? `${workerBot.name} hit the workspace spend cap.`,
+      );
       return;
     }
     if (workerResult.outcome === "busy") {
