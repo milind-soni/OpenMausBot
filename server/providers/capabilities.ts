@@ -1,4 +1,4 @@
-import type { ProviderPresetId } from "./catalog";
+import type { ProviderPresetId } from "./catalog.js";
 
 export type ProviderCapabilities = {
   streaming: boolean;
