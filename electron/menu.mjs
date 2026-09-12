@@ -35,7 +35,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
     ],
   };
   const template = [
-    ...(isMac ? [{ label: app.name, submenu: [{ role: "about" }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
+    ...(isMac ? [{ label: app.name, submenu: [{ role: "about" }, { role: "preferences" }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
     { role: "fileMenu" },
     { role: "editMenu" },
     server,
