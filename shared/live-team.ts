@@ -32,7 +32,6 @@ export interface StudioHandoff {
   sourceThreadId: string;
   sourceMessageId?: string;
   targetThreadId?: string;
-  messageId?: string;
   state: "queued" | "running" | StudioOutcome | "denied" | "dropped";
   at: number;
 }

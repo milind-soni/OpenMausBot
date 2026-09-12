@@ -17,17 +17,20 @@ export interface StudioRuntime {
 export class StudioTurnOutcomes {
   private active = new Map<string, string>();
   private stopped = new Set<string>();
+  /** Track the active turn so a stop applies to its exact terminal receipt. */
   start(threadId: string, turnId: string): void {
     this.active.set(threadId, turnId);
     // Bound metadata if a driver disappears without a terminal event.
     while (this.active.size > 2000) this.active.delete(this.active.keys().next().value!);
   }
+  /** Remember an explicit stop even when the provider reports a generic failure. */
   interrupt(threadId: string): void {
     const turnId = this.active.get(threadId);
     if (!turnId) return;
     this.stopped.add(`${threadId}:${turnId}`);
     while (this.stopped.size > 2000) this.stopped.delete(this.stopped.values().next().value!);
   }
+  /** Consume stop metadata without misclassifying a later turn or a successful race. */
   finish(threadId: string, turnId: string, ok: boolean, stopReason?: string | null): StudioOutcome {
     const key = `${threadId}:${turnId}`;
     const requested = this.stopped.delete(key);
@@ -36,6 +39,7 @@ export class StudioTurnOutcomes {
   }
 }
 
+/** Validate a bounded nonnegative offset supplied by the studio client. */
 function offset(query: URLSearchParams, key: string): number {
   const value = Number(query.get(key) ?? 0);
   if (!Number.isSafeInteger(value) || value < 0 || value > 100_000) throw new Error(`Invalid ${key}. Use a whole number from 0 to 100000.`);
@@ -86,10 +90,14 @@ export function buildStudioSnapshot(store: Store, runtime: StudioRuntime, query:
       requestId: entry.requestId, at: 0, kind: "computer" });
   }
   const resultsOffset = offset(query, "resultsOffset");
-  const resultPage = studioResults(threads, resultsOffset);
-  // Thread ownership can change through imports or deletion. Never authorize by a saved receipt alone.
-  const results = resultPage.items.filter((item) => visible.has(item.botId) &&
-    (directOwners.get(item.threadId) === item.botId || groupThreads.get(item.threadId)?.memberIds.includes(item.botId)));
+  // Authorize current owners before pagination so stale receipts cannot consume slots.
+  const resultOwners = threads.flatMap((threadId) => {
+    const owner = directOwners.get(threadId);
+    const botIds = new Set([...(owner ? [owner] : []), ...(groupThreads.get(threadId)?.memberIds ?? [])]);
+    return [...botIds].map((botId) => ({ threadId, botId }));
+  });
+  const resultPage = studioResults(resultOwners, resultsOffset);
+  const results = resultPage.items;
   const handoffs = new Map<string, StudioHandoff>();
   for (const receipt of studioDelegationReceipts()) {
     const sourceBotId = directOwners.get(receipt.sourceThreadId) ?? receipt.sourceBotId;

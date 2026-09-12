@@ -310,6 +310,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("POST", `/api/groups/${group.id}/interrupt`, {})).status).toBe(200);
     await expect.poll(async () => (await botState(botId)).busy, { timeout: 10_000 }).toBe(false);
     expect((await api("PATCH", `/api/bots/${botId}/model`, selection)).status).toBe(200);
+    await expect.poll(async () => (await api("GET", "/api/team-map/studio")).body.results.items
+      .find((item: any) => item.threadId === group.threadId)?.status, { timeout: 10_000 }).toBe("interrupted");
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 

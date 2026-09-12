@@ -22,9 +22,9 @@ describe("studio metadata", () => {
     expect(JSON.stringify(first)).not.toContain("Secret");
     expect(buildStudioSnapshot(store, runtime(), new URLSearchParams("resultsOffset=50")).results.items).toHaveLength(7);
     closeMessageDb();
-    expect(studioResults([visible.threadId]).total).toBe(57);
+    expect(studioResults([{ threadId: visible.threadId, botId: visible.id }]).total).toBe(57);
     recordStudioResult({ id: "r0", botId: visible.id, threadId: visible.threadId, turnId: "turn0", finishedAt: 999, title: "duplicate", status: "failed" });
-    expect(studioResults([visible.threadId]).total).toBe(57);
+    expect(studioResults([{ threadId: visible.threadId, botId: visible.id }]).total).toBe(57);
   });
   it("keeps all pending attention counted, even beyond its visible page, and removes answered cards", () => {
     const bot = store.createBot({ name: "Busy", section: "Work" }, { seedMessages: false });
@@ -72,7 +72,26 @@ describe("studio metadata", () => {
     for (const status of ["failed", "interrupted"] as const) recordStudioResult({ id: status, botId: bot.id, threadId: bot.threadId, turnId: status, finishedAt: 1, title: status, status });
     expect(new Set(buildStudioSnapshot(store, runtime(), new URLSearchParams()).results.items.map((item) => item.status))).toEqual(new Set(["failed", "interrupted"]));
     deleteThread(bot.threadId);
-    expect(studioResults([bot.threadId]).total).toBe(0);
+    expect(studioResults([{ threadId: bot.threadId, botId: bot.id }]).total).toBe(0);
+  });
+  it("excludes removed group members before counting and paging receipts", () => {
+    const current = store.createBot({ name: "Current", section: "Work" }, { seedMessages: false });
+    const removed = store.createBot({ name: "Removed", section: "Work" }, { seedMessages: false });
+    const group = store.createGroup("Shared", [current.id, removed.id], false, "Work");
+    for (let i = 0; i < 57; i++) recordStudioResult({ id: `valid-${i}`, botId: current.id, threadId: group.threadId, turnId: `valid-${i}`, finishedAt: i, title: "Valid", status: "completed" });
+    for (let i = 0; i < 51; i++) recordStudioResult({ id: `stale-${i}`, botId: removed.id, threadId: group.threadId, turnId: `stale-${i}`, finishedAt: 100 + i, title: "Stale", status: "completed" });
+    // The removed bot stays visible and the shared thread still exists.
+    store.patchGroup(group.id, { memberIds: [current.id] });
+    const first = buildStudioSnapshot(store, runtime(), new URLSearchParams("room=Work")).results;
+    expect(first.total).toBe(57);
+    expect(first.items).toHaveLength(50);
+    expect(first.items.every((item) => item.botId === current.id)).toBe(true);
+    expect(first.items[0].id).toBe("valid-56");
+    const second = buildStudioSnapshot(store, runtime(), new URLSearchParams("room=Work&resultsOffset=50")).results;
+    expect(second.total).toBe(57);
+    expect(second.items.map((item) => item.id)).toEqual(["valid-6", "valid-5", "valid-4", "valid-3", "valid-2", "valid-1", "valid-0"]);
+    expect(studioResults([])).toEqual({ items: [], total: 0 });
+    expect(studioResults([{ threadId: current.threadId, botId: removed.id }]).total).toBe(0);
   });
   it("rejects malformed paging and emits no content fields", () => {
     expect(() => buildStudioSnapshot(store, runtime(), new URLSearchParams("resultsOffset=-1"))).toThrow("Invalid");

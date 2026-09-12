@@ -1,6 +1,7 @@
 import type { StudioSnapshot } from "../../shared/live-team";
 export interface StudioMotion { id: string; kind: "handoff" | "result"; sourceBotId?: string; targetBotId: string }
 export interface StudioMotionState { scope: string; since: number; seen: ReadonlySet<string> }
+/** Animate at most two unseen events, resetting history after reconnects or scope changes. */
 export function studioMotions(previous: StudioMotionState | null, snapshot: StudioSnapshot, reset = false): { state: StudioMotionState; motions: StudioMotion[]; overflow: number } {
   const scope = JSON.stringify([snapshot.workspaceId, snapshot.room, snapshot.handoffs.offset, snapshot.results.offset]);
   const baseline = reset || previous?.scope !== scope;

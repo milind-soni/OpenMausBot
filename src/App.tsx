@@ -30,6 +30,7 @@ import { LiveTeamStudio } from "@/components/live-team/LiveTeamStudio";
 import { t, setLocale } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 
+/** Coordinate app navigation, retaining studio drafts and focus across conversation visits. */
 function Shell() {
   const { state, dispatch } = useStore();
   const unreadCount =

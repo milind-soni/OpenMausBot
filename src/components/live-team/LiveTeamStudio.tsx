@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, Hand, Layers, Network, RefreshCw, Send, X } from "lucide-react";
 import { api, openThread, useStore } from "@/state/store";
 import type { StudioHandoff, StudioSnapshot, StudioTarget } from "../../../shared/live-team";
@@ -13,7 +13,9 @@ import { StudioStation } from "./StudioStation";
 import "./live-team.css";
 
 const freshPreferences: StudioPreferences = { presentation: "map", room: "", calm: false };
+/** Access optional browser storage without failing in restricted environments. */
 function storage(): Storage | undefined { try { return window.localStorage; } catch { return undefined; } }
+/** Navigate the bounded server collections in pages of fifty items. */
 function Pagination({ offset, total, onChange }: { offset: number; total: number; onChange: (offset: number) => void }) {
   if (total <= 50) return null;
   return <nav className="studio-pagination" aria-label={t("studio.historyPages")}>
@@ -148,7 +150,7 @@ export function LiveTeamStudio({ active, onNavigate }: { active: boolean; onNavi
     requestAnimationFrame(() => root.current?.querySelector<HTMLElement>(`[data-station="${CSS.escape(selected)}"] button`)?.focus());
   };
   const latest = useRef({ state, onNavigate, snapshot });
-  latest.current = { state, onNavigate, snapshot };
+  useLayoutEffect(() => { latest.current = { state, onNavigate, snapshot }; }, [state, onNavigate, snapshot]);
   const open = useCallback((target: StudioTarget, computer = false) => {
     const { state, onNavigate } = latest.current;
     const bot = state.bots.find((bot) => bot.id === target.botId && !bot.hidden);

@@ -27,6 +27,7 @@ let mode = "connected";
 // A host capture outlives an aborted renderer fetch. Keep this work pending
 // until explicitly released, so reconnects exercise real lifecycle contention.
 const transport = {
+  mutations: [] as string[],
   requests: 0, aborted: 0, conflicts: 0, capturing: false,
   joining: false, duringJoin: 0, controlCalls: 0,
   releaseCapture: () => {}, releaseJoin: () => {},
@@ -48,6 +49,7 @@ Object.assign(window, { ogb: { desktopViewer: {
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const path = typeof input === "string" ? input : "";
+  if (init?.method === "POST" && path.includes("/computer/")) transport.mutations.push(path);
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
     status, headers: { "content-type": "application/json" },
   });
@@ -113,6 +115,7 @@ function Fixture() {
   const bot = state.bots[0];
   const [busy, setBusy] = useState(false);
   const [generation, setGeneration] = useState(0);
+  const [watchOnly, setWatchOnly] = useState(false);
   const [panel, setPanel] = useState("computer");
   useEffect(() => {
     if (bot) {
@@ -129,6 +132,7 @@ function Fixture() {
       <label>Panel<select aria-label="Panel" value={panel} onChange={(event) => setPanel(event.target.value)}>
         <option value="computer">Computer</option><option value="remote">Remote desktop</option>
       </select></label>
+      <button onClick={() => { setWatchOnly(!watchOnly); setGeneration((n) => n + 1); }}>Watch only: {String(watchOnly)}</button>
       <button onClick={() => setGeneration((n) => n + 1)}>Reconnect panel</button>
       <button onClick={() => setBusy(!busy)}>Busy: {String(busy)}</button>
       <button onClick={() => transport.releaseCapture()}>Release held capture</button>
@@ -137,7 +141,7 @@ function Fixture() {
     </div>
     {state.settingsOpen && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
     {state.computerOpen && bot ? panel === "computer"
-      ? <ComputerPanel key={generation} bot={{ ...bot, busy }} />
+      ? <ComputerPanel key={generation} bot={{ ...bot, busy }} observationOnly={watchOnly} />
       : <RemoteDesktopPanel key={generation} bot={{ ...bot, busy }} />
       : !state.settingsOpen && <button onClick={() => dispatch({ type: "toggleComputer", open: true })}>Open computer panel</button>}
   </div>;

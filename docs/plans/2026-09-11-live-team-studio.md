@@ -4,7 +4,7 @@ Status: core implementation and local verification complete. All four milestones
 
 Prepared for Richard on September 11, 2026. Planning refresh on September 12, 2026.
 
-Repository: `/Users/richardsuwandi/github/OpenMausBot`  
+Repository: the repository root
 Upstream: <https://github.com/milind-soni/OpenMausBot>  
 Reviewed baseline: `5491157c7679d67287ce9bdcde1c0be45faa52f0`, package version `0.1.74`.
 
@@ -358,6 +358,6 @@ Upstream moves quickly. The recorded baseline and PR status are planning evidenc
 
 ## 13. Proposed future goal
 
-> Implement the Live Team studio in `/Users/richardsuwandi/github/OpenMausBot` according to `docs/plans/2026-09-11-live-team-studio.md`, completing milestones 1 through 4 and the acceptance checklist. Build a softly illustrated spatial room with the existing Maus characters, real task states, identifiable handoffs, staged brief assignment, actionable requests, workstation navigation, a results shelf, and calm mode. Reuse the current agent runtime and permission behavior. Verify the launch story in an isolated fixture, provide screenshots and video, and leave the work ready for review. Keep implementation local unless publishing or GitHub communication is separately authorized.
+> Implement the Live Team studio in the repository root according to `docs/plans/2026-09-11-live-team-studio.md`, completing milestones 1 through 4 and the acceptance checklist. Build a softly illustrated spatial room with the existing Maus characters, real task states, identifiable handoffs, staged brief assignment, actionable requests, workstation navigation, a results shelf, and calm mode. Reuse the current agent runtime and permission behavior. Verify the launch story in an isolated fixture, provide screenshots and video, and leave the work ready for review. Keep implementation local unless publishing or GitHub communication is separately authorized.
 
 This was the implementation goal that Richard subsequently activated. Its core scope is now implemented and locally verified. The optional follow-ups in section 3H are not included in that completion.

@@ -58,6 +58,25 @@ describe("cloud preview recovery in the real renderer", () => {
     await evaluate(`location.href = ${JSON.stringify(preview.previewUrl)}; true`);
     await expect.poll(frameVisible, { timeout: 20_000 }).toBe(true);
 
+    // Ready cloud previews stay readable but cannot mutate the computer until
+    // the operator explicitly starts it. Disabled buttons also ignore .click().
+    await click("Watch only: false");
+    await expect.poll(frameVisible, { timeout: 20_000 }).toBe(true);
+    await evaluate("window.cloudPreviewFixture.mutations.length = 0");
+    expect(await evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('button')].filter(button =>
+        /Take control|Sleep/.test(button.textContent) || /live desktop$/.test(button.getAttribute('aria-label') || ''));
+      for (const button of buttons) button.click();
+      return buttons.length >= 3 && buttons.every(button => button.disabled);
+    })()`)).toBe(true);
+    expect(await stat("mutations")).toEqual([]);
+    await click("Start cloud computer");
+    await expect.poll(() => stat("mutations")).toContainEqual(expect.stringContaining("/computer/provision"));
+    expect(await evaluate("[...document.querySelectorAll('button')].find(button => button.textContent.trim() === 'Take control')?.disabled")).toBe(false);
+
+    await click("Watch only: true");
+    await expect.poll(frameVisible, { timeout: 20_000 }).toBe(true);
+
     // Busy changes must not cancel an expensive capture. A real abort does
     // not terminate its simulated host work; the next generation sees409.
     await select("Screenshot response", "held");

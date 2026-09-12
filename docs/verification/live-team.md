@@ -148,3 +148,43 @@ The following requirements have direct implementation and local verification evi
 - **Motion and accessibility.** Real handoff animation starts are recorded. Calm/reduced-motion paths remain static, stale refresh errors retain a static room, and recovery does not replay deliveries. Native Electron zoom verifies a 720 × 500 CSS viewport at 200%, without horizontal overflow and with editable brief input. Expanded-label captures were inspected at 375 px. The final focused workflow passed inspector-focus and polite-announcement assertions.
 - **Performance and integration.** The measured twelve-station scene remains near the development machine's 16.7 ms frame budget under off-page SSE traffic. Metadata reads are visible-only and bounded, transcript content is fetched on demand, and the studio does not create another SSE client, scheduler, permission policy, or window manager.
 - **Contribution package.** The implementation plan, exact verification commands, local artifacts, baseline comparison, platform limits, and proposed review slices are present. The public upstream HEAD was rechecked and still matches the recorded baseline. Spaces #830 remains open at its previously recorded head.
+
+
+## CodeRabbit review follow-up, September 12, 2026
+
+Addressed the five inline findings, the room-stop finding outside the diff, and
+the unused handoff field from PR #1116. Result queries now authorize current
+thread and bot pairs before counting or pagination. Cloud watch mode blocks
+control, join, sleep, provisioning, and replacement until the explicit start
+action or a computer selection change. Studio callbacks read committed React
+state. Recorder commands have ten-second deadlines and reject on disconnect,
+including during startup and shutdown. The plan uses portable repository paths.
+Function documentation was expanded for the docstring coverage warning.
+CodeRabbit must rerun its own coverage check to confirm its reported percentage.
+
+Verification used Node 24.9.0 and the installed repository dependencies:
+
+```sh
+node_modules/.bin/vitest run server/live-team.test.ts src/lib/live-team.test.ts server/delegations.test.ts server/peer-approval.test.ts src/lib/team-map.test.ts src/state/store.test.ts src/lib/local-computer.test.ts server/request-auth.test.ts scripts/testing/live-team-demo-capture.test.ts src/components/ComputerPanel.test.ts src/components/ComputerPanel.browser.test.ts src/components/ComputerPanel.i18n.test.ts
+node_modules/.bin/vitest run server/independent-threads-api.test.ts -t "keeps a Group"
+OMB_UI_E2E=1 node_modules/.bin/vitest run scripts/testing/cloud-preview.e2e.test.ts
+OMB_UI_E2E=1 OMB_UI_ELECTRON=1 node_modules/.bin/vitest run scripts/testing/live-team-ui.e2e.test.ts server/live-team.test.ts
+node_modules/.bin/oxlint --deny-warnings .
+node_modules/.bin/tsc -b
+node_modules/.bin/tsc -p tsconfig.server.json
+node_modules/.bin/vite build
+```
+
+The focused suite passed 242 tests. The room-stop fixture passed its selected
+test, with the seven unrelated cases excluded by the name filter. The cloud
+browser fixture passed, including disabled watch-mode controls, no mutation on
+click, and provisioning after Start cloud computer. The final Studio browser
+and hidden Electron run plus metadata tests passed all nine tests. This last
+run includes the final SQL ownership filter. Lint, both typechecks, and the
+production build passed. Vite reported its existing large-chunk advisory.
+
+All server and browser checks used disposable homes, fake engines, and fixture
+URLs. Cloud transport was simulated. The full repository suite was not rerun
+for this follow-up, and the platform limits documented above still apply.
+Local logs are retained under `.omb-scratch/live-team/review-fixes/` alongside
+the existing ignored workflow evidence.

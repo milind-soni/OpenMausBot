@@ -24,6 +24,7 @@ const DB_FILE = () => join(DATA_DIR, "messages.db");
 let handle: DatabaseSync | null = null;
 let handlePath: string | null = null;
 
+/** Open the private message database and initialize transcript, search, and receipt tables. */
 function open(): DatabaseSync {
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   const file = DB_FILE();
@@ -382,6 +383,7 @@ export function setActiveLeaf(threadId: string, leafId: string | null): void {
     .run(threadId, leafId);
 }
 
+/** Remove a thread's transcript, search entries, and persisted studio results. */
 export function deleteThread(threadId: string): void {
   writeFollowups((connection) => {
     connection.prepare("DELETE FROM chat_followups WHERE thread_id = ?").run(threadId);
@@ -659,13 +661,15 @@ export function recordStudioResult(result: StudioResult): void {
   database.prepare("DELETE FROM studio_turn_receipts WHERE id IN (SELECT id FROM studio_turn_receipts ORDER BY finished_at DESC, id DESC LIMIT -1 OFFSET 5000)").run();
 }
 
-export function studioResults(threadIds: string[], offset = 0, limit = 50): { items: StudioResult[]; total: number } {
-  if (!threadIds.length) return { items: [], total: 0 };
-  const allowed = JSON.stringify(threadIds);
-  const total = db().prepare("SELECT count(*) AS n FROM studio_turn_receipts WHERE thread_id IN (SELECT value FROM json_each(?))").get(allowed) as { n: number };
-  const rows = db().prepare("SELECT json FROM studio_turn_receipts WHERE thread_id IN (SELECT value FROM json_each(?)) ORDER BY finished_at DESC, id DESC LIMIT ? OFFSET ?")
+/** Filter by current thread ownership before counting and paging terminal receipts. */
+export function studioResults(owners: Array<{ threadId: string; botId: string }>, offset = 0, limit = 50): { items: StudioResult[]; total: number } {
+  if (!owners.length) return { items: [], total: 0 };
+  const allowed = JSON.stringify(owners);
+  const where = "(thread_id, bot_id) IN (SELECT json_extract(value, '$.threadId'), json_extract(value, '$.botId') FROM json_each(?))";
+  const total = db().prepare(`SELECT count(*) AS n FROM studio_turn_receipts WHERE ${where}`).get(allowed) as { n: number };
+  const rows = db().prepare(`SELECT json FROM studio_turn_receipts WHERE ${where} ORDER BY finished_at DESC, id DESC LIMIT ? OFFSET ?`)
     .all(allowed, Math.min(50, Math.max(1, limit)), Math.max(0, offset)) as Array<{ json: string }>;
-  return { items: rows.map((row) => JSON.parse(row.json) as StudioResult), total: total.n };
+  return { items: rows.map((row) => JSON.parse(row.json)), total: total.n };
 }
 
 export interface StudioPendingCard {
@@ -677,6 +681,7 @@ export interface StudioPendingCard {
   at: number;
 }
 
+/** Page unanswered provider cards within authorized threads, optionally scoped to one bot. */
 export function studioPendingCards(threadIds: string[], offset = 0, limit = 50, botId?: string): { items: StudioPendingCard[]; total: number } {
   if (!threadIds.length) return { items: [], total: 0 };
   const allowed = JSON.stringify(threadIds);

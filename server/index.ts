@@ -11442,6 +11442,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // of the task ahead of it.
       for (const { threadId } of interruptTargets) cancelGroupTurnOperations(group.id, threadId);
       for (const { threadId, instance } of interruptTargets) {
+        studioTurnOutcomes.interrupt(threadId);
         revokeInternalCapabilitiesForThread(threadId);
         await instance?.adapter.interruptTurn(threadId).catch(() => {});
         closeOpenApprovals(threadId);

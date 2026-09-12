@@ -306,6 +306,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   );
 }
 
+/** Render the existing relationship map and an optional entry into Live Team. */
 export function TeamMapPage({ onStudio }: { onStudio?: () => void }) {
   const { state } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;

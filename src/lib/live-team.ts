@@ -2,6 +2,7 @@ import type { Bot, InstanceInfo } from "@/state/store";
 import type { StudioSnapshot, StudioStation } from "../../shared/live-team";
 
 export type StationState = "waiting" | "working" | "queued" | "unavailable" | "ready" | "stale";
+/** Prioritize stale data and requests for help over work, queue, and provider status. */
 export function stationState(bot: Bot, station: StudioStation | undefined, snapshot: StudioSnapshot, instances: InstanceInfo[], stale: boolean): StationState {
   if (stale) return "stale";
   if ((station?.attentionCount ?? 0) > 0 || snapshot.attention.items.some((item) => item.botId === bot.id) || station?.threads.some((thread) => thread.activity === "waiting-on-you")) return "waiting";

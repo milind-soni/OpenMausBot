@@ -6,6 +6,7 @@ import type { StudioStation as Station } from "../../../shared/live-team";
 import type { StationState } from "@/lib/live-team";
 import { t } from "@/lib/i18n";
 
+/** Render a stable bot workstation with task, assistance, and assignment controls. */
 export const StudioStation = memo(function StudioStation({ bot, station, status, calm, selected, onOpen, onComputer, onAssign, onTasks, onAttention, onSelect }: {
   locale: string; bot: Bot; station?: Station; status: StationState; calm: boolean; selected: boolean;
   onOpen: (botId: string) => void; onComputer: (botId: string) => void; onAssign: (botId: string) => void;

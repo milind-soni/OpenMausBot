@@ -3,6 +3,7 @@ import type { StudioHandoff, StudioTarget } from "../../../shared/live-team";
 import { api, type Message } from "@/state/store";
 import { t } from "@/lib/i18n";
 
+/** Load a handoff's source request on demand and link its existing conversations. */
 export function StudioHandoffDetail({ handoff, sourceName, targetName, onClose, onOpen }: {
   handoff: StudioHandoff; sourceName: string; targetName: string; onClose: () => void; onOpen: (target: StudioTarget) => void;
 }) {

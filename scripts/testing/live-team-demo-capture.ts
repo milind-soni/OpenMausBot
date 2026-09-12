@@ -5,18 +5,55 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+const CDP_TIMEOUT_MS = 10_000;
+
+/** Record an owned fixture page, bounding CDP waits and rejecting disconnected commands. */
 export async function startDemoCapture(endpoint: string, pageUrl: string, directory: string) {
   const socket = new WebSocket(endpoint);
-  await new Promise<void>((resolve, reject) => {
-    socket.addEventListener("open", () => resolve(), { once: true });
-    socket.addEventListener("error", () => reject(Error("Cannot connect to the fixture recorder")), { once: true });
-  });
-  let id = 0;
+  let disconnected: Error | undefined;
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-  const command = (method: string, params: object = {}, sessionId?: string): Promise<any> => new Promise((resolve, reject) => {
+  const disconnect = (error: Error) => {
+    disconnected ??= error;
+    for (const request of pending.values()) request.reject(disconnected);
+  };
+  socket.addEventListener("close", () => disconnect(Error("CDP socket closed")));
+  socket.addEventListener("error", () => disconnect(Error("CDP socket failed")));
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        socket.removeEventListener("open", opened);
+        socket.removeEventListener("close", closed);
+        socket.removeEventListener("error", failed);
+      };
+      const opened = () => { cleanup(); resolve(); };
+      const closed = () => { cleanup(); reject(Error("CDP socket closed before opening")); };
+      const failed = () => { cleanup(); reject(Error("CDP socket failed to open")); };
+      const timer = setTimeout(() => { cleanup(); reject(Error("CDP socket connection timed out")); }, CDP_TIMEOUT_MS);
+      socket.addEventListener("open", opened);
+      socket.addEventListener("close", closed);
+      socket.addEventListener("error", failed);
+    });
+  } catch (error) {
+    socket.close();
+    throw error;
+  }
+  let id = 0;
+  const command = (method: string, params: Record<string, unknown> = {}, sessionId?: string) => new Promise<any>((resolve, reject) => {
+    if (disconnected || socket.readyState !== WebSocket.OPEN) {
+      reject(disconnected ?? Error("CDP socket is not open"));
+      return;
+    }
     const requestId = ++id;
-    pending.set(requestId, { resolve, reject });
-    socket.send(JSON.stringify({ id: requestId, method, params, ...(sessionId ? { sessionId } : {}) }));
+    const cleanup = () => { clearTimeout(timer); pending.delete(requestId); };
+    const fail = (error: Error) => { cleanup(); reject(error); };
+    const timer = setTimeout(() => fail(Error(`CDP command timed out: ${method}`)), CDP_TIMEOUT_MS);
+    pending.set(requestId, { resolve: (value) => { cleanup(); resolve(value); }, reject: fail });
+    try {
+      socket.send(JSON.stringify({ id: requestId, method, params, ...(sessionId ? { sessionId } : {}) }));
+    } catch (error) {
+      fail(error instanceof Error ? error : Error(String(error)));
+    }
   });
   const frames: { file: string; at: number }[] = [];
   const framesDirectory = join(directory, "demo-frames");
@@ -34,7 +71,6 @@ export async function startDemoCapture(endpoint: string, pageUrl: string, direct
     const message = JSON.parse(String(event.data));
     if (message.id) {
       const request = pending.get(message.id);
-      pending.delete(message.id);
       if (message.error) request?.reject(Error(JSON.stringify(message.error)));
       else request?.resolve(message.result);
     } else if (message.method === "Page.screencastFrame" && message.sessionId === activeSession) {
@@ -58,6 +94,7 @@ export async function startDemoCapture(endpoint: string, pageUrl: string, direct
   }
   let stopped = false;
   return {
+    /** Stop recording once, close CDP, and encode frames using elapsed capture times. */
     async stop() {
       if (stopped) return;
       stopped = true;

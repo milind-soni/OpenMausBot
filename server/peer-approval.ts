@@ -98,6 +98,7 @@ const ACTION_VERB: Record<PeerAction, string> = {
   post_to_room: "post in",
 };
 
+/** Attach an approval to its source thread and identify the speaker in group conversations. */
 function pushApprovalCard(
   bus: ApprovalBus,
   from: BotRecord,
