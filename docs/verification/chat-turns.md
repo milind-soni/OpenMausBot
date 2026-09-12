@@ -156,5 +156,13 @@ lifecycle tests retain the verification profile on the same failure.
 POSIX group escalation and the
 new server cases are skipped on Windows; its existing `taskkill /T /F` path
 remains covered by the cross-platform child-tree test when run on Windows.
+Windows event-order regressions also run on every host in
+`server/kill-tree-windows.test.ts`: successful `taskkill` alone is not proof
+that Node observed the child's exit. Both orders (exit before or after the
+command callback) must settle without waiting for inherited pipes to close;
+an unobserved exit still times out as uncertain. The native Antigravity
+`closeAndWait` test in Windows CI verifies that callers cannot rename an
+executable while its process is still running. Local mocked Windows tests
+do not substitute for that native check.
 Processes that intentionally detach into a different group are not owned by
 this POSIX group-based cancellation.
