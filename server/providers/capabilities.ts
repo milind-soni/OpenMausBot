@@ -8,11 +8,11 @@ export type ProviderCapabilities = {
 };
 
 const DEFAULTS: Record<ProviderPresetId, ProviderCapabilities> = {
-  openai: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
-  openrouter: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
-  groq: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
-  mistral: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
-  "nvidia-nim": { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
+  openai: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
+  openrouter: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
+  groq: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
+  mistral: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
+  "nvidia-nim": { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
   "custom-openai-compatible": { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
 };
 
