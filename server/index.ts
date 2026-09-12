@@ -1,10 +1,12 @@
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
+import { spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, unlinkSync, utimesSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
@@ -124,6 +126,7 @@ import {
   EVENTS_DIR,
   NATIVE_DIR,
   customMcpServers,
+  selfModifyEnabled,
 } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
@@ -282,6 +285,19 @@ import {
 import { fetchSkillFromSource } from "./skill-fetch.ts";
 import { BUILT_IN_PRESETS, fetchPromptsFromSource, presetWire, PROMPT_COLLECTIONS } from "./prompt-presets.ts";
 import { distillPrompts, META_SOURCE_PREFIX } from "./prompt-distill.ts";
+import {
+  applyPending,
+  discardPending,
+  failStartupCheck,
+  listJournal,
+  listPending,
+  markProposalForBoot,
+  reconcileAbandonedProposals,
+  revertProposal,
+  verifyBootedProposal,
+  writeJournal,
+  type JournalEntry,
+} from "./self-modify.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -456,6 +472,80 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+
+// ── self-modify trial boot ───────────────────────────────────────
+// Disk may hold an `applied` proposal from a previous run (a runtime apply
+// keeps the old code in memory; the NEXT boot is the trial). This runs as
+// early as possible so the marker + detached watchdog cover the whole
+// risky window: if THIS boot cannot parse, initialize, or bind — the
+// watchdog reverts; if it dies in a handled failure below,
+// failStartupCheck reverts; if it serves, the listener callback verifies.
+if (selfModifyEnabled(cfg)) {
+  const pendingTrial = listJournal().find((entry) => entry.status === "applied");
+  if (pendingTrial) {
+    markProposalForBoot(pendingTrial);
+    spawnDetachedSelfModifyWatchdog(pendingTrial);
+    console.log(`self-modify: trial boot for "${pendingTrial.proposal.id}" — reverting on crash, wedge, or failed boot`);
+  }
+  const abandoned = reconcileAbandonedProposals();
+  for (const id of abandoned) console.log(`self-modify: reverted unverified proposal "${id}" from a previous run`);
+  // Heartbeat: the watchdog reads the marker's mtime; a stalled mtime with
+  // a live pid means the event loop wedged. Best-effort by design.
+  const selfModifyHeartbeat = setInterval(() => {
+    try {
+      const marker = join(DATA_DIR, "self-modify", "boot-marker.json");
+      if (existsSync(marker)) utimesSync(marker, new Date(), new Date());
+    } catch {
+      // a missed beat is not fatal; staleness is judged over 60s
+    }
+  }, 15_000);
+  selfModifyHeartbeat.unref();
+}
+
+/** Spawn the detached stability watchdog for a trial boot. Detached +
+ * unref'd: it must outlive this process even if this process is killed
+ * -9, and it must never hold the event loop open. */
+function spawnDetachedSelfModifyWatchdog(entry: JournalEntry): void {
+  try {
+    const script = join(resolve(dirname(fileURLToPath(import.meta.url)), ".."), "electron", "self-modify-watchdog.mjs");
+    if (!existsSync(script)) {
+      console.warn("self-modify: watchdog script missing — trial boot runs without a crash watcher");
+      return;
+    }
+    const journalFile = join(DATA_DIR, "self-modify", "journal", `${entry.proposal.id}.json`);
+    const child = spawn(
+      process.execPath,
+      [script, journalFile, DATA_DIR, String(process.pid), resolve(dirname(fileURLToPath(import.meta.url)), "..")],
+      { detached: true, stdio: "ignore", windowsHide: true },
+    );
+    child.unref();
+  } catch (error) {
+    console.warn(`self-modify: could not spawn watchdog: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// A boot failure under a live proposal must leave the originals restored.
+// The guard is installed only for the trial window and removed once the
+// listener verifies — the server's own crash semantics are untouched
+// afterward. The rethrow lands on the next tick so the revert completes
+// before the process dies with its original stack.
+let selfModifyBootGuard: ((error: Error) => void) | null = null;
+if (selfModifyEnabled(cfg) && listJournal().some((entry) => entry.status === "applied")) {
+  selfModifyBootGuard = (error: Error) => {
+    process.off("uncaughtException", selfModifyBootGuard!);
+    selfModifyBootGuard = null;
+    try {
+      failStartupCheck(`boot crashed before serving: ${error.message}`);
+      console.error(`self-modify: boot crashed with the proposal applied — originals restored; re-crashing`, error);
+    } catch (revertError) {
+      console.error(`self-modify: boot-crash revert failed: ${revertError instanceof Error ? revertError.message : String(revertError)}`);
+    }
+    setImmediate(() => {
+      throw error;
+    });
+  };
+  process.on("uncaughtException", selfModifyBootGuard);
+}
 
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
@@ -8168,6 +8258,7 @@ function configStatus() {
       skillAuthoring: skillAuthoringEnabled(cfg),
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
+      selfModify: selfModifyEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -13932,6 +14023,71 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
     }
 
+    // ── self-modify: journal + pending inbox (admin scope) ──────────
+    // The gate is read per request so toggling the feature takes effect
+    // without a restart. Every mutation requires admin; applying runs the
+    // journal-first + preflight + trial-boot pipeline from self-modify.ts.
+    if (path === "/api/self-modify" || path.startsWith("/api/self-modify/")) {
+      if (!selfModifyEnabled(cfg)) return json(res, 403, { error: "self-modify is disabled — set features.selfModify or OMB_SELF_MODIFY=1" });
+      if (!auth.scopes.includes("admin")) return json(res, 403, { error: "admin scope required" });
+
+      if (method === "GET" && path === "/api/self-modify") {
+        return json(res, 200, {
+          journal: listJournal().map((entry) => ({
+            id: entry.proposal.id,
+            proposedBy: entry.proposal.proposedBy,
+            reason: entry.proposal.reason,
+            status: entry.status,
+            appliedAt: entry.appliedAt,
+            verifiedAt: entry.verifiedAt ?? null,
+            revertedAt: entry.revertedAt ?? null,
+            revertReason: entry.revertReason ?? null,
+            files: entry.proposal.files.map((f) => f.path),
+            checks: entry.checks ?? [],
+          })),
+          pending: listPending(),
+          enabled: true,
+        });
+      }
+
+      const mSelf = path.match(/^\/api\/self-modify\/([a-zA-Z0-9._-]{1,64})$/);
+      if (mSelf && method === "GET") {
+        const entry = listJournal().find((candidate) => candidate.proposal.id === mSelf[1]);
+        if (!entry) return json(res, 404, { error: "no journal entry with that id" });
+        return json(res, 200, { entry });
+        }
+
+      if (mSelf && method === "POST") {
+        // action is in the body: apply | revert | verify | discard
+        const body = await readBody(req);
+        const action = typeof body?.action === "string" ? body.action : "";
+        const id = mSelf[1]!;
+        if (action === "apply") {
+          const result = applyPending(id);
+          return json(res, result.ok ? 200 : 422, result);
+        }
+        const entry = listJournal().find((candidate) => candidate.proposal.id === id);
+        if (action === "revert" && entry) {
+          const reverted = revertProposal(entry, "reverted by operator");
+          writeJournal(reverted);
+          return json(res, 200, { entry: reverted });
+        }
+        if (action === "verify" && entry) {
+          if (entry.proposal.files.some((f) => f.path.startsWith("server/") || f.path.startsWith("shared/")) || entry.proposal.packageJson) {
+            return json(res, 409, { error: "server-touching proposals are verified by a trial boot, not by hand" });
+            }
+          const verified = { ...entry, status: "verified" as const, verifiedAt: new Date().toISOString() };
+          writeJournal(verified);
+          return json(res, 200, { entry: verified });
+        }
+        if (action === "discard") {
+          const removed = discardPending(id);
+          return json(res, removed ? 200 : 404, removed ? { ok: true } : { error: "no pending proposal with that id" });
+        }
+        return json(res, 400, { error: "action must be apply | revert | verify | discard" });
+      }
+    }
+
     // ── app config (API keys — never echoed back, booleans only) ──
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configForAccess(configStatus(), auth.scopes.includes("admin")));
@@ -13948,6 +14104,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       }
       const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
+      // Turning self-modify off must not leave an unverified proposal on
+      // disk: the trial-boot machinery would not run to judge it.
+      const disablingSelfModify = patch.features?.selfModify === false && selfModifyEnabled(cfg);
       const removedBrowserProfileIds = patch.browserProfiles === undefined
         ? []
         : (cfg.browserProfiles ?? [])
@@ -14255,6 +14414,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       let browserReferenceCleanupError: unknown = null;
       if (disablingBuiltInBrowser) browserLive.closeAll();
+      if (disablingSelfModify) {
+        for (const entry of listJournal()) {
+          if (entry.status !== "applied") continue;
+          const reverted = revertProposal(entry, "self-modify disabled while the proposal was unverified");
+          writeJournal(reverted);
+          console.log(`self-modify: reverted "${entry.proposal.id}" — feature disabled`);
+        }
+      }
       for (const request of browserCleanupRequests) {
         if (request.kind === "profile") browserLive.closeForSession(browserSessionId("", request.partitionId));
       }
@@ -14789,6 +14956,19 @@ restoreChannelMessages();
 
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  // The trial boot survived parse, module init, and listener bind: the
+  // riskiest window is behind us, so the live proposal is promoted and the
+  // boot-crash guard comes off.
+  try {
+    const verified = verifyBootedProposal();
+    if (verified) console.log(`self-modify: trial boot verified "${verified.proposal.id}"`);
+  } catch (error) {
+    console.warn(`self-modify: verify failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (selfModifyBootGuard) {
+    process.off("uncaughtException", selfModifyBootGuard);
+    selfModifyBootGuard = null;
+  }
   followupsReady = true;
   drainQueuedSends();
   drainQueuedChannelSends();
