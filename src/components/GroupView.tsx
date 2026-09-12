@@ -90,7 +90,13 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
       <div className="flex justify-start">
         <button
           type="button"
-          onClick={() => dispatch({ type: "select", id: comm.groupId })}
+          onClick={() => {
+            dispatch({ type: "select", id: comm.groupId });
+            const destination = state.groups.find(g => g.id === comm.groupId);
+            if (comm.threadId && destination?.tasks?.some(task => task.threadId === comm.threadId)) {
+              dispatch({ type: "switchGroupTask", groupId: comm.groupId, threadId: comm.threadId });
+            }
+          }}
           title={t("room.openBot", { name: comm.withName })}
           className="flex items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
@@ -109,7 +115,8 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
           tool.ok === false ? "text-danger" : "text-ink-secondary",
         )}
       >
-        <span className="max-w-[480px] truncate font-mono">{tool.name}</span>
+        {comm && <BotAvatar bot={state.bots.find(b => b.id === comm.withBotId) ?? { name: comm.withName, color: comm.withColor }} state="happy" size={16} />}
+        <span className={cn("max-w-[480px] truncate", !comm && "font-mono")}>{tool.name}</span>
       </div>
     </div>
   );
@@ -179,7 +186,8 @@ const Transcript = memo(function Transcript({
   const memberOf = (id?: string) => members.find((b) => b.id === id);
   // Several bots working at once turn a room into a wall of chips; fold the
   // finished ones the same way a 1:1 chat does.
-  const items = useMemo(() => groupActivityRuns(messages), [messages]);
+  const items = useMemo(() => groupActivityRuns(messages.filter(message =>
+    message.kind !== "activity" || roomActivityVisible(message, showToolCalls))), [messages, showToolCalls]);
   const newestMessageId = messages.at(-1)?.id;
   const newestUserMessageId = [...messages].reverse().find((message) => message.role === "user")?.id;
   const focus = state.focusMessage;

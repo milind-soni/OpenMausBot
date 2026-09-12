@@ -124,6 +124,8 @@ export interface SecretRequestCardData {
 }
 
 export interface Message {
+  /** Durable delivery identity, kept out of the visible message body. */
+  roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
@@ -200,7 +202,7 @@ export interface Message {
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
    * bot⇄bot channel where the exchange is mirrored. */
-  comm?: { groupId: string; withBotId: string; withName: string; withColor: string };
+  comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X" in the opener's chat,
    * linking to the thread a bot started with start_thread. Carries the
    * title so the chip still reads after a rename or a deletion. */

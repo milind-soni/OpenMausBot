@@ -47,4 +47,16 @@ describe("RoomToolChip", () => {
     expect(markup).not.toContain("<button");
     expect(markup).toContain("Posted in Standup");
   });
+
+  it("shows a same-room teammate avatar without adding a navigation button", () => {
+    const message = chip({
+      tool: { name: "Sent to Eli", ok: true },
+      comm: { groupId: "here", withBotId: "eli", withName: "Eli", withColor: "green" },
+    });
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null,
+      createElement(RoomToolChip, { message, roomId: "here" })));
+    expect(markup).toContain("Sent to Eli");
+    expect(markup).toContain('aria-label="Eli"');
+    expect(markup).not.toContain("<button");
+  });
 });
