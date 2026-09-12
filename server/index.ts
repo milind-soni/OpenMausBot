@@ -396,8 +396,12 @@ import {
   type PhoneSecretContext,
 } from "./phone-secret.ts";
 
-const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
-const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+const startPort = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
+const startWebhookPort = Number(process.env.OMB_WEBHOOK_PORT) || startPort + 1;
+let PORT = startPort;
+let WEBHOOK_PORT = startWebhookPort;
+const HOST = "127.0.0.1";
+const MAX_PORT_ATTEMPTS = 100;
 // Behind a proxy or tunnel, the base URL senders should use (docs/self-hosting.md).
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
@@ -446,7 +450,12 @@ const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // for this server, the paired sessions, and the cookie the served UI uses.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
 const sessions = new SessionRegistry({ file: join(DATA_DIR, "sessions.json") });
-const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
+// Assigned after the server binds: a future port-fallback path must key the
+// session cookie on the port the instance actually bound, not the configured
+// start port. Cookies are not port-scoped, so the name is the only thing
+// separating two instances in the same browser profile. Every consumer runs
+// inside a request handler, which only executes after the server is listening.
+let SESSION_COOKIE: string;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
@@ -5852,17 +5861,8 @@ const webhooks = new WebhookManager({
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
-try {
-  webhookIngress = await listenWebhookIngress(webhooks, {
-    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
-    claimRequest: () => workspaceMaintenance.request(),
-  });
-  const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
-  console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
-} catch (error) {
-  webhookIngressError = error instanceof Error ? error.message : String(error);
-  console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
-}
+// The webhook receiver is bound after the main server resolves its port so
+// that a busy webhook port does not drag the main port forward with it.
 
 const webhookIngressStatus = () => ({
   available: Boolean(webhookIngress),
@@ -14860,27 +14860,100 @@ for (const row of chatFollowups()) {
 restoreSteeredMessages();
 restoreChannelMessages();
 
-server.listen(PORT, "127.0.0.1", () => {
-  console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
-  followupsReady = true;
-  drainQueuedSends();
-  drainQueuedChannelSends();
-  // Startup work uses the same turn dispatcher and local tool endpoint as
-  // ordinary chat. Start only once every registry is initialized and the
-  // endpoint is listening; earlier dispatch can hit uninitialized bindings.
-  routines!.start();
-  const leftover = pendingThreads();
-  if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
-  for (const threadId of leftover) {
-    const run = routines!.runForThread(threadId);
-    // A person can reuse a completed run's task for unrelated work. Only
-    // discard the old run's handoffs, not a later user's persisted queue.
-    const reused = run?.finishedAt !== undefined && store.botByThread(threadId) &&
-      store.activePath(threadId).some((message) => message.role === "user" && message.at > run.finishedAt!);
-    if (run && !["running", "waiting"].includes(run.status) && !reused) discardDelegations(commsBus, threadId);
-    else drainThreadDelegations(threadId);
+function isEaddrinuse(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EADDRINUSE";
+}
+
+// Bind the main server first. When the desktop parent spawns us it sets
+// OMB_PORT and then polls that exact port, so a packaged child must not
+// silently move. Source/headless runs may walk forward until they find a free
+// port.
+const mainAttempts = DESKTOP_MANAGED ? 1 : MAX_PORT_ATTEMPTS + 1;
+for (let offset = 0; offset < mainAttempts; offset++) {
+  const candidatePort = startPort + offset;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off("error", onError);
+        reject(error);
+      };
+      server.once("error", onError);
+      PORT = candidatePort;
+      server.listen(candidatePort, HOST, () => {
+        server.off("error", onError);
+        resolve();
+      });
+    });
+    console.log(`openmausbot server on http://${HOST}:${PORT}`);
+    break;
+  } catch (error) {
+    if (DESKTOP_MANAGED || !isEaddrinuse(error)) throw error;
   }
+}
+
+if (!server.listening) {
+  throw new Error(`could not find an available port after ${MAX_PORT_ATTEMPTS + 1} attempts starting from ${startPort}`);
+}
+
+// The session cookie is scoped by port; recompute it once the real bind port
+// is known so the UI and remote clients get a cookie matching this listener.
+SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
+
+followupsReady = true;
+drainQueuedSends();
+drainQueuedChannelSends();
+// Startup work uses the same turn dispatcher and local tool endpoint as
+// ordinary chat. Start only once every registry is initialized and the
+// endpoint is listening; earlier dispatch can hit uninitialized bindings.
+routines!.start();
+const leftover = pendingThreads();
+if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
+for (const threadId of leftover) {
+  const run = routines!.runForThread(threadId);
+  // A person can reuse a completed run's task for unrelated work. Only
+  // discard the old run's handoffs, not a later user's persisted queue.
+  const reused = run?.finishedAt !== undefined && store.botByThread(threadId) &&
+    store.activePath(threadId).some((message) => message.role === "user" && message.at > run.finishedAt!);
+  if (run && !["running", "waiting"].includes(run.status) && !reused) discardDelegations(commsBus, threadId);
+  else drainThreadDelegations(threadId);
+}
+
+// Bind the webhook receiver in its own loop after the main server is locked.
+// A busy webhook port must not prevent the main server from using its
+// configured port, and the webhook must not steal the resolved main port.
+const webhookAttempts = DESKTOP_MANAGED ? 1 : MAX_PORT_ATTEMPTS + 1;
+for (let offset = 0; offset < webhookAttempts; offset++) {
+  const candidateWebhookPort = startWebhookPort + offset;
+  if (candidateWebhookPort === PORT) continue;
+  try {
+    webhookIngress = await listenWebhookIngress(webhooks, {
+      port: candidateWebhookPort,
+      publicBaseUrl: WEBHOOK_PUBLIC_URL,
+      claimRequest: () => workspaceMaintenance.request(),
+    });
+    WEBHOOK_PORT = candidateWebhookPort;
+    webhookIngressError = null;
+    const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
+    console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
+    break;
+  } catch (error) {
+    if (DESKTOP_MANAGED || !isEaddrinuse(error)) {
+      webhookIngressError = error instanceof Error ? error.message : String(error);
+      console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
+      break;
+    }
+  }
+}
+
+utilityParentPort?.postMessage({
+  type: "openmausbot:listen",
+  port: PORT,
+  webhookPort: WEBHOOK_PORT,
 });
+
+export function getResolvedPort(): number | undefined {
+  return server.listening ? PORT : undefined;
+}
 
 // A second listener for `openmausbot serve --tunnel` (server/tunnel.ts): the
 // connector gateway on this machine forwards public traffic to this IPC path.
