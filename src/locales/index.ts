@@ -12,6 +12,7 @@ import ja from "./ja.json";
 import ptBr from "./pt-br.json";
 import zh from "./zh.json";
 import zhTw from "./zh-tw.json";
+import uk from "./uk.json";
 
 export { en };
 export type LocaleKey = keyof typeof en;
@@ -35,6 +36,7 @@ export const locales: Record<string, LocalePack> = {
   "zh-hk": zhTw,
   "zh-mo": zhTw,
   "zh-tw": zhTw,
+  uk,
 };
 
 /** Pickable languages for the settings dropdown. Alias keys ("pt") are
@@ -49,4 +51,5 @@ export const localeChoices: ReadonlyArray<{ code: string; label: string }> = [
   { code: "pt-br", label: "Português (Brasil)" },
   { code: "zh", label: "简体中文" },
   { code: "zh-tw", label: "繁體中文（台灣）" },
+  { code: "uk", label: "Українська" },
 ];
