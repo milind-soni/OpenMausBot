@@ -408,7 +408,7 @@
   "chat.workingFolder": "Робоча папка: {folder}",
   "chat.usage.turnsOne": "1 запит",
   "chat.usage.turnsMany": "{count} запитів",
-  "chat.usage.cachedNote": "кеш = контекст, перечитаний щозапиту, а не новий текст",
+  "chat.usage.cachedNote": "кеш = контекст, перечитаний на кожний запит, а не новий текст",
   "chat.usage.tokens": "{tokens} ток",
   "chat.usage.in": "{tokens} вхід",
   "chat.usage.inCached": "{tokens} вхід ({cached} кеш)",
