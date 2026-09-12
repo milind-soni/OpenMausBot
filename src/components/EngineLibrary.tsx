@@ -4,6 +4,7 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ProviderMark } from "./ProviderIcons";
+import { ProviderManager } from "./ProviderManager";
 
 export function engineReady(instance: InstanceInfo): boolean {
   return instance.snapshot.state === "available" &&
@@ -94,4 +95,16 @@ export function RefreshEngines() {
     <RefreshCw size={13} aria-hidden="true" className={cn(busy && "animate-spin")} />
     {busy ? t("common.checking") : t("engines.library.refresh")}
   </button>;
+}
+
+export function ProviderAndEngineSections({ instances, renderEngine }: {
+  instances: InstanceInfo[];
+  renderEngine: (instance: InstanceInfo) => ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-5">
+      <ProviderManager />
+      <EngineSections instances={instances} renderEngine={renderEngine} />
+    </div>
+  );
 }
