@@ -46,7 +46,8 @@ export type ProviderConnectionInstanceConfig = {
 };
 
 const SAFE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._()-]{0,79}$/u;
-const URL_SCHEMA = z.string().trim().url().refine((value) => /^https?:\/\//i.test(value), "URL must use http or https");
+const URL_SCHEMA = z.string().trim().max(2048).url();
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 const PRESETS: readonly ProviderConnectionPreset[] = [
   {
@@ -55,7 +56,7 @@ const PRESETS: readonly ProviderConnectionPreset[] = [
     description: "OpenAI API with automatic model discovery.",
     baseUrl: "https://api.openai.com/v1",
     requiresBaseUrl: false,
-    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
+    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
   },
   {
     id: "openrouter",
@@ -63,7 +64,7 @@ const PRESETS: readonly ProviderConnectionPreset[] = [
     description: "OpenAI-compatible access to many hosted model providers.",
     baseUrl: "https://openrouter.ai/api/v1",
     requiresBaseUrl: false,
-    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
+    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
   },
   {
     id: "groq",
@@ -71,7 +72,7 @@ const PRESETS: readonly ProviderConnectionPreset[] = [
     description: "Fast hosted inference through Groq's OpenAI-compatible API.",
     baseUrl: "https://api.groq.com/openai/v1",
     requiresBaseUrl: false,
-    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
+    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
   },
   {
     id: "mistral",
@@ -79,16 +80,15 @@ const PRESETS: readonly ProviderConnectionPreset[] = [
     description: "Mistral API through its OpenAI-compatible endpoint.",
     baseUrl: "https://api.mistral.ai/v1",
     requiresBaseUrl: false,
-    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
+    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
   },
   {
     id: "nvidia-nim",
     displayName: "NVIDIA NIM",
     description: "Connect to a self-hosted or managed NVIDIA NIM OpenAI-compatible endpoint.",
-    // NIM deployments use their own server base URL; /v1 is appended by the OpenAI-compatible driver.
     baseUrl: "http://localhost:8000/v1",
     requiresBaseUrl: true,
-    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: true },
+    capabilities: { streaming: true, reasoning: true, modelDiscovery: true, toolCalls: false },
   },
   {
     id: "custom-openai-compatible",
@@ -112,6 +112,18 @@ export function getProviderConnectionPreset(id: ProviderPresetId): ProviderConne
 
 function normalizeBaseUrl(value: string): string {
   return value.trim().replace(/\/+$/, "");
+}
+
+export function validateProviderBaseUrl(value: string): string {
+  const url = new URL(URL_SCHEMA.parse(value));
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("Provider URL must not contain credentials, query parameters, or fragments");
+  }
+  const loopback = LOOPBACK_HOSTS.has(url.hostname.toLowerCase());
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
+    throw new Error("Provider API URLs must use HTTPS; HTTP is allowed only for loopback endpoints");
+  }
+  return normalizeBaseUrl(url.toString());
 }
 
 function assertSafeSecret(value: string): void {
@@ -158,12 +170,11 @@ export function normalizeProviderConnectionInput(
   assertSafeSecret(parsed.apiKey);
 
   const preset = getProviderConnectionPreset(parsed.provider);
-  const rawBaseUrl = parsed.baseUrl?.trim() || preset.baseUrl;
-  const baseUrl = normalizeBaseUrl(URL_SCHEMA.parse(rawBaseUrl));
-
-  if (parsed.provider === "nvidia-nim" && !parsed.baseUrl) {
-    throw new Error("NVIDIA NIM requires the base URL of your NIM deployment");
+  if (preset.requiresBaseUrl && !parsed.baseUrl) {
+    throw new Error(`${preset.displayName} requires a base URL`);
   }
+  const rawBaseUrl = parsed.baseUrl?.trim() || preset.baseUrl;
+  const baseUrl = validateProviderBaseUrl(rawBaseUrl);
 
   const instanceId = allocateProviderInstanceId(parsed.name, existingIds);
   const secretEnv = `OPENMAUSBOT_API_${instanceId.replace(/[^A-Z0-9]+/gi, "_").toUpperCase()}_KEY`;
