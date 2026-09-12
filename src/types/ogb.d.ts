@@ -13,7 +13,7 @@ const __APP_VERSION__: string;
       session: "x11" | "wayland" | "headless" | "unknown";
       packaged: boolean;
     };
-    windowChrome: "mac-inset" | "native";
+    windowChrome: "mac-inset" | "win-overlay" | "native";
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";

@@ -10,11 +10,10 @@ describe("window chrome", () => {
     });
   });
 
-  it("uses frameless overlay controls on Windows", () => {
+  it("uses Window Controls Overlay on Windows, without frame:false", () => {
     expect(windowChromeOptions("win32")).toEqual({
-      frame: false,
       titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 32 },
+      titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 26 },
     });
   });
 

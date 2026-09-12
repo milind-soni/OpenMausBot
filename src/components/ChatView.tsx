@@ -1,4 +1,4 @@
-import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowDown,
@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
+import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, usageChip, usageDetail } from "@/lib/usage";
 import {
   api,
@@ -890,6 +891,15 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  // Windows draws the native caption buttons (titleBarOverlay) over the
+  // header's right end; shift the icon row down under them and make the
+  // header itself the window drag region (the renderer owns no native bar).
+  const { capabilities } = useDesktopCapabilities();
+  const windowsOverlay = capabilities.windowChrome === "win-overlay";
+  // SAFETY: Electron's documented -webkit-app-region CSS property is not in
+  // React's CSSProperties type, but the renderer accepts it as an inline style.
+  const headerDragStyle = windowsOverlay ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
+  const headerNoDragStyle = windowsOverlay ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -1156,6 +1166,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <CallOverlay bot={bot} />
       {/* Header */}
       <div
+        style={headerDragStyle}
         className={cn(
           // @container so the chips on the right can fold to icon bubbles
           // when the column is narrow (side panel open, small window)
@@ -1164,7 +1175,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1">
+        <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1" style={headerNoDragStyle}>
           <button
             onClick={() => dispatch({ type: "toggleSettings", open: true })}
             className="flex size-10 shrink-0 items-center justify-center rounded-lg hover:bg-raised/50"
@@ -1202,7 +1213,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           )}
           {bot.busy && <WorkingDots className="text-ink-secondary" />}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div
+          className="flex shrink-0 items-center gap-2"
+          // The caption buttons sit over the header's right end; drop this
+          // icon row 16px (visual only — the header keeps its height) so the
+          // buttons clear the 26px overlay while the rest of the layout stays.
+          style={windowsOverlay ? ({ WebkitAppRegion: "no-drag", transform: "translateY(16px)" } as CSSProperties) : undefined}
+        >
           <button
             onClick={() => setFindOpen((open) => !open)}
             aria-label={t("chat.find")}

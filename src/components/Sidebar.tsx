@@ -1503,14 +1503,18 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   const macInset = capabilities.windowChrome === "mac-inset";
   const browser = capabilities.host.label === "Browser";
+  // macOS owns inset traffic lights; Windows hides the native bar and draws
+  // caption buttons over the header's right end. Either way this top row is
+  // the window's drag handle (ChatView/GroupView headers do the same).
+  const draggableChrome = macInset || capabilities.windowChrome === "win-overlay";
   // SAFETY: Electron's documented -webkit-app-region CSS property is not in
   // React's CSSProperties type, but the renderer accepts it as an inline style.
-  const windowDragStyle = macInset
+  const windowDragStyle = draggableChrome
     ? ({ WebkitAppRegion: "drag" } as React.CSSProperties)
     : undefined;
   // SAFETY: Same Electron-only CSS property as windowDragStyle; interactive
   // buttons must explicitly opt out of the draggable title-bar region.
-  const windowNoDragStyle = macInset
+  const windowNoDragStyle = draggableChrome
     ? ({ WebkitAppRegion: "no-drag" } as React.CSSProperties)
     : undefined;
 

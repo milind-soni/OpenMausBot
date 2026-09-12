@@ -2,7 +2,7 @@
 // carry the personality; avatars inside the room stay still so a busy group
 // does not become a wall of competing motion. Plain messages go to the room's
 // default responder; @mentions override that routing.
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { activeLocale, t } from "@/lib/i18n";
 import { ArrowDown, Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, X } from "lucide-react";
 import {
@@ -895,6 +895,13 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
 export function GroupView({ group }: { group: Group }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  // Same Windows caption-overlay handling as ChatView: drag on the header,
+  // shift the right-hand controls below the 26px overlay.
+  const { capabilities } = useDesktopCapabilities();
+  const windowsOverlay = capabilities.windowChrome === "win-overlay";
+  // SAFETY: Electron's documented -webkit-app-region CSS property is not in
+  // React's CSSProperties type, but the renderer accepts it as an inline style.
+  const headerDragStyle = windowsOverlay ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1112,17 +1119,23 @@ export function GroupView({ group }: { group: Group }) {
       )}
       {/* Header: static member avatars; a ring + dot marks the working bot. */}
       <div
+        style={headerDragStyle}
         className={cn(
           "flex items-center justify-between px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2" style={windowsOverlay ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div
+          className="flex items-center gap-1.5"
+          // The caption buttons sit over the header's right end; drop this
+          // control row 16px (visual only) below the 26px overlay.
+          style={windowsOverlay ? ({ WebkitAppRegion: "no-drag", transform: "translateY(16px)" } as CSSProperties) : undefined}
+        >
           <button
             type="button"
             onClick={() => setFindOpen((open) => !open)}

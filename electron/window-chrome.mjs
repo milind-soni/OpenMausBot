@@ -1,7 +1,9 @@
 /**
- * Frameless window with overlay controls on Windows.
- * titleBarOverlay keeps native min/max/close buttons but removes the
- * default title bar, so the renderer draws its own header.
+ * Windows uses the Window Controls Overlay: titleBarStyle "hidden" removes
+ * the native title bar while titleBarOverlay keeps the caption buttons,
+ * which Windows draws over the top-right of the app header. The renderer
+ * shifts that header's icon row out from under the 26px-tall overlay
+ * (ChatView/GroupView) and marks the headers as window drag regions.
  */
 export function windowChromeOptions(platform) {
   if (platform === "darwin") {
@@ -9,9 +11,8 @@ export function windowChromeOptions(platform) {
   }
   if (platform === "win32") {
     return {
-      frame: false,
       titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 32 },
+      titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 26 },
     };
   }
   return {};

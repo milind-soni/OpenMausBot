@@ -1872,7 +1872,7 @@ ipcMain.handle("desktop:skin", (event, skin) => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
     if (win && !win.isDestroyed()) {
       if (process.platform === "win32" && typeof win.setTitleBarOverlay === "function") {
-        win.setTitleBarOverlay({ color, symbolColor, height: 32 });
+        win.setTitleBarOverlay({ color, symbolColor, height: 26 });
       }
       try { win.setBackgroundColor(color); } catch {}
     }
