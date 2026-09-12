@@ -19,7 +19,7 @@ export interface FleetWorkspaceView {
   status: "running" | "suspended";
   createdAt: string;
   live: string;
-  usage: { month: string; turns: number; costUsd: number | null; billableUsd: number | null };
+  usage: { month: string; turns: number | null; costUsd: number | null; billableUsd: number | null; unavailable?: boolean };
 }
 
 export interface FleetView {
@@ -55,7 +55,7 @@ export function WorkspacesTable({ fleet, onAct, busy }: { fleet: FleetView; onAc
               <a href={`https://${workspace.host}`} target="_blank" rel="noreferrer" className="block truncate text-[12px] text-accent hover:underline">{workspace.host}</a>
             </span>
             <span className={cn("text-right", suspended ? "text-warning" : workspace.live === "active" ? "text-success" : "text-danger")}>{state}</span>
-            <span className="text-right tabular-nums text-ink" title={t("workspaces.turns", { turns: String(workspace.usage.turns) })}>
+            <span className="text-right tabular-nums text-ink" title={workspace.usage.turns === null ? undefined : t("workspaces.turns", { turns: String(workspace.usage.turns) })}>
               {hasFiniteCost(workspace.usage.costUsd) ? formatUsd(workspace.usage.costUsd) : "—"}
               {hasFiniteCost(workspace.usage.billableUsd) && <span className="text-ink-secondary"> · {formatUsd(workspace.usage.billableUsd)}</span>}
             </span>

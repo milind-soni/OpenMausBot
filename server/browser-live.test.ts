@@ -124,6 +124,29 @@ describe("browser viewer protocol boundary", () => {
 });
 
 describe("authenticated browser viewer relay", () => {
+  it("fences a late stream startup when that owner is closed during discovery", async () => {
+    let finish!: (value: ReturnType<typeof output>) => void;
+    execute.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));
+    const opening = open();
+    const rejected = expect(opening).rejects.toThrow();
+    await expect.poll(() => execute.mock.calls.length).toBe(1);
+    live.closeForOwner("admin-a");
+    finish(output(ready));
+    await rejected;
+    expect(SocketFixture.instances).toHaveLength(0);
+  });
+  it("closes every stream and upstream socket for a revoked owner without touching other owners", async () => {
+    const a = await open();
+    const b = await open({ botId: "bot-b", session: "profile-b" });
+    const other = await open({ owner: "other" });
+    live.closeForOwner("admin-a");
+    expect(a.res.writableEnded).toBe(true);
+    expect(b.res.writableEnded).toBe(true);
+    expect(a.socket.readyState).toBe(3);
+    expect(b.socket.readyState).toBe(3);
+    expect(other.res.writableEnded).toBe(false);
+    expect(other.socket.readyState).toBe(1);
+  });
   it("keeps opening status, tabs and the seed frame even if they arrive immediately with the WebSocket upgrade", async () => {
     SocketFixture.initialMessages = [{ type: "status", connected: true }, { type: "tabs", tabs: [] }, frame];
     const a = await open();

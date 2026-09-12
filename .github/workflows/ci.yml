@@ -62,6 +62,24 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: pnpm exec vite build
 
+  hosted-admin:
+    name: hosted admin isolation + production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @openmausbot/admin test
+      - run: node --test enterprise/admin/deploy/deploy.node-test.mjs
+      - run: pnpm --filter @openmausbot/admin build
+
   cloudflared-linux-arm64:
     name: cloudflared installer (Linux ARM64)
     runs-on: ubuntu-24.04-arm

@@ -1,0 +1,35 @@
+{
+  "name": "@openmausbot/admin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "license": "SEE LICENSE IN ../LICENSE",
+  "engines": { "node": ">=24.15.0" },
+  "scripts": {
+    "dev": "node --experimental-strip-types server/main.ts",
+    "preview:fixture": "pnpm build && node --experimental-strip-types tests/preview.ts",
+    "check": "tsc --noEmit",
+    "test": "vitest run --config vite.config.ts",
+    "build": "pnpm check && vite build && esbuild server/main.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/server.mjs",
+    "start": "node dist/server.mjs"
+  },
+  "dependencies": {
+    "better-auth": "1.7.4",
+    "nodemailer": "10.0.5",
+    "lucide-react": "^0.539.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/nodemailer": "^7.0.11",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.3",
+    "vite": "^7.1.0",
+    "vitest": "^4.1.10"
+  }
+}

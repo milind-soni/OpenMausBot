@@ -134,6 +134,51 @@ describe("pairing codes", () => {
 });
 
 describe("sessions", () => {
+  it("revokes every over-scoped email device and its tickets on demotion, but not paired devices", () => {
+    let scopes: Array<"admin" | "client"> | null = ["admin", "client"];
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => scopes });
+    const paired = pair();
+    const first = registry.issue({ label: "browser", email: "person@example.test", scopes: ["admin", "client"] });
+    const second = registry.issue({ label: "phone", email: "person@example.test", scopes: ["admin", "client"] });
+    const member = registry.issue({ label: "member", email: "person@example.test", scopes: ["client"] });
+    const tickets = [first, second].map(({ session }) => registry.issueStreamTicket(session.id).ticket);
+    const revoked: string[] = [];
+    registry.onSessionRevoked((id) => revoked.push(id));
+    scopes = ["client"];
+    expect(registry.authenticate(first.token)).toBeNull();
+    expect(registry.isLive(second.session.id)).toBe(false);
+    expect(tickets.map((ticket) => registry.redeemStreamTicket(ticket))).toEqual([null, null]);
+    expect(revoked).toEqual([first.session.id, second.session.id]);
+    expect(registry.authenticate(paired.token)?.scopes).toEqual(["admin", "client"]);
+    expect(registry.authenticate(member.token)?.scopes).toEqual(["client"]);
+    scopes = ["admin", "client"]; // promotion never widens or revives a token
+    expect(registry.authenticate(member.token)?.scopes).toEqual(["client"]);
+    expect(registry.authenticate(first.token)).toBeNull();
+    scopes = null;
+    expect(registry.renew(member.session.id)).toBe(false);
+    expect(registry.list().map((session) => session.id)).toEqual([paired.session.id]);
+    const loaded = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => ["admin", "client"] });
+    expect(loaded.authenticate(first.token)).toBeNull();
+  });
+
+  it.each([undefined, () => { throw new Error("membership unavailable"); }])("fails closed when email membership cannot be checked (%s)", (emailScopes) => {
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes });
+    const paired = pair();
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    expect(registry.authenticate(email.token)).toBeNull();
+    expect(registry.authenticate(paired.token)?.id).toBe(paired.session.id);
+  });
+
+  it("rechecks membership when a stream ticket is the first use after removal", () => {
+    let allowed = true;
+    registry = new SessionRegistry({ file: file(), now: () => clock, emailScopes: () => allowed ? ["client"] : null });
+    const email = registry.issue({ label: "browser", email: "person@example.test", scopes: ["client"] });
+    const { ticket } = registry.issueStreamTicket(email.session.id);
+    allowed = false;
+    expect(registry.redeemStreamTicket(ticket)).toBeNull();
+    expect(registry.isLive(email.session.id)).toBe(false);
+  });
+
   it("stores only a hash, owner-only, and reloads from disk", () => {
     const { token, session } = pair();
     const onDisk = readFileSync(file(), "utf8");

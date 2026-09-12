@@ -23,8 +23,12 @@ customer, because the key decides the feature set rather than the code.
 { "edition": "oss", "features": [], "notice": "OMB_LICENSE_KEY expired on 2027-09-02; renew it to keep enterprise features" }
 ```
 
-A missing, altered, or expired key never stops the server: it runs the
-open-source edition and the notice says what to fix.
+A missing, altered, or expired key does not stop an ordinary standalone
+server: it runs the open-source edition and the notice says what to fix.
+The separate hosted Admin service requires an active `admin` entitlement.
+Workspaces explicitly managed by that portal fail closed for hosted access
+when the entitlement or portal is unavailable; they must not fall back to
+unrestricted standalone access.
 
 ## Entitlement ids
 
@@ -32,7 +36,7 @@ open-source edition and the notice says what to fix.
 |---|---|
 | `whitelabel` | product name, tagline, accent colour, logo, favicon and support link from `brand.json` (below) |
 | `sso` | identity-header trust behind an OIDC proxy |
-| `admin` | the admin panel routes |
+| `admin` | hosted Admin portal, workspace provisioning and access management |
 | `budgets` | per-bot and per-section spend limits |
 
 Core gates a feature with `entitled("id")` from `server/enterprise.ts`.
@@ -58,6 +62,15 @@ working until they expire.
   would be shown? It lives here, behind an entitlement.
 - Customer-specific brand, skills, packages, connectors? The customer's own
   repo: data and config, never a fork.
+
+## Hosted Admin (`admin`)
+
+The [Admin portal](admin/README.md) is a separately deployed service in this
+folder, not a page in the desktop app or an extra process started by the
+normal npm/Docker command. It uses the fleet provisioner to create isolated,
+blank client workspaces, with invite-only access and centrally managed
+Anthropic/OpenRouter API keys. Follow its [Linux deployment guide](admin/README.md#fresh-linux-deployment)
+and qualification checklist before the [client onboarding procedure](admin/CLIENT-ONBOARDING.md).
 
 ## White-label (`whitelabel`)
 

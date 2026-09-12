@@ -2,7 +2,7 @@
 // sign in with an emailed code from the control plane (stubbed here) and
 // ends up with the same cookie session a pairing code would give.
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { startControlPlaneStub, type ControlPlaneStub } from "./testing/control-plane-stub.ts";
+import { openSse } from "./testing/sse.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
@@ -72,6 +73,21 @@ const cookieOf = (reply: Reply): string => {
   return (first ?? "").split(";")[0];
 };
 
+async function signIn(email: string): Promise<string> {
+  expect((await call("/api/auth/email/start", { body: { email } })).status).toBe(200);
+  const reply = await call("/api/auth/email/verify", { body: { email, code: stub.otp } });
+  expect(reply.status).toBe(200);
+  return cookieOf(reply);
+}
+
+async function openEvents(cookie: string) {
+  const stream = await openSse(`http://127.0.0.1:${PORT}/api/events`, {
+    "x-forwarded-for": "203.0.113.7", "x-forwarded-proto": "https", cookie,
+  });
+  await stream.until((frame) => frame.kind === "hello");
+  return stream;
+}
+
 beforeAll(async () => {
   stub = await startControlPlaneStub();
   home = mkdtempSync(join(tmpdir(), "omb-email-signin-"));
@@ -79,7 +95,10 @@ beforeAll(async () => {
   mkdirSync(join(home, ".openmausbot"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Served UI</title>");
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances: { fixture: { driver: "email-signin-test-shadow" } } }));
+  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+    instances: { fixture: { driver: "email-signin-test-shadow" } },
+    signIn: { admins: ["her@example.test", "@agentada.test"], members: ["staff@example.test"] },
+  }));
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
@@ -94,8 +113,7 @@ beforeAll(async () => {
       OMB_ENVIRONMENT_LABEL: "agentada",
       OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
       OMB_CONTROL_PLANE_URL: stub.url,
-      OMB_SIGNIN_EMAILS: "Her@Example.test, @agentada.test",
-      OMB_SIGNIN_MEMBER_EMAILS: "staff@example.test",
+      OMB_SSE_HEARTBEAT_MS: "50",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -201,5 +219,59 @@ describe("sign in with your email on a hosted server", () => {
     // the lockout is per source: someone else still gets in
     const other = await call("/api/auth/email/verify", { body: { email: "her@example.test", code: stub.otp }, from: "198.51.100.43" });
     expect(other.status).toBe(200);
+  });
+
+  it("revokes demoted email devices and live streams before the next frame, without changing paired devices", async () => {
+    const owner = await signIn("her@example.test");
+    const first = await signIn("anyone@agentada.test");
+    const second = await signIn("anyone@agentada.test");
+    const streams = await Promise.all([openEvents(first), openEvents(second)]);
+    try {
+      const ticket = await call("/api/auth/stream-ticket", { body: {}, headers: { cookie: first } });
+      expect(ticket.status).toBe(200);
+      const pairing = await call("/api/auth/pairing", { body: {}, headers: { cookie: owner } });
+      expect(pairing.status).toBe(200);
+      const paired = await call("/api/auth/pair", { body: { code: pairing.body.code, cookie: true, label: "QR device" } });
+      expect(paired.status).toBe(200);
+      const changed = await call("/api/config", {
+        method: "PUT", headers: { cookie: owner },
+        body: {
+          signIn: { admins: ["her@example.test"], members: ["staff@example.test", "@agentada.test"] },
+          profile: { name: "post-demotion-private-marker" },
+        },
+      });
+      expect(changed.status).toBe(200);
+      await Promise.all(streams.map((stream) => expect(stream.until(() => false, 2_000)).rejects.toThrow("SSE stream closed")));
+      expect(JSON.stringify(streams.map((stream) => stream.frames))).not.toContain("post-demotion-private-marker");
+      expect((await call("/api/bots", { headers: { cookie: first } })).status).toBe(401);
+      expect((await call("/api/bots", { headers: { cookie: second } })).status).toBe(401);
+      expect((await call(`/api/events?ticket=${ticket.body.ticket}`)).status).toBe(401);
+      expect((await call("/api/auth/sessions", { headers: { cookie: cookieOf(paired) } })).status).toBe(200);
+
+      const member = await signIn("anyone@agentada.test");
+      expect((await call("/api/auth/session", { headers: { cookie: member } })).body.scopes).toEqual(["client"]);
+      expect((await call("/api/config", { method: "PUT", headers: { cookie: member }, body: { language: "en" } })).status).toBe(403);
+      expect((await call("/api/config", {
+        method: "PUT", headers: { cookie: owner },
+        body: { signIn: { admins: ["her@example.test", "@agentada.test"], members: ["staff@example.test"] } },
+      })).status).toBe(200);
+      expect((await call("/api/auth/session", { headers: { cookie: member } })).body.scopes).toEqual(["client"]);
+    } finally { for (const stream of streams) stream.close(); }
+  });
+
+  it("ends an idle email stream after an external allow-list removal and never revives the old cookie", async () => {
+    const cookie = await signIn("staff@example.test");
+    const stream = await openEvents(cookie);
+    const configPath = join(home, ".openmausbot", "config.json");
+    const config = JSON.parse(readFileSync(configPath, "utf8"));
+    try {
+      // The fleet agent and CLI update this file outside the running server.
+      writeFileSync(configPath, JSON.stringify({ ...config, signIn: { ...config.signIn, members: [] } }));
+      await expect(stream.until(() => false, 2_000)).rejects.toThrow("SSE stream closed");
+      expect((await call("/api/bots", { headers: { cookie } })).status).toBe(401);
+      expect((await call("/api/auth/email/start", { body: { email: "staff@example.test" } })).status).toBe(403);
+      writeFileSync(configPath, JSON.stringify(config));
+      expect((await call("/api/bots", { headers: { cookie } })).status).toBe(401);
+    } finally { stream.close(); writeFileSync(configPath, JSON.stringify(config)); }
   });
 });

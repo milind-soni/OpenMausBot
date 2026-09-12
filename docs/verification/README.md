@@ -52,6 +52,7 @@ Use only mapped, tested commands:
 - [Full workspace backups](workspace-backups.md)
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)
+- [Hosted Admin portal and invitations](hosted-admin.md)
 - [Usage ledger](usage-ledger.md)
 - [Spend cap and sell prices](spend-cap.md)
 
