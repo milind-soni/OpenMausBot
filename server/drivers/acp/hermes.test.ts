@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import {
   HERMES_ACP_MODELS_TIMEOUT_ENV,
+  HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS,
   HERMES_CONFIG_MODEL_ID,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT,
   HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL,
@@ -268,7 +269,7 @@ process.stdin.on("data", (chunk) => {
     writeFileSync(cli, FAKE_CLI_SOURCE, { mode: 0o755 });
     // The spawn gets exactly this env, so PATH has to survive for the
     // script's /usr/bin/env node shebang to resolve.
-    return { cli, env: { PATH: process.env.PATH ?? "", HOME: home, ...env } };
+    return { cli, env: { PATH: process.env.PATH ?? "", ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, ...env } };
   }
 
   it("returns the advertised catalog when session/new answers inside the deadline", async () => {
@@ -280,11 +281,13 @@ process.stdin.on("data", (chunk) => {
     const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "2000", [HERMES_ACP_MODELS_TIMEOUT_ENV]: "150" });
     const started = Date.now();
     await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual([]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(125);
     expect(Date.now() - started).toBeLessThan(1500);
   });
 
-  it("ignores an invalid timeout override and falls back to the 15s default", async () => {
-    const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "150", [HERMES_ACP_MODELS_TIMEOUT_ENV]: "not-a-number" });
+  it.each(["not-a-number", "0", "-1", "0.5", "Infinity", "2147483648"])("ignores invalid timeout %s and falls back to the 15s default", async (timeout) => {
+    expect(HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS).toBe(15_000);
+    const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "150", [HERMES_ACP_MODELS_TIMEOUT_ENV]: timeout });
     // Resolving at all before any realistic default proves the override was
     // rejected; a 0/NaN deadline would have returned [] immediately.
     await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual(CATALOG);

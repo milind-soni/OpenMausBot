@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { resolveCli } from "../../procs.ts";
 import { decodeInjectId, hostApiKey, INJECT_SEP, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -272,7 +273,9 @@ function hermesAcpModelsTimeoutMs(env: Record<string, string | undefined>): numb
   const raw = env[HERMES_ACP_MODELS_TIMEOUT_ENV];
   if (raw === undefined) return HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 2_147_483_647
+    ? parsed
+    : HERMES_ACP_MODELS_DEFAULT_TIMEOUT_MS;
 }
 
 export async function fetchHermesAcpModels(
@@ -282,7 +285,8 @@ export async function fetchHermesAcpModels(
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(cli, ["acp"], { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv });
+      const resolved = resolveCli(cli, ["acp"]);
+      child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
     } catch {
       return resolve([]);
     }
