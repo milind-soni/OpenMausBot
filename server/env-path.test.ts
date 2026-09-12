@@ -205,6 +205,16 @@ winOnly("resolveCli (Windows)", () => {
     });
   });
 
+  it("uses the supplied PATH and PATHEXT without depending on the app environment", () => {
+    shimWith("ombfake.cmd", EXE_SHIM, "ombfake.exe", "MZ-not-really");
+    expect(resolveCli("ombfake", ["acp"], { Path: dir, PATHEXT: ".CMD" })).toEqual({
+      command: join(dir, "node_modules", "pkg", "bin", "ombfake.exe"),
+      args: ["acp"],
+    });
+    onPath();
+    expect(resolveCli("ombfake", [], { PATH: "", PATHEXT: ".CMD" })).toEqual({ command: "ombfake", args: [] });
+  });
+
   it("parses an npm .cmd shim down to `node <cli.js>`, never the shim's own node.exe", async () => {
     shimWith("ombfake.cmd", JS_SHIM, "ombfake.js", "console.log('js target ' + process.argv.slice(2).join(','));\n");
     onPath();

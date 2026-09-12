@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.ThreadCloser
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -28,6 +29,27 @@ class TaskRulesTest {
     fun `an empty title reads as untitled rather than blank`() {
         assertEquals("Untitled thread", TaskRules.title(task("t1", "")))
         assertEquals("Research", TaskRules.title(task("t1", "Research")))
+    }
+
+    @Test
+    fun `threads a bot closed list after every open thread, unless something is live there`() {
+        val closer = ThreadCloser(botId = "pm", name = "Parker", at = 9.0)
+        val helpers = (0 until 3).map { task("helper-$it", "Helper $it").copy(closedBy = closer) }
+        val own = listOf(task("t1", "Plan the launch"), task("t2", "Draft release notes"))
+        // newest first from the server: the closed pile sits on top of the person's own
+        assertEquals(
+            listOf("t1", "t2", "helper-0", "helper-1", "helper-2"),
+            TaskRules.tasks(bot(helpers + own)).map { it.threadId },
+        )
+        // running, unread, or current closed threads are treated as open and keep their place
+        val live = listOf(helpers[0].copy(busy = true), helpers[1].copy(unread = true), helpers[2]) + own
+        assertEquals(listOf("helper-0", "helper-1", "t1", "t2", "helper-2"), TaskRules.tasks(bot(live)).map { it.threadId })
+        assertEquals(
+            listOf("helper-0", "t1", "t2", "helper-1", "helper-2"),
+            TaskRules.tasks(bot(helpers + own, current = "helper-0")).map { it.threadId },
+        )
+        assertTrue(TaskRules.demandsAttention(task("t1").copy(activity = "waiting-on-you")))
+        assertFalse(TaskRules.demandsAttention(task("t1").copy(activity = "idle")))
     }
 
     @Test

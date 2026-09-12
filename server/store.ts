@@ -19,6 +19,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile, type BotAvatarCrop } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { MascotBodyId } from "../shared/mascot-bodies.ts";
+import type { QuestionRequestCardData } from "../shared/ask-question.ts";
 import type { ProfileRequestCardData, ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { RoutineRequestCardData } from "../shared/routine-request.ts";
 import type { RoutineRunCardData } from "../shared/routine-run.ts";
@@ -49,6 +50,10 @@ export interface OptionCardData {
   subtitle: string;
   options: string[];
   answered?: string;
+  /** What was actually answered, when the answer is words rather than a
+   * verdict. `answered` only records the behavior ("answer") for a live ask,
+   * so without this a question card forgets its own reply on reload. */
+  answeredText?: string;
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
@@ -81,6 +86,9 @@ export interface OptionCardData {
   /** A durable learned-skill proposal. The skill stays staged until the
    * user confirms this card — it never rides the prompt before that. */
   skillRequest?: SkillRequestCardData;
+  /** A provider's structured question set (Claude's AskUserQuestion), so the
+   * card can offer the model's own options instead of Allow/Deny. */
+  questionRequest?: QuestionRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -116,6 +124,8 @@ export interface SecretRequestCardData {
 }
 
 export interface Message {
+  /** Durable delivery identity, kept out of the visible message body. */
+  roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
@@ -192,7 +202,7 @@ export interface Message {
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" in the caller's chat, linking to the
    * bot⇄bot channel where the exchange is mirrored. */
-  comm?: { groupId: string; withBotId: string; withName: string; withColor: string };
+  comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
   /** thread chips: "Opened thread #Title on @X" in the opener's chat,
    * linking to the thread a bot started with start_thread. Carries the
    * title so the chip still reads after a rename or a deletion. */
@@ -299,6 +309,17 @@ export interface TaskOpenedBy {
   at: number;
 }
 
+/** Which bot closed a thread with close_thread. Set once the thread's result
+ * has been read; the sidebar folds a closed thread out of the default list
+ * (still reachable under "all threads", never deleted) and list_threads
+ * reports it as closed. Cleared the moment a new turn starts there, so a
+ * thread the person picks back up is simply open again. */
+export interface TaskClosedBy {
+  botId: string;
+  name: string;
+  at: number;
+}
+
 export interface TaskRecord {
   threadId: ThreadId;
   title: string;
@@ -310,6 +331,9 @@ export interface TaskRecord {
   /** Set when a bot, not a person, opened this thread. Persisted with the
    * task so the sidebar and a backup keep the attribution. */
   openedBy?: TaskOpenedBy;
+  /** Set by close_thread; absent while the thread is open. Runtime clears
+   * it on the next turn. Persisted with the task like openedBy. */
+  closedBy?: TaskClosedBy;
   /** Defaults are copied when a task is created; older records fall back
    * to the bot until migration seeds their model selection. */
   modelSelection?: ModelSelection;
@@ -396,6 +420,24 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     if (typeof card.subtitle === "string") card.subtitle = redactSecretsInText(card.subtitle);
     if (typeof card.summary === "string") card.summary = redactSecretsInText(card.summary);
     if (typeof card.held === "string") card.held = redactSecretsInText(card.held);
+    if (typeof card.answeredText === "string") card.answeredText = redactSecretsInText(card.answeredText);
+    // Bot-authored question text sits behind the subtitle the same way a
+    // routine's instructions do, so it is scrubbed on the same boundary.
+    if (card.questionRequest) {
+      card.questionRequest = {
+        ...card.questionRequest,
+        questions: card.questionRequest.questions.map((question) => ({
+          ...question,
+          question: redactSecretsInText(question.question),
+          ...(question.header ? { header: redactSecretsInText(question.header) } : {}),
+          options: question.options.map((option) => ({
+            ...option,
+            label: redactSecretsInText(option.label),
+            ...(option.description ? { description: redactSecretsInText(option.description) } : {}),
+          })),
+        })),
+      };
+    }
     // Routine definitions are executable bot-authored text stored behind the
     // visible summary. Scrub the durable payload too so nesting it on a card
     // cannot bypass the transcript's secret-redaction boundary.
@@ -1295,11 +1337,20 @@ export class Store {
   }
 
   private thread(threadId: string): ThreadState {
-    let t = this.threads.get(threadId);
+    const t = this.threads.get(threadId);
     if (t) return t;
     // SQLite is the source of truth; a thread with no rows imports its
     // legacy messages-<threadId>.json once, inside readThread
-    const { messages, activeLeafId: storedLeaf } = mdb.readThread(threadId, messagesFile(threadId));
+    return this.cacheThread(threadId, mdb.readThread(threadId, messagesFile(threadId)));
+  }
+
+  /** Finish hydrating a full set of thread rows into the cache: chain any
+   * legacy (pre-branching) rows' parentId in array order, default the
+   * active leaf to the newest message, and store it. Shared by a full load
+   * and by messagesTail() when its bounded read turns out to be the whole
+   * thread anyway. */
+  private cacheThread(threadId: string, rows: mdb.ThreadRows): ThreadState {
+    const { messages, activeLeafId: storedLeaf } = rows;
     let activeLeafId = storedLeaf;
     // legacy rows carry no parentId — chain them in array order
     let prev: string | null = null;
@@ -1308,13 +1359,44 @@ export class Store {
       prev = m.id;
     }
     if (!activeLeafId) activeLeafId = messages.at(-1)?.id ?? null;
-    t = { messages, activeLeafId };
+    const t = { messages, activeLeafId };
     this.threads.set(threadId, t);
     return t;
   }
 
   messagesFor(threadId: string): Message[] {
     return this.thread(threadId).messages;
+  }
+
+  /** A bounded page of a thread's newest messages, for callers that only
+   * need a display page — the startup/reconnect hydrate and a fresh
+   * scrollback view. Reads just `limit` rows at the SQL boundary instead of
+   * the whole transcript, unless the thread is already cached from other
+   * work (then it's a plain in-memory slice, no extra SQL) or the bounded
+   * read comes back as the complete thread anyway (short thread, or a
+   * one-time legacy import) — that gets cached like any other full load so
+   * a later messagesFor() doesn't re-read it. Legacy rows that predate
+   * per-message parentId are only chained correctly on a full load, so a
+   * bounded page missing that context falls back to one rather than
+   * returning messages with a broken parent chain. */
+  messagesTail(threadId: string, limit: number): { messages: Message[]; hasMore: boolean; activeLeafId: string | null } {
+    let state = this.threads.get(threadId);
+    if (!state) {
+      const tail = mdb.readThreadTail(threadId, messagesFile(threadId), limit);
+      const legacyRows = tail.hasMore !== undefined && tail.messages.some((m) => m.parentId === undefined);
+      if (tail.hasMore !== true || legacyRows) {
+        state = this.cacheThread(threadId, legacyRows ? mdb.readThread(threadId, messagesFile(threadId)) : tail);
+      } else {
+        return {
+          messages: tail.messages,
+          hasMore: tail.hasMore,
+          activeLeafId: tail.activeLeafId ?? tail.messages.at(-1)?.id ?? null,
+        };
+      }
+    }
+    const { messages, activeLeafId } = state;
+    const start = Math.max(0, messages.length - limit);
+    return { messages: messages.slice(start), hasMore: start > 0, activeLeafId };
   }
 
   /** Used only with newly allocated import threads. No live actions are
@@ -2021,6 +2103,21 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
     task.openedBy = structuredClone(openedBy);
+    this.saveBots();
+    this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  /** Stamp or clear the closer record. `null` reopens: the next turn in a
+   * closed thread calls this so the row comes back to the sidebar. Never
+   * reachable from the HTTP task PATCH: closedBy is not a TASK_PATCH_FIELD. */
+  setTaskClosedBy(botId: string, threadId: string, closedBy: TaskClosedBy | null): TaskRecord | null {
+    const bot = this.bot(botId);
+    const task = this.taskByThread(botId, threadId);
+    if (!bot || !task) return null;
+    if (closedBy) task.closedBy = structuredClone(closedBy);
+    else if (!task.closedBy) return task;
+    else delete task.closedBy;
     this.saveBots();
     this.emit({ type: "bot", botId });
     return task;

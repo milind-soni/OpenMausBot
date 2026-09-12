@@ -70,3 +70,29 @@ describe("held notes", () => {
     }
   });
 });
+
+describe("tools that ask a person", () => {
+  // A question normally arrives typed as a question and never reaches a
+  // verdict. This is the backstop for the path where one arrives typed as a
+  // permission: no mode may answer it, because approving does not answer
+  // anything — the CLI runs the tool with no answers and the model is told
+  // "The user did not answer the questions."
+  const modes = ["ask", "edits", "auto", "custom", "full"] as const;
+
+  it("never answers AskUserQuestion for the person, even under Full access", () => {
+    for (const mode of modes) {
+      expect(autoVerdict(mode, "AskUserQuestion"), mode).toEqual({ approve: null, source: "no-grant" });
+    }
+  });
+
+  it("never answers ask_user, bare or MCP-prefixed", () => {
+    for (const mode of modes) {
+      expect(autoVerdict(mode, "ask_user").approve, mode).toBeNull();
+      expect(autoVerdict(mode, "mcp__ogb__ask_user").approve, mode).toBeNull();
+    }
+  });
+
+  it("still answers an ordinary tool under Full access", () => {
+    expect(autoVerdict("full", "Read").approve).toBeTruthy();
+  });
+});

@@ -35,6 +35,52 @@ describe("Store", () => {
     expect(bot.modelSelection).toEqual(selection());
   });
 
+  it("messagesTail reads a bounded page via SQL on a fresh Store, and older messages still load in full", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    for (let i = 0; i < 10; i++) {
+      store.appendMessage(bot.threadId, { role: "user", kind: "text", text: `message ${i}` });
+    }
+
+    // a brand-new Store: its in-memory cache has never seen this thread, so
+    // this exercises the SQL LIMIT fast path, not an in-memory slice
+    const reloaded = new Store(selection);
+    const tail = reloaded.messagesTail(bot.threadId, 3);
+    expect(tail.messages.map((m) => m.text)).toEqual(["message 7", "message 8", "message 9"]);
+    expect(tail.hasMore).toBe(true);
+    expect(tail.activeLeafId).toBe(tail.messages.at(-1)!.id);
+
+    // older messages still load in full on the same (now-cached) instance
+    expect(reloaded.messagesFor(bot.threadId).map((m) => m.text)).toEqual(
+      Array.from({ length: 10 }, (_, i) => `message ${i}`),
+    );
+
+    // asking for at least as many messages as exist: the whole thread, hasMore false
+    const whole = new Store(selection).messagesTail(bot.threadId, 100);
+    expect(whole.messages).toHaveLength(10);
+    expect(whole.hasMore).toBe(false);
+  });
+
+  it("caches a complete tail but never caches a zero-message page as an empty thread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "keep this" });
+    const read = vi.spyOn(mdb, "readThread");
+    try {
+      const fresh = new Store(selection);
+      expect(fresh.messagesTail(bot.threadId, 10)).toMatchObject({ hasMore: false });
+      read.mockClear();
+      expect(fresh.messagesFor(bot.threadId)).toHaveLength(1);
+      expect(read).not.toHaveBeenCalled();
+
+      const zeroPage = new Store(selection);
+      expect(zeroPage.messagesTail(bot.threadId, 0)).toMatchObject({ messages: [], hasMore: true });
+      expect(zeroPage.messagesFor(bot.threadId)[0]?.text).toBe("keep this");
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it("dismisses an open options card when the user talks, and leaves live asks", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -814,6 +860,23 @@ describe("Store change stream", () => {
     const reloaded = new Store(selection);
     expect(reloaded.taskByThread(bot.id, opened.threadId)?.openedBy).toEqual({ botId: opener.id, name: opener.name, delegationId: "d-1", at: 7 });
     expect(reloaded.taskByThread(bot.id, own.threadId)).not.toHaveProperty("openedBy");
+  });
+
+  it("setTaskClosedBy stamps who closed a thread, survives a reload, and null reopens it", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const closer = store.createBot();
+    const task = store.createTask(bot.id, "Helper")!;
+    expect(task).not.toHaveProperty("closedBy");
+    expect(store.setTaskClosedBy(bot.id, task.threadId, { botId: closer.id, name: closer.name, at: 9 })!.closedBy)
+      .toEqual({ botId: closer.id, name: closer.name, at: 9 });
+    expect(store.setTaskClosedBy(bot.id, "no-such-thread", { botId: closer.id, name: closer.name, at: 9 })).toBeNull();
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)?.closedBy).toEqual({ botId: closer.id, name: closer.name, at: 9 });
+    // the person picking the thread back up clears the stamp entirely
+    expect(store.setTaskClosedBy(bot.id, task.threadId, null)).not.toHaveProperty("closedBy");
+    expect(new Store(selection).taskByThread(bot.id, task.threadId)).not.toHaveProperty("closedBy");
+    // the HTTP task PATCH cannot forge or clear it
+    expect(store.patchTask(bot.id, task.threadId, { closedBy: { botId: closer.id, name: closer.name, at: 1 } } as never)).not.toHaveProperty("closedBy");
   });
 
   it("every bot write emits a bot event carrying only the id (the wire shape is the caller's)", () => {

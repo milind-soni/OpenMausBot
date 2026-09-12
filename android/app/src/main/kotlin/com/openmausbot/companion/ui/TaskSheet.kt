@@ -46,7 +46,8 @@ import kotlinx.coroutines.launch
 import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.chat
 import com.openmausbot.companion.core.target
-import com.openmausbot.companion.core.openedByLabel
+import com.openmausbot.companion.core.bylineLabel
+import com.openmausbot.companion.core.isClosed
 
 /**
  * Separate contexts for an agent or channel — the port of
@@ -228,6 +229,9 @@ private fun TaskRow(
     val canSwitch = TaskRules.canSwitch(task, chat)
     val canDelete = TaskRules.canDelete(task, chat)
     val now = remember(task.threadId) { System.currentTimeMillis() }
+    // A closed thread with nothing live in it reads quieter, like the desktop's
+    // dimmed row; a live status, unread, or being current outranks the closed note.
+    val dimmed = task.isClosed && !TaskRules.demandsAttention(task) && !current
 
     Row(
         modifier = Modifier
@@ -241,7 +245,7 @@ private fun TaskRow(
             Text(
                 text = TaskRules.title(task),
                 fontSize = 16.sp,
-                color = if (canSwitch || current) {
+                color = if ((canSwitch || current) && !dimmed) {
                     MaterialTheme.colorScheme.onSurface
                 } else {
                     secondaryTint
@@ -252,9 +256,9 @@ private fun TaskRow(
                 fontSize = 12.sp,
                 color = secondaryTint,
             )
-            task.openedByLabel?.let { openedBy ->
+            task.bylineLabel?.let { byline ->
                 Text(
-                    text = openedBy,
+                    text = byline,
                     fontSize = 12.sp,
                     color = secondaryTint,
                 )

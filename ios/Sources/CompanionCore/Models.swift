@@ -57,6 +57,13 @@ public struct OptionCard: Codable, Hashable, Sendable {
     /// Learned skills must show their complete reviewed contents before an
     /// approval button is offered on a compact companion surface.
     public var skillRequest: SkillRequestCardData? = nil
+    /// The model's own questions and options (Claude's `AskUserQuestion`).
+    /// Present only on a structured ask; every other card leaves it nil.
+    public var questionRequest: QuestionRequestCardData? = nil
+    /// What an answered question was answered WITH. `answered` only records
+    /// the behavior once the harness settles a live ask, so without this a
+    /// settled question card would read "answer" instead of the reply.
+    public var answeredText: String? = nil
 
     /// A card is actionable while it is unanswered and still has a request
     /// behind it. Everything else is transcript.
@@ -66,6 +73,14 @@ public struct OptionCard: Codable, Hashable, Sendable {
 
     /// Permission cards carry a tool; questions do not.
     public var isPermission: Bool { tool != nil }
+
+    /// A structured ask draws its own card: the model posed real questions
+    /// with real options, and a flat row of buttons cannot say which
+    /// question a tap answered.
+    public var questions: [AskQuestion] {
+        guard let questionRequest, !questionRequest.questions.isEmpty else { return [] }
+        return questionRequest.questions
+    }
 
     /// The wire API accepts an approval behavior rather than the button's
     /// display text. Treat the one refusal as deny and every other offered
@@ -236,6 +251,15 @@ public struct ThreadOpener: Codable, Hashable, Sendable {
     public var at: Double
 }
 
+/// The bot that closed a thread with close_thread, once its result was
+/// read. Absent means the thread is open; the computer clears it the moment
+/// a new turn starts there, so a reopened thread simply loses the stamp.
+public struct ThreadCloser: Codable, Hashable, Sendable {
+    public var botId: String
+    public var name: String
+    public var at: Double
+}
+
 /// A folder within one bot, in the order saved by the desktop.
 public struct BotProject: Codable, Hashable, Identifiable, Sendable {
     public var id: String
@@ -258,12 +282,33 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var alwaysAllow: [String]?
     public var projectId: String?
     public var openedBy: ThreadOpener?
+    public var closedBy: ThreadCloser?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
 
     /// The thread list's quiet second line, worded as the desktop words it.
     public var openedByLabel: String? {
         openedBy.map { "opened by \($0.name)" }
+    }
+
+    /// A bot closed this thread and nothing has happened there since.
+    public var isClosed: Bool { closedBy != nil }
+
+    /// The one line under a title: who closed it once a bot has, otherwise
+    /// who opened it, otherwise nothing. Closed wins because it is the newer
+    /// fact and the reason the row is dimmed.
+    public var bylineLabel: String? {
+        closedBy.map { "closed by \($0.name)" } ?? openedByLabel
+    }
+
+    /// Whether the row must stay in the list regardless of closed state:
+    /// it is running, needs the person, or has something they have not read.
+    public var demandsAttention: Bool {
+        if busy == true || unread == true { return true }
+        switch activity {
+        case "waiting-on-you", "waiting", "working", "running", "queued": return true
+        default: return false
+        }
     }
 }
 

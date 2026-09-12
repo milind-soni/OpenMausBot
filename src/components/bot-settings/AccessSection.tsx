@@ -246,7 +246,9 @@ export function AccessSection({
                   ? localDisabledReason ?? undefined
                   : mode === "browser"
                     ? browserSelectable ? "The built-in browser tab only; no desktop" : browserDisabledReason
-                    : undefined
+                    : mode === "off"
+                      ? "No computer and no built-in browser"
+                      : undefined
               }
               onClick={() => {
                 if ((mode === null && bot.computer === undefined) || mode === bot.computer) return;
@@ -269,6 +271,13 @@ export function AccessSection({
             </button>
           ))}
         </div>
+        {bot.computer === "off" && (
+          <div className="mt-3 rounded-lg bg-inset px-3 py-2.5 text-[11.5px] leading-relaxed text-ink-secondary">
+            <span className="font-medium text-ink">Off means no screen.</span>{" "}
+            This bot gets no computer and no built-in browser, so it cannot open a web page, click, or type
+            anywhere. Its connected apps, MCP servers, files and chat all still work.
+          </div>
+        )}
         {(!bot.computer || bot.computer === "cloud") && (
           <>
             {!bot.computer && (
@@ -375,16 +384,22 @@ export function AccessSection({
                 ? "The built-in browser is switched off under App Settings → Experimental."
                 : !canUseBrowser
                   ? "This bot's current engine cannot use the built-in browser."
-                  : browserEnabled
-                    ? "This bot has its own browser with its own logins."
-                    : "Keep the built-in browser unavailable to this bot."}
+                  : bot.computer === "off"
+                    ? "Works on is set to Off, so this bot has no browser. Pick another destination above to give it one."
+                    : browserEnabled
+                      ? "This bot has its own browser with its own logins."
+                      : "Keep the built-in browser unavailable to this bot."}
           </div>
         </div>
         <Switch
-          checked={browserEnabled}
+          checked={browserEnabled && bot.computer !== "off"}
           aria-label="Give this bot a built-in browser"
-          disabled={!browserEnabled && ((!desktopBrowser && !browserInstallable) || !browserFeature || !canUseBrowser)}
+          disabled={
+            bot.computer === "off" ||
+            (!browserEnabled && ((!desktopBrowser && !browserInstallable) || !browserFeature || !canUseBrowser))
+          }
           onClick={() => patch({ browser: !browserAllowed })}
+          title={bot.computer === "off" ? "Works on is set to Off, so this bot has no browser" : undefined}
           className="disabled:cursor-not-allowed"
         />
       </div>

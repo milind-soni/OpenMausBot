@@ -38,6 +38,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -276,6 +277,16 @@ const playTurn = (prompt: JsonValue) => {
   if (mode === "resume-dies-after-init" && argv.includes("--resume")) {
     process.stderr.write("fake-claude: simulated crash after accepting the resumed session\n");
     process.exit(3);
+  }
+
+  if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
+    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt).then(text => {
+      out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+      out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
+    }).catch(error => {
+      out({ type: "result", is_error: true, result: String(error), stop_reason: "error" });
+    }).finally(() => { turnRunning = false; finishIfDone(); });
+    return;
   }
 
   if (mode === "hang") {

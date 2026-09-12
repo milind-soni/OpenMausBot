@@ -76,9 +76,27 @@ data class OptionCard(
     val allowKey: String? = null,
     /** Learned skills require a complete, hash-bound review before approval. */
     val skillRequest: SkillRequestCardData? = null,
+    /**
+     * The model's own questions and options (Claude's `AskUserQuestion`).
+     * Present only on a structured ask; every other card leaves it null.
+     */
+    val questionRequest: QuestionRequestCardData? = null,
+    /**
+     * What an answered question was answered WITH. `answered` only records the
+     * behavior once the harness settles a live ask, so without this a settled
+     * question card would read "answer" instead of the reply.
+     */
+    val answeredText: String? = null,
 ) {
     val isPending: Boolean get() = requestId != null && answered == null && dismissed != true
     val isPermission: Boolean get() = tool != null
+
+    /**
+     * A structured ask draws its own card: the model posed real questions with
+     * real options, and a flat row of buttons cannot say which question a tap
+     * answered.
+     */
+    val questions: List<AskQuestion> get() = questionRequest?.questions.orEmpty()
 
     fun responseBehavior(choice: String): String = responseBehavior(choice, isPermission)
 
@@ -243,6 +261,18 @@ data class ThreadOpener(
     val at: Double,
 )
 
+/**
+ * The bot that closed a thread with close_thread, once its result was read.
+ * Absent means the thread is open; the computer clears it the moment a new
+ * turn starts there, so a reopened thread simply loses the stamp.
+ */
+@Serializable
+data class ThreadCloser(
+    val botId: String,
+    val name: String,
+    val at: Double,
+)
+
 @Serializable
 data class BotTask(
     val threadId: String,
@@ -257,6 +287,7 @@ data class BotTask(
     val alwaysAllow: List<String>? = null,
     val projectId: String? = null,
     val openedBy: ThreadOpener? = null,
+    val closedBy: ThreadCloser? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
 )
@@ -264,6 +295,18 @@ data class BotTask(
 /** The thread list's quiet second line, worded as the desktop words it. */
 val BotTask.openedByLabel: String?
     get() = openedBy?.let { "opened by ${it.name}" }
+
+/** A bot closed this thread and nothing has happened there since. */
+val BotTask.isClosed: Boolean
+    get() = closedBy != null
+
+/**
+ * The one line under a title: who closed it once a bot has, otherwise who
+ * opened it, otherwise nothing. Closed wins because it is the newer fact and
+ * the reason the row is dimmed.
+ */
+val BotTask.bylineLabel: String?
+    get() = closedBy?.let { "closed by ${it.name}" } ?: openedByLabel
 
 @Serializable
 data class Bot(

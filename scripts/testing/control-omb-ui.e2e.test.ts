@@ -138,6 +138,37 @@ describe("control-omb ui drives the real renderer", () => {
     // needs no flag; the fixture's default config is what a fresh install has.
     expect(flagged.features).toMatchObject({ skillAuthoring: true });
 
+    // Model changes in the real header default to the bot (groups/new
+    // threads), with an explicit thread-only choice. No permissions change.
+    const savedBot = async () => (await fetch(`${info.url}/api/bots`).then((response) => response.json())).bots.find((bot: any) => bot.id === info.botId);
+    const originalBot = await savedBot();
+    const originalModel = originalBot.modelSelection.model;
+    const models = await runControlOmb(["models", "--url", info.url]) as any;
+    const options = models.instances.find((instance: any) => instance.instanceId === originalBot.modelSelection.instanceId).models.options;
+    const originalLabel = options.find((option: any) => option.id === originalModel).label;
+    const nextModel = options.find((option: any) => option.id !== originalModel);
+    await ui("click", info.ui, "--name", originalLabel);
+    expect(await ui("eval", info.ui, "--js", "[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'This bot').getAttribute('aria-pressed')"))
+      .toMatchObject({ result: "true" });
+    const scopeShot = join(evidenceDir, "model-scope.png");
+    mkdirSync(evidenceDir, { recursive: true });
+    await ui("screenshot", info.ui, "--out", scopeShot);
+    await ui("click", info.ui, "--name", nextModel.label);
+    await expect.poll(async () => (await savedBot()).modelSelection.model, { timeout: 10_000 }).toBe(nextModel.id);
+    expect((await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model).toBe(nextModel.id);
+    await ui("click", info.ui, "--name", nextModel.label);
+    await ui("click", info.ui, "--name", "Only this thread");
+    // The provider-default badge is part of the accessible model-row name.
+    const modelSnapshot = await ui("snapshot", info.ui, "--interactive");
+    const originalRow = Object.entries(modelSnapshot.refs as Record<string, { name: string; role: string }>)
+      .find(([, value]) => value.role === "button" && value.name.startsWith(originalLabel));
+    expect(originalRow).toBeDefined();
+    await ui("click", info.ui, "--ref", `@${originalRow![0]}`);
+    await expect.poll(async () => (await savedBot()).tasks.find((task: any) => task.threadId === originalBot.threadId).modelSelection.model,
+      { timeout: 10_000 }).toBe(originalModel);
+    expect((await savedBot()).modelSelection.model).toBe(nextModel.id);
+    expect((await savedBot()).approvalMode).toBe(originalBot.approvalMode);
+
     const before = await ui("snapshot", info.ui, "--interactive");
     expect(before.ok).toBe(true);
     const [composer, ...moreComposers] = refsNamed(before, "Message Pepper", "textbox");
