@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
+import { waitForExit } from "./cleanup.ts";
 
 export async function runRoomHandoffAgent(argv: string[], planPath: string, prompt?: unknown): Promise<string> {
   const arg = (flag: string) => argv[argv.indexOf(flag) + 1];
@@ -24,37 +25,55 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   const child = spawn(integration.command, integration.args, { env: { ...process.env, ...integration.env }, stdio: ["pipe", "pipe", "pipe"] });
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
   let serial = 0;
+  let closing = false;
+  let failure: Error | undefined;
+  let rejectRun!: (error: Error) => void;
+  const failed = new Promise<never>((_resolve, reject) => { rejectRun = reject; });
+  const fail = (error: Error) => {
+    if (closing || failure) return;
+    failure = error;
+    for (const p of pending.values()) p.reject(error);
+    pending.clear();
+    rejectRun(error);
+  };
   const lines = createInterface({ input: child.stdout });
   lines.on("line", line => {
-    const data = JSON.parse(line);
-    const waiter = pending.get(data.id);
-    if (waiter) { pending.delete(data.id); waiter.resolve(data); }
+    try {
+      const data = JSON.parse(line);
+      const waiter = pending.get(data.id);
+      if (waiter) { pending.delete(data.id); waiter.resolve(data); }
+    } catch { fail(new Error("Fixture MCP returned malformed JSON")); }
   });
-  child.on("error", error => { for (const p of pending.values()) p.reject(error); pending.clear(); });
+  child.on("error", fail);
+  child.on("exit", (code, signal) => fail(new Error(`Fixture MCP exited unexpectedly: ${signal ?? code}`)));
+  child.stdin.on("error", fail);
+  child.stderr.resume();
   const call = (method: string, params: unknown = {}) => new Promise<any>((resolve, reject) => {
+    if (failure) { reject(failure); return; }
     const id = ++serial; pending.set(id, { resolve, reject });
     child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
   });
-  const timer = setTimeout(() => {
-    for (const p of pending.values()) p.reject(new Error("Fixture MCP call timed out"));
-    child.kill();
-  }, 20_000);
+  const timer = setTimeout(() => fail(new Error("Fixture MCP run timed out")), 20_000);
+  let delayTimer: ReturnType<typeof setTimeout> | undefined;
   const evidence: unknown[] = [];
   try {
-    await call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "room-fixture", version: "1" } });
-    evidence.push(await call("tools/list"));
-    evidence.push(await call("tools/call", { name: "list_room_targets", arguments: {} }));
-    for (const step of steps) {
-      const response = await call("tools/call", { name: step.tool ?? "coordinate_bots", arguments: step.arguments });
-      evidence.push({ step, response });
-      if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
-    }
-    if (plan.delayMs) await new Promise(resolve => setTimeout(resolve, plan.delayMs));
-    if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");
-    return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;
+    return await Promise.race([failed, (async () => {
+      await call("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "room-fixture", version: "1" } });
+      evidence.push(await call("tools/list"));
+      evidence.push(await call("tools/call", { name: "list_room_targets", arguments: {} }));
+      for (const step of steps) {
+        const response = await call("tools/call", { name: step.tool ?? "coordinate_bots", arguments: step.arguments });
+        evidence.push({ step, response });
+        if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
+      }
+      if (plan.delayMs) await new Promise(resolve => { delayTimer = setTimeout(resolve, plan.delayMs); });
+      if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");
+      return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;
+    })()]);
   } finally {
+    closing = true;
+    clearTimeout(timer); clearTimeout(delayTimer); lines.close(); child.stdin.destroy();
+    await waitForExit(child, { signal: "SIGTERM", graceMs: 500 });
     appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId: integration.env.OMB_THREAD_ID, resumed, system, prompt, evidence }) + "\n");
-    clearTimeout(timer); lines.close(); child.stdin.end();
-    await new Promise<void>(resolve => { if (child.exitCode !== null) resolve(); else { child.once("exit", () => resolve()); child.kill(); } });
   }
 }

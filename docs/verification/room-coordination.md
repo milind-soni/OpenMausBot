@@ -25,17 +25,23 @@ receipt, subject to the bounded retention and fresh peer/section access checks.
 ```sh
 pnpm exec vitest run server/room-handoffs.test.ts server/room-coordination.e2e.test.ts src/components/GroupView.test.ts src/lib/room-activity.test.ts --maxWorkers=2
 pnpm exec vitest run server/group-goal-run.e2e.test.ts server/group-goal-wait-cap.e2e.test.ts server/drivers/agents-proxy.test.ts --maxWorkers=2
+pnpm exec vitest run server/room-recovery.e2e.test.ts server/testing/room-handoff-agent.test.ts
 ```
 
 The integration suite launches the disposable control fixture and drives the
 actual injected agents MCP proxy with a scripted provider. It checks same-room
 multi-recipient consultation, cross-room work and return, busy peers, cancellation,
 provider failure, thread pinning, section changes, peer revocation, explicit
-approvals and validation. It does not claim model judgment or artifact correctness.
+approvals and validation. Multiple required approvals are presented together;
+no recipient starts until all are allowed. It does not claim model judgment or artifact correctness.
 Follow-up checks cover retained report context and withholding after peer access
 is revoked, without mirroring a second visible transcript.
 Unit checks cover bounded depth/fan-out, idempotent retry, original request
 retention, automatic return, cancellation and restart without replay.
+The recovery fixture restarts the same disposable server with an interrupted
+routine and verifies its source-room card and error-free recovery broadcasts.
+The subprocess fixture checks malformed output, unexpected exit and bounded
+cleanup so an agent-process failure cannot silently pass or hang these tests.
 
 ## Real-model and UI checks
 

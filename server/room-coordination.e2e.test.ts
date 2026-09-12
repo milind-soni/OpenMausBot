@@ -154,6 +154,33 @@ it.each(["allow", "deny"])("honors %s on the sender's peer-approval card", behav
   else expect(f.nodes().find((n: any) => n.parentId)).toMatchObject({ status: "completed", approvalGranted: true });
 }), 45_000);
 
+it.each(["allow", "deny"])("presents all peer approvals together and dispatches only if every recipient is allowed (%s)", behavior => withRooms(async f => {
+  const reviewer = (await f.cli("new-bot", "--name", "Reviewer", "--section", "A")).bot;
+  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [f.target.id, reviewer.id] });
+  await f.api(`/api/bots/${f.sender.id}`, { approvePeerComms: true }, "PATCH");
+  f.plan[reviewer.id] = { reply: "Reviewed CSV" };
+  f.plan[f.sender.id].steps[0].arguments.bot_ids.push(reviewer.id);
+  f.plan[f.sender.id].steps[0].expectError = behavior === "deny";
+  await f.start();
+  let cards: any[] = [];
+  await expect.poll(async () => {
+    cards = (await f.messages(f.source.activeTaskId)).filter((m: any) => m.card?.tool === "delegate_bot");
+    return cards.length;
+  }, { timeout: 10_000 }).toBe(2);
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  // Answer the second one first: approving one recipient cannot start
+  // partial work or wait for another card to be created.
+  await f.api(`/api/threads/${f.source.activeTaskId}/respond`, { requestId: cards[1].card.requestId, behavior });
+  expect(f.nodes()).toEqual([]);
+  await f.api(`/api/threads/${f.source.activeTaskId}/respond`, { requestId: cards[0].card.requestId, behavior: "allow" });
+  expect((await f.wait()).status).toBe("settled");
+  if (behavior === "deny") expect(f.nodes()).toEqual([]);
+  else expect(f.nodes().filter((n: any) => n.parentId)).toMatchObject([
+    { status: "completed", approvalGranted: true }, { status: "completed", approvalGranted: true },
+  ]);
+}), 45_000);
+
 it("pins a busy destination's task even when its active task changes", () => withRooms(async f => {
   f.plan[f.target.id].delayMs = 1500;
   f.savePlan(); await f.cli("send", "--bot", f.target.id, "--text", "Independent work");
