@@ -2524,14 +2524,29 @@ function slimMessage(message: Message): Message | Record<string, unknown> {
   return { ...rest, hasImage: true };
 }
 
-/** `limit === undefined` is the original, unpaginated shape. */
+/** `limit === undefined` is the original, unpaginated shape. A bounded,
+ * cursor-less request (the common case: startup hydrate, a fresh
+ * scrollback view) goes through messagesTail(), which can read just the
+ * newest rows from SQLite instead of hydrating the whole transcript first.
+ * Paging further back with `before` still needs the full, cached array to
+ * seek to an arbitrary point in history. */
 function messagePage(threadId: string, limit: number | undefined, before?: string | null) {
+  if (limit === undefined) {
+    return { messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) };
+  }
+  if (!before) {
+    const tail = store.messagesTail(threadId, limit);
+    return { messages: tail.messages.map(slimMessage), hasMore: tail.hasMore, activeLeafId: tail.activeLeafId };
+  }
   const all = store.messagesFor(threadId);
-  if (limit === undefined) return { messages: all };
-  const end = before ? all.findIndex((msg) => msg.id === before) : -1;
+  const end = all.findIndex((msg) => msg.id === before);
   const stop = end === -1 ? all.length : end;
   const start = Math.max(0, stop - limit);
-  return { messages: all.slice(start, stop).map(slimMessage), hasMore: start > 0 };
+  return {
+    messages: all.slice(start, stop).map(slimMessage),
+    hasMore: start > 0,
+    activeLeafId: store.activeLeaf(threadId),
+  };
 }
 
 /** A bounded page centred on a known message, used when a search result is
@@ -10378,8 +10393,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "GET" && path === "/api/bots") {
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      // wireBot(), not publicBot(): publicBot() pulls the whole transcript via
+      // messagesFor() just to have it overwritten below by messagePage(),
+      // which — for a bounded request — never needs the full transcript.
+      // tasks stays explicit, because that is the one field publicBot() adds
+      // that messagePage() does not: wireBot() omits the key entirely for a
+      // bot record carrying no tasks, where publicBot() always sent [].
       return json(res, 200, {
-        bots: store.bots.map((bot) => ({ ...publicBot(bot), ...messagePage(bot.threadId, limit) })),
+        bots: store.bots.map((bot) => ({
+          ...wireBot(bot),
+          tasks: store.tasks(bot.id).map(wireTask),
+          ...messagePage(bot.threadId, limit),
+        })),
         botQueuedMessages: publicBotQueuedMessages(),
         groups: store.groups.map((g) => ({ ...publicGroupState(g), ...messagePage(g.threadId, limit) })),
         computerControl: Object.fromEntries(
