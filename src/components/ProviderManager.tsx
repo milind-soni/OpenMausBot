@@ -85,22 +85,23 @@ export function ProviderManager() {
       await api("/api/config", {
         method: "PATCH",
         body: JSON.stringify({
-          instances: {
+          providerConnections: {
             [instanceId]: {
-              driver: "openai-compat",
               displayName: trimmedName,
-              environment: { [secretEnvFor(instanceId)]: trimmedKey },
-              config: {
-                url,
-                apiKeyEnv: secretEnvFor(instanceId),
-                ...(model.trim() ? { model: model.trim() } : {}),
-              },
+              apiKey: trimmedKey,
+              url,
+              ...(model.trim() ? { model: model.trim() } : {}),
             },
           },
         }),
       });
       await refreshInstances();
-      setStatus(`${trimmedName} added. Refresh its models to verify the connection.`);
+      try {
+        await refreshModels(instanceId);
+      } catch {
+        // The connection is already persisted; model discovery is opportunistic.
+      }
+      setStatus(`${trimmedName} added. Its model list will refresh when the provider is available.`);
       setOpen(false);
       setApiKey("");
     } catch (e) {
@@ -116,7 +117,10 @@ export function ProviderManager() {
     setError(null);
     setStatus(null);
     try {
-      await api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "DELETE" });
+      await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ providerConnectionDeletes: [instance.instanceId] }),
+      });
       await refreshInstances();
       setStatus(`${instance.displayName} removed.`);
     } catch (e) {
