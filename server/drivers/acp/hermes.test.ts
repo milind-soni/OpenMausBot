@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -275,6 +275,23 @@ process.stdin.on("data", (chunk) => {
   it("returns the advertised catalog when session/new answers inside the deadline", async () => {
     const { cli, env } = fakeCli({ FAKE_SESSION_DELAY_MS: "150", [HERMES_ACP_MODELS_TIMEOUT_ENV]: "2000" });
     await expect(fetchHermesAcpModels(cli, env)).resolves.toEqual(CATALOG);
+  });
+
+  it("finds the catalog CLI on the supplied PATH, including a Windows npm shim", async () => {
+    const { cli, env } = fakeCli({ [HERMES_ACP_MODELS_TIMEOUT_ENV]: "2000" });
+    const root = dirname(cli);
+    const command = "omb-hermes-probe";
+    if (process.platform === "win32") {
+      writeFileSync(join(root, "probe.js"), FAKE_CLI_SOURCE);
+      writeFileSync(join(root, `${command}.cmd`), '@echo off\nnode "%~dp0\\probe.js" %*\n');
+    } else {
+      writeFileSync(join(root, command), FAKE_CLI_SOURCE, { mode: 0o755 });
+    }
+    await expect(fetchHermesAcpModels(command, {
+      ...env,
+      PATH: [root, dirname(process.execPath)].join(delimiter),
+      PATHEXT: ".CMD;.EXE",
+    })).resolves.toEqual(CATALOG);
   });
 
   it("returns [] when session/new outlives the deadline, without waiting for it", async () => {

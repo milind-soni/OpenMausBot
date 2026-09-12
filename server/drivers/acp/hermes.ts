@@ -285,7 +285,7 @@ export async function fetchHermesAcpModels(
   return await new Promise((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      const resolved = resolveCli(cli, ["acp"]);
+      const resolved = resolveCli(cli, ["acp"], env);
       child = spawn(resolved.command, resolved.args, { stdio: ["pipe", "pipe", "ignore"], env: env as NodeJS.ProcessEnv, windowsHide: true });
     } catch {
       return resolve([]);
