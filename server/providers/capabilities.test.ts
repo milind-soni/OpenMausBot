@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capabilityLabels, providerCapabilities } from "./capabilities";
+import { capabilityLabels, providerCapabilities } from "./capabilities.js";
 
 describe("provider capabilities", () => {
   it("marks hosted OpenAI-compatible presets as streaming/model-discovery capable", () => {
