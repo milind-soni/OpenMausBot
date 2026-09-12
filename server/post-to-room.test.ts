@@ -341,7 +341,7 @@ describe("peer comms from a room turn", () => {
 });
 
 describe("a room turn and the teammates outside the room", () => {
-  it("tells the bot who its @mentions cannot reach, and shows a mention that missed", async () => {
+  it("routes room work through target discovery, keeps mentions local, and shows a mention that missed", async () => {
     const speaker = await makeBot("Room Speaker", "Reach", "mentioner");
     const inside = await makeBot("Room Inside", "Reach");
     const outside = await makeBot(OUTSIDE_BOT, "Reach");
@@ -358,11 +358,13 @@ describe("a room turn and the teammates outside the room", () => {
     // that shape fails the assertions below rather than the parse.
     const dump = JSON.parse(readFileSync(mentionerDump, "utf8")) as { systemPrompt?: string };
     const system = String(dump.systemPrompt ?? "");
-    // the room turn is told who an @mention cannot reach, and how to reach them
-    expect(system).toContain("An @mention only reaches the members of this room");
-    expect(system).toContain(`- ${OUTSIDE_BOT} — General assistant (available)`);
-    expect(system).toContain("ask_bot");
-    // room members are the @mention roster, not this one; other sections stay unseen
+    // Ordinary rooms have one coordination path. Discovery supplies eligible
+    // room IDs; a plain mention still cannot silently summon an outside bot.
+    expect(system).toContain("Plain @mentions are only for conversational replies in this room");
+    expect(system).toContain("list_room_targets");
+    expect(system).toContain("coordinate_bots");
+    expect(system).not.toContain("ask_bot");
+    // Do not duplicate the peer catalog in the prompt; other sections stay unseen.
     expect(system).not.toContain("- Room Inside — General assistant");
     expect(system).not.toContain("Elsewhere Bot");
 
