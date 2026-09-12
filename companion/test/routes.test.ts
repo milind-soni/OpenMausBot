@@ -99,6 +99,7 @@ describe("what the app may do", () => {
     ["GET", "/api/connectors/connected"],
     ["GET", "/api/connectors"],
     ["POST", "/api/connectors/slack/authorize"],
+    ["DELETE", "/api/connectors/slack/accounts/ca_123"],
     ["GET", "/api/bots/bot_123/connector-cards/msg_2/status"],
     ["POST", "/api/bots/bot_123/connector-cards/msg_2/authorize"],
     ["POST", "/api/bots/bot_123/connector-cards/msg_2/resume"],
@@ -219,9 +220,10 @@ describe("what it may not", () => {
     expect(allowed("POST", "/api/routine-runs/run_1/retry")).toBe(false);
     expect(allowed("DELETE", "/api/connectors/slack")).toBe(false);
     expect(allowed("GET", "/api/connectors/connected/all")).toBe(false);
-    // revocation is a host-only affordance: a paired client can list and add
-    // accounts but the account DELETE route is deliberately not allowed
-    expect(allowed("DELETE", "/api/connectors/slack/accounts/ca_123")).toBe(false);
+    // per-account removal is allowed (the server proves ownership before
+    // revoking); removing the whole service binding stays host-only
+    expect(allowed("DELETE", "/api/connectors/slack/accounts/ca_123")).toBe(true);
+    expect(allowed("DELETE", "/api/connectors/slack/accounts/../gmail")).toBe(false);
     expect(allowed("POST", "/api/bots/bot_123/secret-cards/msg_2/provided")).toBe(false);
     expect(allowed("PATCH", "/api/groups/room-1")).toBe(false);
   });

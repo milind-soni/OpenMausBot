@@ -18,6 +18,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
+import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { RoutineRequestCardData } from "../../shared/routine-request";
 import type { RoutineRunCardData } from "../../shared/routine-run";
@@ -29,6 +30,7 @@ import {
 } from "../../shared/skill-request";
 import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
 import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
+import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
 import { speaker } from "@/lib/tts";
@@ -64,7 +66,19 @@ export interface OptionCardData {
   title: string;
   subtitle: string;
   options: string[];
+  /** what each option means, keyed by its label — a question that came with
+   * explanations (AskUserQuestion) shows them under the buttons. Kept beside
+   * `options` rather than inside it so every existing reader of the plain
+   * label list — the phone, call-mode narration, the sidebar preview — keeps
+   * working untouched. */
+  optionHints?: Record<string, string>;
+  /** the question takes more than one option; `answered` is then the chosen
+   * labels joined with ", ", which is the format the asking tool expects */
+  multiSelect?: boolean;
   answered?: string;
+  /** The words an answered question card was answered with — `answered`
+   * only holds the behavior once the server settles a live ask. */
+  answeredText?: string;
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
@@ -85,6 +99,9 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  /** The model's own questions and options (Claude's AskUserQuestion), so
+   * the card offers choices instead of an unanswerable Allow/Deny. */
+  questionRequest?: QuestionRequestCardData;
 }
 
 export interface ConnectorCardData {
@@ -154,6 +171,10 @@ export interface Message {
   sendId?: string;
   /** rooms: which member said this (sender attribution). */
   from?: { botId: string; name: string; color: MausColor };
+  /** a user-role line another bot delivered into this conversation
+   * (ask_bot, delegate_bot, start_thread): the words are that bot's, not
+   * the person's. Rendered as the peer speaking — see lib/peer-message. */
+  peerAsk?: { botId: string; name: string; unattended?: boolean };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
@@ -344,6 +365,9 @@ export interface Bot {
    * bot's own session (null is how a clear travels over PATCH). */
   browserProfile?: string | null;
   messages: Message[];
+  /** Renderer-only: a deleted selection moved to a thread whose full
+   * transcript has not arrived yet. Never carry the deleted chat into it. */
+  awaitingThreadSnapshot?: boolean;
   /** leaf of the visible conversation branch (see visibleMessages) */
   activeLeafId?: string | null;
 }
@@ -377,11 +401,12 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
 
 export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMode" | "autoApprove" | "pinnedMessageId">> & {
   acknowledgeLocalAuto?: boolean;
+  updateBotDefault?: boolean;
   projectId?: string | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { acknowledgeLocalAuto: _localAck, projectId, ...fields } = patch;
+  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, projectId, ...fields } = patch;
   return { ...fields, ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
 }
 
@@ -813,8 +838,11 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
-  | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string }
-  | { type: "dismissCard"; botId: string; messageId: string; threadId?: string }
+  // `threadId` is the thread the card was shown in; `groupId` when the card
+  // is in a room: the message lives on the room's list, and the answer goes
+  // to the room's thread
+  | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
+  | { type: "dismissCard"; botId: string; messageId: string; threadId?: string; groupId?: string }
   // permission cards answer by THREAD, so a request raised inside a room
   // can be answered the same way as one in a 1:1 chat
   | {
@@ -856,7 +884,7 @@ export type Action =
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
-  | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string }
+  | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean }
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
@@ -997,13 +1025,21 @@ function withMascotMotion(
   };
 }
 
+function withPatchedCard(messages: Message[], messageId: string, patch: Partial<OptionCardData>): Message[] {
+  return messages.map((m) => (m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m));
+}
+
 function patchCard(state: AppState, botId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
-  return updateBot(state, botId, (b) => ({
-    ...b,
-    messages: b.messages.map((m) =>
-      m.id === messageId && m.card ? { ...m, card: { ...m.card, ...patch } } : m,
+  return updateBot(state, botId, (b) => ({ ...b, messages: withPatchedCard(b.messages, messageId, patch) }));
+}
+
+function patchGroupCard(state: AppState, groupId: string, messageId: string, patch: Partial<OptionCardData>): AppState {
+  return {
+    ...state,
+    groups: state.groups.map((g) =>
+      g.id === groupId ? { ...g, messages: withPatchedCard(g.messages, messageId, patch) } : g,
     ),
-  }));
+  };
 }
 
 /** First-run quiz still sitting on this bot's thread. */
@@ -1043,7 +1079,7 @@ function optimisticUserMessage(
 
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
-    const owner = state.bots.find((bot) => bot.threadId !== action.threadId && bot.tasks?.some((task) => task.threadId === action.threadId));
+    const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
     if (owner) {
       // ponytail: a bounded race buffer, not a second transcript store. The
       // server supplies complete history whenever this thread is reopened.
@@ -1185,6 +1221,7 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     // optimistic card settle; the server's message.patch confirms it later
     case "answerCard": {
+      if (action.groupId) return patchGroupCard(state, action.groupId, action.messageId, { answered: action.answer });
       const bot = state.bots.find((candidate) => candidate.id === action.botId);
       const card = bot?.messages.find((message) => message.id === action.messageId)?.card;
       return withMascotMotion(
@@ -1198,6 +1235,7 @@ export function reducer(state: AppState, action: Action): AppState {
       );
     }
     case "dismissCard":
+      if (action.groupId) return patchGroupCard(state, action.groupId, action.messageId, { dismissed: true });
       return patchCard(state, action.botId, action.messageId, { dismissed: true });
     case "decideRequest":
       return state; // the server's request.resolved patch settles the card
@@ -1263,26 +1301,36 @@ export function reducer(state: AppState, action: Action): AppState {
       const switchedThread =
         typeof action.bot.threadId === "string" && action.bot.threadId !== before.threadId &&
         !action.bot.tasks?.some((task) => task.threadId === before.threadId);
-      const patched = updateBot(next, action.bot.id, (b) => ({
+      // As with explicit navigation, the snapshot already includes events
+      // buffered while its thread was in the background. Replay only races
+      // after this switch begins, not older approval patches.
+      let switching = next;
+      if (switchedThread) {
+        const { [action.bot.threadId]: _stale, ...otherThreadEvents } = next.backgroundThreadEvents;
+        switching = { ...next, backgroundThreadEvents: otherThreadEvents };
+      }
+      if ((switchedThread || (before.awaitingThreadSnapshot && action.bot.threadId === before.threadId)) &&
+          Array.isArray(action.bot.messages)) {
+        // The slim deletion broadcast can arrive before the full snapshot.
+        // Finish that switch once, replaying any events received in between.
+        // Later duplicate HTTP snapshots must not overwrite newer messages.
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+      }
+      const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
         ...action.bot,
         threadId: switchedThread ? action.bot.threadId : b.threadId,
-        activeLeafId: switchedThread ? action.bot.activeLeafId : b.activeLeafId,
+        activeLeafId: switchedThread ? null : b.activeLeafId,
+        awaitingThreadSnapshot: switchedThread || b.awaitingThreadSnapshot,
         // Complete bot frames omit this optional field after switching back
         // to Own browser (or deleting a shared profile). Do not retain the
         // previous profile's name and selection in another window.
         browserProfile: action.bot.browserProfile,
-        // Existing threads keep this window's selection. Only losing the
-        // current thread (deletion, or a legacy server) adopts the frame's
-        // transcript; deliberate navigation uses taskSwitched below.
-        messages:
-          switchedThread && Array.isArray(action.bot.messages)
-            ? action.bot.messages
-            : b.messages,
+        // Clear immediately on deletion: old approvals must never be sent
+        // to the replacement thread while waiting for its transcript.
+        messages: switchedThread ? [] : b.messages,
       }));
-      return switchedThread && Array.isArray(action.bot.messages)
-        ? reconcileSnapshotQueues(patched, [action.bot])
-        : patched;
+      return patched;
     }
     case "messageAdded": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
@@ -1739,6 +1787,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...bot,
         ...action.bot,
         messages: action.bot.messages ?? [],
+        awaitingThreadSnapshot: false,
       }));
       for (const frame of state.backgroundThreadEvents[action.bot.threadId] ?? []) switched = reducer(switched, frame);
       const { [action.bot.threadId]: _settled, ...backgroundThreadEvents } = switched.backgroundThreadEvents;
@@ -2109,7 +2158,7 @@ const StoreContext = createContext<{
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const taskWrites = useRef(new Map<string, { promise: Promise<BotAnnouncement>; execution: Promise<unknown>; patch: TaskUpdatePatch }>()).current;
+  const taskWrites = useRef(new Map<string, { botId: string; updatesDefault: boolean; promise: Promise<BotAnnouncement>; execution: Promise<unknown>; patch: TaskUpdatePatch }>()).current;
   const withTaskWrites = (bot: BotAnnouncement): BotAnnouncement => ({
     ...bot,
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
@@ -2184,6 +2233,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
       setTimeout(() => rawDispatch({ type: "error", message: null }), 6000);
     };
+    /** Where a card action's message lives, and the card on it. A card asked
+     * inside a room belongs to the room's list, never to one member's. */
+    const cardTarget = (action: { botId: string; messageId: string; groupId?: string }) => {
+      const host = action.groupId
+        ? stateRef.current.groups.find((g) => g.id === action.groupId)
+        : stateRef.current.bots.find((b) => b.id === action.botId);
+      return { host, card: host?.messages.find((m) => m.id === action.messageId)?.card, inRoom: !!action.groupId };
+    };
     // fire-and-forget card persistence; the route is optional server-side
     const persistCard = (botId: string, messageId: string, patch: Partial<OptionCardData>) => {
       fetch(`/api/bots/${botId}/cards/${messageId}`, {
@@ -2198,7 +2255,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Reconciliation may clear a failed lane meanwhile; that must not turn
       // an already-waiting send into work under reverted settings.
       const taskWrite = threadId ? taskWrites.get(threadId)?.execution : undefined;
-      await Promise.all([taskWrite, ...expectedBots.map(async (expected) => {
+      const defaultWrites = [...taskWrites.values()].filter((write) => write.updatesDefault && expectedBots.some((bot) => bot.id === write.botId));
+      await Promise.all([taskWrite, ...defaultWrites.map((write) => write.execution), ...expectedBots.map(async (expected) => {
         const persisted = await botPatchQueue.flush(expected.id);
         if (!persisted) return;
         const expectedSelection = expected.modelSelection;
@@ -2216,7 +2274,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const persistTaskPatch = (botId: string, threadId: string, patch: TaskUpdatePatch) => {
       const previous = taskWrites.get(threadId);
-      const promise = (previous?.promise.catch(() => {}) ?? Promise.resolve())
+      // A quick tab switch may queue two default changes on different threads.
+      // Keep their order, and don't let a group send race either pending save.
+      const defaults = patch.updateBotDefault ? [...taskWrites.values()].filter((write) => write.botId === botId && write.updatesDefault) : [];
+      const promise = Promise.all([previous?.promise, ...defaults.map((write) => write.promise)].map((save) => save?.catch(() => {})))
         .then(async () => {
           // Full/Custom grants still belong to the private desktop bridge.
           if (patch.approvalMode === "full" || patch.approvalMode === "custom") {
@@ -2232,7 +2293,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // successful folder move is not confirmation of a failed model change.
       const execution = Promise.all([previous?.execution, promise]);
       void execution.catch(() => {}); // handled by the write and send paths
-      const pending = { patch: { ...previous?.patch, ...patch }, promise, execution };
+      const pending = { botId, updatesDefault: Boolean(patch.updateBotDefault || previous?.updatesDefault), patch: { ...previous?.patch, ...patch }, promise, execution };
       taskWrites.set(threadId, pending);
       void pending.promise.then((bot) => {
         if (taskWrites.get(threadId) !== pending) return;
@@ -2479,26 +2540,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "answerCard": {
-          const bot = stateRef.current.bots.find((b) => b.id === action.botId);
-          const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
+          const { host, card, inRoom } = cardTarget(action);
           void waitForExecutionSettings(executionBotsBeforeAction, action.threadId)
             .then(() => {
-              if (card?.requestId) {
-                const behavior = card.skillRequest
-                  ? skillRequestBehavior(action.answer)
-                  : action.answer === "Allow" ? "allow" : action.answer === "Deny" ? "deny" : "answer";
-                return api(`/api/threads/${action.threadId}/respond`, {
+              if (card?.requestId && host) {
+                // allow/deny for a permission, the chosen text for a question
+                // — decided from the card, never from the label (see
+                // card-answer.ts). By THREAD, so a card raised inside a room
+                // answers the same way a 1:1 one does.
+                const response = card.skillRequest
+                  ? { behavior: skillRequestBehavior(action.answer) }
+                  : answerResponse(card, action.answer);
+                return api(`/api/threads/${action.threadId ?? host.threadId}/respond`, {
                   method: "POST",
                   body: JSON.stringify({
                     requestId: card.requestId,
-                    behavior,
-                    message: behavior === "answer" ? action.answer : undefined,
-                    reviewedSha256: behavior === "allow" && card.skillRequest
+                    ...response,
+                    reviewedSha256: response.behavior === "allow" && card.skillRequest
                       ? reviewedSkillSha256(card.skillRequest)
                       : undefined,
                   }),
                 });
               }
+              if (inRoom) return;
               persistCard(action.botId, action.messageId, { answered: action.answer, dismissed: true });
               return api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
@@ -2509,14 +2573,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         }
         case "dismissCard": {
-          const bot = stateRef.current.bots.find((b) => b.id === action.botId);
-          const card = bot?.messages.find((m) => m.id === action.messageId)?.card;
-          if (card?.requestId) {
-            api(`/api/threads/${action.threadId}/respond`, {
+          const { host, card, inRoom } = cardTarget(action);
+          if (card?.requestId && host) {
+            // a question is DECLINED rather than denied — the broker refuses
+            // a deny on one (see card-answer.ts)
+            api(`/api/threads/${action.threadId ?? host.threadId}/respond`, {
               method: "POST",
-              body: JSON.stringify({ requestId: card.requestId, behavior: "deny", message: "Dismissed by user." }),
+              body: JSON.stringify({ requestId: card.requestId, ...dismissResponse(card) }),
             }).catch(() => {});
-          } else {
+          } else if (!inRoom) {
             persistCard(action.botId, action.messageId, { dismissed: true });
           }
           break;
@@ -2684,7 +2749,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "setModel":
           if (action.threadId) {
-            persistTaskPatch(action.botId, action.threadId, { modelSelection: action.selection });
+            persistTaskPatch(action.botId, action.threadId, {
+              modelSelection: action.selection,
+              ...(action.updateBotDefault ? { updateBotDefault: true } : {}),
+            });
             break;
           }
           if (botBeforeUpdate) {

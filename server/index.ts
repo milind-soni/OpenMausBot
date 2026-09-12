@@ -228,6 +228,7 @@ import { TurnResources, workspaceResource, type TurnOwner } from "./turn-resourc
 import {
   ensureWorkspace,
   ensureTaskWorkspace,
+  workspaceLocationsPrompt,
   updateMemory,
   appendMemoryLog,
   isMemoryTopicName,
@@ -2680,6 +2681,15 @@ async function answerRequest(
       outcome = "unavailable";
     }
   }
+  // An answered question keeps its words. `request.resolved` only records
+  // the behavior, so without this the card reads "answer" forever and the
+  // person can no longer see what they told the bot.
+  if (outcome !== "unavailable" && behavior === "answer" && message && cardMessage) {
+    const settled = store.messagesFor(threadId).find((m) => m.id === cardMessage.id)?.card;
+    if (settled) {
+      store.patchMessage(threadId, cardMessage.id, { card: { ...settled, answeredText: message } });
+    }
+  }
   // The human's verdict, recorded only when it actually reached the engine:
   // `unavailable` means the action never ran, and a "user-approved" row
   // over a request nothing answered would be the audit log lying. A
@@ -3374,7 +3384,11 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "request.opened": {
-      const permission = event.requestType === "permission";
+      // A structured ask carries the model's own options and has no
+      // allow/deny answer, so it is a question no matter which channel the
+      // provider routed it through — and, like every question, no approval
+      // mode may ever answer it for the person.
+      const permission = event.requestType === "permission" && !event.questions?.length;
       // A permission request here is one the provider left for a person: its
       // own mode already ran (Ask, Edits, Auto's reviewer, Custom's config).
       // OpenMausBot decides nothing about the action itself. Only Full access
@@ -3475,6 +3489,10 @@ bus.subscribe((event: RuntimeEvent) => {
         break;
       }
       const heldContext = { source: verdict?.source, permission };
+      // A structured ask (Claude's AskUserQuestion) is a question whatever
+      // the provider routed it as: it has no allow/deny answer, only the
+      // model's own options. The card carries them so the person can choose.
+      const questions = event.questions?.length ? event.questions : undefined;
       const message = pushMessage({
         role: "bot",
         kind: "options",
@@ -3489,6 +3507,7 @@ bus.subscribe((event: RuntimeEvent) => {
           options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
+          questionRequest: questions ? { version: 1, questions } : undefined,
           // the provider can keep an allow for its session; the app keeps
           // no grant of its own for a provider's tool
           allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
@@ -4056,10 +4075,12 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
     const target = store.bot(toBotId);
     const opener = store.bot(sourceBotId);
     const unattended = isUnattended(sourceBotId, sourceThreadId);
-    // The first line of an opened thread is another bot's words: it carries
-    // the same provenance note every relayed peer line does, structurally
-    // (peerAsk) as well as in the text.
-    const peerAsk: Message["peerAsk"] | undefined = openedThreadId && opener
+    // The inbound line is another bot's words whichever way it arrived: an
+    // opened thread's first line carries the shared provenance note, a
+    // classic handoff the "[Delegated by @X" prefix from the drain. Both
+    // record the author structurally (peerAsk) as well as in the text, so
+    // a renderer never has to take the line for the person's own message.
+    const peerAsk: Message["peerAsk"] | undefined = opener
       ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
       : undefined;
     const text = openedThreadId && opener
@@ -5091,6 +5112,7 @@ async function startTurn(
         // to a turn whose engine actually mounted them (setupMode is already
         // false when they are not — see agentsMounted above)
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, { skills: skillAuthoring, cwd: liveBot?.cwd ?? bot.cwd }) },
+        { id: "files", label: "File locations", text: worksInWorkspace && opts?.runOn !== "cloud" ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd) : "" },
         { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
         { id: "plan", label: "Surface", text: plan.note },
         // gated on the integration, not the key: the hint only goes to a
@@ -5115,6 +5137,7 @@ async function startTurn(
       ]);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
+        botId: bot.id,
         text: turnText,
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0),
@@ -6297,6 +6320,7 @@ async function runGroupMemberTurn(
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
   }
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
+    { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "computer", label: "Computer", text: computerPrompt(roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
@@ -6402,6 +6426,7 @@ async function runGroupMemberTurn(
     providerDispatched = true;
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
+        botId: readyBot.id,
         text,
         images: turnImages,
         approvalMode: approvalModeForTurn(readyBot, false),
@@ -8637,6 +8662,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (method === "POST" && path === "/api/auth/pairing") {
       const body = await readBody(req);
+      // Authentication happened before the request body was read. A session
+      // can be revoked while a slow client is still sending that body, so do
+      // not let the captured authorization mint a replacement session.
+      if (auth.kind === "session" && !sessions.isLive(auth.session.id)) {
+        return json(res, 401, { error: "Your session ended. Sign in again before creating a pairing code." });
+      }
       const requested: unknown = body?.scopes;
       const scopes = Array.isArray(requested) ? requested.filter((v): v is Scope => v === "admin" || v === "client") : undefined;
       const opened = sessions.openPairing({ label: typeof body?.label === "string" ? body.label : undefined, scopes });
@@ -13134,12 +13165,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
-      for (const key of ["requireAvailableModel", "acknowledgeLocalAuto"] as const) {
+      for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
       }
       if (body.requireAvailableModel === true && body.modelSelection === undefined) return json(res, 400, { error: "requireAvailableModel requires modelSelection" });
+      if (body.updateBotDefault === true && body.modelSelection === undefined) return json(res, 400, { error: "updateBotDefault requires modelSelection" });
       const patch: Parameters<typeof store.patchTask>[2] = {};
       if (body.projectId !== undefined) {
         if (body.projectId === null) patch.projectId = undefined;
@@ -13186,6 +13218,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         (!supportsApprovalMode(registry.cliTarget(patch.modelSelection.instanceId)?.driverKind, mode) ||
           registry.cliTarget(patch.modelSelection.instanceId)?.driverKind !== registry.cliTarget(current.modelSelection.instanceId)?.driverKind)) {
         return json(res, 400, { error: "Choose Ask for this thread before changing providers with elevated permissions" });
+      }
+      if (body.updateBotDefault === true && patch.modelSelection) {
+        const profile = store.bot(current.id)!;
+        const checked = checkedModelSelection(patch.modelSelection, {
+          selection: profile.modelSelection, busy: Boolean(activeGroupTurnForBot(current.id)),
+        });
+        if (!checked.ok) return json(res, checked.status, { error: checked.error });
+        const defaultMode = approvalModeFor(profile);
+        if ((defaultMode === "full" || defaultMode === "custom") &&
+          (!supportsApprovalMode(registry.cliTarget(patch.modelSelection.instanceId)?.driverKind, defaultMode) ||
+            registry.cliTarget(patch.modelSelection.instanceId)?.driverKind !== registry.cliTarget(profile.modelSelection.instanceId)?.driverKind)) {
+          return json(res, 400, { error: "Choose Ask in bot settings before changing its default provider with elevated permissions" });
+        }
+        // Validate both scopes before saving either. Existing sibling threads
+        // retain their selections; only this pinned thread and future/group
+        // turns adopt the new default. Do not target the currently selected tab.
+        store.patchBot(current.id, { modelSelection: patch.modelSelection });
       }
       const task = store.patchTask(m[1], m[2], patch)!;
       const fresh = botWithThread(store.bot(m[1])!);

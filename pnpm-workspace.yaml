@@ -5,6 +5,13 @@ packages:
   - "."
   - "apps/docs"
   - "cloudflare/control-plane"
+# Packaging fetches optional binaries for both desktop CPU targets. This lived
+# in package.json's "pnpm" field, which pnpm 10.33 ignores — it printed a
+# warning on every command and, more to the point, silently was not applied.
+supportedArchitectures:
+  cpu:
+    - arm64
+    - x64
 allowBuilds:
   electron: true # postinstall downloads the Electron dist
   esbuild: true # postinstall validates the platform binary

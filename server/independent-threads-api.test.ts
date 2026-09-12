@@ -304,12 +304,14 @@ describe("independent bot tasks through the isolated control surface", () => {
     // a no-op relative to the task is not a no-op relative to the Group.
     expect((await api("PATCH", `/api/bots/${botId}/model`, selection)).status).toBe(409);
     expect((await api("PATCH", `/api/bots/${botId}`, { modelSelection: selection })).status).toBe(409);
+    expect((await api("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true })).status).toBe(409);
     expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadId)?.modelSelection).toEqual(selection);
     const profile = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === botId);
     expect(profile.modelSelection.model).toBe(models[0]);
     expect((await api("POST", `/api/groups/${group.id}/interrupt`, {})).status).toBe(200);
     await expect.poll(async () => (await botState(botId)).busy, { timeout: 10_000 }).toBe(false);
-    expect((await api("PATCH", `/api/bots/${botId}/model`, selection)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${botId}/tasks/${threadId}`, { modelSelection: selection, updateBotDefault: true })).status).toBe(200);
+    expect((await botState(botId)).modelSelection).toEqual(selection);
     evidence.push({ groupDefaultPreservedUntilStop: true, groupId: group.id, selectedTaskId: threadId });
   }, 30_000);
 

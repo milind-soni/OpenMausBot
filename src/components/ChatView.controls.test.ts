@@ -43,6 +43,11 @@ const bot: Bot = {
 };
 
 describe("thread control placement", () => {
+  it("keeps the composer inert until the deleted thread's replacement transcript arrives", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, awaitingThreadSnapshot: true } }));
+    expect(markup).toMatch(/<textarea[^>]*disabled=""[^>]*aria-busy="true"/);
+    expect(markup).not.toContain("Finish group setup");
+  });
   it("offers scoped Full access only when the bot already has it and the local trusted bridge exists", () => {
     const fullBot = { ...bot, busy: false, approvalMode: "full" as const };
     expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).not.toContain("Use bot’s Full access for this thread");

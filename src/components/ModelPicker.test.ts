@@ -68,6 +68,14 @@ function renderEffort(instances: InstanceInfo[], effort?: EffortLevel): string {
 }
 
 describe("EffortRow", () => {
+  it("can apply effort to the pinned thread and bot default together", () => {
+    fixture.instances = [engine(["high"])];
+    const row = EffortRow({ bot: bot(), threadId: "thread-atlas", updateBotDefault: true })!;
+    const levels = Children.toArray(row.props.children).at(-1) as ReactElement<{ children: ReactNode }>;
+    const high = Children.toArray(levels.props.children)[1] as ReactElement<{ onClick: () => void }>;
+    high.props.onClick();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "setModel", botId: "atlas", threadId: "thread-atlas", updateBotDefault: true, selection: { instanceId: "codex", model: "gpt-5.6", effort: "high" } });
+  });
   it("pins thread effort changes without changing profile defaults", () => {
     fixture.instances = [engine(["high"])];
     const row = EffortRow({ bot: bot(), threadId: "independent-thread" })!;
