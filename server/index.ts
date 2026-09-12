@@ -281,6 +281,7 @@ import {
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
 import { BUILT_IN_PRESETS, fetchPromptsFromSource, presetWire, PROMPT_COLLECTIONS } from "./prompt-presets.ts";
+import { distillPrompts, META_SOURCE_PREFIX } from "./prompt-distill.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
 import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
@@ -12275,8 +12276,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (m[1]) {
         const source = decodeURIComponent(m[1].slice(1));
         if (!source) return json(res, 400, { error: "source must not be empty" });
-        const fetched = await fetchPromptsFromSource(source);
+        // `meta:<source>` distills: fetch the prompts verbatim, then have an
+        // available engine reduce each one to vendor-neutral principles.
+        // Results are cached by source content (server/prompt-distill.ts);
+        // one prompt's failure is one error line, never the batch's.
+        const metaRequested = source.startsWith(META_SOURCE_PREFIX);
+        const fetched = await fetchPromptsFromSource(metaRequested ? source.slice(META_SOURCE_PREFIX.length) : source);
         if ("error" in fetched) return json(res, 422, { error: fetched.error });
+        if (metaRequested) {
+          const complete = async (prompt: string): Promise<string> => {
+            for (const candidate of registry.instances()) {
+              if (typeof candidate.generateText !== "function") continue;
+              try {
+                const snapshot = await candidate.snapshot();
+                if (snapshot.state !== "available") continue;
+                return await candidate.generateText(prompt);
+              } catch {
+                continue; // a dead engine is the next engine's turn
+              }
+            }
+            throw new Error("no available engine to distill with — connect an engine first, or import without the meta: prefix");
+          };
+          const distilled = await distillPrompts(fetched.presets, complete);
+          return json(res, 200, { presets: distilled.presets.map(presetWire), errors: [...fetched.errors, ...distilled.errors] });
+        }
         return json(res, 200, { presets: fetched.presets.map(presetWire), errors: fetched.errors });
       }
       return json(res, 200, { presets: BUILT_IN_PRESETS.map(presetWire), collections: PROMPT_COLLECTIONS });

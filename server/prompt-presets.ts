@@ -121,6 +121,12 @@ export const BUILT_IN_PRESETS: PromptPreset[] = [
 
 const underCap = (text: string): boolean => Buffer.byteLength(text, "utf8") <= PROMPT_PRESET_MAX_BYTES;
 
+/** Source-string prefix that turns a verbatim import into a distilled one
+ * (server/prompt-distill.ts). Declared before PROMPT_COLLECTIONS, which
+ * uses it, so the collections list can reference it without a circular
+ * import. */
+export const META_SOURCE_PREFIX = "meta:";
+
 /** One-click collections: vendor folders from the community prompt
  * collection (asgeirtj/system_prompts_leaks). Sources are full tree URLs so
  * parsePromptSource validates them by the same grammar as a pasted link —
@@ -141,6 +147,11 @@ export const PROMPT_COLLECTIONS: Array<{ label: string; source: string }> = [
   { label: "Kimi", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Kimi` },
   { label: "DeepSeek", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/DeepSeek` },
   { label: "GLM", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/GLM` },
+  // Distilled variants: each leaked prompt is reduced by an available engine
+  // to short vendor-neutral principles, cached by content. Requires at least
+  // one connected engine; the verbatim collections above always work.
+  { label: "Anthropic · distilled", source: `${META_SOURCE_PREFIX}${PROMPT_COLLECTION_SOURCE}/tree/main/Anthropic` },
+  { label: "OpenAI · distilled", source: `${META_SOURCE_PREFIX}${PROMPT_COLLECTION_SOURCE}/tree/main/OpenAI` },
 ];
 
 /** Wire shape for the catalog endpoint. Accepts built-ins and imported

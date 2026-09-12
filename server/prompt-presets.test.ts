@@ -41,12 +41,17 @@ describe("built-in presets", () => {
     expect(PROMPT_COLLECTIONS.length).toBeGreaterThanOrEqual(8);
     for (const collection of PROMPT_COLLECTIONS) {
       expect(collection.label.length).toBeGreaterThan(0);
-      const parsed = parsePromptSource(collection.source);
+      // Distilled collections ride the `meta:` prefix; everything after it
+      // must still parse by the same grammar as a pasted link.
+      const source = collection.source.startsWith("meta:") ? collection.source.slice("meta:".length) : collection.source;
+      const parsed = parsePromptSource(source);
       expect(parsed).not.toHaveProperty("error");
       expect((parsed as { owner: string }).owner).toBe("asgeirtj");
       expect((parsed as { repo: string }).repo).toBe("system_prompts_leaks");
       expect((parsed as { path: string }).path.length).toBeGreaterThan(0);
     }
+    // The distilled variants exist and are prefixed.
+    expect(PROMPT_COLLECTIONS.filter((c) => c.source.startsWith("meta:")).length).toBeGreaterThanOrEqual(2);
   });
 });
 
