@@ -10,8 +10,12 @@ describe("window chrome", () => {
     });
   });
 
-  it("keeps Windows controls in the native title bar, outside app content", () => {
-    expect(windowChromeOptions("win32")).toEqual({});
+  it("uses frameless overlay controls on Windows", () => {
+    expect(windowChromeOptions("win32")).toEqual({
+      frame: false,
+      titleBarStyle: "hidden",
+      titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 32 },
+    });
   });
 
   it("keeps Linux window chrome native", () => {
