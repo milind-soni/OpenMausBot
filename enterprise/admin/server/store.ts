@@ -43,12 +43,21 @@ export class PortalStore {
       );
       CREATE TABLE IF NOT EXISTS portal_handoff (
         hash TEXT PRIMARY KEY, workspace TEXT NOT NULL, email TEXT NOT NULL,
-        challenge TEXT NOT NULL, expiresAt INTEGER NOT NULL
+        challenge TEXT NOT NULL, expiresAt INTEGER NOT NULL, sessionId TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS portal_grant (
-        hash TEXT PRIMARY KEY, workspace TEXT NOT NULL, email TEXT NOT NULL, expiresAt INTEGER NOT NULL
+        hash TEXT PRIMARY KEY, workspace TEXT NOT NULL, email TEXT NOT NULL, expiresAt INTEGER NOT NULL,
+        sessionId TEXT NOT NULL
       );
     `);
+    // Old grants were detached from portal sign-out. Invalidate only those
+    // unbound credentials; workspace membership and conversations stay intact.
+    for (const table of ["portal_handoff", "portal_grant"]) {
+      const columns = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+      if (!columns.some(column => column.name === "sessionId")) {
+        db.exec(`BEGIN IMMEDIATE; ALTER TABLE ${table} ADD COLUMN sessionId TEXT; DELETE FROM ${table}; COMMIT;`);
+      }
+    }
     // A restart never presents an unfinished create as Ready or retries a root action blindly.
     db.prepare("UPDATE portal_workspace SET status = 'error', error = ? WHERE status = 'provisioning'")
       .run("Provisioning was interrupted. Check the fleet before retrying or deleting anything.");
@@ -100,32 +109,37 @@ export class PortalStore {
   }
   activity() { return this.db.prepare("SELECT * FROM portal_audit ORDER BY id DESC LIMIT 100").all(); }
 
-  handoff(workspace: string, email: string, challenge: string): string {
+  private sessionLive(sessionId: string, email: string): boolean {
+    const session = this.db.prepare('SELECT u.email, u.emailVerified, s.expiresAt FROM "session" s JOIN "user" u ON u.id = s.userId WHERE s.id = ?')
+      .get(sessionId) as { email: string; emailVerified: number; expiresAt: string } | undefined;
+    return Boolean(session && session.emailVerified === 1 && normalizeEmail(session.email) === normalizeEmail(email) && Date.parse(session.expiresAt) > this.now());
+  }
+  handoff(workspace: string, email: string, challenge: string, sessionId: string): string {
     this.db.prepare("DELETE FROM portal_handoff WHERE expiresAt <= ?").run(this.now());
     const code = randomBytes(32).toString("base64url");
-    this.db.prepare("INSERT INTO portal_handoff VALUES (?,?,?,?,?)")
-      .run(digest(code), workspace, email, challenge, this.now() + 60_000);
+    this.db.prepare("INSERT INTO portal_handoff VALUES (?,?,?,?,?,?)")
+      .run(digest(code), workspace, email, challenge, this.now() + 60_000, sessionId);
     return code;
   }
   consume(code: string, workspace: string, verifier: string): { grant: string; email: string; role: Role } | null {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.db.prepare("SELECT * FROM portal_handoff WHERE hash = ? AND workspace = ? AND challenge = ? AND expiresAt > ?")
-        .get(digest(code), workspace, digest(verifier), this.now()) as { email: string } | undefined;
+        .get(digest(code), workspace, digest(verifier), this.now()) as { email: string; sessionId: string } | undefined;
       const member = row && this.member(workspace, row.email);
-      if (!member || this.workspace(workspace)?.status !== "running") { this.db.exec("ROLLBACK"); return null; }
+      if (!row || !member || !this.sessionLive(row.sessionId, row.email) || this.workspace(workspace)?.status !== "running") { this.db.exec("ROLLBACK"); return null; }
       this.db.prepare("DELETE FROM portal_handoff WHERE hash = ?").run(digest(code));
       const grant = randomBytes(32).toString("base64url");
       this.db.prepare("DELETE FROM portal_grant WHERE expiresAt <= ?").run(this.now());
-      this.db.prepare("INSERT INTO portal_grant VALUES (?,?,?,?)").run(digest(grant), workspace, member.email, this.now() + 7 * 86400_000);
+      this.db.prepare("INSERT INTO portal_grant VALUES (?,?,?,?,?)").run(digest(grant), workspace, member.email, this.now() + 7 * 86400_000, row.sessionId);
       this.db.exec("COMMIT");
       return { grant, email: member.email, role: member.role };
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
   grant(grant: string, workspace: string): Member | null {
-    const row = this.db.prepare("SELECT email FROM portal_grant WHERE hash = ? AND workspace = ? AND expiresAt > ?")
-      .get(digest(grant), workspace, this.now()) as { email: string } | undefined;
-    return row && this.workspace(workspace)?.status === "running" ? this.member(workspace, row.email) ?? null : null;
+    const row = this.db.prepare("SELECT email, sessionId FROM portal_grant WHERE hash = ? AND workspace = ? AND expiresAt > ?")
+      .get(digest(grant), workspace, this.now()) as { email: string; sessionId: string } | undefined;
+    return row && this.sessionLive(row.sessionId, row.email) && this.workspace(workspace)?.status === "running" ? this.member(workspace, row.email) ?? null : null;
   }
   revokeGrants(workspace: string, email: string) {
     this.db.prepare("DELETE FROM portal_grant WHERE workspace = ? AND email = ?").run(workspace, normalizeEmail(email));

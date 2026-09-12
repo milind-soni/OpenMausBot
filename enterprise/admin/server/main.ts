@@ -60,7 +60,7 @@ const lease = acquireDataDirLeaseForProcess(dataDir);
 const db = new DatabaseSync(resolve(dataDir, "admin.sqlite"));
 const store = new PortalStore(db);
 const portal = await createPortal({ config, store, licensed,
-  fleet: (method, path, body) => fleetRequest(env.OMB_FLEET_SOCKET, method, path, body),
+  fleet: (method, path, body) => fleetRequest(env.OMB_FLEET_SOCKET, method, path, body, method === "GET" ? 5_000 : undefined),
   sendMail: async (message) => { await mail.sendMail({ from: env.OMB_ADMIN_MAIL_FROM, ...message }); },
 });
 const here = dirname(fileURLToPath(import.meta.url));

@@ -37,6 +37,11 @@ export async function createPortal(options: {
     if (!admin(email) && store.member(slug, email)?.role !== "admin") fail(403, "Workspace administrator access is required.");
   };
   const syncMember = (slug: string, email: string, role: Role) => operate("POST", `/workspaces/${slug}/users`, { action: "add", email, chatOnly: role === "member" });
+  const checkBootstrapRole = (slug: string, email: string, role: Role) => {
+    if (email === config.admins[0] && role === "member" && !store.people(slug).members.some(person => person.role === "admin" && person.email !== email)) {
+      fail(400, "Invite another workspace administrator first and have them accept, or join as Workspace admin.");
+    }
+  };
 
   async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
@@ -70,7 +75,29 @@ export async function createPortal(options: {
       if (!session || !session.user.emailVerified) return json({ error: "Sign in with your verified email to continue." }, 401);
       const email = normalizeEmail(session.user.email);
       if (path === "/api/me") return json({ email, name: session.user.name, platformAdmin: admin(email) });
-      if (path === "/api/workspaces" && request.method === "GET") return json({ workspaces: store.workspaces().filter((workspace) => admin(email) || store.member(workspace.slug, email)).map((workspace) => ({ ...workspace, role: store.member(workspace.slug, email)?.role ?? null, models: gateway.access(workspace.slug), openrouterModels: gateway.access(workspace.slug, "openrouter") })) });
+      if (path === "/api/workspaces" && request.method === "GET") {
+        const list = store.workspaces().filter(workspace => admin(email) || store.member(workspace.slug, email));
+        let runtime: Map<string, string> | null = null;
+        let checkedAt: number | null = null;
+        if (list.some(workspace => ["running", "suspended"].includes(workspace.status))) {
+          try {
+            const result = await operate("GET", "/workspaces?statusOnly=true");
+            const live = z.object({ workspaces: z.array(z.object({ slug: z.string(), live: z.string() })) }).parse(result);
+            runtime = new Map(live.workspaces.map(workspace => [workspace.slug, workspace.live]));
+            checkedAt = store.now();
+          } catch { /* Keep management available; unavailable is not a successful health check. */ }
+        }
+        return json({ workspaces: store.workspaces().filter(workspace => admin(email) || store.member(workspace.slug, email)).map(workspace => {
+          const live = runtime?.get(workspace.slug);
+          return {
+            ...workspace, role: store.member(workspace.slug, email)?.role ?? null,
+            models: gateway.access(workspace.slug), openrouterModels: gateway.access(workspace.slug, "openrouter"),
+            runtime: !["running", "suspended"].includes(workspace.status) ? null : !runtime ? "unknown"
+              : !runtime.has(workspace.slug) ? "missing" : ["active", "inactive", "failed"].includes(live!) ? live : "unknown",
+            checkedAt,
+          };
+        }) });
+      }
       if (path === "/api/workspaces" && request.method === "POST") {
         if (!admin(email)) return json({ error: "Only a platform administrator can create workspaces." }, 403);
         const input = createSchema.parse(await request.json());
@@ -121,6 +148,7 @@ export async function createPortal(options: {
           if (email !== current.email) return json({ error: "This invitation is for a different email. Switch accounts to accept it." }, 403);
           if (current.status !== "pending" || current.expiresAt <= store.now()) return json({ error: "This invitation is no longer available. Ask your administrator for a new one." }, 409);
           if (requireWorkspace(workspace.slug).status !== "running") return json({ error: "This workspace is not ready yet." }, 409);
+          checkBootstrapRole(workspace.slug, email, current.role);
           await syncMember(workspace.slug, email, current.role);
           store.accept(current);
           store.audit(email, "invitation.accepted", workspace.slug);
@@ -147,7 +175,7 @@ export async function createPortal(options: {
         if (action === "connect" && request.method === "POST") {
           const input = z.object({ challenge: proofSchema, state: proofSchema }).parse(await request.json());
           if (!store.member(slug, email) || workspace.status !== "running") return json({ error: "Accept an invitation to this workspace before opening it." }, 403);
-          const code = store.handoff(slug, email, input.challenge);
+          const code = store.handoff(slug, email, input.challenge, session.session.id);
           const callback = new URL(`https://${workspace.host}/api/auth/hosted/callback`);
           callback.searchParams.set("state", input.state); callback.searchParams.set("code", code);
           return json({ url: callback.href });
@@ -160,6 +188,7 @@ export async function createPortal(options: {
             canManage(slug, email);
             if (store.workspace(slug)?.status !== "running") return json({ error: "Wait until this workspace is ready before inviting people." }, 409);
             if (store.member(slug, input.email)) return json({ error: "This person is already a member. Change their role instead." }, 409);
+            checkBootstrapRole(slug, input.email, input.role);
             const invitation = store.invite(slug, input.email, input.role);
             store.audit(email, "invitation.created", slug, input.email);
             try { await invitationMail(invitation.id, invitation.email, workspace.name); }
@@ -195,7 +224,8 @@ export async function createPortal(options: {
           const input = z.object({ models: z.array(z.string()), openrouterModels: z.array(z.string()).optional() }).parse(await request.json());
           return await serial(async () => {
             const models = gateway.validateModels(input.models);
-            const openrouterModels = gateway.validateModels(input.openrouterModels ?? gateway.access(slug, "openrouter"), "openrouter");
+            const retained = gateway.access(slug, "openrouter").filter(model => gateway.status("openrouter").models.includes(model));
+            const openrouterModels = gateway.validateModels(input.openrouterModels ?? retained, "openrouter");
             if (!["running", "suspended"].includes(requireWorkspace(slug).status)) return json({ error: "Recover this workspace before changing model access." }, 409);
             const previous = gateway.access(slug, "openrouter");
             // Narrow first, widen only after the workspace catalog is written.

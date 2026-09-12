@@ -132,12 +132,13 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
       if (method === "GET" && url.pathname === "/health") return send(200, { ok: true });
       if (method === "GET" && url.pathname === "/workspaces") {
         const registry = loadRegistry(layout, deps);
-        const workspaces: FleetWorkspaceView[] = [];
+        const statusOnly = url.searchParams.get("statusOnly") === "true";
+        const workspaces: (FleetWorkspaceView | Pick<FleetWorkspaceView, "slug" | "live">)[] = [];
         for (const workspace of Object.values(registry.workspaces).sort((a, b) => a.slug.localeCompare(b.slug))) {
           const live = workspace.status === "running" || workspace.status === "suspended"
             ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown"
             : workspace.status;
-          workspaces.push({ ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) });
+          workspaces.push(statusOnly ? { slug: workspace.slug, live } : { ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) });
         }
         return send(200, { domain: registry.domain, operator: registry.operator ?? null, workspaces });
       }

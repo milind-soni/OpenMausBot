@@ -135,6 +135,34 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     expect(readFileSync(join(root, "audit.jsonl"), "utf8")).not.toContain("sk-ant-fixture");
   });
 
+  it("lists service status without reading tenant usage or mutating the fleet", async () => {
+    const m = machine(root);
+    const registryPath = fleetLayout(root).registryFile;
+    const entry = (slug: string, port: number, status: string) => ({ slug, host: `${slug}.example.test`, port, webhookPort: port + 1, status, createdAt: "" });
+    m.files.set(registryPath, JSON.stringify({ ...emptyRegistry("example.test"), workspaces: {
+      alpha: entry("alpha", 8810, "running"), beta: entry("beta", 8820, "suspended"), retired: entry("retired", 8830, "retained"),
+    } }));
+    const usage = vi.spyOn(m.deps, "usage");
+    const readText = vi.spyOn(m.deps, "readText");
+    const writeText = vi.spyOn(m.deps, "writeText");
+    const remove = vi.spyOn(m.deps, "remove");
+    await boot(m);
+    const files = [...m.files];
+    expect(await fleetRequest(socketPath, "GET", "/workspaces?statusOnly=true")).toEqual({ status: 200, body: {
+      domain: "example.test", operator: null, workspaces: [
+        { slug: "alpha", live: "active" }, { slug: "beta", live: "active" }, { slug: "retired", live: "retained" },
+      ],
+    } });
+    expect(usage).not.toHaveBeenCalled();
+    expect(readText.mock.calls).toEqual([[registryPath]]);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+    expect([...m.files]).toEqual(files);
+    expect(m.calls).toEqual(["systemctl is-active openmausbot@alpha.service", "systemctl is-active openmausbot@beta.service"]);
+    expect((await fleetRequest(socketPath, "GET", "/workspaces?statusOnly=false")).status).toBe(200);
+    expect(usage).toHaveBeenCalledTimes(3);
+  });
+
   it("refuses bad names and unknown operations, and reports a failed step without the tool's secrets", async () => {
     const m = machine(root, { failing: ["systemctl enable"] });
     m.files.set(fleetLayout(root).registryFile, JSON.stringify(emptyRegistry("agentada.cc")));

@@ -9,6 +9,7 @@ import {
   describeSteps,
   emptyRegistry,
   fenceRules,
+  fenceUnit,
   fleetLayout,
   initPlan,
   initialConfig,
@@ -53,6 +54,16 @@ describe("rendered files", () => {
     expect(unit).toContain("ExecStart=/usr/bin/node /usr/lib/node_modules/openmausbot/cli.js serve --port ${OMB_PORT} --data-dir ${OMB_DATA_DIR} --public-url ${OMB_PUBLIC_URL} --label %i --no-pair");
     for (const line of ["PrivateTmp=yes", "NoNewPrivileges=yes", "ProtectSystem=strict", "ReadWritePaths=/var/lib/openmausbot/%i"]) expect(unit).toContain(line);
     expect(templateUnit({ node: "/usr/bin/node", script: "/src/server/cli.ts", layout })).toContain("--experimental-strip-types /src/server/cli.ts");
+  });
+
+  it("requires the loopback fence to start successfully before every tenant instance", () => {
+    const unit = templateUnit({ node: "/usr/bin/node", script: "/src/server/openmausbot.ts", layout });
+    const header = unit.split("[Service]")[0];
+    expect(header).toContain("After=network-online.target openmausbot-fence.service\n");
+    expect(header).toContain("Requires=openmausbot-fence.service\n");
+    const fence = fenceUnit(layout);
+    expect(fence).toContain("Type=oneshot\nRemainAfterExit=yes\nExecStart=/usr/sbin/nft -f /etc/openmausbot/fence.nft\n");
+    expect(fence).not.toContain("Before=openmausbot@.service");
   });
 
   it("fences each workspace's loopback ports to its own user, Caddy and root", () => {

@@ -54,7 +54,8 @@ describe("membership mutation authority boundaries", () => {
   it("validates role changes before revoking grants, but removal remains effective when fleet sync fails", async () => {
     await member();
     const verifier = randomBytes(32).toString("base64url");
-    const code = fixture.store.handoff("alpha", "member@example.test", digest(verifier));
+    const session = fixture.db.prepare('SELECT s.id FROM "session" s JOIN "user" u ON u.id = s.userId WHERE u.email = ?').get("member@example.test") as { id: string };
+    const code = fixture.store.handoff("alpha", "member@example.test", digest(verifier), session.id);
     const issued = fixture.store.consume(code, "alpha", verifier)!;
     expect((await operator.request("/api/workspaces/alpha/members", "POST", { email: "member@example.test" })).status).toBe(400);
     expect(fixture.store.grant(issued.grant, "alpha")).not.toBeNull();

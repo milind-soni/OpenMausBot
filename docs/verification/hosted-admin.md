@@ -30,6 +30,15 @@ operations and upstream provider responses. They cover:
   preserved tool/SSE payloads and rejected alternate model-routing fields.
 - Managed OpenCode seeds with no master key, updates to existing workspaces,
   and revocation-first/no-widening behavior when catalog synchronization fails.
+- Multiple accepted administrators/members in one workspace, independent client
+  membership, last-admin protection and fleet bootstrap-role constraints.
+- Parent Admin session sign-out/expiry revoking its handoffs and workspace
+  grants without ending another device's independent session; migration of
+  older unbound grants without changing memberships.
+- Shared-office email-code rate limits, five-attempt code lockout, and partial
+  invitation delivery with failed-only retries through the existing endpoints.
+- Bounded, status-only fleet reads that skip tenant usage collection and never
+  report an unavailable manager or missing service as healthy.
 
 The harness fixture additionally exercises the real hosted bridge with fake
 HTTPS responses: state/cookie mismatch, replay, stale grants, legacy credentials,
@@ -57,14 +66,39 @@ workspaces and keys are disposable. No email or cloud resources are created.
    resolve. Do not change DNS or bypass browser protections. Return to the
    printed portal's `/workspaces` page: the member sees only their workspace,
    without platform Providers/Activity or management controls.
-5. As the operator, exercise dialogs, invitation revoke/resend and provider/model
-   forms using fake values only. Check both narrow and wide layouts.
+5. Create a fresh workspace and invite `lead@example.test` and
+   `retry@example.test` together as workspace administrators. The preview fails
+   the latter's first invitation delivery deliberately. Confirm one success,
+   one saved-but-undelivered invitation, and **Retry failed** resending only the
+   failed invitation. The original successful link must remain unchanged.
+6. Accept as the lead, then invite two more fake members from the workspace's
+   **People** tab. Confirm **Member** is the subsequent default, both results
+   appear, and revoking one invitation leaves the other pending. The last
+   administrator must have no removal/demotion control. **Models** is read-only
+   and platform Providers/Activity/Hosting must be absent for this account.
+7. As the operator, exercise dialogs and provider/model forms using fake values
+   only. Check both narrow and wide layouts.
 
 This walkthrough was driven through the real built UI on 2026-09-11: email
 sign-in, blank creation, pending invitation, same-tab wrong-account handling,
 account switch, acceptance and the isolated member list were observed. The
 provider settings layout was inspected. The final workspace-host navigation
 was not live-tested because the fixture has no real tenant host.
+
+The expanded walkthrough passed on 2026-09-12 against an isolated built portal:
+suggested workspace address, direct-to-People creation, mixed invitation delivery
+and failed-only retry, same-tab account switching with the invite preserved,
+acceptance, workspace-admin-only visibility, two subsequent member invitations,
+revocation, last-admin protection and operator-only suspension/resumption with
+matching refreshed service state. The narrow 680px layout had no horizontal
+page overflow, and the invitation dialog focused its email field. The provider
+and fleet responses were synthetic; acceptance still ended at the deliberately
+unresolvable workspace host, not a deployed tenant.
+
+That revision passed 77 Admin tests, 148 related hosted-access/session/fleet/
+group-VM tests, both deployment-template tests, root typecheck/lint, the Admin
+production build and packaged-server smoke (all 12 proxy paths and MCP round
+trip). These results are not a Windows CI or real-host deployment claim.
 
 Stop the foreground preview with Ctrl-C; it removes only its owned temporary
 database and closes its server. It never uses the installed app's data.
@@ -154,3 +188,9 @@ sockets, blank tenant data, signed-in handoff, access revocation, real SMTP,
 configured OAuth callbacks, and an explicitly authorized bounded provider call.
 Local tests do not replace this. Do not enable a tenant-facing deployment with
 unverified proxy/socket/identity boundaries.
+
+Also verify a real reboot and deliberately failed fence startup: tenant units
+must wait for and require the fence service. Existing installations need their
+generated units updated deliberately; an app-only upgrade does not rewrite
+them. Configure and exercise per-workspace resource limits and restore a backup
+before a client pilot; the portal does not yet manage those resource limits.

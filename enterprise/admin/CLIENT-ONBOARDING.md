@@ -47,22 +47,26 @@ users and data directories on one kernel, not a VM/container per client.
    the client's display name and a unique address slug. Slugs are 2–31
    lowercase letters, digits or dashes, starting with a letter; the UI cannot
    rename the address later. Select only this client's managed Anthropic/OpenRouter
-   models and choose **Create workspace**. Wait for **Ready**. Existing fleet
+   models and choose **Create workspace**. The display name suggests an editable
+   address; confirm it before creating. The workspace opens on **People** so
+   you can invite its team next. Check the refreshed runtime status. Existing fleet
    workspaces are not automatically imported; never copy your personal home,
    chats, credentials or connected accounts into the new workspace.
-2. **Confirm model access.** Open the workspace's details. In **Model access**,
+2. **Confirm model access.** Open the workspace's **Models** tab. In **Model access**,
    check the intended models and use **Save model access** if changes are
    needed. With none assigned, managed model requests cannot run. The global
    provider list and this workspace's assignment must both allow a model.
    OpenRouter models are configured in the workspace's OpenCode model picker.
    Refresh the engine catalog after assignment changes. Existing bots are not
    silently switched: choose a replacement if their selected model was removed.
-3. **Invite the client's first administrator.** Choose **Manage people →
-   Invite person**, enter the exact client email, select **Workspace admin**
-   (the default is Member), and choose **Send invitation**. Confirm it appears
+3. **Invite the client's first administrator.** In the workspace's **People**
+   tab, choose **Invite people**, enter the exact client email and select
+   **Workspace admin**. The first invitation defaults to this role; review it
+   before sending. Confirm it appears
    as **Pending**. Sending alone grants no workspace membership. If delivery
    fails, the invitation may still be saved: check the list and use **Resend**
-   after repairing mail delivery.
+   after repairing mail delivery. The bootstrap operator must join as Workspace
+   admin unless another workspace administrator has already accepted.
 4. **Have the client accept as the correct person.** They open the emailed
    invitation and sign in with that same email: **Email me a code**, then the
    six-digit code, or a qualified configured social provider. Codes expire
@@ -84,10 +88,14 @@ users and data directories on one kernel, not a VM/container per client.
    customer-specific configuration/skills in the customer's own repository,
    not a fork of the application. Run a bounded acceptance task after agreeing
    on any paid calls or external actions.
-7. **Invite the rest of this client's team.** From **People**, use **Member**
+7. **Invite the rest of this client's team.** From the workspace's **People** tab,
+   paste up to 20 email addresses (one per line, or comma-separated). Use **Member**
    for ordinary workspace users and **Workspace admin** only for people who
    should manage its people/settings. Every recipient must accept. Do not
-   invite another client into this workspace to save a provisioning step.
+   invite another client into this workspace to save a provisioning step. Review
+   each delivery result. Retry only failed deliveries; an uncertain network
+   result requires refreshing the invitation list first so a successful invite
+   is not silently replaced.
 
 Record the client, workspace hostname, accepted administrator(s), assigned
 models and acceptance-check outcome. A **Needs attention** or failed operation
@@ -96,6 +104,10 @@ delete a reservation, or reuse its slug to force another create.
 
 ## Change or end access
 
+- **Sign out:** signing out of Admin invalidates workspace sign-ins made from
+  that same Admin session, including unconsumed sign-in links. Other signed-in
+  devices retain their independent sessions. Removing a member instead ends
+  that person's access to this workspace across devices.
 - **Unaccepted invitation:** in **People → Invitations**, choose **Revoke**.
   To remove someone who already accepted, use their entry under **Members**.
 - **One person:** choose **Change role** or **Remove**, confirm, and refresh
@@ -107,7 +119,7 @@ delete a reservation, or reuse its slug to force another create.
   its last one. A synchronization error can occur after central removal has
   taken effect: inspect the fleet state instead of assuming access was restored.
 - **Whole client, temporarily:** a platform administrator uses the workspace's
-  **Suspend** action and confirms **Suspend workspace**. Confirm **Suspended**
+  **Hosting → Suspend** action and confirms **Suspend workspace**. Confirm **Suspended**
   and that member access is denied. Managed provider requests/streams are
   aborted, but already processed work or charges cannot be undone. **Resume**
   starts it again for its remaining members.
@@ -124,6 +136,13 @@ delete a reservation, or reuse its slug to force another create.
 
 ## What this does not set up
 
+- **Runtime status is not an end-to-end health check.** Refresh queries the
+  service manager without scanning conversation or usage data. A running
+  service is not proof that mail, models or the customer journey works. An
+  unavailable manager is shown as unknown, never as successful provisioning.
+- Agree and configure tenant resource limits (memory, CPU, process count and
+  spend) before shared-host production use. The portal does not yet manage
+  those limits; use a reviewed operator procedure and capacity-test the host.
 - Managed access supports Anthropic API and OpenRouter chat models. It does not pool personal
   Claude/Codex CLI subscriptions, sign in those accounts for clients, or manage
   every provider. Email/OAuth here identifies a person; bot integrations are separate.

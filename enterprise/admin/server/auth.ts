@@ -49,6 +49,9 @@ export async function createPortalAuth(config: PortalConfig, store: PortalStore,
     },
     plugins: [emailOTP({
       otpLength: 6, expiresIn: 600, allowedAttempts: 5, storeOTP: "hashed",
+      // Coworkers often share one office IP. Keep the plugin's IP/path limiter,
+      // but allow a small team to sign in together; each code still gets 5 tries.
+      rateLimit: { window: 60, max: 20 },
       async sendVerificationOTP({ email, otp, type }) {
         // A generic successful response for unknown emails avoids exposing the invitation list.
         if (type !== "sign-in" || !allowed(email)) return;

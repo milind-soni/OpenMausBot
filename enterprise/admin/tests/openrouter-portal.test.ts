@@ -70,3 +70,15 @@ it("does not grant a workspace administrator platform provider authority", async
   expect((await admin.request("/api/workspaces/alpha/providers", "POST", { models: [], openrouterModels: ["unapproved/model"] })).ok).toBe(false);
   expect(fixture.portal.gateway.access("alpha", "openrouter")).toEqual([]);
 });
+
+it("drops globally removed OpenRouter grants on an Anthropic-only update without accepting explicit disallowed models", async () => {
+  const admin = await setup();
+  await admin.request("/api/providers/anthropic", "POST", { key: "synthetic-anthropic-master", models: ["fixture-claude"] });
+  await admin.request("/api/workspaces", "POST", { slug: "alpha", name: "Alpha", openrouterModels: models });
+  await admin.request("/api/providers/openrouter", "POST", { models: [models[1]] });
+  expect((await admin.request("/api/workspaces/alpha/providers", "POST", { models: ["fixture-claude"] })).status).toBe(200);
+  expect(fixture.portal.gateway.access("alpha")).toEqual(["fixture-claude"]);
+  expect(fixture.portal.gateway.access("alpha", "openrouter")).toEqual([models[1]]);
+  expect((await admin.request("/api/workspaces/alpha/providers", "POST", { models: [], openrouterModels: [models[0]] })).status).toBe(400);
+  expect(fixture.portal.gateway.access("alpha", "openrouter")).toEqual([models[1]]);
+});

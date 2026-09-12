@@ -77,6 +77,13 @@ automatically migrated. Test a fresh hosting deployment before moving clients.
   removing its model access blocks subsequent gateway requests and aborts active
   gateway requests/streams. This cannot undo work or charges already processed
   upstream. No individual gateway token-rotation workflow is implemented.
+- Workspace sign-ins are bound to the Admin session that opened them. Signing
+  out, revoking or expiring that session ends its workspace access; independent
+  logins on other devices are unaffected. The first upgrade from unbound grants
+  invalidates those old workspace sign-ins, not membership or conversations.
+- Workspace runtime status is refreshed from the service manager with a bounded
+  read that skips usage logs. Persisted provisioning state is shown separately;
+  an unreachable manager is unknown, not a healthy workspace.
 
 ## Build and offline checks
 
@@ -252,6 +259,17 @@ fleet socket, Caddy admin socket, sibling data and sibling loopback API is
 denied. Follow the [fleet qualification recipe](../../docs/verification/fleet.md)
 for actual user/process/network checks. Record versions and results; never
 perform qualification against a customer's live data.
+
+Every tenant unit requires the loopback-fence service and starts after it;
+a failed fence startup must block tenant startup. Existing fleets must regenerate
+the template through the reviewed `fleet init --yes` procedure above; replacing
+application files alone does not update installed units. On the disposable deployment,
+qualify both a normal reboot and an intentionally failed fence startup before
+onboarding clients. Stopping/restarting the fence can also stop dependent
+workspaces, so plan that maintenance. Ordinary fleet operations update rules
+directly with `nft -f`, without restarting the fence service. This dependency
+does not detect firewall rules removed outside the fleet; do not flush or
+replace its table through another firewall manager.
 
 ## Backups, recovery and removal
 
