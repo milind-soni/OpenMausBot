@@ -4,6 +4,7 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { ProviderMark } from "./ProviderIcons";
+import { ProviderManager } from "./ProviderManager";
 
 export function engineReady(instance: InstanceInfo): boolean {
   return instance.snapshot.state === "available" &&
@@ -67,20 +68,23 @@ export function EngineSections({ instances, renderEngine }: {
   // Flat, instance-keyed siblings keep forms and sign-in state alive when a
   // refreshed status moves a card between groups. Separate section parents
   // would remount it and discard unsaved input.
-  return <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
-    {[true, false].flatMap((ready) => {
-      const rows = instances.filter((instance) => engineReady(instance) === ready);
-      if (!rows.length) return [];
-      const label = t(ready ? "onboarding.engines.ready" : "onboarding.engines.needsSetup");
-      return [
-        <div key={`heading-${ready}`} className={cn("col-span-full flex items-center justify-between gap-3", !ready && instances.some(engineReady) && "mt-4")}>
-          <h2 className="text-[12px] font-semibold text-ink-secondary">{label}</h2>
-          <span className="text-[11px] tabular-nums text-ink-secondary">{t(rows.length === 1 ? "engines.library.countOne" : "engines.library.count", { count: rows.length })}</span>
-        </div>,
-        ...rows.map((instance) => <div key={instance.instanceId} className="contents">{renderEngine(instance)}</div>),
-      ];
-    })}
-    {instances.length === 0 && <p className="col-span-full py-4 text-[13px] text-ink-secondary">{t("engines.none")}</p>}
+  return <div className="flex min-w-0 flex-col gap-5">
+    <ProviderManager />
+    <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,280px),1fr))] items-start gap-3">
+      {[true, false].flatMap((ready) => {
+        const rows = instances.filter((instance) => engineReady(instance) === ready);
+        if (!rows.length) return [];
+        const label = t(ready ? "onboarding.engines.ready" : "onboarding.engines.needsSetup");
+        return [
+          <div key={`heading-${ready}`} className={cn("col-span-full flex items-center justify-between gap-3", !ready && instances.some(engineReady) && "mt-4")}>
+            <h2 className="text-[12px] font-semibold text-ink-secondary">{label}</h2>
+            <span className="text-[11px] tabular-nums text-ink-secondary">{t(rows.length === 1 ? "engines.library.countOne" : "engines.library.count", { count: rows.length })}</span>
+          </div>,
+          ...rows.map((instance) => <div key={instance.instanceId} className="contents">{renderEngine(instance)}</div>),
+        ];
+      })}
+      {instances.length === 0 && <p className="col-span-full py-4 text-[13px] text-ink-secondary">{t("engines.none")}</p>}
+    </div>
   </div>;
 }
 
