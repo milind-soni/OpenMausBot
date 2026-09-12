@@ -10,10 +10,9 @@ describe("window chrome", () => {
     });
   });
 
-  it("uses Window Controls Overlay on Windows, without frame:false", () => {
+  it("hides the native title bar on Windows; caption buttons are renderer-drawn", () => {
     expect(windowChromeOptions("win32")).toEqual({
       titleBarStyle: "hidden",
-      titleBarOverlay: { color: "#070707", symbolColor: "#b5b5b5", height: 26 },
     });
   });
 

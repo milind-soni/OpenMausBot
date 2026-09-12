@@ -1506,7 +1506,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   // macOS owns inset traffic lights; Windows hides the native bar and draws
   // caption buttons over the header's right end. Either way this top row is
   // the window's drag handle (ChatView/GroupView headers do the same).
-  const draggableChrome = macInset || capabilities.windowChrome === "win-overlay";
+  const draggableChrome = macInset || capabilities.windowChrome === "win-caption";
   // SAFETY: Electron's documented -webkit-app-region CSS property is not in
   // React's CSSProperties type, but the renderer accepts it as an inline style.
   const windowDragStyle = draggableChrome

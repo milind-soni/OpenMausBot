@@ -149,6 +149,16 @@ function installWindowStatePersistence(win) {
   };
   win.on("resize", schedule);
   win.on("move", schedule);
+  // The renderer's caption buttons track the native maximize state (the
+  // restore/maximize glyph flips); a lost push just leaves a stale glyph
+  // until the next toggle, so a send failure is not fatal.
+  const pushMaximized = () => {
+    try {
+      if (!win.isDestroyed()) win.webContents.send("window:maximized-changed", win.isMaximized());
+    } catch {}
+  };
+  win.on("maximize", pushMaximized);
+  win.on("unmaximize", pushMaximized);
   win.on("maximize", schedule);
   win.on("unmaximize", schedule);
   win.on("close", flush);
@@ -1863,21 +1873,39 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
   });
 }));
 
-// The renderer owns the skin. Sync the frameless caption-button overlay and
-// window background to the same colours so the buttons sit on the app header.
+// The renderer owns the skin, including the Windows caption buttons it draws
+// itself (titleBarStyle hidden, no native overlay). Keep syncing the window
+// background so a light skin never flashes the Midnight-black cold start.
 ipcMain.handle("desktop:skin", (event, skin) => {
   if (!isKnownSkin(skin)) return false;
   try {
-    const { color, symbolColor } = skinChrome(skin);
+    const { color } = skinChrome(skin);
     const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
     if (win && !win.isDestroyed()) {
-      if (process.platform === "win32" && typeof win.setTitleBarOverlay === "function") {
-        win.setTitleBarOverlay({ color, symbolColor, height: 26 });
-      }
       try { win.setBackgroundColor(color); } catch {}
     }
   } catch {}
   return true;
+});
+
+// Caption controls for the overlay-less frameless window. The renderer's
+// buttons are the only way to act on the window, so the channels stay
+// open for the local page; a remote server's page never has them.
+for (const [channel, act] of [
+  ["window:minimize", (win) => win.minimize()],
+  ["window:toggle-maximize", (win) => (win.isMaximized() ? win.unmaximize() : win.maximize())],
+  ["window:close", (win) => win.close()],
+]) {
+  ipcMain.handle(channel, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!win || win.isDestroyed()) return false;
+    act(win);
+    return true;
+  });
+}
+ipcMain.handle("window:state", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+  return { maximized: Boolean(win && !win.isDestroyed() && win.isMaximized()) };
 });
 
 ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async (_event, rawUrl) => {

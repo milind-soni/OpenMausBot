@@ -171,7 +171,7 @@ function desktopCapabilities({
       homeDir: remote ? "" : homeDir,
     },
     windowChrome:
-      isMac ? "mac-inset" : hostPlatform === "win32" ? "win-overlay" : "native",
+      isMac ? "mac-inset" : hostPlatform === "win32" ? "win-caption" : "native",
     screenPreview,
     dictation,
     localComputer,

@@ -125,6 +125,19 @@ const bridge = {
   /** Tell the window which skin the page wears, so the native chrome the
    * renderer cannot paint (the Windows caption-button overlay) matches. */
   applySkin: (skin) => ipcRenderer.invoke("desktop:skin", skin),
+  /** The renderer-drawn Windows caption buttons: minimize / restore /
+   * maximize / close, plus live maximize state so the glyph can flip. */
+  windowControls: {
+    minimize: () => ipcRenderer.invoke("window:minimize"),
+    toggleMaximize: () => ipcRenderer.invoke("window:toggle-maximize"),
+    close: () => ipcRenderer.invoke("window:close"),
+    state: () => ipcRenderer.invoke("window:state"),
+    onMaximizedChanged: (cb) => {
+      const handler = (_event, maximized) => cb(maximized);
+      ipcRenderer.on("window:maximized-changed", handler);
+      return () => ipcRenderer.removeListener("window:maximized-changed", handler);
+    },
+  },
   /** A reviewed BotMRR package opened through openmausbot://install. */
   onPackageInstall: (cb) => {
     packageInstallListeners.add(cb);

@@ -1955,5 +1955,9 @@
   "backup.skipDrafts": "Continue without restoring drafts",
   "backup.skipDraftsHint": "Keep this browser’s current drafts and preferences. This does not undo the workspace restore.",
   "backup.serverBusy": "A workspace backup operation is already running.",
-  "backup.checkStatus": "Checking backup availability…"
+  "backup.checkStatus": "Checking backup availability…",
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close"
 }

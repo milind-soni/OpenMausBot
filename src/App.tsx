@@ -20,7 +20,8 @@ import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -32,6 +33,7 @@ import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 
 function Shell() {
   const { state, dispatch } = useStore();
+  const { capabilities } = useDesktopCapabilities();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && bot.unread).length +
     state.groups.filter((group) => group.unread).length;
@@ -289,6 +291,16 @@ function Shell() {
           palette on top when one of them is open underneath */}
       <CommandPalette onOpenChange={setPaletteOpen} />
       </div>
+      {/* Renderer-drawn caption buttons for the overlay-less frameless
+          Windows window. Deliberately the LAST child of the shell: Blink
+          resolves -webkit-app-region in DOM-walk order, so these no-drag
+          buttons must come after every drag-region header to actually
+          subtract from it — earlier placement let the header's drag region
+          swallow the buttons (dead clicks, no hover). z-40 keeps true
+          modals (z-50, later in DOM) painting above the buttons. */}
+      <WindowCaptionButtons
+        visible={capabilities.windowChrome === "win-caption" && Boolean(window.ogb?.windowControls)}
+      />
     </div>
   );
 }
