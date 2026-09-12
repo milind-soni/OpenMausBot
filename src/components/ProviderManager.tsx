@@ -8,10 +8,6 @@ function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "provider";
 }
 
-function secretEnvFor(id: string): string {
-  return `OPENMAUSBOT_API_${id.replace(/[^a-z0-9]+/gi, "_").toUpperCase()}_KEY`;
-}
-
 function isApiInstance(instance: InstanceInfo): boolean {
   return instance.driverKind === "openai-compat";
 }
