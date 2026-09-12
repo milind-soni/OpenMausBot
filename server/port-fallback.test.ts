@@ -1,6 +1,6 @@
 // Verify the server falls back from an occupied OMB_PORT to the next free
-// port, keeps the webhook listener in lock-step, and reports both resolved
-// ports in its boot log.
+// port, binds the webhook listener in an independent retry loop, and reports
+// both resolved ports in its boot log.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { mkdirSync, mkdtempSync } from "node:fs";
@@ -52,7 +52,7 @@ beforeAll(
     await listenOn(occupiedMain, basePort);
     await listenOn(occupiedWebhook, basePort + 1);
 
-    child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+    child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "index.ts")], {
       cwd: ROOT,
       env: {
         ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
