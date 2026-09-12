@@ -47,7 +47,7 @@ export type ProviderConnectionInstanceConfig = {
 
 const SAFE_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._()-]{0,79}$/u;
 const URL_SCHEMA = z.string().trim().max(2048).url();
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 const PRESETS: readonly ProviderConnectionPreset[] = [
   {
