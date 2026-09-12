@@ -15,6 +15,7 @@ import {
   visibleNotificationThread,
   type Bot,
   type BotAnnouncement,
+  type ConfigStatusFrame,
   type Group,
   type Message,
   type Action,
@@ -1695,5 +1696,43 @@ describe("bot settings section", () => {
       id: "bot-a",
     });
     expect(state.botSettingsSection).toBe("overview");
+  });
+});
+
+describe("live config frames", () => {
+  const baseFrame: ConfigStatusFrame = {
+    composio: { configured: false },
+    box: { configured: false },
+    vps: { configured: false, sshAlias: "" },
+    rooms: { turnTimeoutMinutes: 10 },
+    localVm: { mode: "shared", maxInstances: 1 },
+  };
+
+  it("preserves edition, budgets and billing through configStatusFromFrame", () => {
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD", prices: { default: { inputPerMillion: 1, outputPerMillion: 2 } } },
+    };
+    const status = configStatusFromFrame(frame);
+    expect(status.edition).toEqual(frame.edition);
+    expect(status.budgets).toEqual(frame.budgets);
+    expect(status.billing).toEqual(frame.billing);
+  });
+
+  it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD" },
+    };
+    const state = reducer(initialState, { type: "configStatus", config: configStatusFromFrame(frame) });
+    expect(state.config).toMatchObject({
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD" },
+    });
   });
 });
