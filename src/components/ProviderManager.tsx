@@ -111,13 +111,12 @@ export function ProviderManager() {
   };
 
   const removeConnection = async (instance: InstanceInfo) => {
+    if (!window.confirm(`Remove the API connection “${instance.displayName}”?`)) return;
     setBusy(true);
     setError(null);
+    setStatus(null);
     try {
-      const config = await api("/api/config");
-      const instances = { ...(config.instances ?? {}) } as Record<string, unknown>;
-      delete instances[instance.instanceId];
-      await api("/api/config", { method: "PATCH", body: JSON.stringify({ instances }) });
+      await api(`/api/instances/${encodeURIComponent(instance.instanceId)}`, { method: "DELETE" });
       await refreshInstances();
       setStatus(`${instance.displayName} removed.`);
     } catch (e) {
@@ -196,7 +195,7 @@ export function ProviderManager() {
                 <div className="truncate text-[13px] font-semibold text-ink">{instance.displayName}</div>
                 <div className="truncate text-[11px] text-ink-secondary">{instance.snapshot.state} · {models.slice(0, 3).map((m) => m.id).join(", ") || "model list not refreshed"}</div>
               </div>
-              <button type="button" onClick={() => refreshModels(instance.instanceId)} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink"><RefreshCw size={12} /> Refresh models</button>
+              <button type="button" onClick={() => refreshModels(instance.instanceId)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><RefreshCw size={12} /> Refresh models</button>
               <button type="button" onClick={() => removeConnection(instance)} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] text-danger/80 hover:bg-danger/10 disabled:opacity-50"><Trash2 size={12} /> Remove</button>
             </div>
           );
