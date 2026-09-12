@@ -109,6 +109,12 @@ app.whenReady().then(async () => {
   const verifyUi = () => require("./testing/approval-ui-smoke.cjs")({ root, url: `http://127.0.0.1:${port}`, api, until,
     grant: (botId, mode, options) => coordinator.request(child, botId, mode, options),
   });
+  if (process.argv.includes("--skill-ui-only")) {
+    await require("./testing/skill-approval-ui-smoke.cjs")({ root, home, url: `http://127.0.0.1:${port}`, api, until,
+      capability: (botId, threadId) => api("/api/testing/internal-capability", "POST", { botId, threadId, skillAuthoring: true }, { "x-openmausbot-test-capability": testCapabilityKey }),
+    });
+    return;
+  }
   if (process.argv.includes("--ui-only")) { await verifyUi(); return; }
   const created = await api("/api/bots", "POST", { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
   assert.equal(created.status, 201);

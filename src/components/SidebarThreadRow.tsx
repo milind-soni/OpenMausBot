@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy"> & { queued?: boolean };
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy"> & { queued?: boolean };
 
 /** "opened by Scout" for a thread a bot started, null for the person's own.
  * Shared by the sidebar row and the All-threads picker so both say it the
@@ -17,11 +17,34 @@ export function threadOpenerLabel(task: Pick<Task, "openedBy">): string | null {
   return name ? t("task.openedBy", { name }) : null;
 }
 
+/** The one line under a title: "closed by Scout" once a bot has closed the
+ * thread, otherwise who opened it, otherwise nothing. Closed wins because it
+ * is the newer fact and the reason the row is where it is. */
+export function threadByline(task: Pick<Task, "openedBy" | "closedBy">): string | null {
+  const closer = task.closedBy?.name.trim();
+  return closer ? t("task.closedBy", { name: closer }) : threadOpenerLabel(task);
+}
+
+/** Whether a row must stay on screen regardless of age or closed state:
+ * the person is looking at it, it needs them, or it has something new. */
+const demandsAttention = (task: ThreadRowTask, activeId: string) =>
+  task.threadId === activeId || task.activity === "waiting-on-you" || task.activity === "working" || Boolean(task.busy) || Boolean(task.queued) || Boolean(task.unread);
+
+/** The default list is the six most recent OPEN threads plus anything that
+ * demands attention. A thread a bot closed is folded away — a PM bot that
+ * opened ten helper threads and closed them must not leave ten rows behind —
+ * but it is never gone: "show all" and search still list it, and a closed
+ * thread that becomes busy or unread again is back in the list at once. */
 export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
   const needle = query.trim().toLowerCase();
-  return tasks.filter((task, index) => needle
-    ? task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle))
-    : showAll || index < 6 || task.threadId === activeId || task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.queued || task.unread);
+  if (needle) {
+    return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
+  }
+  if (showAll) return tasks;
+  let open = 0;
+  return tasks.filter((task) => task.closedBy
+    ? demandsAttention(task, activeId)
+    : open++ < 6 || demandsAttention(task, activeId));
 }
 
 /** One quiet row for bot and group histories. Surface denotes selection;
@@ -44,7 +67,8 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : task.busy ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
-  const opener = threadOpenerLabel(task);
+  const byline = threadByline(task);
+  const closed = Boolean(task.closedBy) && !status;
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 190)) });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const finishRename = (save: boolean) => {
@@ -70,14 +94,14 @@ export function SidebarThreadRow({ task, current, compact, folders, onSelect, on
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={`${task.title}${status ? ` · ${status}` : ""}${task.unread ? ` · ${t("task.unread")}` : ""}`}
+        title={`${task.title}${status ? ` · ${status}` : closed ? ` · ${t("task.closed")}` : ""}${task.unread ? ` · ${t("task.unread")}` : ""}`}
         onClick={onSelect} onDoubleClick={startRename}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
         className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-md pl-3 pr-1 text-left text-[13px] font-medium outline-none focus-visible:ring-1 focus-visible:ring-accent/60", compact ? "min-h-7 py-1" : "min-h-8 py-1.5", current ? "font-semibold text-ink" : "text-ink-secondary hover:text-ink")}>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink")}>{task.title}</span>
-          {opener && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{opener}</span>}
+          <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", closed && !current && "text-ink-secondary/70")}>{task.title}</span>
+          {byline && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{byline}</span>}
         </span>
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : task.busy ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}

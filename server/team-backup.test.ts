@@ -35,9 +35,11 @@ function fixture() {
   store.renameTask(chief.id, chief.threadId, "First conversation");
   // created first: tasks are newest-first and the tests below read the
   // transcript of tasks[0], which must stay the conversation with messages
-  store.createTask(chief.id, "Opened by a deleted bot", false, undefined, { botId: "gone-bot", name: "Gone", at: 98 });
+  const strangers = store.createTask(chief.id, "Opened by a deleted bot", false, undefined, { botId: "gone-bot", name: "Gone", at: 98 })!;
+  store.setTaskClosedBy(chief.id, strangers.threadId, { botId: "gone-bot", name: "Gone", at: 102 });
   const active = store.createTask(chief.id, "Second conversation")!;
   store.setTaskOpenedBy(chief.id, active.threadId, { botId: scout.id, name: scout.name, delegationId: "do-not-resume-delegation", at: 99 });
+  store.setTaskClosedBy(chief.id, active.threadId, { botId: scout.id, name: scout.name, at: 103 });
   store.appendMessage(active.threadId, { role: "user", kind: "text", text: "Current question", queued: true, queueId: "do-not-replay" });
   store.appendMessage(active.threadId, { role: "bot", kind: "options", card: {
     title: "Permission request", subtitle: "Old approval", options: ["Allow"], requestId: "do-not-resume", allowKey: "Bash",
@@ -138,6 +140,11 @@ describe("additive portable team backups", () => {
       .toEqual({ botId: importedScout.id, name: scout.name, at: 99 });
     expect(importedChief.tasks!.find((task) => task.title === "Opened by a deleted bot")).not.toHaveProperty("openedBy");
     expect(importedChief.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("openedBy");
+    // a thread the opener closed stays closed after import, closer remapped the same way
+    expect(importedChief.tasks!.find((task) => task.title === "Second conversation")!.closedBy)
+      .toEqual({ botId: importedScout.id, name: scout.name, at: 103 });
+    expect(importedChief.tasks!.find((task) => task.title === "Opened by a deleted bot")).not.toHaveProperty("closedBy");
+    expect(importedChief.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("closedBy");
     const firstTask = importedChief.tasks!.find((task) => task.title === "First conversation")!;
     expect(store.messagesFor(firstTask.threadId).map((message) => message.text)).toEqual(["Original question", "Original answer", "Edited question"]);
     expect(store.activePath(firstTask.threadId).map((message) => message.text)).toEqual(["Original question", "Original answer"]);

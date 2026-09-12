@@ -59,6 +59,58 @@ function call(
   });
 }
 
+/** Hold a JSON body after the server has accepted its authenticated headers,
+ * so a test can revoke that session before the route commits its mutation. */
+function delayedCall(
+  path: string,
+  init: { headers: Record<string, string>; body: unknown },
+): Promise<{
+  finish: () => Promise<{ status: number; body: any }>;
+  close: () => void;
+}> {
+  const raw = JSON.stringify(init.body);
+  const req = request(
+    {
+      host: "127.0.0.1",
+      port: PORT,
+      path,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(raw),
+        expect: "100-continue",
+        ...init.headers,
+      },
+    },
+  );
+  const response = new Promise<{ status: number; body: any }>((resolve, reject) => {
+    req.on("error", reject);
+    req.on("response", (res) => {
+      let data = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => (data += chunk));
+      res.on("error", reject);
+      res.on("end", () => {
+        try {
+          resolve({ status: res.statusCode ?? 0, body: data ? JSON.parse(data) : {} });
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  });
+  void response.catch(() => {});
+  const accepted = new Promise<void>((resolve) => req.once("continue", resolve));
+  req.flushHeaders();
+  return accepted.then(() => ({
+    finish: () => {
+      req.end(raw);
+      return response;
+    },
+    close: () => req.destroy(),
+  }));
+}
+
 const header = (headers: Record<string, string | string[] | undefined>, name: string): string => {
   const v = headers[name];
   return Array.isArray(v) ? v.join("\n") : (v ?? "");
@@ -180,6 +232,37 @@ describe("pairing", () => {
     expect(denied.status).toBe(403);
     expect(denied.body.error).toContain("lacks the admin scope");
     expect((await call("/api/bots", { headers: remote("10.0.0.2", { authorization: `Bearer ${paired.body.token}` }) })).status).toBe(200);
+  });
+
+  it("rechecks an admin session after a slow pairing body before minting a code", async () => {
+    const opened = await pairingCode();
+    const paired = await call("/api/auth/pair", {
+      method: "POST",
+      headers: remote("10.0.0.22"),
+      body: JSON.stringify({ code: opened.code, label: "revoked admin" }),
+    });
+    expect(paired.status).toBe(200);
+    const held = await delayedCall("/api/auth/pairing", {
+      headers: remote("10.0.0.22", { authorization: `Bearer ${paired.body.token}` }),
+      body: { label: "must not be minted after revocation", scopes: ["admin", "client"] },
+    });
+    try {
+      const revoked = await call(`/api/auth/sessions/${paired.body.session.id}`, { method: "DELETE" });
+      expect(revoked.status).toBe(200);
+      expect((await call("/api/auth/session", {
+        headers: remote("10.0.0.22", { authorization: `Bearer ${paired.body.token}` }),
+      })).status).toBe(401);
+
+      const late = await held.finish();
+      expect(late.status).toBe(401);
+      expect(late.body.error).toMatch(/session ended/i);
+      const remaining = await call("/api/auth/pairing");
+      expect(remaining.body.pairings).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ label: "must not be minted after revocation" }),
+      ]));
+    } finally {
+      held.close();
+    }
   });
 
   it("exchanges a code exactly once, with a bearer token for native clients", async () => {

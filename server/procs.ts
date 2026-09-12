@@ -22,8 +22,8 @@ import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import { resolveCliSpawn, type ResolvedSpawn } from "./env-path.ts";
 
-export function resolveCli(cli: string, args: string[] = []): ResolvedSpawn {
-  return resolveCliSpawn(cli, args);
+export function resolveCli(cli: string, args: string[] = [], env?: NodeJS.ProcessEnv): ResolvedSpawn {
+  return resolveCliSpawn(cli, args, env);
 }
 
 /** Leave headroom below CreateProcess' 32,767 UTF-16 code-unit limit for

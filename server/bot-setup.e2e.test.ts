@@ -23,7 +23,7 @@ it("dispatches setup and canonical standing instructions through the real isolat
       return JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
     };
     const setup = await turn("/setup Help me track garden watering");
-    expect(setup.systemPrompt).toContain("Your job this conversation is to set yourself up");
+    expect(setup.systemPrompt).toContain("The user explicitly asked you to set yourself up");
     expect(setup.systemPrompt).toContain("propose_profile");
     expect(JSON.stringify(setup.prompt)).toContain("Set yourself up for this job: Help me track garden watering");
 
@@ -32,7 +32,7 @@ it("dispatches setup and canonical standing instructions through the real isolat
     const configured = await turn("What is your job?");
     expect(configured.systemPrompt).toContain("Only water the fixture garden after approval.");
     expect(configured.systemPrompt).not.toContain("UNAPPROVED MIRROR INSTRUCTIONS");
-    expect(configured.systemPrompt).not.toContain("Your job this conversation is to set yourself up");
+    expect(configured.systemPrompt).not.toContain("The user explicitly asked you to set yourself up");
     const drift = await api("GET", `/api/bots/${bot.id}/soul`);
     expect(drift.drift).toBe(true);
     expect(drift.fileText).toBe("UNAPPROVED MIRROR INSTRUCTIONS");

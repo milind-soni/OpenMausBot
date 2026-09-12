@@ -15,7 +15,7 @@ import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
-import { threadOpenerLabel } from "./SidebarThreadRow";
+import { threadByline } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -68,7 +68,7 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
   );
 }
 
-type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "busy" | "activity" | "unread" | "projectId" | "openedBy"> & { usage?: Task["usage"] };
+type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy"> & { usage?: Task["usage"] };
 
 /** The full picker searches both thread titles and their project names.
  * Legacy/orphaned project IDs remain visible under Ungrouped. */
@@ -274,7 +274,7 @@ function ConversationTaskPicker({
               </div>
             ) : visible.map((task, index) => {
               const active = task.threadId === threadId;
-              const opener = threadOpenerLabel(task);
+              const opener = threadByline(task);
               const heading = grouped?.find((group) => group.tasks[0]?.threadId === task.threadId)?.project;
               return (
                 <Fragment key={task.threadId}>

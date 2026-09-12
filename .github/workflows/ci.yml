@@ -24,10 +24,10 @@ jobs:
         # supported host platforms. POSIX-only process tests self-skip.
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # Windows' serial process fixtures already take ~14m on healthy runs;
-    # leave enough room for runner variance and the complete failure report.
+    # The full serial suite plus packaging/cleanup now reaches ~15m on
+    # healthy macOS/Linux runs; Windows needs a little more runner margin.
     # Keep every check and each test's own timeout unchanged.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 25 || 15 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 25 || 20 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10

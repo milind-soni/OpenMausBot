@@ -40,6 +40,54 @@ command without starting a turn.
 - A bot working inside a channel must be awaited through that channel.
 - `needs-user`, `failed`, and `stalled` are results, not successful settlement.
 
+## Surface gating: Works on = Off
+
+Off withholds both surfaces. No other path may hand that bot the built-in
+browser, and the turn must tell the model it has no screen rather than leave
+it to narrate a browser it cannot call.
+
+```sh
+node --experimental-strip-types scripts/control-omb.ts launch
+# second terminal, using the printed URL
+pnpm control:omb new-bot --name Orbit --url http://127.0.0.1:PORT
+pnpm control:omb send --bot BOT_ID --text "list my calendar events" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 40 --url http://127.0.0.1:PORT
+# the fixture's own API sets the destination the Works on picker sets
+curl -s -X PATCH "http://127.0.0.1:PORT/api/bots/BOT_ID" \
+  -H 'content-type: application/json' -d '{"computer":"off"}'
+pnpm control:omb send --bot BOT_ID --text "open a browser and check my calendar" --url http://127.0.0.1:PORT
+pnpm control:omb wait --bot BOT_ID --timeout 40 --url http://127.0.0.1:PORT
+```
+
+After each settled turn read `fake-claude-dump.json` in the fixture's printed
+`dataDir`: it holds the exact `systemPrompt` and `mcpConfig` that engine run
+received. The Auto turn must carry no Works-on sentence. The Off turn's prompt
+must say the setting is Off and that no computer and no built-in browser are
+mounted. Repeat through a channel — the room path resolves its surface
+separately — and mention a second Auto bot in the same room as the control.
+
+Proving the browser server's own absence from `mcpConfig` needs a fixture with
+a real browser engine; see [Live browser and profiles](browser-live.md). The
+dump above proves what the model was told, not what a native browser would do.
+
+### Last exercised
+
+2026-09-12, isolated macOS fixture on port 21008. A bot on Auto settled with
+`mcpConfig` servers `agents` and `ogb` and no Works-on sentence. The same bot
+patched to `computer: "off"` settled with the Works-on-Off sentence in its
+system prompt. A channel send to that bot carried the same sentence in the room
+prompt; an Auto bot mentioned in the same room did not. The fixture and its
+temporary data directory were removed with Ctrl-C afterwards.
+
+Maintainer review, 2026-09-12: repeated against an isolated fixture with the
+native agent-browser 0.37.0 and Chrome for Testing explicitly installed. The
+fake model's captured MCP configuration included `browser` for Auto and
+Browser-only direct turns, and omitted it for Off direct and Off room turns.
+All four turns settled and the fixture was closed. This proves tool mounting
+with an available engine; it does not claim a browser navigation or a real
+provider response. Only server names and bounded fixture messages were retained,
+not the capability tokens in the raw MCP configuration.
+
 ## Queued follow-up recovery
 
 Accepted bot and channel follow-ups are committed to the transcript database

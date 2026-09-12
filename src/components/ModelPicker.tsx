@@ -50,11 +50,13 @@ export function effortLabel(level: EffortLevel): string {
 export function EffortRow({
   bot,
   threadId,
+  updateBotDefault,
   className,
   label,
 }: {
   bot: Bot;
   threadId?: string;
+  updateBotDefault?: boolean;
   className?: string;
   label?: ReactNode;
 }) {
@@ -81,7 +83,7 @@ export function EffortRow({
                 ? "Send no effort level and let the engine decide"
                 : `Ask for ${effortLabel(level)} reasoning effort`
             }
-            onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, selection: { ...selection, effort: level } })}
+            onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } })}
             className={cn(
               "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
               selection.effort === level
@@ -257,6 +259,7 @@ export function ModelPicker({
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [scope, setScope] = useState<"bot" | "thread">("bot");
   const rootRef = useRef<HTMLDivElement>(null);
   const refreshingRef = useRef(false);
   const lastClaudeIdRef = useRef<string | null>(null);
@@ -363,6 +366,7 @@ export function ModelPicker({
       type: "setModel",
       botId: bot.id,
       threadId,
+      ...(threadId && scope === "bot" ? { updateBotDefault: true } : {}),
       selection: nextSelection,
     });
     setOpen(false);
@@ -489,6 +493,21 @@ export function ModelPicker({
           <ModelEngineRail instances={state.instances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} onSelect={selectRail} />
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {threadId && (
+              <div className="shrink-0 border-b border-hairline/40 px-3 py-2">
+                <div role="group" aria-label="Apply model changes to" className="flex gap-1">
+                  {(["bot", "thread"] as const).map((value) => (
+                    <button key={value} type="button" aria-pressed={scope === value} onClick={() => setScope(value)}
+                      className={cn("rounded-lg px-2 py-1 text-[12px]", scope === value ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60")}>
+                      {value === "bot" ? "This bot" : "Only this thread"}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[11px] text-ink-secondary">
+                  {scope === "bot" ? "This thread, groups, and new threads. Other existing threads keep their model." : "Other threads and groups keep their model."}
+                </p>
+              </div>
+            )}
             {railInstance ? (
               <>
                 <div className="shrink-0 px-4 pb-2 pt-3.5">
@@ -533,7 +552,7 @@ export function ModelPicker({
                     </p>
                   )}
                   <div className="mt-0.5 text-[11.5px] text-ink-secondary">
-                    {pane === "custom" ? t("model.localHint") : t(threadId ? "model.chooseThreadHint" : "model.chooseHint")}
+                    {pane === "custom" ? t("model.localHint") : t(threadId && scope === "thread" ? "model.chooseThreadHint" : "model.chooseHint")}
                   </div>
                 </div>
 
@@ -663,6 +682,7 @@ export function ModelPicker({
                   <EffortRow
                     bot={bot}
                     threadId={threadId}
+                    updateBotDefault={Boolean(threadId && scope === "bot")}
                     className="shrink-0 border-t border-hairline/40 px-4 py-3"
                     label={<span className="text-[12.5px] font-medium text-ink">Effort</span>}
                   />

@@ -265,6 +265,34 @@ export function readThread(threadId: string, legacyFile: string): ThreadRows {
   return importLegacy(threadId, legacyFile);
 }
 
+export interface ThreadTailRows extends ThreadRows {
+  /** `true` means older rows exist beyond this page; `false` means the SQL
+   * read returned the complete thread. Absent for a full legacy import.
+   * Both false and absent results can be cached as a full load. */
+  hasMore?: boolean;
+}
+
+/** The newest `limit` rows only, read at the SQL boundary — the fast path
+ * for a display page (startup hydrate, a fresh scrollback view) that never
+ * needs the rest of a long transcript. Falls back to a full legacy import
+ * on first touch, same as readThread(); that read is a one-time migration
+ * cost regardless of how much of the result the caller keeps. */
+export function readThreadTail(threadId: string, legacyFile: string, limit: number): ThreadTailRows {
+  const rows = db()
+    .prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT ?")
+    .all(threadId, limit + 1) as Array<{ json: string }>;
+  if (rows.length) {
+    const hasMore = rows.length > limit;
+    if (hasMore) rows.length = limit;
+    rows.reverse();
+    const state = db()
+      .prepare("SELECT active_leaf_id FROM thread_state WHERE thread_id = ?")
+      .get(threadId) as { active_leaf_id: string | null } | undefined;
+    return { messages: rows.map(rowToMessage), activeLeafId: state?.active_leaf_id ?? null, hasMore };
+  }
+  return importLegacy(threadId, legacyFile);
+}
+
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   let messages: Message[] = [];
   let activeLeafId: string | null = null;

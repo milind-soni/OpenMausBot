@@ -6,6 +6,7 @@
 // readable.
 
 import type { ApprovalMode } from "../shared/approval-mode.ts";
+import type { AskQuestion } from "../shared/ask-question.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -141,6 +142,10 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
+        /** A provider's structured ask (Claude's AskUserQuestion): the whole
+         * set of questions, each with its own options, so the card can offer
+         * them instead of an Allow/Deny a person cannot answer. */
+        questions?: AskQuestion[];
         approvalScope?: "local-computer";
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */
@@ -188,6 +193,13 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // carrying the provider-native continuation (e.g. a claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  /** The bot this turn belongs to. threadIds are meant to be unique per bot
+   * task, but a driver's process-level resource maps (permission-broker
+   * socket, CLI session) key off threadId alone — botId lets a driver namespace
+   * those resources so a threadId that unexpectedly coincides across two
+   * bots (e.g. a delegation still holding its own broker open) can never
+   * collide with another bot's live session or broker (see #1017). */
+  botId?: string;
   text: string;
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */
