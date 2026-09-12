@@ -3,6 +3,8 @@
 export function botListItemPointerIntent(
   type: string,
   insideRenameInput = false,
+  dragging = false,
 ): "select" | "ignore" {
+  if (dragging) return "ignore";
   return type === "click" && !insideRenameInput ? "select" : "ignore";
 }
