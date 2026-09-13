@@ -23,7 +23,8 @@ import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "boxAgent";
-const BOX_API = "https://ascii.dev/api/box/v1";
+// overridable so tests and a dev backend can be pointed at instead of the live provider
+const BOX_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
 
 const MODELS = {
   default: "claude-fable-5",
@@ -34,7 +35,26 @@ const MODELS = {
   ],
 };
 
-const providerFor = (model: string) => (model.startsWith("gpt") ? "codex" : "claude-code");
+/** The box runs every harness ascii.dev ships (claude-code, codex, pi, opencode,
+ * prime-agent, kimi). Which one a model id belongs to comes from the public
+ * catalog, `GET /api/provider-models` at the API root: an object keyed by
+ * harness, each with its `models`. A bot that arrives here from another engine
+ * carries that engine's model id, so this is what lets it keep its model. */
+let catalog: Record<string, { models?: Array<{ id?: string }> }> | null = null;
+async function loadCatalog(): Promise<void> {
+  const root = BOX_API.replace(/\/api\/box\/v1\/?$/, "");
+  catalog = await fetch(`${root}/api/provider-models`, { signal: AbortSignal.timeout(15_000) })
+    .then((res) => (res.ok ? res.json() : null))
+    .catch(() => null) as typeof catalog;
+}
+const providerFor = (model: string): { provider: string; model: string } => {
+  const slash = model.indexOf("/");
+  if (slash > 0 && catalog?.[model.slice(0, slash)]) return { provider: model.slice(0, slash), model: model.slice(slash + 1) };
+  for (const [provider, harness] of Object.entries(catalog ?? {})) {
+    if (harness.models?.some((m) => m?.id === model)) return { provider, model };
+  }
+  return { provider: model.startsWith("gpt") ? "codex" : "claude-code", model };
+};
 
 export interface BoxAgentConfig {
   pollMs: number;
@@ -103,9 +123,10 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
         .filter((s) => s !== undefined)
         .join("\n");
 
+      if (!catalog) await loadCatalog();
       const started: any = await api(`/boxes/${boxId}/prompt`, {
         method: "POST",
-        body: JSON.stringify({ provider: providerFor(model), model, prompt }),
+        body: JSON.stringify({ ...providerFor(model), prompt }),
       });
       appendNative(threadId, { dir: "out", source: "box.prompt", msg: { model, prompt, response: started } });
       // real shape (2026-08): {type:"prompt.queued", promptId, promptRun:{id,…},
@@ -152,6 +173,10 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
             const events: any = await api(`/boxes/${boxId}/events`).catch(() => null);
             const list: any[] = events?.events ?? events?.items ?? [];
             for (const ev of list) {
+              // The stream is the whole conversation from its start; `taskId`
+              // names the prompt run an event belongs to. Earlier turns are
+              // history, not this answer.
+              if (promptId && ev.taskId && String(ev.taskId) !== promptId) continue;
               const id = String(ev.id ?? ev.eventId ?? JSON.stringify(ev).slice(0, 120));
               if (seen.has(id)) continue;
               seen.add(id);

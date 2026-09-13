@@ -133,7 +133,6 @@ import {
   customMcpServers,
 } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
-import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
 import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
@@ -5092,13 +5091,17 @@ async function startTurn(
   }
   const task = store.taskByThread(bot.id, threadId);
   if (!task) throw Object.assign(new Error("no such task"), { status: 404 });
-  const instance = opts?.runOn === "cloud"
+  // A turn on the cloud computer runs ON the cloud computer. The Box runs the
+  // bot's own harness there, with the computer tools built in, so nothing on
+  // this machine relays clicks and screenshots any more.
+  const onBox = opts?.runOn === "cloud" || turnProvider(bot, opts?.runOn) === "box" && bot.computer === "cloud";
+  const instance = onBox
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : registry.get(bot.modelSelection.instanceId);
   if (!instance) {
     throw Object.assign(
       new Error(
-        opts?.runOn === "cloud"
+        onBox
           ? "the Cloud VM runner is unavailable — configure Box in App Settings"
           : `provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`,
       ),
@@ -16051,9 +16054,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (m[2] === "exec") {
         const body = await readBody(req);
         boxCommand = String(body?.command ?? "");
-        if (boxCommand.length > MAX_REMOTE_COMMAND_LENGTH) {
+        if (boxCommand.length > box.MAX_REMOTE_COMMAND_LENGTH) {
           return json(res, 400, {
-            error: `command is too long (maximum ${MAX_REMOTE_COMMAND_LENGTH} characters)`,
+            error: `command is too long (maximum ${box.MAX_REMOTE_COMMAND_LENGTH} characters)`,
           });
         }
       }

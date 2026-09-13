@@ -6,8 +6,7 @@
 // Covered: server up + SSE hello, instance snapshots, a claude turn with a
 // streamed reply, the permission broker (allow AND deny), interrupt, a
 // codex turn, and — with --with-box + OMB_E2E_BOX_TOKEN — box provisioning,
-// a turn that runs ON the box (boxAgent), the computer MCP tools over the
-// claude driver, and a panel screenshot. Box computers are put to sleep at
+// a turn that runs ON the box (boxAgent), and a panel screenshot. Box computers are put to sleep at
 // the end. Test bots are deleted unless --keep-bots.
 //
 // Exits non-zero on the first hard failure; soft notes print as "skip".
@@ -254,21 +253,6 @@ async function main() {
       await api(`/api/bots/${boxBot.id}/computer/sleep`, { method: "POST" }).catch(() => {});
       log("  ✓ box asleep (billing paused)");
 
-      // computer tools through the claude driver (computer-proxy MCP)
-      if (byKind.claudeAgent?.snapshot.state === "available") {
-        const handy = await makeBot("E2E Claude+Box", "claude", byKind.claudeAgent.models.default);
-        created.push(handy.id);
-        await api(`/api/bots/${handy.id}/computer/provision`, { method: "POST" });
-        await send(
-          handy.id,
-          `Using your cloud computer's computer_exec tool, run: echo ${marker("box-tool")} — then tell me the output. Do not ask before acting.`,
-        );
-        const settled = await waitTurnDone(handy.id, 420_000);
-        const sawTool = settled.messages.some((m) => m.kind === "activity" && /computer|mcp/i.test(m.tool?.name ?? ""));
-        if (!sawTool) fail("claude turn never touched the computer tools");
-        log("  ✓ claude used the computer tools on its box");
-        await api(`/api/bots/${handy.id}/computer/sleep`, { method: "POST" }).catch(() => {});
-      }
     }
   } catch (e) {
     // keep the bots (and their native/event NDJSON logs) for postmortem

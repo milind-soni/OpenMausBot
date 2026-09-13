@@ -99,20 +99,6 @@ describe("buildMcpServers", () => {
     });
   });
 
-  it("wraps the cloud computer in the computer-proxy spawn contract", () => {
-    const servers = buildMcpServers({
-      threadId: "t",
-      text: "hi",
-      integrations: {
-        computer: { kind: "box", boxId: "b1", token: "tok", control: { url: "http://c", token: "ct" } },
-      },
-    });
-    expect(servers?.computer).toMatchObject({
-      command: process.execPath,
-      args: [expect.stringContaining("computer-proxy")],
-      env: expect.objectContaining({ OGB_BOX_ID: "b1", OGB_BOX_TOKEN: "tok" }),
-    });
-  });
 
   it("passes a local computer (Cua/VPS) through as a direct stdio server", () => {
     const servers = buildMcpServers({
@@ -476,11 +462,6 @@ describe("PiDriver turns (fake CLI)", () => {
     const servers = mcpRow!.mcpConfig!.mcpServers!;
     // composio passes through verbatim as a stdio server
     expect(servers.composio).toMatchObject({ command: "node", args: ["connector-proxy.js"], env: { COMPOSIO_KEY: "ck" } });
-    // the cloud computer wraps in the computer-proxy spawn contract
-    expect(servers.computer.args[0]).toContain("computer-proxy");
-    expect(servers.computer.env).toMatchObject({ OGB_BOX_ID: "b1", OGB_BOX_TOKEN: "bt" });
-    // the box token lives in the 0600 config file, never in argv
-    expect(JSON.stringify(mcpRow!.argv)).not.toContain("bt");
   });
 
   it("rides the toolUse auto-continue and only settles on the final end_turn", async () => {

@@ -692,28 +692,6 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(seen.env.OMB_VM_TOKEN).toBe("vm-secret");
   });
 
-  it("mounts the remote computer proxy without placing its token in argv", async () => {
-    await create();
-    const dump = join(scratch, "remote-computer.json");
-    process.env.FAKE_CODEX_DUMP = dump;
-
-    await instance.adapter.sendTurn({
-      threadId: "t-remote-computer",
-      text: "take a screenshot",
-      integrations: {
-        computer: { boxId: "box-123", token: "remote-secret" },
-      },
-    });
-    await recorder.until((event) => event.type === "turn.completed");
-
-    const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.argv.join(" ")).toContain("mcp_servers.computer.command");
-    expect(seen.argv.join(" ")).toContain("computer-proxy");
-    expect(seen.argv.join(" ")).toContain("OGB_BOX_TOKEN");
-    expect(seen.argv.join(" ")).not.toContain("remote-secret");
-    expect(seen.env.OGB_BOX_ID).toBe("box-123");
-    expect(seen.env.OGB_BOX_TOKEN).toBe("remote-secret");
-  });
 
   it("sends the local provider when the picker id is custom-encoded", async () => {
     await create({ environment: { UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret" } });

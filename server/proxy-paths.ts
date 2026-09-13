@@ -35,7 +35,6 @@ export function resolveProxy(relative: string): string {
  * the check that would have caught the 0.1.24 breakage. */
 export const SPAWNED_PROXIES = {
   browser: resolveProxy("browser-proxy"),
-  computer: resolveProxy("computer-proxy"),
   localComputer: resolveProxy("local-computer-proxy"),
   permission: resolveProxy("permission-proxy"),
   containerMcp: resolveProxy("container-mcp"),

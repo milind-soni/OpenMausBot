@@ -44,17 +44,11 @@ import type {
   TurnImageInput,
 } from "../../contracts.ts";
 import { newEventId, newId } from "../../contracts.ts";
-import { computerProxyEnv } from "../../container-computer.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
-// Resolved from the server root, never relative to this file: bundling inlines
-// this module two directories up, so the `".."` pair here would climb past the
-// packaged server dir entirely. See server/proxy-paths.ts.
-const COMPUTER_PROXY_PATH = SPAWNED_PROXIES.computer;
 import { appendNative } from "../native.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
-import { SPAWNED_PROXIES } from "../../proxy-paths.ts";
 
 export interface AcpConfig {
   cli: string;
@@ -412,18 +406,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (browser) {
           servers.push({ name: "browser", command: browser.command, args: browser.args, env: acpEnv(browser.env) });
         }
-        // The bot's computer, mounted exactly like the Claude driver does.
-        // Cloud boxes use the REST adapter; host and sandbox Cua connections
-        // expose Cua Driver's official MCP server directly.
-        const computer = turn.integrations?.computer;
-        if (computer) {
-          servers.push({
-            name: "computer",
-            command: process.execPath,
-            args: [COMPUTER_PROXY_PATH],
-            env: acpEnv({ ELECTRON_RUN_AS_NODE: "1", ...computerProxyEnv(computer) }),
-          });
-        } else if (turn.integrations?.localComputer) {
+        // The bot's computer, mounted exactly like the Claude driver does:
+        // host and sandbox Cua connections expose Cua Driver's own MCP server.
+        // (A cloud box is not mounted here at all: a cloud turn runs ON the box.)
+        if (turn.integrations?.localComputer) {
           const local = turn.integrations.localComputer;
           servers.push({
             name: "computer",

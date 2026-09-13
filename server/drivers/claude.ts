@@ -30,7 +30,6 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
 } from "../contracts.ts";
-import { computerProxyEnv } from "../container-computer.ts";
 import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
@@ -433,7 +432,6 @@ export function readClaudeModelCatalog(env: Record<string, string | undefined> =
 // Resolved from the server root, never relative to this file: bundling inlines
 // this module into an entry one directory up, so a `".."` here would climb too
 // far. See server/proxy-paths.ts.
-const PROXY_PATH = SPAWNED_PROXIES.computer;
 const PERM_PROXY_PATH = SPAWNED_PROXIES.permission;
 const DWEB_PROXY_PATH = SPAWNED_PROXIES.dweb;
 // in the packaged app process.execPath is the Electron binary — this env
@@ -1096,14 +1094,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         mcpServers.composio = { ...turn.integrations.composio };
         allowed.push("mcp__composio");
       }
-      if (turn.integrations?.computer) {
-        mcpServers.computer = {
-          command: process.execPath,
-          args: [PROXY_PATH],
-          env: { ...NODE_ENV_FLAG, ...computerProxyEnv(turn.integrations.computer) },
-        };
-        allowed.push("mcp__computer");
-      } else if (turn.integrations?.localComputer) {
+      if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
         mcpServers.computer = {
           command: local.command,

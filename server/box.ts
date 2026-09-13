@@ -23,12 +23,28 @@ import {
   retireDeletedBoxCreate,
   type BoxCreateRequest,
 } from "./box-create-idempotency.ts";
-import {
-  ensureRemoteCuaCommand,
-  isolatedRemoteCommand,
-  MAX_REMOTE_COMMAND_LENGTH,
-  remoteComputerBootstrapCommand,
-} from "./remote-computer.ts";
+
+const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
+
+export const MAX_REMOTE_COMMAND_LENGTH = 4_000;
+
+/** Run an owner-supplied console command without inheriting provider or
+ * account credentials from the box's environment. */
+export function isolatedRemoteCommand(command: string): string {
+  return [
+    "exec env -i",
+    'HOME="$HOME"',
+    'USER="${USER:-$(id -un)}"',
+    'LOGNAME="${LOGNAME:-${USER:-$(id -un)}}"',
+    'PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"',
+    'DISPLAY="${DISPLAY:-:0}"',
+    'XAUTHORITY="${XAUTHORITY:-$HOME/.Xauthority}"',
+    'XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"',
+    'DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}"',
+    "/bin/bash -c",
+    shellQuote(command),
+  ].join(" ");
+}
 
 // overridable so tests can point at a stub instead of the live provider
 const BOX_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
@@ -846,7 +862,7 @@ export async function boxStatus(cfg: AppConfig, botId: string) {
  * idempotent bootstrap (screenshot tooling for the computer-use bridge +
  * a tmux welcome), and mint a fresh desktop URL.
  */
-export async function provisionBox(cfg: AppConfig, botId: string, botName: string) {
+export async function provisionBox(cfg: AppConfig, botId: string, _botName: string) {
   cfg = snapshotBoxConfig(cfg);
   if (!boxConfigured(cfg)) {
     throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
@@ -877,20 +893,8 @@ export async function provisionBox(cfg: AppConfig, botId: string, botName: strin
     const ready = await waitReady(cfg, box.id);
     if (!ready) throw new Error("box did not become ready within 90s — retry in a minute");
 
-    // Install the exact Cua Driver executable in the background, keep its
-    // daemon private to the VM, and retain X11 tooling as a degraded fallback.
-    const bootstrap = remoteComputerBootstrapCommand(botName);
-    let boot;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      boot = await runCommand(cfg, box.id, bootstrap);
-      if (boot.ok || boot.exitCode !== null) break;
-      await new Promise((r) => setTimeout(r, 3000));
-    }
-    if (!boot?.ok) {
-      const detail = boot?.stderr?.slice(0, 200) || (boot?.exitCode != null ? `exit ${boot.exitCode}` : "no response");
-      throw new Error(`box setup failed: ${detail}`);
-    }
-
+    // Nothing to install: every box ships its own computer-use driver and
+    // registers it with every harness it runs.
     const joinUrl = await mintDesktopUrl(cfg, box.id);
     if (!joinUrl) throw new Error("box desktop link could not be created");
     return { boxId: box.id, machineName: vmName, reused: !created, state: ready.state, joinUrl };
@@ -935,9 +939,8 @@ export async function joinBox(cfg: AppConfig, botId: string) {
   if (!box) throw new Error("no computer yet — provision it first");
   const ready = await waitReady(cfg, box.id);
   if (!ready) throw new Error("the box did not wake in time — try again");
-  // Provider archive/resume preserves disk but not processes. Reattach the
-  // driver daemon before handing the desktop back to the user.
-  await runCommand(cfg, box.id, ensureRemoteCuaCommand(), { timeoutMs: 15_000 }).catch(() => null);
+  // Provider archive/resume preserves disk but not processes; the box brings
+  // its own driver daemon back up, so there is nothing to reattach here.
   return { joinUrl: await mintDesktopUrl(cfg, box.id), state: ready.state ?? null };
 }
 
