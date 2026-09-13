@@ -9,6 +9,7 @@ import {
   Check,
   ChevronRight,
   ClipboardCopy,
+  Columns3,
   Copy,
   Crown,
   FolderMinus,
@@ -2081,6 +2082,19 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             )}
           </button>
           <button
+            onClick={() => dispatch({ type: "showTaskBoard" })}
+            className={cn(
+              "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+              density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+              state.activeView === "task-board" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+            )}
+            aria-label={density === "icons" ? t("sidebar.nav.taskBoard") : undefined}
+            title={density === "icons" ? t("sidebar.nav.taskBoard") : undefined}
+          >
+            <Columns3 size={20} className={state.activeView === "task-board" ? "text-accent" : "text-ink-secondary"} />
+            <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>{t("sidebar.nav.taskBoard")}</span>
+          </button>
+          <button
             onClick={() => dispatch({ type: "togglePlugins", open: true })}
             className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
             aria-label={density === "icons" ? t("sidebar.nav.connectedApps") : undefined}
@@ -2118,6 +2132,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   (run) => ["failed", "missed"].includes(run.status) && !run.seenAt,
                 ),
                 onSelect: () => dispatch({ type: "showRoutines" }),
+              },
+              {
+                key: "task-board",
+                label: t("sidebar.nav.taskBoard"),
+                icon: <Columns3 size={18} />,
+                active: state.activeView === "task-board",
+                onSelect: () => dispatch({ type: "showTaskBoard" }),
               },
               {
                 key: "plugins",
