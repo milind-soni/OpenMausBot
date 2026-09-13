@@ -16,6 +16,19 @@ async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, fil
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe("addressed room request tree", () => {
+  it("allows bounded same-room discussion but never recursive discussion or another-room participants", () => fixture(async (engine, hooks) => {
+    const discussion = engine.enqueue(addr("A"), "turn", undefined, addr("A"), "debate", "Evaluate the plan", false, false, "", ["reviewer", "qa"]).node;
+    expect(discussion.kind).toBe("discussion");
+    expect(() => engine.enqueue(addr("A"), "other", undefined, addr("B"), "bad", "Evaluate", false, false, "", ["qa"])).toThrow("same conversation");
+    discussion.status = "running";
+    expect(() => engine.enqueue(addr("A"), "t", discussion.id, addr("B"), "recurse", "Again")).toThrow("cannot delegate");
+    discussion.status = "queued";
+    engine.sourceSettled("turn", true);
+    for (let i = 0; i < 5; i++) { engine.tick(); await flush(); }
+    expect(hooks.run).toHaveBeenCalledTimes(2);
+    expect(engine.nodes.get("turn")?.executions).toBe(3);
+  }));
+
   it("treats group-less tasks as bounded work, deduplicates pinned threads and rejects direct or mixed cycles", () => fixture(engine => {
     const source = { botId: "clive", threadId: "clive-chat" };
     const target = { botId: "lead", threadId: "lead-task" };
@@ -67,6 +80,9 @@ describe("addressed room request tree", () => {
     engine.enqueue(addr("C"), "cancel", undefined, addr("D"), "work", "cancel work");
     updates.length = 0; engine.cancelRoom("C");
     expect(updates.flat()).toEqual([{ id: "D", active: false }, { id: "C", active: false }]);
+    updates.length = 0;
+    engine.cancelTree(engine.nodes.get("cancel")!, "Late provider rejection", "failed");
+    expect(updates).toEqual([]);
   }));
   it("splits responsibility between existing members who send their own downstream work and return to the chair", () => fixture(async (engine, hooks) => {
     const member = (id: string) => ({ ...addr("A"), botId: id });

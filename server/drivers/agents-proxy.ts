@@ -383,6 +383,15 @@ const ROUTINE_FIELDS_SCHEMA = {
 
 const TOOLS = [
   {
+    name: "discuss_room",
+    description: "Convene a bounded discussion in your CURRENT group before deciding or delegating. Use currentRoom.members from list_room_targets to select 1-4 other members. Give a concrete proposal and ask them to challenge tradeoffs. Members speak in order, seeing preceding opinions; you resume afterward to accept/reject their suggestions, resolve disagreements and state your decision. Finish your turn after calling; never poll. Only after you resume may you send the resulting brief downstream. Reuse request_key for identical retries.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      member_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, uniqueItems: true },
+      topic: { type: "string", minLength: 1, maxLength: 4000 },
+      request_key: { type: "string" },
+    }, required: ["member_ids", "topic", "request_key"] },
+  },
+  {
     name: "list_shared_computers",
     description: "List online desktop computers explicitly shared with this workspace, and their allowed folders/capabilities. These are the user's computers, not this server. An offline or unshared computer cannot be accessed. Folder paths use opaque folder IDs and relative paths.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -843,12 +852,15 @@ const SHAREABLE_TOOLS = SHARED_COMPUTERS_ENABLED
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
-const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
+const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots", "discuss_room"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const COORDINATING = process.env.OMB_ROOM_TURN === "1";
 const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
-const AVAILABLE_TOOLS = COORDINATING
-  ? SHAREABLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
+const AVAILABLE_TOOLS = process.env.OMB_ROOM_DISCUSSION === "1"
+  ? SHAREABLE_TOOLS.filter(tool => tool.name === "list_room_targets")
+  : COORDINATING
+  ? SHAREABLE_TOOLS.filter(tool => (!ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION)) &&
+      (tool.name !== "discuss_room" || process.env.OMB_ROOM_DISCUSSION_ENABLED === "1"))
     .map(tool => tool.name === "start_thread" ? {
       ...tool,
       description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
@@ -964,6 +976,13 @@ function recallSpeaker(hit: Json): string {
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "discuss_room") {
+    const r = await api("/api/internal/discuss-room", { method: "POST", body: JSON.stringify({
+      memberIds: args.member_ids, topic: args.topic, requestKey: args.request_key,
+    }) });
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
+
   if (name === "list_room_targets") {
     const r = await api("/api/internal/room-targets");
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };

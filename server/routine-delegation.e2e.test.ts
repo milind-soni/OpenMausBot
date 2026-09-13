@@ -169,21 +169,24 @@ describe("routine delegation through the isolated harness", () => {
     unlinkSync(file(run.threadId, "json"));
     await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "A new request: ask the peer for a fresh report." });
     const launched = await dump(run.threadId);
+    expect(launched.mcpConfig.mcpServers.agents.env.OMB_ROOM_TURN).toBe("1");
     const coordinated = await api("POST", "/api/internal/coordinate-bots", {
-      botIds: [peer.id], requestKey: "fresh-report", message: "Produce a fresh fixture report.",
+      botIds: [peer.id], requestKey: "fresh-report", message: "Produce a fresh report for this new user request.",
     }, launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN);
+    expect(coordinated.errors).toEqual([]);
     expect(coordinated.accepted).toHaveLength(1);
     const requestId = coordinated.accepted[0].requestId;
-    const handoff = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8"))
-      .find((node: any) => node.id === requestId);
+    const nodes = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8")) as any[];
+    const recipient = nodes().find(node => node.id === requestId);
     finish(run.threadId);
-    await dump(handoff().threadId);
-    finish(handoff().threadId);
+    await dump(recipient.threadId);
+    finish(recipient.threadId);
     await expect.poll(async () => (await messages(run.threadId)).some(
-      (message) => message.from?.botId === peer.id && message.roomRequest?.id === requestId && message.roomRequest.phase === "result",
+      message => message.from?.botId === peer.id && message.roomRequest?.id === requestId && message.roomRequest.phase === "result" && message.tool?.ok,
     ), { timeout: 20_000 }).toBe(true);
-    await control(["wait", "--bot", source.id, "--task", run.threadId]);
-    expect(handoff().status).toBe("completed");
+    await expect.poll(() => nodes().find(node => !node.parentId && node.threadId === run.threadId)?.status, { timeout: 20_000 }).toBe("completed");
+    expect(nodes().find(node => node.id === requestId).status).toBe("completed");
+    expect((await dump(run.threadId)).systemPrompt).toContain("Your downstream room requests have settled");
     expect(await runState(run.id)).toMatchObject({ status: "completed", finishedAt: finished.finishedAt, output: finished.output });
     evidence.push({ reusedCompletedExecution: true, transcript: await messages(run.threadId) });
   }, 45_000);

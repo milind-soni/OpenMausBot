@@ -11,7 +11,8 @@ const nodeSchema = z.object({
   result: z.string().default(""), reported: z.boolean().default(false),
   executions: z.number().int().nonnegative().default(0),
   approvalGranted: z.boolean().default(false),
-  kind: z.enum(["work", "assignment"]).default("work"),
+  kind: z.enum(["work", "discussion", "assignment"]).default("work"),
+  participants: z.array(z.string()).max(4).default([]),
 });
 export type RoomHandoff = z.infer<typeof nodeSchema>;
 export type RoomAddress = Pick<RoomHandoff, "groupId" | "threadId" | "botId">;
@@ -75,7 +76,7 @@ export class RoomHandoffs {
 
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
     target: RoomAddress, key: string, text: string, approvalGranted = false,
-    rework = false, sourceText = ""): { node: RoomHandoff; duplicate: boolean } {
+    rework = false, sourceText = "", discussion?: string[]): { node: RoomHandoff; duplicate: boolean } {
     if (this.loadError) throw new Error(this.loadError);
     let parent = parentId ? this.nodes.get(parentId) : this.nodes.get(generation);
     if (parentId && (!parent || parent.status !== "running")) throw new Error("The originating room task is no longer running");
@@ -83,19 +84,22 @@ export class RoomHandoffs {
       throw new Error("The handoff belongs to a different room speaker");
     }
     const fresh = !parent;
-    parent ??= { ...source, id: generation, rootId: generation, key: "root", text: sourceText.slice(0, 12_000), createdAt: this.now(), status: "source", result: "", reported: true, executions: 0, approvalGranted: false, kind: "work" };
-    const kind = target.groupId && target.groupId === source.groupId ? "assignment" : "work";
+    parent ??= { ...source, id: generation, rootId: generation, key: "root", text: sourceText.slice(0, 12_000), createdAt: this.now(), status: "source", result: "", reported: true, executions: 0, approvalGranted: false, kind: "work", participants: [] };
+    if (parent.kind === "discussion") throw new Error("Discussion participants cannot delegate or start another discussion");
+    const kind = discussion ? "discussion" : target.groupId && target.groupId === source.groupId ? "assignment" : "work";
+    if (discussion && (!source.groupId || target.groupId !== source.groupId || target.threadId !== source.threadId || target.botId !== source.botId ||
+      !discussion.length || discussion.length > 4 || new Set(discussion).size !== discussion.length || discussion.includes(source.botId))) throw new Error("Discussion must name 1-4 other members of this same conversation");
     const path = this.path(parent);
-    if (path.some(n => n.botId === target.botId && (!n.groupId || !target.groupId || n.groupId === target.groupId))) {
+    if (!discussion && path.some(n => n.botId === target.botId && (!n.groupId || !target.groupId || n.groupId === target.groupId))) {
       throw new Error("Cannot assign work back to an ancestor; results return automatically");
     }
     const existing = this.children(parent.id).find(n => n.key === key);
     if (existing) {
       if (existing.groupId !== target.groupId || existing.botId !== target.botId || existing.text !== text ||
-        existing.kind !== kind) throw new Error("request_key was already used for different work");
+        existing.kind !== kind || JSON.stringify(existing.participants) !== JSON.stringify(discussion ?? [])) throw new Error("request_key was already used for different work");
       return { node: existing, duplicate: true };
     }
-    if (!rework && this.children(parent.id).some(n => n.kind === kind &&
+    if (!discussion && !rework && this.children(parent.id).some(n => n.kind === kind &&
       n.groupId === target.groupId && n.botId === target.botId && n.status === "completed")) {
       throw new Error("This agent already completed your assignment. Do not send acknowledgements or approvals as new work. Finish with your decision; results return automatically. Only use rework=true for concrete additional work.");
     }
@@ -117,7 +121,7 @@ export class RoomHandoffs {
     }
     const node: RoomHandoff = { ...target, id: randomUUID(), rootId: parent.rootId, parentId: parent.id,
       key, text, createdAt: this.now(), status: "queued", result: "", reported: false, executions: 0, approvalGranted,
-      kind };
+      kind, participants: discussion ?? [] };
     const problem = this.hooks.validate(node, parent);
     if (problem) throw new Error(problem);
     if (fresh) this.nodes.set(parent.id, parent);
@@ -138,8 +142,8 @@ export class RoomHandoffs {
     if (!terminal(node)) {
       node.status = status; node.result = reason;
       this.controllers.get(node.id)?.abort();
+      this.publish(node);
     }
-    this.publish(node);
   }
   cancelRoom(groupId: string, threadId?: string) {
     for (const n of this.nodes.values()) {
@@ -178,7 +182,7 @@ export class RoomHandoffs {
       if (parent && terminal(parent)) { this.cancelTree(n, "Originating request has ended"); continue; }
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);
-      const executionCost = 1;
+      const executionCost = n.kind === "discussion" ? n.participants.length : 1;
       if (root.executions + executionCost > ROOM_HANDOFF_LIMITS.executions) { this.cancelTree(n, "Room execution budget exhausted", "failed"); continue; }
       const resumed = n.status === "resume";
       const childCount = this.children(n.id).length;

@@ -1,0 +1,1819 @@
+{
+  "ok": true,
+  "verifiedAt": "2026-09-13T05:09:17.638Z",
+  "live": false,
+  "model": "scripted",
+  "upstreamBase": "536b7893549924c3e2b71eb2e9564ea2986a146a",
+  "rooms": [
+    {
+      "id": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "name": "経営会議",
+      "memberIds": [
+        "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+        "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+        "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0"
+      ],
+      "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者ミナトは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し2巡行う。1巡目の懸念に責任者が修正案を出し、2巡目で両名がその修正案に回答する。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:CSV出力の初期対象。仮案は全項目・全件出力。アオイは早期公開のため対象限定、ユイは営業に必要な項目を要求。2巡目で具体的な妥協案を再検討して決定する。",
+      "defaultResponder": {
+        "kind": "member",
+        "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4"
+      },
+      "section": null,
+      "directMessage": false,
+      "working": false,
+      "busyBotId": null,
+      "activeTaskId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+      "tasks": [
+        {
+          "taskId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+          "title": "New task",
+          "createdAt": 1789276130799,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "name": "開発部",
+      "memberIds": [
+        "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+        "6827e882-47f5-4a8d-8745-ce934785b6e3",
+        "f99d3afb-6ff7-4496-a2dc-874981866984"
+      ],
+      "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者レンは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し2巡行う。1巡目の懸念に責任者が修正案を出し、2巡目で両名がその修正案に回答する。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:CSV設計と受入条件。仮案は直接書込み・件数の事前確認のみ。リツは処理の簡素さ、マコは途中失敗と件数変化の危険を検討。2巡目で修正案を相互確認して決定する。",
+      "defaultResponder": {
+        "kind": "member",
+        "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409"
+      },
+      "section": null,
+      "directMessage": false,
+      "working": false,
+      "busyBotId": null,
+      "activeTaskId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+      "tasks": [
+        {
+          "taskId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+          "title": "New task",
+          "createdAt": 1789276131886,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+      "name": "営業部",
+      "memberIds": [
+        "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+        "b0e939c9-6e4a-4091-be93-1cac33fdf159",
+        "77ead2b6-0b20-4544-b814-5c58061969bf"
+      ],
+      "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者コウは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。",
+      "defaultResponder": {
+        "kind": "member",
+        "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46"
+      },
+      "section": null,
+      "directMessage": false,
+      "working": false,
+      "busyBotId": null,
+      "activeTaskId": "008c7257-f458-4675-99bb-c523796ce62c",
+      "tasks": [
+        {
+          "taskId": "008c7257-f458-4675-99bb-c523796ce62c",
+          "title": "New task",
+          "createdAt": 1789276133053,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+      "name": "実装チーム",
+      "memberIds": [
+        "bc0c5e31-edad-4117-ae17-fa05038c9728",
+        "84ae3b90-3deb-4132-adb1-435d3a908fa7",
+        "8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1"
+      ],
+      "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者ソラは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:出力形式とサンプルを議論。決定後ヒナに架空データ3行のCSV本文、ナギにそのCSVのカンマ・引用符の検査表を作成依頼。ナギはヒナの成果を読んで検査する。",
+      "defaultResponder": {
+        "kind": "member",
+        "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728"
+      },
+      "section": null,
+      "directMessage": false,
+      "working": false,
+      "busyBotId": null,
+      "activeTaskId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+      "tasks": [
+        {
+          "taskId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+          "title": "New task",
+          "createdAt": 1789276134287,
+          "active": true
+        }
+      ]
+    },
+    {
+      "id": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+      "name": "QAチーム",
+      "memberIds": [
+        "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+        "8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+        "542deb27-1773-4b70-9aae-fda895d8c390"
+      ],
+      "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者レオは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:受入試験を議論。決定後メイに0件・上限ちょうど・上限超過の3ケース表、ハルに生成中の件数変化・途中失敗・権限なしの3ケース表を作成依頼。入力条件と期待結果を必ず記載する。",
+      "defaultResponder": {
+        "kind": "member",
+        "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2"
+      },
+      "section": null,
+      "directMessage": false,
+      "working": false,
+      "busyBotId": null,
+      "activeTaskId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+      "tasks": [
+        {
+          "taskId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+          "title": "New task",
+          "createdAt": 1789276135775,
+          "active": true
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "groupId": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "threadId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+      "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+      "id": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "key": "root",
+      "text": "@ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案を再検討して方針を決めてください。その後、アオイに開発部レンへの依頼と結果確認、ユイに営業部コウへの依頼と結果確認をcoordinate_botsで分担。開発部でも2巡議論の後、リツが実装チームのソラへ、マコがQAチームのレオへ依頼します。最下層と営業部は1巡議論後に各既存メンバーへ成果物作成を分担。計画だけで終わらず架空CSVサンプル・検査表・FAQ・チェックリストを作成。結果を各担当が確認して責任者へ戻し、最後に経営会議で統合してください。役割・経路は各グループの掲示にあります。実データやコード変更は不要です。",
+      "createdAt": 1789276136274,
+      "status": "completed",
+      "result": "経営会議統合報告。両担当の成果を確認しました。",
+      "reported": true,
+      "executions": 44,
+      "approvalGranted": false,
+      "kind": "work",
+      "participants": []
+    },
+    {
+      "groupId": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "threadId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+      "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+      "id": "c8ef82db-887e-45b5-9f9c-1493b4fc78ff",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "key": "round-1",
+      "text": "経営会議第1巡。修正案を検討",
+      "createdAt": 1789276136274,
+      "status": "completed",
+      "result": "アオイ: アオイ懸念。仮案に条件不足があるため修正を提案します。\n\nユイ: ユイ懸念。仮案に条件不足があるため修正を提案します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+        "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0"
+      ]
+    },
+    {
+      "groupId": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "threadId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+      "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+      "id": "f44fe827-b02b-4acf-8225-17bff3dccef0",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "key": "round-2",
+      "text": "経営会議第2巡。修正案を検討",
+      "createdAt": 1789276138271,
+      "status": "completed",
+      "result": "アオイ: アオイ再検討。修正により懸念が解消しました。境界条件も追加して合意します。\n\nユイ: ユイ再検討。修正により懸念が解消しました。境界条件も追加して合意します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+        "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0"
+      ]
+    },
+    {
+      "groupId": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "threadId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+      "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+      "id": "da5f5ded-a257-4d6a-b3f7-941ba2627e1d",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "key": "owner-451ee3d3-ac10-41fd-a2f1-6e712e7aeef6:451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+      "text": "経営会議決定に基づく担当業務。実行してください",
+      "createdAt": 1789276140157,
+      "status": "completed",
+      "result": "アオイ成果。下層の結果をレビューして責任者へ報告します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "threadId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+      "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+      "id": "13026e88-db5a-4604-8cb6-3458537578b7",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "key": "owner-dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0:dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+      "text": "経営会議決定に基づく担当業務。実行してください",
+      "createdAt": 1789276140167,
+      "status": "completed",
+      "result": "ユイ成果。下層の結果をレビューして責任者へ報告します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "threadId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+      "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+      "id": "dcbb193d-a7ad-4373-a785-d64c83e647cd",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "da5f5ded-a257-4d6a-b3f7-941ba2627e1d",
+      "key": "to-1:1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+      "text": "経営会議決定を具体化した依頼。CSV設計と受入条件。仮案は直接書込み・件数の事前確認のみ。リツは処理の簡素さ、マコは途中失敗と件数変化の危険を検討。2巡目で修正案を相互確認して決定する。",
+      "createdAt": 1789276141281,
+      "status": "completed",
+      "result": "開発部統合報告。両担当の成果を確認しました。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "work",
+      "participants": []
+    },
+    {
+      "groupId": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+      "threadId": "008c7257-f458-4675-99bb-c523796ce62c",
+      "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+      "id": "36bb59e4-73f9-4760-9eb9-2e1a17272f0e",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "13026e88-db5a-4604-8cb6-3458537578b7",
+      "key": "to-2:e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+      "text": "経営会議決定を具体化した依頼。公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。",
+      "createdAt": 1789276141977,
+      "status": "completed",
+      "result": "営業部統合報告。両担当の成果を確認しました。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "work",
+      "participants": []
+    },
+    {
+      "groupId": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "threadId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+      "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+      "id": "0d79d808-17b3-4e5f-970c-3f912f49d246",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "dcbb193d-a7ad-4373-a785-d64c83e647cd",
+      "key": "round-1",
+      "text": "開発部第1巡。修正案を検討",
+      "createdAt": 1789276142021,
+      "status": "completed",
+      "result": "リツ: リツ懸念。仮案に条件不足があるため修正を提案します。\n\nマコ: マコ懸念。仮案に条件不足があるため修正を提案します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "6827e882-47f5-4a8d-8745-ce934785b6e3",
+        "f99d3afb-6ff7-4496-a2dc-874981866984"
+      ]
+    },
+    {
+      "groupId": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+      "threadId": "008c7257-f458-4675-99bb-c523796ce62c",
+      "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+      "id": "632183e2-9d9a-4e54-bc3f-59179f37756f",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "36bb59e4-73f9-4760-9eb9-2e1a17272f0e",
+      "key": "round-1",
+      "text": "営業部第1巡。修正案を検討",
+      "createdAt": 1789276142759,
+      "status": "completed",
+      "result": "サキ: サキ懸念。仮案に条件不足があるため修正を提案します。\n\nトワ: トワ懸念。仮案に条件不足があるため修正を提案します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "b0e939c9-6e4a-4091-be93-1cac33fdf159",
+        "77ead2b6-0b20-4544-b814-5c58061969bf"
+      ]
+    },
+    {
+      "groupId": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "threadId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+      "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+      "id": "257c096a-e9e1-4151-a3c7-330d5088c6e7",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "dcbb193d-a7ad-4373-a785-d64c83e647cd",
+      "key": "round-2",
+      "text": "開発部第2巡。修正案を検討",
+      "createdAt": 1789276144291,
+      "status": "completed",
+      "result": "リツ: リツ再検討。修正により懸念が解消しました。境界条件も追加して合意します。\n\nマコ: マコ再検討。修正により懸念が解消しました。境界条件も追加して合意します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "6827e882-47f5-4a8d-8745-ce934785b6e3",
+        "f99d3afb-6ff7-4496-a2dc-874981866984"
+      ]
+    },
+    {
+      "groupId": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+      "threadId": "008c7257-f458-4675-99bb-c523796ce62c",
+      "botId": "b0e939c9-6e4a-4091-be93-1cac33fdf159",
+      "id": "9bf327ee-7e43-439a-837d-d084d1e67e22",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "36bb59e4-73f9-4760-9eb9-2e1a17272f0e",
+      "key": "owner-b0e939c9-6e4a-4091-be93-1cac33fdf159:b0e939c9-6e4a-4091-be93-1cac33fdf159",
+      "text": "営業部決定に基づく担当業務。実行してください",
+      "createdAt": 1789276145101,
+      "status": "completed",
+      "result": "サキ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+      "threadId": "008c7257-f458-4675-99bb-c523796ce62c",
+      "botId": "77ead2b6-0b20-4544-b814-5c58061969bf",
+      "id": "08ea0456-de88-4bdd-a8a3-312735c6136e",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "36bb59e4-73f9-4760-9eb9-2e1a17272f0e",
+      "key": "owner-77ead2b6-0b20-4544-b814-5c58061969bf:77ead2b6-0b20-4544-b814-5c58061969bf",
+      "text": "営業部決定に基づく担当業務。実行してください",
+      "createdAt": 1789276145110,
+      "status": "completed",
+      "result": "トワ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "threadId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+      "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+      "id": "a2900da4-013a-4d6e-8aab-c107c28ad956",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "dcbb193d-a7ad-4373-a785-d64c83e647cd",
+      "key": "owner-6827e882-47f5-4a8d-8745-ce934785b6e3:6827e882-47f5-4a8d-8745-ce934785b6e3",
+      "text": "開発部決定に基づく担当業務。実行してください",
+      "createdAt": 1789276146596,
+      "status": "completed",
+      "result": "リツ成果。下層の結果をレビューして責任者へ報告します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "threadId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+      "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+      "id": "818cb516-0271-44fd-a6d3-b3f411df9a61",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "dcbb193d-a7ad-4373-a785-d64c83e647cd",
+      "key": "owner-f99d3afb-6ff7-4496-a2dc-874981866984:f99d3afb-6ff7-4496-a2dc-874981866984",
+      "text": "開発部決定に基づく担当業務。実行してください",
+      "createdAt": 1789276146607,
+      "status": "completed",
+      "result": "マコ成果。下層の結果をレビューして責任者へ報告します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+      "threadId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+      "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+      "id": "7a9b3ca6-4f9d-42ee-8a0f-ef6bb9c0409e",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "a2900da4-013a-4d6e-8aab-c107c28ad956",
+      "key": "to-3:bc0c5e31-edad-4117-ae17-fa05038c9728",
+      "text": "開発部決定を具体化した依頼。出力形式とサンプルを議論。決定後ヒナに架空データ3行のCSV本文、ナギにそのCSVのカンマ・引用符の検査表を作成依頼。ナギはヒナの成果を読んで検査する。",
+      "createdAt": 1789276147566,
+      "status": "completed",
+      "result": "実装チーム統合報告。両担当の成果を確認しました。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "work",
+      "participants": []
+    },
+    {
+      "groupId": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+      "threadId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+      "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+      "id": "88633527-e171-4c73-b0c4-051d148c4066",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "818cb516-0271-44fd-a6d3-b3f411df9a61",
+      "key": "to-4:0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+      "text": "開発部決定を具体化した依頼。受入試験を議論。決定後メイに0件・上限ちょうど・上限超過の3ケース表、ハルに生成中の件数変化・途中失敗・権限なしの3ケース表を作成依頼。入力条件と期待結果を必ず記載する。",
+      "createdAt": 1789276148488,
+      "status": "completed",
+      "result": "QAチーム統合報告。両担当の成果を確認しました。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "work",
+      "participants": []
+    },
+    {
+      "groupId": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+      "threadId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+      "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+      "id": "aed0a77e-dc57-4223-ad3a-54bed05471e5",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "7a9b3ca6-4f9d-42ee-8a0f-ef6bb9c0409e",
+      "key": "round-1",
+      "text": "実装チーム第1巡。修正案を検討",
+      "createdAt": 1789276148573,
+      "status": "completed",
+      "result": "ヒナ: ヒナ懸念。仮案に条件不足があるため修正を提案します。\n\nナギ: ナギ懸念。仮案に条件不足があるため修正を提案します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "84ae3b90-3deb-4132-adb1-435d3a908fa7",
+        "8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1"
+      ]
+    },
+    {
+      "groupId": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+      "threadId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+      "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+      "id": "da27b36f-1ed5-4320-8a70-efd172363151",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "88633527-e171-4c73-b0c4-051d148c4066",
+      "key": "round-1",
+      "text": "QAチーム第1巡。修正案を検討",
+      "createdAt": 1789276149250,
+      "status": "completed",
+      "result": "メイ: メイ懸念。仮案に条件不足があるため修正を提案します。\n\nハル: ハル懸念。仮案に条件不足があるため修正を提案します。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "discussion",
+      "participants": [
+        "8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+        "542deb27-1773-4b70-9aae-fda895d8c390"
+      ]
+    },
+    {
+      "groupId": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+      "threadId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+      "botId": "84ae3b90-3deb-4132-adb1-435d3a908fa7",
+      "id": "85e67379-3bf9-418a-be13-686fa4370193",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "7a9b3ca6-4f9d-42ee-8a0f-ef6bb9c0409e",
+      "key": "owner-84ae3b90-3deb-4132-adb1-435d3a908fa7:84ae3b90-3deb-4132-adb1-435d3a908fa7",
+      "text": "実装チーム決定に基づく担当業務。実行してください",
+      "createdAt": 1789276150735,
+      "status": "completed",
+      "result": "ヒナ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+      "threadId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+      "botId": "8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1",
+      "id": "f5d9966f-ecb3-434b-ab7d-fa75d5fffa08",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "7a9b3ca6-4f9d-42ee-8a0f-ef6bb9c0409e",
+      "key": "owner-8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1:8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1",
+      "text": "実装チーム決定に基づく担当業務。実行してください",
+      "createdAt": 1789276150748,
+      "status": "completed",
+      "result": "ナギ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+      "threadId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+      "botId": "8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+      "id": "3f1c7c1a-afbd-4f7d-b2d5-726818e30e88",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "88633527-e171-4c73-b0c4-051d148c4066",
+      "key": "owner-8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4:8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+      "text": "QAチーム決定に基づく担当業務。実行してください",
+      "createdAt": 1789276151296,
+      "status": "completed",
+      "result": "メイ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    },
+    {
+      "groupId": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+      "threadId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+      "botId": "542deb27-1773-4b70-9aae-fda895d8c390",
+      "id": "37024d75-d748-4374-af0b-00e5dcc599d1",
+      "rootId": "c3f9f797-6736-47d0-aab3-62fa0914435e",
+      "parentId": "88633527-e171-4c73-b0c4-051d148c4066",
+      "key": "owner-542deb27-1773-4b70-9aae-fda895d8c390:542deb27-1773-4b70-9aae-fda895d8c390",
+      "text": "QAチーム決定に基づく担当業務。実行してください",
+      "createdAt": 1789276151330,
+      "status": "completed",
+      "result": "ハル成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+      "reported": true,
+      "executions": 0,
+      "approvalGranted": false,
+      "kind": "assignment",
+      "participants": []
+    }
+  ],
+  "transcripts": [
+    {
+      "name": "経営会議",
+      "id": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+      "transcript": {
+        "channel": {
+          "id": "fd260b39-be00-4ec8-96ad-acadd5433c0a",
+          "name": "経営会議",
+          "memberIds": [
+            "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+            "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+            "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0"
+          ],
+          "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者ミナトは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し2巡行う。1巡目の懸念に責任者が修正案を出し、2巡目で両名がその修正案に回答する。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:CSV出力の初期対象。仮案は全項目・全件出力。アオイは早期公開のため対象限定、ユイは営業に必要な項目を要求。2巡目で具体的な妥協案を再検討して決定する。\n分担:アオイが開発部のレン宛てに依頼し、その結果をレビューしてミナトへ報告する。 ユイが営業部のコウ宛てに依頼し、その結果をレビューしてミナトへ報告する。担当者はlist_room_targetsから宛先IDを確認する。下層にも同じ議論・分担・実行の手順を伝える。",
+          "defaultResponder": {
+            "kind": "member",
+            "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4"
+          },
+          "section": null,
+          "directMessage": false,
+          "working": false,
+          "busyBotId": null,
+          "activeTaskId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+          "tasks": [
+            {
+              "taskId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+              "title": "@ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案…",
+              "createdAt": 1789276130799,
+              "active": true
+            }
+          ]
+        },
+        "taskId": "17c5f7bd-d8c6-4ece-9b6b-101a48733723",
+        "messages": [
+          {
+            "id": "3eed4075-1d34-40ff-9baf-96a4ad383cb2",
+            "at": 1789276135837,
+            "role": "user",
+            "kind": "text",
+            "text": "@ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案を再検討して方針を決めてください。その後、アオイに開発部レンへの依頼と結果確認、ユイに営業部コウへの依頼と結果確認をcoordinate_botsで分担。開発部でも2巡議論の後、リツが実装チームのソラへ、マコがQAチームのレオへ依頼します。最下層と営業部は1巡議論後に各既存メンバーへ成果物作成を分担。計画だけで終わらず架空CSVサンプル・検査表・FAQ・チェックリストを作成。結果を各担当が確認して責任者へ戻し、最後に経営会議で統合してください。役割・経路は各グループの掲示にあります。実データやコード変更は不要です。"
+          },
+          {
+            "id": "dcadd59f-81e3-4b47-94fe-c54d7747a6ab",
+            "at": 1789276136296,
+            "role": "bot",
+            "kind": "text",
+            "text": "経営会議仮案。各担当の意見を求めます。",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "bd71027e-4cb9-4968-9df0-f07889dee5da",
+            "at": 1789276136515,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@アオイ @ユイ\n経営会議第1巡。修正案を検討",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "0d8d8b03-f28d-4713-8e18-c2592477d988",
+            "at": 1789276136935,
+            "role": "bot",
+            "kind": "text",
+            "text": "アオイ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+              "name": "アオイ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "52ed21e0-2546-45f1-a6c9-d26ce82c3272",
+            "at": 1789276137324,
+            "role": "bot",
+            "kind": "text",
+            "text": "ユイ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+              "name": "ユイ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "253e13cb-fe2b-48b4-9479-b00840f2d223",
+            "at": 1789276138295,
+            "role": "bot",
+            "kind": "text",
+            "text": "経営会議修正案。懸念を受けて条件を限定します。再確認してください。",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "6322b408-24b0-4a6f-b0f4-0a4089c90e0b",
+            "at": 1789276138346,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@アオイ @ユイ\n経営会議第2巡。修正案を検討",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "fa019691-66b7-46b9-a0b3-a0dc558b67d8",
+            "at": 1789276138788,
+            "role": "bot",
+            "kind": "text",
+            "text": "アオイ再検討。修正により懸念が解消しました。境界条件も追加して合意します。",
+            "from": {
+              "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+              "name": "アオイ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "7f00a353-78b8-48d6-93de-c5aeb54244cb",
+            "at": 1789276139204,
+            "role": "bot",
+            "kind": "text",
+            "text": "ユイ再検討。修正により懸念が解消しました。境界条件も追加して合意します。",
+            "from": {
+              "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+              "name": "ユイ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "964b7b0e-7480-4118-a4b3-4844cdae443c",
+            "at": 1789276140161,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            },
+            "tool": {
+              "name": "Sent to アオイ",
+              "ok": true
+            }
+          },
+          {
+            "id": "e9d914bf-5333-4a04-9387-3096a9c26565",
+            "at": 1789276140171,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            },
+            "tool": {
+              "name": "Sent to ユイ",
+              "ok": true
+            }
+          },
+          {
+            "id": "bf5eaa89-e137-4241-8f23-8ef42618d8ba",
+            "at": 1789276140425,
+            "role": "bot",
+            "kind": "text",
+            "text": "経営会議決定。懸念を反映し2名に別々の責任を割り当てました。",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "cd5865f1-c41f-46d9-b926-bda20722ba93",
+            "at": 1789276140684,
+            "role": "bot",
+            "kind": "text",
+            "text": "@アオイ 経営会議決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "9ac662d6-9d86-44f3-b148-75a907b9ba04",
+            "at": 1789276141294,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+              "name": "アオイ",
+              "color": "red"
+            },
+            "tool": {
+              "name": "Sent to レン · 開発部",
+              "ok": true
+            }
+          },
+          {
+            "id": "20ec768b-acec-4568-a684-b897f9f8d3ea",
+            "at": 1789276141310,
+            "role": "bot",
+            "kind": "text",
+            "text": "アオイ担当として下層へ依頼しました。",
+            "from": {
+              "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+              "name": "アオイ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "3c724fb0-84be-43e6-a71d-0d2bb270a9c4",
+            "at": 1789276141472,
+            "role": "bot",
+            "kind": "text",
+            "text": "@ユイ 経営会議決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "e47ae981-50c5-49ec-aea9-b93fae396b58",
+            "at": 1789276141983,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+              "name": "ユイ",
+              "color": "orange"
+            },
+            "tool": {
+              "name": "Sent to コウ · 営業部",
+              "ok": true
+            }
+          },
+          {
+            "id": "ab01555d-a69f-45ea-b391-639054620aed",
+            "at": 1789276142003,
+            "role": "bot",
+            "kind": "text",
+            "text": "ユイ担当として下層へ依頼しました。",
+            "from": {
+              "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+              "name": "ユイ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "40ee79d3-275f-47eb-8c94-2b81f67f99f3",
+            "at": 1789276147653,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            },
+            "tool": {
+              "name": "コウ replied · 営業部",
+              "ok": true
+            }
+          },
+          {
+            "id": "c51e4154-8a35-4b2f-87a0-6866dd049cbc",
+            "at": 1789276148799,
+            "role": "bot",
+            "kind": "text",
+            "text": "ユイ成果。下層の結果をレビューして責任者へ報告します。",
+            "from": {
+              "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+              "name": "ユイ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "60b4a217-979b-4643-9b88-d1099dd59619",
+            "at": 1789276155742,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            },
+            "tool": {
+              "name": "レン replied · 開発部",
+              "ok": true
+            }
+          },
+          {
+            "id": "3b34019a-26af-4473-b34f-dd78e21f8d62",
+            "at": 1789276156485,
+            "role": "bot",
+            "kind": "text",
+            "text": "アオイ成果。下層の結果をレビューして責任者へ報告します。",
+            "from": {
+              "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+              "name": "アオイ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "8b40f365-4de2-43ab-bf28-4cc2b045bbea",
+            "at": 1789276157175,
+            "role": "bot",
+            "kind": "text",
+            "text": "経営会議統合報告。両担当の成果を確認しました。",
+            "from": {
+              "botId": "02e36f8b-168b-4f6b-b8ba-2a952cb313b4",
+              "name": "ミナト",
+              "color": "blue"
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "開発部",
+      "id": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+      "transcript": {
+        "channel": {
+          "id": "e274171c-1dfa-4ffb-83eb-7ada551c660b",
+          "name": "開発部",
+          "memberIds": [
+            "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+            "6827e882-47f5-4a8d-8745-ce934785b6e3",
+            "f99d3afb-6ff7-4496-a2dc-874981866984"
+          ],
+          "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者レンは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し2巡行う。1巡目の懸念に責任者が修正案を出し、2巡目で両名がその修正案に回答する。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:CSV設計と受入条件。仮案は直接書込み・件数の事前確認のみ。リツは処理の簡素さ、マコは途中失敗と件数変化の危険を検討。2巡目で修正案を相互確認して決定する。\n分担:リツが実装チームのソラ宛てに依頼し、その結果をレビューしてレンへ報告する。 マコがQAチームのレオ宛てに依頼し、その結果をレビューしてレンへ報告する。担当者はlist_room_targetsから宛先IDを確認する。下層にも同じ議論・分担・実行の手順を伝える。",
+          "defaultResponder": {
+            "kind": "member",
+            "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409"
+          },
+          "section": null,
+          "directMessage": false,
+          "working": false,
+          "busyBotId": null,
+          "activeTaskId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+          "tasks": [
+            {
+              "taskId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+              "title": "New task",
+              "createdAt": 1789276131886,
+              "active": true
+            }
+          ]
+        },
+        "taskId": "d84be120-67c5-44fc-94d5-d7c5693a0733",
+        "messages": [
+          {
+            "id": "4fb038d9-c8b3-4d73-b287-045b4ec90d59",
+            "at": 1789276141475,
+            "role": "bot",
+            "kind": "text",
+            "text": "@レン 経営会議決定を具体化した依頼。CSV設計と受入条件。仮案は直接書込み・件数の事前確認のみ。リツは処理の簡素さ、マコは途中失敗と件数変化の危険を検討。2巡目で修正案を相互確認して決定する。",
+            "from": {
+              "botId": "451ee3d3-ac10-41fd-a2f1-6e712e7aeef6",
+              "name": "アオイ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "833698e5-2693-4a16-903b-e7ea8c5c13a4",
+            "at": 1789276142042,
+            "role": "bot",
+            "kind": "text",
+            "text": "開発部仮案。各担当の意見を求めます。",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "9deafbe8-817d-48cd-9679-38aa5d2382da",
+            "at": 1789276142250,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@リツ @マコ\n開発部第1巡。修正案を検討",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "e8224b41-9399-4bee-8845-6238ecf0c4d8",
+            "at": 1789276142809,
+            "role": "bot",
+            "kind": "text",
+            "text": "リツ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+              "name": "リツ",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "465cbfde-dbd7-41ad-83f4-568fc0b0346e",
+            "at": 1789276143340,
+            "role": "bot",
+            "kind": "text",
+            "text": "マコ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+              "name": "マコ",
+              "color": "pink"
+            }
+          },
+          {
+            "id": "c234ae21-21c0-4118-8a31-636f9f75c7f1",
+            "at": 1789276144316,
+            "role": "bot",
+            "kind": "text",
+            "text": "開発部修正案。懸念を受けて条件を限定します。再確認してください。",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "b9f355b0-9143-4042-b4ce-60012088693e",
+            "at": 1789276144569,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@リツ @マコ\n開発部第2巡。修正案を検討",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "af8766d2-805d-4d8d-8b7d-53ecb6697704",
+            "at": 1789276145108,
+            "role": "bot",
+            "kind": "text",
+            "text": "リツ再検討。修正により懸念が解消しました。境界条件も追加して合意します。",
+            "from": {
+              "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+              "name": "リツ",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "b5fddb38-8734-4d9a-a07a-9d9dbd0c4f00",
+            "at": 1789276145592,
+            "role": "bot",
+            "kind": "text",
+            "text": "マコ再検討。修正により懸念が解消しました。境界条件も追加して合意します。",
+            "from": {
+              "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+              "name": "マコ",
+              "color": "pink"
+            }
+          },
+          {
+            "id": "d7d3a073-aed3-474c-ae87-64ffe3e33ce2",
+            "at": 1789276146602,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            },
+            "tool": {
+              "name": "Sent to リツ",
+              "ok": true
+            }
+          },
+          {
+            "id": "853e7f03-5bfd-4f6a-acb1-f4104dd024b1",
+            "at": 1789276146611,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            },
+            "tool": {
+              "name": "Sent to マコ",
+              "ok": true
+            }
+          },
+          {
+            "id": "6d45dba4-181d-4dfd-a3fa-b920ccde62e0",
+            "at": 1789276146629,
+            "role": "bot",
+            "kind": "text",
+            "text": "開発部決定。懸念を反映し2名に別々の責任を割り当てました。",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "9865f6d1-540d-4931-a89a-458acd394d8e",
+            "at": 1789276146896,
+            "role": "bot",
+            "kind": "text",
+            "text": "@リツ 開発部決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "9e85b7fb-1ff8-413a-a142-866ce2ec0262",
+            "at": 1789276147571,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+              "name": "リツ",
+              "color": "cyan"
+            },
+            "tool": {
+              "name": "Sent to ソラ · 実装チーム",
+              "ok": true
+            }
+          },
+          {
+            "id": "01800484-7a8f-4a25-a7f3-64b0f80bf310",
+            "at": 1789276147588,
+            "role": "bot",
+            "kind": "text",
+            "text": "リツ担当として下層へ依頼しました。",
+            "from": {
+              "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+              "name": "リツ",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "d21a230e-7700-4d58-a477-9c48e843a51a",
+            "at": 1789276147668,
+            "role": "bot",
+            "kind": "text",
+            "text": "@マコ 開発部決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "04412527-945d-4ead-8dd0-4c3630d70035",
+            "at": 1789276148497,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+              "name": "マコ",
+              "color": "pink"
+            },
+            "tool": {
+              "name": "Sent to レオ · QAチーム",
+              "ok": true
+            }
+          },
+          {
+            "id": "13d48e84-25a0-4a84-868a-70f236f06ca9",
+            "at": 1789276148516,
+            "role": "bot",
+            "kind": "text",
+            "text": "マコ担当として下層へ依頼しました。",
+            "from": {
+              "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+              "name": "マコ",
+              "color": "pink"
+            }
+          },
+          {
+            "id": "37f5845a-bc34-436a-af99-cd7dafd9363c",
+            "at": 1789276153385,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            },
+            "tool": {
+              "name": "ソラ replied · 実装チーム",
+              "ok": true
+            }
+          },
+          {
+            "id": "93dc0c71-31af-4d91-a820-4e73b3ae9a5c",
+            "at": 1789276153936,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            },
+            "tool": {
+              "name": "レオ replied · QAチーム",
+              "ok": true
+            }
+          },
+          {
+            "id": "6206491d-babf-4ea3-9705-144e49d2a9f9",
+            "at": 1789276154196,
+            "role": "bot",
+            "kind": "text",
+            "text": "リツ成果。下層の結果をレビューして責任者へ報告します。",
+            "from": {
+              "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+              "name": "リツ",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "5708cbb8-07cd-4db8-8cc7-b971ef1dd1fd",
+            "at": 1789276154957,
+            "role": "bot",
+            "kind": "text",
+            "text": "マコ成果。下層の結果をレビューして責任者へ報告します。",
+            "from": {
+              "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+              "name": "マコ",
+              "color": "pink"
+            }
+          },
+          {
+            "id": "cea4a413-a67b-497f-a78a-debe932a3283",
+            "at": 1789276155676,
+            "role": "bot",
+            "kind": "text",
+            "text": "開発部統合報告。両担当の成果を確認しました。",
+            "from": {
+              "botId": "1ef0bcf2-1ea8-48f8-94d3-783b96730409",
+              "name": "レン",
+              "color": "purple"
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "営業部",
+      "id": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+      "transcript": {
+        "channel": {
+          "id": "628c778b-3d53-4a46-898e-22c3fc4429ea",
+          "name": "営業部",
+          "memberIds": [
+            "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+            "b0e939c9-6e4a-4091-be93-1cac33fdf159",
+            "77ead2b6-0b20-4544-b814-5c58061969bf"
+          ],
+          "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者コウは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。",
+          "defaultResponder": {
+            "kind": "member",
+            "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46"
+          },
+          "section": null,
+          "directMessage": false,
+          "working": false,
+          "busyBotId": null,
+          "activeTaskId": "008c7257-f458-4675-99bb-c523796ce62c",
+          "tasks": [
+            {
+              "taskId": "008c7257-f458-4675-99bb-c523796ce62c",
+              "title": "New task",
+              "createdAt": 1789276133053,
+              "active": true
+            }
+          ]
+        },
+        "taskId": "008c7257-f458-4675-99bb-c523796ce62c",
+        "messages": [
+          {
+            "id": "2b6a0fc4-0e0a-49c8-a4f1-09f55dc17d02",
+            "at": 1789276142245,
+            "role": "bot",
+            "kind": "text",
+            "text": "@コウ 経営会議決定を具体化した依頼。公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。",
+            "from": {
+              "botId": "dbfa5fbe-bf1d-44a8-8885-26ed048d6ad0",
+              "name": "ユイ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "6f439e1f-9bb9-410d-ac09-a57ba0bccb76",
+            "at": 1789276142783,
+            "role": "bot",
+            "kind": "text",
+            "text": "営業部仮案。各担当の意見を求めます。",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            }
+          },
+          {
+            "id": "bbb77e3b-8566-4565-baa5-481d466cb341",
+            "at": 1789276143020,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@サキ @トワ\n営業部第1巡。修正案を検討",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            }
+          },
+          {
+            "id": "0fdcc8d0-a6fc-400a-9cb4-89c2d5e27df8",
+            "at": 1789276143548,
+            "role": "bot",
+            "kind": "text",
+            "text": "サキ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "b0e939c9-6e4a-4091-be93-1cac33fdf159",
+              "name": "サキ",
+              "color": "teal"
+            }
+          },
+          {
+            "id": "492b040f-ae06-486f-a4c4-540aa3f390d7",
+            "at": 1789276144065,
+            "role": "bot",
+            "kind": "text",
+            "text": "トワ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "77ead2b6-0b20-4544-b814-5c58061969bf",
+              "name": "トワ",
+              "color": "coral"
+            }
+          },
+          {
+            "id": "265ec490-b114-49f2-8ae7-c5d881b863e6",
+            "at": 1789276145105,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            },
+            "tool": {
+              "name": "Sent to サキ",
+              "ok": true
+            }
+          },
+          {
+            "id": "78a41496-1bee-4108-bc84-b1752b8b889c",
+            "at": 1789276145116,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            },
+            "tool": {
+              "name": "Sent to トワ",
+              "ok": true
+            }
+          },
+          {
+            "id": "f1ad5886-2a12-4cc8-a8ab-a87ba3cc3341",
+            "at": 1789276145157,
+            "role": "bot",
+            "kind": "text",
+            "text": "営業部決定。懸念を反映し2名に別々の責任を割り当てました。",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            }
+          },
+          {
+            "id": "1c721077-2a0d-4e9c-9857-96920e60b863",
+            "at": 1789276145333,
+            "role": "bot",
+            "kind": "text",
+            "text": "@サキ 営業部決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            }
+          },
+          {
+            "id": "6d74e883-0aa1-49f7-a620-77ed4589b604",
+            "at": 1789276145787,
+            "role": "bot",
+            "kind": "text",
+            "text": "サキ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+            "from": {
+              "botId": "b0e939c9-6e4a-4091-be93-1cac33fdf159",
+              "name": "サキ",
+              "color": "teal"
+            }
+          },
+          {
+            "id": "076dcd17-fd4a-4828-a013-d8b2ad9076f1",
+            "at": 1789276145855,
+            "role": "bot",
+            "kind": "text",
+            "text": "@トワ 営業部決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            }
+          },
+          {
+            "id": "a2cc07c2-ddea-4311-8b7e-402355596a1e",
+            "at": 1789276146396,
+            "role": "bot",
+            "kind": "text",
+            "text": "トワ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+            "from": {
+              "botId": "77ead2b6-0b20-4544-b814-5c58061969bf",
+              "name": "トワ",
+              "color": "coral"
+            }
+          },
+          {
+            "id": "81013874-6bf4-45e0-a961-4d9359794023",
+            "at": 1789276147527,
+            "role": "bot",
+            "kind": "text",
+            "text": "営業部統合報告。両担当の成果を確認しました。",
+            "from": {
+              "botId": "e92234c6-6c76-4c2a-9ccc-267a8ea46f46",
+              "name": "コウ",
+              "color": "yellow"
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "実装チーム",
+      "id": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+      "transcript": {
+        "channel": {
+          "id": "cafe2fa1-e14e-4b76-ae62-b5b203cea8ef",
+          "name": "実装チーム",
+          "memberIds": [
+            "bc0c5e31-edad-4117-ae17-fa05038c9728",
+            "84ae3b90-3deb-4132-adb1-435d3a908fa7",
+            "8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1"
+          ],
+          "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者ソラは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:出力形式とサンプルを議論。決定後ヒナに架空データ3行のCSV本文、ナギにそのCSVのカンマ・引用符の検査表を作成依頼。ナギはヒナの成果を読んで検査する。",
+          "defaultResponder": {
+            "kind": "member",
+            "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728"
+          },
+          "section": null,
+          "directMessage": false,
+          "working": false,
+          "busyBotId": null,
+          "activeTaskId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+          "tasks": [
+            {
+              "taskId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+              "title": "New task",
+              "createdAt": 1789276134287,
+              "active": true
+            }
+          ]
+        },
+        "taskId": "e6a3d23b-0f6d-470a-8280-1be60abfb355",
+        "messages": [
+          {
+            "id": "b8a3290a-0c1b-4aa4-b919-895107d1e06f",
+            "at": 1789276147673,
+            "role": "bot",
+            "kind": "text",
+            "text": "@ソラ 開発部決定を具体化した依頼。出力形式とサンプルを議論。決定後ヒナに架空データ3行のCSV本文、ナギにそのCSVのカンマ・引用符の検査表を作成依頼。ナギはヒナの成果を読んで検査する。",
+            "from": {
+              "botId": "6827e882-47f5-4a8d-8745-ce934785b6e3",
+              "name": "リツ",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "267decee-740b-4e0f-b88b-1a20c417ff9d",
+            "at": 1789276148601,
+            "role": "bot",
+            "kind": "text",
+            "text": "実装チーム仮案。各担当の意見を求めます。",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            }
+          },
+          {
+            "id": "1c7bc142-430f-4fdd-941f-7656dc3cde77",
+            "at": 1789276148713,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@ヒナ @ナギ\n実装チーム第1巡。修正案を検討",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            }
+          },
+          {
+            "id": "9674ee79-a6d3-42e7-954f-a6dc40b5c6db",
+            "at": 1789276149258,
+            "role": "bot",
+            "kind": "text",
+            "text": "ヒナ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "84ae3b90-3deb-4132-adb1-435d3a908fa7",
+              "name": "ヒナ",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "e2d9a927-4e2d-44d6-a6a6-c9dc5cded60c",
+            "at": 1789276149741,
+            "role": "bot",
+            "kind": "text",
+            "text": "ナギ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1",
+              "name": "ナギ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "cb46ec80-3afd-46ee-98c0-879594ea7958",
+            "at": 1789276150741,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            },
+            "tool": {
+              "name": "Sent to ヒナ",
+              "ok": true
+            }
+          },
+          {
+            "id": "42cb00df-0e55-4809-9a4f-90fb4072fce7",
+            "at": 1789276150752,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            },
+            "tool": {
+              "name": "Sent to ナギ",
+              "ok": true
+            }
+          },
+          {
+            "id": "e7d54877-3e1d-4cf5-ba96-250d4b22122a",
+            "at": 1789276150772,
+            "role": "bot",
+            "kind": "text",
+            "text": "実装チーム決定。懸念を反映し2名に別々の責任を割り当てました。",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            }
+          },
+          {
+            "id": "602941c4-f857-4a91-901c-7b9e555de67d",
+            "at": 1789276150802,
+            "role": "bot",
+            "kind": "text",
+            "text": "@ヒナ 実装チーム決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            }
+          },
+          {
+            "id": "12e8df82-11b7-4957-a21b-3e36a2f6172c",
+            "at": 1789276151311,
+            "role": "bot",
+            "kind": "text",
+            "text": "ヒナ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+            "from": {
+              "botId": "84ae3b90-3deb-4132-adb1-435d3a908fa7",
+              "name": "ヒナ",
+              "color": "blue"
+            }
+          },
+          {
+            "id": "21582847-9cfe-481a-85d3-57f36b0751cb",
+            "at": 1789276151585,
+            "role": "bot",
+            "kind": "text",
+            "text": "@ナギ 実装チーム決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            }
+          },
+          {
+            "id": "f698b83a-483f-4e66-8d83-e4044a1eb604",
+            "at": 1789276152096,
+            "role": "bot",
+            "kind": "text",
+            "text": "ナギ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+            "from": {
+              "botId": "8bd763a1-0d77-4c4b-8702-8de5ba4cb7a1",
+              "name": "ナギ",
+              "color": "red"
+            }
+          },
+          {
+            "id": "d5003db5-d414-408f-a3e1-eab298ac705e",
+            "at": 1789276153274,
+            "role": "bot",
+            "kind": "text",
+            "text": "実装チーム統合報告。両担当の成果を確認しました。",
+            "from": {
+              "botId": "bc0c5e31-edad-4117-ae17-fa05038c9728",
+              "name": "ソラ",
+              "color": "green"
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    },
+    {
+      "name": "QAチーム",
+      "id": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+      "transcript": {
+        "channel": {
+          "id": "0f0a5f0b-068f-48e6-bef4-0700865188f2",
+          "name": "QAチーム",
+          "memberIds": [
+            "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+            "8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+            "542deb27-1773-4b70-9aae-fda895d8c390"
+          ],
+          "bulletin": "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者レオは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:受入試験を議論。決定後メイに0件・上限ちょうど・上限超過の3ケース表、ハルに生成中の件数変化・途中失敗・権限なしの3ケース表を作成依頼。入力条件と期待結果を必ず記載する。",
+          "defaultResponder": {
+            "kind": "member",
+            "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2"
+          },
+          "section": null,
+          "directMessage": false,
+          "working": false,
+          "busyBotId": null,
+          "activeTaskId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+          "tasks": [
+            {
+              "taskId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+              "title": "New task",
+              "createdAt": 1789276135775,
+              "active": true
+            }
+          ]
+        },
+        "taskId": "41fc54f7-2d21-4555-9959-b9128e4028b9",
+        "messages": [
+          {
+            "id": "4513549b-72c2-4ff1-a7b9-19490062c018",
+            "at": 1789276148708,
+            "role": "bot",
+            "kind": "text",
+            "text": "@レオ 開発部決定を具体化した依頼。受入試験を議論。決定後メイに0件・上限ちょうど・上限超過の3ケース表、ハルに生成中の件数変化・途中失敗・権限なしの3ケース表を作成依頼。入力条件と期待結果を必ず記載する。",
+            "from": {
+              "botId": "f99d3afb-6ff7-4496-a2dc-874981866984",
+              "name": "マコ",
+              "color": "pink"
+            }
+          },
+          {
+            "id": "ab879d5c-8fc1-4e79-9e2e-7034a69f86cc",
+            "at": 1789276149308,
+            "role": "bot",
+            "kind": "text",
+            "text": "QAチーム仮案。各担当の意見を求めます。",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "af0acf54-cbe2-4308-a6aa-2d31c3a84c06",
+            "at": 1789276149474,
+            "role": "bot",
+            "kind": "text",
+            "text": "【議論】@メイ @ハル\nQAチーム第1巡。修正案を検討",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "89c93450-201e-474c-8ea9-77935a064538",
+            "at": 1789276149936,
+            "role": "bot",
+            "kind": "text",
+            "text": "メイ懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+              "name": "メイ",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "9e3c503c-63df-4541-890e-c8fa4db039d7",
+            "at": 1789276150393,
+            "role": "bot",
+            "kind": "text",
+            "text": "ハル懸念。仮案に条件不足があるため修正を提案します。",
+            "from": {
+              "botId": "542deb27-1773-4b70-9aae-fda895d8c390",
+              "name": "ハル",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "1a80294a-9d07-43d8-892e-cf3d0d66e7b5",
+            "at": 1789276151308,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            },
+            "tool": {
+              "name": "Sent to メイ",
+              "ok": true
+            }
+          },
+          {
+            "id": "6d801bb6-69de-432a-8083-eb103410f57b",
+            "at": 1789276151335,
+            "role": "bot",
+            "kind": "activity",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            },
+            "tool": {
+              "name": "Sent to ハル",
+              "ok": true
+            }
+          },
+          {
+            "id": "df71f9ba-31da-45f6-8a32-8acf049e0143",
+            "at": 1789276151355,
+            "role": "bot",
+            "kind": "text",
+            "text": "QAチーム決定。懸念を反映し2名に別々の責任を割り当てました。",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "98cd9ff1-3750-4a47-91e0-0b57574d0f34",
+            "at": 1789276151589,
+            "role": "bot",
+            "kind": "text",
+            "text": "@メイ QAチーム決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "9aadc8d8-5ef2-44e8-9afd-dbe353db1ae6",
+            "at": 1789276152120,
+            "role": "bot",
+            "kind": "text",
+            "text": "メイ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+            "from": {
+              "botId": "8b33edbd-3021-4f2c-bf9a-e5f89ceee8d4",
+              "name": "メイ",
+              "color": "purple"
+            }
+          },
+          {
+            "id": "582f986b-e240-4d35-8732-625c31aeb1c6",
+            "at": 1789276152350,
+            "role": "bot",
+            "kind": "text",
+            "text": "@ハル QAチーム決定に基づく担当業務。実行してください",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            }
+          },
+          {
+            "id": "8255d92d-a7b3-4014-bafd-3bf3ab5ea159",
+            "at": 1789276152944,
+            "role": "bot",
+            "kind": "text",
+            "text": "ハル成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。",
+            "from": {
+              "botId": "542deb27-1773-4b70-9aae-fda895d8c390",
+              "name": "ハル",
+              "color": "cyan"
+            }
+          },
+          {
+            "id": "32e26f4f-65de-44e6-bcfa-2da80594aca5",
+            "at": 1789276153900,
+            "role": "bot",
+            "kind": "text",
+            "text": "QAチーム統合報告。両担当の成果を確認しました。",
+            "from": {
+              "botId": "0e633b7d-2530-4dfc-a7a9-e68226980bf2",
+              "name": "レオ",
+              "color": "orange"
+            }
+          }
+        ],
+        "hasMore": false
+      }
+    }
+  ],
+  "providerTurns": 45
+}

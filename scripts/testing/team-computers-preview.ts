@@ -77,5 +77,21 @@ export async function launchTeamComputersPreview() {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await launchTeamComputersPreview();
+  // This standalone launcher bypasses control-omb's CLI wrapper. Forward the
+  // same parent IPC shutdown to launchUi so Windows can close both fixtures.
+  const stop = () => { process.emit("SIGINT"); };
+  const onMessage = (message: unknown) => {
+    if (message === "control-omb:stop") stop();
+  };
+  if (process.connected) {
+    process.on("message", onMessage);
+    process.once("disconnect", stop);
+  }
+  try {
+    await launchTeamComputersPreview();
+  } finally {
+    process.removeListener("message", onMessage);
+    process.removeListener("disconnect", stop);
+    if (process.connected) process.disconnect?.();
+  }
 }

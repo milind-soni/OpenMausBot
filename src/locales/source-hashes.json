@@ -6854,7 +6854,11 @@
       "remote.signInAccess.empty": "7166fa8f2d9ef4f4fbbbe7da946c67814553260b89fa71481e6e03a533284a86",
       "remote.signInAccess.invalid": "f7571753e84241b531638ab312bb1b704d261eebae3a05d27f24c02a5ba5061e",
       "remote.signInAccess.note": "ce9c15dc3fe23bbed92cb66d4cd54b8fdf0498f52f6bd2250067134b1ac65783",
-      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d"
+      "remote.signInAccess.error": "71a471a7b15e8647dda8cab60737a1b41901bdcbe3be10f477a9163b723f4e1d",
+      "room.incoming.summary": "6df7ab104bff6e27c9a5e20da2d5d33697e1ab9ac06d0efac14c2955e04a322b",
+      "room.incoming.description": "fbe3e0aa493efa600c57dacfb3372b3eafb6d4f1eedc9f7a0c7a0b944eee60a9",
+      "room.incoming.discussion": "4ed8f158834c1bf6b97c3d75027fb5609490fe3460737d356d92910300a889ca",
+      "room.incoming.restrict": "a7f9dce40d7258aa857f5b0b6a734d58cdc2ebb8b73a311bbfd5490dcb17789d"
     },
     "pt-br": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",

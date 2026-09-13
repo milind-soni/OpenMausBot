@@ -323,6 +323,21 @@ describe("MCP tool execution", () => {
     }, fetcher)).rejects.toThrow("OpenMausBot did not return the renamed task");
   });
 
+  it("normalizes duplicate incoming routes through MCP validation and rejects malformed lists", async () => {
+    const fetcher = vi.fn(async () => ({ group: { id: "channel-1", name: "Engineering", memberIds: [] } }));
+    await handleToolCall("update_channel", {
+      channel_id: "channel-1", incoming_group_ids: ["source-1", "source-1", "source-2"],
+    }, fetcher);
+    expect(fetcher).toHaveBeenCalledWith("/api/groups/channel-1", {
+      method: "PATCH", body: JSON.stringify({ incomingGroupIds: ["source-1", "source-2"] }),
+    });
+    fetcher.mockClear();
+    for (const incoming_group_ids of [["source-1", 12], Array(101).fill("source-1"), ["../source"]]) {
+      await expect(handleToolCall("update_channel", { channel_id: "channel-1", incoming_group_ids }, fetcher)).rejects.toThrow();
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("searches with encoded, bounded parameters", async () => {
     const fetcher = vi.fn(async () => ({ hits: [{ messageId: "m1" }] }));
     const result: any = await handleToolCall("search_messages", { query: "release notes", task_id: "task-1", limit: 100 }, fetcher);
