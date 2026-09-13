@@ -949,7 +949,7 @@ async function interruptDirectThread(botId: string, threadId: string): Promise<v
   const owner = botForThread(botId, threadId);
   cancelDirectTurnDispatch(botId, threadId);
   revokeInternalCapabilitiesForThread(threadId);
-  await (owner ? turnInstance(owner) : null)?.adapter.interruptTurn(threadId);
+  await (owner ? runningTurnInstance(owner, threadId) : null)?.adapter.interruptTurn(threadId);
   closeOpenApprovals(threadId);
 }
 
@@ -3241,7 +3241,7 @@ const watchdog = new TurnWatchdog({
     const bot = botForThread(turn.botId, turn.threadId);
     const routineRun = activeRoutineRunForThread(turn.threadId);
     const instance = bot
-      ? turnInstance(bot, routineRun?.runOn)
+      ? runningTurnInstance(bot, turn.threadId, routineRun?.runOn)
       : routineRun?.runOn === "cloud" ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") : null;
     void instance?.adapter.interruptTurn(turn.threadId).catch(() => {});
     const minutes = Math.round(TURN_STALL_MS / 60_000);
@@ -3336,7 +3336,10 @@ bus.subscribe((event: RuntimeEvent) => {
 // failures and never reaches the fold below.
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
-  if (event.type === "turn.completed" || event.type === "session.exited") endMemoryTurn(event.threadId);
+  if (event.type === "turn.completed" || event.type === "session.exited") {
+    runningTurnEngines.delete(event.threadId);
+    endMemoryTurn(event.threadId);
+  }
 });
 
 // Bots currently working with nobody at the keyboard — a webhook turn, or a
@@ -3611,6 +3614,13 @@ function turnInstance(bot: NonNullable<ReturnType<typeof store.bot>>, runOn?: Ro
   return onBox
     ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null
     : registry.get(bot.modelSelection.instanceId);
+}
+
+/** The engine that dispatched each live turn. A bot's settings may change
+ * mid-turn; an interrupt or steer must reach the engine actually running. */
+const runningTurnEngines = new Map<string, NonNullable<ReturnType<typeof registry.get>>>();
+function runningTurnInstance(bot: NonNullable<ReturnType<typeof store.bot>>, threadId: string, runOn?: RoutineRunOn): ReturnType<typeof registry.get> {
+  return runningTurnEngines.get(threadId) ?? turnInstance(bot, runOn);
 }
 
 function providerTransitionForTurn(
@@ -5740,6 +5750,7 @@ async function startTurn(
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: boundedCoordination && tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : mentionPrompt(tagged) },
       ]);
+      runningTurnEngines.set(threadId, instance);
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: bot.id,
@@ -6024,7 +6035,7 @@ async function interruptRoutineGroupGoal(
   const bot = speaker ? store.bot(speaker.botId) : undefined;
   cancelGroupTurnOperations(groupId, threadId, outcome);
   revokeInternalCapabilitiesForThread(threadId);
-  await (bot ? turnInstance(bot) : null)
+  await (bot ? runningTurnInstance(bot, threadId) : null)
     ?.adapter.interruptTurn(threadId)
     .catch(() => {});
   closeOpenApprovals(threadId);
@@ -6060,7 +6071,7 @@ async function stopBotForEmergencyApprovalDowngrade(botId: string): Promise<void
     cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
     const results = await Promise.allSettled([
       directStop,
-      turnInstance(bot)?.adapter.interruptTurn(groupTurn.threadId),
+      runningTurnInstance(bot, groupTurn.threadId)?.adapter.interruptTurn(groupTurn.threadId),
     ]);
     closeOpenApprovals(groupTurn.threadId);
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
@@ -6143,7 +6154,7 @@ routines = new RoutineManager({
     cancelDirectTurnDispatch(botId, threadId);
     revokeInternalCapabilitiesForThread(threadId);
     const instance = bot
-      ? turnInstance(bot, runOn)
+      ? runningTurnInstance(bot, threadId, runOn)
       : runOn === "cloud" ? registry.instances().find((candidate) => candidate.driverKind === "boxAgent") ?? null : null;
     try {
       await instance?.adapter.interruptTurn(threadId);
@@ -7387,6 +7398,7 @@ async function runGroupMemberTurn(
     watchdog.watch(threadId, bot.id);
     onProviderHandshakeStarted?.();
     providerDispatched = true;
+    runningTurnEngines.set(threadId, instance);
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: readyBot.id,
@@ -12731,7 +12743,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             : undefined;
         return {
           threadId,
-          instance: busy ? turnInstance(busy) : undefined,
+          instance: busy ? runningTurnInstance(busy, threadId) : undefined,
         };
       });
       // Abort every queued operation before the first provider round trip;
@@ -13364,7 +13376,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (groupTurn) {
           cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
           revokeInternalCapabilitiesForThread(groupTurn.threadId);
-          await turnInstance(existingBot)?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
+          await runningTurnInstance(existingBot, groupTurn.threadId)?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
           closeOpenApprovals(groupTurn.threadId);
         }
       }
@@ -13457,12 +13469,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               }
               await routines!.cancelRun(routineRun.id);
             }
-            const instance = turnInstance(bot);
             const groupTurn = activeGroupTurnForBot(bot.id);
             if (groupTurn) {
               cancelGroupTurnOperations(groupTurn.group.id, groupTurn.threadId);
               revokeInternalCapabilitiesForThread(groupTurn.threadId);
-              await instance?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
+              await runningTurnInstance(bot, groupTurn.threadId)?.adapter.interruptTurn(groupTurn.threadId).catch(() => {});
               closeOpenApprovals(groupTurn.threadId);
             }
           }),
@@ -13962,7 +13973,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           // loses a race with turn settlement, or the engine cannot steer, the
           // existing server-side queue records it atomically for the next turn.
           if (currentAtStart.busy) {
-            const instance = turnInstance(currentAtStart);
+            const instance = runningTurnInstance(currentAtStart, threadId);
             let steered = false;
             // A live text steer has no image side channel. Keep an attachment
             // message intact for the next ordinary turn, where central image
