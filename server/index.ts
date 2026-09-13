@@ -323,6 +323,7 @@ import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { WorkItems, isWorkStatus, type WorkItem, type WorkStatus } from "./work-items.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BrowserRuntime } from "./browser-runtime.ts";
@@ -6007,6 +6008,60 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   return sourceThreadId;
 }
 
+/** How a routine run reads on the board. The mapping is deliberately coarse:
+ * a run that is waiting on an approval is still work in flight, and the
+ * board's columns are about where the work stands, not about which subsystem
+ * is currently holding it. */
+function routineRunBoardStatus(status: RoutineRunStatus): WorkStatus {
+  switch (status) {
+    case "queued":
+      return "todo";
+    case "running":
+    case "waiting":
+      return "in_progress";
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+    case "missed":
+      return "blocked";
+  }
+}
+
+/** Put a routine run on the board as the card for its ROUTINE.
+ *
+ * One card per routine, updated in place — a schedule that fires every night
+ * must not leave a trail of cards behind it. Room goals are skipped: their
+ * coordinator owns the run and the work is not a single bot's to show.
+ *
+ * The routines layer calls this; nothing here reaches back into it. A card
+ * never creates, edits or cancels a routine. */
+function projectRoutineRunToBoard(run: RoutineRun): void {
+  if (run.target !== "bot" || !run.botId) return;
+  const bot = store.bot(run.botId);
+  // A hidden bot is off every roster in the app, and its cards fall to the
+  // unsectioned team. Skipping the projection entirely is the honest answer:
+  // a card for a bot nobody can see is work nobody can act on.
+  if (!bot || bot.hidden) return;
+  const detail = run.error ?? run.attention;
+  try {
+    workItems.projectRoutine({
+      routineId: run.routineId,
+      title: run.routineName,
+      ownerBotId: run.botId,
+      threadId: run.threadId ?? null,
+      status: routineRunBoardStatus(run.status),
+      ...(detail ? { detail } : {}),
+    });
+    broadcast({ kind: "task-board" });
+  } catch (error) {
+    // A board that cannot record a run must never fail the run itself: the
+    // schedule is the thing doing the work, and this is only a view of it.
+    console.error("task board: could not project routine run", error);
+  }
+}
+
 async function interruptRoutineGroupGoal(
   groupId: string,
   threadId: string,
@@ -6146,7 +6201,10 @@ routines = new RoutineManager({
     }
   },
   interruptGoal: interruptRoutineGroupGoal,
-  onRunChanged: syncRoutineRunToSource,
+  onRunChanged: (run) => {
+    syncRoutineRunToSource(run);
+    projectRoutineRunToBoard(run);
+  },
   onRunFailed: (run) => {
     if (run.threadId) {
       pendingDelegationWakes.delete(run.threadId);

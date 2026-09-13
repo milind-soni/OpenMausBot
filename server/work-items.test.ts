@@ -310,4 +310,82 @@ describe("WorkItems", () => {
     expect(moved.routineId).toBe("routine-1");
     expect(moved.origin).toBe("routine");
   });
+
+  it("keeps one card per routine, updating it instead of stacking a new one", () => {
+    let clock = 1_000;
+    const items = new WorkItems({ file: tempFile(), now: () => (clock += 10) });
+    const first = items.projectRoutine({
+      routineId: "routine-1",
+      title: "Nightly report",
+      ownerBotId: "bot-1",
+      threadId: "thread-1",
+      status: "in_progress",
+    });
+    items.projectRoutine({
+      routineId: "routine-1",
+      title: "Nightly report",
+      ownerBotId: "bot-1",
+      threadId: "thread-1",
+      status: "done",
+    });
+
+    // A job that fires every night must not leave a trail of cards behind it:
+    // the card shows what the schedule is doing, not everything it ever did.
+    expect(items.list()).toHaveLength(1);
+    const card = items.get(first.id)!;
+    expect(card.status).toBe("done");
+    expect(card.origin).toBe("routine");
+    expect(card.routineId).toBe("routine-1");
+  });
+
+  it("does not drag a finished routine card back into the running columns", () => {
+    let clock = 1_000;
+    const items = new WorkItems({ file: tempFile(), now: () => (clock += 10) });
+    const card = items.projectRoutine({ routineId: "routine-1", title: "nightly", status: "done" });
+
+    // A person marked the work finished. The schedule firing again is not a
+    // reason to reopen a decision someone already made.
+    const after = items.projectRoutine({
+      routineId: "routine-1",
+      title: "nightly",
+      status: "in_progress",
+      threadId: "thread-2",
+    });
+
+    expect(items.list()).toHaveLength(1);
+    expect(after.id).toBe(card.id);
+    expect(after.status).toBe("done");
+  });
+
+  it("carries why a routine run failed onto its card", () => {
+    const items = board().open();
+    const card = items.projectRoutine({
+      routineId: "routine-1",
+      title: "nightly",
+      status: "blocked",
+      detail: "the assigned bot no longer exists",
+    });
+
+    // A failure that only ever appears in a transcript nobody opened reads as
+    // a schedule that silently stopped working.
+    expect(card.status).toBe("blocked");
+    expect(card.lastError).toMatch(/no longer exists/);
+  });
+
+  it("refuses a routine card with no routine to point at", () => {
+    const items = board().open();
+    expect(() => items.projectRoutine({ routineId: "", title: "orphan", status: "todo" })).toThrow();
+  });
+
+  it("names a card whose routine has no name, and never erases a name it has", () => {
+    const items = board().open();
+    const card = items.projectRoutine({ routineId: "routine-1", title: "   ", status: "todo" });
+    // A nameless routine still has work worth showing, so the card falls back
+    // to the routine's id rather than throwing the projection away.
+    expect(card.title).toBe("routine-1");
+
+    const renamed = items.projectRoutine({ routineId: "routine-1", title: "", status: "in_progress" });
+    // A blank name on a later run must not erase a name already on the board.
+    expect(renamed.title).toBe("routine-1");
+  });
 });

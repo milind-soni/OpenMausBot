@@ -382,6 +382,64 @@ export class WorkItems {
     return next;
   }
 
+  /**
+   * Project a routine run onto the board: one card per ROUTINE, updated in
+   * place, never one card per firing.
+   *
+   * A nightly job that has run for a month must not push thirty cards onto a
+   * board — the card is a view of what the schedule is doing, not an archive
+   * of everything it ever did. The routine is the schedule and keeps its own
+   * run history; the card only ever shows the newest state of it.
+   *
+   * The link is one-way. This is called BY the routines layer and never
+   * creates, edits or cancels a routine: a board column is not a schedule.
+   */
+  projectRoutine(input: {
+    routineId: string;
+    title: string;
+    ownerBotId?: string | null;
+    threadId?: string | null;
+    status: WorkStatus;
+    detail?: string;
+  }): WorkItem {
+    const routineId = cleanBotId(input.routineId);
+    if (!routineId) throw Object.assign(new Error("a routine card needs a routine"), { status: 400 });
+    // A routine called nothing is still a routine, and its card needs a name
+    // a person can find. Falling back to the id keeps a nameless routine's
+    // work on the board instead of failing the projection and losing it.
+    const title = cleanText(input.title, MAX_TITLE) || routineId;
+    const existing = this.byRoutine(routineId);
+    // A terminal column is a person's decision, so a schedule firing again
+    // must not quietly drag a finished card back into the running columns.
+    if (existing && TERMINAL.has(existing.status) && !TERMINAL.has(input.status)) return existing;
+    const detail = input.detail ? scrub(input.detail).slice(0, 2_000) : undefined;
+    // One code path for both: create the bare card, then let the same field
+    // rules apply whether this is the routine's first run or its hundredth.
+    // Two paths here would mean a first failure and a later one showing
+    // different things, which is exactly the kind of drift a projection must
+    // not have.
+    const card = existing ?? this.create({
+      title,
+      status: input.status,
+      ownerBotId: input.ownerBotId ?? null,
+      routineId,
+    });
+    const next: WorkItem = {
+      ...card,
+      title: input.title.trim() ? title : card.title,
+      status: input.status,
+      updatedAt: this.now(),
+      ...(input.threadId ? { threadId: input.threadId } : {}),
+      ...(detail ? { lastError: detail } : {}),
+    };
+    if (input.status === "in_progress") next.startedAt = next.startedAt ?? this.now();
+    this.items = this.items.map((candidate) => (candidate.id === card.id ? next : candidate));
+    this.save();
+    return next;
+  }
+
+  /** Record why the work stopped, without claiming it is a routine's fault.
+   * Used by the run route, which knows the bot failed but not whose fault. */
   fail(id: string, reason: string): WorkItem {
     const item = this.get(id);
     if (!item) throw Object.assign(new Error("no such card"), { status: 404 });
