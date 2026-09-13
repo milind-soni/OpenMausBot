@@ -51,6 +51,34 @@ describe("desktop capabilities", () => {
     expect(capabilities.windowChrome).toBe("win-caption");
   });
 
+  it("offers Windows local control once the driver is connected", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      packaged: true,
+      localConnection: { mode: "embedded" },
+    });
+
+    expect(capabilities).toMatchObject({
+      host: { platform: "win32", label: "Windows", packaged: true },
+      localComputer: { available: true, support: "supported", enabled: true, status: "ready" },
+    });
+  });
+
+  it.each(["unavailable", "standalone"])("keeps Windows local control closed for %s", (mode) => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      packaged: true,
+      localConnection: { mode, reason: "no owned driver" },
+    });
+
+    expect(capabilities.localComputer).toMatchObject({
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+    });
+  });
+
   it.each(["freebsd"])("fails closed on %s", (platform) => {
     const capabilities = desktopCapabilities({
       platform,

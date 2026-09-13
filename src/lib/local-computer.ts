@@ -23,7 +23,10 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
-  return capabilities.host.platform === "darwin";
+  // macOS and Windows both keep the destination clickable before the driver
+  // is live, so the user can pick it and then finish the permission/setup
+  // step instead of hunting for why the button is greyed out.
+  return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
 export function localComputerDisabledReason({
@@ -51,6 +54,9 @@ export function localComputerDisabledReason({
   }
   if (capabilities.host.label === "Browser") {
     return "Local computer control requires the desktop app.";
+  }
+  if (capabilities.host.platform === "win32") {
+    return "The bundled Cua Driver could not start. Restart OpenMausBot and check Diagnostics if it still fails.";
   }
   return "CUA Driver is not ready for local computer control.";
 }

@@ -419,7 +419,11 @@ describe("agents-proxy MCP surface", () => {
     expect(JSON.stringify(create.inputSchema)).not.toMatch(/"oneOf"|"anyOf"|"allOf"|"const"/);
     expect(schedule.type).toBe("object");
     expect(schedule.required).toEqual(["type"]);
-    expect(schedule.properties.type.enum).toEqual(["once", "weekly", "daily", "interval"]);
+    expect(schedule.properties.type.enum).toEqual(["once", "weekly", "daily", "interval", "cron"]);
+    expect(schedule.properties.expression.description).toContain("0 9 L * *");
+    expect(schedule.properties.expression.description).toContain("MON#2");
+    expect(schedule.properties.timeZone.description).toContain("IANA");
+    expect(create.description).toContain("Never approximate unsupported requests");
     expect(schedule.properties.weekdays.items.enum).toEqual([
       "monday",
       "tuesday",
@@ -1189,6 +1193,36 @@ describe("agents-proxy MCP surface", () => {
       window: { start: "09:00", end: "17:00" },
       endsAt: "2026-09-30T17:00:00+05:30",
     });
+  });
+
+  it("normalizes cron proposals and updates without losing the explicit zone", async () => {
+    const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" };
+    const result = await callTool("propose_routine", {
+      name: "Monthly report", instructions: "Summarize the previous month.",
+      schedule: JSON.stringify({ ...schedule, expression: "  0 9  1 * *  " }),
+    });
+    expect(result.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.schedule).toEqual(schedule);
+    const update = await callTool("propose_routine_action", {
+      action: "update", routine_id: "routine-1", changes: { schedule: { ...schedule, expression: "0 9 L * *" } },
+    });
+    expect(update.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.changes.schedule).toEqual({ ...schedule, expression: "0 9 L * *" });
+  });
+
+  it.each([
+    { expression: "0 9 1 * *" },
+    { expression: "0 9 1 * *", timeZone: "EST" },
+    { expression: "0 9 1 * *", timeZone: "Fake/Zone" },
+    { expression: "0 0 9 1 * *", timeZone: "UTC" },
+    { expression: "@monthly", timeZone: "UTC" },
+    { expression: "0 9 31 2 *", timeZone: "UTC" },
+    { expression: "0 9 1 * *", timeZone: "UTC", weekdays: ["monday"] },
+  ])("rejects unsafe cron input before calling the harness: %j", async (schedule) => {
+    lastRoutineRequestBody = null;
+    const result = await callTool("propose_routine", { name: "Bad cron", instructions: "Do not run.", schedule: { type: "cron", ...schedule } });
+    expect(result.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
   });
 
   it.each([

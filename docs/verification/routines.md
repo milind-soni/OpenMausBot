@@ -1,5 +1,25 @@
 # Routines
 
+## Monthly and custom cron
+
+See [schedule behavior and examples](../routine-schedules.md). In the isolated
+renderer below, create a monthly routine for day 1 at 09:00 in Asia/Kolkata.
+Check that the next three dates are all on the 1st, then save, reload and edit
+the title without changing its expression or zone. Switch to Custom cron and
+try `0 9 31 2 *`: the inline error must disable Save and leave the stored rule
+untouched. Check `0 9 L * *` and `0 9 * * MON#2` for real month-end/nth-weekday
+previews. Calendar calls deliberately retain their existing scheduling choices.
+
+The automated cron tool fixture calls the real MCP proxy through a disposable
+server, confirms the resulting card, and verifies list/update/pause/resume,
+persisted timing and HTTP 400 validation failures. It scripts the tool call;
+it does not measure a real model's natural-language-to-cron accuracy.
+
+```sh
+pnpm exec vitest run shared/routine-schedule.test.ts server/routine-cron.e2e.test.ts server/routines.test.ts server/routines-startup.test.ts src/components/routines/cron-editor.test.ts src/lib/routine-calendar.test.ts src/lib/schedule-label.test.ts server/bot-package.test.ts server/package-export.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/cron-routines-ui.e2e.test.ts
+```
+
 ## Launch the isolated renderer
 
 Run the launcher directly so Ctrl-C reaches the fixture owner:

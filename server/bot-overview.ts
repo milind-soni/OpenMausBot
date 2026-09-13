@@ -7,6 +7,7 @@ import type { BotRecord } from "./store.ts";
 import type { Routine } from "./routines.ts";
 import type { RoutineRequestSchedule } from "../shared/routine-request.ts";
 import { approvalModeFor } from "../shared/approval-mode.ts";
+import { cronScheduleLabel } from "../shared/cron-label.ts";
 
 export interface BotOverview {
   who: { name: string; title: string; blurb: string; soulLead: string };
@@ -104,6 +105,7 @@ function clockTime(hhmm: string): string {
  * approval card's scheduleText() carries the anchor instant and timezone
  * name because a card must be exact; a plain-language overview must not. */
 function schedulePhrase(schedule: OverviewFacts["routines"][number]["schedule"], timeZone: string): string {
+  if (schedule.type === "cron") return cronScheduleLabel(schedule);
   if (schedule.type === "once") {
     const date = new Date(schedule.at).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone });
     return `Once on ${date} at ${time(schedule.at, timeZone)}`;

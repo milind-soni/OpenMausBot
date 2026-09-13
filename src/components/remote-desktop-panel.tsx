@@ -6,6 +6,7 @@ import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
 import type { Routine } from "@/lib/routines";
+import { scheduleLabel } from "@/lib/schedule-label";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
 import { RoutineEditor } from "./RoutinesPage";
 
@@ -16,6 +17,7 @@ function viewerAddress(raw: unknown): string {
 }
 
 function routineScheduleLabel(routine: Routine) {
+  if (routine.schedule.type === "cron") return scheduleLabel(routine.schedule);
   if (routine.schedule.type === "once") {
     return new Date(routine.schedule.at).toLocaleString([], {
       month: "short",

@@ -55,6 +55,18 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
+  it("keeps This computer selectable on Windows before the driver is live", () => {
+    const capabilities = {
+      host: { platform: "win32" as const, label: "Windows" },
+      localComputer: { available: false, enabled: false, status: "unavailable" },
+    } as DesktopCapabilities;
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
+    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toContain(
+      "Cua Driver",
+    );
+  });
+
   it("states that Linux Auto never selects this computer", () => {
     expect(linuxAutoDescription()).toContain("otherwise computer use stays off");
     expect(

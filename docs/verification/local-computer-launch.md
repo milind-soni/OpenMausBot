@@ -51,6 +51,25 @@ distinguishes window delivery from full-desktop input. OMB retains its existing
 CUA driver, permission broker, and human-control gate rather than importing
 OpenClaw's application-specific gateway or unrestricted authorization policy.
 
+## Windows local control
+
+`pnpm build:cua:win && pnpm smoke:cua-win` on Windows x64 stages the pinned
+0.22.1 executable and matching SDK, loads the packaged native-library bundle,
+starts an embedded host, then proves its child exits after Stop. CI runs this
+on a disposable Windows runner with telemetry disabled and a bounded timeout.
+The smoke does not capture a screen or send input.
+
+`pnpm exec vitest run electron/cua-windows-isolation.test.mjs` exercises the
+Windows branch with a disposable directory and mocked SDK: private embedded
+startup, failed host, cancellation, replacement isolation, shutdown,
+and development binary discovery. It refuses macOS permission imports and any
+unowned daemon launch or foreign-pipe probe. macOS keeps its existing fallback.
+
+Release packaging calls `build:cua:win` automatically. This proves startup and
+transport ownership, not arbitrary Windows input, elevated/UAC screens, or
+background focus behavior; those still require a disposable interactive
+Windows desktop acceptance test.
+
 ## Separate native focus issue
 
 CUA's [background contract](https://cua.ai/docs/concepts/the-no-foreground-contract)

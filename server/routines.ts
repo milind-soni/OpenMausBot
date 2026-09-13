@@ -9,6 +9,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
+import { normalizeCronSchedule, nextCronRuns, type RoutineCronSchedule } from "../shared/routine-schedule.ts";
 
 export interface RoutineIntervalWindow {
   start: string;
@@ -39,6 +40,7 @@ export type RoutineIntervalScheduleInput = Omit<RoutineIntervalSchedule, "weekda
 export type RoutineSchedule =
   | { type: "once"; at: number }
   | { type: "daily"; time: string; weekdays: number[] }
+  | RoutineCronSchedule
   | RoutineIntervalSchedule;
 
 export type RoutineScheduleInput =
@@ -353,6 +355,7 @@ function loadAttachments(value: unknown): RoutineContextAttachment[] {
 
 function cloneSchedule(schedule: RoutineSchedule): RoutineSchedule {
   if (schedule.type === "once") return { type: "once", at: schedule.at };
+  if (schedule.type === "cron") return { ...schedule };
   if (schedule.type === "interval") {
     return {
       type: "interval",
@@ -517,7 +520,12 @@ function finishedOrder(run: RoutineRun): number {
   return run.finishedAt ?? run.createdAt;
 }
 
-function cleanSchedule(schedule: RoutineScheduleInput): RoutineSchedule {
+export class RoutineScheduleError extends Error {
+  readonly status = 400;
+}
+
+function parseSchedule(schedule: RoutineScheduleInput, after: number): RoutineSchedule {
+  if (schedule?.type === "cron") return normalizeCronSchedule(schedule, after);
   if (schedule?.type === "once") {
     const at = Number(schedule.at);
     if (!Number.isFinite(at)) throw new Error("Choose a valid date and time");
@@ -556,9 +564,14 @@ function cleanSchedule(schedule: RoutineScheduleInput): RoutineSchedule {
   throw new Error("Choose a supported schedule");
 }
 
-function loadSchedule(value: unknown): RoutineSchedule | null {
+function cleanSchedule(schedule: RoutineScheduleInput, after: number): RoutineSchedule {
+  try { return parseSchedule(schedule, after); }
+  catch (error) { throw new RoutineScheduleError((error as Error).message); }
+}
+
+function loadSchedule(value: unknown, after: number): RoutineSchedule | null {
   try {
-    return cleanSchedule(value as RoutineScheduleInput);
+    return cleanSchedule(value as RoutineScheduleInput, after);
   } catch {
     return null;
   }
@@ -595,9 +608,10 @@ function nextAlignedInterval(schedule: RoutineIntervalSchedule, after: number): 
   return Number.isSafeInteger(candidate) && candidate <= MAX_DATE_MS ? candidate : null;
 }
 
-/** Next wall-clock occurrence in this computer's timezone, strictly after `after`. */
+/** Next occurrence strictly after `after`: cron uses its saved zone, daily uses the host zone. */
 export function nextOccurrence(schedule: RoutineSchedule, after: number): number | null {
   if (schedule.type === "once") return schedule.at > after ? schedule.at : null;
+  if (schedule.type === "cron") return nextCronRuns(schedule, after, 1)[0] ?? null;
   if (schedule.type === "interval") {
     const intervalMs = schedule.everyMinutes * 60_000;
     let candidate = nextAlignedInterval(schedule, after);
@@ -659,7 +673,7 @@ function mergeScheduleUpdate(
   return merged;
 }
 
-function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
+function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" | "createdAt" | "updatedAt" | "nextRunAt"> {
   const name = String(input.name ?? "").trim().slice(0, 80);
   const prompt = String(input.prompt ?? "").trim().slice(0, 20_000);
   const botId = String(input.botId ?? "").trim();
@@ -695,7 +709,7 @@ function sanitizeInput(input: RoutineInput): Omit<Routine, "id" | "createdAt" | 
     groupId: target === "room-goal" ? groupId : undefined,
     runOn,
     enabled: input.enabled !== false,
-    schedule: cleanSchedule(input.schedule),
+    schedule: cleanSchedule(input.schedule, after),
     durationMinutes: Math.min(240, Math.max(5, Math.round(Number(input.durationMinutes) || 30))),
     ...(timeoutMinutes === undefined ? {} : { timeoutMinutes }),
     attachments,
@@ -722,7 +736,7 @@ export class RoutineManager {
       const disk = JSON.parse(readFileSync(this.file, "utf8")) as Partial<RoutineFile>;
       this.routines = Array.isArray(disk.routines)
         ? disk.routines.flatMap((routine) => {
-            const schedule = loadSchedule(routine.schedule);
+            const schedule = loadSchedule(routine.schedule, this.now());
             if (!schedule) return [];
             const target = loadTarget(routine.target);
             const loaded: Routine = {
@@ -916,9 +930,9 @@ export class RoutineManager {
         throw new Error("This routine request was already applied");
       }
     }
-    const clean = sanitizeInput(input);
-    if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const at = this.now();
+    const clean = sanitizeInput(input, at);
+    if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const nextRunAt = clean.enabled ? this.initialOccurrence(clean.schedule, at) : null;
     if (clean.schedule.type === "interval" && clean.enabled && nextRunAt === null) {
       throw new Error("This interval has no future runs. Choose a later end date or turn it off.");
@@ -970,7 +984,7 @@ export class RoutineManager {
       timeoutMinutes: Object.hasOwn(patch, "timeoutMinutes") ? patch.timeoutMinutes : routine.timeoutMinutes,
       attachments: patch.attachments ?? routine.attachments,
       continuity: patch.continuity ?? routine.continuity,
-    });
+    }, now);
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const scheduleChanged = JSON.stringify(clean.schedule) !== JSON.stringify(routine.schedule);
     const enabledChanged = clean.enabled !== routine.enabled;
@@ -1330,9 +1344,9 @@ export class RoutineManager {
             const scheduledFor = routine.schedule.type === "interval" && late <= CATCH_UP_MS
               ? latestIntervalOccurrence(routine.schedule, now) ?? pendingAt
               : pendingAt;
-            // One slow interval run must not build an unbounded queue of stale
-            // copies behind it. The series still advances on its original phase.
-            const overlapping = routine.schedule.type === "interval" && this.runs.some(
+            // Frequent recurring work must not build an unbounded queue of stale
+            // copies. Elapsed intervals keep their phase; cron keeps its calendar.
+            const overlapping = (routine.schedule.type === "interval" || routine.schedule.type === "cron") && this.runs.some(
               (run) => run.routineId === routine.id && ["queued", "running", "waiting"].includes(run.status),
             );
             if (!overlapping) {

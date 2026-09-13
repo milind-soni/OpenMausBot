@@ -36,6 +36,7 @@
 import readline from "node:readline";
 
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
+import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
 import { peerName } from "../peer-roster.ts";
@@ -92,12 +93,22 @@ const ROUTINE_SCHEDULE_SCHEMA = {
   type: "object",
   additionalProperties: false,
   description:
-    'Either {"type":"once","at":RFC3339} for one future run, {"type":"weekly","time":"HH:MM","weekdays":[...]} for chosen days, {"type":"daily","time":"HH:MM"} for every day, or {"type":"interval","every_minutes":15} to repeat. Intervals can optionally be limited with weekdays, window_start + window_end, and ends_at.',
+    'Use {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} for 09:00 on the first of each month, once with at for one future run, weekly with time + weekdays, daily with time, or interval with every_minutes for elapsed-time repetition. Intervals can optionally be limited with weekdays, window_start + window_end, and ends_at.',
   properties: {
     type: {
       type: "string",
-      enum: ["once", "weekly", "daily", "interval"],
-      description: "once = a single future run; weekly = chosen weekdays; daily = every day; interval = every N minutes.",
+      enum: ["once", "weekly", "daily", "interval", "cron"],
+      description: "once = a single future run; weekly = chosen weekdays; daily = every day; interval = every N elapsed minutes; cron = a calendar rule in an explicit timezone.",
+    },
+    expression: {
+      type: "string",
+      maxLength: 256,
+      description: "Only for cron: five fields, minute hour day-of-month month weekday. Examples: 0 9 1 * * = monthly on day 1 at 09:00; 0 9 L * * = last day of each month; 0 9 * * MON#2 = second Monday of each month. Lists, ranges and steps are supported. No seconds, year, or @ macros. Never substitute daily AI date checks for a calendar rule.",
+    },
+    timeZone: {
+      type: "string",
+      maxLength: 128,
+      description: "Required for cron: explicit IANA timezone, for example Asia/Kolkata, America/New_York, or UTC. Use the user's requested zone; resolve ambiguity before proposing. Do not send a numeric offset or local-time abbreviation.",
     },
     at: {
       type: "string",
@@ -172,7 +183,8 @@ const SHORT_WEEKDAYS = {
 const SUPPORTED_SCHEDULES =
   'Supported schedules: {"type":"once","at":"2026-09-01T09:00:00+05:30"} (future RFC3339 with explicit offset), ' +
   '{"type":"weekly","time":"09:00","weekdays":["monday","friday"]}, {"type":"daily","time":"09:00"}, ' +
-  'or {"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"}.';
+  '{"type":"interval","every_minutes":15,"weekdays":["monday","friday"],"window_start":"09:00","window_end":"17:00"}, ' +
+  'or {"type":"cron","expression":"0 9 1 * *","timeZone":"Asia/Kolkata"} (monthly at 09:00 on day 1; five fields and an explicit IANA timezone).';
 
 /** The outcome of coercing a model-sent schedule: the harness-dialect
  * schedule, or a message telling the model exactly what to send instead. */
@@ -203,13 +215,22 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
       ? ["type", "time", "weekdays"]
       : type === "interval"
         ? ["type", "every_minutes", "everyMinutes", "starts_at", "anchorAt", "weekdays", "every_day", "window_start", "window_end", "window", "all_day", "ends_at", "endsAt", "never_ends"]
-        : null;
+        : type === "cron"
+          ? ["type", "expression", "timeZone"]
+          : null;
   // Provider conversions may send unused optional fields as null. Ignore
   // those, but never silently discard an actual scheduling constraint (for
   // example timezone or a misspelled starts_at) and approve different work.
   const unsupported = fields && Object.keys(raw).find((key) => raw[key] != null && !fields.includes(key));
   if (unsupported) {
     return { error: `Unsupported ${type} schedule field "${unsupported}". Weekly and daily times use the computer's timezone from list_routines. ${SUPPORTED_SCHEDULES}` };
+  }
+  if (type === "cron") {
+    try {
+      return { schedule: { ...normalizeCronSchedule({ type, expression: raw.expression, timeZone: raw.timeZone }) } };
+    } catch (error) {
+      return { error: `${error instanceof Error ? error.message : "Invalid cron schedule"}. ${SUPPORTED_SCHEDULES}` };
+    }
   }
   if (type === "once") {
     if (typeof raw.at !== "string" || !raw.at.trim()) {
@@ -323,7 +344,7 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
       },
     };
   }
-  if (type === "cron" || type === "hourly" || type === "minutes") {
+  if (type === "hourly" || type === "minutes") {
     return { error: `Use an interval schedule for every-N-minutes work. ${SUPPORTED_SCHEDULES}` };
   }
   return { error: `Unknown schedule type "${type || "(missing)"}". ${SUPPORTED_SCHEDULES}` };
@@ -698,7 +719,7 @@ const TOOLS = [
   {
     name: "propose_routine",
     description:
-      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. This only creates a durable confirmation card; it does NOT enable the routine. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. After calling it, end the turn and do not claim the routine exists until the user confirms the card. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id.",
+      "Prepare a new routine after the user explicitly asks to schedule recurring or future work. Call list_routines first for relative dates or times so you use its authoritative current time and timezone. Convert calendar requests (monthly dates, last days, nth weekdays) into a validated five-field cron schedule with an explicit IANA timeZone; keep elapsed every-N-minutes work as interval. Never approximate unsupported requests with a different weekly schedule or an AI date-check routine; explain the limitation instead. This only creates a durable confirmation card; it does NOT enable the routine. Resolve ambiguous dates, times, timezone, destination, or instructions with the user first, and always give one-time schedules an explicit RFC3339 offset. After calling it, end the turn and do not claim the routine exists until the user confirms the card. If the user asks for the routine to run as ANOTHER bot in your section, call list_bots and pass that bot's id as for_bot_id.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

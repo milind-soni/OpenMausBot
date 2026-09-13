@@ -125,6 +125,8 @@ export function createBotPackageExport(input: {
       runOn: routine.runOn,
       schedule: routine.schedule.type === "once"
         ? { type: "once", at: routine.schedule.at }
+        : routine.schedule.type === "cron"
+          ? { ...routine.schedule }
         : routine.schedule.type === "interval"
           ? {
               type: "interval",

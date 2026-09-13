@@ -24,6 +24,7 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
   };
   try {
     const scheduledBot = (await api("POST", "/api/bots", { name: "Restart scheduled" })).bot;
+    const cronBot = (await api("POST", "/api/bots", { name: "Restart cron" })).bot;
     const queuedBot = (await api("POST", "/api/bots", { name: "Restart queued" })).bot;
     const interruptedBot = (await api("POST", "/api/bots", { name: "Interrupted routine" })).bot;
     const orphanPeer = (await api("POST", "/api/bots", { name: "Orphan peer" })).bot;
@@ -34,6 +35,11 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
     const scheduled = (await api("POST", "/api/routines", {
       name: "Due at startup", prompt: "Report after the restart", botId: scheduledBot.id,
       schedule: { type: "once", at: Date.now() + 60 * 60_000 },
+    })).routine;
+    const cron = (await api("POST", "/api/routines", {
+      name: "Cron due at startup", prompt: "Recover one cron run, not every missed minute", botId: cronBot.id,
+      enabled: false,
+      schedule: { type: "cron", expression: "* * * * *", timeZone: "UTC" },
     })).routine;
     const manual = (await api("POST", "/api/routines", {
       name: "Queued before restart", prompt: "Finish the queued request", botId: queuedBot.id,
@@ -55,6 +61,9 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
     expect(scheduler.listRuns().find((run) => run.id === queued.id)?.status).toBe("queued");
     const disk = JSON.parse(readFileSync(file, "utf8"));
     const dueAt = Date.now() - 1_000;
+    const cronDueAt = Math.floor(Date.now() / 60_000) * 60_000 - 5 * 60_000;
+    disk.routines.find((routine: { id: string }) => routine.id === cron.id).enabled = true;
+    disk.routines.find((routine: { id: string }) => routine.id === cron.id).nextRunAt = cronDueAt;
     disk.routines.find((routine: { id: string }) => routine.id === scheduled.id).schedule.at = dueAt;
     disk.routines.find((routine: { id: string }) => routine.id === scheduled.id).nextRunAt = dueAt;
     disk.runs.push({
@@ -106,7 +115,7 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
       expect(restarted.exitCode, `restarted server exited; see ${logPath}`).toBeNull();
       try {
         runs = (await api("GET", "/api/routines")).runs;
-        if ([scheduled.id, manual.id].every((id) => runs.some((run) => run.routineId === id && run.status === "completed"))) break;
+        if ([scheduled.id, manual.id, cron.id].every((id) => runs.some((run) => run.routineId === id && run.status === "completed"))) break;
       } catch {
         // The exact replacement child is still starting its listener.
       }
@@ -114,9 +123,14 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
     }
     expect(runs, readFileSync(logPath, "utf8").slice(-4_000)).toEqual(expect.arrayContaining([
       expect.objectContaining({ routineId: scheduled.id, scheduledFor: dueAt, status: "completed" }),
+      expect.objectContaining({ routineId: cron.id, scheduledFor: cronDueAt, status: "completed" }),
       expect.objectContaining({ id: queued.id, routineId: manual.id, status: "completed" }),
       expect.objectContaining({ id: "interrupted-run", status: "failed", error: expect.stringContaining("restarted") }),
     ]));
+    expect(runs.filter(run => run.routineId === cron.id && run.scheduledFor < Math.floor(Date.now() / 60_000) * 60_000)).toHaveLength(1);
+    const restoredCron = (await api("GET", "/api/routines")).routines.find((routine: { id: string }) => routine.id === cron.id);
+    expect(restoredCron.schedule).toEqual(cron.schedule);
+    expect(restoredCron.nextRunAt).toBeGreaterThan(Date.now());
     const recoveredPeer = (await api("GET", "/api/bots")).bots.find((bot: { id: string }) => bot.id === orphanPeer.id);
     expect(recoveredPeer.messages.some((message: { role: string }) => message.role === "user")).toBe(false);
     expect(Boolean(recoveredPeer.busy)).toBe(false);

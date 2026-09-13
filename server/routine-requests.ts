@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
+import { cronScheduleLabel } from "../shared/cron-label.ts";
+import { normalizeCronSchedule, nextCronRuns } from "../shared/routine-schedule.ts";
 import { newId } from "./contracts.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { parseJson, schemaIssue, type JsonObject, type JsonValue } from "./schema.ts";
@@ -56,6 +58,7 @@ const toolIntervalWindowSchema = z.object({
 }).strict();
 
 const routineToolScheduleSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("cron"), expression: z.string().max(256), timeZone: z.string().max(128) }).strict(),
   z.object({ type: z.literal("once"), at: z.string().max(64) }).strict(),
   z.object({
     type: z.literal("weekly"),
@@ -118,7 +121,17 @@ const storedIntervalWindowSchema = z.object({
   ({ start, end }) => start < end,
   "Stored interval window must end later on the same day",
 );
+const storedCronScheduleSchema = z.object({
+  type: z.literal("cron"), expression: z.string().max(256), timeZone: z.string().max(128),
+}).strict().superRefine((schedule, context) => {
+  try {
+    normalizeCronSchedule(schedule);
+  } catch (error) {
+    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid stored cron schedule" });
+  }
+});
 const storedScheduleSchema = z.discriminatedUnion("type", [
+  storedCronScheduleSchema,
   z.object({ type: z.literal("once"), at: z.number().int().nonnegative() }).strict(),
   z.object({
     type: z.literal("daily"),
@@ -151,6 +164,7 @@ const storedScheduleSchema = z.discriminatedUnion("type", [
   }
 });
 const storedScheduleChangesSchema = z.discriminatedUnion("type", [
+  storedCronScheduleSchema,
   z.object({ type: z.literal("once"), at: z.number().int().nonnegative() }).strict(),
   z.object({
     type: z.literal("daily"),
@@ -443,6 +457,13 @@ function rfc3339Instant(value: string, offsetMessage: string): number {
 }
 
 function normalizeSchedule(schedule: RoutineToolScheduleInput, now: number): RoutineRequestSchedule {
+  if (schedule.type === "cron") {
+    try {
+      return normalizeCronSchedule(schedule, now);
+    } catch (error) {
+      throw new RoutineRequestError(error instanceof Error ? error.message : "Invalid cron schedule");
+    }
+  }
   if (schedule.type === "once") {
     const at = rfc3339Instant(
       schedule.at,
@@ -591,6 +612,7 @@ function normalizedOperation(
 }
 
 function asSchedule(schedule: RoutineRequestSchedule, now: number): RoutineSchedule {
+  if (schedule.type === "cron") return { ...schedule };
   if (schedule.type === "once") return { type: "once", at: schedule.at };
   if (schedule.type === "interval") {
     return {
@@ -629,6 +651,7 @@ function effectiveSchedule(
   current: RoutineRequestSchedule,
   incoming: RoutineRequestScheduleChanges,
 ): RoutineRequestSchedule {
+  if (incoming.type === "cron") return { ...incoming };
   if (incoming.type !== "interval") {
     return incoming.type === "once"
       ? { type: "once", at: incoming.at }
@@ -691,6 +714,7 @@ function intervalHasRestrictions(
 }
 
 export function scheduleText(schedule: RoutineRequestSchedule, timeZone: string): string {
+  if (schedule.type === "cron") return `${cronScheduleLabel(schedule)} · Cron: ${schedule.expression}`;
   if (schedule.type === "once") return `${formatInstant(schedule.at, timeZone)} (${timeZone})`;
   if (schedule.type === "interval") {
     const restricted = intervalHasRestrictions(schedule);
@@ -719,6 +743,7 @@ export function consequenceLine(schedule: RoutineRequestSchedule, continuity = f
   // over is the previous run's report, so say that rather than contradict
   // the Continuity line above it.
   const session = continuity ? "each run starts a fresh session with the previous run's report" : "each run starts a fresh session";
+  if (schedule.type === "cron") return `Will run at matching calendar times in ${schedule.timeZone}; ${session}.`;
   if (schedule.type === "once") return "Will run once; that run starts a fresh session.";
   if (schedule.type === "interval") {
     if (intervalHasRestrictions(schedule)) {
@@ -789,6 +814,7 @@ function cardCopy(
     };
   }
   const nextRunAt = nextForOperation(operation, manager, now);
+  const scheduleTimeZone = definition.schedule.type === "cron" ? definition.schedule.timeZone : timeZone;
   const when = operation.action === "run_now" ? "Now" : scheduleText(definition.schedule, timeZone);
   const destination = definition.runOn === "cloud" ? "Cloud VM" : "This OpenMausBot setup";
   const current = operation.action === "create"
@@ -806,7 +832,7 @@ function cardCopy(
         ? `Next allowed time after confirmation (${timeZone})`
         : "One interval after confirmation"
       : nextRunAt !== null
-        ? formatInstant(nextRunAt, timeZone)
+        ? formatInstant(nextRunAt, scheduleTimeZone)
         : operation.action === "pause"
           ? "None — this routine will be paused"
           : operation.action === "delete"
@@ -829,6 +855,9 @@ function cardCopy(
       ...(forBot ? [`For: @${redactSecretsInText(forBot.name)} — each run uses that bot's engine and permissions`] : []),
       `Schedule: ${when}`,
       `Next run: ${nextDescription}`,
+      ...(definition.schedule.type === "cron" && nextRunAt !== null && operation.action !== "run_now"
+        ? [`Next 3 runs (${scheduleTimeZone}): ${nextCronRuns(definition.schedule, now, 3).map((at) => formatInstant(at, scheduleTimeZone)).join(" · ")}`]
+        : []),
       `Runs on: ${destination}`,
       `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
       `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
@@ -944,6 +973,13 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
     : operation.action === "update"
       ? operation.changes.schedule
       : undefined;
+  if (schedule?.type === "cron") {
+    try {
+      normalizeCronSchedule(schedule, now);
+    } catch (error) {
+      throw new RoutineRequestError(error instanceof Error ? error.message : "Invalid cron schedule", 409);
+    }
+  }
   if (schedule?.type === "once" && schedule.at <= now) {
     throw new RoutineRequestError("That one-time schedule is now in the past. Ask the bot to propose a new time.", 409);
   }
@@ -1033,7 +1069,8 @@ export class RoutineRequestService {
       createdAt: cardAt,
       operation,
     };
-    const timeZone = this.timeZone();
+    const definition = effectiveDefinition(operation, this.routines);
+    const timeZone = definition?.schedule.type === "cron" ? definition.schedule.timeZone : this.timeZone();
     const copy = cardCopy(operation, this.routines, timeZone, cardAt);
     const messageInput: Parameters<RoutineRequestStore["appendMessage"]>[1] = {
       role: "bot",

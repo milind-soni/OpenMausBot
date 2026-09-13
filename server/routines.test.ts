@@ -7,6 +7,7 @@ import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import {
   nextOccurrence,
   RoutineManager,
+  RoutineScheduleError,
   type RoutineManagerOptions,
   type RoutineRun,
   type RoutineSchedule,
@@ -103,6 +104,106 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
 afterEach(() => {
   vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("cron routines use the existing persistent scheduler", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z");
+  const monthly = { type: "cron" as const, expression: "0 9 1 * *", timeZone: "UTC" };
+  const input = (schedule = monthly) => ({ name: "Monthly report", prompt: "Write the report", botId: "maus-1", schedule });
+
+  it("normalizes, clones and reloads cron definitions without shifting the cursor", () => {
+    const h = harness(start);
+    const routine = h.manager.create(input({ ...monthly, expression: " 0  9 1 * * " }));
+    expect(routine.schedule).toEqual(monthly);
+    expect(routine.nextRunAt).toBe(Date.parse("2026-10-01T09:00:00Z"));
+    (routine.schedule as typeof monthly).expression = "0 9 2 * *";
+    expect(h.manager.listRoutines()[0].schedule).toEqual(monthly);
+    const restored = new RoutineManager(h.options);
+    expect(restored.listRoutines()[0]).toEqual(h.manager.listRoutines()[0]);
+    h.setNow(Date.parse("2026-10-01T10:00:00Z"));
+    expect(restored.update(routine.id, { name: "Renamed overdue report" })?.nextRunAt).toBe(routine.nextRunAt);
+    expect(new RoutineManager(h.options).listRoutines()[0].nextRunAt).toBe(routine.nextRunAt);
+  });
+
+  it("recalculates only intentional expression or timezone changes", () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    expect(h.manager.update(routine.id, { schedule: { ...monthly, timeZone: "Asia/Kolkata" } })?.nextRunAt).toBe(Date.parse("2026-10-01T03:30:00Z"));
+    expect(h.manager.update(routine.id, { schedule: { ...monthly, expression: "0 9 2 * *", timeZone: "Asia/Kolkata" } })?.nextRunAt).toBe(Date.parse("2026-10-02T03:30:00Z"));
+  });
+
+  it("does not dispatch early or depend on a model to check the day of month", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    h.setNow(routine.nextRunAt! - 1);
+    await h.manager.tick(); expect(h.started).toHaveLength(0);
+    h.setNow(routine.nextRunAt!);
+    await h.manager.tick(); await h.manager.tick();
+    expect(h.started).toEqual([{ botId: "maus-1", threadId: "thread-1", prompt: "Write the report" }]);
+    expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "running", triggerSource: "schedule" });
+    expect(h.manager.listRoutines()[0].nextRunAt).toBe(Date.parse("2026-11-01T09:00:00Z"));
+  });
+
+  it("catches up once within twelve hours and does not replay missed minute slots", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(start + 8 * 3_600_000);
+    await h.manager.tick(); await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns()).toHaveLength(1);
+    expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "running" });
+    expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 8 * 3_600_000 + 60_000);
+  });
+
+  it("records one missed receipt after longer downtime and advances straight to the future", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(start + 20 * 3_600_000);
+    await h.manager.tick(); await h.manager.tick();
+    expect(h.started).toHaveLength(0);
+    expect(h.manager.listRuns()).toHaveLength(1);
+    expect(h.manager.listRuns()[0]).toMatchObject({ scheduledFor: routine.nextRunAt, status: "missed" });
+    expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 20 * 3_600_000 + 60_000);
+  });
+
+  it("does not accumulate cron work while a previous run is queued or active", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(start + 5 * 60_000); await h.manager.tick();
+    expect(h.manager.listRuns()).toHaveLength(1);
+    expect(h.manager.listRuns()[0].status).toBe("queued");
+    h.setBot("ready"); await h.manager.tick();
+    h.setNow(start + 6 * 60_000); await h.manager.tick();
+    expect(h.manager.listRuns()).toHaveLength(1); expect(h.started).toHaveLength(1);
+    h.manager.handleRuntimeEvent({ eventId: "done", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "turn.completed", ok: true });
+    h.setNow(start + 7 * 60_000); await h.manager.tick();
+    expect(h.manager.listRuns()).toHaveLength(2); expect(h.started).toHaveLength(2);
+  });
+
+  it("pause cancels queued work, survives restart, and resume chooses the next calendar date", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create(input());
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    expect(h.manager.update(routine.id, { enabled: false })).toMatchObject({ schedule: monthly, enabled: false, nextRunAt: null });
+    expect(h.manager.listRuns()[0].status).toBe("cancelled");
+    const restored = new RoutineManager(h.options);
+    h.setNow(Date.parse("2026-11-15T12:00:00Z"));
+    await restored.tick(); expect(h.started).toHaveLength(0);
+    expect(restored.update(routine.id, { enabled: true })?.nextRunAt).toBe(Date.parse("2026-12-01T09:00:00Z"));
+  });
+
+  it("rejects invalid schedules as validation errors without changing persisted work", () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    const before = readFileSync(h.options.file!, "utf8");
+    for (const schedule of [{ ...monthly, expression: "0 9 31 2 *" }, { ...monthly, timeZone: "Mars/Olympus" }, { ...monthly, expression: "0 0 9 * * *" }]) {
+      expect(() => h.manager.create(input(schedule))).toThrow(RoutineScheduleError);
+      try { h.manager.update(routine.id, { schedule }); throw new Error("expected rejection"); }
+      catch (error) { expect(error).toMatchObject({ status: 400 }); }
+    }
+    expect(readFileSync(h.options.file!, "utf8")).toBe(before);
+  });
 });
 
 describe("persistent routine results destinations", () => {

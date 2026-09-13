@@ -1,9 +1,12 @@
+import type { RoutineCronSchedule } from "../../shared/routine-schedule";
+
 export interface RoutineIntervalWindow {
   start: string;
   end: string;
 }
 
 export type RoutineSchedule =
+  | RoutineCronSchedule
   | { type: "once"; at: number }
   | { type: "daily"; time: string; weekdays: number[] }
   | {
@@ -19,7 +22,7 @@ export type RoutineSchedule =
   };
 
 export type RoutineScheduleInput =
-  | Extract<RoutineSchedule, { type: "once" | "daily" }>
+  | Extract<RoutineSchedule, { type: "once" | "daily" | "cron" }>
   | {
     type: "interval";
     everyMinutes: number;

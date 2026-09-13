@@ -3,6 +3,19 @@ import { describe, expect, it } from "vitest";
 import { intervalLabel, scheduleLabel, scheduleSentence, whenLabel } from "./schedule-label";
 
 describe("schedule labels", () => {
+  it.each([
+    ["0 9 1 * *", "Monthly on day 1 at 09:00"],
+    ["30 8 L * *", "Monthly on the last day at 08:30"],
+    ["0 9 1 1 *", "Yearly on January 1 at 09:00"],
+    ["0 9 * * 1#2", "Monthly on the second Monday at 09:00"],
+    ["0 9 * * 1-5", "Every weekday at 09:00"],
+    ["0 9 1 * 1", "Cron 0 9 1 * 1"],
+    ["*/15 9-17 * * 1-5", "Cron */15 9-17 * * 1-5"],
+  ])("labels %s without inventing a meaning for arbitrary expressions", (expression, description) => {
+    const schedule = { type: "cron" as const, expression, timeZone: "Asia/Kolkata" };
+    expect(scheduleLabel(schedule)).toBe(`${description} · Asia/Kolkata`);
+    expect(scheduleSentence(schedule)).toBe(`${description} · Asia/Kolkata`);
+  });
   it("keeps interval restrictions in both compact labels and prose", () => {
     const schedule = { type: "interval" as const, everyMinutes: 5, anchorAt: 0,
       weekdays: [1, 2, 3, 4, 5], window: { start: "09:00", end: "17:00" },
