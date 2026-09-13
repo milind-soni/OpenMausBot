@@ -11649,6 +11649,90 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, { ok: true });
     }
 
+    // Starting and stopping a card is a WRAPPER, never a second way to run a
+    // turn. The board calls the same routes the chat calls, so there is one
+    // implementation of "run a turn" and it cannot drift from what a person
+    // gets when they type into the composer themselves.
+    const cardRunMatch = path.match(/^\/api\/task-board\/items\/([\w-]+)\/run$/);
+    if (cardRunMatch && method === "POST") {
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can start work" });
+      }
+      const card = workItems.get(cardRunMatch[1]);
+      if (!card) return json(res, 404, { error: "no such card" });
+      if (!card.ownerBotId) return json(res, 400, { error: "assign this card to a bot before starting it" });
+      const bot = store.bot(card.ownerBotId);
+      if (!bot) return json(res, 400, { error: "the bot this card was assigned to no longer exists" });
+
+      // The turn needs a thread of its own. It is created once and then pinned
+      // to the card for good: a fresh thread per start would scatter one piece
+      // of work's history across many conversations, and "open the chat" would
+      // land on an empty one.
+      let threadId = card.threadId;
+      if (!threadId || !store.taskByThread(bot.id, threadId)) {
+        const task = store.createTask(bot.id, card.title, false);
+        if (!task) return json(res, 400, { error: "this bot could not open a thread for the card" });
+        threadId = task.threadId;
+      }
+
+      const prompt = card.brief.trim() || card.title;
+      try {
+        // A card that is already working is refused here rather than queued.
+        // The composer queues because a person's words must not be lost, but
+        // Run on a busy card is a double press: answering "already working"
+        // tells the person what happened, while a silent second turn in the
+        // queue would start invisible work they never asked for — and would
+        // make Run and Stop disagree about how many turns are in flight.
+        if (threadBusy(bot.id, threadId)) {
+          throw Object.assign(new Error("this agent is already working on the card — stop it first"), {
+            status: 409,
+            code: "thread_busy",
+          });
+        }
+        await startOrQueueDirectMessage(bot.id, threadId, prompt, undefined, parseSendId(newId()));
+      } catch (error) {
+        const status = (error as { status?: number }).status ?? 500;
+        const code = (error as { code?: string }).code;
+        const reason = error instanceof Error ? error.message : String(error);
+        // A card that could not start says so on the card. The board is where
+        // the person who pressed the button is looking, so "nothing happened"
+        // is never the answer — an error that only lands in a transcript
+        // nobody opened reads as a broken button.
+        workItems.fail(card.id, reason);
+        broadcast({ kind: "task-board" });
+        return json(res, status, { error: reason, ...(code ? { code } : {}) });
+      }
+
+      const item = workItems.attachThread(card.id, threadId);
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { item, threadId });
+    }
+
+    const cardStopMatch = path.match(/^\/api\/task-board\/items\/([\w-]+)\/stop$/);
+    if (cardStopMatch && method === "POST") {
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can stop work" });
+      }
+      const card = workItems.get(cardStopMatch[1]);
+      if (!card) return json(res, 404, { error: "no such card" });
+      if (!card.ownerBotId) return json(res, 400, { error: "this card has no bot to stop" });
+      const bot = store.bot(card.ownerBotId);
+      if (!bot) return json(res, 400, { error: "the bot this card was assigned to no longer exists" });
+      // No thread means no turn was ever dispatched from this card. Stopping
+      // the bot instead would reach whatever it is doing for somebody else.
+      if (!card.threadId) return json(res, 409, { error: "this card has not been started yet" });
+
+      // The thread is always named. Without it the stop would land on
+      // bot.threadId — whatever the bot happens to be showing — and could
+      // cancel unrelated work. This route also handles a routine running on
+      // that thread, since /interrupt already does.
+      const routineRun = routines!.activeBotRunForBot(bot.id);
+      if (routineRun?.threadId === card.threadId) await routines!.cancelRun(routineRun.id);
+      else await interruptDirectThread(bot.id, card.threadId);
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { ok: true });
+    }
+
     // ── routines calendar ────────────────────────────────────────────────
     if (path === "/api/routines" && method === "GET") {
       const fromParam = url.searchParams.get("from");
