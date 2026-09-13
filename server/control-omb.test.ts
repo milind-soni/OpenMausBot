@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -283,7 +284,7 @@ describe("control-omb isolated verification loop", () => {
   it("scripts the fake engine's tool calls from the launcher's environment", async () => {
     const session = await launchVerificationServer({
       ...process.env,
-      FAKE_CLAUDE_TOOL_CALLS: '[{"name":"Bash","input":{"command":"pnpm control:omb doctor"},"ok":true},{"name":"Bash","input":{"command":"false"},"ok":false}]',
+      FAKE_CLAUDE_TOOL_CALLS: '[{"name":"Bash","input":{"command":"pnpm control:omb doctor","password":"fixture-secret"},"output":{"text":"fixture healthy","api_key":"fixture-output-secret"},"ok":true},{"name":"Bash","input":{"command":"false"},"output":"fixture command failed","ok":false}]',
     });
     const env = { OPENMAUSBOT_URL: session.info.url };
     try {
@@ -297,6 +298,31 @@ describe("control-omb isolated verification loop", () => {
         .filter((message: { kind?: string }) => message.kind === "activity")
         .map((message: { tool?: { name?: string; ok?: boolean } }) => ({ name: message.tool?.name, ok: message.tool?.ok }));
       expect(tools).toEqual([{ name: "Bash", ok: true }, { name: "Bash", ok: false }]);
+      // The model-facing control transcript stays compact. The renderer's
+      // own HTTP hydration path, not that projection, carries display details.
+      for (const message of transcript.messages.filter((message: { tool?: unknown }) => message.tool)) {
+        expect(message.tool).not.toHaveProperty("input");
+        expect(message.tool).not.toHaveProperty("output");
+      }
+      const response = await fetch(`${session.info.url}/api/threads/${encodeURIComponent(created.bot.activeTaskId)}/messages?limit=20`);
+      expect(response.ok).toBe(true);
+      const rendererTranscript = await response.json() as { messages: Array<{ kind: string; tool?: { input?: string; output?: string } }> };
+      const recorded = rendererTranscript.messages.filter((message) => message.kind === "activity");
+      expect(recorded[0].tool?.input).toContain("pnpm control:omb doctor");
+      expect(recorded[0].tool?.output).toContain("fixture healthy");
+      expect(recorded[1].tool?.output).toBe("fixture command failed");
+      expect(JSON.stringify(recorded)).not.toContain("fixture-secret");
+      expect(JSON.stringify(recorded)).not.toContain("fixture-output-secret");
+      // Read only the fixture database: completed previews survive hydration
+      // from disk and are redacted before being persisted, not just in the UI.
+      const db = new DatabaseSync(join(session.info.dataDir, "messages.db"), { readOnly: true });
+      try {
+        const rows = db.prepare("SELECT json FROM messages WHERE thread_id = ? AND kind = 'activity' ORDER BY rowid").all(created.bot.activeTaskId);
+        const persisted = rows.map((row) => JSON.parse(String(row.json)));
+        expect(persisted.map((message) => message.tool)).toEqual(recorded.map((message) => message.tool));
+      } finally {
+        db.close();
+      }
     } finally {
       await session.close();
     }

@@ -279,6 +279,12 @@ describe("ACP turns (fake CLI)", () => {
       "turn.completed",
     ]);
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "grokAgent")).toBe(true);
+    expect(recorder.events.filter((event) => event.itemId === "tc-1")).toMatchObject([
+      { type: "item.started", input: expect.stringContaining("/fixture/readme.md") },
+      { type: "item.completed", output: expect.stringContaining("fixture file content") },
+    ]);
+    expect(JSON.stringify(recorder.events)).not.toContain("acp-input-secret");
+    expect(JSON.stringify(recorder.events)).not.toContain("acp-output-secret");
     const usage = recorder.events.find((e) => e.type === "thread.token-usage.updated")!;
     expect(usage).toMatchObject({ input: 10, output: 5 });
     const text = recorder.events.find((e) => e.type === "item.completed" && (e as any).itemType === "assistant_text")!;

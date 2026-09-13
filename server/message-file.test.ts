@@ -266,6 +266,18 @@ describe("message-linked files", () => {
     await opened.handle.close();
   });
 
+  it("accepts an authored file URL without double-decoding percent or filename suffix characters", async () => {
+    for (const name of ["demo#one.mp4", "r%20.pdf", "r .pdf"]) {
+      const path = join(workspace, name);
+      writeFileSync(path, name);
+      const href = pathToFileURL(path).href;
+      expect(messageReferencesFile(`[file](${href})`, href)).toBe(true);
+      const opened = await openMessageFile(href, [workspace]);
+      expect(opened.name).toBe(name);
+      await opened.handle.close();
+    }
+  });
+
   it("serves OpenDocument formats with their standard MIME types", async () => {
     for (const [extension, mime] of [
       ["odt", "application/vnd.oasis.opendocument.text"],
@@ -277,6 +289,22 @@ describe("message-linked files", () => {
       expect(file.mime).toBe(mime);
       await file.handle.close();
     }
+  });
+
+  it("serves message-authorized video formats without changing the file ceiling", async () => {
+    for (const [extension, mime] of [
+      ["mp4", "video/mp4"], ["m4v", "video/x-m4v"],
+      ["webm", "video/webm"], ["mov", "video/quicktime"],
+    ]) {
+      writeFileSync(join(workspace, `clip.${extension}`), "video fixture");
+      const file = await openMessageFile(`clip.${extension}`, [workspace]);
+      expect(file.mime).toBe(mime);
+      await file.handle.close();
+    }
+    const large = join(workspace, "large.mp4");
+    writeFileSync(large, "x");
+    truncateSync(large, MESSAGE_FILE_MAX_BYTES + 1);
+    await expect(openMessageFile(large, [workspace])).rejects.toMatchObject({ status: 413 });
   });
 
   it("refuses traversal and a symlink that resolves outside the allowed root", async () => {

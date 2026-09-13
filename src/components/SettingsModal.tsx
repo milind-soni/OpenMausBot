@@ -22,7 +22,8 @@ import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
-import { Card, Switch } from "./SettingsPrimitives";
+import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
@@ -86,9 +87,10 @@ function ProfileFields() {
     "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
   return (
     <div className="flex flex-col gap-3">
-      <input value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
+      <input aria-label={t("settings.profile.name")} value={name} onChange={(e) => setName(e.target.value)} onBlur={save} placeholder={t("settings.profile.name")} className={inputClass} />
       <input
         type="email"
+        aria-label={t("phone.signIn.email")}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         onBlur={save}
@@ -129,7 +131,7 @@ function UpdatesRow() {
                     ? t("settings.updates.failed", { message: s.message ?? t("settings.updates.unknownError") })
                     : t("settings.updates.latest");
   return (
-    <Card title={t("settings.updates.title")} subtitle={label}>
+    <SettingRow title={t("settings.updates.title")} subtitle={label}>
       <button
         onClick={() => {
           if (s?.status === "available") return void updater.download();
@@ -140,7 +142,7 @@ function UpdatesRow() {
           s?.status === "checking" || s?.status === "downloading" || s?.status === "preparing" ||
           s?.status === "installing" || s?.retryable === false
         }
-        className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+        className="ui-button"
       >
         {s?.retryable === false
           ? t("settings.updates.quitReopen")
@@ -158,7 +160,7 @@ function UpdatesRow() {
                     : t("settings.updates.restartingShort")
                   : t("settings.updates.check")}
       </button>
-    </Card>
+    </SettingRow>
   );
 }
 
@@ -169,7 +171,7 @@ function UpdatesRow() {
 function AnalyticsRow() {
   const [on, setOn] = useState(analyticsEnabled);
   return (
-    <Card title={t("settings.analytics.title")} subtitle={t("settings.analytics.subtitle")}>
+    <SettingRow title={t("settings.analytics.title")} subtitle={t("settings.analytics.subtitle")}>
       <Switch
         checked={on}
         aria-label={t("settings.analytics.aria")}
@@ -179,7 +181,7 @@ function AnalyticsRow() {
           setOn(next);
         }}
       />
-    </Card>
+    </SettingRow>
   );
 }
 
@@ -211,7 +213,7 @@ function ReplayAppTourButton() {
             .catch(() => setFailed(true))
             .finally(() => setSaving(false));
         }}
-        className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+        className="ui-button"
       >
         {t("settings.welcome.appTour")}
       </button>
@@ -223,17 +225,17 @@ function ReplayAppTourButton() {
 function ReplayTourRow() {
   const { dispatch } = useStore();
   return (
-    <Card title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitle")}>
+    <SettingRow title={t("settings.welcome.title")} subtitle={t("settings.welcome.subtitle")}>
       <div className="flex flex-wrap gap-2">
         <ReplayAppTourButton />
         <button
           onClick={() => dispatch({ type: "toggleWelcome", open: true })}
-          className="rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+          className="ui-button"
         >
           {t("settings.welcome.replay")}
         </button>
       </div>
-    </Card>
+    </SettingRow>
   );
 }
 
@@ -261,13 +263,17 @@ function LanguageRow() {
   };
 
   return (
-    <Card title={t("settings.language.title")} subtitle={t("settings.language.subtitle")}>
+    <SettingRow
+      title={t("settings.language.title")}
+      subtitle={t("settings.language.subtitle")}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
       <select
         value={current}
         disabled={saving}
         aria-label={t("settings.language.aria")}
         onChange={(event) => void save(event.target.value)}
-        className="w-full max-w-[280px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13.5px] text-ink disabled:cursor-wait disabled:opacity-50"
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
@@ -276,24 +282,20 @@ function LanguageRow() {
           </option>
         ))}
       </select>
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
-    </Card>
+    </SettingRow>
   );
 }
 
 function ShowThreadsRow() {
   const enabled = useShowThreads();
   return (
-    <Card title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="text-[14px] font-medium text-ink">{t("settings.threadDisplay.show")}</div>
-        <Switch
-          checked={enabled}
-          aria-label={t("settings.threadDisplay.show")}
-          onClick={() => setShowThreads(!enabled)}
-        />
-      </div>
-    </Card>
+    <SettingRow title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.threadDisplay.show")}
+        onClick={() => setShowThreads(!enabled)}
+      />
+    </SettingRow>
   );
 }
 
@@ -321,24 +323,19 @@ function ToolCallsRow() {
   };
 
   return (
-    <Card title={t("settings.toolCalls.title")} subtitle={t("settings.toolCalls.subtitle")}>
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[14px] font-medium text-ink">{t("settings.toolCalls.show")}</div>
-          <div className="mt-0.5 text-[12px] leading-relaxed text-ink-secondary">
-            {t("settings.toolCalls.detail")}
-          </div>
-        </div>
-        <Switch
-          checked={enabled}
-          aria-label={t("settings.toolCalls.aria")}
-          disabled={saving}
-          onClick={() => void toggle()}
-          className="disabled:cursor-wait disabled:opacity-50"
-        />
-      </div>
-      {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
-    </Card>
+    <SettingRow
+      title={t("settings.toolCalls.title")}
+      subtitle={<>{t("settings.toolCalls.subtitle")} {t("settings.toolCalls.detail")}</>}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.toolCalls.aria")}
+        disabled={saving}
+        onClick={() => void toggle()}
+        className="disabled:cursor-wait disabled:opacity-50"
+      />
+    </SettingRow>
   );
 }
 
@@ -445,26 +442,24 @@ function DiagnosticsRow() {
   };
 
   return (
-    <Card title={t("settings.diagnostics.title")} subtitle={t("settings.diagnostics.subtitle")}>
-      <div className="flex min-w-0 flex-col items-end gap-2">
-        <button
-          onClick={() => void exportDiagnostics()}
-          disabled={exporting}
-          aria-label={t("settings.diagnostics.aria")}
-          className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
-        >
-          {exporting ? t("settings.diagnostics.exporting") : t("settings.diagnostics.export")}
-        </button>
-        {result ? (
-          <span
-            role={result.kind === "error" ? "alert" : "status"}
-            className={`max-w-64 break-all text-right text-[12px] ${result.kind === "error" ? "text-danger" : "text-success"}`}
-          >
-            {result.message}
-          </span>
-        ) : null}
-      </div>
-    </Card>
+    <SettingRow
+      title={t("settings.diagnostics.title")}
+      subtitle={t("settings.diagnostics.subtitle")}
+      message={result ? (
+        <p role={result.kind === "error" ? "alert" : "status"} className={cn("break-all", result.kind === "error" ? "text-danger" : "text-success")}>
+          {result.message}
+        </p>
+      ) : null}
+    >
+      <button
+        onClick={() => void exportDiagnostics()}
+        disabled={exporting}
+        aria-label={t("settings.diagnostics.aria")}
+        className="ui-button"
+      >
+        {exporting ? t("settings.diagnostics.exporting") : t("settings.diagnostics.export")}
+      </button>
+    </SettingRow>
   );
 }
 
@@ -498,7 +493,9 @@ export function SettingsModal() {
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
-    dialog?.focus();
+    const search = dialog?.querySelector<HTMLInputElement>("[data-settings-search]");
+    if (search?.checkVisibility()) search.focus();
+    else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -553,13 +550,14 @@ export function SettingsModal() {
       >
         {/* section nav */}
         <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
-        <nav className="hidden min-h-0 w-[190px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-hairline/40 p-3 sm:flex">
+        <nav className="hidden min-h-0 w-[190px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-app/30 p-3 sm:flex">
           <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
             {t("settings.title")}
           </div>
-          <div className="mb-2 mt-1 flex shrink-0 items-center gap-2 rounded-lg bg-control/70 px-2.5 py-2">
+          <div className="mb-2 mt-1 flex min-h-8 shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
+              data-settings-search
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
@@ -584,18 +582,18 @@ export function SettingsModal() {
               onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: id })}
               aria-current={section === id ? "page" : undefined}
               className={cn(
-                "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[14px]",
+                "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
                 section === id ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50 hover:text-ink",
               )}
             >
-              <Icon size={15} />
+              <Icon size={15} className="shrink-0" />
               {t(labelKey)}
             </button>
           ))}
         </nav>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center justify-between gap-3 px-3 py-3 sm:px-5">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:px-5">
             <select
               aria-label={t("settings.title")}
               value={section}
@@ -615,28 +613,33 @@ export function SettingsModal() {
             <button
               onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
               aria-label={t("settings.close")}
-              className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
+              title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
+              className="ui-icon-button shrink-0"
             >
               <X size={18} />
             </button>
           </div>
 
-          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 pb-3 sm:px-5 sm:pb-5">
+          <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 sm:px-5 sm:pb-5">
             {section === "desktopWorkspaces" && <ConnectedWorkspacesSettings />}
             {section === "general" && (
               <>
                 <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
                   <ProfileFields />
                 </Card>
+                <div>
+                  <LanguageRow />
+                  <AnalyticsRow />
+                </div>
                 <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
                 </Card>
                 <ThreadConcurrencySettings />
-                <LanguageRow />
-                {!remoteActive && <ReplayTourRow />}
-                <UpdatesRow />
-                <DiagnosticsRow />
-                <AnalyticsRow />
+                <div>
+                  {!remoteActive && <ReplayTourRow />}
+                  <UpdatesRow />
+                  <DiagnosticsRow />
+                </div>
               </>
             )}
 
@@ -645,8 +648,10 @@ export function SettingsModal() {
                 <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
                   <SkinPicker />
                 </Card>
-                <ShowThreadsRow />
-                {!remoteActive && <ToolCallsRow />}
+                <div>
+                  <ShowThreadsRow />
+                  {!remoteActive && <ToolCallsRow />}
+                </div>
               </>
             )}
 

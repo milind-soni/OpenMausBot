@@ -491,6 +491,10 @@ describe("PiDriver turns (fake CLI)", () => {
     // a tool ran and completed, then pi auto-continued to synthesize the reply
     expect(recorder.events.filter((e) => e.type === "item.started").length).toBe(1);
     expect(recorder.events.filter((e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "tool").length).toBe(1);
+    expect(recorder.events.find((event) => event.type === "item.started")).toMatchObject({ summary: "echo hi", input: expect.stringContaining("echo hi") });
+    expect(recorder.events.find((event) => event.type === "item.completed" && event.itemType === "tool")).toMatchObject({ output: expect.stringContaining('"text": "hi"') });
+    expect(JSON.stringify(recorder.events)).not.toContain("pi-input-secret");
+    expect(JSON.stringify(recorder.events)).not.toContain("pi-output-secret");
     expect(done).toMatchObject({ ok: true, stopReason: "end_turn" });
     expect((done as { usage: { input: number; output: number } }).usage).toEqual({ input: 12, output: 2 });
     const text = recorder.events.find(

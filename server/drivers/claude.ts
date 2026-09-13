@@ -33,7 +33,7 @@ import type {
 import { computerProxyEnv } from "../container-computer.ts";
 import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
-import { askInputSummary, commandSummary } from "../tool-summary.ts";
+import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import {
   applyClaudeInject,
@@ -1515,6 +1515,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                   itemId: b.id,
                   title: b.name,
                   summary: commandSummary(b.input),
+                  input: toolDetailPreview(b.input),
                 });
               }
             }
@@ -1534,7 +1535,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           case "user":
             for (const b of Array.isArray(o.message?.content) ? o.message.content : []) {
               if (b.type === "tool_result") {
-                emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "tool", itemId: b.tool_use_id, ok: !b.is_error });
+                emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "tool", itemId: b.tool_use_id, ok: !b.is_error, output: toolDetailPreview(b.content) });
               }
             }
             break;

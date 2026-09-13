@@ -29,6 +29,7 @@ import { computerProxyEnv } from "../container-computer.ts";
 import { augmentedPath } from "../env-path.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 
 import type {
   DriverCreateInput,
@@ -415,6 +416,8 @@ interface PiEvent {
   // tool_execution_*
   toolCallId?: string;
   toolName?: string;
+  args?: unknown;
+  result?: unknown;
   isError?: boolean;
   // turn_end / message_end
   message?: { stopReason?: string; errorMessage?: string; usage?: { input?: number; output?: number } };
@@ -689,6 +692,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               itemType: "tool",
               itemId: evt.toolCallId,
               title: String(evt.toolName ?? "tool").slice(0, 80),
+              summary: commandSummary(evt.args),
+              input: toolDetailPreview(evt.args),
             });
             return;
           }
@@ -699,6 +704,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
               itemType: "tool",
               itemId: evt.toolCallId,
               ok: !evt.isError,
+              output: toolDetailPreview(evt.result),
             });
             return;
           }

@@ -815,8 +815,16 @@ const AUTHORING_TOOLS = SKILL_AUTHORING_ENABLED
 const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const COORDINATING = process.env.OMB_ROOM_TURN === "1";
+const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
 const AVAILABLE_TOOLS = COORDINATING
-  ? AUTHORING_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name))
+  ? AUTHORING_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
+    .map(tool => tool.name === "start_thread" ? {
+      ...tool,
+      description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
+      inputSchema: { ...tool.inputSchema, properties: { ...tool.inputSchema.properties,
+        bot_id: { type: "string", enum: [BOT_ID], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." },
+      } },
+    } : tool)
   : AUTHORING_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 
 type Json = Record<string, unknown>;
@@ -1137,6 +1145,9 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       };
     }
     const toBotId = typeof args.bot_id === "string" ? args.bot_id.trim() : "";
+    if (COORDINATING && toBotId && toBotId !== BOT_ID) {
+      return { text: "Use coordinate_bots for teammates; start_thread only opens a separate job on yourself.", isError: true };
+    }
     const folder = typeof args.folder === "string" ? args.folder.trim() : "";
     const body: Record<string, unknown> = { fromBotId: BOT_ID, fromThreadId: THREAD_ID, title, message, depth: DEPTH };
     if (toBotId) body.toBotId = toBotId;

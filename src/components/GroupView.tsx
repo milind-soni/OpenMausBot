@@ -18,6 +18,7 @@ import {
 } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { ThreadChip } from "./ThreadChip";
+import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
@@ -34,7 +35,7 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
-import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
+import { AttachmentGallery, MessageAttachmentGallery } from "./AttachmentGallery";
 import { OptionCard } from "./OptionCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 
@@ -107,6 +108,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
       </div>
     );
   }
+  if (!comm) return <ToolActivity tool={tool} />;
   return (
     <div className="flex justify-start">
       <div
@@ -316,19 +318,7 @@ const Transcript = memo(function Transcript({
                   })()}
                   {user ? (
                     <>
-                      {attachments && attachments.images.length > 0 && (
-                        <AttachedImageGallery
-                          paths={attachments.images}
-                          eager={m.id === newestMessageId || m.id === newestUserMessageId}
-                        />
-                      )}
-                      {attachments && attachments.files.length > 0 && (
-                        <AttachedFileChips
-                          files={attachments.files}
-                          message={{ threadId: group.threadId, messageId: m.id }}
-                          className={!attachments.display ? "mb-0" : undefined}
-                        />
-                      )}
+                      {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId: group.threadId, messageId: m.id }} eager={m.id === newestMessageId || m.id === newestUserMessageId} className={!attachments.display ? "mb-0" : undefined} />}
                       <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
                       {m.via === "api" && (
                         <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
@@ -336,13 +326,7 @@ const Transcript = memo(function Transcript({
                     </>
                   ) : (
                     <>
-                      {m.attachments?.length ? (
-                        <AttachedImageGallery
-                          paths={m.attachments.map((attachment) => attachment.path)}
-                          className={m.text ? "justify-start" : "mb-0 justify-start"}
-                          eager={m.id === newestMessageId || m.id === newestUserMessageId}
-                        />
-                      ) : null}
+                      <MessageAttachmentGallery text={m.text ?? ""} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={m.id === newestMessageId || m.id === newestUserMessageId} />
                       {m.text ? <ChatMarkdown text={m.text} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
                     </>
                   )}

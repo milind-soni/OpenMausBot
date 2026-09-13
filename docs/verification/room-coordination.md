@@ -39,6 +39,7 @@ pnpm exec vitest run server/group-goal-run.e2e.test.ts server/group-goal-wait-ca
 pnpm exec vitest run server/room-recovery.e2e.test.ts server/testing/room-handoff-agent.test.ts
 pnpm exec vitest run server/direct-coordination.e2e.test.ts --maxWorkers=1
 pnpm exec vitest run server/turn-dispatch-guard.test.ts
+pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/peer-allowlist.e2e.test.ts server/steer-queue.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
 ```
 
@@ -72,6 +73,11 @@ The recovery fixture restarts the same disposable server with an interrupted
 routine and verifies its source-room card and error-free recovery broadcasts.
 The subprocess fixture checks malformed output, unexpected exit and bounded
 cleanup so an agent-process failure cannot silently pass or hang these tests.
+Legacy comms checks enter through real routine execution, where ask/delegate
+remain supported. Ordinary-chat checks assert that calling a replaced tool is
+an explicit protocol error, never an empty successful reply. Thread checks also
+cover self-owned jobs, queued provenance and the transition from a completed
+routine back to a normal user conversation.
 
 ## Real-model and UI checks
 
@@ -96,8 +102,12 @@ preview/server processes afterward; retain evidence without credentials.
 ## Limits and safety
 
 Existing peer allow-lists/approvals and every room reader's section still apply.
-Ordinary chats replace competing ask/delegate/start-thread execution paths with
-one bounded coordination tool. Direct routines, webhooks and legacy peer delivery
+Ordinary chats use one bounded coordination tool for teammate work instead of
+the competing ask/delegate/peer-thread execution paths. A top-level direct turn
+can still use `start_thread` to open separate work on itself, without moving the
+person's selected conversation. That tool is not an alternative way to dispatch
+teammates or recursively fan out from model-opened threads and coordinated children.
+Direct routines, webhooks and legacy peer delivery
 retain their existing lifecycle: their completion is not claimed early by this
 new loop. Finish together remains separate too. Cancellation
 stops descendants; restart records interruption without replaying side effects.

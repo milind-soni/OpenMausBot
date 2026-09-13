@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useId, useRef, useState, type ComponentProps } from "react";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -14,14 +14,14 @@ export function Switch({
       role="switch"
       aria-checked={checked}
       className={cn(
-        "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-40",
+        "relative h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
         checked ? "bg-accent" : "bg-control",
         className,
       )}
     >
       <span
         className={cn(
-          "absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-all",
+          "absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-[left] motion-reduce:transition-none",
           checked ? "left-[21px]" : "left-[3px]",
         )}
       />
@@ -43,6 +43,33 @@ export function Card({
       {title && <div className="text-[15px] font-medium text-ink">{title}</div>}
       {subtitle && <div className={title ? "mt-0.5 text-[13px] leading-relaxed text-ink-secondary" : "text-[13px] leading-relaxed text-ink-secondary"}>{subtitle}</div>}
       {children && <div className={title || subtitle ? "mt-4" : undefined}>{children}</div>}
+    </div>
+  );
+}
+
+/** Simple preferences share an aligned row; forms with several fields keep a Card. */
+export function SettingRow({
+  title,
+  subtitle,
+  children,
+  message,
+}: {
+  title: string;
+  subtitle?: React.ReactNode;
+  children: React.ReactNode;
+  message?: React.ReactNode;
+}) {
+  const titleId = useId();
+  return (
+    <div role="group" aria-labelledby={titleId} className="setting-row border-t border-hairline/40 py-4 first:border-t-0">
+      <div className="grid min-w-0 grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6">
+        <div className="min-w-0">
+          <div id={titleId} className="text-[14px] font-medium text-ink">{title}</div>
+          {subtitle && <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">{subtitle}</div>}
+        </div>
+        <div className="min-w-0 sm:max-w-[240px]">{children}</div>
+      </div>
+      {message && <div className="mt-2 text-[12px]">{message}</div>}
     </div>
   );
 }
@@ -79,7 +106,7 @@ export function CommandLine({ command, copyLabel = "Copy command" }: { command: 
         type="button"
         onClick={() => void copy()}
         aria-label={copyLabel}
-        className="shrink-0 rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="ui-icon-button shrink-0"
       >
         {copied ? <Check size={13} className="text-success" /> : <Copy size={13} />}
       </button>

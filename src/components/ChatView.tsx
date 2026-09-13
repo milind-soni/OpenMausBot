@@ -48,7 +48,8 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
-import { askText, nameIsCommand, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
+import { askText, runSteps, runSummary, showRun, skillPrompt, skillStaged } from "@/lib/verify-steps";
+import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { OptionCard, shouldHideOnboardingCard } from "./OptionCard";
 import { ApprovalCard } from "./ApprovalCard";
@@ -59,7 +60,7 @@ import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
-import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
+import { AttachmentGallery, collectMessageFiles } from "./AttachmentGallery";
 import { RenameTitle } from "./RenameTitle";
 import { BotActivityPicker, TaskPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
@@ -296,6 +297,8 @@ function Bubble({
   const [expanded, setExpanded] = useState(false);
   const [viewRaw, setViewRaw] = useState(false);
   const text = peer ? peer.body : (message.text ?? "");
+  const generatedPaths = useMemo(() => message.attachments?.map((attachment) => attachment.path) ?? [], [message.attachments]);
+  const linkedFiles = useMemo(() => user ? [] : collectMessageFiles(text, generatedPaths), [user, text, generatedPaths]);
   const webhookView = user ? webhookMessageView(text) : null;
   const attachments = user && !webhookView ? splitTranscriptAttachments(text) : null;
   const visibleText = webhookView?.task ?? attachments?.display ?? text;
@@ -406,12 +409,7 @@ function Bubble({
             </div>
           ) : user ? (
             <>
-              {attachments && attachments.images.length > 0 && (
-                <AttachedImageGallery paths={attachments.images} eager={eagerAttachments} />
-              )}
-              {attachments && attachments.files.length > 0 && (
-                <AttachedFileChips files={attachments.files} message={{ threadId: bot.threadId, messageId: message.id }} className={!visibleText ? "mb-0" : undefined} />
-              )}
+              {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId: bot.threadId, messageId: message.id }} eager={eagerAttachments} className={!visibleText ? "mb-0" : undefined} />}
               {visibleText && (
                 <div
                   className={cn("chat-text", collapsible && "max-h-40 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]")}
@@ -437,13 +435,7 @@ function Bubble({
             </>
           ) : (
             <MessageBoundary key={viewRaw ? "raw" : "rendered"} fallbackText={text || t("chat.generatedImage")}>
-              {message.attachments?.length ? (
-                <AttachedImageGallery
-                  paths={message.attachments.map((attachment) => attachment.path)}
-                  className={text ? "justify-start" : "mb-0 justify-start"}
-                  eager={eagerAttachments}
-                />
-              ) : null}
+              <AttachmentGallery images={generatedPaths} files={linkedFiles} message={{ threadId: bot.threadId, messageId: message.id }} className={text ? undefined : "mb-0"} eager={eagerAttachments} />
               {viewRaw && text ? (
                 <RawMarkdownView text={text} />
               ) : text ? (
@@ -590,29 +582,7 @@ function ActivityChip({ message }: { message: Message }) {
       </div>
     );
   }
-  const failed = tool.ok === false;
-  return (
-    <div className="flex justify-start">
-      <div
-        className={cn(
-          "flex max-w-[min(480px,100%)] min-w-0 items-center gap-2 rounded-full border border-hairline/40 bg-panel px-3 py-1.5 text-[13px]",
-          failed ? "text-danger" : "text-ink-secondary",
-        )}
-      >
-        {tool.ok === undefined ? (
-          <WorkingDots size={3.5} />
-        ) : failed ? (
-          <X size={13} />
-        ) : (
-          <Check size={13} className="text-success" />
-        )}
-        <span className="shrink-0 max-w-[480px] truncate font-mono">{tool.name}</span>
-        {tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && (
-          <span className="min-w-0 flex-1 truncate font-mono" title={tool.summary}>{tool.summary}</span>
-        )}
-      </div>
-    </div>
-  );
+  return <ToolActivity tool={tool} />;
 }
 
 function ScreenFrame({ png, mime }: { png: string; mime?: string }) {

@@ -126,9 +126,11 @@ export type RuntimeEvent = RuntimeEventBase &
          * 200 characters, for the chip and the Verify card. Absent for calls
          * that run no command (a Read, a fetch). */
         summary?: string;
+        /** Bounded, redacted display preview; never raw tool arguments. */
+        input?: string;
       }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
-    | { type: "item.completed"; itemType: "tool"; ok: boolean }
+    | { type: "item.completed"; itemType: "tool"; ok: boolean; output?: string }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
     /** Provider-generated raster bytes. This event is folded into the
      * private attachment store and is never forwarded to renderer SSE: a

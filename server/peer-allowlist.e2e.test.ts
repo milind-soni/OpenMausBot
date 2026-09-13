@@ -8,7 +8,9 @@
 // the loopback API a bot's own tool call can reach. The
 // endpoints are sealed behind a per-turn token. The real MCP config is still
 // inspected below, while the isolated server's test-only mint route provides
-// an exact synthetic active turn for driving the endpoint after the fake exits.
+// an exact synthetic legacy turn for the ask/delegate authorization checks.
+// These checks do not prove ordinary-chat dispatch: direct-coordination.e2e.test.ts
+// exercises that mounted coordinate_bots flow, including grants and revocation.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -219,7 +221,7 @@ describe("peer allow-list", () => {
     }
   }, 45_000);
 
-  it("requires an explicit Chief grant, uses it for real direct consultation, and revokes it on demotion", async () => {
+  it("requires an explicit Chief grant for legacy consultation and revokes it on demotion", async () => {
     await hideSeededBot();
     const clive = await createBot("Clive", "plain");
     const specialist = await createBot("Engineer", "plain");
@@ -267,8 +269,13 @@ describe("peer allow-list", () => {
       expect(systemPrompt).toContain("[TEAM ROSTER]");
       expect(systemPrompt).toContain("- Quill — General assistant (available)");
       expect(systemPrompt).toContain("- Patch — General assistant (available)");
-      // and is told nothing about creating bots or directing them
-      expect(systemPrompt).toContain("peers, not staff");
+      // Ordinary chats may coordinate bounded subwork, but never inherit a
+      // Chief's authority or a teammate's permissions.
+      expect(systemPrompt).toContain("Use coordinate_bots");
+      expect(systemPrompt).toContain("Each recipient runs with its own model and permissions");
+      expect(systemPrompt).toContain("you cannot grant them your access");
+      expect(systemPrompt).not.toContain("Use delegate_bot");
+      expect(systemPrompt).not.toContain("use ask_bot");
       expect(systemPrompt).not.toContain("create_bot");
       // The harness keeps appending its own rules with a bare leading space
       // (index.ts: `${coordinationPrompt}` then credentialPrompt). The last

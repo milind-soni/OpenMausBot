@@ -1,8 +1,11 @@
-// Agent-to-agent comms, end to end: boots the real harness server with the
-// grokAgent driver pointed at the fake ACP CLI in ask-peer mode, then has
+// Legacy routine agent-to-agent comms, end to end: boots the real harness
+// server with the grokAgent driver pointed at the fake ACP CLI, then has
 // bot A's "agent" reach bot B through the injected agents proxy (list_bots →
 // ask_bot → B runs a real depth-1 turn → reply folds back into A's answer).
-// This exercises the whole chain the packaged app uses: startTurn →
+// Routines/webhooks retain this one-hop lifecycle; ordinary chat teamwork is
+// covered separately in direct-coordination.e2e.test.ts. Each legacy case
+// enters through an actual routine, not a private bypass of the new routing.
+// This exercises the whole chain the packaged app uses: routine → startTurn →
 // session/new mcpServers → agents-proxy → /api/internal/ask-bot →
 // askBotAndWait → bus fold. The internal endpoints' auth is pinned too.
 //
@@ -80,7 +83,7 @@ describe("roomResponders", () => {
   });
 });
 
-describe("comms e2e (fake ACP fleet)", () => {
+describe("legacy routine comms e2e (fake ACP fleet)", () => {
   let child: ChildProcess;
   let home: string;
   let gateFile = "";
@@ -101,6 +104,28 @@ describe("comms e2e (fake ACP fleet)", () => {
       body: body ? JSON.stringify(body) : undefined,
     });
     return { status: res.status, body: await res.json() };
+  };
+
+  const startRoutine = async (botId: string, text: string) => {
+    const created = await api("POST", "/api/routines", {
+      name: "Legacy communication fixture",
+      prompt: text,
+      botId,
+      enabled: false,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const started = await api("POST", `/api/routines/${created.body.routine.id}/run`);
+    expect(started.status, JSON.stringify(started.body)).toBe(201);
+    let run: any;
+    await waitUntil(async () => {
+      run = (await api("GET", "/api/routines")).body.runs.find((candidate: any) => candidate.id === started.body.run.id);
+      return Boolean(run?.threadId);
+    }, 15_000, "routine execution thread was not created");
+    // Navigation does not grant execution authority. Select this disposable
+    // execution thread so the visible-bot assertions below inspect its output.
+    expect((await api("POST", `/api/bots/${botId}/tasks/${run.threadId}`)).status).toBe(200);
+    return { status: started.status, body: { run } };
   };
 
   beforeAll(async () => {
@@ -257,6 +282,29 @@ describe("comms e2e (fake ACP fleet)", () => {
     expect(ask.status).toBe(401);
   });
 
+  it.each([
+    { instanceId: "grok", tool: "ask_bot", prefix: "peer error:" },
+    { instanceId: "askerDelegate", tool: "delegate_bot", prefix: "delegate error:" },
+  ])("reports the removed $tool fixture call in ordinary chat instead of an empty reply", async ({ instanceId, tool, prefix }) => {
+    const caller = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${caller.id}`, {
+      name: "Outdated fixture",
+      section: "Fixture protocol regression",
+      modelSelection: { instanceId, model: "fake-model" },
+    });
+    expect((await api("POST", `/api/bots/${caller.id}/messages`, { text: "Try the old communication fixture." })).status).toBe(202);
+    let current: any;
+    await waitUntil(async () => {
+      current = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === caller.id);
+      return !current.busy && current.messages.some((message: any) => message.text?.startsWith(prefix));
+    }, 15_000, "the fixture did not surface its protocol error");
+    const answer = current.messages.findLast((message: any) => message.role === "bot" && message.kind === "text");
+    expect(answer.text).toContain(`Unknown tool: ${tool}`);
+    expect(answer.text).toContain("Fixture MCP request failed");
+    expect(current.messages.some((message: any) => /^(peer says:|delegated:)\s*$/.test(message.text ?? ""))).toBe(false);
+    await api("PATCH", `/api/bots/${caller.id}`, { hidden: true });
+  }, 30_000);
+
   it(
     "carries a question from bot A through the agents proxy to bot B and back",
     async () => {
@@ -269,8 +317,8 @@ describe("comms e2e (fake ACP fleet)", () => {
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: selection });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper ping" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper ping");
+      expect(send.status).toBe(201);
 
       // wait for A's turn to settle with the peer's reply folded in
       const deadline = Date.now() + 25_000;
@@ -347,10 +395,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         modelSelection: { instanceId: "geminiAsker", model: "gemini-3.8-flash-high" },
       });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, {
-        text: "Ask the other bot for a status check.",
-      });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "Ask the other bot for a status check.");
+      expect(send.status).toBe(201);
 
       const deadline = Date.now() + 30_000;
       let state: any;
@@ -421,10 +467,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         modelSelection: { instanceId: "chiefCreator", model: "fake-model" },
       });
 
-      const send = await api("POST", `/api/bots/${chief.id}/messages`, {
-        text: "Create the specialist team and start the design review.",
-      });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(chief.id, "Create the specialist team and start the design review.");
+      expect(send.status).toBe(201);
 
       const deadline = Date.now() + 30_000;
       let operator: any;
@@ -475,8 +519,8 @@ describe("comms e2e (fake ACP fleet)", () => {
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: askerSelection });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
 
       // wait for A's turn to settle: it should NOT have a "peer says:" line
       // (delegate_bot doesn't return the peer's reply to A) and the channel
@@ -614,9 +658,7 @@ describe("comms e2e (fake ACP fleet)", () => {
       });
 
       try {
-        expect((await api("POST", `/api/bots/${chief.id}/messages`, {
-          text: "ASSIGN_TO_PEER: have @LongWorker handle the long task.",
-        })).status).toBe(202);
+        expect((await startRoutine(chief.id, "ASSIGN_TO_PEER: have @LongWorker handle the long task.")).status).toBe(201);
 
         let chiefBot: any;
         let helperBot: any;
@@ -717,7 +759,7 @@ describe("comms e2e (fake ACP fleet)", () => {
 
       // A asks the busy peer — the proxy's reply must be the queued-as-
       // delegation guidance, not a dead-end bounce
-      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "ask @GateHelper something" })).status).toBe(202);
+      expect((await startRoutine(asker.id, "ask @GateHelper something")).status).toBe(201);
       let askerBot: any;
       await waitUntil(async () => {
         askerBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
@@ -783,7 +825,7 @@ describe("comms e2e (fake ACP fleet)", () => {
 
       // Start the ask while B is idle so the normal ask_bot approval card is
       // the first and only human decision for this exact peer message.
-      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "ask @ReloadHelper something" })).status).toBe(202);
+      expect((await startRoutine(asker.id, "ask @ReloadHelper something")).status).toBe(201);
       let approvalCard: any;
       await waitUntil(async () => {
         const current = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
@@ -816,8 +858,9 @@ describe("comms e2e (fake ACP fleet)", () => {
         return queued && waiting && !current.busy;
       }, 25_000, "approved ask was not retained as a waiting delegation");
 
-      // Provider reload releases B without turn.completed. The explicit idle
-      // retry must still pick up the waiting handoff on the rebuilt fleet.
+      // Provider reload releases B without turn.completed. A's routine is
+      // waiting, not executing on a provider being replaced: its accepted
+      // handoff must still run on the rebuilt fleet without another approval.
       expect((await api("PUT", "/api/config", { xai: { key: `xai_retry_${Date.now()}` } })).status).toBe(200);
       writeFileSync(gateFile, "go");
 
@@ -877,7 +920,7 @@ describe("comms e2e (fake ACP fleet)", () => {
 
       // the ask starts the peer's gated turn, which stays open well past
       // the 8s ceiling — the asker must get a claim ticket, not a drop
-      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "ask @SlowHelper for the numbers" })).status).toBe(202);
+      expect((await startRoutine(asker.id, "ask @SlowHelper for the numbers")).status).toBe(201);
       let askerBot: any;
       await waitUntil(async () => {
         askerBot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
@@ -930,8 +973,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
       });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
 
       const deadline = Date.now() + 30_000;
       let channel: any;
@@ -980,8 +1023,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
       });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
 
       let channelId: string | undefined;
       const busyDeadline = Date.now() + 30_000;
@@ -1044,8 +1087,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
       });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
 
       // settle = the channel exists (request mirrored) and carries the
       // failed terminal chip (B's turn started and crashed at initialize)
@@ -1099,8 +1142,8 @@ describe("comms e2e (fake ACP fleet)", () => {
         modelSelection: { instanceId: "askerDelegate", model: "fake-model" },
       });
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper please pick this up" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper please pick this up");
+      expect(send.status).toBe(201);
 
       const deadline = Date.now() + 30_000;
       let channel: any;
@@ -1157,8 +1200,8 @@ describe("comms e2e (fake ACP fleet)", () => {
       expect(approval.status).toBe(200);
       expect(approval.body.bot.approvePeerComms).toBe(true);
 
-      const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper needs approval" });
-      expect(send.status).toBe(202);
+      const send = await startRoutine(asker.id, "hey @Helper needs approval");
+      expect(send.status).toBe(201);
 
       // Wait for the options card to appear on A's thread. While the card
       // is open, B MUST NOT have started: no inbound user message, not busy,
@@ -1245,8 +1288,8 @@ describe("comms e2e (fake ACP fleet)", () => {
       approvePeerComms: true,
     });
 
-    const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "hey @Helper do not allow" });
-    expect(send.status).toBe(202);
+    const send = await startRoutine(asker.id, "hey @Helper do not allow");
+    expect(send.status).toBe(201);
 
     let askerBot: any;
     let helperBot: any;
@@ -1334,8 +1377,8 @@ describe("comms e2e (fake ACP fleet)", () => {
     const asker = (await api("POST", "/api/bots")).body.bot;
     await api("PATCH", `/api/bots/${asker.id}`, { name: "Asker", modelSelection: askerSelection });
 
-    const send = await api("POST", `/api/bots/${asker.id}/messages`, { text: "delegate this to @Helper please" });
-    expect(send.status).toBe(202);
+    const send = await startRoutine(asker.id, "delegate this to @Helper please");
+    expect(send.status).toBe(201);
 
     // Wait for B's depth-1 turn to settle and write its reply
     const deadline = Date.now() + 30_000;
