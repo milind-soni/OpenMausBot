@@ -24,6 +24,12 @@ import { redactSecretsInText } from "./redact.ts";
  * kinds of not-started; `done` and `cancelled` are terminal. */
 export type WorkStatus = "backlog" | "todo" | "in_progress" | "blocked" | "done" | "cancelled";
 
+/** Who put the card on the board. The distinction is cosmetic on screen (a
+ * routine card carries an icon) but load-bearing in one place: a person's
+ * cards are theirs to delete freely, while a routine card is a projection of
+ * a schedule that still exists. */
+export type WorkOrigin = "manual" | "routine";
+
 /** Until a thread exists, a card can only be looked at. */
 export interface WorkArtifact {
   kind: "file" | "url" | "thread";
@@ -46,6 +52,14 @@ export interface WorkItem {
    * kept for the life of the item, so "open the chat" always lands on the
    * history of THIS work rather than a fresh empty thread. */
   threadId?: string;
+  /** Set when this card was produced by a routine run, or when a person tied
+   * it to an existing routine. The routine stays the schedule; the card is
+   * only a projection of what that schedule did, which is why a card can
+   * carry this and still be moved, renamed and reassigned like any other.
+   * A card never CREATES a routine: a board column is not a schedule. */
+  routineId?: string;
+  /** Where the card came from. `manual` is a person; `routine` is a run. */
+  origin: WorkOrigin;
   artifacts: WorkArtifact[];
   /** Approval posture for the card's own turn, mirroring TaskRecord. */
   approvalMode?: string;
@@ -76,6 +90,10 @@ export function isWorkStatus(value: unknown): value is WorkStatus {
   return typeof value === "string" && (WORK_STATUSES as readonly string[]).includes(value);
 }
 
+export function isWorkOrigin(value: unknown): value is WorkOrigin {
+  return value === "manual" || value === "routine";
+}
+
 /** The default board. Cards created before boards were a concept, and every
  * card a client creates without naming one, belong here. */
 export const DEFAULT_BOARD_ID = "default";
@@ -92,6 +110,10 @@ export interface WorkItemInput {
   boardId?: string;
   ownerBotId?: string | null;
   approvalMode?: string | null;
+  /** Routine run that produced this card. Present only on cards the server
+   * creates from a run; a client never sets it on a hand-made card. */
+  routineId?: string | null;
+  origin?: WorkOrigin;
 }
 
 export interface WorkItemPatch {
@@ -184,6 +206,7 @@ export class WorkItems {
         const createdAt = typeof item.createdAt === "number" ? item.createdAt : this.now();
         const owner = cleanBotId(item.ownerBotId);
         const threadId = cleanBotId(item.threadId);
+        const routineId = cleanBotId(item.routineId);
         return [{
           id: item.id,
           boardId: cleanText(item.boardId, 64) || DEFAULT_BOARD_ID,
@@ -193,6 +216,10 @@ export class WorkItems {
           order: cleanOrder(item.order),
           ...(owner ? { ownerBotId: owner } : {}),
           ...(threadId ? { threadId } : {}),
+          // A card is a routine's card only when it names the routine. An
+          // origin without an id would render an icon that opens nothing, so
+          // the id is what decides — not a stored flag that can go stale.
+          ...(routineId ? { routineId, origin: "routine" as const } : { origin: "manual" as const }),
           artifacts: cleanArtifacts(item.artifacts),
           ...(typeof item.approvalMode === "string" && item.approvalMode ? { approvalMode: item.approvalMode } : {}),
           createdAt,
@@ -236,6 +263,14 @@ export class WorkItems {
     return this.items.find((item) => item.threadId === threadId);
   }
 
+  /** The most recent card a routine produced — the one a live run updates
+   * instead of stacking a new card per firing. */
+  byRoutine(routineId: string): WorkItem | undefined {
+    return this.items
+      .filter((item) => item.routineId === routineId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+  }
+
   create(input: WorkItemInput): WorkItem {
     this.prune();
     const title = cleanText(input.title, MAX_TITLE);
@@ -244,7 +279,9 @@ export class WorkItems {
     const status = input.status && isWorkStatus(input.status) ? input.status : "backlog";
     const boardId = cleanText(input.boardId, 64) || DEFAULT_BOARD_ID;
     const owner = cleanBotId(input.ownerBotId);
+    const routineId = cleanBotId(input.routineId);
     const at = this.now();
+    const origin: WorkOrigin = routineId ? "routine" : "manual";
     const item: WorkItem = {
       id: newId(),
       boardId,
@@ -254,6 +291,8 @@ export class WorkItems {
       // New cards land at the top of their column.
       order: this.nextOrder(boardId, status),
       ...(owner ? { ownerBotId: owner } : {}),
+      ...(routineId ? { routineId } : {}),
+      origin,
       artifacts: [],
       ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
       createdAt: at,

@@ -250,4 +250,64 @@ describe("WorkItems", () => {
     expect(isWorkStatus("in-progress")).toBe(false);
     expect(isWorkStatus(3)).toBe(false);
   });
+
+  it("marks a card a routine produced, so the board can badge it", () => {
+    const items = board().open();
+    const manual = items.create({ title: "by hand" });
+    const fromRoutine = items.create({ title: "nightly report", routineId: "routine-1", origin: "routine" });
+
+    expect(manual.origin).toBe("manual");
+    expect(manual.routineId).toBeUndefined();
+    expect(fromRoutine.origin).toBe("routine");
+    expect(fromRoutine.routineId).toBe("routine-1");
+  });
+
+  it("never badges a card as a routine's without a routine to point at", () => {
+    const items = board().open();
+    // An origin with no id would render an icon that opens nothing, so the
+    // id decides and the flag is ignored.
+    const card = items.create({ title: "odd", origin: "routine" });
+    expect(card.origin).toBe("manual");
+    expect(card.routineId).toBeUndefined();
+  });
+
+  it("keeps the badge honest after a restart, even if the origin field lies", () => {
+    const file = tempFile();
+    writeFileSync(file, JSON.stringify({
+      version: 1,
+      items: [
+        // names a routine but claims to be manual
+        { id: "a", title: "from a routine", status: "todo", routineId: "routine-9", origin: "manual", createdAt: 1, updatedAt: 1, order: 0 },
+        // claims a routine but names none
+        { id: "b", title: "claims one", status: "todo", origin: "routine", createdAt: 1, updatedAt: 1, order: 0 },
+      ],
+    }));
+    const items = new WorkItems({ file });
+
+    expect(items.get("a")).toMatchObject({ origin: "routine", routineId: "routine-9" });
+    expect(items.get("b")!.origin).toBe("manual");
+    expect(items.get("b")!.routineId).toBeUndefined();
+  });
+
+  it("hands back the newest card a routine produced, not the first ever", () => {
+    let clock = 1_000;
+    const items = new WorkItems({ file: tempFile(), now: () => (clock += 10) });
+    items.create({ title: "run one", routineId: "routine-7", origin: "routine" });
+    const latest = items.create({ title: "run two", routineId: "routine-7", origin: "routine" });
+    items.create({ title: "another routine", routineId: "routine-8", origin: "routine" });
+
+    expect(items.byRoutine("routine-7")!.id).toBe(latest.id);
+    expect(items.byRoutine("routine-nope")).toBeUndefined();
+  });
+
+  it("leaves a routine card's routine alone when a person renames or moves it", () => {
+    const items = board().open();
+    const card = items.create({ title: "nightly", routineId: "routine-1", origin: "routine" });
+    const moved = items.update(card.id, { title: "nightly report", status: "done", order: 3 });
+
+    // The card is a projection of the schedule; editing the card must not
+    // quietly detach it from the routine that produced it.
+    expect(moved.routineId).toBe("routine-1");
+    expect(moved.origin).toBe("routine");
+  });
 });
