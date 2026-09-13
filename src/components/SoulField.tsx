@@ -9,6 +9,7 @@ import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { cn } from "@/lib/cn";
 import { firstSentence, soulPatchFor, utf8Bytes } from "@/lib/soul";
 import { api, useStore, type Bot } from "@/state/store";
+import { PromptLibrary } from "./PromptLibrary";
 import { inputCls } from "./bot-settings/field";
 
 type SoulRead = { soul: string; revision: string; bytes: number; limit: number; file: string; drift: boolean; fileText?: string };
@@ -77,16 +78,19 @@ export function SoulField({
         <label htmlFor={`bot-soul-${bot.id}`} className="text-[13px] text-ink-secondary">
           Standing instructions (SOUL.md)
         </label>
-        {canMigrate && (
-          <button
-            type="button"
-            disabled={resolving}
-            onClick={() => onPatch({ soul: bot.description, description: firstSentence(bot.description) })}
-            className="rounded-md px-1.5 py-1 text-[11.5px] font-medium text-accent-text hover:bg-accent/10"
-          >
-            Move instructions into SOUL.md
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          <PromptLibrary hasExisting={draft.trim() !== ""} onApply={change} />
+          {canMigrate && (
+            <button
+              type="button"
+              disabled={resolving}
+              onClick={() => onPatch({ soul: bot.description, description: firstSentence(bot.description) })}
+              className="rounded-md px-1.5 py-1 text-[11.5px] font-medium text-accent-text hover:bg-accent/10"
+            >
+              Move instructions into SOUL.md
+            </button>
+          )}
+        </div>
       </div>
       {info?.drift && (
         <div className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-[12px] text-ink">
