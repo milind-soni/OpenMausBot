@@ -17,14 +17,14 @@ if (!enabled) console.log("skipping template UI e2e: set OMB_UI_E2E=1 to install
 
 describe("additive template imports in the real renderer", () => {
   let child: ChildProcess | undefined;
-  afterAll(async () => { await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }); });
+  afterAll(async () => { await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 }); });
 
   (enabled ? it : it.skip)("adds library and file templates as sections without losing existing chats", async () => {
     let stdout = "";
     let stderr = "";
     let info: { ui: string; url: string; botId: string; logPath: string };
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });

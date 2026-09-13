@@ -12,6 +12,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 export default defineConfig({
+  worker: { format: "es" },
   plugins: [react(), tailwindcss()],
   define: {
     __APP_VERSION__: JSON.stringify(version),

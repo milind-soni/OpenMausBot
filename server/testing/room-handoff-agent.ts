@@ -66,6 +66,11 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
         evidence.push({ step, response });
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
       }
+      // A test releases this gate after observing the intended concurrent state.
+      // The existing run deadline still bounds a gate that is never released.
+      while (plan.waitForFile && !existsSync(plan.waitForFile)) {
+        await new Promise(resolve => { delayTimer = setTimeout(resolve, 25); });
+      }
       if (plan.delayMs) await new Promise(resolve => { delayTimer = setTimeout(resolve, plan.delayMs); });
       if (plan.fail && !resumed) throw new Error("Scripted addressed agent failure");
       return basePlan.turns ? plan.reply : resumed ? plan.resumeReply ?? `Summary from ${botId}` : plan.reply ?? `Result from ${botId}`;

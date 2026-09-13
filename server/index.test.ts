@@ -880,6 +880,11 @@ beforeAll(async () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr!.on("data", (c) => (stderr += c));
+  child.on("close", (code, signal) => {
+    if (code !== 0 && signal !== "SIGTERM" && signal !== "SIGINT") {
+      console.error(`Isolated API fixture exited (code=${code}, signal=${signal}):\n${stderr}`);
+    }
+  });
 
   const deadline = Date.now() + 20_000;
   for (;;) {
@@ -4091,7 +4096,10 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    const groupsBefore = (await api("GET", "/api/bots")).body.groups.length;
+    const beforeImport = (await api("GET", "/api/bots")).body;
+    const groupsBefore = beforeImport.groups.length;
+    const chiefsBefore = beforeImport.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff)
+      .map((bot: { id: string }) => bot.id).sort();
     const room = (await api("POST", "/api/groups", { memberIds: [trusted.id], name: "War Room" })).body.group;
 
     const smuggled = {
@@ -4157,10 +4165,9 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    // the single-Chief invariant survives the manifest's chiefOfStaff claim
-    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id)).toEqual([
-      trusted.id,
-    ]);
+    // Import cannot add, remove or replace any existing section's Chief.
+    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff)
+      .map((bot: { id: string }) => bot.id).sort()).toEqual(chiefsBefore);
 
     // a legacy v1 file carries a room block; import ignores it entirely —
     // it neither creates a room nor touches the existing one sharing its name
@@ -6332,6 +6339,10 @@ describe("harness HTTP API", () => {
     } finally {
       rmSync(failureMarker, { force: true });
       if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      // Interrupt acknowledges the request before the provider finishes stopping.
+      // Keep this fixture's profile until the server releases its active turn.
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
@@ -6342,10 +6353,11 @@ describe("harness HTTP API", () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let room: any;
     try {
-      expect((await api("PATCH", "/api/config", {
+      const configured = await api("PATCH", "/api/config", {
         features: { browser: true },
         browserProfiles: [{ id: "work", name: "Work" }],
-      })).status).toBe(200);
+      });
+      expect(configured.status, JSON.stringify(configured.body)).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         browserProfile: "work",
         approvalMode: "auto",
@@ -6399,6 +6411,8 @@ describe("harness HTTP API", () => {
     } finally {
       if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       else await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
