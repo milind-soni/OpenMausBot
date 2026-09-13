@@ -3416,6 +3416,10 @@ function isInternalTurn(threadId: string): boolean {
 const personAskAt = new Map<string, number>();
 let routines: RoutineManager | null = null;
 let calendarCalls: CalendarCallManager | null = null;
+/** The board. A plain durable store with no scheduler and no dispatcher: it
+ * records what work exists and who owns it, and every action that actually
+ * runs a bot goes through the routes that already own those paths. */
+const workItems = new WorkItems();
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
 const localVmLeases = new LocalVmLeasePool(30 * 60_000);
 const localVmLifecycleBusy = new Set<string>();
@@ -11486,6 +11490,163 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return [{ sourceBotId, targetBotId: watch.toBotId, threadId, groupId: channel?.id }];
       });
       return json(res, 200, { collaborations, queued, running });
+    }
+
+    // ── task board ───────────────────────────────────────────────────────
+    // A board is a group of bots, chosen by team. A card reaches a team
+    // through its owner: the bot's `section` is the same field the sidebar
+    // groups by and the team map draws, so a board and a map never disagree
+    // about who is in what. A card with no owner belongs to no team and is
+    // shown only when no team is selected — otherwise it would appear in
+    // every team at once, which is the one thing a filter must not do.
+    const CARD_SECTION = (item: WorkItem): string => {
+      const bot = item.ownerBotId ? store.bot(item.ownerBotId) : undefined;
+      // A hidden bot is not on the board's roster any more, so its cards fall
+      // back to the unsectioned team. Missing owners do the same — see the
+      // agent field below, which reports the SAME answer, so a card's badge
+      // and its filter membership can never disagree.
+      if (!bot || bot.hidden) return "";
+      return bot.section?.trim() ?? "";
+    };
+
+    /** The board a client asked for. `team` names a section, "" is the
+     * unsectioned team, and omitting it entirely means every card. */
+    const teamFilter = url.searchParams.get("team");
+    const wantsTeam = teamFilter !== null;
+
+    const boardPayload = () => {
+      const items = workItems
+        .list()
+        .filter((item) => !wantsTeam || CARD_SECTION(item) === teamFilter)
+        // Newest first inside a column; the client re-sorts by `order` for
+        // its own layout, this is only so the payload reads sensibly.
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((item) => {
+          const bot = item.ownerBotId ? store.bot(item.ownerBotId) : undefined;
+          return {
+            ...item,
+            // What the card shows about its agent, and what the Run button
+            // needs to decide whether it can be pressed at all. `section` is
+            // read through CARD_SECTION, not off the bot directly: a hidden
+            // owner falls back to the unsectioned team, so a badge that said
+            // otherwise would contradict the filter that placed the card.
+            agent: bot
+              ? {
+                id: bot.id,
+                name: bot.name,
+                section: CARD_SECTION(item),
+                activity: bot.activity ?? "idle",
+                busy: bot.busy === true || threadBusy(bot.id, item.threadId ?? bot.threadId),
+                hidden: bot.hidden === true,
+              }
+              : null,
+          };
+        });
+      return { items };
+    };
+
+    if (method === "GET" && path === "/api/task-board") {
+      return json(res, 200, boardPayload());
+    }
+
+    // Every section the app currently has, so the board's team switcher is
+    // built from the same source the sidebar is. The unsectioned team is
+    // always first and always offered — it is where a bot lands when nobody
+    // filed it, so it must be reachable even while it is empty. Its position
+    // is forced rather than incidental: a starter bot is seeded on every
+    // boot, so relying on iteration order would put General wherever that
+    // bot happens to fall.
+    if (method === "GET" && path === "/api/task-board/teams") {
+      const seen = new Map<string, number>();
+      for (const bot of store.bots) {
+        if (bot.hidden) continue;
+        const key = bot.section?.trim() ?? "";
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+      }
+      const rest = [...seen]
+        .filter(([key]) => key !== "")
+        .map(([key, count]) => ({ key, name: key, count }));
+      return json(res, 200, { teams: [{ key: "", name: "General", count: seen.get("") ?? 0 }, ...rest] });
+    }
+
+    if (method === "POST" && path === "/api/task-board/items") {
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const allowed = new Set(["title", "brief", "status", "ownerBotId", "approvalMode", "boardId"]);
+      if (Object.keys(body).some((key) => !allowed.has(key))) {
+        return json(res, 400, { error: "unsupported card setting" });
+      }
+      if (typeof body.title !== "string" || !body.title.trim()) {
+        return json(res, 400, { error: "a card needs a title" });
+      }
+      if (body.status !== undefined && !isWorkStatus(body.status)) {
+        return json(res, 400, { error: "unknown status" });
+      }
+      if (body.ownerBotId !== undefined && body.ownerBotId !== null) {
+        if (typeof body.ownerBotId !== "string" || !store.bot(body.ownerBotId)) {
+          return json(res, 400, { error: "no such bot to assign this card to" });
+        }
+      }
+      const item = workItems.create({
+        title: body.title,
+        brief: typeof body.brief === "string" ? body.brief : undefined,
+        status: body.status,
+        boardId: typeof body.boardId === "string" ? body.boardId : undefined,
+        ownerBotId: body.ownerBotId ?? null,
+        approvalMode: typeof body.approvalMode === "string" ? body.approvalMode : null,
+      });
+      broadcast({ kind: "task-board" });
+      return json(res, 201, { item });
+    }
+
+    const cardMatch = path.match(/^\/api\/task-board\/items\/([\w-]+)$/);
+    if (cardMatch && method === "PATCH") {
+      const existing = workItems.get(cardMatch[1]);
+      if (!existing) return json(res, 404, { error: "no such card" });
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const allowed = new Set(["title", "brief", "status", "order", "ownerBotId", "approvalMode", "artifacts"]);
+      if (Object.keys(body).some((key) => !allowed.has(key))) {
+        return json(res, 400, { error: "unsupported card setting" });
+      }
+      if (body.status !== undefined && !isWorkStatus(body.status)) {
+        return json(res, 400, { error: "unknown status" });
+      }
+      if (body.ownerBotId !== undefined && body.ownerBotId !== null) {
+        if (typeof body.ownerBotId !== "string" || !store.bot(body.ownerBotId)) {
+          return json(res, 400, { error: "no such bot to assign this card to" });
+        }
+      }
+      // The board is a view a paired device may read, but rearranging other
+      // people's work is an owner action, the same rule the rest of the app
+      // applies to its own mutating routes.
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can change the board" });
+      }
+      const item = workItems.update(cardMatch[1], {
+        title: body.title,
+        brief: body.brief,
+        status: body.status,
+        order: body.order,
+        ownerBotId: body.ownerBotId,
+        approvalMode: body.approvalMode,
+        artifacts: body.artifacts,
+      });
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { item });
+    }
+
+    if (cardMatch && method === "DELETE") {
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can change the board" });
+      }
+      if (!workItems.remove(cardMatch[1])) return json(res, 404, { error: "no such card" });
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { ok: true });
     }
 
     // ── routines calendar ────────────────────────────────────────────────
