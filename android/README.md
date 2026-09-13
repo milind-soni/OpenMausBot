@@ -19,13 +19,42 @@ cd android
 ./gradlew :core:test :app:testDebugUnitTest :app:assembleDebug
 ```
 
-That is the same command CI runs (`.github/workflows/ci.yml`). Gradle caches
-aggressively — a suspiciously fast `BUILD SUCCESSFUL` usually means nothing ran.
+CI also builds the preview APK described below (`.github/workflows/ci.yml`).
+Gradle caches aggressively — a suspiciously fast `BUILD SUCCESSFUL` usually means nothing ran.
 Prefix `cleanTest` when a test count matters:
 
 ```sh
 ./gradlew cleanTest :core:test :app:testDebugUnitTest :app:assembleDebug
 ```
+
+## Installable threads preview
+
+```sh
+cd android
+./gradlew :app:assemblePreview
+```
+
+Install `app/build/outputs/apk/preview/app-preview.apk`. Its launcher name is
+**OpenMausBot Preview**, its application ID is `com.openmausbot.companion.preview`,
+and its version ends in `-threads-preview`. Gradle signs it with the local debug
+key, so no release signing material is needed. It installs beside the released
+app with separate pairing, preferences and messages; it does not update that app.
+
+Open Preview and pair using its QR scanner or manual address form. Preview does
+not register the release's `openmausbot://` pairing links or system share targets.
+Its file-sharing provider uses the preview application ID too.
+
+Pull-request CI runs the core and debug UI unit tests, builds both APK variants,
+and uploads `android-threads-preview-<tested-commit>-<attempt>` for 14 days. Download
+and extract that run's artifact to get the same installable preview APK. Debug
+keys can differ between local builds and CI runners; Android requires the same
+key to update an existing preview installation. A fresh installation after
+removing a differently signed preview loses only that preview's local data.
+
+Verify conversation changes against an isolated fixture as described in
+[`docs/verification/README.md`](../docs/verification/README.md), using a disposable
+emulator. These builds do not exercise live pairing or a physical phone by
+themselves.
 
 ## Building a release APK
 

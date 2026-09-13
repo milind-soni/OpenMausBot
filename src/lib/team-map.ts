@@ -42,12 +42,16 @@ export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
   running: [],
 };
 
-export function buildTeamMapSections<T extends TeamMapBot>(bots: T[]): TeamMapSection<T>[] {
+export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: string[] = []): TeamMapSection<T>[] {
   const sections = new Map<string, T[]>();
   for (const bot of bots) {
     if (bot.hidden) continue;
     const key = bot.section?.trim() || "";
     sections.set(key, [...(sections.get(key) ?? []), bot]);
+  }
+  for (const name of names) {
+    const key = name.trim();
+    if (key && !sections.has(key)) sections.set(key, []);
   }
   return [...sections].map(([key, sectionBots]) => ({
     key,

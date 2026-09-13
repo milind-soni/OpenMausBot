@@ -99,6 +99,7 @@ export interface OptionCardData {
   skillRequest?: SkillRequestCardData;
   /** Persisted profile proposal used by the server when the user confirms it. */
   profileRequest?: ProfileRequestCardData;
+  teamSetupRequest?: import("../../shared/team-setup").TeamSetupRequest;
   /** The model's own questions and options (Claude's AskUserQuestion), so
    * the card offers choices instead of an unanswerable Allow/Deny. */
   questionRequest?: QuestionRequestCardData;
@@ -178,7 +179,7 @@ export interface Message {
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
-  comm?: { groupId: string; withBotId: string; withName: string; withColor: MausColor };
+  comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: MausColor };
   /** thread chips: "Opened thread #Title on Bot" linking to that thread */
   threadRef?: { botId: string; threadId: string; title: string };
   /** sent while the bot was mid-turn; auto-sends when the turn settles.
@@ -270,6 +271,10 @@ export interface Task {
   /** set when a bot (not the person) started this thread — its own or a
    * teammate's; the sidebar shows a quiet "opened by <name>" under the title */
   openedBy?: ThreadOpener;
+  /** set when a bot closed this thread with close_thread; the sidebar folds
+   * it out of the default list (still under "show all", never deleted) and
+   * the server clears it when a new turn starts there */
+  closedBy?: ThreadCloser;
 }
 
 /** The bot that opened a thread on itself or a teammate. */
@@ -277,6 +282,13 @@ export interface ThreadOpener {
   botId: string;
   name: string;
   delegationId?: string;
+  at: number;
+}
+
+/** The bot that closed a thread it opened (or one of its own). */
+export interface ThreadCloser {
+  botId: string;
+  name: string;
   at: number;
 }
 
@@ -346,6 +358,8 @@ export interface Bot {
   pinnedMessageId?: string;
   /** This sidebar section's primary coordinator. */
   chiefOfStaff?: boolean;
+  /** Additional teams the owner explicitly lets this Chief work with. */
+  managedSections?: string[];
   /** When this bot wants to talk to another bot (ask_bot/delegate_bot),
    * pause and ask the user first. Off by default. */
   approvePeerComms?: boolean;
@@ -400,14 +414,17 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
 }
 
 export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMode" | "autoApprove" | "pinnedMessageId">> & {
+  confirmFullAccess?: boolean;
   acknowledgeLocalAuto?: boolean;
   updateBotDefault?: boolean;
+  resetApprovalToAsk?: boolean;
   projectId?: string | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, projectId, ...fields } = patch;
-  return { ...fields, ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, ...fields } = patch;
+  return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
+    ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }) };
 }
 
 /** The visible conversation: walk parentId links from the active leaf back
@@ -505,7 +522,7 @@ export interface BrowserProfile {
 
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles"
+  "xai" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -526,6 +543,9 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     onboarding: frame.onboarding,
     browserEngine: frame.browserEngine,
     browserProfiles: frame.browserProfiles,
+    edition: frame.edition,
+    budgets: frame.budgets,
+    billing: frame.billing,
   };
 }
 
@@ -596,6 +616,7 @@ export interface InstanceInfo {
 
 export type AppSettingsSection =
   | "general"
+  | "desktopWorkspaces"
   | "appearance"
   | "experimental"
   | "connections"
@@ -625,6 +646,8 @@ export type BotSettingsSection =
 export interface AppState {
   bots: Bot[];
   groups: Group[];
+  /** Persisted named teams; older servers omit this, so clients also derive labels. */
+  sections?: string[];
   instances: InstanceInfo[];
   config: ConfigStatus | null;
   /** selected chat — a bot id OR a group id */
@@ -657,6 +680,8 @@ export interface AppState {
   /** the guided tour on the live interface that follows the welcome flow */
   tourOpen: boolean;
   botSettingsSection: BotSettingsSection;
+  /** True only when the open action named a section — accordion expands that row. */
+  botSettingsExpandAccordion: boolean;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string }>;
   /** bots whose cloud computer is being provisioned */
@@ -773,10 +798,12 @@ export type Action =
       type: "hydrate";
       bots: Bot[];
       groups: Group[];
+      sections?: string[];
       computerControl: Record<string, { held: boolean; helpReason: string | null }>;
       botQueuedMessages?: AppState["pendingQueued"];
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
+  | { type: "sections"; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string }
   | { type: "showTeamMap" }
   | { type: "showChat" }
@@ -884,13 +911,13 @@ export type Action =
   | { type: "screenFrame"; botId: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
-  | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean }
+  | { type: "setModel"; botId: string; selection: ModelSelection; threadId?: string; updateBotDefault?: boolean; resetApprovalToAsk?: boolean }
   | { type: "interrupt"; botId: string; threadId?: string; onError?: () => void }
   | { type: "connected"; value: boolean }
   | { type: "error"; message: string | null }
   | { type: "notice"; notice: AppState["notice"] }
   | { type: "revealThread"; threadId: string }
-  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection }
+  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
   | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
   | { type: "toggleNewBot"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
@@ -1096,6 +1123,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         bots: action.bots,
         groups: action.groups,
+        sections: action.sections ?? [],
         computerControl: action.computerControl,
         selectedId,
         backgroundThreadEvents: {},
@@ -1105,6 +1133,8 @@ export function reducer(state: AppState, action: Action): AppState {
         [...action.bots, ...action.groups],
       );
     }
+    case "sections":
+      return { ...state, sections: action.sections };
     case "botQueues":
       return reconcileSnapshotQueues(replaceBotQueues(state, action.queues), [...state.bots, ...state.groups]);
     case "showRoutines":
@@ -1181,7 +1211,11 @@ export function reducer(state: AppState, action: Action): AppState {
     case "groupPatched": {
       const exists = state.groups.some((g) => g.id === action.group.id);
       const groups = exists
-        ? state.groups.map((g) => (g.id === action.group.id ? { ...g, ...action.group, messages: action.group.messages ?? g.messages } : g))
+        ? state.groups.map((g) => (g.id === action.group.id ? {
+            ...g, ...action.group,
+            section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
+            messages: action.group.messages ?? g.messages,
+          } : g))
         : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...state.groups];
       return { ...state, groups };
     }
@@ -1314,7 +1348,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // The slim deletion broadcast can arrive before the full snapshot.
         // Finish that switch once, replaying any events received in between.
         // Later duplicate HTTP snapshots must not overwrite newer messages.
-        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
+        return reducer(switching, { type: "taskSwitched", bot: { ...before, ...action.bot, section: action.bot.section, messages: action.bot.messages, browserProfile: action.bot.browserProfile } });
       }
       const patched = updateBot(switching, action.bot.id, (b) => ({
         ...b,
@@ -1326,6 +1360,9 @@ export function reducer(state: AppState, action: Action): AppState {
         // to Own browser (or deleting a shared profile). Do not retain the
         // previous profile's name and selection in another window.
         browserProfile: action.bot.browserProfile,
+        // A complete frame omits section after another client moves the bot
+        // into General. Retaining the old label strands an empty team in UI.
+        section: action.bot.section,
         // Clear immediately on deletion: old approvals must never be sent
         // to the replacement thread while waiting for its transcript.
         messages: switchedThread ? [] : b.messages,
@@ -1490,7 +1527,8 @@ export function reducer(state: AppState, action: Action): AppState {
         },
       };
     case "setModel":
-      if (action.threadId) return reducer(state, { type: "updateTask", botId: action.botId, threadId: action.threadId, patch: { modelSelection: action.selection } });
+      if (action.threadId) return reducer(state, { type: "updateTask", botId: action.botId, threadId: action.threadId,
+        patch: { modelSelection: action.selection, resetApprovalToAsk: action.resetApprovalToAsk } });
       return updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection }));
     case "updateTask": {
       const patch = taskPatchFields(action.patch);
@@ -1511,16 +1549,21 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     // bot settings, the computer panel, and app settings share the right slot
     case "toggleSettings": {
-      const open = action.open ?? !state.settingsOpen;
+      if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
+      const selectedId = action.botId ?? state.selectedId;
+      // A targeted settings link opens that bot without navigating to chat
+      // or marking its conversations read, even when another panel is open.
+      const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
       return {
         ...state,
+        selectedId,
         settingsOpen: open,
-        botSettingsSection: action.section ?? state.botSettingsSection,
-        // A centered modal sits over the side panels, so opening it leaves
-        // the computer panel and inspector as they were — the computer
-        // panel's own gear opens this dialog, and closing the panel under it
-        // would destroy what the user was just looking at. The app settings
-        // modal is the one thing that cannot share the screen with it.
+        botSettingsSection: action.section ?? (selectedId !== state.selectedId ? "overview" : state.botSettingsSection),
+        // Mascot / bare open omits `section` → accordion stays fully collapsed.
+        // Deep links expand that row even when the panel is already open.
+        botSettingsExpandAccordion: open ? action.section !== undefined : false,
+        // Preserve the computer and inspector surfaces; their own controls
+        // can open bot settings. App settings are mutually exclusive.
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1841,6 +1884,7 @@ export const initialState: AppState = {
   backgroundThreadEvents: {},
   bots: [],
   groups: [],
+  sections: [],
   instances: [],
   config: null,
   selectedId: "",
@@ -1865,6 +1909,7 @@ export const initialState: AppState = {
   welcomeOpen: false,
   tourOpen: false,
   botSettingsSection: "overview",
+  botSettingsExpandAccordion: false,
   screens: {},
   provisioning: {},
   deletingBots: {},
@@ -1920,9 +1965,28 @@ type TrustedApprovalBridge = {
   setMode(
     botId: string,
     mode: ApprovalMode,
-    options?: { acknowledgeLocalAuto?: boolean },
+    options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean },
   ): Promise<BotAnnouncement>;
 };
+
+/** Composer changes use the same private bridge as bot settings, but never
+ * change profile defaults. Confirmation is UI state, never an HTTP credential. */
+export async function persistTaskApproval(
+  botId: string, threadId: string, patch: TaskUpdatePatch,
+  bridge: TrustedApprovalBridge | undefined,
+  request: (path: string, init?: RequestInit) => Promise<{ bot: BotAnnouncement }> = api,
+): Promise<BotAnnouncement> {
+  const { approvalMode, autoApprove, confirmFullAccess, acknowledgeLocalAuto, ...ordinary } = patch;
+  const mode = approvalMode ?? (autoApprove === undefined ? undefined : autoApprove ? "auto" : "ask");
+  if (mode === "full" && confirmFullAccess !== true) throw new Error("Confirm Full access for this thread first");
+  if ((mode === "full" || mode === "custom") && !bridge) throw new Error("This approval change requires the packaged desktop app");
+  if (mode && bridge) {
+    if (Object.keys(ordinary).length) await request(`/api/bots/${botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify(ordinary) });
+    return bridge.setMode(botId, mode, { threadId, threadOnly: true, acknowledgeLocalAuto: acknowledgeLocalAuto === true });
+  }
+  const result = await request(`/api/bots/${botId}/tasks/${threadId}`, { method: "PATCH", body: JSON.stringify({ ...ordinary, approvalMode, autoApprove, acknowledgeLocalAuto }) });
+  return result.bot;
+}
 
 /** Persist one coalesced bot edit without ever putting Full/Custom authority
  * on the bot-accessible HTTP surface. Entering a trusted mode writes ordinary
@@ -2276,17 +2340,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const previous = taskWrites.get(threadId);
       // A quick tab switch may queue two default changes on different threads.
       // Keep their order, and don't let a group send race either pending save.
-      const defaults = patch.updateBotDefault ? [...taskWrites.values()].filter((write) => write.botId === botId && write.updatesDefault) : [];
+      const defaults = patch.updateBotDefault || patch.approvalMode !== undefined
+        ? [...taskWrites.values()].filter((write) => write.botId === botId) : [];
       const promise = Promise.all([previous?.promise, ...defaults.map((write) => write.promise)].map((save) => save?.catch(() => {})))
         .then(async () => {
-          // Full/Custom grants still belong to the private desktop bridge.
-          if (patch.approvalMode === "full" || patch.approvalMode === "custom") {
-            throw new Error("Full and Custom access must be granted in bot settings in the desktop app");
+          // The private path is required for Custom; use it for every
+          // confirmed desktop switch so optimistic Ask cannot hide the
+          // original mode while a pending write waits its turn.
+          if (patch.resetApprovalToAsk && window.ogb?.approvals) {
+            return window.ogb.approvals.setMode(botId, "ask", {
+              threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
+            });
           }
-          const result = await api(`/api/bots/${botId}/tasks/${threadId}`, {
-            method: "PATCH", body: JSON.stringify(patch),
-          });
-          return result.bot as BotAnnouncement;
+          return persistTaskApproval(botId, threadId, patch, window.ogb?.approvals);
         });
       // Later edits still get saved after an earlier failure, but a send
       // awaiting this batch must observe every rejected setting in it. A
@@ -2752,6 +2818,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             persistTaskPatch(action.botId, action.threadId, {
               modelSelection: action.selection,
               ...(action.updateBotDefault ? { updateBotDefault: true } : {}),
+              ...(action.resetApprovalToAsk ? { resetApprovalToAsk: true } : {}),
             });
             break;
           }
@@ -2972,12 +3039,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const loadAll = async (): Promise<boolean> => {
       const chat = () =>
-        api("/api/bots").then(({ bots, groups, computerControl, botQueuedMessages }) => {
+        api("/api/bots").then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;
           rawDispatch({
             type: "hydrate",
             bots,
             groups: groups ?? [],
+            sections: sections ?? [],
             computerControl: computerControl ?? {},
             botQueuedMessages,
           });
@@ -3046,6 +3114,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         bumpPeripheralVersion("webhooks");
       }
       switch (frame.kind) {
+        case "sections":
+          rawDispatch({ type: "sections", sections: frame.sections });
+          break;
         case "bot.queued":
           rawDispatch({ type: "botQueues", queues: frame.queues });
           break;

@@ -16,10 +16,10 @@ export interface FleetWorkspaceView {
   slug: string;
   host: string;
   port: number;
-  status: "running" | "suspended";
+  status: "running" | "suspended" | "provisioning" | "error" | "retained";
   createdAt: string;
   live: string;
-  usage: { month: string; turns: number; costUsd: number | null; billableUsd: number | null };
+  usage: { month: string; turns: number | null; costUsd: number | null; billableUsd: number | null; unavailable?: boolean };
 }
 
 export interface FleetView {
@@ -47,22 +47,27 @@ export function WorkspacesTable({ fleet, onAct, busy }: { fleet: FleetView; onAc
       </div>
       {fleet.workspaces.map((workspace) => {
         const suspended = workspace.status === "suspended";
-        const state = suspended ? t("workspaces.suspended") : workspace.live === "active" ? t("workspaces.running") : workspace.live;
+        const operational = workspace.status === "running" || suspended;
+        const state = workspace.status === "provisioning" ? t("workspaces.provisioning")
+          : workspace.status === "error" ? t("workspaces.error")
+          : workspace.status === "retained" ? t("workspaces.retained")
+          : suspended ? t("workspaces.suspended") : workspace.live === "active" ? t("workspaces.running") : workspace.live;
         return (
           <div key={workspace.slug} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5 border-b border-hairline/20 py-2 text-[13px]">
             <span className="min-w-0">
               <span className="block truncate text-ink">{workspace.slug}</span>
               <a href={`https://${workspace.host}`} target="_blank" rel="noreferrer" className="block truncate text-[12px] text-accent hover:underline">{workspace.host}</a>
+              {!operational && <span className="block text-[12px] text-ink-secondary">{t("workspaces.recoveryHint")}</span>}
             </span>
-            <span className={cn("text-right", suspended ? "text-warning" : workspace.live === "active" ? "text-success" : "text-danger")}>{state}</span>
-            <span className="text-right tabular-nums text-ink" title={t("workspaces.turns", { turns: String(workspace.usage.turns) })}>
+            <span className={cn("text-right", suspended || workspace.status === "provisioning" ? "text-warning" : workspace.status === "running" && workspace.live === "active" ? "text-success" : "text-danger")}>{state}</span>
+            <span className="text-right tabular-nums text-ink" title={workspace.usage.turns === null ? undefined : t("workspaces.turns", { turns: String(workspace.usage.turns) })}>
               {hasFiniteCost(workspace.usage.costUsd) ? formatUsd(workspace.usage.costUsd) : "—"}
               {hasFiniteCost(workspace.usage.billableUsd) && <span className="text-ink-secondary"> · {formatUsd(workspace.usage.billableUsd)}</span>}
             </span>
             <span className="flex items-center justify-end gap-2 text-[12px]">
-              <button type="button" disabled={busy !== null} onClick={() => onAct(workspace.slug, "users")} className="text-ink-secondary hover:text-ink disabled:opacity-50">{t("workspaces.users")}</button>
+              {operational && <><button type="button" disabled={busy !== null} onClick={() => onAct(workspace.slug, "users")} className="text-ink-secondary hover:text-ink disabled:opacity-50">{t("workspaces.users")}</button>
               <button type="button" disabled={busy !== null} onClick={() => onAct(workspace.slug, suspended ? "resume" : "suspend")} className="text-ink-secondary hover:text-ink disabled:opacity-50">{suspended ? t("workspaces.resume") : t("workspaces.suspend")}</button>
-              <button type="button" disabled={busy !== null} onClick={() => onAct(workspace.slug, "delete")} className="text-danger hover:underline disabled:opacity-50">{t("workspaces.delete")}</button>
+              <button type="button" disabled={busy !== null} onClick={() => onAct(workspace.slug, "delete")} className="text-danger hover:underline disabled:opacity-50">{t("workspaces.delete")}</button></>}
             </span>
           </div>
         );

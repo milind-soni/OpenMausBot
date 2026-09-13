@@ -13,7 +13,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.emptyFlow
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -21,7 +20,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.mockwebserver.MockResponse
-import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
 
@@ -238,54 +236,97 @@ class SessionP1Test {
     }
 
     @Test
-    fun threadChipSwitchesByTheTaskRouteAndLandsOnTheBotWhenTheThreadIsGone() = runTest {
+    fun searchingABackgroundBotThreadLoadsItsMessagesWithoutSelectingItOnTheComputer() = runTest {
         val scout = bot("scout", "task-1", "task-1", "task-2")
-        val switched = scout.copy(threadId = "task-2")
         val session = session { Fleet(listOf(scout), emptyList()) }
-        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(switched)}}"""))
+        session.openThread(ThreadRef("scout", "task-1", "Task 1"))
+        val message = Message("match", Message.Role.USER, Message.Kind.TEXT, 2.0, text = "Find me")
+        server.enqueue(json(CompanionJson.encodeToString(ThreadPage(listOf(message)))))
+
+        val opened = session.open(SearchHit(
+            threadId = "task-2", messageId = "match", at = 2.0, role = message.role, kind = message.kind,
+            snippet = "Find me", matchStart = 0, matchLength = 4, botId = "scout", name = "Scout", onActivePath = true,
+        ))
+
+        assertEquals("task-2", opened?.threadId)
+        assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        assertEquals(listOf(message), session.state.value.transcript("task-2"))
+        assertEquals(1, server.requestCount)
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertTrue(request.path!!.startsWith("/api/threads/task-2/messages?"))
+        assertTrue(request.path!!.contains("around=match"))
+    }
+
+    @Test
+    fun aLoadedLegacyPageIsNotFetchedAgainWhenTheThreadReopens() = runTest {
+        val session = session()
+        server.enqueue(json("""{"messages":[]}"""))
+        session.loadThreadIfNeeded("background")
+        session.loadThreadIfNeeded("background")
+        assertTrue(session.state.value.hasLoadedPage("background"))
+        assertEquals(1, server.requestCount)
+        assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test
+    fun renameReportsFailureForBotAndRoomDialogsWithoutDismissingTheirDrafts() = runTest {
+        val session = session()
+        val task = BotTask("task-1", "Original", 1.0)
+        repeat(2) { server.enqueue(json("""{"error":"Rename failed"}""", code = 500)) }
+        assertEquals(false, session.renameTask(task, bot("b1", "task-1", "task-1"), "New name"))
+        assertEquals("Rename failed", session.actionError)
+        assertEquals(false, session.renameTask(task, room("r1", "task-1", "task-1"), "New name"))
+        assertEquals("Rename failed", session.actionError)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun threadChipSelectsLocallyAndDoesNotChooseASiblingWhenTheThreadIsGone() = runTest {
+        val scout = bot("scout", "task-1", "task-1", "task-2")
+        val session = session { Fleet(listOf(scout), emptyList()) }
 
         val opened = session.openThread(ThreadRef("scout", "task-2", "Task 2"))
 
         assertEquals("task-2", opened?.threadId)
-        assertEquals("task-2", session.state.value.bot("scout")?.threadId)
-        assertEquals("POST /api/bots/scout/tasks/task-2", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        assertEquals(0, server.requestCount)
         assertNull(session.actionError)
 
-        // The chip's thread was deleted after the chip was written: land on
-        // the bot's current thread and say so, never nowhere.
-        server.enqueue(json("""{"error":"Task not found."}""", code = 404))
+        // A stale chip must not open a sibling that could receive a reply
+        // intended for the missing thread.
         val fallback = session.openThread(ThreadRef("scout", "task-9", "Gone"))
-        assertEquals("task-2", fallback?.threadId)
-        assertEquals("POST /api/bots/scout/tasks/task-9", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertNull(fallback)
+        assertEquals(0, server.requestCount)
         assertEquals(Session.THREAD_GONE_MESSAGE, session.actionError)
 
         // A thread the bot is already on needs no request at all.
         session.actionError = null
         assertEquals("task-2", session.openThread(ThreadRef("scout", "task-2", "Task 2"))?.threadId)
-        assertEquals(2, server.requestCount)
+        assertEquals(0, server.requestCount)
 
         assertNull(session.openThread(ThreadRef("nobody", "task-1", "Nope")))
         assertEquals("That agent no longer exists.", session.actionError)
     }
 
     @Test
-    fun threadChipDoesNotNavigateOnAuthenticationServerOrUnreadableResponseErrors() = runTest {
+    fun threadChipReportsHydrationErrorsAndAllowsRetry() = runTest {
         val scout = bot("scout", "task-1", "task-1", "task-2")
-        val session = session { Fleet(listOf(scout), emptyList()) }
-        for (code in listOf(401, 403, 409, 500)) {
-            server.enqueue(json("""{"error":"Switch failed: $code"}""", code = code))
-            assertNull(session.openThread(ThreadRef("scout", "task-2", "Task 2")))
-            assertEquals("Switch failed: $code", session.actionError)
-            assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        var failure: APIError.Status? = null
+        val session = session {
+            failure?.let { throw it }
+            Fleet(listOf(scout), emptyList())
         }
-        server.enqueue(json("not json"))
-        assertNull(session.openThread(ThreadRef("scout", "task-2", "Task 2")))
-        assertTrue(session.actionError != Session.THREAD_GONE_MESSAGE)
-
-        // A successful retry clears the error from the failed tap.
-        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(scout.copy(threadId = "task-2"))}}"""))
+        for (code in listOf(401, 403, 409, 500)) {
+            failure = APIError.Status(code, "Load failed: $code")
+            assertNull(session.openThread(ThreadRef("scout", "task-2", "Task 2")))
+            assertEquals("Load failed: $code", session.actionError)
+            assertTrue(session.state.value.bots.isEmpty())
+        }
+        failure = null
         assertEquals("task-2", session.openThread(ThreadRef("scout", "task-2", "Task 2"))?.threadId)
         assertNull(session.actionError)
+        assertEquals(0, server.requestCount)
     }
 
     @Test
@@ -310,48 +351,32 @@ class SessionP1Test {
     }
 
     @Test
-    fun threadChipDiscardsSwitchSuccessAndFailureFromThePreviousComputer() = runTest {
-        val scout = bot("scout", "task-1", "task-1", "task-2")
-        for (code in listOf(200, 404, 500)) {
-            val session = session(otherComputer = true) { Fleet(listOf(scout), emptyList()) }
-            session.openThread(ThreadRef("scout", "task-1", "Task 1"))
-            val started = CompletableDeferred<Unit>()
-            val release = CompletableDeferred<Unit>()
-            server.dispatcher = object : Dispatcher() {
-                override fun dispatch(request: RecordedRequest): MockResponse {
-                    started.complete(Unit)
-                    runBlocking { release.await() }
-                    return if (code == 200) json("""{"bot":${CompanionJson.encodeToString(scout.copy(threadId = "task-2"))}}""")
-                    else json("""{"error":"Old computer error"}""", code = code)
-                }
-            }
-            val opening = async { session.openThread(ThreadRef("scout", "task-2", "Task 2")) }
-            try {
-                started.await()
-                session.switchComputer("other")
-                runCurrent()
-                assertEquals("other", session.connection.value?.id)
-            } finally {
-                release.complete(Unit)
-            }
-            assertNull(opening.await())
-            assertTrue(session.state.value.bots.isEmpty())
-            assertNull(session.actionError)
+    fun threadChipDiscardsAHydrationFailureFromThePreviousComputer() = runTest {
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val session = session(otherComputer = true) {
+            started.complete(Unit)
+            release.await()
+            throw APIError.Status(500, "Old computer error")
         }
+        val opening = async { session.openThread(ThreadRef("scout", "task-2", "Task 2")) }
+        started.await()
+        session.switchComputer("other")
+        runCurrent()
+        release.complete(Unit)
+        assertNull(opening.await())
+        assertTrue(session.state.value.bots.isEmpty())
+        assertNull(session.actionError)
     }
 
     @Test
     fun threadChipCancellationDoesNotNavigateOrReportADeletedThread() = runTest {
-        val scout = bot("scout", "task-1", "task-1", "task-2")
-        val session = session { Fleet(listOf(scout), emptyList()) }
         val started = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        server.dispatcher = object : Dispatcher() {
-            override fun dispatch(request: RecordedRequest): MockResponse {
-                started.complete(Unit)
-                runBlocking { release.await() }
-                return json("""{"error":"Task not found."}""", code = 404)
-            }
+        val session = session {
+            started.complete(Unit)
+            release.await()
+            Fleet(listOf(bot("scout", "task-1", "task-1", "task-2")), emptyList())
         }
         val opening = async { session.openThread(ThreadRef("scout", "task-2", "Task 2")) }
         try {
@@ -361,12 +386,12 @@ class SessionP1Test {
             release.complete(Unit)
         }
         assertFailsWith<CancellationException> { opening.await() }
-        assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        assertTrue(session.state.value.bots.isEmpty())
         assertNull(session.actionError)
     }
 
     @Test
-    fun roomTaskNotificationSwitchesTheChannelAndFallsBackWhenTheTaskIsGone() = runTest {
+    fun roomTaskNotificationSwitchesTheChannelAndDoesNotOpenASiblingWhenTheTaskIsGone() = runTest {
         val room = room("room-1", "room-task-1", "room-task-1", "room-task-2")
         val switched = room.copy(
             threadId = "room-task-2",
@@ -383,8 +408,8 @@ class SessionP1Test {
 
         server.enqueue(json("""{"error":"Task not found."}""", code = 404))
         val fallback = session.openNotification(target("asker", "room-task-1"))
-        assertEquals("room-task-2", assertIs<Chat.RoomChat>(fallback).threadId)
-        assertNull(session.actionError)
+        assertNull(fallback)
+        assertEquals("Task not found.", session.actionError)
     }
 
     @Test
@@ -456,14 +481,12 @@ class SessionP1Test {
     }
 
     @Test
-    fun inactiveTaskNotificationSwitchesOnceAndRepeatedOpenIsIdempotent() = runTest {
+    fun inactiveTaskNotificationKeepsSelectionLocalAndRepeatedOpenIsIdempotent() = runTest {
         var hydrates = 0
-        val switched = bot("b1", "task-2", "task-1", "task-2")
         val session = session {
             hydrates++
             Fleet(listOf(bot("b1", "task-1", "task-1", "task-2")), emptyList())
         }
-        server.enqueue(json("""{"bot":${CompanionJson.encodeToString(switched)}}"""))
         val target = target("b1", "task-2")
 
         val first = session.openNotification(target)
@@ -471,25 +494,69 @@ class SessionP1Test {
 
         assertEquals("task-2", assertIs<Chat.BotChat>(first).threadId)
         assertEquals("task-2", assertIs<Chat.BotChat>(second).threadId)
-        assertEquals("task-2", session.state.value.bot("b1")?.threadId)
+        assertEquals("task-1", session.state.value.bot("b1")?.threadId)
         assertEquals(1, hydrates)
-        assertEquals(1, server.requestCount)
-        assertEquals("POST /api/bots/b1/tasks/task-2", server.takeRequest().let { "${it.method} ${it.path}" })
+        assertEquals(0, server.requestCount)
     }
 
     @Test
-    fun deletedTaskNotificationFallsBackToTheBotsCurrentChat() = runTest {
+    fun deletedTaskNotificationReportsGoneWithoutOpeningTheBotsCurrentChat() = runTest {
         val session = session {
             Fleet(listOf(bot("b1", "task-1", "task-1")), emptyList())
         }
-        server.enqueue(json("""{"error":"Task not found."}""", code = 404))
-
         val opened = session.openNotification(target("b1", "deleted-task"))
 
-        assertEquals("task-1", assertIs<Chat.BotChat>(opened).threadId)
-        assertNull(session.actionError)
+        assertNull(opened)
+        assertEquals(Session.THREAD_GONE_MESSAGE, session.actionError)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun unknownThreadTargetsRefreshMetadataAndOpenExactlyWithoutLosingScrollback() = runTest {
+        var tasks = listOf("task-1")
+        var reads = 0
+        val session = session {
+            reads++
+            Fleet(listOf(bot("scout", "task-1", *tasks.toTypedArray())), emptyList())
+        }
+        session.openThread(ThreadRef("scout", "task-1", "Task 1"))
+        val message = Message("saved", Message.Role.USER, Message.Kind.TEXT, 1.0, text = "Scrollback")
+        server.enqueue(json(CompanionJson.encodeToString(ThreadPage(listOf(message), hasMore = true))))
+        session.loadThreadIfNeeded("task-1")
+
+        tasks = listOf("task-1", "task-2")
+        assertEquals("task-2", session.openThread(ThreadRef("scout", "task-2", "Task 2"))?.threadId)
+        tasks = listOf("task-1", "task-2", "task-3")
+        assertEquals("task-3", session.openNotification(target("scout", "task-3"))?.threadId)
+
+        assertEquals(3, reads)
+        assertEquals("task-1", session.state.value.bot("scout")?.threadId)
+        assertEquals(listOf(message), session.state.value.transcript("task-1"))
+        assertEquals(true, session.state.value.hasMore["task-1"])
         assertEquals(1, server.requestCount)
-        assertEquals("/api/bots/b1/tasks/deleted-task", server.takeRequest().path)
+        assertEquals("GET", server.takeRequest().method)
+    }
+
+    @Test
+    fun notificationDiscardsMetadataAndErrorsFromThePreviousComputer() = runTest {
+        for (fails in listOf(false, true)) {
+            val started = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val session = session(otherComputer = true) {
+                started.complete(Unit)
+                release.await()
+                if (fails) throw APIError.Status(500, "Old computer error")
+                Fleet(listOf(bot("scout", "task-1", "task-1", "task-2")), emptyList())
+            }
+            val opening = async { session.openNotification(target("scout", "task-2")) }
+            started.await()
+            session.switchComputer("other")
+            runCurrent()
+            release.complete(Unit)
+            assertNull(opening.await())
+            assertTrue(session.state.value.bots.isEmpty())
+            assertNull(session.actionError)
+        }
     }
 
     @Test

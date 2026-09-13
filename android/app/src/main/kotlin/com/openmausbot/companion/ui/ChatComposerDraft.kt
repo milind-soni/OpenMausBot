@@ -1,6 +1,9 @@
 package com.openmausbot.companion.ui
 
 import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import com.openmausbot.companion.core.Dictation
 import com.openmausbot.companion.core.DraftProvenance
 
@@ -24,7 +27,7 @@ class ChatComposerDraft(
     initialSaveable: String,
 ) {
     /** Volatile field text — may contain speech. Never what the saver persists. */
-    var text: String
+    var text: String by mutableStateOf("")
         private set
 
     /**
@@ -115,9 +118,8 @@ class ChatComposerDraft(
         ): Saver<ChatComposerDraft, Any> = Saver(
             save = { listOf(TYPED_MARKER, it.saveableValue) },
             restore = { raw ->
-                ChatComposerDraft(
+                holder.composer(
                     chatId,
-                    holder,
                     initialSaveable = typedSnapshotFromSaved(raw).orEmpty(),
                 )
             },

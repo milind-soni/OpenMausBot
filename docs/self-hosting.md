@@ -394,23 +394,40 @@ gets a session cookie (30 days, renewed on use up to 180 days from pairing, revo
 listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
 screen follows.
 
-From the **desktop app**, open **Settings → Remote access → Connect to another
-computer**, choose **Self-hosted server**, and paste the full HTTPS pairing
-link from your server. Custom domains and Cloudflare tunnel addresses work
-here; Tailscale is not required. Generate a fresh link for each device (use
-`npx openmausbot pair --client` for chat-only access). A code already used by
-your phone cannot also pair your desktop.
+From the **desktop app**, use the workspace dropdown above Search → **Connect
+hosted workspace…**, or **Settings → Connected workspaces**. Enter the server's
+HTTPS address or full pairing link, with an optional name. Custom domains and
+Cloudflare tunnel addresses work; Tailscale is not required. Generate a fresh
+link for each device: `npx openmausbot pair --label "My desktop"` creates an
+owner link without the phone wizard; add `--client` for chat-only access.
+A code already used by your phone cannot also pair your desktop.
 
 Confirm the server address in the app's connection dialog, then finish pairing
-on the server page. The app stays signed in across restarts. The **Server** menu
-switches between Local and saved servers; **Add Server from Copied Pairing
-Link…** remains available there too (on Windows and Linux press Alt to show
+on the server page. The app stays signed in across restarts. The workspace
+dropdown switches between **This computer** and saved hosted workspaces, without
+moving bots or chats. The **Server** menu and **Add Server from Copied Pairing
+Link…** remain available there too (on Windows and Linux press Alt to show
 the menu bar). The separate **Desktop companion** option in Settings is for
 the six-digit code from another desktop app, not a self-hosted server's
-12-character code. While a remote server is
-shown, this computer's screen, microphone, files and local control are not
-offered to it. "Forget" signs the app out of that server; revoke the
-session on the server too if the device is gone.
+12-character code. Older hosted UIs may not show the dropdown; use the native
+Server menu to switch back until the server is updated.
+
+After pairing, **Share this computer?** offers **Choose access** or **Not now**.
+Nothing is shared automatically. In **Settings → Connected workspaces → Computer
+access**, choose read-only folders and optionally allow edits. Unrestricted
+terminal and screen/app control are separate opt-ins, confirmed in a native
+dialog. They can access information outside the selected folders. Share only
+with a workspace you trust; its bots and AI providers may receive shared content.
+Folder transfers are limited to 256 KiB per file and do not follow links or
+delete files. Local screen control also needs OS permissions and a supported
+desktop driver. Microphone access is not included.
+
+Sharing works while this desktop is awake and running, including when viewing
+another workspace. **Stop sharing** revokes access; closing the app stops the
+connector. An action already sent to a local app may still finish. **Forget**
+also stops sharing and signs this desktop out, without deleting the server's
+bots or conversations. If sign-out cannot reach the server, the app warns you;
+revoke its session there when reachable again, or if the device is gone.
 
 What this changes about the trust model: the server still binds loopback
 and still trusts loopback as the owner. A **paired session** is the second

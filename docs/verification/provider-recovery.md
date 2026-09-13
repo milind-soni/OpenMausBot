@@ -42,14 +42,22 @@ fake Claude, Codex, Grok and Antigravity providers. Assertions cover:
 
 - Changing a bot's default to Full leaves existing Ask threads unchanged.
 - Explicitly applying that approved default changes only the selected thread.
-- Direct HTTP elevation, unknown threads, unapproved defaults and threads
-  using a different provider are rejected.
+- The composer also grants Full directly to an Ask thread without changing the
+  bot default or visiting Settings. Its private request pins the thread and
+  waits for an actual commit acknowledgment before a queued send can proceed.
+- Custom is available for Codex threads, even when the bot default uses another
+  provider. Returning to Ask uses the same private scoped path.
+- Direct HTTP elevation and unknown threads are rejected. The legacy
+  apply-bot-default operation still checks that default/provider; the composer
+  checks the selected thread's own provider instead.
 - The updated conversation uses the provider's native Full mode; unrelated
   conversations remain Ask. Delegation never borrows the sender's authority.
 - Auto-accept edits works only for providers that implement that mode.
-- The real composer opens a scoped warning with Cancel focused. Cancel does
+- The real composer approval menu exposes Full without a separate shortcut
+  or settings link. It opens a scoped warning with Cancel focused. Cancel does
   not send a grant; confirmation changes server state through the private
-  channel and updates the composer through SSE. A subsequent message completes.
+  channel and updates the composer. The bot default remains Ask, and a
+  subsequent message completes.
 - At 390px the new control and confirmation remain usable. The provider
   safety error explains the restriction and does not offer Retry.
 

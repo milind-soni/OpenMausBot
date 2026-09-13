@@ -57,7 +57,8 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).toContain("Do not call wait_delegation");
     expect(prompt).toContain("Use ask_bot only for a brief consultation");
     expect(prompt).toContain("Never use ask_bot for an assigned task");
-    expect(prompt).toContain("use create_bot");
+    expect(prompt).toContain("propose_team_setup once");
+    expect(prompt).toContain("structured result");
   });
 
   it("does not promise delegation when the engine cannot mount agent tools", () => {
@@ -77,11 +78,7 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(ordinaryPrompt).not.toContain("TRUSTED OPENMAUSBOT STATUS");
   });
 
-  it("renders the Chief's prompt exactly as it did before ordinary bots got a roster", () => {
-    // The Chief's wording is load-bearing — it is what makes create_bot and
-    // section-wide staffing legible to the model — so extracting the shared
-    // roster renderer must not have moved a single byte of it. This is the
-    // pin: a golden prompt, not a set of contains().
+  it("pins legacy delegation guidance and shared staffing independently of the bounded chat coordinator", () => {
     const prompt = chiefOfStaffSystemPrompt("chief", bots, true, "TRUSTED OPENMAUSBOT STATUS\nfreshness=fresh");
 
     expect(prompt).toBe(
@@ -89,7 +86,8 @@ describe("chiefOfStaffSystemPrompt", () => {
         "You are the Chief of Staff for the Work section. You are the user's primary contact for this section's team of bots.",
         "Own the outcome: understand the request, decide what to handle yourself, coordinate the right specialists when useful, and return one concise consolidated answer.",
         "Do not delegate trivial work merely to appear busy. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
-        "Use list_bots to confirm the live roster and IDs. When assigning work to a teammate, use delegate_bot: it returns immediately, keeps you available to the user, and delivers the teammate's outcome back into this conversation automatically — success or failure. When the result arrives you are woken with it: report it to the user and act. If the teammate fails or stalls, tell the user plainly and decide the next step yourself. After delegate_bot accepts the task, acknowledge the handoff and continue with any independent work or end your turn. Do not call wait_delegation or repeatedly poll check_delegation in the same turn. Use ask_bot only for a brief consultation whose answer you must have before writing your current response. Never use ask_bot for an assigned task, background work, or anything potentially long-running. When the user asks you to assemble a team, use create_bot for each genuinely useful specialist. Give each one a clear role and instructions, then use delegate_bot to assign its work. Do not create duplicate or unnecessary bots. Delegate with a clear, self-contained brief. Say that the task is assigned, not completed; only claim completion after the teammate's result has actually arrived. You may assign work to more than one teammate when the request genuinely benefits. Stay responsive while they work, then combine their returned results when the user asks for a synthesis.",
+        "Use list_bots to confirm the live roster and IDs. When assigning work to a teammate, use delegate_bot: it returns immediately, keeps you available to the user, and delivers the teammate's outcome back into this conversation automatically — success or failure. When the result arrives you are woken with it: report it to the user and act. If the teammate fails or stalls, tell the user plainly and decide the next step yourself. After delegate_bot accepts the task, acknowledge the handoff and continue with any independent work or end your turn. Do not call wait_delegation or repeatedly poll check_delegation in the same turn. Use ask_bot only for a brief consultation whose answer you must have before writing your current response. Never use ask_bot for an assigned task, background work, or anything potentially long-running. Delegate with a clear, self-contained brief. Say that the task is assigned, not completed; only claim completion after the teammate's result has actually arrived. You may assign work to more than one teammate when the request genuinely benefits. Stay responsive while they work, then combine their returned results when the user asks for a synthesis.",
+        "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the combined card reviews their creation and your access. Existing thread models stay unchanged. End your turn after the proposal: the user's decision automatically resumes you once with a structured result. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. Use create_bot only for a single specialist when no combined setup was requested. For explicitly requested bot deletion, use propose_bot_deletion separately. Do not create duplicate or unnecessary bots.",
         "Current Work section team:",
         "- Quill — Writer: Drafts concise copy (available)",
         "- Patch — Engineer (working right now)",

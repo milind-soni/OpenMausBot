@@ -10,6 +10,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import type { RequestAuth } from "./request-auth.ts";
+import type { SessionRegistry } from "./sessions.ts";
 
 import { SERVER_ROOT } from "./proxy-paths.ts";
 
@@ -35,6 +38,51 @@ const layerSchema = z.object({
 const DEFAULT_DIR = join(SERVER_ROOT, "..", "enterprise");
 
 let current: EditionStatus = { edition: "oss", features: [] };
+let workspaceAccessFactory: ((options: WorkspaceAccessOptions) => WorkspaceAccess) | undefined;
+
+export interface WorkspaceAccessOptions {
+  sessions: SessionRegistry;
+  cookieName: string;
+  closeSessionStreams(sessionId: string): void;
+  entitled(): boolean;
+  env?: NodeJS.ProcessEnv;
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+}
+
+export interface WorkspaceAccess {
+  handlePublic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean>;
+  authorize(req: IncomingMessage, auth: RequestAuth): Promise<{ status: 401 | 403 | 503; error: string } | null>;
+  revalidate(): Promise<void>;
+}
+
+export function hostedWorkspaceConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.OMB_ADMIN_URL !== undefined || env.OMB_ADMIN_WORKSPACE !== undefined || env.OMB_ADMIN_MEMBERSHIP !== undefined;
+}
+
+/** Validate the operator's complete hosted configuration before any session
+ * can delegate membership authority. A partial setting is never standalone. */
+export function hostedWorkspaceConfiguration(env: NodeJS.ProcessEnv = process.env): { admin: URL; tenant: URL; workspace: string; portalMembership: boolean } | null {
+  try {
+    const origin = (raw: string | undefined) => {
+      if (!raw || raw !== raw.trim()) throw new Error("missing origin");
+      const url = new URL(raw);
+      if (url.protocol !== "https:" || (raw !== url.origin && raw !== `${url.origin}/`)) throw new Error("invalid origin");
+      return url;
+    };
+    if (!/^[a-z][a-z0-9-]{1,30}$/.test(env.OMB_ADMIN_WORKSPACE ?? "")) return null;
+    if (env.OMB_ADMIN_MEMBERSHIP !== undefined && !["local", "portal"].includes(env.OMB_ADMIN_MEMBERSHIP)) return null;
+    return { admin: origin(env.OMB_ADMIN_URL), tenant: origin(env.OMB_PUBLIC_URL), workspace: env.OMB_ADMIN_WORKSPACE!, portalMembership: env.OMB_ADMIN_MEMBERSHIP === "portal" };
+  } catch { return null; }
+}
+
+/** No enterprise import or portal dependency enters the core bundle. A
+ * configured server without this hook must refuse hosted access, not fall
+ * back to legacy email or QR credentials. */
+export function createWorkspaceAccess(options: Omit<WorkspaceAccessOptions, "entitled">): WorkspaceAccess | null {
+  if (!hostedWorkspaceConfigured(options.env)) return null;
+  return workspaceAccessFactory?.({ ...options, entitled: () => entitled("admin") }) ?? null;
+}
 
 function oss(notice?: string): EditionStatus {
   current = notice ? { edition: "oss", features: [], notice } : { edition: "oss", features: [] };
@@ -46,6 +94,7 @@ function oss(notice?: string): EditionStatus {
 export async function loadEnterpriseLayer(
   options: { dir?: string; licenseKey?: string } = {},
 ): Promise<EditionStatus> {
+  workspaceAccessFactory = undefined;
   const dir = options.dir ?? process.env.OMB_ENTERPRISE_DIR ?? DEFAULT_DIR;
   const licenseKey = options.licenseKey ?? process.env.OMB_LICENSE_KEY;
   // Source in a checkout, a compiled bundle in an image: same convention as proxy-paths.ts.
@@ -57,6 +106,8 @@ export async function loadEnterpriseLayer(
   }
   try {
     const loaded: unknown = await import(pathToFileURL(entry).href);
+    const access: unknown = Reflect.get(Object(loaded), "createWorkspaceAccess");
+    if (typeof access === "function") workspaceAccessFactory = access as (options: WorkspaceAccessOptions) => WorkspaceAccess;
     const register: unknown = Reflect.get(Object(loaded), "register");
     if (typeof register !== "function") throw new Error(`${entry} does not export register()`);
     if (!licenseKey) return oss("enterprise layer present but OMB_LICENSE_KEY is not set");

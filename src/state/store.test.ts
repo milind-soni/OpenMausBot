@@ -9,18 +9,43 @@ import {
   openNotificationTarget,
   openThread,
   persistBotUpdate,
+  persistTaskApproval,
   pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
   visibleNotificationThread,
   type Bot,
   type BotAnnouncement,
+  type ConfigStatusFrame,
   type Group,
   type Message,
   type Action,
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { RoutineRun } from "../lib/routines";
+
+describe("composer thread approval persistence", () => {
+  it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
+    const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;
+    const bridge = { setMode: vi.fn().mockResolvedValue(bot) };
+    const request = vi.fn();
+    expect(await persistTaskApproval("bot", "thread", { approvalMode: mode, confirmFullAccess: true }, bridge, request)).toBe(bot);
+    expect(bridge.setMode).toHaveBeenCalledExactlyOnceWith("bot", mode, { threadId: "thread", threadOnly: true, acknowledgeLocalAuto: false });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("never falls back to HTTP for Full or Custom, or grants Full without confirmation", async () => {
+    const request = vi.fn(), bridge = { setMode: vi.fn() };
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full" }, bridge, request)).rejects.toThrow("Confirm Full");
+    for (const mode of ["full", "custom"] as const) await expect(persistTaskApproval("bot", "thread", { approvalMode: mode, confirmFullAccess: true }, undefined, request)).rejects.toThrow("packaged desktop");
+    expect(request).not.toHaveBeenCalled(); expect(bridge.setMode).not.toHaveBeenCalled();
+  });
+  it("does not send local confirmation metadata over HTTP and propagates failed grants", async () => {
+    const request = vi.fn().mockResolvedValue({ bot: { id: "bot" } });
+    await persistTaskApproval("bot", "thread", { approvalMode: "ask", confirmFullAccess: true }, undefined, request);
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ approvalMode: "ask" });
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full", confirmFullAccess: true }, { setMode: vi.fn().mockRejectedValue(new Error("gone")) }, request)).rejects.toThrow("gone");
+  });
+});
 
 describe("stream delta flushing", () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -181,6 +206,24 @@ describe("independent bot threads", () => {
     expect(state.bots[0]).toMatchObject({ threadId: "second", messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
   });
 
+  it.each(["slim-first", "full-first"])("replaces the only worked thread with an empty task (%s)", (order) => {
+    const onlyThread = { ...bot, busy: false, activity: "idle" as const, unread: false, tasks: bot.tasks!.slice(0, 1) };
+    const otherBot = { ...bot, id: "other-bot", threadId: "other-thread", tasks: [{ threadId: "other-thread", title: "Keep this task", createdAt: 1 }] };
+    const replacement = { threadId: "fresh-thread", title: "New task", createdAt: 3, busy: false, activity: "idle" as const, unread: false };
+    const full = { ...onlyThread, threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null };
+    const { messages: _messages, ...slim } = full;
+    let state: ReturnType<typeof reducer> = { ...start(), bots: [onlyThread, otherBot] };
+    state = reducer(state, { type: "botPatched", bot: order === "slim-first" ? slim : full });
+    expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null });
+    expect(Boolean(state.bots[0]?.awaitingThreadSnapshot)).toBe(order === "slim-first");
+    state = reducer(state, { type: "botPatched", bot: order === "slim-first" ? full : slim });
+    expect(state.bots[0]).toMatchObject({ threadId: replacement.threadId, tasks: [replacement], messages: [], activeLeafId: null, awaitingThreadSnapshot: false });
+    expect(state.selectedId).toBe(bot.id);
+    expect(state.bots[1]).toBe(otherBot);
+    // A late event for the deleted thread cannot repopulate its replacement.
+    expect(reducer(state, { type: "messageAdded", threadId: onlyThread.threadId, message: onlyThread.messages[0]! })).toBe(state);
+  });
+
   it("does not replay old background approvals over the replacement snapshot", () => {
     const stale: Message = { id: "approval", role: "bot", kind: "options", at: 2,
       card: { title: "Review", subtitle: "Old state", options: ["Enable", "Deny"], requestId: "request", tool: "stage_skill" } };
@@ -257,6 +300,7 @@ describe("keyboard shortcuts dialog state", () => {
   it("opens and closes without replacing bot settings navigation", () => {
     expect(initialState.shortcutsOpen).toBe(false);
     expect(initialState.botSettingsSection).toBe("overview");
+    expect(initialState.botSettingsExpandAccordion).toBe(false);
     const state = { ...initialState, botSettingsSection: "soul" as const };
     const opened = reducer(state, { type: "toggleShortcuts", open: true });
     expect(opened.shortcutsOpen).toBe(true);
@@ -1217,6 +1261,22 @@ describe("section Chiefs", () => {
     chiefOfStaff,
   });
 
+  it("clears previous membership when a complete bot frame moves it to General", () => {
+    const current = { ...bot("moved", "Delivery"), messages: [] };
+    const { section: _oldSection, ...announcement } = current;
+    const next = reducer({ ...initialState, bots: [current], sections: ["Delivery"] }, { type: "botPatched", bot: announcement });
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.sections).toEqual(["Delivery"]);
+  });
+
+  it("clears full group membership without treating a partial patch as a move", () => {
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const state = { ...initialState, groups: [group] };
+    expect(reducer(state, { type: "groupPatched", group: { id: group.id, unread: true } }).groups[0].section).toBe("Delivery");
+    const { section: _oldSection, ...announcement } = group;
+    expect(reducer(state, { type: "groupPatched", group: announcement }).groups[0].section).toBeUndefined();
+  });
+
   it("hands off only within the patched bot's section", () => {
     const workChief = bot("work-a", "Work", true);
     const workCandidate = bot("work-b", "Work");
@@ -1606,6 +1666,7 @@ describe("bot settings section", () => {
     });
     expect(next.settingsOpen).toBe(true);
     expect(next.botSettingsSection).toBe("identity");
+    expect(next.botSettingsExpandAccordion).toBe(true);
   });
 
   it("toggleSettings leaves the computer panel and inspector open, closes app settings", () => {
@@ -1617,17 +1678,87 @@ describe("bot settings section", () => {
     expect(next.appSettingsOpen).toBe(false);
   });
 
+  it("reopens the same section after a collapse without remounting settings", () => {
+    const opened = reducer(initialState, { type: "toggleSettings", open: true, section: "usage" });
+    const collapsed = reducer(opened, { type: "toggleSettings", open: true });
+    expect(collapsed.settingsOpen).toBe(true);
+    expect(collapsed.botSettingsExpandAccordion).toBe(false);
+    const reopened = reducer(collapsed, { type: "toggleSettings", open: true, section: "usage" });
+    expect(reopened.botSettingsSection).toBe("usage");
+    expect(reopened.botSettingsExpandAccordion).toBe(true);
+  });
+
   it("toggleSettings without a section keeps it", () => {
     const state = reducer(initialState, {
       type: "toggleSettings",
       open: true,
       section: "soul",
     });
+    expect(state.botSettingsExpandAccordion).toBe(true);
     const next = reducer(state, {
       type: "toggleSettings",
       open: true,
     });
     expect(next.botSettingsSection).toBe("soul");
+    // Bare reopen (mascot) must not auto-expand a leftover section.
+    expect(next.botSettingsExpandAccordion).toBe(false);
+  });
+
+  it.each(["identity", "model"] as const)("opens a bot's %s settings without leaving the team map or reading its conversations", (section) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: "room",
+      bots: [{ ...bot, unread: true }],
+      groups: [{ id: "room", unread: true } as Group],
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: bot.id, section });
+    expect(next.selectedId).toBe(bot.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe(section);
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.bots).toBe(state.bots);
+    expect(next.groups).toBe(state.groups);
+  });
+
+  it("switches an open settings panel to another bot without toggling it closed", () => {
+    const other = { ...bot, id: "other-bot" };
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, other],
+      settingsOpen: true,
+      botSettingsSection: "soul" as const,
+      botSettingsExpandAccordion: true,
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    expect(next.selectedId).toBe(other.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("overview");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+
+    const model = reducer(next, { type: "toggleSettings", botId: bot.id, section: "model" });
+    expect(model.settingsOpen).toBe(true);
+    expect(model.botSettingsSection).toBe("model");
+    expect(model.botSettingsExpandAccordion).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id }).settingsOpen).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id, open: false }).settingsOpen).toBe(false);
+    expect(reducer(model, { type: "toggleSettings" }).settingsOpen).toBe(false);
+  });
+
+  it.each(["missing-bot", "hidden-bot", "room"])("ignores unavailable settings target %s", (botId) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, { ...bot, id: "hidden-bot", hidden: true }],
+      groups: [{ id: "room" } as Group],
+      settingsOpen: true,
+    };
+    expect(reducer(state, { type: "toggleSettings", botId, section: "identity" })).toBe(state);
   });
 
   it("selecting a different bot resets botSettingsSection to overview", () => {
@@ -1695,5 +1826,43 @@ describe("bot settings section", () => {
       id: "bot-a",
     });
     expect(state.botSettingsSection).toBe("overview");
+  });
+});
+
+describe("live config frames", () => {
+  const baseFrame: ConfigStatusFrame = {
+    composio: { configured: false },
+    box: { configured: false },
+    vps: { configured: false, sshAlias: "" },
+    rooms: { turnTimeoutMinutes: 10 },
+    localVm: { mode: "shared", maxInstances: 1 },
+  };
+
+  it("preserves edition, budgets and billing through configStatusFromFrame", () => {
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD", prices: { default: { inputPerMillion: 1, outputPerMillion: 2 } } },
+    };
+    const status = configStatusFromFrame(frame);
+    expect(status.edition).toEqual(frame.edition);
+    expect(status.budgets).toEqual(frame.budgets);
+    expect(status.billing).toEqual(frame.billing);
+  });
+
+  it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD" },
+    };
+    const state = reducer(initialState, { type: "configStatus", config: configStatusFromFrame(frame) });
+    expect(state.config).toMatchObject({
+      edition: { edition: "enterprise", features: ["budgets", "billing"] },
+      budgets: { monthlyUsd: 10, warnAtPercent: 80 },
+      billing: { currency: "USD" },
+    });
   });
 });

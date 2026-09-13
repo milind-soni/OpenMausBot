@@ -96,7 +96,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
 
       const prompt = [
         turn.system,
-        "You are working on your own cloud computer — its desktop, Chrome, and shell are yours.",
+        "You are working on the assigned cloud computer — use its desktop, Chrome, and shell within the access described above.",
         "",
         turn.text,
       ]

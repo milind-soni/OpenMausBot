@@ -39,7 +39,73 @@ function parsePairingLink(input) {
   const code = /(?:^|[#&])code=([^&]+)/.exec(url.hash)?.[1] ?? null;
   const isPairPage = url.pathname === "/pair" || url.pathname === "/pair/";
   if (code && !isPairPage) return null; // a code belongs on /pair; anything else is not a pairing link
-  return { origin, code: code ? decodeURIComponent(code) : null, url: code ? `${origin}/pair#code=${code}` : origin };
+  try {
+    return { origin, code: code ? decodeURIComponent(code) : null, url: code ? `${origin}/pair#code=${code}` : origin };
+  } catch {
+    return null;
+  }
+}
+
+/** The desktop connection form accepts a hostname, HTTPS address or pairing
+ * link. Keep codes out of queries/history and refuse unrelated URL paths. */
+function parseHostedWorkspaceLink(input) {
+  if (typeof input !== "string") return null;
+  const text = input.trim();
+  if (!text || /[\s\\]/.test(text)) return null;
+  try {
+    const url = new URL(text.includes("://") ? text : `https://${text}`);
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) return null;
+    if (url.username || url.password || url.search || !["/", "/pair", "/pair/"].includes(url.pathname)) return null;
+    if (!loopback && !url.hostname.includes(".")) return null;
+    const parsed = parsePairingLink(url.href);
+    if (!parsed || (url.hash && (!parsed.code || !/^[A-Z0-9-]{12,16}$/i.test(parsed.code)))) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Remote renderers learn only their current workspace, not the local list. */
+function workspaceSummary(state) {
+  const active = activeEnvironment(state);
+  return active ? { local: false, name: active.name, origin: active.origin } : { local: true, name: "This computer" };
+}
+
+/** Renderer navigation stays in the selected workspace. Switching is a main
+ * process action; a cloud page must not navigate itself onto the local bridge. */
+function workspaceNavigationAllowed(url, state, localOrigin) {
+  try {
+    return new URL(url).origin === (activeEnvironment(state)?.origin ?? localOrigin);
+  } catch {
+    return false;
+  }
+}
+
+/** Only the main window's main frame may request this deliberately small
+ * shell surface. Being embedded in a saved server grants no host authority. */
+function workspaceSenderAllowed(event, contents, state, localOrigin) {
+  if (!contents || event?.sender !== contents || event?.senderFrame !== contents.mainFrame) return false;
+  try {
+    return workspaceNavigationAllowed(event.senderFrame.url, state, localOrigin);
+  } catch {
+    return false;
+  }
+}
+
+/** Native menu choices, never renderer-supplied destinations or callbacks. */
+function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget }) {
+  const active = activeEnvironment(state);
+  return [
+    { id: "workspace-local", label: "This computer", type: "radio", checked: !active, click: () => onSwitch(LOCAL_ID) },
+    ...state.environments.map((entry) => ({
+      id: `workspace-${entry.id}`, label: entry.name, sublabel: new URL(entry.origin).host,
+      type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
+    })),
+    { type: "separator" },
+    { id: "workspace-connect", label: "Connect hosted workspace…", click: onConnect },
+    ...(active ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
+  ];
 }
 
 function cleanName(value, fallback) {
@@ -124,8 +190,13 @@ module.exports = {
   normalizeOrigin,
   parseEnvironments,
   parsePairingLink,
+  parseHostedWorkspaceLink,
   serializeEnvironments,
   withActive,
   withEnvironment,
   withoutEnvironment,
+  workspaceMenuTemplate,
+  workspaceNavigationAllowed,
+  workspaceSenderAllowed,
+  workspaceSummary,
 };

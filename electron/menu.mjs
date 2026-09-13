@@ -10,9 +10,10 @@ import { Menu, app } from "electron";
  * @param {string} input.activeId  "local" or an environment id
  * @param {(id: string) => void} input.onSwitch
  * @param {() => void} input.onAddFromClipboard
+ * @param {() => void} input.onConnect
  * @param {(id: string) => void} input.onForget
  */
-export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onForget }) {
+export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget }) {
   const isMac = process.platform === "darwin";
   const active = environments.find((e) => e.id === activeId) ?? null;
   const server = {
@@ -26,6 +27,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
         click: () => onSwitch(e.id),
       })),
       { type: "separator" },
+      { label: "Connect hosted workspace…", click: onConnect },
       { label: "Add Server from Copied Pairing Link…", click: () => onAddFromClipboard() },
       {
         label: active ? `Forget “${active.name}”` : "Forget Server",

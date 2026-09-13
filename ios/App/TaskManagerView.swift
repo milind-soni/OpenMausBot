@@ -28,7 +28,7 @@ struct TaskManagerView: View {
 
     private var tasks: [BotTask] {
         switch current {
-        case let .bot(bot): return bot.threadGroups().flatMap(\.tasks)
+        case let .bot(bot): return bot.threadGroups(includingClosed: true).flatMap(\.tasks)
         case let .room(room): return room.tasks ?? []
         }
     }
@@ -122,7 +122,9 @@ struct TaskManagerView: View {
     @ViewBuilder private var threadSections: some View {
         switch current {
         case let .bot(bot):
-            let groups = bot.threadGroups(matching: search)
+            // The manage sheet is the "all threads" surface: closed ones
+            // are listed here, dimmed, so nothing a bot tidied is lost.
+            let groups = bot.threadGroups(matching: search, includingClosed: true)
             if groups.isEmpty {
                 emptySearch
             } else {

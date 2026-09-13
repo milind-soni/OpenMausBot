@@ -27,7 +27,11 @@ whose bot/room/coordinator was deleted are omitted. These cases produce
 explicit notes in the backup, download confirmation and import preview.
 
 Existing `.mausteam.json` and BotMRR Markdown templates remain importable;
-they contain setup only, not conversation history. Old clients attempting
+they contain setup only, not conversation history. Every template import adds
+a new section named after the team, with its new bots and any imported rooms
+inside. Existing sections are left alone; importing again numbers the new
+section (for example, "Sales 2"). Project imports use the same grouping.
+Old clients attempting
 `mode=replace` receive a clear error and change nothing.
 
 ## Drive and evidence
@@ -44,7 +48,10 @@ fixture in `finally`. Its steps are covered by
 
 The output records doctor, new-bot, send, wait and messages; the export/import
 counts; exact original-record and transcript comparisons; rejection of old
-replace mode and malformed files; and a settled new turn on the imported bot.
+replace mode and malformed files; and settled turns on imported bots. It also
+imports legacy v1/v2 templates, a project and repeated Markdown packages into
+unique sections, checking that existing bots, section Chiefs, rooms and the
+original conversation remain unchanged after each import.
 Keep that JSON output and the printed persistent server log as evidence.
 
 `server/team-backup.test.ts` additionally covers all-task/branch restoration,
@@ -52,6 +59,21 @@ multi-section Chiefs, room-goal routines, repeat imports, restart persistence,
 malformed reference graphs, permission injection and rollback on failure.
 The scripted fixture does not by itself prove the native file picker or
 download UI; verify those separately in a renderer connected to a fixture.
+
+### Template sidebar UI
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/team-template-ui.e2e.test.ts --silent=false
+```
+
+This owns a disposable `control-omb ui` app. It sends a fixture conversation,
+creates two existing sections, imports a catalog template, then imports the
+same template through the file input. It checks the preview copy, distinct
+new sections, and preservation of existing bots and their conversation.
+The catalog download is simulated; the renderer, import API and persistence
+are real. The file-input change handler is exercised, not the OS file picker.
+The output includes the fixture log path and a sidebar screenshot saved at
+`.omb-scratch/verify-evidence/template-import-sections.png`.
 
 ## Explicit skills in setup packages
 

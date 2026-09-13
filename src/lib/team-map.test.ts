@@ -10,6 +10,10 @@ const bots = [
 ];
 
 describe("team map projection", () => {
+  it("shows persisted empty teams alongside legacy bot membership", () => {
+    expect(buildTeamMapSections(bots, ["Empty", "Work"]).map(({ key, members }) => [key, members.length]))
+      .toEqual([["Work", 1], ["", 1], ["Empty", 0]]);
+  });
   it("groups visible bots by section and separates chiefs", () => {
     expect(buildTeamMapSections(bots)).toEqual([
       { key: "Work", name: "Work", chiefs: [bots[0]], members: [bots[1]] },

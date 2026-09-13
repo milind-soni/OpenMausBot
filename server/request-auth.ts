@@ -187,6 +187,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },
+  // Own outbound desktop connector, additionally bound to a private secret.
+  { methods: ["POST"], path: /^\/api\/shared-computers\/(?:connect|[\w-]+\/(?:poll|lease|result|disconnect))$/ },
   // liveness, identity, the stream
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
@@ -353,6 +355,12 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     return { auth: { kind: "session", session, via, scopes: session.scopes }, status: 401, error: "" };
   }
 
+  // A removed email member must not become the loopback owner merely because
+  // their now-invalid cookie or bearer was presented to a local address.
+  if (via) {
+    return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
+  }
+
   const proxied = isProxied(req);
   const loopback = !proxied && isLoopbackHost(headerValue(req.headers.host)) && isAllowedOrigin(headerValue(req.headers.origin));
   if (loopback) {
@@ -376,9 +384,6 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
     return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
   }
 
-  if (via) {
-    return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
-  }
   if (proxied) {
     return deny(403, "forbidden: this request came through a proxy (pair this device to use the server remotely)");
   }

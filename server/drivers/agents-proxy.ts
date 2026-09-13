@@ -38,6 +38,8 @@ import readline from "node:readline";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
+import { peerName } from "../peer-roster.ts";
+
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
@@ -357,15 +359,45 @@ const ROUTINE_FIELDS_SCHEMA = {
 
 const TOOLS = [
   {
+    name: "list_shared_computers",
+    description: "List online desktop computers explicitly shared with this workspace, and their allowed folders/capabilities. These are the user's computers, not this server. An offline or unshared computer cannot be accessed. Folder paths use opaque folder IDs and relative paths.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "shared_computer",
+    description: "Use a desktop explicitly shared by the user. Discover computer_id and folder_id with list_shared_computers. list_files/read_file/write_file are confined to chosen folders; paths are relative. read_file returns sha256; overwriting requires expected_sha256. Binary files support base64 encoding. run_command requires a SEPARATE unrestricted terminal grant. computer_tools lists the native computer-control tools; computer_call invokes one with arguments and needs a SEPARATE computer-control grant. Never substitute the server's filesystem when this desktop is offline. Actions are not retried automatically; inspect an uncertain outcome before retrying.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      computer_id: { type: "string" }, action: { type: "string", enum: ["list_files", "read_file", "write_file", "run_command", "computer_tools", "computer_call"] },
+      folder_id: { type: "string" }, path: { type: "string" }, content: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, expected_sha256: { type: "string" },
+      command: { type: "string" }, tool_name: { type: "string" }, arguments: { type: "object", additionalProperties: true },
+    }, required: ["computer_id", "action"] },
+  },
+  {
+    name: "list_room_targets",
+    description: "Discover actual OpenMausBot teammates and rooms in your allowed teams. Works in a normal bot conversation too; no room is required. Returns bot and room IDs, roles and working folders, never other conversations' history. Use these bots, not native coding helpers with similar names, when the user asks their team to work together.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
+    name: "coordinate_bots",
+    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat each assignment gets a separate recipient conversation; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Name 1-4 bot_ids: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      group_id: { type: "string", description: "Optional destination room. Omit for this room, or separate recipient tasks when chatting directly." },
+      bot_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, uniqueItems: true },
+      message: { type: "string", minLength: 1, maxLength: 4000, description: "Self-contained question or task for these teammates. Send separate requests when responsibilities differ." },
+      request_key: { type: "string", description: "A short unique assignment key. Reuse for an identical retry." },
+      rework: { type: "boolean", description: "True only for concrete additional work from someone who already completed a request." },
+    }, required: ["bot_ids", "message", "request_key"] },
+  },
+  {
     name: "list_bots",
     description:
-      "List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
+      "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or requesting advice through your available coordination tools.",
     inputSchema: { type: "object", properties: {} },
   },
   {
     name: "list_rooms",
     description:
-      "List the shared rooms (team channels) you belong to, with the other members of each. Call this before post_to_room — it is the only place room ids come from. One-to-one bot channels are never listed (reach a single bot with ask_bot or delegate_bot). A room you are in but cannot post into — one containing someone outside your section — is named without an id, together with the reason, so you can tell the user why.",
+      "List the shared rooms (team channels) you belong to, with the other members of each. Call this before post_to_room. One-to-one bot channels are never listed; discover individual teammates with list_bots. A room you are in but cannot post into is named without an id, together with the reason, so you can tell the user why.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
@@ -423,13 +455,13 @@ const TOOLS = [
   {
     name: "list_threads",
     description:
-      "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, or idle), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A teammate's other threads are never listed — only the ones you opened. This is a read: it starts nothing and changes nothing.",
+      "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, idle, or closed), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A teammate's other threads are never listed — only the ones you opened. This is a read: it starts nothing and changes nothing.",
     inputSchema: { type: "object", additionalProperties: false, properties: {} },
   },
   {
     name: "close_thread",
     description:
-      "Mark a thread you opened (or one of your own) as finished once you have read its result: it goes idle in the person's sidebar with a note saying you closed it. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
+      "Mark a thread you opened (or one of your own) as finished once you have read its result: it leaves the person's default sidebar list (still under all threads, with a note saying you closed it) and list_threads reports it as closed. Nothing is deleted — deleting stays the person's decision — and a thread that is still running cannot be closed; wait for it or leave it. Use the thread id from list_threads or from the start_thread result. If a close is refused, do not retry it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -480,6 +512,45 @@ const TOOLS = [
       },
       required: ["name", "role", "instructions"],
     },
+  },
+  {
+    name: "list_team_setup",
+    description: "Chief of Staff only: list authorized teams, teammate IDs, and exact engine/model choices for team setup. Call before proposing configuration; never invent model IDs. Existing thread models are independent of bot defaults.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  },
+  {
+    name: "propose_team_setup",
+    description: "Chief of Staff only: propose all requested specialist creation, profile/model configuration, and authorized team moves in ONE combined review card. Nothing changes until the user applies it. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; the card also asks to authorize your access to just those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. After proposing, end your turn. The decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        reason: { type: "string", minLength: 1, maxLength: 500 },
+        newTeams: { type: "array", maxItems: 8, items: { type: "string", minLength: 1, maxLength: 60 } },
+        operations: { type: "array", minItems: 1, maxItems: 24, items: {
+          type: "object", additionalProperties: false,
+          properties: {
+            action: { type: "string", enum: ["create", "update"] },
+            key: { type: "string", description: "For create: your stable short name for this new bot in this plan." },
+            botId: { type: "string", description: "For update: exact existing bot ID from list_team_setup." },
+            fields: { type: "object", additionalProperties: false, properties: {
+              name: { type: "string", maxLength: 100 }, title: { type: "string", maxLength: 200 },
+              description: { type: "string", maxLength: 4000 }, soul: { type: "string", description: "Standing instructions; required with name/title/modelSelection for every new bot." },
+              section: { type: "string", maxLength: 60, description: "Exact authorized existing team, or a team explicitly named in newTeams. Empty string means General." },
+              modelSelection: { type: "object", additionalProperties: false, properties: {
+                instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" },
+              }, required: ["instanceId", "model"] },
+            } },
+          }, required: ["action", "fields"],
+        } },
+      }, required: ["reason", "operations"],
+    },
+  },
+  {
+    name: "propose_bot_deletion",
+    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, create a separate confirmation card for that exact bot. Deletion removes its conversations, memory, instructions and skills; generated project files remain. Running work and owned computers can block deletion. Never delete yourself, substitute an archive, or put deletion into a setup batch. End your turn after proposing; the decision and result resume you once.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      bot_id: { type: "string", minLength: 1 }, reason: { type: "string", minLength: 1, maxLength: 500 },
+    }, required: ["bot_id", "reason"] },
   },
   {
     name: "create_room",
@@ -735,9 +806,18 @@ const TOOLS = [
 });
 
 const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
-const AVAILABLE_TOOLS = SKILL_AUTHORING_ENABLED
+const AUTHORING_TOOLS = SKILL_AUTHORING_ENABLED
   ? TOOLS
   : TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
+// One teamwork path in room turns; keep all unrelated integrations available.
+// Ordinary direct chats use this same bounded coordinator. Goal-owned turns
+// retain their independent loop and cannot start a second coordinator.
+const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
+const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
+const COORDINATING = process.env.OMB_ROOM_TURN === "1";
+const AVAILABLE_TOOLS = COORDINATING
+  ? AUTHORING_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name))
+  : AUTHORING_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -845,17 +925,34 @@ function recallSpeaker(hit: Json): string {
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "list_room_targets") {
+    const r = await api("/api/internal/room-targets");
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
+  if (name === "coordinate_bots") {
+    const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
+      groupId: args.group_id, botIds: args.bot_ids, message: args.message,
+      requestKey: args.request_key, rework: args.rework,
+    }) });
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
   if (name === "list_bots") {
     const r = await api(`/api/internal/agents?self=${encodeURIComponent(BOT_ID)}`);
     const bots = (r.bots as Array<Json>) ?? [];
-    if (!bots.length) return { text: "No other bots in this section yet." };
+    if (!bots.length) return { text: "No other reachable bots yet." };
     const lines = bots.map((b) => {
       const role = b.title ? ` — ${b.title}` : "";
       const about = b.description ? ` (${String(b.description).slice(0, 120)})` : "";
-      return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${b.busy ? ", busy" : ""}]`;
+      // statusText is the server's own wording for what the teammate is
+      // doing; an older server only sends busy, so fall back to that.
+      const state = typeof b.statusText === "string"
+        ? (b.status === "available" ? "" : b.statusText)
+        : (b.busy ? "busy" : "");
+      const team = typeof b.section === "string" ? `, team: ${peerName(b.section) || "General"}` : "";
+      return `- ${b.name}${role}${about} [id: ${b.id}, model: ${b.model}${team}${state ? `, ${state}` : ""}]`;
     });
     return {
-      text: `Other bots in your section:\n${lines.join("\n")}\n\nAssign work with delegate_bot. Use ask_bot only for a short answer you need inline.`,
+      text: `Reachable teammates:\n${lines.join("\n")}\n\n${COORDINATING ? "Use coordinate_bots for advice or concrete work, then end your turn. Busy teammates queue and results resume you automatically." : "Assign work with delegate_bot. Use ask_bot only for a short answer you need inline."}`,
     };
   }
   if (name === "list_rooms") {
@@ -981,7 +1078,16 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const who = typeof r.toBotName === "string" && r.toBotName ? `@${r.toBotName}` : "the peer";
     if (r.status === "done") return { text: `${who} finished task ${taskId}:\n${String(r.result || "(no reply text)")}` };
     if (r.status === "queued") {
-      return { text: `Task ${taskId} is still queued — ${who} hasn't picked it up yet${waitMs ? ` after ${timeout}s` : ""}. Keep working and check again later.` };
+      const why = r.targetStatus === "waiting-on-user"
+        ? ` ${who} is waiting on the user, so it goes through after they answer.`
+        : r.targetStatus === "working" ? ` ${who} is busy with other work.` : "";
+      const expiresInMs = Number(r.expiresInMs);
+      const expiry = !Number.isFinite(expiresInMs)
+        ? ""
+        : expiresInMs <= 0
+          ? " It is past its 24-hour limit and will expire the next time it cannot be delivered."
+          : ` It expires if not picked up within ${Math.ceil(expiresInMs / 3_600_000)} hour${Math.ceil(expiresInMs / 3_600_000) === 1 ? "" : "s"}.`;
+      return { text: `Task ${taskId} is still queued — ${who} hasn't picked it up yet${waitMs ? ` after ${timeout}s` : ""}.${why}${expiry} Keep working and check again later.` };
     }
     if (r.status === "running") {
       const elapsedMs = Number.isFinite(r.elapsedMs) ? Number(r.elapsedMs) : 0;
@@ -1070,6 +1176,18 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       text: `${opened}${timing}${approval} Its result will be delivered to this conversation automatically (delegation id: ${delegationId || "unknown"}). Acknowledge it, mention it to the person as #${threadTitle}, and finish your turn; do not check or wait for it in this turn.`,
     };
   }
+  if (name === "list_team_setup") {
+    return { text: JSON.stringify(await api("/api/internal/team-setup-catalog")) };
+  }
+  if (name === "propose_team_setup" || name === "propose_bot_deletion") {
+    const deleting = name === "propose_bot_deletion";
+    const result = await api(deleting ? "/api/internal/bot-deletion-requests" : "/api/internal/team-setup-requests", {
+      method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID,
+        ...(deleting ? { targetBotId: args.bot_id, reason: args.reason } : { plan: args }),
+      }),
+    });
+    return { text: `One review card is visible: ${String(result.title)}. Nothing has been applied. End this turn; the decision and structured result resume you automatically once. Do not ask again, poll, or repeat this proposal.` };
+  }
   if (name === "create_bot") {
     const botName = String(args.name ?? "").trim();
     const role = String(args.role ?? "").trim();
@@ -1092,7 +1210,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     });
     createdThisTurn += 1;
     return {
-      text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}]. Assign work with delegate_bot.`,
+      text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}]. Assign work with ${COORDINATING ? "coordinate_bots" : "delegate_bot"}.`,
     };
   }
   if (name === "create_room") {
@@ -1461,6 +1579,17 @@ async function handle(msg: Json) {
       const name = params.name as string;
       if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
+        if (name === "list_shared_computers") {
+          textResult(id, JSON.stringify(await api("/api/internal/shared-computers")));
+          return;
+        }
+        if (name === "shared_computer") {
+          const response = await api("/api/internal/shared-computers", { method: "POST", body: JSON.stringify(params.arguments ?? {}) });
+          const result = response.result as Json;
+          if (Array.isArray(result?.content)) ok(id, result);
+          else textResult(id, JSON.stringify(result));
+          return;
+        }
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
         textResult(id, text, isError);
       } catch (e) {

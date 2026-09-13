@@ -33,19 +33,58 @@ import kotlin.test.assertTrue
 class ChatDraftHolderTest {
 
     @Test
-    fun taskSwitchWithinOneBotKeepsTheDraft() {
-        // Identity is chat.id, not threadId — same bot, new thread keeps the entry.
+    fun taskSwitchKeepsSeparateDraftsAndRestoresTheSource() {
         val holder = ChatDraftHolder()
-        val draft = ChatComposerDraft("bot-1", holder, initialSaveable = "")
+        holder.register("bot-1", "thread-a")
+        holder.register("bot-1", "thread-b")
+        val draft = ChatComposerDraft("thread-a", holder, initialSaveable = "")
         draft.onTypedChange("please look")
-
-        // Task switch does not change chat.id; a new composer for the same id
-        // re-seeds from the holder the way LoadedChat does on re-entry.
-        val afterSwitch = ChatComposerDraft("bot-1", holder, initialSaveable = "please look")
+        val sibling = ChatComposerDraft("thread-b", holder, initialSaveable = "")
+        assertEquals("", sibling.text)
+        sibling.onTypedChange("other work")
+        val afterSwitch = ChatComposerDraft("thread-a", holder, initialSaveable = "")
         assertEquals("please look", afterSwitch.text)
         assertEquals("please look", afterSwitch.saveableValue)
         assertFalse(afterSwitch.contaminated)
-        assertNull(holder.get("bot-2"))
+        assertEquals("other work", holder.get("thread-b")?.text)
+        holder.clearOwner("bot-1")
+        assertNull(holder.get("thread-a"))
+        assertNull(holder.get("thread-b"))
+    }
+
+    @Test
+    fun lateAttachmentResultsStayWithTheirOriginalThread() {
+        val holder = ChatDraftHolder()
+        holder.register("bot-1", "thread-a")
+        holder.register("bot-1", "thread-b")
+        val source = holder.attachments("thread-a")
+        source.sending.value = true
+        val destination = holder.attachments("thread-b")
+        // An upload completes after the reader switched to B.
+        source.sending.value = false
+        source.error.value = "Upload failed"
+        assertNull(destination.error.value)
+        assertFalse(destination.sending.value)
+        assertEquals("Upload failed", holder.attachments("thread-a").error.value)
+        holder.clearOwner("bot-1")
+        assertNull(holder.attachments("thread-a").error.value)
+    }
+
+    @Test
+    fun returningBeforeAnUploadCompletesReusesTheLiveComposer() {
+        val holder = ChatDraftHolder()
+        val source = holder.composer("thread-a")
+        source.onTypedChange("original")
+        holder.composer("thread-b").onTypedChange("unrelated")
+        val returned = holder.composer("thread-a")
+        assertTrue(source === returned)
+        returned.onTypedChange("newer edit")
+        assertEquals("newer edit", source.text)
+        // Successful completion can clear the same live UI object, not an
+        // abandoned TextField state cell from before the switch.
+        source.onSend()
+        assertEquals("", returned.text)
+        assertEquals("unrelated", holder.composer("thread-b").text)
     }
 
     @Test

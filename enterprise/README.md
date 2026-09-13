@@ -23,8 +23,11 @@ customer, because the key decides the feature set rather than the code.
 { "edition": "oss", "features": [], "notice": "OMB_LICENSE_KEY expired on 2027-09-02; renew it to keep enterprise features" }
 ```
 
-A missing, altered, or expired key never stops the server: it runs the
-open-source edition and the notice says what to fix.
+A missing, altered, or expired key does not stop an ordinary standalone
+server: it runs the open-source edition and the notice says what to fix.
+A workspace explicitly configured for hosted sign-in fails closed for remote
+access when its `admin` entitlement or identity service is unavailable. It
+must not silently fall back to standalone email or pairing credentials.
 
 ## Entitlement ids
 
@@ -32,7 +35,7 @@ open-source edition and the notice says what to fix.
 |---|---|
 | `whitelabel` | product name, tagline, accent colour, logo, favicon and support link from `brand.json` (below) |
 | `sso` | identity-header trust behind an OIDC proxy |
-| `admin` | the admin panel routes |
+| `admin` | Settings → Workspaces and the optional hosted workspace sign-in adapter |
 | `budgets` | per-bot and per-section spend limits |
 
 Core gates a feature with `entitled("id")` from `server/enterprise.ts`.
@@ -58,6 +61,21 @@ working until they expire.
   would be shown? It lives here, behind an entitlement.
 - Customer-specific brand, skills, packages, connectors? The customer's own
   repo: data and config, never a fork.
+
+## Hosted workspace sign-in (`admin`)
+
+The workspace-side adapter in `server/workspace-access.ts` connects to an
+independently deployed identity service over HTTPS. The service's console,
+invitations, provider gateway and deployment automation are not shipped in
+this repository. The desktop and ordinary self-hosted server do not start
+or depend on a hosted console.
+
+Operators opt a workspace into this protocol using `OMB_ADMIN_URL`,
+`OMB_ADMIN_WORKSPACE` and `OMB_PUBLIC_URL`; a valid `admin` entitlement is
+required. The default keeps the local sign-in allow-list as an additional,
+narrowing check. Operators may explicitly delegate membership for verified
+portal sessions with `OMB_ADMIN_MEMBERSHIP=portal`; this never exempts ordinary
+email or pairing sessions. See the [protocol and isolated verification recipe](../docs/verification/hosted-workspaces.md).
 
 ## White-label (`whitelabel`)
 

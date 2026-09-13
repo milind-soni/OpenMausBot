@@ -29,6 +29,12 @@ helpVerbs.add("help");
 
 const serverSource = readFileSync(join(ROOT, "server", "index.ts"), "utf8");
 const hooksSource = readFileSync(join(ROOT, "server", "webhook-ingress.ts"), "utf8");
+const hostedSource = readFileSync(join(ROOT, "enterprise", "server", "workspace-access.ts"), "utf8");
+// Only constants named in the public handler's accepted-path guard are routes.
+// Outbound post("/api/handoff/...") calls belong to the identity service, not us.
+const hostedConstants = new Map([...hostedSource.matchAll(/const ([A-Z_]+) = "(\/api\/[^"\n]+)";/g)].map(match => [match[1]!, match[2]!]));
+const hostedPublicRoutes = new Set((hostedSource.match(/!\[([^\]]+)\]\.includes\(path\)/)?.[1] ?? "")
+  .split(",").map(name => hostedConstants.get(name.trim())).filter((path): path is string => path !== undefined));
 // server/index.ts matches routes two ways: `path === "/api/x"` and
 // `path.match(/^\/api\/x\/(a|b)$/)`. Collect the regex form too.
 const routePatterns = [...serverSource.matchAll(/\/(\^\\\/api\\\/(?:\[(?:[^\]\\]|\\.)*\]|[^/\\\n[]|\\.)*)\/[a-z]*/g)].map((match) => new RegExp(match[1]!));
@@ -63,6 +69,7 @@ describe("docs/verification recipes cite things that exist", () => {
     expect(refs.length).toBeGreaterThan(5);
     const registered = (route: string) => {
       const path = route.replace(/[.,;:]+$/, "");
+      if (hostedPublicRoutes.has(path)) return true;
       const source = path.startsWith("/hooks/") ? hooksSource : serverSource;
       const segments = path.split("/").slice(1);
       const literal = segments.findIndex((segment) => PLACEHOLDER.test(segment));
@@ -73,6 +80,12 @@ describe("docs/verification recipes cite things that exist", () => {
         || routePatterns.some((pattern) => pattern.test(segments.map((segment) => PLACEHOLDER.test(segment) ? "x-1" : segment).join("/").replace(/^/, "/")));
     };
     expect([...new Set(refs.filter((hit) => !registered(target(hit))))]).toEqual([]);
+  });
+
+  it("distinguishes delegated public routes from external identity backchannels", () => {
+    expect([...hostedPublicRoutes]).toEqual(["/api/auth/hosted/start", "/api/auth/hosted/callback"]);
+    expect(hostedPublicRoutes.has("/api/handoff/consume")).toBe(false);
+    expect(hostedPublicRoutes.has("/api/handoff/check")).toBe(false);
   });
 
   it("are all reachable from README.md", () => {

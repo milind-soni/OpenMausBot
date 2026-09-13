@@ -43,6 +43,7 @@ import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
+import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu, NewThreadButton } from "./BotProjects";
@@ -83,6 +84,7 @@ import { sidebarSectionAttention } from "@/lib/sidebar-attention";
 import { botListItemPointerIntent } from "@/lib/sidebar-selection";
 import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
 import { SidebarMoreMenu } from "./SidebarMoreMenu";
+import { DesktopWorkspaceSwitcher } from "./DesktopWorkspaceSwitcher";
 import { profileInitials, SidebarProfileMenu } from "./SidebarProfileMenu";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -530,6 +532,7 @@ function SectionPicker({
   // Channels and bots share one namespace, so Work or Personal can hold both.
   const sections = [
     ...new Set([
+      ...(state.sections ?? []),
       ...state.bots.filter((b) => !b.hidden && b.section).map((b) => b.section!),
       ...state.groups.filter((g) => g.section).map((g) => g.section!),
     ]),
@@ -820,6 +823,15 @@ export function botConfirmCopy(kind: BotConfirmKind, name: string) {
         confirmLabel: t("common.delete"),
         tone: "danger" as const,
       };
+}
+
+export function archivedDeleteAllCopy() {
+  return {
+    title: t("sidebar.archived.deleteAllTitle"),
+    body: t("sidebar.archived.deleteAllBody"),
+    confirmLabel: t("sidebar.archived.deleteAll"),
+    tone: "danger" as const,
+  };
 }
 
 export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
@@ -1220,6 +1232,52 @@ export function BotListItem({
   );
 }
 
+export function ArchivedBotRow({
+  bot,
+  restoring,
+  deleting,
+  disabled,
+  onRestore,
+  onDelete,
+}: {
+  bot: Bot;
+  restoring: boolean;
+  deleting: boolean;
+  disabled: boolean;
+  onRestore: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex min-h-[82px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
+      <BotAvatar bot={bot} state="happy" size={42} animated={false} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[14px] font-medium text-ink">{bot.name}</div>
+        <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title || t("sidebar.archived.botFallback")}</div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          onClick={onRestore}
+          disabled={disabled || deleting}
+          className="flex min-w-[78px] items-center justify-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-40"
+        >
+          {restoring && <Loader2 size={13} className="animate-spin" />}
+          {t("sidebar.archived.restore")}
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={disabled || deleting}
+          aria-label={t("sidebar.archived.deleteAria", { name: bot.name })}
+          className="flex items-center justify-center gap-1.5 rounded-full px-3.5 py-2 text-[12.5px] text-danger hover:bg-danger/10 disabled:opacity-40"
+        >
+          {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+          {t("common.delete")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ArchivedBotsPanel({
   bots,
   onClose,
@@ -1229,20 +1287,27 @@ function ArchivedBotsPanel({
   onClose: () => void;
   onRestored: (message: string) => void;
 }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [restoringAll, setRestoringAll] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<Bot | "all" | null>(null);
   const [error, setError] = useState("");
+  const deleting = bots.some((bot) => Boolean(state.deletingBots[bot.id]));
+  const locked = restoringAll || Boolean(busyId) || deleting || Boolean(pendingDelete);
+
+  useEffect(() => {
+    if (bots.length === 0) onClose();
+  }, [bots.length, onClose]);
 
   useEffect(() => {
     dialogRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busyId && !restoringAll) onClose();
+      if (event.key === "Escape" && !locked) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busyId, onClose, restoringAll]);
+  }, [locked, onClose]);
 
   const restore = async (bot: Bot) => {
     setBusyId(bot.id);
@@ -1294,7 +1359,7 @@ function ArchivedBotsPanel({
   return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
-      onMouseDown={(event) => event.target === event.currentTarget && !busyId && !restoringAll && onClose()}
+      onMouseDown={(event) => event.target === event.currentTarget && !locked && onClose()}
     >
       <div
         ref={dialogRef}
@@ -1313,16 +1378,27 @@ function ArchivedBotsPanel({
             {bots.length > 1 && (
               <button
                 onClick={() => void restoreAll()}
-                disabled={restoringAll || Boolean(busyId)}
+                disabled={locked}
                 className="flex items-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-40"
               >
                 {restoringAll && <Loader2 size={13} className="animate-spin" />}
                 {t("sidebar.archived.restoreAll")}
               </button>
             )}
+            {bots.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setPendingDelete("all")}
+                disabled={locked}
+                className="flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[12.5px] text-danger hover:bg-danger/10 disabled:opacity-40"
+              >
+                <Trash2 size={13} />
+                {t("sidebar.archived.deleteAll")}
+              </button>
+            )}
             <button
               onClick={onClose}
-              disabled={restoringAll || Boolean(busyId)}
+              disabled={locked}
               className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
               aria-label={t("sidebar.archived.close")}
             >
@@ -1334,26 +1410,38 @@ function ArchivedBotsPanel({
           <div className="mb-3 text-[12px] font-medium text-ink-secondary">{t("sidebar.archived.count", { count: bots.length })}</div>
           <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
             {bots.map((bot) => (
-              <div key={bot.id} className="flex min-h-[82px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
-                <BotAvatar bot={bot} state="happy" size={42} animated={false} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-medium text-ink">{bot.name}</div>
-                  <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{bot.title || t("sidebar.archived.botFallback")}</div>
-                </div>
-                <button
-                  onClick={() => void restore(bot)}
-                  disabled={restoringAll || Boolean(busyId)}
-                  className="flex min-w-[78px] items-center justify-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover disabled:opacity-40"
-                >
-                  {busyId === bot.id && <Loader2 size={13} className="animate-spin" />}
-                  {t("sidebar.archived.restore")}
-                </button>
-              </div>
+              <ArchivedBotRow
+                key={bot.id}
+                bot={bot}
+                restoring={busyId === bot.id}
+                deleting={Boolean(state.deletingBots[bot.id])}
+                disabled={locked}
+                onRestore={() => void restore(bot)}
+                onDelete={() => setPendingDelete(bot)}
+              />
             ))}
           </div>
           {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
         </div>
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        {...(pendingDelete === "all"
+          ? archivedDeleteAllCopy()
+          : botConfirmCopy("delete", pendingDelete?.name ?? ""))}
+        icon={<Trash2 size={18} />}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          const target = pendingDelete;
+          setPendingDelete(null);
+          if (target === "all") {
+            for (const bot of bots) dispatch({ type: "deleteBot", botId: bot.id });
+            return;
+          }
+          dispatch({ type: "deleteBot", botId: target.id });
+        }}
+      />
     </div>,
     document.body,
   );
@@ -1370,6 +1458,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const cancelConfirm = useCallback(() => setConfirm(null), []);
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
+  const [newTeam, setNewTeam] = useState(false);
+  const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -1547,7 +1637,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   // User sections keep first-appearance order. The saved layout keeps an
   // empty section's former slot so it returns there when content comes back.
-  const sectionNames: string[] = [];
+  const sectionNames: string[] = (state.sections ?? []).filter((name) => !q || name.toLowerCase().includes(q.toLowerCase()));
   for (const bot of sectionedBots) {
     if (!sectionNames.includes(bot.section!)) sectionNames.push(bot.section!);
   }
@@ -1769,6 +1859,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   <Users size={16} className="text-ink-secondary" />
                   {t("sidebar.newChannel.title")}
                 </button>
+                {!remoteClient && <button
+                  onClick={() => { setPlusOpen(false); setNewTeam(true); }}
+                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
+                >
+                  <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
+                </button>}
                 {!remoteClient && <>
                 <button
                   onClick={() => {
@@ -1800,6 +1896,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
       </div>
 
+      <DesktopWorkspaceSwitcher compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
         <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-accent/50">
@@ -1926,6 +2023,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                         onMenu={setMenu}
                       />
                     ))}
+                    {!remoteClient && sectionName && layoutInteractive && sectionChiefItems.length + sectionGroupItems.length + sectionBotItems.length === 0 && (
+                      <button onClick={() => setMoveToTeam(sectionName)} aria-label={t("team.addBotsTo", { name: sectionName })}
+                        className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
+                        <Plus size={13} /> {t("team.addBots")}
+                      </button>
+                    )}
                   </>
                 )}
                 {dropTarget?.id === id && dropTarget.place === "after" && draggingSectionId !== id && (
@@ -2073,6 +2176,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           else dispatch({ type: "deleteBot", botId: bot.id });
         }}
       />
+      {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
+      {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
       {sectionPicker && (
         <SectionPicker
           current={state.bots.find((b) => b.id === sectionPicker.botId)?.section}

@@ -48,12 +48,15 @@ describe("thread control placement", () => {
     expect(markup).toMatch(/<textarea[^>]*disabled=""[^>]*aria-busy="true"/);
     expect(markup).not.toContain("Finish group setup");
   });
-  it("offers scoped Full access only when the bot already has it and the local trusted bridge exists", () => {
+  it("offers trusted modes in the composer without requiring a Full bot default", () => {
     const fullBot = { ...bot, busy: false, approvalMode: "full" as const };
     expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).not.toContain("Use bot’s Full access for this thread");
     window.ogb = { approvals: { setMode: vi.fn() } } as unknown as NonNullable<Window["ogb"]>;
-    expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).toContain("Use bot’s Full access for this thread");
-    expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("Use bot’s Full access for this thread");
+    expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).not.toContain("Use bot’s Full access for this thread");
+    renderToStaticMarkup(createElement(ChatView, { bot }));
+    expect(fixture.approval?.trustedModesAvailable).toBe(true);
+    fixture.approval!.onSelect("custom");
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "custom" } });
     delete window.ogb;
   });
 

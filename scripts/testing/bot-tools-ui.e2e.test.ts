@@ -48,12 +48,14 @@ describe("bot setup and tools in the real renderer", () => {
     const bots = async (): Promise<SavedBot[]> => (await fetch(`${info.url}/api/bots`).then((response) => response.json())).bots;
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
     const openTools = async () => {
-      // The sidebar also has Tools; the composer's button comes after it.
+      // Composer tray Tools is gone; open bot settings (mascot) then Access.
+      // Accordion starts collapsed, so Access must be expanded explicitly.
       const state = await ui("snapshot", "--interactive");
-      const target = Object.entries(state.refs as Record<string, { role: string; name: string }>)
-        .filter(([, entry]) => entry.role === "button" && entry.name === "Tools").at(-1);
-      expect(target).toBeDefined();
-      await ui("click", "--ref", `@${target![0]}`);
+      const profile = Object.entries(state.refs as Record<string, { role: string; name: string }>)
+        .find(([, entry]) => entry.role === "button" && /Open .+ profile/.test(entry.name));
+      expect(profile).toBeDefined();
+      await ui("click", "--ref", `@${profile![0]}`);
+      await click("Access");
     };
     const clickRole = async (title: string) => {
       const state = await ui("snapshot", "--interactive");
@@ -109,8 +111,37 @@ describe("bot setup and tools in the real renderer", () => {
     await press("Escape");
     await expect.poll(dialogCount, { timeout: 10_000 }).toBe(0);
 
+    // Give the selected disposable bot real usage so its header shortcut
+    // exercises the same external open action as the shipped chat header.
+    await runControlOmb(["send", "--bot", created[0].id, "--text", "Reply briefly for the sidebar test.", "--url", info.url]);
+    expect((await runControlOmb(["wait", "--bot", created[0].id, "--timeout", "20", "--url", info.url]) as { status: string }).status).toBe("settled");
     await openTools();
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("No MCP servers added yet.");
+    const usageExpanded = () => evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.trim() === 'Usage')?.getAttribute('aria-expanded')");
+    const openHeaderUsage = async () => {
+      const state = await ui("snapshot", "--interactive");
+      const cost = Object.entries(state.refs as Record<string, { role: string; name: string }>)
+        .filter(([, entry]) => entry.role === "button" && entry.name.includes("$0.01"));
+      expect(cost).toHaveLength(1);
+      await ui("click", "--ref", `@${cost[0][0]}`);
+      await expect.poll(usageExpanded).toBe("true");
+      expect(await snapshot()).toContain("All bots");
+      // Allow subpixel rounding at the bottom edge of the scroll viewport.
+      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()")).toBeLessThanOrEqual(1);
+    };
+    await openHeaderUsage();
+    await click("Usage");
+    expect(await usageExpanded()).toBe("false");
+    await openHeaderUsage(); // same section, already mounted, after collapse
+    const search = await ui("snapshot", "--interactive");
+    const searchRef = Object.entries(search.refs as Record<string, { role: string; name: string }>)
+      .find(([, entry]) => entry.role === "textbox" && entry.name === "Search settings");
+    expect(searchRef).toBeDefined();
+    await ui("type", "--ref", `@${searchRef![0]}`, "--text", "standing");
+    expect(await evaluate("document.querySelector('[aria-label=\"Search settings\"]')?.value")).toBe("standing");
+    await openHeaderUsage(); // a stale search must not hide an external target
+    expect(await evaluate("document.querySelector('[aria-label=\"Search settings\"]')?.value")).toBe("");
+    await ui("screenshot", "--out", `${info.logPath}.settings.png`);
     await click("Overview");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Optional ways to customize this bot. You can start chatting now.");
     await click("Access");

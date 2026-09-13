@@ -122,4 +122,18 @@ describe("Settings → Appearance", () => {
     expect(html).toContain("all conversation history and running work");
     expect(html).not.toContain("settings.threadDisplay");
   });
+
+  it("offers desktop connections as a top-level page without exposing the list remotely", () => {
+    fixture.section = "desktopWorkspaces";
+    vi.stubGlobal("window", { ogb: { environments: {} } });
+    const local = render();
+    expect(local).toContain('<option value="desktopWorkspaces" selected="">Connected workspaces</option>');
+    expect(local).toContain("Workspace address or pairing link");
+    expect(local).toContain("Name (optional)");
+    expect(local).toContain("Your workspaces");
+    expect(local).toContain("npx openmausbot pair --label");
+    fixture.section = "general";
+    vi.stubGlobal("window", { ogb: { workspaces: {} } });
+    expect(render()).not.toContain('<option value="desktopWorkspaces"');
+  });
 });

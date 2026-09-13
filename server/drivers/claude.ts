@@ -929,7 +929,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
        * the truth — this is. null until init, or on a CLI that omits it. */
       nativePermissionMode: string | null;
       /** the running turn, or null between turns */
-      turn: { turnId: string; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean } | null;
+      turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
       stderr: string;
@@ -1009,7 +1009,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     // is a fresh sendTurn, and the attempt cap must survive across launches
     const retryState = new Map<string, { attempt: number; cancelled: boolean }>();
 
-    const sendTurn = async (turn: SendTurnInput) => {
+    const sendTurn = async (turn: SendTurnInput, logicalTurnId?: string) => {
       const { threadId, botId } = turn;
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
       // A bot-level mode is authoritative for this turn. In particular, an
@@ -1029,7 +1029,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Materialize before creating a broker or process. A missing/corrupt
       // attachment must fail this call without leaving a live session behind.
       const promptMsg = claudeUserMessage(turn.text, turn.images);
-      const turnId = newId();
+      // Internal relaunches are still the turn acknowledged to the harness.
+      // A new user message gets a fresh id, but retry/recovery must not orphan
+      // its capability, coordination result or queued continuation ownership.
+      const turnId = logicalTurnId ?? newId();
       const retryAbort = new AbortController();
       const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
       retry.cancelled = false;
@@ -1238,9 +1241,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const live = sessions.get(threadId);
       if (live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         if (live.idleTimer) clearTimeout(live.idleTimer);
-        live.turn = { turnId, settled: false, sawStreamDelta: false };
+        live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false };
         active.set(threadId, { stop: () => {
           closeSession(threadId, "interrupted");
+          retry.cancelled = true;
+          retryAbort.abort();
           stopSession(live);
         }, turnId, broker: live.broker });
         emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -1402,7 +1407,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         sessionId: sessionId ?? newSessionId,
         sawInit: false,
         nativePermissionMode: null,
-        turn: { turnId, settled: false, sawStreamDelta: false },
+        turn: { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false },
         idleTimer: null,
         closing: false,
         stderr: "",
@@ -1603,6 +1608,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // process that exited between turns (idle close, contract change)
         // is just a session ending
         if (session.turn && !session.turn.settled) {
+          // A retained process may be running a later user turn. Its close
+          // handler must retry that request, not the process's first prompt.
+          const { turnId, input: turn, retryAbort } = session.turn;
+          const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
           const message = `claude exited ${code} before result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`;
           const verdict = classifyError({ exitCode: code, stderr: message });
           if (
@@ -1663,7 +1672,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               active.delete(threadId);
               try {
                 const cursor = session.sessionId ?? sessionId ?? undefined;
-                await sendTurn({ ...turn, resumeCursor: cursor });
+                await sendTurn({ ...turn, resumeCursor: cursor }, turnId);
               } catch (e) {
                 retryState.delete(threadId);
                 emit({
@@ -1728,7 +1737,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             void (async () => {
               try {
                 // no cursor: a fresh session, carrying the rebuild
-                await sendTurn({ ...turn, resumeCursor: undefined, recoveryText: undefined, text: recovery.text });
+                await sendTurn({ ...turn, resumeCursor: undefined, recoveryText: undefined, text: recovery.text }, turnId);
               } catch (e) {
                 retryState.delete(threadId);
                 emit({

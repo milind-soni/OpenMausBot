@@ -43,6 +43,51 @@ describe("provider turn capability correlation", () => {
       generation: "generation-1",
     });
   });
+
+  it("retains an early result only for its exact thread and provider ACK", () => {
+    const turns = new ProviderTurnGenerationRegistry<{ ok: boolean; text: string }>();
+    const outcome = { ok: true, text: "Reviewer ran the tests" };
+    expect(turns.complete("thread-1", "fast-turn", outcome)).toBeNull();
+    expect(turns.takeEarlyCompletion("other-thread", "fast-turn")).toBeUndefined();
+    expect(turns.bind("thread-1", "new-generation", "new-turn")).toBe(true);
+    expect(turns.takeEarlyCompletion("thread-1", "new-turn")).toBeUndefined();
+    expect(turns.bind("thread-1", "fast-generation", "fast-turn")).toBe(false);
+    expect(turns.takeEarlyCompletion("thread-1", "fast-turn")).toEqual(outcome);
+    expect(turns.takeEarlyCompletion("thread-1", "fast-turn")).toBeUndefined();
+    expect(turns.complete("thread-1", "fast-turn", { ok: false, text: "duplicate" })).toBeNull();
+    expect(turns.takeEarlyCompletion("thread-1", "fast-turn")).toBeUndefined();
+    expect(turns.complete("thread-1", "new-turn")).toEqual({ threadId: "thread-1", generation: "new-generation" });
+  });
+
+  it("does not let a late completion from a stopped generation settle its replacement", () => {
+    const turns = new ProviderTurnGenerationRegistry<string>();
+    turns.bind("same-thread", "stopped-generation", "old-turn");
+    expect(turns.deleteGeneration("same-thread", "stopped-generation")).toEqual(["old-turn"]);
+    turns.bind("same-thread", "replacement-generation", "new-turn");
+    expect(turns.complete("same-thread", "old-turn", "stale success")).toBeNull();
+    expect(turns.takeEarlyCompletion("same-thread", "old-turn")).toBeUndefined();
+    expect(turns.complete("same-thread", "new-turn", "real success")).toEqual({
+      threadId: "same-thread", generation: "replacement-generation",
+    });
+  });
+
+  it("cannot settle another thread or consume its ownership", () => {
+    const turns = new ProviderTurnGenerationRegistry();
+    turns.bind("owner-thread", "generation", "turn");
+    expect(turns.complete("wrong-thread", "turn")).toBeNull();
+    expect(turns.complete("owner-thread", "turn")).toEqual({ threadId: "owner-thread", generation: "generation" });
+  });
+
+  it("bounds unclaimed early receipts and clears their payloads", () => {
+    const turns = new ProviderTurnGenerationRegistry<string>(2);
+    turns.complete("thread", "one", "one");
+    turns.complete("thread", "two", "two");
+    turns.complete("thread", "three", "three");
+    expect(turns.takeEarlyCompletion("thread", "one")).toBeUndefined();
+    expect(turns.takeEarlyCompletion("thread", "two")).toBe("two");
+    turns.clear();
+    expect(turns.takeEarlyCompletion("thread", "three")).toBeUndefined();
+  });
 });
 
 describe("turn dispatch cancellation boundary", () => {

@@ -232,6 +232,14 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
         ) {
             Text(update.chat.name, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Text(
+                text = update.chat.threadTitle,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = secondaryTint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
                 text = update.line.ifEmpty { " " },
                 fontSize = 14.sp,
                 color = secondaryTint,

@@ -16,12 +16,18 @@ struct BotThreadRow: View {
         }
     }
 
+    /// A closed thread with nothing live in it reads quieter, like the
+    /// desktop's dimmed row; a live status or unread outranks the closed note.
+    private var dimmed: Bool {
+        task.isClosed && runtime == nil && task.unread != true
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
                 Text(verbatim: task.displayTitle)
                     .font(.body.weight(task.unread == true ? .semibold : .regular))
-                    .foregroundStyle(Color.primary)
+                    .foregroundStyle(dimmed ? Color.secondary : Color.primary)
                     .lineLimit(2)
 
                 if runtime != nil || task.unread == true {
@@ -42,9 +48,9 @@ struct BotThreadRow: View {
                     if task.createdAt > 0 {
                         Text(RelativeStamp.list(task.createdAt))
                     }
-                    if let opener = task.openedByLabel {
+                    if let byline = task.bylineLabel {
                         if task.createdAt > 0 { Text("·") }
-                        Text(verbatim: opener)
+                        Text(verbatim: byline)
                     }
                 }
                 .font(.caption)
@@ -62,6 +68,7 @@ struct BotThreadRow: View {
         .padding(.vertical, 3)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
+        .accessibilityValue(dimmed ? "Closed" : "")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

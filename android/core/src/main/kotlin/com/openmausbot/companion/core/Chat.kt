@@ -10,6 +10,19 @@ sealed class Chat {
     abstract val busy: Boolean
     abstract val color: String
 
+    /** Owner IDs stay available for profile APIs; navigation identifies the conversation. */
+    val conversationId: String
+        get() = when (this) {
+            is BotChat -> "bot:$id:$threadId"
+            is RoomChat -> "room:$id:$threadId"
+        }
+
+    val threadTitle: String
+        get() = when (this) {
+            is BotChat -> bot.tasks?.firstOrNull { it.threadId == threadId }?.displayTitle ?: "Untitled thread"
+            is RoomChat -> room.tasks?.firstOrNull { it.threadId == threadId }?.displayTitle ?: "Conversation"
+        }
+
     /** Older desktops omit room tasks, so don't expose routes they do not support. */
     val supportsTasks: Boolean
         get() = when (this) {
@@ -82,6 +95,16 @@ data class ChatSummary(
     val pinned: Boolean,
 ) {
     val id: String get() = chat.id
+    val conversationId: String get() = chat.conversationId
+}
+
+/** Build a row from that thread's model, runtime flags, unread state and transcript. */
+fun CompanionState.chatSummary(
+    target: ChatTarget,
+    activity: ActivityDetail = ActivityDetail.FULL,
+): ChatSummary? = chat(target)?.let { chat ->
+    val messages = visibleTranscript(chat.threadId)
+    ChatSummary(chat, rosterPreview(messages, activity), messages.lastOrNull()?.at ?: 0.0, pinned(chat))
 }
 
 /**

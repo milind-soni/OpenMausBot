@@ -53,11 +53,13 @@ object ThreadResolution {
     fun chatOrNull(state: CompanionState, threadId: String): Chat? =
         (resolve(state, threadId) as? Result.Open)?.chat
 
-    /** Keep the addressed task open until the reader switches or it is removed. */
+    /** Bot selection is local; a room follows its shared current conversation. */
     fun resolve(state: CompanionState, destination: Destination.Conversation): Result =
         when (destination) {
-            is Destination.Chat -> state.chat(destination.target)?.let(Result::Open)
-                ?: unknown(state)
+            is Destination.Chat -> when (val target = destination.target) {
+                is ChatTarget.Bot -> state.chat(target)
+                is ChatTarget.Room -> state.rooms.firstOrNull { it.id == target.roomId }?.let(Chat::RoomChat)
+            }?.let(Result::Open) ?: unknown(state)
             is Destination.Thread -> resolve(state, destination.threadId)
         }
 

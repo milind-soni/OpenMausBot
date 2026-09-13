@@ -184,6 +184,72 @@ const peerNames = async (selfId: string, token: string) => {
 };
 
 describe("peer allow-list", () => {
+  it.each(["rename", "delete"])("requires existing teams and never revives grants after %s and recreation", async mode => {
+    await hideSeededBot();
+    const clive = await createBot(`Chief ${mode}`, "plain");
+    const engineer = await createBot(`Engineer ${mode}`, "plain");
+    const team = `Lifecycle ${mode}`;
+    const state = async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.id === clive.id);
+    try {
+      await api("PATCH", `/api/bots/${clive.id}`, { section: `Office ${mode}`, chiefOfStaff: true });
+      await api("PATCH", `/api/bots/${engineer.id}`, { section: `Parking ${mode}` });
+      const grant = (managedSections: string[]) => api("PATCH", `/api/bots/${clive.id}`, { managedSections, acknowledgePeerScope: true });
+      expect((await grant([team])).status).toBe(400);
+      expect((await grant([""])).status).toBe(200);
+      expect((await api("POST", "/api/sidebar-sections", { name: team })).status).toBe(200);
+      expect((await grant([team.toLowerCase()])).status).toBe(400);
+      expect((await grant([team])).status).toBe(200);
+      expect((await api("PATCH", `/api/sidebar-sections?section=${encodeURIComponent(team)}`, { name: team })).status).toBe(200);
+      expect((await state()).managedSections).toEqual([team]);
+      await warmUp(clive.id);
+      const token = await mintCapability(clive.id, clive.threadId);
+      const changed = await api(mode === "rename" ? "PATCH" : "DELETE", `/api/sidebar-sections?section=${encodeURIComponent(team)}`,
+        mode === "rename" ? { name: `${team} renamed` } : undefined);
+      expect(changed.status).toBe(200);
+      expect((await state()).managedSections).toEqual([]);
+      expect((await api("POST", "/api/sidebar-sections", { name: team, botIds: [engineer.id] })).status).toBe(200);
+      expect(await peerNames(clive.id, token)).toEqual([]);
+      const refused = await api("POST", "/api/internal/ask-bot", { toBotId: engineer.id, message: "Old grants must not return" }, { authorization: `Bearer ${token}` });
+      expect(refused.status).toBe(403);
+    } finally {
+      for (const bot of [clive, engineer]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+        await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      }
+    }
+  }, 45_000);
+
+  it("requires an explicit Chief grant, uses it for real direct consultation, and revokes it on demotion", async () => {
+    await hideSeededBot();
+    const clive = await createBot("Clive", "plain");
+    const specialist = await createBot("Engineer", "plain");
+    try {
+      await api("PATCH", `/api/bots/${clive.id}`, { section: "Office" });
+      await api("PATCH", `/api/bots/${specialist.id}`, { section: "Engineering" });
+      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(400);
+      await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: true });
+      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"] })).status).toBe(400);
+      expect((await api("PATCH", `/api/bots/${clive.id}`, { managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(200);
+      await warmUp(clive.id);
+      const token = await mintCapability(clive.id, clive.threadId);
+      expect(await peerNames(clive.id, token)).toEqual(["Engineer"]);
+      const outcome = await api("POST", "/api/internal/ask-bot", { toBotId: specialist.id, message: "Review this small test plan" }, { authorization: `Bearer ${token}` });
+      expect(outcome.status).toBe(200);
+      expect(outcome.body.error).toBeUndefined();
+      expect(outcome.body.text).toBeTruthy();
+      await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: false });
+      await api("PATCH", `/api/bots/${clive.id}`, { chiefOfStaff: true });
+      expect(await peerNames(clive.id, token)).toEqual([]);
+      const state = (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: any) => bot.id === clive.id);
+      expect(state.managedSections ?? []).toEqual([]);
+    } finally {
+      for (const bot of [clive, specialist]) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+        await api("PATCH", `/api/bots/${bot.id}`, { chiefOfStaff: false }).catch(() => undefined);
+        await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      }
+    }
+  }, 45_000);
   it("gives an ordinary bot a roster, then narrows it and the comms endpoints", async () => {
     await hideSeededBot();
     const asker = await createBot("Ada", "asker");
@@ -399,6 +465,14 @@ describe("peer allow-list", () => {
         const refused = await api("PATCH", `/api/bots/${bound.id}`, body);
         expect(refused.status, JSON.stringify(body)).toBe(409);
         expect(String(refused.body.error)).toContain("desktop app or a paired device");
+      }
+      // A fake browser header does not grant cross-team authority to a shell.
+      for (const headers of [{}, { origin: base }] as Record<string, string>[]) {
+        const refused = await api("PATCH", `/api/bots/${bound.id}`, {
+          chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true,
+        }, headers);
+        expect(refused.status).toBe(409);
+        expect(String(refused.body.error)).toContain("paired owner session");
       }
       // refused means unchanged
       expect(await botState(bound.id)).toMatchObject({ peers: [peer.id], approvePeerComms: true, section: "Ops" });

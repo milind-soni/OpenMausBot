@@ -84,9 +84,9 @@ describe("full backup Settings in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "You"');
     await click("New or share");
     const menu = await snapshot();
-    expect(menu).toContain('button "Teams"');
+    expect(menu).toContain('button "Templates"');
     expect(menu).not.toContain('button "Export backup"');
-    await click("Teams");
+    await click("Templates");
     await ui("press", "--keys", "Escape");
     await click("You");
     await click("Settings");

@@ -21,21 +21,22 @@ export interface SectionContextRecord {
 
 interface SectionContextFile {
   version: 1;
+  /** Named teams exist independently of their current bots or group chats. */
+  sections: string[];
   contexts: Record<string, SectionContextRecord>;
 }
 
+const sectionContextRecordSchema = z.object({ text: z.string(), updatedAt: z.number().finite() });
 const sectionContextFileSchema = z.object({
   version: z.literal(1),
+  sections: z.array(z.string()).optional(),
   contexts: z.record(
     z.string(),
-    z.object({
-      text: z.string(),
-      updatedAt: z.number().finite(),
-    }),
+    sectionContextRecordSchema,
   ),
 });
 
-const emptyFile = (): SectionContextFile => ({ version: 1, contexts: {} });
+const emptyFile = (): SectionContextFile => ({ version: 1, sections: [], contexts: Object.create(null) });
 
 /** Section labels are identities everywhere else in the store: trim once,
  * and use the empty key for the unsectioned General team. */
@@ -47,20 +48,66 @@ export function sectionContextLabel(section?: string | null): string {
   return sectionContextKey(section) || "General";
 }
 
-function loadFile(): SectionContextFile {
+function loadFile(forWrite = false): SectionContextFile {
   if (!existsSync(SECTION_CONTEXTS_FILE)) return emptyFile();
   try {
-    const candidate = sectionContextFileSchema.safeParse(JSON.parse(readFileSync(SECTION_CONTEXTS_FILE, "utf8")));
-    if (!candidate.success) return emptyFile();
-    const contexts: Record<string, SectionContextRecord> = {};
-    for (const [key, record] of Object.entries(candidate.data.contexts)) {
+    const input: unknown = JSON.parse(readFileSync(SECTION_CONTEXTS_FILE, "utf8"));
+    const candidate = sectionContextFileSchema.safeParse(input);
+    if (!candidate.success) throw new Error("Invalid team instructions file");
+    const contexts: Record<string, SectionContextRecord> = Object.create(null);
+    // Read own entries after validating the envelope: record parsers can omit
+    // labels such as __proto__, which are ordinary team names here. Validate
+    // each value again before putting it into the prototype-free dictionary.
+    const entries = (input as { contexts: Record<string, unknown> }).contexts;
+    for (const [key, value] of Object.entries(entries)) {
+      const parsed = sectionContextRecordSchema.safeParse(value);
+      if (!parsed.success) continue;
+      const record = parsed.data;
       if (Buffer.byteLength(record.text, "utf8") > SECTION_CONTEXT_MAX_BYTES) continue;
       contexts[sectionContextKey(key)] = { text: record.text, updatedAt: record.updatedAt };
     }
-    return { version: 1, contexts };
+    return { version: 1, sections: [...new Set([
+      ...(candidate.data.sections ?? []), ...Object.keys(contexts),
+    ].map(sectionContextKey).filter(Boolean))], contexts };
   } catch {
+    if (forWrite) throw new Error("Saved teams and shared instructions could not be read; the existing file was left unchanged");
     return emptyFile();
   }
+}
+
+function saveFile(data: SectionContextFile): void {
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+  writeFileAtomic(SECTION_CONTEXTS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+export function readSections(): string[] {
+  return loadFile().sections;
+}
+
+/** Remember legacy labels and newly created teams without changing membership. */
+export function ensureSections(names: (string | undefined)[]): boolean {
+  const data = loadFile(true);
+  const sections = [...new Set([...data.sections, ...names.map(sectionContextKey).filter(Boolean)])];
+  if (sections.length === data.sections.length) return false;
+  saveFile({ ...data, sections });
+  return true;
+}
+
+/** The caller checks that no bots or group chats still use this identity. */
+export function changeEmptySection(name: string, nextName: string | null): void {
+  const data = loadFile(true);
+  const index = data.sections.indexOf(name);
+  if (index < 0) throw new Error("No such team");
+  if (nextName !== null && nextName !== name && data.sections.includes(nextName)) {
+    throw new Error("A team with that name already exists");
+  }
+  if (nextName === name) return;
+  if (nextName === null) data.sections.splice(index, 1);
+  else data.sections[index] = nextName;
+  const context = data.contexts[name];
+  delete data.contexts[name];
+  if (nextName !== null && context) data.contexts[nextName] = context;
+  saveFile(data);
 }
 
 export function readSectionContext(section?: string | null): SectionContextRecord | null {
@@ -74,15 +121,15 @@ export function writeSectionContext(section: string | null | undefined, text: st
   if (Buffer.byteLength(text, "utf8") > SECTION_CONTEXT_MAX_BYTES) {
     throw new Error(`section context is capped at ${SECTION_CONTEXT_MAX_BYTES} bytes`);
   }
-  const data = loadFile();
+  const data = loadFile(true);
   const key = sectionContextKey(section);
+  if (key && !data.sections.includes(key)) data.sections.push(key);
   if (!text.trim()) {
     delete data.contexts[key];
   } else {
     data.contexts[key] = { text, updatedAt: now };
   }
-  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  writeFileAtomic(SECTION_CONTEXTS_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
+  saveFile(data);
   return data.contexts[key] ? { ...data.contexts[key] } : null;
 }
 

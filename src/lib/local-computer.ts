@@ -61,6 +61,7 @@ export function linuxAutoDescription(): string {
 
 export type BoxPanelAction =
   | "ensure-box"
+  | "team-box"
   | "show-ready-box"
   | "show-sleeping-box"
   | "show-pending-box"
@@ -82,13 +83,18 @@ export function resolveBoxPanelAction({
   boxState,
   canUseCloud,
   autoLocal,
+  teamComputer = false,
 }: {
   computer: Bot["computer"];
   configured: boolean;
   boxState: string | null;
   canUseCloud: boolean;
   autoLocal: boolean;
+  teamComputer?: boolean;
 }): BoxPanelAction {
+  // A team's explicit grant wins over Auto's private-Box/local fallback.
+  // This panel reports it; paid lifecycle and shared access stay in Team map.
+  if (computer === undefined && teamComputer) return "team-box";
   const explicitCloud = computer === "cloud";
 
   if (!configured) {

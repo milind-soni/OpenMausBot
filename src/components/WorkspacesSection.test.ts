@@ -29,6 +29,14 @@ const fleet: FleetView = {
 };
 
 describe("workspaces section", () => {
+  it.each(["provisioning", "error", "retained"] as const)("does not offer normal lifecycle actions for %s workspaces", status => {
+    const html = renderToStaticMarkup(createElement(WorkspacesTable, {
+      fleet: { ...fleet, workspaces: [{ ...fleet.workspaces[0]!, status }] }, onAct: () => {}, busy: null,
+    }));
+    expect(html).toContain("Contact the server operator");
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain(">Running<");
+  });
   it("appears only with the admin entitlement and a fleet agent on this server", () => {
     expect(workspacesAvailable(config([], true))).toBe(false);
     expect(workspacesAvailable(config(["admin"], false))).toBe(false);

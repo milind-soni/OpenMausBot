@@ -38,6 +38,7 @@
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -278,6 +279,16 @@ const playTurn = (prompt: JsonValue) => {
     process.exit(3);
   }
 
+  if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
+    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt).then(text => {
+      out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+      out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
+    }).catch(error => {
+      out({ type: "result", is_error: true, result: String(error), stop_reason: "error" });
+    }).finally(() => { turnRunning = false; finishIfDone(); });
+    return;
+  }
+
   if (mode === "hang") {
     // stay alive until killed — lets tests exercise interrupt + the
     // permission broker while a turn is officially in flight
@@ -400,8 +411,10 @@ process.stdin.on("data", (c) => {
     } catch {
       continue;
     }
-    if (turnRunning) steered.push(promptText(prompt));
-    else {
+    if (turnRunning) {
+      steered.push(promptText(prompt));
+      if (process.env.FAKE_CLAUDE_STEER_RECEIVED) writeFileSync(process.env.FAKE_CLAUDE_STEER_RECEIVED, "received");
+    } else {
       playTurn(prompt);
       armSteerGate();
     }

@@ -70,6 +70,20 @@ switching and Stop can be exercised without a real provider or account.
     all histories/folders. Also toggle off/on without reloading and check that
     folder disclosure state survives. Check the Appearance switch in a narrow
     window and keyboard navigation through bot rows and activity controls.
+14. In a bot with only one completed thread, use its row menu → **Delete
+    thread** and confirm. The old transcript must disappear immediately and
+    one empty **New thread** must replace it, with the bot still selected.
+    Reload and send a new message: the old conversation must not return.
+    A running thread must still require Stop before deletion. Deleting a
+    conversation does not delete generated project files.
+
+The last-thread walkthrough passed on 2026-09-13 in this disposable fixture:
+Miso completed a fake-provider turn, its only thread was deleted through the
+real confirmation dialog, the empty state survived reload, and a fresh send
+completed without the old messages. Pepper's existing threads were unchanged.
+Store/API regressions also verify fresh provider context, retained generated
+files and rejection of running/stale deletes. Renderer regressions cover both
+orders of the full response and slim event, including late old-thread messages.
 
 For approval verification, new fake-provider launches also write fixture-only
 `<thread-id>.launch.json` receipts inside the printed disposable data directory.

@@ -1524,11 +1524,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("a message sent mid-turn is steered into the running turn", async () => {
-    await create("slow");
+    const finishGate = join(scratch, "steer-finish.gate");
+    const received = join(scratch, "steer-received");
+    await create("slow", {
+      FAKE_CLAUDE_SLOW_FINISH_GATE: finishGate,
+      FAKE_CLAUDE_STEER_RECEIVED: received,
+    });
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-steer", text: "first" });
     await recorder.until((e) => e.type === "item.completed" && e.itemType === "tool");
     expect(instance.adapter.capabilities.queueing).toBe(true);
     await expect(instance.adapter.steer!("t-steer", "and also this")).resolves.toBe(true);
+    // Hold the turn until the child has consumed the steer; an 800ms timer
+    // can finish before a loaded CI runner resumes this test's continuation.
+    await expect.poll(() => existsSync(received)).toBe(true);
+    writeFileSync(finishGate, "finish");
     await recorder.until((e) => e.type === "turn.completed");
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(1);
     const reply = recorder.events.find(
@@ -1631,19 +1640,21 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const imagePath = join(scratch, "retry.webp");
     writeFileSync(imagePath, image);
     await create();
-    await instance.adapter.sendTurn({
+    const dispatch = await instance.adapter.sendTurn({
       threadId: "t-retry",
       text: "go",
       images: [{ path: imagePath, mime: "image/webp", bytes: image.length }],
     });
 
-    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    const completed = await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    expect(completed.turnId).toBe(dispatch.turnId);
     const retries = recorder.events.filter((e) => e.type === "turn.retrying");
     expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
     expect(retries.every((e) => e.delayMs > 0 && typeof e.reason === "string")).toBe(true);
     // exactly one settled reply across all three launches
     const replies = recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "assistant_text");
     expect(replies).toHaveLength(1);
+    expect(replies[0].turnId).toBe(dispatch.turnId);
     expect(JSON.parse(readFileSync(dump, "utf8")).prompt.message.content).toEqual([
       {
         type: "image",
@@ -1664,6 +1675,31 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const retries = recorder.events.filter((e) => e.type === "turn.retrying");
     expect(retries.map((e) => e.attempt)).toEqual([1, 2]);
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
+  }, 20_000);
+
+  it("keeps the second retained turn's prompt and ACK identity across a retry", async () => {
+    const state = join(scratch, "retained-launches");
+    const dump = join(scratch, "retained-retry.json");
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_STATE = state;
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    writeFileSync(state, "1"); // first turn succeeds in the retained process
+    await create();
+    const first = await instance.adapter.sendTurn({ threadId: "t-retained-retry", text: "first request" });
+    await recorder.until(e => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+    writeFileSync(state, "0"); // second turn, same process, fails before output
+    const second = await instance.adapter.sendTurn({ threadId: "t-retained-retry", text: "second request" });
+    expect(second.turnId).not.toBe(first.turnId);
+    const retry = await recorder.until(e => e.type === "turn.retrying");
+    expect(retry.turnId).toBe(second.turnId);
+    const completed = await recorder.until(e => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(completed).toMatchObject({ ok: true });
+    const recovered = JSON.parse(readFileSync(dump, "utf8"));
+    expect(recovered.pid).not.toBe(firstPid);
+    expect(recovered.prompt.message.content).toBe("second request");
+    expect(recorder.events.filter(e => e.type === "turn.completed")).toHaveLength(2);
   }, 20_000);
 
   it("gives a later turn on the same thread a fresh retry budget", async () => {
@@ -2243,7 +2279,7 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     // identically, with no way back except switching engines.
     const dump = join(scratch, "recovered.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
-    await instance.adapter.sendTurn({
+    const dispatch = await instance.adapter.sendTurn({
       threadId: "t-dead",
       text: "what now?",
       resumeCursor: "a-session-claude-no-longer-has",
@@ -2251,7 +2287,7 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     });
     await recorder.until((e) => e.type === "turn.completed");
 
-    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: true });
+    expect(recorder.events.filter((e) => e.type === "turn.completed").at(-1)).toMatchObject({ ok: true, turnId: dispatch.turnId });
     expect(recorder.events.find((e) => e.type === "turn.retrying")).toMatchObject({ reason: "resume_rejected" });
     // it started a NEW session, so the harness records a live cursor again
     const started = recorder.events.filter((e) => e.type === "session.started");

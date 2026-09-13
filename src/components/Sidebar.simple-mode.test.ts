@@ -142,7 +142,7 @@ describe("bot-first sidebar", () => {
     expect(disabled).not.toContain("New thread");
     expect(disabled).not.toContain("New folder");
     expect(disabled).toContain("Edit Profile");
-    expect(disabled).toContain("Move to section");
+    expect(disabled).toContain("Move to team");
   });
 
   it("does not change group collaboration histories or creation", () => {

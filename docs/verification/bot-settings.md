@@ -28,8 +28,8 @@ Check these user paths:
    the full text; both must return on revisiting Overview.
 5. Open a skill's full text or its enable-review dialog. Tab must remain
    inside that layer and Escape must close only it. Identity → View full
-   must also close without closing settings. Shift-Tab from the initial
-   settings focus must remain inside settings.
+    must also close without closing settings. The settings sidebar itself is
+    non-modal: Tab may return to chat, while nested dialogs retain focus.
 6. Change Soul twice, then Undo this change from History. Cancel must be
    focused by default, and cancelling must leave the profile unchanged.
    Confirm Restore instructions. The appropriate
@@ -53,6 +53,20 @@ Check these user paths:
     value, then replace it with ordinary instructions. History must explain
     why the redacted previous version cannot be restored, without an Undo
     button on that row. Exact safe rows must still offer Undo.
+11. After a fixture chat turn has usage, open the bot's settings, then click
+    the chat header's usage chip. Usage must expand without closing the panel.
+    Collapse Usage and click the header chip again; repeat after searching
+    for another section. The requested section must open and clear the search.
+
+The full-app automated regression covers those repeated external opens, plus
+role creation, optional setup, connected-app settings and failure recovery:
+
+```sh
+pnpm exec vitest run scripts/testing/bot-tools-ui.e2e.test.ts src/state/store.test.ts
+```
+
+It uses the disposable `control-omb ui` launcher, not the running app. Set
+`OMB_UI_E2E=1` to install the pinned browser if unavailable.
 
 This browser fixture verifies renderer interaction and persistence, not
 packaged Electron privileges, actual operating-system access, or the

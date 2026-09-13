@@ -3,6 +3,9 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.isClosed
+import com.openmausbot.companion.core.displayTitle
+import com.openmausbot.companion.core.threadGroups
 
 /**
  * Separate contexts for an agent or a channel — the rules behind
@@ -26,15 +29,30 @@ object TaskRules {
         is Chat.RoomChat -> "Group threads"
     }
 
-    /** Filter navigation only; full task state still resolves run logs and approvals. */
-    fun tasks(bot: Bot): List<BotTask> = bot.tasks.orEmpty().filter { it.routineRunId == null }
+    /**
+     * Filter navigation only; full task state still resolves run logs and approvals.
+     * The sheet is the phone's only thread list, so threads a bot closed stay in
+     * it — but after every open thread, in their own server order, so a pile of
+     * closed helper threads never buries the person's own. A closed thread that
+     * is running, unread, or the current one is treated as open.
+     */
+    fun tasks(bot: Bot): List<BotTask> {
+        val navigable = bot.threadGroups(includingClosed = true).flatMap { it.tasks }
+        val (open, closed) = navigable.partition { !it.isClosed || demandsAttention(it) || isCurrent(it, bot) }
+        return open + closed
+    }
+
+    /** Running, needing the person, or holding something they have not read. */
+    fun demandsAttention(task: BotTask): Boolean =
+        task.busy == true || task.unread == true ||
+            task.activity in setOf("waiting-on-you", "waiting", "working", "running", "queued")
 
     fun tasks(chat: Chat): List<BotTask> = when (chat) {
         is Chat.BotChat -> tasks(chat.bot)
         is Chat.RoomChat -> chat.room.tasks.orEmpty()
     }
 
-    fun title(task: BotTask): String = task.title.ifEmpty { UNTITLED }
+    fun title(task: BotTask): String = task.displayTitle
 
     fun isCurrent(task: BotTask, bot: Bot): Boolean = task.threadId == bot.threadId
 
@@ -62,9 +80,12 @@ object TaskRules {
     }
 
     /** Already being on a task is not a switch; legacy desktops still serialize. */
-    fun canSwitch(task: BotTask, bot: Bot): Boolean = canCreate(bot) && !isCurrent(task, bot)
+    fun canSwitch(task: BotTask, bot: Bot): Boolean = tasks(bot).any { it.threadId == task.threadId } && !isCurrent(task, bot)
 
-    fun canSwitch(task: BotTask, chat: Chat): Boolean = canCreate(chat) && !isCurrent(task, chat)
+    fun canSwitch(task: BotTask, chat: Chat): Boolean = when (chat) {
+        is Chat.BotChat -> canSwitch(task, chat.bot)
+        is Chat.RoomChat -> canCreate(chat) && !isCurrent(task, chat)
+    }
 
     /** Renaming is allowed while busy: it touches the label, not the thread. */
     fun canRename(bot: Bot): Boolean = true

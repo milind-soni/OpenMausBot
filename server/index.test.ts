@@ -4,7 +4,7 @@
 // suite is deterministic with or without agent CLIs installed — and pins
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createServer, request, type Server } from "node:http";
 import { connect, type Socket } from "node:net";
@@ -129,6 +129,8 @@ const deferredGate = (): DeferredGate => {
   return { wait, release, entered, enter };
 };
 let managedBoxListGate: DeferredGate | null = null;
+let managedBoxCreateGate: DeferredGate | null = null;
+const managedBoxCreateBodies: Array<Record<string, unknown>> = [];
 type ManagedBoxCreateMode = "refuse" | "ambiguous" | "fail-rename" | "success";
 let managedBoxCreateMode: ManagedBoxCreateMode = "refuse";
 let managedBoxCreateId = "bx_cdefghjk";
@@ -720,6 +722,13 @@ beforeAll(async () => {
       res.setHeader("content-type", "application/json");
       res.statusCode = 200;
       if (method === "POST" && path === "/boxes") {
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        managedBoxCreateBodies.push(raw ? JSON.parse(raw) : {});
+        if (managedBoxCreateGate) {
+          managedBoxCreateGate.enter();
+          await managedBoxCreateGate.wait;
+        }
         if (managedBoxCreateMode === "ambiguous") {
           res.statusCode = 503;
           return res.end(JSON.stringify({ ok: false, message: "provider outcome is unknown" }));
@@ -756,6 +765,9 @@ beforeAll(async () => {
         return res.end(JSON.stringify({ ok: true, box: exists }));
       }
       if (method === "PATCH" && boxMatch) {
+        let raw = "";
+        for await (const chunk of req) raw += chunk;
+        const requestedName = raw ? JSON.parse(raw).name : undefined;
         if (managedBoxRenameDelayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, managedBoxRenameDelayMs));
         }
@@ -765,7 +777,7 @@ beforeAll(async () => {
         }
         managedBoxRows = [
           ...managedBoxRows.filter((candidate) => candidate.id !== boxMatch[1]),
-          { id: boxMatch[1], name: managedBoxCreateName, state: "idle" },
+          { id: boxMatch[1], name: managedBoxCreateName || requestedName, state: "idle" },
         ];
         return res.end(JSON.stringify({ ok: true, box: managedBoxRows.at(-1) }));
       }
@@ -2212,6 +2224,226 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("creates team computers only with consent, retains failed creates, and assigns safely", async () => {
+    const requestId = randomUUID();
+    const section = `Computer fixture ${requestId.slice(0, 8)}`;
+    let botId = "";
+    let pendingCreate: Promise<{ status: number; body: any }> | undefined;
+    const record = async () => (await api("GET", "/api/team-computers")).body.computers.find(
+      (computer: { id: string }) => computer.id === requestId,
+    );
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots", { name: "Computer fixture bot", section,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
+      botId = bot.id;
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "off" })).status).toBe(200);
+      boxRouteCalls.length = 0;
+      expect((await api("GET", "/api/team-computers")).body.configured).toBe(true);
+      expect(boxRouteCalls.every(call => call.method === "GET")).toBe(true);
+      for (const body of [
+        { requestId, name: "Build machine" },
+        { requestId, name: "Build machine", acknowledgeCost: false },
+        { requestId, name: "Build machine", acknowledgeCost: true, section },
+      ]) expect((await api("POST", "/api/team-computers", body)).status).toBe(400);
+      expect(await record()).toBeUndefined();
+      expect(boxRouteCalls.every(call => call.method === "GET")).toBe(true);
+
+      const denied = await fetch(`${BASE}/api/team-computers`, {
+        method: "POST", headers: { "content-type": "application/json", origin: "https://untrusted.invalid" },
+        body: JSON.stringify({ requestId, name: "Build machine", acknowledgeCost: true }),
+      });
+      expect(denied.status).toBe(403);
+      expect(await record()).toBeUndefined();
+      expect(boxRouteCalls.every(call => call.method === "GET")).toBe(true);
+
+      managedBoxCreateMode = "refuse";
+      managedBoxCreateId = "bx_pqrstuvw";
+      managedBoxCreateName = "";
+      managedBoxCreateBodies.length = 0;
+      const failed = await api("POST", "/api/team-computers", { requestId, name: "Build machine", acknowledgeCost: true });
+      expect(failed.status).toBe(500);
+      expect(failed.body.error).toMatch(/fixture refused create/);
+      expect(await record()).toMatchObject({ id: requestId, name: "Build machine", section: null, problem: expect.stringMatching(/fixture refused create/) });
+      expect(managedBoxCreateBodies).toHaveLength(1);
+      expect(managedBoxCreateBodies[0]).toMatchObject({ noEnv: true });
+      const persisted = JSON.parse(readFileSync(join(home, ".openmausbot", "team-computers.json"), "utf8"));
+      expect(persisted.computers).toContainEqual(expect.objectContaining({ id: requestId, name: "Build machine", section: null }));
+      expect((await api("POST", "/api/team-computers", { requestId, name: "Different machine", acknowledgeCost: true })).status).toBe(409);
+      expect((await api("POST", `/api/team-computers/${requestId}/provision`, {})).status).toBe(400);
+      expect(managedBoxCreateBodies).toHaveLength(1);
+
+      managedBoxCreateMode = "success";
+      managedBoxCreateGate = deferredGate();
+      pendingCreate = api("POST", `/api/team-computers/${requestId}/provision`, { acknowledgeCost: true });
+      await Promise.race([managedBoxCreateGate.entered, pendingCreate.then(({ status }) => {
+        throw new Error(`team computer retry returned ${status} before reaching the provider create gate`);
+      })]);
+      expect(await record()).toMatchObject({ id: requestId, name: "Build machine", section: null });
+      expect((await api("POST", `/api/team-computers/${requestId}/provision`, { acknowledgeCost: true })).status).toBe(409);
+      managedBoxCreateGate.release();
+      expect((await pendingCreate).status).toBe(200);
+      managedBoxCreateGate = null;
+      pendingCreate = undefined;
+      expect(await record()).toMatchObject({ id: requestId, name: "Build machine", section: null, state: "idle" });
+      expect((await record()).problem).toBeUndefined();
+      expect(managedBoxRows.find(row => row.id === managedBoxCreateId)?.name).toBe(managedBoxNameForFixture(`computer_${requestId}`));
+      const creates = managedBoxCreateBodies.length;
+      expect([200, 201]).toContain((await api("POST", "/api/team-computers", { requestId, name: "Build machine", acknowledgeCost: true })).status);
+      expect(managedBoxCreateBodies).toHaveLength(creates);
+
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section })).status).toBe(400);
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: "No such fixture team", acknowledgeSharedAccess: true })).status).toBe(404);
+      expect((await record()).section).toBeNull();
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold assignment until this turn stops" })).status).toBe(202);
+      await readJsonFileWhenReady(fakeClaudeDump);
+      boxRouteCalls.length = 0;
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true })).status).toBe(409);
+      expect((await record()).section).toBeNull();
+      expect(boxRouteCalls.every(call => call.method === "GET")).toBe(true);
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`, {})).status).toBe(200);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((entry: { id: string }) => entry.id === bot.id)?.busy,
+        { timeout: 5_000 }).toBe(false);
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true })).status).toBe(200);
+      expect(await record()).toMatchObject({ id: requestId, section, state: "idle" });
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find((entry: { id: string }) => entry.id === bot.id)).toMatchObject({ computer: "off", section });
+      const saved = JSON.parse(readFileSync(join(home, ".openmausbot", "team-computers.json"), "utf8"));
+      expect(saved.computers).toContainEqual(expect.objectContaining({ id: requestId, section }));
+      expect((await api("POST", `/api/team-computers/${requestId}/join`, {})).status).toBe(409);
+      expect((await api("POST", `/api/team-computers/${requestId}/control`, { action: "take" })).status).toBe(200);
+      expect((await api("POST", `/api/team-computers/${requestId}/join`, {})).body.joinUrl).toBe(`https://desktop.invalid/${managedBoxCreateId}`);
+      expect((await api("POST", `/api/team-computers/${requestId}/control`, { action: "release" })).status).toBe(200);
+      expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(200);
+      expect((await record()).state).toBe("archived");
+    } finally {
+      managedBoxCreateGate?.release();
+      await pendingCreate?.catch(() => undefined);
+      managedBoxCreateGate = null;
+      if (botId) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+      await api("POST", `/api/team-computers/${requestId}/control`, { action: "release" }).catch(() => undefined);
+      await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true }).catch(() => undefined);
+      managedBoxRows = [];
+      managedBoxCreatedIds.clear();
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      managedBoxCreateMode = "refuse";
+      managedBoxCreateId = "bx_cdefghjk";
+      managedBoxCreateName = "";
+      managedBoxCreateBodies.length = 0;
+      boxRouteCalls.length = 0;
+      rmSync(fakeClaudeDump, { force: true });
+    }
+  }, 30_000);
+
+  it("shares one team computer across direct and room turns without overriding explicit destinations", async () => {
+    const requestId = randomUUID();
+    const section = `Shared machine ${requestId.slice(0, 8)}`;
+    const botIds: string[] = [];
+    let roomId = "";
+    const idle = async (botId: string) => expect.poll(async () =>
+      (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === botId)?.busy,
+    { timeout: 5_000 }).toBe(false);
+    type ComputerDump = { mcpConfig: { mcpServers: { computer?: { env: { OGB_BOX_ID: string; OMB_CONTROL_URL: string; OMB_CONTROL_TOKEN: string } } } } };
+    const gate = (computer: NonNullable<ComputerDump["mcpConfig"]["mcpServers"]["computer"]>) =>
+      fetch(computer.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${computer.env.OMB_CONTROL_TOKEN}` } });
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      for (const name of ["Direct shared", "Room shared", "Explicit off"]) {
+        const bot = (await api("POST", "/api/bots", { name, section,
+          modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).body.bot;
+        botIds.push(bot.id);
+      }
+      expect((await api("PATCH", `/api/bots/${botIds[2]}`, { computer: "off" })).status).toBe(200);
+      managedBoxCreateMode = "success";
+      managedBoxCreateId = "bx_qrstuvwx";
+      managedBoxCreateName = "";
+      expect((await api("POST", "/api/team-computers", { requestId, name: "Shared desktop", acknowledgeCost: true })).status).toBe(201);
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true })).status).toBe(200);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === botIds[0])).not.toHaveProperty("computer");
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === botIds[2]).computer).toBe("off");
+      const room = (await api("POST", "/api/groups", { name: "Shared computer room", memberIds: [botIds[1]], section,
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: botIds[1] } } })).body.group;
+      roomId = room.id;
+      const createCount = boxRouteCalls.filter(call => call.method === "POST" && call.path === "/boxes").length;
+
+      // An explicit Off bot gets no computer even inside the assigned team.
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${botIds[2]}/messages`, { text: "explicitly no desktop" })).status).toBe(202);
+      expect((await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer).toBeUndefined();
+      expect((await api("POST", `/api/bots/${botIds[2]}/interrupt`, {})).status).toBe(200);
+      await idle(botIds[2]);
+
+      expect((await api("POST", `/api/bots/${botIds[0]}/computer/control`, { action: "take" })).status).toBe(200);
+      expect((await api("GET", `/api/bots/${botIds[1]}/computer/control`)).body.held).toBe(true);
+      expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true })).status).toBe(409);
+      expect((await api("POST", `/api/bots/${botIds[0]}/computer/control`, { action: "release" })).status).toBe(200);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "hold the shared desktop" })).status).toBe(202);
+      const direct = (await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer!;
+      expect(direct.env.OGB_BOX_ID).toBe(managedBoxCreateId);
+      expect((await gate(direct)).status).toBe(200);
+      expect((await fetch(direct.env.OMB_CONTROL_URL.replace(botIds[0], botIds[1]), {
+        headers: { authorization: `Bearer ${direct.env.OMB_CONTROL_TOKEN}` },
+      })).status).toBe(403);
+      for (const action of ["sleep", "provision"]) {
+        expect((await api("POST", `/api/team-computers/${requestId}/${action}`, { acknowledgeCost: true })).status).toBe(409);
+      }
+      expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true })).status).toBe(409);
+      expect((await api("PATCH", `/api/bots/${botIds[0]}`, { computer: "off" })).status).toBe(409);
+
+      // The room's different bot cannot concurrently claim the physical Box.
+      expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the occupied shared desktop" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
+        (group: { id: string }) => group.id === roomId,
+      )), { timeout: 5_000 }).toMatch(/another thread is using this computer/);
+      await idle(botIds[1]);
+      expect((await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer).toEqual(direct);
+      expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, {})).status).toBe(200);
+      await idle(botIds[0]);
+      expect((await gate(direct)).status).toBe(401);
+
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the released shared desktop" })).status).toBe(202);
+      const roomComputer = (await readJsonFileWhenReady<ComputerDump>(fakeClaudeDump)).mcpConfig.mcpServers.computer!;
+      expect(roomComputer.env.OGB_BOX_ID).toBe(direct.env.OGB_BOX_ID);
+      expect((await gate(roomComputer)).status).toBe(200);
+      expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
+      expect((await api("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
+      await idle(botIds[1]);
+      expect((await gate(roomComputer)).status).toBe(401);
+
+      // A missing paid resource must never be silently replaced by a turn.
+      managedBoxRows = [];
+      managedBoxCreatedIds.clear();
+      rmSync(fakeClaudeDump, { force: true });
+      expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "do not create a replacement" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.bots.find(
+        (bot: { id: string }) => bot.id === botIds[0],
+      )), { timeout: 5_000 }).toMatch(/team's Box computer is missing/);
+      await idle(botIds[0]);
+      expect(existsSync(fakeClaudeDump)).toBe(false);
+      expect(boxRouteCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(createCount);
+    } finally {
+      if (roomId) await api("POST", `/api/groups/${roomId}/interrupt`, {}).catch(() => undefined);
+      for (const botId of botIds) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+      await api("POST", `/api/team-computers/${requestId}/control`, { action: "release" }).catch(() => undefined);
+      await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true }).catch(() => undefined);
+      managedBoxRows = [];
+      managedBoxCreatedIds.clear();
+      if (roomId) await api("DELETE", `/api/groups/${roomId}`).catch(() => undefined);
+      for (const botId of botIds) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      managedBoxCreateMode = "refuse";
+      managedBoxCreateId = "bx_cdefghjk";
+      managedBoxCreateName = "";
+      boxRouteCalls.length = 0;
+      rmSync(fakeClaudeDump, { force: true });
+    }
+  }, 30_000);
+
   it("blocks bot-scoped Box lifecycle changes after a direct turn claims the bot", async () => {
     let botId = "";
     try {
@@ -2755,7 +2987,7 @@ describe("harness HTTP API", () => {
       expect(response).toEqual({
         status: 409,
         body: {
-          error: "A section can have only one Chief of Staff. Choose one Chief or use a section without one.",
+          error: "A team can have only one Chief of Staff. Choose one Chief or use a team without one.",
         },
       });
 
@@ -2782,7 +3014,7 @@ describe("harness HTTP API", () => {
 
       for (const body of [
         { name: "S".repeat(61), botIds: [visible.id] },
-        { name: "Work", botIds: [] },
+        { name: "", botIds: [] },
         { name: "Work", botIds: ["not/an/id"] },
         { name: "Work", botIds: [visible.id], extra: true },
       ]) {
@@ -3411,8 +3643,8 @@ describe("harness HTTP API", () => {
         const scoped = await isolatedApi("PATCH", `/api/bots/${seeded.id}/tasks/${seeded.threadId}`, {
           modelSelection: targetSelection, updateBotDefault: true, approvalMode: "ask",
         });
-        expect(scoped.status, seeded.approvalMode).toBe(400);
-        expect(scoped.body.error).toMatch(/Choose Ask in bot settings/i);
+        expect(scoped.status, seeded.approvalMode).toBe(seeded.approvalMode === "custom" ? 403 : 400);
+        expect(scoped.body.error).toMatch(/Custom approval|resetApprovalToAsk/i);
         const unchanged = (await isolatedApi("GET", "/api/bots?messages=0")).body.bots.find(
           (candidate: { id: string }) => candidate.id === seeded.id,
         );
@@ -3422,6 +3654,37 @@ describe("harness HTTP API", () => {
         });
         expect(unchanged.tasks.find((task: { threadId: string }) => task.threadId === seeded.threadId).modelSelection).toEqual(seeded.modelSelection);
       }
+
+      const full = trustedBots.find(candidate => candidate.approvalMode === "full")!;
+      const sibling = (await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "Untouched" })).body.task;
+      for (const body of [
+        { resetApprovalToAsk: true },
+        { modelSelection: targetSelection, resetApprovalToAsk: "yes" },
+        { modelSelection: targetSelection, resetApprovalToAsk: true, approvalMode: "auto" },
+        { modelSelection: targetSelection, resetApprovalToAsk: true, updateBotDefault: "yes" },
+        { modelSelection: { ...targetSelection, effort: "turbo" }, resetApprovalToAsk: true },
+      ]) {
+        expect((await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, body)).status).toBe(400);
+      }
+      const sameProvider = await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, {
+        modelSelection: { ...full.modelSelection, model: "another-model" },
+      });
+      expect(sameProvider.status).toBe(200);
+      expect(sameProvider.body.task.approvalMode ?? sameProvider.body.bot.approvalMode).toBe("full");
+      const switched = await isolatedApi("PATCH", `/api/bots/${full.id}/tasks/${full.threadId}`, {
+        modelSelection: targetSelection, updateBotDefault: true, resetApprovalToAsk: true,
+      });
+      expect(switched.status).toBe(200);
+      expect(switched.body.bot).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask", autoApprove: false });
+      expect(switched.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask", alwaysAllow: [] });
+      expect(switched.body.bot.tasks.find((task: { threadId: string }) => task.threadId === sibling.threadId))
+        .toMatchObject({ modelSelection: full.modelSelection, approvalMode: "full" });
+      const created = await isolatedApi("POST", `/api/bots/${full.id}/tasks`, { title: "New defaults" });
+      expect(created.body.task).toMatchObject({ modelSelection: targetSelection, approvalMode: "ask" });
+      const refusedCustom = trustedBots.find(candidate => candidate.approvalMode === "custom")!;
+      expect((await isolatedApi("PATCH", `/api/bots/${refusedCustom.id}/tasks/${refusedCustom.threadId}`, {
+        modelSelection: targetSelection, resetApprovalToAsk: true,
+      })).status).toBe(403);
 
       // A loopback-capable bot must not escape a restrictive Custom config
       // by changing another idle bot to Ask/Auto. Leaving Custom is a trusted
@@ -3577,7 +3840,8 @@ describe("harness HTTP API", () => {
 
       const created = await api("POST", `/api/teams/import?mode=project&cwd=${encodeURIComponent(folder)}`, exported.body);
       expect(created.status).toBe(201);
-      expect(created.body.group).toMatchObject({ name: "Client XY", cwd: folder });
+      expect(created.body.group).toMatchObject({ name: "Client XY", cwd: folder, section: "Client XY" });
+      expect(created.body.bots.every((bot: { section?: string }) => bot.section === "Client XY")).toBe(true);
       // the room is made of exactly the bots this import created
       expect(created.body.group.memberIds.sort()).toEqual(created.body.bots.map((bot: { id: string }) => bot.id).sort());
       // the folder is the room's WISH; the store pins it on the first turn
@@ -3587,7 +3851,8 @@ describe("harness HTTP API", () => {
 
       // an explicit name wins over the team name, and the folder is optional
       const named = await api("POST", "/api/teams/import?mode=project&room=Client%20XY%20-%20Ads", exported.body);
-      expect(named.body.group).toMatchObject({ name: "Client XY - Ads" });
+      expect(named.body.group).toMatchObject({ name: "Client XY - Ads", section: "Client XY 2" });
+      expect(named.body.bots.every((bot: { section?: string }) => bot.section === "Client XY 2")).toBe(true);
       expect(named.body.group.cwd).toBeUndefined();
 
       for (const room of [created.body.group, named.body.group]) {
@@ -3598,6 +3863,38 @@ describe("harness HTTP API", () => {
       }
     } finally {
       stream.close();
+    }
+  });
+
+  it("allocates editable template sections without colliding with rooms or archived bots", async () => {
+    const stem = "X".repeat(60);
+    const seed = await api("POST", "/api/bots", { name: "Existing section owner", color: "blue", section: `${stem.slice(0, 58)} 2` });
+    expect(seed.status).toBe(201);
+    const original = seed.body.bot;
+    const createdRoom = await api("POST", "/api/groups", { name: "Existing section room", memberIds: [original.id], section: stem.toLowerCase() });
+    expect(createdRoom.status).toBe(201);
+    const room = createdRoom.body.group;
+    expect((await api("PATCH", `/api/bots/${original.id}`, { hidden: true })).status).toBe(200);
+    const before = (await api("GET", "/api/bots")).body;
+    const copies: string[] = [];
+    try {
+      for (const suffix of [3, 4]) {
+        const imported = await api("POST", "/api/teams/import", {
+          format: "openmaus.team", version: 2,
+          team: { name: `${stem} long template name`, members: [{ key: "helper", name: "Template helper", section: "Must not choose destination", appearance: { color: "blue" } }] },
+        });
+        expect(imported.status).toBe(201);
+        copies.push(...imported.body.bots.map((bot: { id: string }) => bot.id));
+        expect(imported.body.bots[0].section).toBe(`${stem.slice(0, 58)} ${suffix}`);
+        // The normal profile API accepts the allocated section unchanged.
+        expect((await api("PATCH", `/api/bots/${copies.at(-1)}`, { section: imported.body.bots[0].section })).status).toBe(200);
+      }
+      const after = (await api("GET", "/api/bots")).body;
+      for (const bot of before.bots) expect(after.bots.find((value: { id: string }) => value.id === bot.id)).toEqual(bot);
+      expect(after.groups).toEqual(before.groups);
+    } finally {
+      await api("DELETE", `/api/groups/${room.id}`);
+      for (const id of [original.id, ...copies]) await api("DELETE", `/api/bots/${id}`);
     }
   });
 
@@ -3681,6 +3978,8 @@ describe("harness HTTP API", () => {
     expect(installed.body.bots).toHaveLength(2);
     expect(installed.body.groups).toHaveLength(1);
     expect(installed.body.routines).toHaveLength(1);
+    expect(installed.body.bots.every((bot: { section?: string }) => bot.section === packageFile.package.name)).toBe(true);
+    expect(installed.body.groups[0].section).toBe(packageFile.package.name);
 
     const scout = installed.body.bots.find((bot: { name: string }) => bot.name.startsWith("Package Scout"));
     const editor = installed.body.bots.find((bot: { name: string }) => bot.name.startsWith("Package Editor"));

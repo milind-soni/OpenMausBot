@@ -12,6 +12,7 @@ import com.openmausbot.companion.core.ModelSelection
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.Reaction
 import com.openmausbot.companion.core.Room
+import com.openmausbot.companion.core.chat
 import com.openmausbot.companion.core.target
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -194,6 +195,39 @@ class ConversationResolutionTest {
             ThreadResolution.Result.Gone,
             ThreadResolution.resolve(CompanionState(rooms = emptyList(), cursor = hydrated), opened),
         )
+    }
+
+    @Test
+    fun `a room destination follows its shared task while explicit history targets stay pinned`() {
+        val original = room().copy(tasks = listOf(
+            BotTask("thread-room-1", "First", 0.0), BotTask("next", "Next", 1.0),
+        ))
+        val destination = Destination.Chat(Chat.RoomChat(original).target)
+        val live = original.copy(threadId = "next", busyBotId = "bot-2", unread = true)
+        val state = CompanionState(rooms = listOf(live), cursor = hydrated)
+
+        val resolved = (ThreadResolution.resolve(state, destination) as ThreadResolution.Result.Open).chat
+        assertEquals(Chat.RoomChat(live), resolved)
+        assertTrue(resolved.busy)
+        assertTrue(resolved.unread)
+        assertEquals("thread-room-1", state.chat(destination.target)?.threadId)
+        assertEquals("thread-room-1", ThreadResolution.chatOrNull(state, "thread-room-1")?.threadId)
+
+        // Deleting the formerly selected room task also keeps the channel open.
+        val removed = state.copy(rooms = listOf(live.copy(tasks = live.tasks?.filter { it.threadId == "next" })))
+        assertEquals("next", (ThreadResolution.resolve(removed, destination) as ThreadResolution.Result.Open).chat.threadId)
+    }
+
+    @Test
+    fun `an addressed bot destination stays local when the desktop selects a sibling`() {
+        val original = bot().copy(tasks = listOf(
+            BotTask("thread-bot-1", "First", 0.0, busy = true), BotTask("next", "Next", 1.0, busy = false),
+        ))
+        val destination = Destination.Chat(Chat.BotChat(original).target)
+        val state = CompanionState(bots = listOf(original.copy(threadId = "next", busy = false)), cursor = hydrated)
+        val resolved = (ThreadResolution.resolve(state, destination) as ThreadResolution.Result.Open).chat
+        assertEquals("thread-bot-1", resolved.threadId)
+        assertTrue(resolved.busy)
     }
 
     @Test

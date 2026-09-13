@@ -103,6 +103,19 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
+  it("reports an inherited team Box without choosing a private Box or local fallback", () => {
+    for (const configured of [false, true]) {
+      for (const boxState of [null, "idle", "archived", "provisioning"]) {
+        for (const canUseCloud of [false, true]) {
+          expect(resolveBoxPanelAction({ computer: undefined, configured, boxState, canUseCloud,
+            autoLocal: true, teamComputer: true })).toBe("team-box");
+        }
+      }
+    }
+    expect(resolveBoxPanelAction({ computer: "cloud", configured: true, boxState: "idle",
+      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("ensure-box");
+  });
+
   it("never creates a missing Box merely because an Auto panel opened", () => {
     expect(
       resolveBoxPanelAction({

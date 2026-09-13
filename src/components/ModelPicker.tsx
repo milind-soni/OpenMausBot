@@ -6,13 +6,15 @@
 // same row and write through the same action.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Loader2, RefreshCw, Search } from "lucide-react";
-import { useStore, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
+import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
 import type { EffortLevel } from "../../server/contracts.ts";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
 import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
+import { ConfirmDialog } from "./ConfirmDialog";
+import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
@@ -259,7 +261,9 @@ export function ModelPicker({
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [scope, setScope] = useState<"bot" | "thread">("bot");
+  const [scope, setScope] = useState<"bot" | "thread">("thread");
+  const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
+    selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const refreshingRef = useRef(false);
   const lastClaudeIdRef = useRef<string | null>(null);
@@ -362,11 +366,22 @@ export function ModelPicker({
       model,
     };
     if (sameInstance && selection.effort) nextSelection.effort = selection.effort;
+    const updateBotDefault = !threadId || scope === "bot";
+    const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
+    const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
+    if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
+      state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
+      instance.driverKind))) {
+      setPendingSwitch({ botId: bot.id, threadId: threadId ?? bot.threadId,
+        selection: nextSelection, updateBotDefault, name: modelLabel(instance, model) });
+      setOpen(false);
+      return;
+    }
     dispatch({
       type: "setModel",
       botId: bot.id,
-      threadId,
-      ...(threadId && scope === "bot" ? { updateBotDefault: true } : {}),
+      threadId: threadId ?? bot.threadId,
+      updateBotDefault,
       selection: nextSelection,
     });
     setOpen(false);
@@ -496,10 +511,10 @@ export function ModelPicker({
             {threadId && (
               <div className="shrink-0 border-b border-hairline/40 px-3 py-2">
                 <div role="group" aria-label="Apply model changes to" className="flex gap-1">
-                  {(["bot", "thread"] as const).map((value) => (
+                  {(["thread", "bot"] as const).map((value) => (
                     <button key={value} type="button" aria-pressed={scope === value} onClick={() => setScope(value)}
                       className={cn("rounded-lg px-2 py-1 text-[12px]", scope === value ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60")}>
-                      {value === "bot" ? "This bot" : "Only this thread"}
+                      {value === "bot" ? "Thread + bot default" : "Only this thread"}
                     </button>
                   ))}
                 </div>
@@ -721,6 +736,25 @@ export function ModelPicker({
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingSwitch !== null}
+        title={t("model.providerSwitch.title")}
+        body={t(pendingSwitch?.updateBotDefault ? "model.providerSwitch.botBody" : "model.providerSwitch.threadBody", {
+          model: pendingSwitch?.name ?? "",
+        })}
+        tone="neutral"
+        confirmLabel={t("model.providerSwitch.confirm")}
+        onCancel={() => setPendingSwitch(null)}
+        onConfirm={() => {
+          if (!pendingSwitch || bot.busy || pendingSwitch.botId !== bot.id || pendingSwitch.threadId !== (threadId ?? bot.threadId)) {
+            setPendingSwitch(null); return;
+          }
+          dispatch({ type: "setModel", botId: pendingSwitch.botId, threadId: pendingSwitch.threadId,
+            selection: pendingSwitch.selection, updateBotDefault: pendingSwitch.updateBotDefault,
+            resetApprovalToAsk: true });
+          setPendingSwitch(null);
+        }}
+      />
     </div>
   );
 }

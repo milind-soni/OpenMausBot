@@ -1,5 +1,6 @@
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 import { teamImportPreview, type PendingTeamImport } from "@/lib/team-import";
 import type { Routine } from "@/lib/routines";
 import { api, useStore, type Bot, type Group } from "@/state/store";
@@ -424,13 +425,13 @@ export function TeamLibraryPanel({
                   }}
                   disabled={importing}
                   className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-                  aria-label="Back to teams"
+                  aria-label="Back to templates"
                 >
                   <ArrowLeft size={18} />
                 </button>
               )}
               <h2 id="team-library-title" className="truncate text-[22px] font-semibold tracking-[-0.01em] text-ink">
-                {pending ? pending.name : "Teams"}
+                {pending ? pending.name : "Templates"}
               </h2>
             </div>
             <p className={cn("mt-1 text-[13px] text-ink-secondary", pending && "ml-9")}>
@@ -448,7 +449,7 @@ export function TeamLibraryPanel({
               <button
                 onClick={() => void openExternal(catalog?.repositoryUrl ?? COMMUNITY_TEAMS_REPOSITORY)}
                 className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink"
-                title="Open the community teams repository"
+                title="Open the community templates repository"
               >
                 <Github size={16} />
                 <span className="max-sm:hidden">Community repo</span>
@@ -459,7 +460,7 @@ export function TeamLibraryPanel({
               onClick={onClose}
               disabled={importing}
               className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-              aria-label="Close teams"
+              aria-label="Close templates"
             >
               <X size={21} />
             </button>
@@ -479,7 +480,7 @@ export function TeamLibraryPanel({
               {(pending.kind === "package" || pending.kind === "backup") && (
                 <div className="mt-5 flex flex-wrap gap-2 text-[11.5px] text-ink-secondary">
                   {pending.chiefOfStaff && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Crown size={13} />{pending.chiefOfStaff} leads</span>}
-                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{pending.rooms} {pending.rooms === 1 ? "group" : "groups"}</span>
+                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{pending.rooms} {pending.rooms === 1 ? "group chat" : "group chats"}</span>
                   <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><BookOpen size={13} />{pending.playbooks} playbooks</span>
                   <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><CalendarClock size={13} />{pending.routines} paused routines</span>
                   {pending.kind === "package" && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Plug size={13} />{pending.apps.length} connections</span>}
@@ -513,7 +514,7 @@ export function TeamLibraryPanel({
                   {pending.kind === "backup"
                     ? `${TEAM_BACKUP_EXCLUSIONS} ${pending.archivedBots ? `${pending.archivedBots} archived bots will remain archived.` : ""}`
                     : pending.kind === "package"
-                    ? "Bots, Chief of Staff, groups, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
+                    ? "Bots, Chief of Staff, group chats, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
                     : "Only roles and appearance are loaded. Your conversations, account connections, permissions, and computer access stay private."}
                 </p>
               </div>
@@ -523,7 +524,9 @@ export function TeamLibraryPanel({
             <footer className="flex flex-col gap-3 border-t border-hairline/35 px-6 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-8">
               <div className="text-[12.5px] text-ink-secondary">
                 Your {currentBotCount > 0 ? `${currentBotCount} existing ${currentBotCount === 1 ? "bot and its" : "bots and their"}` : "existing"} conversations stay unchanged.
-                Imported bots are added as new copies; duplicate names and backup sections get numbered.
+                {" "}{pending.kind === "backup"
+                  ? t("teamImport.backupCopies")
+                  : t("teamImport.newSection", { name: pending.name })}
               </div>
               <button
                 onClick={() => void importTeam()}
@@ -540,7 +543,7 @@ export function TeamLibraryPanel({
         ) : (
           <>
             <div className="flex flex-col gap-3 px-6 pb-4 pt-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
-              <div className="flex w-fit rounded-xl bg-raised/70 p-1" role="tablist" aria-label="Team source">
+              <div className="flex w-fit rounded-xl bg-raised/70 p-1" role="tablist" aria-label="Template source">
                 <button
                   role="tab"
                   aria-selected={tab === "explore"}
@@ -590,8 +593,8 @@ export function TeamLibraryPanel({
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search teams"
-                    aria-label="Search teams"
+                    placeholder="Search templates"
+                    aria-label="Search templates"
                     className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
                   />
                 </label>
@@ -602,11 +605,11 @@ export function TeamLibraryPanel({
               {tab === "explore" && (
                 <div>
                   <div className="mb-3 text-[12px] font-medium text-ink-secondary">
-                    {search ? "Search results" : "Community teams"}
+                    {search ? "Search results" : "Community templates"}
                   </div>
                   {catalogLoading && (
                     <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary">
-                      <Loader2 size={16} className="animate-spin" /> Loading teams…
+                      <Loader2 size={16} className="animate-spin" /> Loading templates…
                     </div>
                   )}
                   {!catalogLoading && catalogError && (
@@ -643,7 +646,7 @@ export function TeamLibraryPanel({
                   )}
                   {!catalogLoading && catalog && visibleTeams.length === 0 && (
                     <div className="flex min-h-56 flex-col items-center justify-center text-center">
-                      <div className="text-[14px] font-medium text-ink">No teams found</div>
+                      <div className="text-[14px] font-medium text-ink">No templates found</div>
                       <div className="mt-1 text-[12.5px] text-ink-secondary">Try a different search.</div>
                     </div>
                   )}
@@ -839,7 +842,7 @@ export function TeamLibraryPanel({
                         <input
                           value={roomName}
                           onChange={(event) => setRoomName(event.target.value)}
-                          aria-label="Group name"
+                          aria-label="Group chat name"
                           className="min-w-0 flex-1 rounded-xl bg-raised/80 px-3 py-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none"
                         />
                         <button
@@ -848,11 +851,11 @@ export function TeamLibraryPanel({
                           className="flex shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white hover:bg-accent/90 disabled:opacity-60"
                         >
                           {creating && <Loader2 size={15} className="animate-spin" />}
-                          {creating ? "Creating…" : "Create group"}
+                          {creating ? "Creating…" : "Create group chat"}
                         </button>
                       </div>
                       <p className="mt-2 text-[12px] text-ink-secondary">
-                        Creates the team as new bots, opens a group for them, and points its working folder here.
+                        Creates the team as new bots, opens a group chat for them, and points its working folder here.
                       </p>
                     </div>
                   )}

@@ -126,6 +126,15 @@ android {
     }
 
     buildTypes {
+        create("preview") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".preview"
+            versionNameSuffix = "-threads-preview"
+            matchingFallbacks += "debug"
+            // Reuse Gradle's local debug key; this package installs alongside
+            // the separately signed release and keeps its own pairing/data.
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             // Null whenever no signing material was supplied — the unsigned
             // handover build — and the "release" config whenever it was.

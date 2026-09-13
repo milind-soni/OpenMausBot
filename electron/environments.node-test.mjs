@@ -77,3 +77,65 @@ test("adding the same server twice updates the name instead of duplicating; forg
   assert.deepEqual(state, { environments: [], activeId: "local" });
   assert.equal(env.activeEnvironment(state), null);
 });
+
+test("hosted workspace input accepts addresses and keeps valid codes only in the fragment", () => {
+  for (const address of ["bots.company.com", " https://bots.company.com/ ", "https://bots.company.com:8443"]) {
+    const parsed = env.parseHostedWorkspaceLink(address);
+    assert.ok(parsed);
+    assert.equal(parsed.code, null);
+    assert.equal(parsed.url, parsed.origin);
+  }
+  const parsed = env.parseHostedWorkspaceLink("https://bots.company.com/pair#code=ABCD%2DEFGH%2DJKLM");
+  assert.equal(parsed.code, "ABCD-EFGH-JKLM");
+  assert.ok(parsed.url.includes("#code="));
+  assert.ok(!parsed.origin.includes("ABCD"));
+  assert.ok(env.parseHostedWorkspaceLink("http://127.0.0.1:19999"));
+  for (const bad of ["", null, "ABCD-EFGH-JKLM", "https:example.com", "http://cloud.example.com", "https://a.example/other", "https://a.example/?code=SECRET", "https://a.example/pair#code=%", "https://a.example/pair#code=", "https://a.example/pair#code=%20", "https://user:password@a.example", "https://a.example\\@b.example", "javascript:alert(1)"]) {
+    assert.equal(env.parseHostedWorkspaceLink(bad), null, String(bad));
+  }
+  assert.equal(env.parsePairingLink("https://a.example/pair#code=%"), null);
+});
+
+test("workspace shell exposes only current identity and rejects subframes and unrelated windows", () => {
+  const state = { environments: [{ id: "cloud", name: "Acme", origin: "https://acme.example" }], activeId: "cloud" };
+  assert.deepEqual(env.workspaceSummary(state), { local: false, name: "Acme", origin: "https://acme.example" });
+  assert.deepEqual(env.workspaceSummary({ ...state, activeId: "local" }), { local: true, name: "This computer" });
+  const local = "http://127.0.0.1:18799";
+  const contents = { mainFrame: { url: "https://acme.example/" } };
+  const event = { sender: contents, senderFrame: contents.mainFrame };
+  assert.equal(env.workspaceSenderAllowed(event, contents, state, local), true);
+  assert.equal(env.workspaceSenderAllowed({ ...event, sender: {} }, contents, state, local), false);
+  assert.equal(env.workspaceSenderAllowed({ ...event, senderFrame: { url: "https://acme.example/frame" } }, contents, state, local), false);
+  contents.mainFrame.url = "https://untrusted.example";
+  assert.equal(env.workspaceSenderAllowed(event, contents, state, local), false);
+  contents.mainFrame.url = local;
+  assert.equal(env.workspaceSenderAllowed(event, contents, state, local), false);
+  assert.equal(env.workspaceSenderAllowed(event, contents, { ...state, activeId: "local" }, local), true);
+});
+
+test("renderer links and redirects cannot switch onto the local or another saved workspace", () => {
+  const local = "http://127.0.0.1:18799";
+  const state = { environments: [
+    { id: "cloud", name: "Acme", origin: "https://acme.example" },
+    { id: "other", name: "Other", origin: "https://other.example" },
+  ], activeId: "cloud" };
+  assert.equal(env.workspaceNavigationAllowed("https://acme.example/pair#code=ABCD-EFGH-JKLM", state, local), true);
+  for (const url of [local, "https://other.example", "https://unknown.example", "javascript:void(0)"]) {
+    assert.equal(env.workspaceNavigationAllowed(url, state, local), false);
+  }
+  const switched = env.withActive(state, "local");
+  assert.equal(env.workspaceNavigationAllowed(`${local}/?desktop-settings=workspaces`, switched, local), true);
+  assert.equal(env.workspaceNavigationAllowed("https://acme.example", switched, local), false);
+});
+
+test("native workspace choices use saved IDs and connect opens settings without changing state", () => {
+  const state = { environments: [{ id: "cloud", name: "Acme", origin: "https://acme.example" }], activeId: "cloud" };
+  const calls = [];
+  const items = env.workspaceMenuTemplate(state, { onSwitch: (id) => calls.push(["switch", id]), onConnect: () => calls.push(["settings"]), onForget: (id) => calls.push(["forget", id]) });
+  assert.equal(items.find((item) => item.id === "workspace-cloud").checked, true);
+  items.find((item) => item.id === "workspace-local").click();
+  items.find((item) => item.id === "workspace-connect").click();
+  items.find((item) => item.id === "workspace-forget").click();
+  assert.deepEqual(calls, [["switch", "local"], ["settings"], ["forget", "cloud"]]);
+  assert.equal(state.activeId, "cloud");
+});

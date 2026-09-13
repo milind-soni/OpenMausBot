@@ -26,6 +26,7 @@ export function BotPickerList({
           key={b.id}
           onClick={() => onToggle(b.id)}
           role="checkbox"
+          aria-label={b.name}
           aria-checked={picked.has(b.id)}
           className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
         >

@@ -189,9 +189,13 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
 
   return new Promise((resolve) => {
     let timer: NodeJS.Timeout;
+    let finished = false;
     const done = (stopped: boolean) => {
+      if (finished) return;
+      finished = true;
       clearTimeout(timer);
       child.off("close", closed);
+      child.off("exit", closed);
       resolve(stopped);
     };
     const closed = () => done(true);
@@ -200,7 +204,16 @@ async function stopCliTree(child: ChildProcess, pid: number, timeoutMs: number):
     timer.unref?.();
 
     execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true }, (err) => {
-      if (!err) return;
+      if (finished) return;
+      if (!err) {
+        // taskkill can finish before Node observes the process exit. Do not
+        // report success until both have happened; callers may rename the
+        // executable immediately. Conversely, inherited pipes can delay
+        // close after exit, so a confirmed exit need not wait for those pipes.
+        if (exited()) done(true);
+        else child.once("exit", closed);
+        return;
+      }
       try {
         // taskkill is unavailable or the tree lookup failed. At least stop
         // the process we own instead of leaving the entire turn running.

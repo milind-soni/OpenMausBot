@@ -23,6 +23,7 @@ const task = z.object({
   title: z.string().max(2_000),
   createdAt: timestamp,
   openedBy: z.object({ botId: key, name, at: timestamp }).optional(),
+  closedBy: z.object({ botId: key, name, at: timestamp }).optional(),
   activeLeafId: key.nullable(),
   messages: z.array(message).max(100_000),
 });

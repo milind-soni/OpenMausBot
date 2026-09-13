@@ -20,11 +20,17 @@ ipcRenderer.on("package:install", (_event, url) => {
 // helpers here. Main enforces the same rule on the sensitive channels.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
-const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus"]);
+const REMOTE_SAFE = new Set(["platform", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces"]);
 
 const bridge = {
   /** Host platform ("darwin" | "win32" | "linux") — for platform-aware UI. */
   platform: process.platform,
+  // Safe even on a cloud page: the user chooses in a native menu owned by
+  // Electron. No direct switching, saved-list reads, host files or secrets.
+  workspaces: {
+    state: () => ipcRenderer.invoke("workspaces:state"),
+    menu: () => ipcRenderer.invoke("workspaces:menu"),
+  },
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   onCapabilitiesChanged: (cb) => {
     const handler = (_event, capabilities) => cb(capabilities);
@@ -212,8 +218,19 @@ const bridge = {
   environments: {
     state: () => ipcRenderer.invoke("environments:state"),
     switch: (id) => ipcRenderer.invoke("environments:switch", id),
-    addFromLink: (link) => ipcRenderer.invoke("environments:add-from-link", link),
+    addFromLink: (link, name) => ipcRenderer.invoke("environments:add-from-link", link, name),
     forget: (id) => ipcRenderer.invoke("environments:forget", id),
+    onOpenSettings: (cb) => {
+      const handler = (_event, computerId) => cb(computerId);
+      ipcRenderer.on("workspaces:open-settings", handler);
+      return () => ipcRenderer.removeListener("workspaces:open-settings", handler);
+    },
+  },
+  computerSharing: {
+    state: id => ipcRenderer.invoke("sharing:state", id),
+    chooseFolder: () => ipcRenderer.invoke("sharing:folder"),
+    save: (id, grant) => ipcRenderer.invoke("sharing:save", id, grant),
+    revoke: id => ipcRenderer.invoke("sharing:revoke", id),
   },
 };
 

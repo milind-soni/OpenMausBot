@@ -6,7 +6,9 @@ import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.PendingApproval
+import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.takeLastCharacters
+import com.openmausbot.companion.core.visibleTasks
 
 /**
  * What the Updates pill shows: only the chats doing something — the port of
@@ -28,7 +30,7 @@ internal data class ChatUpdate(
     /** The card to answer, when [kind] is [UpdateKind.NEEDS_YOU]. */
     val card: OptionCard? = null,
 ) {
-    val id: String get() = chat.id
+    val id: String get() = chat.conversationId
 }
 
 internal val CompanionState.updates: List<ChatUpdate>
@@ -43,11 +45,11 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
     val out = mutableListOf<ChatUpdate>()
     val seen = mutableSetOf<String>()
 
-    // Newest approval first, one per chat: the pill headlines the most recent
+    // Newest approval first, one per conversation: the pill headlines the most recent
     // thing that stopped, and the sheet lists the rest.
     for (approval in pending) {
         val chat = ThreadResolution.chatOrNull(this, approval.threadId) ?: continue
-        if (!seen.add(chat.id)) continue
+        if (!seen.add(chat.conversationId)) continue
         val card = approval.message.card
         // iOS writes `card?.subtitle ?? card?.title ?? ""`, where `subtitle` is
         // not optional — so the title arm is reachable only for a null card, and
@@ -57,30 +59,36 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
 
     for (bot in bots) {
         if (bot.hidden == true) continue
-        val chat = Chat.BotChat(bot)
-        if (chat.id in seen) continue
-        when {
-            bot.busy == true -> {
-                seen += chat.id
-                out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(bot.threadId))
-            }
-            bot.unread -> {
-                seen += chat.id
-                out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(bot.threadId))
+        // Old desktops expose only the selected conversation. New desktops
+        // expose each task's own runtime flags, including active siblings.
+        val conversations = if (bot.tasks == null) listOf(bot)
+            else bot.visibleTasks.mapNotNull { bot.forTask(it.threadId) }
+        for (conversation in conversations) {
+            val chat = Chat.BotChat(conversation)
+            if (!seen.add(chat.conversationId)) continue
+            when {
+                conversation.activity == "waiting-on-you" ->
+                    out += ChatUpdate(chat, UpdateKind.NEEDS_YOU, "Waiting on you")
+                conversation.activity == "queued" ->
+                    out += ChatUpdate(chat, UpdateKind.WORKING, "Queued — waiting for an available slot")
+                conversation.busy == true ->
+                    out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(chat.threadId))
+                conversation.unread ->
+                    out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(chat.threadId))
             }
         }
     }
 
     for (room in rooms) {
         val chat = Chat.RoomChat(room)
-        if (chat.id in seen) continue
+        if (chat.conversationId in seen) continue
         when {
             room.busyBotId != null -> {
-                seen += chat.id
+                seen += chat.conversationId
                 out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(room.threadId))
             }
             room.unread -> {
-                seen += chat.id
+                seen += chat.conversationId
                 out += ChatUpdate(chat, UpdateKind.TO_REVIEW, lastLine(room.threadId))
             }
         }

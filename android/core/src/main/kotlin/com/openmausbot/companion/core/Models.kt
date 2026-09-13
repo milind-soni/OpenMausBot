@@ -261,6 +261,22 @@ data class ThreadOpener(
     val at: Double,
 )
 
+/**
+ * The bot that closed a thread with close_thread, once its result was read.
+ * Absent means the thread is open; the computer clears it the moment a new
+ * turn starts there, so a reopened thread simply loses the stamp.
+ */
+@Serializable
+data class ThreadCloser(
+    val botId: String,
+    val name: String,
+    val at: Double,
+)
+
+/** A folder within one bot, in the order saved on the computer. */
+@Serializable
+data class BotProject(val id: String, val name: String, val emoji: String? = null)
+
 @Serializable
 data class BotTask(
     val threadId: String,
@@ -275,6 +291,7 @@ data class BotTask(
     val alwaysAllow: List<String>? = null,
     val projectId: String? = null,
     val openedBy: ThreadOpener? = null,
+    val closedBy: ThreadCloser? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
 )
@@ -282,6 +299,18 @@ data class BotTask(
 /** The thread list's quiet second line, worded as the desktop words it. */
 val BotTask.openedByLabel: String?
     get() = openedBy?.let { "opened by ${it.name}" }
+
+/** A bot closed this thread and nothing has happened there since. */
+val BotTask.isClosed: Boolean
+    get() = closedBy != null
+
+/**
+ * The one line under a title: who closed it once a bot has, otherwise who
+ * opened it, otherwise nothing. Closed wins because it is the newer fact and
+ * the reason the row is dimmed.
+ */
+val BotTask.bylineLabel: String?
+    get() = closedBy?.let { "closed by ${it.name}" } ?: openedByLabel
 
 @Serializable
 data class Bot(
@@ -322,6 +351,7 @@ data class Bot(
     val messages: List<Message>? = null,
     val activeLeafId: String? = null,
     val hasMore: Boolean? = null,
+    val projects: List<BotProject>? = null,
 )
 
 /** Project only task-local controls; the original fleet record stays profile-global. */

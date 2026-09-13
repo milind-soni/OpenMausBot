@@ -118,6 +118,37 @@ final class ThreadNavigationTests: XCTestCase {
         XCTAssertEqual(bot.tasks?.last, working)
     }
 
+    func testClosedThreadsFoldOutOfTheTreeButStayReachable() {
+        // Three helper threads a PM bot opened on itself and closed sit on top
+        // of the person's own threads, newest first, one of them filed.
+        let closer = ThreadCloser(botId: "pm", name: "Parker", at: 9)
+        var helpers = (0..<3).map { task("helper-\($0)", title: "Helper \($0)", project: $0 == 0 ? "work" : nil) }
+        for index in helpers.indices {
+            helpers[index].openedBy = ThreadOpener(botId: "pm", name: "Parker", at: 5)
+            helpers[index].closedBy = closer
+        }
+        var bot = makeBot(tasks: helpers + [task("current"), task("plan", title: "Plan the launch")])
+        bot.projects = [project("work")]
+
+        // the default tree shows only open threads; the empty folder disappears with its closed thread
+        XCTAssertEqual(bot.threadGroups().map(\.id), ["unfiled"])
+        XCTAssertEqual(bot.threadGroups().flatMap(\.tasks).map(\.threadId), ["current", "plan"])
+        // the manage sheet and a search still list them — closing is never a deletion
+        XCTAssertEqual(bot.threadGroups(includingClosed: true).map(\.id), ["project:work", "unfiled"])
+        XCTAssertEqual(bot.threadGroups(includingClosed: true).flatMap(\.tasks).count, 5)
+        XCTAssertEqual(bot.threadGroups(matching: "helper 1").flatMap(\.tasks).map(\.threadId), ["helper-1"])
+
+        // a closed thread that is running, unread, or the one open here stays in the tree
+        helpers[1].busy = true
+        helpers[2].unread = true
+        bot.tasks = helpers + [task("current")]
+        XCTAssertEqual(bot.threadGroups().flatMap(\.tasks).map(\.threadId), ["helper-1", "helper-2", "current"])
+        var closedCurrent = task("current")
+        closedCurrent.closedBy = closer
+        bot.tasks = [closedCurrent, task("plan")]
+        XCTAssertEqual(bot.threadGroups().flatMap(\.tasks).map(\.threadId), ["current", "plan"])
+    }
+
     func testSiblingNavigationProjectionsKeepTheirOwnThreadAndRuntime() throws {
         var selected = task("current", title: "Current")
         selected.unread = false

@@ -1510,6 +1510,10 @@ class Session(
         }
     }
 
+    suspend fun loadThreadIfNeeded(threadId: String) {
+        if (!_state.value.hasLoadedPage(threadId)) loadThread(threadId)
+    }
+
     suspend fun loadOlder(threadId: String) {
         val activeClient = client ?: return
         val oldest = _state.value.transcript(threadId).firstOrNull() ?: return
@@ -1545,11 +1549,9 @@ class Session(
         return try {
             val botId = hit.botId
             if (botId != null) {
-                var bot = _state.value.bot(botId) ?: return null
-                if (bot.threadId != hit.threadId) {
-                    bot = activeClient.switchTask(bot.id, hit.threadId)
-                    _state.update { it.apply(Frame.Bot(bot)) }
-                }
+                if (_state.value.bot(botId)?.forTask(hit.threadId) == null && !refreshNavigationState(activeClient)) return null
+                val bot = _state.value.bot(botId)?.forTask(hit.threadId)
+                    ?: throw APIError.Status(404, THREAD_GONE_MESSAGE)
                 if (!hit.onActivePath) {
                     val leaf = activeClient.setActiveBranch(bot.id, hit.messageId, hit.threadId)
                     _state.update { it.apply(Frame.Thread(hit.threadId, leaf)) }
@@ -1592,34 +1594,40 @@ class Session(
                     return@withLock openRoomNotification(activeClient, room, target.threadId)
                 }
 
-                var bot = _state.value.bot(target.botId)
-                if (bot == null) {
-                    val fleet = hydrateFn(activeClient, 50)
-                    _state.update { it.hydrate(fleet) }
-                    notificationSink.setBadge(_state.value.unreadCount)
+                if (_state.value.bot(target.botId)?.forTask(target.threadId) == null) {
+                    if (!refreshNavigationState(activeClient)) return@withLock null
                     _state.value.roomOwningTask(target.threadId)?.let { room ->
                         return@withLock openRoomNotification(activeClient, room, target.threadId)
                     }
-                    bot = _state.value.bot(target.botId)
                 }
 
-                var selected = bot
+                val selected = _state.value.bot(target.botId)
                     ?: throw APIError.Status(404, "That agent no longer exists.")
-                if (target.requiresTaskSwitch(selected.threadId)) {
-                    try {
-                        selected = activeClient.switchTask(selected.id, target.threadId)
-                        _state.update { it.apply(Frame.Bot(selected)) }
-                    } catch (error: Throwable) {
-                        if (error is kotlinx.coroutines.CancellationException) throw error
-                        // The requested task can disappear between notification delivery and the tap.
-                    }
-                }
-                Chat.BotChat(selected.forTask(selected.threadId) ?: selected)
+                Chat.BotChat(selected.forTask(target.threadId)
+                    ?: throw APIError.Status(404, THREAD_GONE_MESSAGE))
             } catch (error: Throwable) {
                 if (error is kotlinx.coroutines.CancellationException) throw error
+                if (client !== activeClient) return@withLock null
                 _actionError.value = error.message
                 null
             }
+        }
+    }
+
+    /** Refresh only navigation metadata; keep already loaded scrollback and live tails. */
+    private suspend fun refreshNavigationState(activeClient: CompanionClient): Boolean {
+        val before = _state.value
+        val fleet = hydrateFn(activeClient, 50)
+        currentCoroutineContext().ensureActive()
+        return gate.withLock {
+            if (client !== activeClient) return@withLock false
+            // A newer live frame wins over this HTTP snapshot, including when
+            // a fresh connection has not established an SSE cursor yet.
+            _state.update { current ->
+                if (current !== before) current else current.copy(bots = fleet.bots, rooms = fleet.groups)
+            }
+            notificationSink.setBadge(_state.value.unreadCount)
+            true
         }
     }
 
@@ -1630,16 +1638,11 @@ class Session(
         threadId: String,
     ): Chat.RoomChat {
         if (room.threadId == threadId) return Chat.RoomChat(room)
-        return try {
-            val switched = activeClient.switchRoomTask(room.id, threadId)
-            _state.update { it.apply(Frame.Room(switched)) }
-            Chat.RoomChat(_state.value.rooms.firstOrNull { it.id == room.id } ?: switched)
-        } catch (error: Throwable) {
-            if (error is kotlinx.coroutines.CancellationException) throw error
-            // Notifications can outlive their task. Open the channel's current
-            // task rather than leaving the person with nowhere to go.
-            Chat.RoomChat(room)
-        }
+        val switched = activeClient.switchRoomTask(room.id, threadId)
+        currentCoroutineContext().ensureActive()
+        if (client !== activeClient) throw CancellationException("The active computer changed.")
+        _state.update { it.apply(Frame.Room(switched)) }
+        return Chat.RoomChat(_state.value.rooms.firstOrNull { it.id == room.id } ?: switched)
     }
 
     fun consumeFocus(messageId: String) {
@@ -1650,11 +1653,11 @@ class Session(
      * A tapped "Opened thread #Title on Scout" chip. Lands on that thread by
      * the route a thread row uses, which only changes what this phone is
      * looking at — a bot mid-turn keeps working where it was. A thread the
-     * computer no longer has still lands on the bot, with a notice, rather
-     * than nowhere.
+     * computer no longer has reports that it is gone, keeping the current
+     * conversation in place.
      *
-     * @return the bot pinned to the thread, or to its current thread when the
-     *   thread is gone; null when opening fails or the connection changes.
+     * @return the bot pinned to the exact thread; null when it is gone,
+     *   opening fails, or the connection changes.
      */
     suspend fun openThread(ref: ThreadRef): Bot? {
         currentCoroutineContext().ensureActive()
@@ -1665,34 +1668,12 @@ class Session(
         }
         _actionError.value = null
         return try {
-            var bot = _state.value.bot(ref.botId)
-            if (bot == null) {
-                val fleet = hydrateFn(activeClient, 50)
-                currentCoroutineContext().ensureActive()
-                if (client !== activeClient) return null
-                _state.update { it.hydrate(fleet) }
-                notificationSink.setBadge(_state.value.unreadCount)
-                bot = _state.value.bot(ref.botId)
+            if (_state.value.bot(ref.botId)?.forTask(ref.threadId) == null) {
+                if (!refreshNavigationState(activeClient)) return null
             }
-            var selected = bot
+            val selected = _state.value.bot(ref.botId)
                 ?: throw APIError.Status(404, "That agent no longer exists.")
-            if (selected.threadId != ref.threadId) {
-                try {
-                    selected = activeClient.switchTask(selected.id, ref.threadId)
-                    currentCoroutineContext().ensureActive()
-                    if (client !== activeClient) return null
-                    _state.update { it.apply(Frame.Bot(selected)) }
-                } catch (error: APIError.Status) {
-                    currentCoroutineContext().ensureActive()
-                    if (client !== activeClient) return null
-                    if (error.code != 404) throw error
-                    // The thread may be gone (deleted since the chip was
-                    // written). The bot's current thread, and a word about it,
-                    // beats a dead tap.
-                    _actionError.value = THREAD_GONE_MESSAGE
-                }
-            }
-            selected.forTask(selected.threadId) ?: selected
+            selected.forTask(ref.threadId) ?: throw APIError.Status(404, THREAD_GONE_MESSAGE)
         } catch (error: Throwable) {
             if (error is kotlinx.coroutines.CancellationException) throw error
             currentCoroutineContext().ensureActive()
@@ -1727,13 +1708,16 @@ class Session(
         }
     }
 
-    suspend fun renameTask(task: BotTask, forBot: Bot, title: String) {
-        val activeClient = client ?: return
-        try {
+    suspend fun renameTask(task: BotTask, forBot: Bot, title: String): Boolean {
+        val activeClient = client ?: return false
+        return try {
             activeClient.renameTask(forBot.id, task.threadId, title)
             refresh()
+            true
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             _actionError.value = error.message
+            false
         }
     }
 
@@ -1774,13 +1758,16 @@ class Session(
         }
     }
 
-    suspend fun renameTask(task: BotTask, forRoom: Room, title: String) {
-        val activeClient = client ?: return
-        try {
+    suspend fun renameTask(task: BotTask, forRoom: Room, title: String): Boolean {
+        val activeClient = client ?: return false
+        return try {
             activeClient.renameRoomTask(forRoom.id, task.threadId, title)
             refresh()
+            true
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             _actionError.value = error.message
+            false
         }
     }
 

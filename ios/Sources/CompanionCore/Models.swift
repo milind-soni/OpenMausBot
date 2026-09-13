@@ -251,6 +251,15 @@ public struct ThreadOpener: Codable, Hashable, Sendable {
     public var at: Double
 }
 
+/// The bot that closed a thread with close_thread, once its result was
+/// read. Absent means the thread is open; the computer clears it the moment
+/// a new turn starts there, so a reopened thread simply loses the stamp.
+public struct ThreadCloser: Codable, Hashable, Sendable {
+    public var botId: String
+    public var name: String
+    public var at: Double
+}
+
 /// A folder within one bot, in the order saved by the desktop.
 public struct BotProject: Codable, Hashable, Identifiable, Sendable {
     public var id: String
@@ -273,12 +282,33 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var alwaysAllow: [String]?
     public var projectId: String?
     public var openedBy: ThreadOpener?
+    public var closedBy: ThreadCloser?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
 
     /// The thread list's quiet second line, worded as the desktop words it.
     public var openedByLabel: String? {
         openedBy.map { "opened by \($0.name)" }
+    }
+
+    /// A bot closed this thread and nothing has happened there since.
+    public var isClosed: Bool { closedBy != nil }
+
+    /// The one line under a title: who closed it once a bot has, otherwise
+    /// who opened it, otherwise nothing. Closed wins because it is the newer
+    /// fact and the reason the row is dimmed.
+    public var bylineLabel: String? {
+        closedBy.map { "closed by \($0.name)" } ?? openedByLabel
+    }
+
+    /// Whether the row must stay in the list regardless of closed state:
+    /// it is running, needs the person, or has something they have not read.
+    public var demandsAttention: Bool {
+        if busy == true || unread == true { return true }
+        switch activity {
+        case "waiting-on-you", "waiting", "working", "running", "queued": return true
+        default: return false
+        }
     }
 }
 

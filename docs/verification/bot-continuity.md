@@ -3,6 +3,7 @@
 ```sh
 pnpm exec vitest run server/setup-mode.test.ts server/bot-setup.e2e.test.ts server/bot-continuity.e2e.test.ts server/independent-threads-api.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
+pnpm exec electron scripts/smoke-approval-modes.cjs --model-ui-only
 ```
 
 The server recipe launches the real app in a temporary home with only the
@@ -27,6 +28,19 @@ wait results, bounded transcripts, and provider-input receipts. Launch
 environments and MCP tokens are not retained. The renderer recipe checks both
 scope buttons in the real model picker, saves a screenshot, changes models,
 checks server persistence, and sends a message through the composer.
+
+The header starts at **Only this thread**; **Thread + bot default** explicitly
+includes group turns and future threads. The desktop model-switch recipe uses
+the real picker and private approval channel against offline providers. It
+checks Cancel, the 390px confirmation layout, switching a Custom Codex thread
+to Claude with Ask in one confirmed operation, then updating a mismatched bot
+default without changing another existing Custom thread. HTTP cannot bypass
+Custom; ordinary Full switches may use the atomic HTTP downgrade. A fresh
+thread adopts the new default, and a sample engineering-handoff request sent
+through the composer completes with the fake provider reply. Screenshots stay
+in `.omb-scratch/verify-evidence/model-switch/`. This proves settings and turn
+dispatch, not the quality of a real model's engineering output. The store test
+also simulates a failed disk write and confirms neither scope changes.
 
 ## Live Claude smoke — 2026-09-12
 

@@ -12,16 +12,24 @@
 ## Driving it
 
 ```sh
-pnpm exec vitest run server/fleet-agent.test.ts server/fleet-cli.test.ts server/fleet.test.ts src/components/WorkspacesSection.test.ts server/request-auth.test.ts
+pnpm exec vitest run server/fleet-agent.test.ts server/fleet-cli.test.ts server/fleet-cli-filesystem.test.ts server/fleet.test.ts src/components/WorkspacesSection.test.ts server/request-auth.test.ts
 ```
 
 The agent test boots the real agent on a temporary socket over a recording
 machine with a temporary filesystem root, drives create, list (reading a
-workspace's own ledger for the month), users, suspend and delete through the
+workspace's own ledger for the month through the usage dependency seam), users, suspend and delete through the
 same client the operator server uses, checks the audit log names every action
 and never a key, and checks refusals: bad names, unknown operations, a failed
 step reported without the tool's secrets, and a plain message when no agent
 exists.
+
+The fleet filesystem suite runs the actual unprivileged child on disposable
+ledgers, including hostile links, special files and oversized input. The
+agent socket fixture checks that unsafe usage returns unavailable/null totals
+without failing other workspace rows or echoing file contents. Neither this
+fixture performs a root deployment or proves actual
+root-to-tenant transitions; qualification still requires a disposable Linux
+server with the real service identities and protections.
 
 On a real server, after `openmausbot fleet init --domain <domain> --operator
 <user>` as root: `systemctl status openmausbot-fleet`, then `ls -l

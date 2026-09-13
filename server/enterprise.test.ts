@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { describeEdition, editionStatus, entitled, loadEnterpriseLayer } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, loadEnterpriseLayer } from "./enterprise.ts";
+import { SessionRegistry } from "./sessions.ts";
 
 const dirs: string[] = [];
 
@@ -22,6 +23,45 @@ afterEach(async () => {
 });
 
 describe("enterprise hook point", () => {
+  it("does not create a hosted bridge unless opted in, and marks partial configuration as hosted", () => {
+    expect(hostedWorkspaceConfigured({})).toBe(false);
+    expect(hostedWorkspaceConfigured({ OMB_PUBLIC_URL: "https://legacy.example.test" })).toBe(false);
+    expect(hostedWorkspaceConfigured({ OMB_ADMIN_URL: "" })).toBe(true);
+    expect(hostedWorkspaceConfigured({ OMB_ADMIN_WORKSPACE: "acme" })).toBe(true);
+    expect(hostedWorkspaceConfigured({ OMB_ADMIN_MEMBERSHIP: "portal" })).toBe(true);
+    const dir = fakeLayer("export const fixture = true;");
+    const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    expect(createWorkspaceAccess({ sessions, cookieName: "session", closeSessionStreams() {}, env: {} })).toBeNull();
+    expect(createWorkspaceAccess({ sessions, cookieName: "session", closeSessionStreams() {}, env: { OMB_ADMIN_WORKSPACE: "acme" } })).toBeNull();
+  });
+  it("requires complete valid hosted configuration before opting into portal membership", () => {
+    const env = { OMB_ADMIN_URL: "https://admin.example.test", OMB_ADMIN_WORKSPACE: "acme", OMB_PUBLIC_URL: "https://acme.example.test" };
+    expect(hostedWorkspaceConfiguration(env)?.portalMembership).toBe(false);
+    expect(hostedWorkspaceConfiguration({ ...env, OMB_ADMIN_MEMBERSHIP: "portal" })?.portalMembership).toBe(true);
+    expect(hostedWorkspaceConfiguration({ ...env, OMB_ADMIN_MEMBERSHIP: "local" })?.portalMembership).toBe(false);
+    for (const patch of [{ OMB_ADMIN_URL: "" }, { OMB_PUBLIC_URL: "http://acme.example.test" }, { OMB_ADMIN_WORKSPACE: "" }, { OMB_ADMIN_MEMBERSHIP: "PORTAL" }]) {
+      expect(hostedWorkspaceConfiguration({ ...env, OMB_ADMIN_MEMBERSHIP: "portal", ...patch })).toBeNull();
+    }
+    const dir = fakeLayer("export const fixture = true;");
+    const invalid = { OMB_ADMIN_MEMBERSHIP: "portal" };
+    const sessions = new SessionRegistry({ file: join(dir, "sessions.json"), portalMembership: hostedWorkspaceConfiguration(invalid)?.portalMembership === true });
+    const issued = sessions.issuePortal({ email: "member@example.test", grant: "g".repeat(43), scopes: ["client"] });
+    expect(sessions.authenticate(issued.token)).toBeNull();
+  });
+  it("passes the live admin entitlement to the optional dynamically loaded bridge", async () => {
+    const dir = fakeLayer(`
+      export function register() { return { customer: 'Fixture', features: ['admin'], expiresAt: null }; }
+      export function createWorkspaceAccess(options) {
+        return { handlePublic: async () => options.entitled(), authorize: async () => null, revalidate: async () => {} };
+      }
+    `);
+    await loadEnterpriseLayer({ dir, licenseKey: "fixture" });
+    const sessions = new SessionRegistry({ file: join(dir, "sessions.json") });
+    const bridge = createWorkspaceAccess({ sessions, cookieName: "session", closeSessionStreams() {}, env: { OMB_ADMIN_WORKSPACE: "acme" } });
+    expect(await bridge!.handlePublic(null as never, null as never, null as never)).toBe(true);
+    await loadEnterpriseLayer({ dir: join(dir, "absent") });
+    expect(await bridge!.handlePublic(null as never, null as never, null as never)).toBe(false);
+  });
   it("is the open-source edition when the folder is absent, and says so if a key was set anyway", async () => {
     const absent = join(tmpdir(), "omb-enterprise-absent");
     expect(await loadEnterpriseLayer({ dir: absent, licenseKey: undefined })).toEqual({ edition: "oss", features: [] });

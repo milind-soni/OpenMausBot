@@ -17,10 +17,7 @@ on:
       - .github/workflows/npm-package.yml
 
 permissions:
-  # write: the release-tag run attaches the tarball to the GitHub release.
-  # Pull-request runs from forks get a read-only token regardless.
-  contents: write
-  id-token: write
+  contents: read
 
 jobs:
   pack-and-prove:
@@ -67,20 +64,57 @@ jobs:
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
           grep -q "run \`openmausbot login\` first" tunnel.log
           kill %1; wait %1 || true
+      - name: Save the proven tarball (release tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-package
+          path: release/npm/openmausbot-*.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-npm:
+    name: publish to npm
+    needs: pack-and-prove
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: release/npm
       # Trusted publishing: npm trusts this repository's workflow through the
-      # OIDC token (`id-token: write` above), so no registry token is stored
+      # OIDC token, so no registry token is stored
       # anywhere and no one-time password is asked for. One-time setup on
       # npmjs.com: package → Settings → Publishing access → GitHub Actions,
       # owner milind-soni, repository OpenMausBot, workflow npm-package.yml.
       # Needs npm ≥ 11.5 (Node 24 ships it).
-      - name: Publish to npm (release tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        working-directory: release/npm
+      - name: Publish to npm
         run: |
           npm --version
-          npm publish --access public --provenance
-      - name: Note the npm package on the GitHub release (release tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+          npm publish release/npm/openmausbot-*.tgz --access public --provenance
+
+  update-github-release:
+    name: update GitHub release
+    needs: publish-npm
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-package
+          path: release/npm
+      - name: Note the npm package on the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -96,8 +130,7 @@ jobs:
       # for people who install from a download rather than the registry. The
       # release exists by the time the tag does (publishing it is what creates
       # the tag); a tag pushed without one is left alone.
-      - name: Attach the tarball to the GitHub release (release tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Attach the tarball to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

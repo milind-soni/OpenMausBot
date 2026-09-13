@@ -470,6 +470,31 @@ class DecodingTest {
     }
 
     @Test
+    fun decodesAThreadABotClosedAndOneStillOpen() {
+        // close_thread stamps who closed a thread; an open thread — and every
+        // thread from an older computer — has no stamp and decodes as open.
+        val closed = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t2","title":"Ship it","createdAt":1,
+               "openedBy":{"botId":"pm","name":"Parker","at":2},
+               "closedBy":{"botId":"pm","name":"Parker","at":9}}""",
+        )
+        assertEquals(ThreadCloser("pm", "Parker", 9.0), closed.closedBy)
+        assertTrue(closed.isClosed)
+        assertEquals("closed by Parker", closed.bylineLabel)
+
+        val open = CompanionJson.decodeFromString<BotTask>(
+            """{"threadId":"t1","title":"","createdAt":1,"openedBy":{"botId":"pm","name":"Parker","at":2}}""",
+        )
+        assertNull(open.closedBy)
+        assertFalse(open.isClosed)
+        assertEquals("opened by Parker", open.bylineLabel)
+        assertNull(CompanionJson.decodeFromString<BotTask>("""{"threadId":"t1","title":"","createdAt":1}""").bylineLabel)
+        decodeFixture<Fleet>("bots-paged").bots.flatMap { it.tasks.orEmpty() }.forEach { task ->
+            assertFalse(task.isClosed, task.threadId)
+        }
+    }
+
+    @Test
     fun aThreadOpenedByABotSaysSoInTheList() {
         // Same words as the desktop's thread list, so a person reading both
         // screens reads one sentence.

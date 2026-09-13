@@ -1,5 +1,6 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.CompanionState
 import com.openmausbot.companion.core.Message
@@ -36,7 +37,7 @@ class UpdatesTest {
             messages = mapOf("thread-bot-1" to listOf(options("m1", pendingCard()))),
         )
         val update = state.updates.single()
-        assertEquals("bot-1", update.id)
+        assertEquals("bot:bot-1:thread-bot-1", update.id)
         assertEquals(UpdateKind.NEEDS_YOU, update.kind)
         assertEquals("ls -la", update.line)
         assertEquals(listOf("Allow", "Deny"), assertNotNull(update.card).options)
@@ -99,6 +100,90 @@ class UpdatesTest {
             messages = mapOf("thread-bot-1" to listOf(options("m1", pendingCard()))),
         )
         assertEquals(listOf(UpdateKind.NEEDS_YOU), state.updates.map { it.kind })
+    }
+
+    @Test
+    fun `each sibling keeps its own activity title and transcript`() {
+        val state = CompanionState(
+            bots = listOf(bot(name = "Pepper").copy(
+                tasks = listOf(
+                    BotTask("thread-bot-1", "Gmail", 0.0, activity = "waiting-on-you", busy = true),
+                    BotTask("icloud", "iCloud", 1.0, busy = true),
+                    BotTask("queued", "Outlook", 2.0, activity = "queued", unread = true),
+                    BotTask("done", "Calendar", 3.0, unread = true),
+                ),
+            )),
+            streaming = mapOf("icloud" to "Sorting the iCloud inbox"),
+            messages = mapOf("done" to listOf(text("done-1", "Calendar is ready"))),
+        )
+
+        val updates = state.updates
+        assertEquals(listOf("thread-bot-1", "icloud", "queued", "done"), updates.map { it.chat.threadId })
+        assertEquals(listOf("Gmail", "iCloud", "Outlook", "Calendar"), updates.map { it.chat.threadTitle })
+        assertEquals(listOf("Pepper", "Pepper", "Pepper", "Pepper"), updates.map { it.chat.name })
+        assertEquals(
+            listOf(UpdateKind.NEEDS_YOU, UpdateKind.WORKING, UpdateKind.WORKING, UpdateKind.TO_REVIEW),
+            updates.map { it.kind },
+        )
+        assertEquals(
+            listOf("Waiting on you", "Sorting the iCloud inbox", "Queued — waiting for an available slot", "Calendar is ready"),
+            updates.map { it.line },
+        )
+        assertEquals(4, updates.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun `newest approval dedup is per thread and preserves the addressed card`() {
+        val state = CompanionState(
+            bots = listOf(bot(busy = true).copy(
+                tasks = listOf(
+                    BotTask("thread-bot-1", "Gmail", 0.0, busy = true),
+                    BotTask("icloud", "iCloud", 1.0, busy = true),
+                    BotTask("working", "Website", 2.0, busy = true),
+                ),
+            )),
+            messages = mapOf(
+                "thread-bot-1" to listOf(
+                    options("old", pendingCard().copy(requestId = "old"), at = 1.0),
+                    options("gmail", pendingCard().copy(requestId = "gmail"), at = 3.0),
+                ),
+                "icloud" to listOf(options("icloud", pendingCard().copy(requestId = "icloud"), at = 2.0)),
+            ),
+        )
+
+        val updates = state.updates
+        assertEquals(listOf("thread-bot-1", "icloud", "working"), updates.map { it.chat.threadId })
+        assertEquals(listOf("gmail", "icloud", null), updates.map { it.card?.requestId })
+        assertEquals(listOf(UpdateKind.NEEDS_YOU, UpdateKind.NEEDS_YOU, UpdateKind.WORKING), updates.map { it.kind })
+        assertEquals(3, updates.map { it.id }.toSet().size)
+    }
+
+    @Test
+    fun `internal routine runs stay hidden until an explicit approval needs an answer`() {
+        val state = CompanionState(
+            bots = listOf(bot().copy(
+                threadId = "internal",
+                busy = true,
+                unread = true,
+                tasks = listOf(
+                    BotTask("internal", "Internal run", 0.0, busy = true, unread = true, routineRunId = "run-1"),
+                    BotTask("result", "Routine result", 1.0, unread = true),
+                ),
+            )),
+        )
+        assertEquals(listOf("result"), state.updates.map { it.chat.threadId })
+
+        val needsAnswer = state.copy(messages = mapOf("internal" to listOf(options("ask", pendingCard()))))
+        assertEquals(listOf("internal", "result"), needsAnswer.updates.map { it.chat.threadId })
+        assertEquals("Internal run", needsAnswer.updates.first().chat.threadTitle)
+        assertEquals(UpdateKind.NEEDS_YOU, needsAnswer.updates.first().kind)
+        assertNotNull(needsAnswer.updates.first().card)
+    }
+
+    @Test
+    fun `an explicit empty task catalog does not resurrect the owner's stale activity`() {
+        val state = CompanionState(bots = listOf(bot(busy = true).copy(unread = true, tasks = emptyList())))
+        assertEquals(emptyList(), state.updates)
     }
 
     @Test
@@ -252,7 +337,7 @@ class UpdatesTest {
             messages = mapOf("thread-room-1" to listOf(activity("m1", "Read"))),
         )
         val update = state.updates.single()
-        assertEquals("room-1", update.id)
+        assertEquals("room:room-1:thread-room-1", update.id)
         assertEquals(UpdateKind.WORKING, update.kind)
         assertEquals("Read", update.line)
     }
@@ -290,7 +375,7 @@ class UpdatesTest {
         )
         assertEquals(
             listOf("bot-4", "bot-2", "room-1", "bot-1", "bot-3"),
-            state.updates.map { it.id },
+            state.updates.map { it.chat.id },
         )
         assertEquals(
             listOf(

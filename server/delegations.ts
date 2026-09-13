@@ -19,8 +19,8 @@ import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visib
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
 import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
-import { peerAllowed } from "./peer-roster.ts";
-import { sectionKey, type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
+import { canAccessTeam, peerAllowed } from "./peer-roster.ts";
+import { type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
 
 export interface DelegationItem {
   toBotId: string;
@@ -53,17 +53,21 @@ interface PendingDelegationItem extends DelegationItem {
   /** The bot that queued this handoff. Stored explicitly because a shared
    * channel's thread is not owned by any single bot. */
   sourceBotId: string;
-  /** Busy-target retries so far. The item stays queued (not canceled) while
-   * the target is busy, and is retried when any of the target's turns
-   * settles — up to MAX_BUSY_ATTEMPTS. */
-  attempts: number;
-  /** True after this item observed the target's current busy period. Other
-   * queue activity must not count that same period again; the target's idle
-   * transition clears this marker before the next retry. */
+  /** Start of this handoff's current delivery window (epoch ms). Restoring
+   * an already elapsed window starts a fresh one; see _loadPending. */
+  queuedAt: number;
+  /** This handoff has already posted its "waiting" chip. One chip per
+   * handoff, not one per busy period. */
+  waitAnnounced?: boolean;
+  /** Parked on the target's current busy period. The target's idle
+   * transition (releaseDelegationsWaitingOn) clears it and re-drains the
+   * source thread; nothing else counts or retries. */
   waitingOnBusy?: boolean;
 }
 
-export type DelegationOutcome = "done" | "failed" | "denied" | "busy_gave_up" | "dropped" | "error";
+/** `busy_gave_up` is only read back from receipts written before handoffs
+ * stopped counting busy periods; nothing produces it any more. */
+export type DelegationOutcome = "done" | "failed" | "denied" | "expired" | "busy_gave_up" | "dropped" | "error";
 
 /** The durable terminal record of one handoff: what the delegating bot reads
  * back with check_delegation / wait_delegation. Bounded and pruned — this is
@@ -104,7 +108,13 @@ const RECEIPTS_FILE = join(DATA_DIR, "delegation-receipts.json");
 const MAX_RECEIPTS = 100;
 const RECEIPT_MAX_AGE_MS = 48 * 60 * 60 * 1000;
 const RESULT_MAX_CHARS = 4_000;
-export const MAX_BUSY_ATTEMPTS = 3;
+
+/** A busy handoff's delivery window. An available target may still pick up
+ * an overdue item. At restart, elapsed windows are renewed before any boot
+ * dispatch, so the first recovered job cannot cause the remaining backlog
+ * to expire. This is not an uptime clock: sleep within a running process
+ * still counts, and a non-expired restored window keeps its deadline. */
+export const DELEGATION_TTL_MS = 24 * 60 * 60 * 1000;
 
 let receipts: DelegationReceipt[] = [];
 
@@ -140,10 +150,12 @@ export function findDelegationReceipt(id: string): DelegationReceipt | null {
 }
 
 /** A still-queued task's routing info, or null once it dispatched/settled. */
-export function pendingDelegationInfo(id: string): { sourceThreadId: string; toBotId: string; attempts: number } | null {
+export function pendingDelegationInfo(
+  id: string,
+): { sourceThreadId: string; toBotId: string; queuedAt: number; waiting: boolean } | null {
   for (const [sourceThreadId, items] of pendingDelegations) {
     const item = items.find((candidate) => candidate.id === id);
-    if (item) return { sourceThreadId, toBotId: item.toBotId, attempts: item.attempts };
+    if (item) return { sourceThreadId, toBotId: item.toBotId, queuedAt: item.queuedAt, waiting: item.waitingOnBusy === true };
   }
   return null;
 }
@@ -158,8 +170,10 @@ export function threadsWaitingOn(toBotId: string): string[] {
 }
 
 /** Mark a target's observed busy period as finished and return the source
- * threads that should be retried. This makes retries count distinct busy
- * periods, not unrelated drain requests on the same source thread.
+ * threads that should be retried. A handoff waits until the target is free,
+ * bounded only by the 24-hour expiry — this just clears the "parked on a
+ * busy period" marker so the next drain re-evaluates it, rather than
+ * counting or limiting retries.
  * `only` narrows the release: a bot that is still busy in one thread has
  * nevertheless freed a slot for the fresh-thread handoffs waiting on it,
  * while its active-thread handoffs go on waiting for it to go idle. */
@@ -189,8 +203,10 @@ function savePending(): void {
 /** Load what a previous process left queued. Missing or corrupt → empty. */
 export function _loadPending(): void {
   pendingDelegations.clear();
+  let backfilled = false;
   try {
     const raw = JSON.parse(readFileSync(DELEGATIONS_FILE, "utf8")) as Record<string, unknown>;
+    const now = Date.now();
     for (const [threadId, list] of Object.entries(raw)) {
       if (!Array.isArray(list)) continue;
       const items = list.flatMap((value): PendingDelegationItem[] => {
@@ -201,6 +217,19 @@ export function _loadPending(): void {
           typeof item.message !== "string" ||
           !Number.isFinite(item.depth)
         ) return [];
+        // Restore every elapsed window before boot dispatch. Merely checking
+        // whether the target is idle loses the second old job as soon as the
+        // first recovered job occupies it. Invalid/legacy timestamps get the
+        // same fresh window; valid, unexpired windows keep their deadline.
+        const hasUsableQueuedAt = Number.isFinite(item.queuedAt) && item.queuedAt! <= now &&
+          now - item.queuedAt! < DELEGATION_TTL_MS;
+        if (!hasUsableQueuedAt) backfilled = true;
+        // A legacy item saved with attempts >= 1 already posted its old
+        // "retry n/3" chip under the since-removed bounded-retry scheme; load
+        // it as already announced so it doesn't post a second waiting chip
+        // the first time this queue drains.
+        const legacyAttempts = (value as { attempts?: unknown }).attempts;
+        const legacyAlreadyAnnounced = typeof legacyAttempts === "number" && Number.isFinite(legacyAttempts) && legacyAttempts > 0;
         const loaded: PendingDelegationItem = {
           id: typeof item.id === "string" && item.id ? item.id : newId(),
           sourceBotId: typeof item.sourceBotId === "string" && item.sourceBotId ? item.sourceBotId : "",
@@ -208,10 +237,11 @@ export function _loadPending(): void {
           message: item.message,
           ...(typeof item.reason === "string" ? { reason: item.reason } : {}),
           depth: Math.max(0, Math.trunc(item.depth!)),
-          attempts: Number.isFinite(item.attempts) ? Math.max(0, Math.trunc(item.attempts!)) : 0,
+          queuedAt: hasUsableQueuedAt ? Math.min(item.queuedAt!, now) : now,
         };
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
         if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
+        if (item.waitAnnounced === true || legacyAlreadyAnnounced) loaded.waitAnnounced = true;
         if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
           loaded.originatingGroupId = item.originatingGroupId;
         }
@@ -225,6 +255,9 @@ export function _loadPending(): void {
   } catch {
     /* fresh install, or unreadable — start empty */
   }
+  // Persist repaired/renewed windows before dispatch. A quick restart loop
+  // must retain that still-valid deadline, not renew it on every load.
+  if (backfilled) savePending();
   receipts = [];
   try {
     const rawReceipts = JSON.parse(readFileSync(RECEIPTS_FILE, "utf8"));
@@ -313,7 +346,7 @@ export function queueDelegation(
       ? originatingGroup.id
       : undefined;
   const id = newId();
-  list.push({ ...item, id, sourceBotId: from.id, attempts: 0, ...(groupId ? { originatingGroupId: groupId } : {}) });
+  list.push({ ...item, id, sourceBotId: from.id, queuedAt: Date.now(), ...(groupId ? { originatingGroupId: groupId } : {}) });
   pendingDelegations.set(sourceThreadId, list);
   savePending();
   const sourceGroup = sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined;
@@ -415,8 +448,9 @@ export function drainDelegations(
           console.error("delegation failed and could not be reported", reportError);
         }
       } finally {
-        // A requeued item (busy target, retries left) stays for the drain
-        // that the target's own settling turn will trigger.
+        // A requeued item (target still busy, waiting until it's free or the
+        // 24-hour expiry) stays for the drain that the target's own settling
+        // turn will trigger.
         const stillQueued = pendingDelegations.get(threadId)?.some((candidate) => candidate.id === item.id);
         if (outcome !== "requeued") acknowledgeDelegation(threadId, item.id);
         if (outcome === "settled" && stillQueued) {
@@ -433,8 +467,8 @@ export function drainDelegations(
     drainingThreads.delete(threadId);
     // A later turn may have queued and settled while this thread was
     // waiting for approval. Only items OUTSIDE our snapshot warrant a fresh
-    // drain — re-draining a just-requeued item would burn its bounded busy
-    // retries in milliseconds instead of once per target settle.
+    // drain — re-draining a just-requeued item would spin it in a tight
+    // loop instead of once per target settle.
     const redrainRequested = queuedRedrains.delete(threadId);
     const snapshotIds = new Set(snapshot.map((item) => item.id));
     const hasNewItems = pendingDelegations.get(threadId)?.some((item) => !snapshotIds.has(item.id)) ?? false;
@@ -452,6 +486,83 @@ function acknowledgeDelegation(threadId: string, itemId: string): void {
   if (remaining.length) pendingDelegations.set(threadId, remaining);
   else pendingDelegations.delete(threadId);
   savePending();
+}
+
+const isExpired = (item: PendingDelegationItem, now: number): boolean => now - item.queuedAt >= DELEGATION_TTL_MS;
+
+/** Record an expired handoff. The chip goes into the source thread only
+ * while it still belongs to the bot that owns the handoff — a deleted
+ * conversation gets the receipt and nothing else. */
+function expireDelegation(bus: CommsBus, sourceThreadId: string, item: PendingDelegationItem, ownerId: string): void {
+  const name = bus.store.bot(item.toBotId)?.name ?? item.toBotId;
+  recordDelegationReceipt({
+    id: item.id,
+    sourceThreadId,
+    toBotId: item.toBotId,
+    toBotName: name,
+    status: "expired",
+    result: `@${name} was not free to take this for 24 hours`,
+  });
+  if (!sourceThreadBelongsToBot(bus.store, ownerId, sourceThreadId)) return;
+  bus.store.appendMessage(sourceThreadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Delegation to @${name} expired — not picked up within 24 hours`, ok: false },
+  });
+}
+
+/** Past its 24 hours AND unable to be delivered right now — the same rule
+ * `processOne` applies, so the hourly sweep and a live drain never disagree
+ * about which items are actually stuck. A target that was deleted counts as
+ * "cannot take the turn": there is nothing to wait on, so such items still
+ * expire even though there is no bot left to test busy/free against. */
+function isDueForExpiry(bus: CommsBus, item: PendingDelegationItem, now: number): boolean {
+  if (!isExpired(item, now)) return false;
+  const target = bus.store.bot(item.toBotId);
+  if (!target) return true;
+  return !targetCanTakeTurn(bus, target, item);
+}
+
+/** Expire every queued handoff past DELEGATION_TTL_MS that still cannot be
+ * delivered, wherever it waits. A drain already expires what it touches;
+ * this covers the handoff nothing drains — a target that never settles
+ * while its source sits idle. A thread mid-drain is skipped: that drain
+ * owns its items and expires them itself. An item whose target could take
+ * the turn right now is left queued instead — the next drain on its source
+ * thread (or the next `retryDelegationsWaitingOn`) delivers it; the sweep
+ * only cleans up what is genuinely stuck. Each expiry is reported through
+ * `onSettled`, the same hook a drain uses to wake the delegating bot.
+ * Returns how many expired. */
+export function expireStaleDelegations(
+  bus: CommsBus,
+  now: number,
+  onSettled?: (receipt: DelegationReceipt) => void,
+): number {
+  const expired: DelegationReceipt[] = [];
+  for (const [threadId, items] of pendingDelegations) {
+    if (drainingThreads.has(threadId)) continue;
+    const due = items.filter((item) => isDueForExpiry(bus, item, now));
+    if (!due.length) continue;
+    const remaining = items.filter((item) => !isDueForExpiry(bus, item, now));
+    if (remaining.length) pendingDelegations.set(threadId, remaining);
+    else pendingDelegations.delete(threadId);
+    const ownerId = bus.store.botByThread(threadId)?.id;
+    for (const item of due) {
+      expireDelegation(bus, threadId, item, ownerId ?? item.sourceBotId);
+      const receipt = findDelegationReceipt(item.id);
+      if (receipt) expired.push(receipt);
+    }
+  }
+  if (!expired.length) return 0;
+  savePending();
+  for (const receipt of expired) {
+    try {
+      onSettled?.(receipt);
+    } catch (error) {
+      console.error("delegation expired but its source could not be resumed", error);
+    }
+  }
+  return expired.length;
 }
 
 /** Drop a thread's queued handoffs without running them, telling the user
@@ -536,7 +647,17 @@ async function processOne(
   if (dropIfThreadGone(bus, target, sourceThreadId, item)) {
     return "settled";
   }
-  const held = holdWhileTargetBusy(bus, target, sourceThreadId, item);
+  // Past its 24 hours AND the target still cannot take the turn: this is the
+  // bound on a busy wait. Use the same free/busy test as holdWhileTargetBusy;
+  // an available target gets even an overdue item. Restart recovery renews
+  // elapsed windows in _loadPending before any target becomes busy. Decide
+  // before announcing a wait so an item cannot post both chips in one pass.
+  const canTakeTurn = targetCanTakeTurn(bus, target, item);
+  if (!canTakeTurn && isExpired(item, Date.now())) {
+    expireDelegation(bus, sourceThreadId, item, sender.id);
+    return "settled";
+  }
+  const held = holdWhileTargetBusy(bus, target, sourceThreadId, item, canTakeTurn);
   if (held) return held;
   if (item.waitingOnBusy) {
     delete item.waitingOnBusy;
@@ -594,7 +715,15 @@ async function processOne(
     if (dropIfThreadGone(bus, current, sourceThreadId, item)) {
       return "settled";
     }
-    const heldAfterApproval = holdWhileTargetBusy(bus, current, sourceThreadId, item);
+    // Approval may have waited for minutes (or, with approvalAlreadyGranted,
+    // up to 24h since the original ask_bot approval) — recheck the same
+    // free/busy-gated expiry as the pre-approval path before dispatching.
+    const canTakeTurnAfterApproval = targetCanTakeTurn(bus, current, item);
+    if (!canTakeTurnAfterApproval && isExpired(item, Date.now())) {
+      expireDelegation(bus, sourceThreadId, item, currentSender.id);
+      return "settled";
+    }
+    const heldAfterApproval = holdWhileTargetBusy(bus, current, sourceThreadId, item, canTakeTurnAfterApproval);
     if (heldAfterApproval) return heldAfterApproval;
     sender = currentSender;
     target = current;
@@ -617,63 +746,56 @@ async function processOne(
   return "dispatched";
 }
 
-/** A busy target holds the handoff. What "busy" means depends on where the
- * turn will run: a classic delegation lands in the target's active thread,
- * so it waits for the bot to go idle, with bounded retries so a stuck peer
- * cannot pin the handoff forever. A fresh-thread handoff needs only a free
- * slot, and waits in line for one without a bound — it IS the line, the
- * same one a person's message joins at that limit. Returns null when the
- * target can take the turn now. */
+/** "Is the target free to take this handoff right now?" What "busy" means
+ * depends on where the turn will run: a classic delegation lands in the
+ * target's active thread, so it needs the bot to be idle; a fresh-thread
+ * handoff needs only a free slot. This is the single free/busy test shared
+ * by the expiry decision in `processOne` and the hold decision below, so
+ * the two can never disagree about whether a handoff could have been
+ * delivered right now. */
+function targetCanTakeTurn(bus: CommsBus, target: BotRecord, item: PendingDelegationItem): boolean {
+  return item.targetThreadId
+    ? (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy)
+    : !target.busy;
+}
+
+/** A busy target holds the handoff. Neither counts busy periods — the only
+ * bound is DELEGATION_TTL_MS, checked in processOne before this runs (using
+ * the same `targetCanTakeTurn` test, passed in as `canTakeTurn` when the
+ * caller already computed it so the two checks can't disagree). One waiting
+ * chip per handoff, worded for what the target is actually doing. Returns
+ * null when the target can take the turn now. */
 function holdWhileTargetBusy(
   bus: CommsBus,
   target: BotRecord,
   sourceThreadId: string,
   item: PendingDelegationItem,
-): "requeued" | "settled" | null {
-  if (item.targetThreadId) {
-    if (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy) return null;
-    if (item.waitingOnBusy) return "requeued";
-    item.waitingOnBusy = true;
-    savePending();
-    // one chip per wait, not one per retry: the line moves on every settle
-    if (item.attempts === 0) {
-      item.attempts = 1;
-      const title = bus.store.taskByThread(target.id, item.targetThreadId)?.title ?? "thread";
-      bus.store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `Thread #${title} on @${target.name} waiting for a free slot` },
-      });
-    }
-    return "requeued";
-  }
-  if (!target.busy) return null;
+  canTakeTurn: boolean = targetCanTakeTurn(bus, target, item),
+): "requeued" | null {
+  if (canTakeTurn) return null;
   if (item.waitingOnBusy) return "requeued";
-  item.attempts += 1;
   item.waitingOnBusy = true;
-  if (item.attempts < MAX_BUSY_ATTEMPTS) {
-    savePending();
+  if (!item.waitAnnounced) {
+    item.waitAnnounced = true;
     bus.store.appendMessage(sourceThreadId, {
       role: "bot",
       kind: "activity",
-      tool: { name: `Delegation to @${target.name} waiting — they're busy (retry ${item.attempts}/${MAX_BUSY_ATTEMPTS} when they finish)` },
+      tool: { name: waitingChipText(bus.store, target, item) },
     });
-    return "requeued";
   }
-  recordDelegationReceipt({
-    id: item.id,
-    sourceThreadId,
-    toBotId: target.id,
-    toBotName: target.name,
-    status: "busy_gave_up",
-    result: `@${target.name} stayed busy through ${MAX_BUSY_ATTEMPTS} retries`,
-  });
-  bus.store.appendMessage(sourceThreadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: `Delegation to @${target.name} canceled — still busy after ${MAX_BUSY_ATTEMPTS} retries`, ok: false },
-  });
-  return "settled";
+  savePending();
+  return "requeued";
+}
+
+function waitingChipText(store: Store, target: BotRecord, item: PendingDelegationItem): string {
+  if (item.targetThreadId) {
+    const title = store.taskByThread(target.id, item.targetThreadId)?.title ?? "thread";
+    return `Thread #${title} on @${target.name} waiting for a free slot`;
+  }
+  if (target.activity === "waiting-on-you") {
+    return `Waiting for @${target.name}, who's waiting on you — it'll go through after you answer`;
+  }
+  return `Delegation to @${target.name} waiting — they're busy; it'll go through when they're free`;
 }
 
 /** The thread a fresh-thread handoff was opened in may be deleted while the
@@ -723,8 +845,8 @@ function dropIfUnreachable(
   sourceThreadId: string,
   item: PendingDelegationItem,
 ): boolean {
-  const sectionsDiffer = sectionKey(sender.section) !== sectionKey(target.section);
-  if (!sectionsDiffer && peerAllowed(sender, target.id)) return false;
+  const sectionsDiffer = !canAccessTeam(sender, target.section);
+  if (!sectionsDiffer && !target.hidden && peerAllowed(sender, target.id)) return false;
   const reason = sectionsDiffer
     ? "bots now belong to different sections"
     : `@${target.name} is no longer an allowed peer`;

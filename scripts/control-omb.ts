@@ -334,7 +334,19 @@ export async function launchVerificationServer(
   /** A stand-in enterprise layer (the folder shape core loads) and the key
    * it should accept, so a recipe can prove entitled behaviour offline. */
   enterprise?: { dir: string; licenseKey: string },
+  room?: { scripted: boolean },
+  /** Optional repository-owned fake providers for multi-engine setup checks. */
+  extraProviders: Array<"codex"> = [],
+  /** Programmatic tests only: an owned loopback Box provider, never a live account. */
+  boxFixtureApi?: string,
 ): Promise<VerificationServer> {
+  if (boxFixtureApi) {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
+      throw new ControlOmbError("Box verification requires an explicit loopback HTTP provider");
+    }
+    try { new URL(boxFixtureApi); }
+    catch { throw new ControlOmbError("Box verification requires a valid loopback port"); }
+  }
   if (localVm) {
     const endpoint = new URL(localVm.host);
     if (endpoint.protocol !== "ssh:" || endpoint.hostname !== "127.0.0.1" || endpoint.password) {
@@ -354,11 +366,16 @@ export async function launchVerificationServer(
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `server-${Date.now()}-${process.pid}.log`);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
+    ...(boxFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
     instances: {
+      ...(extraProviders.includes("codex") ? { codex: {
+        driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+      } } : {}),
       claude: {
         driver: "claudeAgent",
         displayName: "Verification fixture",
         config: { cli: FAKE_CLI },
+        ...(room?.scripted ? { environment: { FAKE_CLAUDE_ROOM_PLAN: join(dataDir, "room-plan.json") } } : {}),
       },
     },
   }, null, 2));
@@ -415,6 +432,7 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
+  if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
     cwd: ROOT,
     env: childEnv,

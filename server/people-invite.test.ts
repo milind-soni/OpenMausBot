@@ -1,8 +1,8 @@
 // End to end: adding people to a hosted workspace. The owner bootstraps the
 // first admin from the box, that admin signs in with an emailed code (the
 // control plane is stubbed) and, through the same requests Settings → People
-// sends, invites a member, promotes them, removes them and revokes their
-// device. Everything the People card reads answers in the shape it renders.
+// sends, invites a member, promotes them and removes them, immediately ending
+// their account sessions. Everything the People card reads answers in the shape it renders.
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
@@ -152,6 +152,8 @@ afterAll(async () => {
 describe("adding people to a hosted workspace", () => {
   let ada: (path: string, init?: CallInit) => Promise<Reply>;
   let bobCookie = "";
+  let bobAdminCookie = "";
+  let bobTicket = "";
 
   it("offers no email sign-in until the owner names the first admin", async () => {
     expect((await remote("/.well-known/openmausbot/environment")).body.capabilities.emailSignIn).toBe(false);
@@ -208,12 +210,16 @@ describe("adding people to a hosted workspace", () => {
     expect(listed.body.sessions.find((s: { email?: string; label: string }) => s.email === BOB)?.label).toBe("Bob's phone");
   });
 
-  it("applies a promotion to the next sign-in, and a removal to every new one", async () => {
+  it("applies a promotion to the next sign-in, and refuses new sign-ins after removal", async () => {
     expect((await ada("/api/config", { method: "PUT", body: { signIn: { admins: [ADA, BOB], members: [] } } })).status).toBe(200);
     // the device Bob already has keeps the scopes it was issued with
     expect((await as(bobCookie)("/api/config", { method: "PUT", body: { language: "en" } })).status).toBe(403);
     const again = await signIn(BOB, "Bob's laptop");
     expect(again.reply.body.session.scopes).toEqual(["admin", "client"]);
+    bobAdminCookie = again.cookie;
+    const ticket = await as(bobCookie)("/api/auth/stream-ticket", { body: {} });
+    expect(ticket.status).toBe(200);
+    bobTicket = ticket.body.ticket;
 
     expect((await ada("/api/config", { method: "PUT", body: { signIn: { admins: [ADA], members: [] } } })).status).toBe(200);
     const refused = await remote("/api/auth/email/start", { body: { email: BOB } });
@@ -222,14 +228,20 @@ describe("adding people to a hosted workspace", () => {
     expect(stub.calls.filter((c) => c === "POST /api/auth/email-otp/send-verification-otp")).toHaveLength(3);
   });
 
-  it("keeps a removed person's devices until an admin revokes them, as the card says", async () => {
-    expect((await as(bobCookie)("/api/bots")).status).toBe(200);
+  it("immediately revokes every removed account device and its tickets, without reviving them on reinvitation", async () => {
+    expect((await as(bobCookie)("/api/bots")).status).toBe(401);
+    expect((await as(bobAdminCookie)("/api/bots")).status).toBe(401);
+    expect((await remote(`/api/events?ticket=${bobTicket}`)).status).toBe(401);
     const listed = await ada("/api/auth/sessions");
     const bobs = listed.body.sessions.filter((s: { email?: string }) => s.email === BOB);
-    expect(bobs).toHaveLength(2);
-    for (const session of bobs) expect((await ada(`/api/auth/sessions/${session.id}`, { method: "DELETE" })).status).toBe(200);
-    expect((await as(bobCookie)("/api/bots")).status).toBe(401);
+    expect(bobs).toHaveLength(0);
     expect((await ada("/api/auth/sessions")).body.sessions.map((s: { email?: string }) => s.email)).toEqual([ADA]);
+    expect((await ada("/api/config", { method: "PUT", body: { signIn: { admins: [ADA], members: [BOB] } } })).status).toBe(200);
+    expect((await as(bobCookie)("/api/bots")).status).toBe(401);
+    expect((await as(bobAdminCookie)("/api/bots")).status).toBe(401);
+    const fresh = await signIn(BOB, "Bob's fresh sign-in");
+    expect(fresh.reply.status).toBe(200);
+    expect((await as(fresh.cookie)("/api/bots")).status).toBe(200);
   });
 
   it("welcomes a whole domain from one entry", async () => {

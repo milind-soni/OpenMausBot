@@ -12,7 +12,7 @@ function Fixture() {
   const bot = state.bots.find(candidate => candidate.id === new URLSearchParams(location.search).get("bot"));
   return <div className="flex h-screen flex-col bg-app text-ink">
     {state.error && <p role="alert">{state.error}</p>}
-    <div className="p-4"><ErrorRow message="This task was blocked by our safety systems." onRetry={() => { throw new Error("Safety errors must not expose Retry"); }} /></div>
+    {!new URLSearchParams(location.search).has("model-switch") && <div className="p-4"><ErrorRow message="This task was blocked by our safety systems." onRetry={() => { throw new Error("Safety errors must not expose Retry"); }} /></div>}
     {bot && <div className="min-h-0 flex-1"><ChatView bot={bot} /></div>}
   </div>;
 }

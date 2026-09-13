@@ -21,6 +21,8 @@ let lastRoomsQuery = "";
 let lastPostBody: any = null;
 let postCalls = 0;
 let postResponse: unknown = { ok: true, messageId: "msg-1", roomName: "Launch" };
+const DEFAULT_AGENTS = { bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }] };
+let agentsResponse: unknown = DEFAULT_AGENTS;
 let roomsResponse: unknown = {
   rooms: [
     { id: "room-launch", name: "Launch", members: ["Asker", "Helper"] },
@@ -119,9 +121,7 @@ beforeAll(async () => {
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(
-        JSON.stringify({
-          bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }],
-        }),
+        JSON.stringify(agentsResponse),
       );
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/rooms?")) {
@@ -337,6 +337,8 @@ describe("agents-proxy MCP surface", () => {
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "list_shared_computers",
+      "shared_computer",
       "list_bots",
       "list_rooms",
       "ask_bot",
@@ -348,6 +350,9 @@ describe("agents-proxy MCP surface", () => {
       "start_thread",
       "post_to_room",
       "create_bot",
+      "list_team_setup",
+      "propose_team_setup",
+      "propose_bot_deletion",
       "create_room",
       "manage_room",
       "request_credential",
@@ -378,7 +383,9 @@ describe("agents-proxy MCP surface", () => {
   it("advertises read annotations only for the reviewed built-in reads", async () => {
     const list = await rpc("tools/list");
     const readNames = [
+      "list_shared_computers",
       "list_bots", "list_rooms", "check_delegation", "wait_delegation", "list_threads",
+      "list_team_setup",
       "session_search", "session_read", "list_routines", "skills_list",
     ];
     expect(list.result.tools.filter((tool: any) => tool.annotations?.readOnlyHint)
@@ -443,6 +450,25 @@ describe("agents-proxy MCP surface", () => {
     expect(text).toContain("Assign work with delegate_bot");
     expect(text).toContain("Use ask_bot only for a short answer");
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
+  });
+
+  it("list_bots says what each teammate is doing, not just busy", async () => {
+    agentsResponse = {
+      bots: [
+        { id: "bot-helper", name: "Helper", model: "fake-model", busy: true, status: "waiting-on-user", statusText: "waiting on the user" },
+        { id: "bot-quill", name: "Quill", model: "fake-model", busy: false, status: "available", statusText: "available" },
+        { id: "bot-old", name: "Old", model: "fake-model", busy: true },
+      ],
+    };
+    try {
+      const text = (await callTool("list_bots", {})).result.content[0].text;
+      expect(text).toContain("[id: bot-helper, model: fake-model, waiting on the user]");
+      expect(text).toContain("[id: bot-quill, model: fake-model]");
+      // an older server that only sends busy still reads as before
+      expect(text).toContain("[id: bot-old, model: fake-model, busy]");
+    } finally {
+      agentsResponse = DEFAULT_AGENTS;
+    }
   });
 
   it("list_rooms names each room, its id, and its members", async () => {
@@ -817,6 +843,40 @@ describe("agents-proxy MCP surface", () => {
     expect(waiting.result.content[0].text).toContain("after 45s");
     expect(lastDelegationUrl).toContain("wait_ms=45000");
     delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+  });
+
+  it("check_delegation explains a queued handoff: who it is waiting on, and when it expires", async () => {
+    delegationStatusResponse = {
+      status: "queued",
+      toBotName: "Helper",
+      targetStatus: "waiting-on-user",
+      expiresInMs: 5 * 3_600_000 - 1,
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).toContain("still queued");
+      expect(text).toContain("@Helper is waiting on the user, so it goes through after they answer.");
+      expect(text).toContain("It expires if not picked up within 5 hours.");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
+  });
+
+  it("check_delegation never says 'within 0 hours' once a queued handoff's expiry has already elapsed", async () => {
+    delegationStatusResponse = {
+      status: "queued",
+      toBotName: "Helper",
+      targetStatus: "working",
+      expiresInMs: 0,
+    };
+    try {
+      const text = (await callTool("check_delegation", { task_id: "task-later456" })).result.content[0].text;
+      expect(text).not.toContain("within 0 hours");
+      expect(text).toContain("past its 24-hour limit");
+      expect(text).toContain("will expire the next time it cannot be delivered");
+    } finally {
+      delegationStatusResponse = { status: "done", toBotName: "Helper", result: "All done." };
+    }
   });
 
   it("memory_update forwards only the configured owner and thread with its capability token", async () => {

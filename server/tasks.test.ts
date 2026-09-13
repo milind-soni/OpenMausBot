@@ -98,8 +98,8 @@ describe("tasks", () => {
     expect(titleFromMessage("x".repeat(80))).toHaveLength(48);
   });
 
-  it("deletes a task with its transcript, but never the last one", async () => {
-    const { store } = await freshStore();
+  it("deletes a task with its transcript and replaces the last one with fresh context", async () => {
+    const { store, UNTITLED_THREAD } = await freshStore();
     const bot = store.createBot();
     const first = bot.threadId;
     const second = store.createTask(bot.id)!;
@@ -111,8 +111,33 @@ describe("tasks", () => {
     expect(store.bot(bot.id)!.threadId).toBe(first);
     expect(store.messagesFor(second.threadId)).toHaveLength(0);
 
-    expect(store.deleteTask(bot.id, first)).toBeNull();
+    store.appendMessage(first, { role: "user", kind: "text", text: "Finished work" });
+    store.setResumeCursor(bot.id, "claude", "old-session");
+    store.patchTask(bot.id, first, {
+      title: "Finished work", rewound: true, pinnedMessageId: "old-pin", unread: true,
+      modelSelection: { instanceId: "codex", model: "thread-only-override" },
+    });
+    expect(store.deleteTask(bot.id, first)).toBeTruthy();
     expect(store.tasks(bot.id)).toHaveLength(1);
+    const replacement = store.activeTask(bot.id)!;
+    expect(replacement.threadId).not.toBe(first);
+    expect(replacement).toMatchObject({
+      title: UNTITLED_THREAD, resumeCursors: {}, modelSelection: bot.modelSelection,
+      busy: false, unread: false, activity: "idle",
+    });
+    expect(replacement.pinnedMessageId).toBeUndefined();
+    expect(replacement.rewound).toBeUndefined();
+    expect(bot.resumeCursors).toEqual({});
+    expect(bot.pinnedMessageId).toBeUndefined();
+    expect(bot.unread).toBe(false);
+    expect(store.messagesFor(first)).toHaveLength(0);
+    expect(store.messagesFor(replacement.threadId)).toHaveLength(0);
+    expect(store.deleteTask(bot.id, first)).toBeNull();
+    const { Store } = await import("./store.ts");
+    const reloaded = new Store(() => ({ instanceId: "claude", model: "m" }));
+    expect(reloaded.bot(bot.id)?.threadId).toBe(replacement.threadId);
+    expect(reloaded.tasks(bot.id)).toHaveLength(1);
+    expect(reloaded.messagesFor(replacement.threadId)).toHaveLength(0);
   });
 
   it("adopts a pre-tasks bot's endless thread as its first task", async () => {

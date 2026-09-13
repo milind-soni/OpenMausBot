@@ -196,6 +196,23 @@ describe("resolveRequestAuth", () => {
     expect(foreignOrigin.error).toBe("forbidden: cross-origin request");
   });
 
+  it("rejects revoked email cookies, bearers and tickets without falling back to loopback ownership", () => {
+    let allowed: Array<"admin" | "client"> = ["admin", "client"];
+    sessions = new SessionRegistry({ file: join(dir, "sessions.json"), emailScopes: () => allowed });
+    const paired = pairedToken();
+    const email = sessions.issue({ label: "browser", email: "person@example.test", scopes: ["admin", "client"] });
+    const { ticket } = sessions.issueStreamTicket(email.session.id);
+    expect(resolve({ host: "localhost", cookie: `${cookieName}=${email.token}` }).auth?.kind).toBe("session");
+    allowed = ["client"];
+    for (const host of ["bots.example.com", "localhost"]) {
+      expect(resolve({ host, cookie: `${cookieName}=${email.token}` })).toMatchObject({ auth: null, status: 401 });
+      expect(resolve({ host, authorization: `Bearer ${email.token}` })).toMatchObject({ auth: null, status: 401 });
+      expect(resolve({ host }, `/api/events?ticket=${ticket}`)).toMatchObject({ auth: null, status: 401 });
+    }
+    expect(resolve({ host: "localhost", authorization: `Bearer ${paired}` }).auth?.kind).toBe("session");
+    expect(resolve({ host: "localhost" }).auth?.kind).toBe("loopback");
+  });
+
   it("renews a session only for a request that passed the origin and scope checks", () => {
     let clock = 1_700_000_000_000;
     sessions = new SessionRegistry({ file: join(dir, "sessions.json"), now: () => clock });
@@ -357,7 +374,7 @@ describe("resolveRequestAuth", () => {
     expect(resolve(headers, path, method).auth).toBeNull();
   });
 
-  it("explains a dead credential instead of silently falling back, except on loopback", () => {
+  it("explains a dead credential instead of silently falling back, even on loopback", () => {
     const token = pairedToken();
     const session = sessions.authenticate(token);
     if (!session) throw new Error("no session");
@@ -365,8 +382,8 @@ describe("resolveRequestAuth", () => {
     const remote = resolve({ host: "bots.example.com", authorization: `Bearer ${token}` });
     expect(remote.status).toBe(401);
     expect(remote.error).toMatch(/expired or was revoked; pair this device again/);
-    // the owner on the same machine keeps working even with a stale cookie
-    expect(resolve({ host: "127.0.0.1:8799", cookie: `${cookieName}=${token}` }).auth?.kind).toBe("loopback");
+    // A rejected credential must never become a more powerful identity.
+    expect(resolve({ host: "127.0.0.1:8799", cookie: `${cookieName}=${token}` })).toMatchObject({ auth: null, status: 401 });
   });
 });
 

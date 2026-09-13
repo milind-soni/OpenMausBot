@@ -51,12 +51,15 @@ export type ProviderTurnGenerationOwner = { threadId: string; generation: string
  * leaving a bearer alive when a very fast provider completes before
  * sendTurn() returns its id. Completed ids are kept in a bounded tombstone
  * registry, so a late bind fails closed instead of publishing stale ownership. */
-export class ProviderTurnGenerationRegistry {
+export class ProviderTurnGenerationRegistry<Outcome = never> {
   readonly #owners = new Map<string, ProviderTurnGenerationOwner>();
   readonly #completed: RetiredTurnRegistry;
+  readonly #earlyCompletions = new Map<string, { threadId: string; outcome: Outcome }>();
+  readonly #limit: number;
 
   constructor(limit = 4_096) {
     this.#completed = new RetiredTurnRegistry(limit);
+    this.#limit = limit;
   }
 
   bind(threadId: string, generation: string, turnId: string): boolean {
@@ -65,24 +68,48 @@ export class ProviderTurnGenerationRegistry {
     return true;
   }
 
-  complete(threadId: string, turnId: string): ProviderTurnGenerationOwner | null {
-    this.#completed.retire(turnId);
+  complete(threadId: string, turnId: string, outcome?: Outcome): ProviderTurnGenerationOwner | null {
+    if (this.#completed.has(turnId)) return null;
     const owner = this.#owners.get(turnId);
-    if (!owner || owner.threadId !== threadId) return null;
+    if (owner && owner.threadId !== threadId) return null;
+    this.#completed.retire(turnId);
+    if (!owner) {
+      // Only a later ACK for this exact provider id may consume the result.
+      // Never attribute an unbound event to the thread's current generation.
+      if (outcome !== undefined) {
+        this.#earlyCompletions.set(turnId, { threadId, outcome });
+        while (this.#earlyCompletions.size > this.#limit) {
+          this.#earlyCompletions.delete(this.#earlyCompletions.keys().next().value!);
+        }
+      }
+      return null;
+    }
     this.#owners.delete(turnId);
     return owner;
   }
 
-  deleteGeneration(threadId: string, generation: string): void {
+  takeEarlyCompletion(threadId: string, turnId: string): Outcome | undefined {
+    const receipt = this.#earlyCompletions.get(turnId);
+    if (receipt?.threadId !== threadId) return undefined;
+    this.#earlyCompletions.delete(turnId);
+    return receipt.outcome;
+  }
+
+  deleteGeneration(threadId: string, generation: string): string[] {
+    const removed: string[] = [];
     for (const [turnId, owner] of this.#owners) {
       if (owner.threadId === threadId && owner.generation === generation) {
         this.#owners.delete(turnId);
+        this.#completed.retire(turnId);
+        removed.push(turnId);
       }
     }
+    return removed;
   }
 
   clear(): void {
     this.#owners.clear();
+    this.#earlyCompletions.clear();
   }
 }
 

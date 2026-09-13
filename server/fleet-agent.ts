@@ -6,9 +6,8 @@
 import { appendFileSync, chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { dirname } from "node:path";
-import { defaultFleetDeps, executePlan, loadRegistry, planFleetAction, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
-import { assertSlug, fleetLayout, workspaceDataDir, type FleetLayout, type FleetWorkspace } from "./fleet.ts";
-import { readUsage, summarizeUsage } from "./usage-ledger.ts";
+import { defaultFleetDeps, executePlan, loadRegistry, markProvisioningFailed, planFleetAction, type FleetDeps, type FleetInput } from "./fleet-cli.ts";
+import { assertSlug, fleetLayout, fleetUser, openRouterModelIds, workspaceDataDir, type FleetLayout, type FleetWorkspace } from "./fleet.ts";
 
 export interface FleetAgentOptions {
   socketPath: string;
@@ -26,7 +25,7 @@ export interface FleetAgentOptions {
 
 export interface FleetWorkspaceView extends FleetWorkspace {
   live: string;
-  usage: { month: string; turns: number; costUsd: number | null; billableUsd: number | null };
+  usage: { month: string; turns: number | null; costUsd: number | null; billableUsd: number | null; unavailable?: true };
 }
 
 const MAX_BODY = 256 * 1024;
@@ -54,12 +53,16 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean) : []);
 const text = (value: unknown): string | undefined => (typeof value === "string" && value.trim() ? value.trim() : undefined);
 const number = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);
+const models = (value: unknown): string[] => {
+  try { return openRouterModelIds(value); }
+  catch (error) { throw Object.assign(error as Error, { status: 400 }); }
+};
 
-/** This month's totals from a workspace's own ledger, read as root. */
-export function workspaceUsage(layout: FleetLayout, slug: string, now: Date): FleetWorkspaceView["usage"] {
-  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const total = summarizeUsage(readUsage(workspaceDataDir(layout, slug), { from, to: now }), "bot").total;
-  return { month: now.toISOString().slice(0, 7), turns: total.turns, costUsd: total.costUsd, billableUsd: total.billableUsd };
+/** Only bounded, unprivileged aggregates cross back into the root process. */
+export function workspaceUsage(layout: FleetLayout, slug: string, now: Date, deps: FleetDeps): FleetWorkspaceView["usage"] {
+  const month = now.toISOString().slice(0, 7);
+  try { return { month, ...deps.usage(workspaceDataDir(layout, slug), fleetUser(slug), now) }; }
+  catch { return { month, turns: null, costUsd: null, billableUsd: null, unavailable: true }; }
 }
 
 export function createFleetAgent(options: FleetAgentOptions): Server {
@@ -81,7 +84,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
     }
   };
 
-  const act = async (input: FleetInput): Promise<{ status: number; body: unknown }> => {
+  const runAction = async (input: FleetInput): Promise<{ status: number; body: unknown }> => {
     const log: string[] = [];
     const errors: string[] = [];
     const io = { log: (line: string) => log.push(line), error: (line: string) => errors.push(line) };
@@ -92,9 +95,30 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
       audit({ action: input.action, slug: input.slug, ok: false, error: error instanceof Error ? error.message : String(error) });
       return { status: 400, body: { error: error instanceof Error ? error.message : String(error) } };
     }
-    const code = await executePlan(steps, deps, io);
+    let code = 1;
+    try {
+      code = await executePlan(steps, deps, io);
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+    if (code !== 0) {
+      try {
+        markProvisioningFailed(input, deps);
+      } catch {
+        errors.push("could not record the failed provisioning; inspect the reserved workspace before recovery");
+      }
+    }
     audit({ action: input.action, slug: input.slug, ok: code === 0, ...(input.email ? { email: input.email } : {}) });
     return code === 0 ? { status: 200, body: { ok: true, log } } : { status: 500, body: { error: errors[0] ?? "the step failed", log: [...log, ...errors] } };
+  };
+
+  // Planning reads the registry too: serialize the entire read/modify/execute
+  // sequence, not just the subprocesses, so ports and updates cannot collide.
+  let mutationTail: Promise<unknown> = Promise.resolve();
+  const act = (input: FleetInput) => {
+    const result = mutationTail.then(() => runAction(input));
+    mutationTail = result.catch(() => {});
+    return result;
   };
 
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
@@ -108,10 +132,13 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
       if (method === "GET" && url.pathname === "/health") return send(200, { ok: true });
       if (method === "GET" && url.pathname === "/workspaces") {
         const registry = loadRegistry(layout, deps);
-        const workspaces: FleetWorkspaceView[] = [];
+        const statusOnly = url.searchParams.get("statusOnly") === "true";
+        const workspaces: (FleetWorkspaceView | Pick<FleetWorkspaceView, "slug" | "live">)[] = [];
         for (const workspace of Object.values(registry.workspaces).sort((a, b) => a.slug.localeCompare(b.slug))) {
-          const live = (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown";
-          workspaces.push({ ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now()) });
+          const live = workspace.status === "running" || workspace.status === "suspended"
+            ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown"
+            : workspace.status;
+          workspaces.push(statusOnly ? { slug: workspace.slug, live } : { ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) });
         }
         return send(200, { domain: registry.domain, operator: registry.operator ?? null, workspaces });
       }
@@ -120,6 +147,9 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         const result = await act({
           ...base(), action: "create", slug: text(body.slug), admins: strings(body.admins), members: strings(body.members),
           cap: number(body.cap), memory: text(body.memory), brandJson: text(body.brandJson), anthropicKey: text(body.anthropicKey),
+          portalUrl: text(body.portalUrl), anthropicUrl: text(body.anthropicUrl),
+          openrouterKey: text(body.openrouterKey), openrouterUrl: text(body.openrouterUrl),
+          openrouterModels: body.openrouterModels === undefined ? undefined : models(body.openrouterModels), openrouterDefault: body.openrouterDefault === true,
         });
         return send(result.status, result.body);
       }
@@ -127,11 +157,16 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         const result = await act({ ...base(), action: "upgrade" });
         return send(result.status, result.body);
       }
-      const match = /^\/workspaces\/([a-z0-9-]+)(?:\/(users|suspend|resume))?$/.exec(url.pathname);
+      const match = /^\/workspaces\/([a-z0-9-]+)(?:\/(users|providers|suspend|resume))?$/.exec(url.pathname);
       if (match) {
         const slug = match[1]!;
         assertSlug(slug);
         const sub = match[2];
+        if (method === "POST" && sub === "providers") {
+          const body = await readBody(req);
+          const result = await act({ ...base(), action: "providers", slug, openrouterModels: models(body.models) });
+          return send(result.status, result.body);
+        }
         if (method === "POST" && sub === "users") {
           const body = await readBody(req);
           const action = body.action === "remove" ? "remove" : body.action === "add" ? "add" : undefined;

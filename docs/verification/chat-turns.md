@@ -111,6 +111,38 @@ This does not prove resumption or cleanup of real provider sessions after a cras
 
 ## Concurrent-task regression
 
+### Delegation mailbox
+
+Queued handoffs now wait through repeated busy turns rather than giving up
+after three. The delivery window is 24 hours; an hourly sweep expires a
+handoff that is still unable to run, reports the failure, and wakes its sender.
+A free target can accept an overdue handoff. At restart, already elapsed
+windows receive a fresh 24 hours **before** dispatching any recovered jobs;
+otherwise the first job can occupy the target and expire the rest of its
+backlog. Valid, unexpired windows retain their saved deadlines. This is a
+wall-clock window, not precise uptime accounting: sleep within a running
+process counts. A routine waiting on a peer skips overlapping interval fires
+until the handoff settles (potentially about 25 hours); it never duplicates
+the pending job to catch up.
+
+```sh
+pnpm exec vitest run server/delegations.test.ts server/peer-roster.test.ts server/drivers/agents-proxy.test.ts
+pnpm exec vitest run server/independent-threads-api.test.ts -t 'holds a delegation behind an approval'
+pnpm exec vitest run server/comms.test.ts
+```
+
+The mailbox API fixture uses the isolated launcher and per-model fake-engine
+gates. A peer waits on a real approval-broker card; a Chief delegates through
+its captured turn capability and finishes. The roster reports waiting on the
+user, exactly one waiting chip appears, approving releases the peer, and one
+attributed result returns to the Chief without another user prompt. Exact
+control commands, waits, transcripts and the server log path are retained in
+the fixture's `.log.json` evidence, without capability tokens. Queue-unit
+tests cover expiry, multi-job restart recovery, repeated busy periods and
+persisted deadlines. These tests do not claim real-provider performance.
+
+### Independent tasks
+
 ```sh
 pnpm exec vitest run server/independent-threads-api.test.ts
 ```
@@ -156,5 +188,13 @@ lifecycle tests retain the verification profile on the same failure.
 POSIX group escalation and the
 new server cases are skipped on Windows; its existing `taskkill /T /F` path
 remains covered by the cross-platform child-tree test when run on Windows.
+Windows event-order regressions also run on every host in
+`server/kill-tree-windows.test.ts`: successful `taskkill` alone is not proof
+that Node observed the child's exit. Both orders (exit before or after the
+command callback) must settle without waiting for inherited pipes to close;
+an unobserved exit still times out as uncertain. The native Antigravity
+`closeAndWait` test in Windows CI verifies that callers cannot rename an
+executable while its process is still running. Local mocked Windows tests
+do not substitute for that native check.
 Processes that intentionally detach into a different group are not owned by
 this POSIX group-based cancellation.
