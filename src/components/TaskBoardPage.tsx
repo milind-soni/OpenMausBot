@@ -21,6 +21,7 @@ import {
   columnsOf,
   dropPatch,
   filterByTeam,
+  placeIn,
   type BoardCard,
   type WorkColumn,
 } from "@/lib/task-board";

@@ -154,7 +154,11 @@ export function TaskBoardCardView({
           className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[12px] font-semibold text-white transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-45"
         >
           {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-          {availability.canRun ? t("taskBoard.run.label") : t("taskBoard.card.working")}
+          {/* The button always says what pressing it would do. Only a card
+              that is genuinely mid-start swaps the label, so a disabled
+              button never claims work is happening when it is not — the
+              reason underneath says why it cannot be pressed. */}
+          {running ? t("taskBoard.card.working") : t("taskBoard.run.label")}
         </button>
 
         {canStop && (
