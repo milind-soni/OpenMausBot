@@ -81,7 +81,7 @@ describe("Box create idempotency", () => {
           createCount += 1;
           const key = String(req.headers["idempotency-key"] ?? "");
           createKeys.push(key);
-          expect(JSON.parse(raw)).toEqual({ ttlSeconds: 8 * 60 * 60, noEnv: true });
+          expect(JSON.parse(raw)).toEqual({ ttlSeconds: 8 * 60 * 60 });
           if (!acceptedKey) acceptedKey = key;
           if (key !== acceptedKey) {
             res.writeHead(409);

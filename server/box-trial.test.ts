@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 describe("Box trial provisioning", () => {
   let api: Server;
   let provisionBox: typeof import("./box.ts").provisionBox;
-  const createBodies: Array<{ ttlSeconds: number; noEnv: boolean }> = [];
+  const createBodies: Array<{ ttlSeconds: number }> = [];
   const createKeys: string[] = [];
 
   beforeAll(async () => {
@@ -66,8 +66,8 @@ describe("Box trial provisioning", () => {
     const result = await provisionBox({ box: { token: "box_trial" } } as any, "trial-bot", "Trial Bot");
     expect(result.boxId).toBe("bx_23456789");
     expect(createBodies).toEqual([
-      { ttlSeconds: 8 * 60 * 60, noEnv: true },
-      { ttlSeconds: 2 * 60 * 60, noEnv: true },
+      { ttlSeconds: 8 * 60 * 60 },
+      { ttlSeconds: 2 * 60 * 60 },
     ]);
     expect(createKeys[0]).toMatch(/^[0-9a-f-]{36}$/);
     expect(createKeys[1]).toMatch(/^[0-9a-f-]{36}$/);

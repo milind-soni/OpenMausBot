@@ -151,6 +151,8 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
         const startedAt = Date.now();
         let lastText = "";
         let pendingText = "";
+        /** Why the box could not answer (login expired, model refused, …). */
+        let problem: string | null = null;
         /** Emit unflushed deltas as assistant_text and reset pendingText. */
         const flushAssistantText = () => {
           const text = pendingText;
@@ -190,6 +192,9 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
               const text = ev.text ?? ev.message ?? ev.data?.text ?? ev.data?.content ?? null;
               if (/assistant|message|output|response/i.test(kind) && typeof text === "string" && text.trim()) {
                 ingest(text);
+              } else if (/usage_limit|error|fail/i.test(kind)) {
+                const why = ev.data?.summary ?? ev.data?.message ?? ev.data?.error ?? ev.message;
+                if (typeof why === "string" && why.trim()) problem = why.trim();
               } else if (/tool|command|exec|browse/i.test(kind)) {
                 flushAssistantText();
                 emit({
@@ -223,13 +228,20 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                 if (typeof result === "string" && result.trim() && result !== lastText) {
                   ingest(result);
                 }
-                if (!pendingText.trim() && !lastText.trim()) pendingText = "(finished)";
+                if (!pendingText.trim() && !lastText.trim()) {
+                  // a run that ends with nothing said and a recorded problem
+                  // (login expired, …) is a failure the person must see
+                  if (problem) throw new Error(problem);
+                  pendingText = "(finished)";
+                }
                 flushAssistantText();
                 active.delete(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
                 return;
               }
               if (/failed|error|cancelled|interrupted/i.test(state)) {
+                const runError = [run?.error, run?.failureReason, run?.message].find((v) => typeof v === "string" && v.trim());
+                if (problem || runError || /failed|error/i.test(state)) throw new Error(problem ?? runError ?? `the box run ${state}`);
                 flushAssistantText();
                 active.delete(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: state, cost: null });

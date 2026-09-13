@@ -773,11 +773,11 @@ function idempotentCreateInProgress(result: Awaited<ReturnType<typeof boxJson>>)
 }
 
 async function requestBoxCreate(cfg: AppConfig, botId: string, ttlSeconds: number): Promise<BoxCreateResult> {
-  // The computer needs the user's desktop session, not the account owner's
-  // host credentials. Keep provider-side env injection off so API keys cannot
-  // silently appear inside the guest. The exact serialized body is also the
-  // idempotency identity: a trial-TTL retry must receive a different key.
-  const body = JSON.stringify({ ttlSeconds, noEnv: true });
+  // The bot's turns run ON this box, so the box receives the account's harness
+  // logins (the same ones the ascii.dev Agents page holds). The exact
+  // serialized body is also the idempotency identity: a trial-TTL retry must
+  // receive a different key.
+  const body = JSON.stringify({ ttlSeconds });
   let attempt = beginBoxCreate(botId, body);
   let request = attempt.request;
   let createdThisAttempt = attempt.startedNow;
@@ -858,9 +858,8 @@ export async function boxStatus(cfg: AppConfig, botId: string) {
 }
 
 /**
- * Find-or-create the bot's persistent box, wait for ready, run the
- * idempotent bootstrap (screenshot tooling for the computer-use bridge +
- * a tmux welcome), and mint a fresh desktop URL.
+ * Find-or-create the bot's persistent box, wait for ready, and mint a fresh
+ * desktop URL. The box ships its own computer-use driver and agent runner.
  */
 export async function provisionBox(cfg: AppConfig, botId: string, _botName: string) {
   cfg = snapshotBoxConfig(cfg);

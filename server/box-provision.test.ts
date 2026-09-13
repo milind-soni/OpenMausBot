@@ -99,7 +99,7 @@ describe("cloud computer provisioning cleanup", () => {
 
     const removal = requests.find((request) => request.method === "DELETE");
     const creation = requests.find((request) => request.method === "POST" && request.path.endsWith("/boxes"));
-    expect(JSON.parse(creation?.body ?? "{}")).toMatchObject({ noEnv: true });
+    expect(JSON.parse(creation?.body ?? "{}")).not.toHaveProperty("noEnv");
     expect(removal?.path).toBe("/api/box/v1/boxes/bx_3456789a");
     expect(removal?.headers["x-ascii-confirm-delete"]).toBe("bx_3456789a");
     expect(requests).toContainEqual(expect.objectContaining({
