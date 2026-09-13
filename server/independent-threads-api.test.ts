@@ -471,7 +471,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect((await api("PATCH", `/api/bots/${botId}`, { approvalMode: "auto" })).status).toBe(200);
     const hook = await api("POST", "/api/webhooks", { name: "Fixture event", prompt: "UNATTENDED_ONLY", botId, runOn: "maus" });
     expect(hook.status).toBe(201);
-    const delivered = await fetch(hook.body.credential.url, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
+    const delivered = await fetch(hook.body.credential.endpointUrl, { method: "POST", body: "{}", headers: { authorization: `Bearer ${hook.body.credential.secret}`, "content-type": "application/json" } });
     expect(delivered.status).toBe(202);
     const { runId } = await delivered.json() as { runId: string };
     let unattendedTask = "";
