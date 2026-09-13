@@ -1,7 +1,8 @@
-// The application menu. Today it exists for one reason: the Server submenu,
-// where the user switches between the local server and paired remote ones.
-// Everything else is Electron's standard roles so macOS keeps Edit/Window
-// and Windows/Linux get the same items under a visible bar.
+// The application menu. It exists for two reasons: the Server submenu,
+// where the user switches between the local server and paired remote ones,
+// and the macOS Preferences… item (Electron has no role for it, so it is
+// built explicitly). Everything else is Electron's standard roles so macOS
+// keeps Edit/Window and Windows/Linux get the same items under a visible bar.
 import { Menu, app } from "electron";
 
 /**
@@ -12,8 +13,9 @@ import { Menu, app } from "electron";
  * @param {() => void} input.onAddFromClipboard
  * @param {() => void} input.onConnect
  * @param {(id: string) => void} input.onForget
+ * @param {() => void} input.onOpenSettings
  */
-export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget }) {
+export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFromClipboard, onConnect, onForget, onOpenSettings }) {
   const isMac = process.platform === "darwin";
   const active = environments.find((e) => e.id === activeId) ?? null;
   const server = {
@@ -37,7 +39,7 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
     ],
   };
   const template = [
-    ...(isMac ? [{ label: app.name, submenu: [{ role: "about" }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
+    ...(isMac ? [{ label: app.name, submenu: [{ role: "about" }, { label: "Preferences…", accelerator: "CmdOrCtrl+,", click: () => onOpenSettings() }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }] }] : []),
     { role: "fileMenu" },
     { role: "editMenu" },
     server,

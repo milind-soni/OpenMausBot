@@ -18,6 +18,7 @@ let pairing: any;
 let folder: SharedFolder;
 let grantFile: string;
 let bot: any;
+let localSharingEnabled = true;
 let sequence = 0;
 const waiting = new Map<number, (value: any) => void>();
 const evidence: string[] = [];
@@ -30,7 +31,9 @@ const api = async (method: string, path: string, body?: unknown, headers: Record
 };
 const rpc = (method: string, params?: unknown): Promise<any> => new Promise((resolve, reject) => {
   const id = ++sequence;
-  const timeout = setTimeout(() => { waiting.delete(id); reject(new Error(`MCP ${method} timed out`)); }, 15_000);
+  // A shared terminal operation can legitimately run for 30 seconds, before
+  // its result crosses the connector and MCP boundaries (including Windows).
+  const timeout = setTimeout(() => { waiting.delete(id); reject(new Error(`MCP ${method} ${JSON.stringify(params)} timed out`)); }, 40_000);
   waiting.set(id, value => { clearTimeout(timeout); resolve(value); });
   proxy.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
 });
@@ -39,9 +42,23 @@ const computers = async () => JSON.parse((await tool("list_shared_computers")).c
 const storedGrant = () => JSON.parse(readFileSync(grantFile, "utf8")).records[env.id];
 const operation = async (action: string, rest = {}) => tool("shared_computer", { computer_id: storedGrant().id, folder_id: folder.id, action, ...rest });
 const data = (result: any) => JSON.parse(result.content[0].text);
+const markedWaitCommand = (marker: string) => process.platform === "win32"
+  ? `[IO.File]::WriteAllText('${marker.replaceAll("'", "''")}', [string]$PID); Start-Sleep -Seconds 20`
+  : `echo $$ > '${marker.replaceAll("'", "'\"'\"'")}'; sleep 20`;
+const commandAlive = (marker: string) => {
+  const pid = Number(readFileSync(marker, "utf8").trim());
+  expect(Number.isInteger(pid) && pid > 0).toBe(true);
+  try { process.kill(pid, 0); return true; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
+};
 
 beforeAll(async () => {
   fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "hang" });
+  // Computer sharing ships off (features.sharedComputers, config.ts). Turn it
+  // on for this fixture before anything is paired or dispatched: the routes,
+  // the advertised capability and the agent tools all read the same gate, and
+  // the agent process is handed its copy when its turn starts.
+  expect((await api("PATCH", "/api/config", { features: { sharedComputers: true } })).status).toBe(200);
   env = { id: "hosted-fixture", name: "Hosted fixture", origin: fixture.info.url };
   const local = join(fixture.info.dataDir, "shared-folder"); mkdirSync(local);
   folder = { id: randomUUID(), name: "Shared fixture", path: realpathSync(local), write: false };
@@ -53,6 +70,7 @@ beforeAll(async () => {
   expect(pairing.token).toMatch(/^omb_sess_/);
   connector = createComputerSharing({
     file: grantFile, environments: () => [env], cuaConnection: async () => null,
+    enabled: async () => localSharingEnabled,
     fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
   });
   bot = (await api("POST", "/api/bots", { name: "Shared desktop tester" })).body.bot;
@@ -124,7 +142,7 @@ it("explicit edits and terminal work; old credentials and other sessions cannot 
   const cookie = `${sessionCookieName(Number(new URL(env.origin).port), grant.environmentId)}=${pairing.token}`;
   expect((await api("POST", `/api/shared-computers/${grant.id}/lease`, {}, { cookie, origin: "https://evil.invalid", "x-omb-computer-secret": grant.secret })).status).toBe(403);
   evidence.push("explicit hash-guarded edit and real terminal; cross-session, stale-secret, CSRF, local-control gate refusals");
-});
+}, 60_000);
 
 it("revocation stops a running command, prevents further access and stays off after restart", async () => {
   const pending = operation("run_command", { command: process.platform === "win32" ? "Start-Sleep -Seconds 20" : "sleep 20" });
@@ -134,8 +152,54 @@ it("revocation stops a running command, prevents further access and stays off af
   await expect.poll(computers).toEqual([]);
   expect((await operation("read_file", { path: "brief.txt" })).isError).toBe(true);
   connector.close();
-  connector = createComputerSharing({ file: grantFile, environments: () => [env], fetch, cuaConnection: async () => null });
+  connector = createComputerSharing({ file: grantFile, environments: () => [env], fetch, cuaConnection: async () => null, enabled: async () => true });
   connector.start(); expect(connector.state(env.id).enabled).toBe(false);
   expect(await computers()).toEqual([]);
   evidence.push("in-flight cancellation, no further access, durable revocation across connector restart");
 });
+
+it("disabling the local gate cancels a live job even while the remote workspace still permits sharing", async () => {
+  connector.close();
+  connector = createComputerSharing({
+    file: grantFile, environments: () => [env], cuaConnection: async () => null,
+    enabled: async () => localSharingEnabled,
+    fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
+  });
+  await connector.save(env, { folders: [folder], terminal: true, computer: false }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const marker = join(folder.path, "local-gate-command-started");
+  const pending = operation("run_command", { command: markedWaitCommand(marker) });
+  await expect.poll(() => existsSync(marker), { timeout: 15_000 }).toBe(true);
+  expect(commandAlive(marker)).toBe(true);
+  localSharingEnabled = false;
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 5000 }).toBe(false);
+  expect((await pending).isError).toBe(true);
+  await expect.poll(() => commandAlive(marker), { timeout: 5000 }).toBe(false);
+  expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities.sharedComputers).toBe(true);
+  await expect(connector.identity(env)).rejects.toThrow("turned off on this computer");
+  expect((await operation("read_file", { path: "brief.txt" })).isError).toBe(true);
+  evidence.push("local flag withdrawal cancels a live remote command and prevents further access despite remote opt-in");
+}, 45_000);
+
+it("withdrawing the workspace flag closes pending jobs and refuses a previously advertised tool", async () => {
+  connector.close(); localSharingEnabled = true;
+  connector = createComputerSharing({
+    file: grantFile, environments: () => [env], cuaConnection: async () => null,
+    enabled: async () => localSharingEnabled,
+    fetch: (url: string, init: RequestInit) => fetch(url, { ...init, headers: { ...init.headers, authorization: `Bearer ${pairing.token}` } }),
+  });
+  await connector.save(env, { folders: [folder], terminal: true, computer: false }, await connector.identity(env));
+  await expect.poll(() => connector.state(env.id).connected, { timeout: 8000 }).toBe(true);
+  const marker = join(folder.path, "workspace-gate-command-started");
+  const pending = operation("run_command", { command: markedWaitCommand(marker) });
+  await expect.poll(() => existsSync(marker), { timeout: 15_000 }).toBe(true);
+  expect(commandAlive(marker)).toBe(true);
+  expect((await api("PATCH", "/api/config", { features: { sharedComputers: false } })).status).toBe(200);
+  expect((await pending).isError).toBe(true);
+  await expect.poll(() => commandAlive(marker), { timeout: 5000 }).toBe(false);
+  const staleTool = await tool("list_shared_computers");
+  expect(staleTool.isError).toBe(true);
+  expect(staleTool.content[0].text).toContain("unknown internal endpoint");
+  expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities).not.toHaveProperty("sharedComputers");
+  evidence.push("workspace flag withdrawal closes in-flight requests and refuses tools advertised to an earlier provider turn");
+}, 45_000);

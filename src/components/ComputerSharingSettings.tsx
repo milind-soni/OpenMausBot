@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { FolderPlus, X } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
+import { useStore } from "@/state/store";
+import { sharedComputersEnabled } from "@/lib/feature-flags";
 
 /** Grants are edited locally and confirmed by a native dialog, never by the hosted page. */
 export function ComputerSharingSettings({ workspace, onClose }: { workspace: { id: string; name: string; origin: string }; onClose: () => void }) {
-  const bridge = window.ogb?.computerSharing;
+  // `state` below is this grant's desktop status; appState is the workspace
+  // config, which says whether this server offers computer sharing at all.
+  const { state: appState } = useStore();
+  const offered = sharedComputersEnabled(appState.config);
+  const bridge = offered ? window.ogb?.computerSharing : undefined;
   const [state, setState] = useState<DesktopComputerSharing | null>(null);
   const [folders, setFolders] = useState<DesktopSharedFolder[]>([]);
   const [terminal, setTerminal] = useState(false);

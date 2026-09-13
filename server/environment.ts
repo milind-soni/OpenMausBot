@@ -26,6 +26,9 @@ export interface EnvironmentDescriptor {
   capabilities: {
     /** Pairing and sessions are available (this build). */
     remoteSessions: true;
+    /** This server accepts computer sharing. Present only while the
+     * maintainer flag `features.sharedComputers` is on: a server with it off
+     * advertises nothing, exactly like a build that predates the feature. */
     sharedComputers?: true;
     /** Who can update the server: the desktop app that runs it, or the operator. */
     selfUpdate: "desktop-managed" | "operator";
@@ -116,7 +119,7 @@ export function serverVersion(): string {
   return "unknown";
 }
 
-export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean }): EnvironmentDescriptor {
+export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean }): EnvironmentDescriptor {
   return {
     environmentId: input.environmentId,
     label: process.env.OMB_ENVIRONMENT_LABEL?.trim() || hostname(),
@@ -124,7 +127,9 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
     version: serverVersion(),
     capabilities: {
       remoteSessions: true,
-      sharedComputers: true,
+      // Never advertise a protocol this server would refuse: the routes are
+      // gone unless features.sharedComputers is on, so the capability is too.
+      ...(input.sharedComputers === true ? { sharedComputers: true as const } : {}),
       selfUpdate: input.desktopManaged ? "desktop-managed" : "operator",
       emailSignIn: input.emailSignIn === true,
     },

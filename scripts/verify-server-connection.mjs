@@ -186,6 +186,18 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     await fill("Name (optional)", "");
     writeFileSync(join(output, "connected-workspaces.png"), (await win.webContents.capturePage()).toPNG());
 
+    assert.equal(await evaluate("document.querySelector('[aria-label^=\"Computer access for \"]') === null"), true, "feature-off workspace offers no computer access");
+    await win.loadURL(`${url}?workspaces=1&share-computer=cloud`);
+    await until(() => evaluate("document.body.textContent.includes('My cloud team')"), "feature-off saved workspace rendered");
+    assert.equal(await evaluate("document.body.textContent.includes('Computer access · My cloud team')"), false, "stale sharing deep link cannot bypass disabled feature");
+    assert.equal(await evaluate(`${button("Choose folder")} === undefined`), true);
+    writeFileSync(join(output, "computer-sharing-disabled.png"), (await win.webContents.capturePage()).toPNG());
+    // Explicitly opt this disposable server in for the unfinished feature's
+    // existing enabled-path regression coverage. Shipped defaults stay off.
+    const enabled = await session.defaultSession.fetch(`${serverUrl}/api/config`, { method: "PATCH", headers: { "content-type": "application/json", origin: serverUrl }, body: JSON.stringify({ features: { sharedComputers: true } }) });
+    assert.equal(enabled.status, 200);
+    await win.loadURL(`${url}?workspaces=1`);
+    await until(() => evaluate("Boolean(document.querySelector('[aria-label=\"Computer access for My cloud team\"]'))"), "explicit fixture opt-in exposes computer access");
     await evaluate("document.querySelector('[aria-label=\"Computer access for My cloud team\"]').click()");
     await until(() => evaluate("document.body.textContent.includes('Not shared')"), "computer sharing defaults off");
     assert.equal(await evaluate("[...document.querySelectorAll('input[type=checkbox]')].every(el => !el.checked)"), true);
@@ -257,7 +269,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
     const { createComputerSharing } = await import("../electron/computer-sharing.mjs");
     const { randomUUID } = await import("node:crypto");
     const nativeEnv = { id: "cookie-fixture", name: "Cookie fixture", origin: serverUrl };
-    const sharing = createComputerSharing({ file: join(output, "native-profile", "sharing.json"), fetch: (...args) => session.defaultSession.fetch(...args), environments: () => [nativeEnv], cuaConnection: async () => null });
+    const sharing = createComputerSharing({ file: join(output, "native-profile", "sharing.json"), fetch: (...args) => session.defaultSession.fetch(...args), environments: () => [nativeEnv], enabled: async () => true, cuaConnection: async () => null });
     try {
       const identity = await sharing.observe(nativeEnv);
       assert.ok(identity?.sessionId, "main fetch sees real paired session cookie");
@@ -268,7 +280,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
       assert.equal(sharing.state(nativeEnv.id).enabled, false);
     } finally { sharing.close(); }
     const receipt = { passed: true, renderer: ["RemoteComputerSection", "ConnectedWorkspacesSettings", "DesktopWorkspaceSwitcher"], preload: "electron/preload.cjs", calls,
-      checks: ["full custom HTTPS link unchanged", "pending submit disabled", "cancel reset", "rejection and retry", "companion six-digit routing", "390px overflow", "remote-safe bridge", "native connect menu item requests Settings", "hosted URL validation", "optional name", "pairing code excluded from saved list", "switch local/cloud", "cancel/confirm forget", "real app Settings deep link", "native Settings event and search reset", "sharing off by default", "read-only folder selection", "cancel/save sharing", "immediate revoke", "post-pair access deep link", "no sharing bridge in remote renderer"],
+      checks: ["full custom HTTPS link unchanged", "pending submit disabled", "cancel reset", "rejection and retry", "companion six-digit routing", "390px overflow", "remote-safe bridge", "native connect menu item requests Settings", "hosted URL validation", "optional name", "pairing code excluded from saved list", "switch local/cloud", "cancel/confirm forget", "real app Settings deep link", "native Settings event and search reset", "feature-off hides sharing controls and stale deep link", "explicit opt-in enables fixture sharing", "sharing off by default", "read-only folder selection", "cancel/save sharing", "immediate revoke", "post-pair access deep link", "no sharing bridge in remote renderer"],
       nativeConnector: "Real HttpOnly pairing cookie → session.defaultSession.fetch → real fixture registration → revoke",
       limitation: "UI IPC replaces native dialogs, workspace persistence and navigation. Native sharing authentication tested against isolated HTTP server; no public DNS/TLS or live screen control tested." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
@@ -293,7 +305,7 @@ if (process.versions.electron && process.argv.includes(fixtureFlag)) {
       name: "server-connection-fixture",
       resolveId(id) { if (id === "virtual:server-connection") return `\0${id}`; },
       load(id) {
-        if (id === "\0virtual:server-connection") return `import React from 'react'; import { createRoot } from 'react-dom/client'; import { setLocale } from '/src/lib/i18n.ts'; import { RemoteComputerSection } from '/src/components/RemoteComputerSection.tsx'; import { ConnectedWorkspacesSettings } from '/src/components/ConnectedWorkspacesSettings.tsx'; import { DesktopWorkspaceSwitcher } from '/src/components/DesktopWorkspaceSwitcher.tsx'; import '/src/styles.css'; setLocale('en'); localStorage.setItem('omb-analytics-opt-out', '1'); const root = createRoot(document.getElementById('root')); if (location.search.includes('app=1')) { document.body.classList.remove('p-4'); import('/src/App.tsx').then(({default: App}) => root.render(React.createElement(App))); } else root.render(location.search.includes('workspaces=1') ? React.createElement('div', { className: 'flex flex-col gap-5 max-w-2xl mx-auto' }, React.createElement(DesktopWorkspaceSwitcher), React.createElement('h1', { className: 'text-lg font-semibold text-ink' }, 'Connected workspaces'), React.createElement(ConnectedWorkspacesSettings)) : React.createElement(RemoteComputerSection));`;
+        if (id === "\0virtual:server-connection") return `import React from 'react'; import { createRoot } from 'react-dom/client'; import { setLocale } from '/src/lib/i18n.ts'; import { StoreProvider } from '/src/state/store.tsx'; import { RemoteComputerSection } from '/src/components/RemoteComputerSection.tsx'; import { ConnectedWorkspacesSettings } from '/src/components/ConnectedWorkspacesSettings.tsx'; import { DesktopWorkspaceSwitcher } from '/src/components/DesktopWorkspaceSwitcher.tsx'; import '/src/styles.css'; setLocale('en'); localStorage.setItem('omb-analytics-opt-out', '1'); const root = createRoot(document.getElementById('root')); if (location.search.includes('app=1')) { document.body.classList.remove('p-4'); import('/src/App.tsx').then(({default: App}) => root.render(React.createElement(App))); } else root.render(React.createElement(StoreProvider, null, location.search.includes('workspaces=1') ? React.createElement('div', { className: 'flex flex-col gap-5 max-w-2xl mx-auto' }, React.createElement(DesktopWorkspaceSwitcher), React.createElement('h1', { className: 'text-lg font-semibold text-ink' }, 'Connected workspaces'), React.createElement(ConnectedWorkspacesSettings)) : React.createElement(RemoteComputerSection)));`;
       },
       configureServer(server) {
         server.middlewares.use((req, res, next) => {

@@ -32,7 +32,8 @@ describe("named team computer ownership", () => {
     expect(restarted.list()).toHaveLength(1);
     restarted.setProblem(requestId);
     expect(new TeamComputers(file, environmentId).get(requestId)?.problem).toBeUndefined();
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    // Windows exposes synthetic POSIX mode bits; its ACLs are not represented here.
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("has one computer per team and requires explicit unassignment before moving", () => {

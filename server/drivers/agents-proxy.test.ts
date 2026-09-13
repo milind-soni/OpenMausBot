@@ -308,6 +308,7 @@ beforeAll(async () => {
       OMB_COMMS_TOKEN: TOKEN,
       OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
+      OMB_SHARED_COMPUTERS_ENABLED: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -1455,5 +1456,73 @@ describe("agents-proxy MCP surface", () => {
     expect(missingTarget.result.isError).toBe(true);
     expect(missingTarget.result.content[0].text).toContain("needs skill_name");
     expect(lastSkillStageBody).toBeNull();
+  });
+});
+
+// Opt-in computer sharing is off unless the harness turns it on. A separate
+// child is the only honest check: the tool list is frozen at module load.
+describe("with computer sharing off (the default)", () => {
+  let gated: ChildProcess;
+  const gatedPending = new Map<number, (msg: any) => void>();
+  let gatedId = 500;
+  const gatedRpc = (method: string, params?: unknown): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const id = gatedId++;
+      gatedPending.set(id, resolve);
+      gated.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => {
+        if (gatedPending.delete(id)) reject(new Error(`${method} timed out`));
+      }, 10_000).unref?.();
+    });
+
+  beforeAll(async () => {
+    gated = spawn(process.execPath, [PROXY], {
+      env: {
+        ...process.env,
+        OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+        OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine",
+        OMB_COMMS_TOKEN: TOKEN,
+        OMB_TURN_DEPTH: "0",
+        OMB_SKILL_AUTHORING_ENABLED: "1",
+        // deliberately no OMB_SHARED_COMPUTERS_ENABLED
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    gated.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        gatedPending.get(msg.id)?.(msg);
+        gatedPending.delete(msg.id);
+      }
+    });
+    await gatedRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+
+  afterAll(() => {
+    gated?.kill();
+  });
+
+  it("does not advertise the shared-computer tools at all", async () => {
+    const list = await gatedRpc("tools/list");
+    const names = list.result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).not.toContain("list_shared_computers");
+    expect(names).not.toContain("shared_computer");
+    // the rest of the surface is untouched — this is a gate, not a removal
+    expect(names).toContain("list_bots");
+    expect(names).toContain("skills_list");
+  });
+
+  it("refuses the handlers if a model calls them by name anyway", async () => {
+    for (const name of ["list_shared_computers", "shared_computer"]) {
+      const refused = await gatedRpc("tools/call", { name, arguments: { computer_id: "x", action: "list_files" } });
+      expect(refused.error?.message ?? refused.result?.content?.[0]?.text).toMatch(/unknown tool|turned off/i);
+    }
   });
 });

@@ -40,6 +40,9 @@ It checks:
   name, not the list) and `menu` (the user selects in Electron's native menu).
 - Computer access starts off, selected folders start read-only, cancelled
   confirmation grants nothing, and Stop sharing immediately updates the state.
+- With the feature flag absent, no sharing controls appear, including through
+  an old post-pair deep link. The smoke then explicitly enables the flag only
+  in its disposable server to exercise the unfinished feature's enabled path.
 - The post-pair deep link opens access for the correct saved workspace. Hosted
   renderers receive **no** `computerSharing` permission bridge.
 - A real pairing exchange sets Chromium's HttpOnly session cookie. The native
@@ -85,6 +88,12 @@ local connection Settings. Remote pages cannot enumerate the desktop's saved
 connections or directly invoke switching, forgetting, or host-only controls.
 
 ## Optional computer sharing
+
+**Computer sharing is disabled by default pending security hardening.**
+Connecting and switching hosted workspaces still works, but does not offer
+local file, terminal, or screen access. The flow below is maintainer-only
+verification with `features.sharedComputers: true` on both servers, not a
+recommended production setup or a Settings switch.
 
 After pairing or signing in successfully, a native **Share this computer?**
 dialog offers **Choose access** or **Not now** (the default). This choice is
@@ -133,10 +142,17 @@ connector. Running commands are cancelled where possible; a native action
 already admitted by Cua may have completed. Inspect uncertain outcomes before
 retrying. A sleeping/offline laptop cannot service requests.
 
+The local feature flag is rechecked before reconnecting a saved grant,
+accepting consent, dispatching a remote job, and on the existing one-second
+job lease. A disabled or unreachable local server aborts the connector;
+an in-flight check may take up to its three-second request deadline. Restart
+the desktop after re-enabling the flag. Turning it off does not erase grants,
+and a native operation already admitted may have completed.
+
 ## Connector and authority tests
 
 ```sh
-pnpm exec vitest run server/shared-computers.test.ts server/shared-computers.e2e.test.ts
+pnpm exec vitest run server/shared-computers.test.ts server/shared-computers.e2e.test.ts server/shared-computers.gate.test.ts
 node --test electron/shared-computer-access.node-test.mjs
 ```
 

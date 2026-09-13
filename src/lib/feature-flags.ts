@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -36,4 +36,12 @@ export function builtInBrowserEnabled(config: FeatureFlagConfig | null | undefin
  * shows that work is happening. */
 export function showToolCallsEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.showToolCalls === true;
+}
+
+/** Opt-in computer sharing — lending this desktop's folders, terminal or
+ * computer control to a connected workspace. Off unless this server was
+ * explicitly switched on in its config.json; there is no Settings toggle, so
+ * the controls simply are not offered. */
+export function sharedComputersEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.sharedComputers === true;
 }

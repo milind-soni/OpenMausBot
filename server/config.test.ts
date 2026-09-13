@@ -22,6 +22,7 @@ import { customMcpServers,
   showToolCallsEnabled,
   saveConfig,
   skillAuthoringEnabled,
+  sharedComputersEnabled,
   builtInBrowserEnabled,
   browserProfilePartitionId,
   browserProfilePartitionTarget,
@@ -390,6 +391,22 @@ describe("configuration boundaries", () => {
     })).toThrow(/browserProfiles.*id.*duplicated/i);
     expect(() => parseConfigPatch({ features: { skillAuthoring: "yes" } })).toThrow(
       "features.skillAuthoring",
+    );
+  });
+
+  it("keeps computer sharing off unless config.json explicitly turns it on", () => {
+    // A maintainer-only escape hatch, not a Settings toggle: missing, empty
+    // and explicit-false all mean off, and only a literal true opts in.
+    expect(sharedComputersEnabled({})).toBe(false);
+    expect(sharedComputersEnabled({ features: {} })).toBe(false);
+    expect(sharedComputersEnabled({ features: { skillAuthoring: true } })).toBe(false);
+    expect(sharedComputersEnabled({ features: { sharedComputers: false } })).toBe(false);
+    expect(sharedComputersEnabled({ features: { sharedComputers: true } })).toBe(true);
+    expect(parseConfigPatch({ features: { sharedComputers: true } })).toEqual({
+      features: { sharedComputers: true },
+    });
+    expect(() => parseConfigPatch({ features: { sharedComputers: "yes" } })).toThrow(
+      "features.sharedComputers",
     );
   });
 

@@ -1368,11 +1368,37 @@ let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
 
+// Opt-in computer sharing is gated by the server this desktop runs, the same
+// way every other server setting reaches this process: the booleans-only
+// /api/config status (server/index.ts configStatus → features). It is read
+// before the connector could start and again whenever a workspace control is
+// used, so a maintainer who edits config.json and restarts the server does not
+// have to reinstall the app. Unreachable or older server → off.
+let sharedComputersAllowed = false;
+
+async function refreshSharedComputersAllowed() {
+  sharedComputersAllowed = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config`, { signal: AbortSignal.timeout(3_000) })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((status) => status?.features?.sharedComputers === true)
+    .catch(() => false);
+  return sharedComputersAllowed;
+}
+
+/** Refuse a workspace sharing control the server would refuse anyway. */
+async function requireSharedComputers() {
+  if (await refreshSharedComputersAllowed()) return;
+  throw new Error("Computer sharing is turned off on this server.");
+}
+
 function sharingController() {
   computerSharing ??= createComputerSharing({
     file: path.join(app.getPath("userData"), "computer-sharing.json"),
+    // The harness server's data directory holds provider API keys and
+    // sessions.json, so a broad share must never reach it either.
+    protectedPaths: [desktopDataDir()],
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
+    enabled: refreshSharedComputersAllowed,
     cuaConnection: () => cuaReady,
     hostControl: async (id, signal) => {
       const lease = async action => {
@@ -1394,6 +1420,8 @@ function sharingController() {
 async function offerComputerSharing(win) {
   const env = activeEnvironment(environmentsState);
   if (!env || sharingPrompts.has(env.id) || win.isDestroyed()) return;
+  // Never offer a grant this build's server will not honour.
+  if (!(await refreshSharedComputersAllowed()) || win.isDestroyed()) return;
   sharingPrompts.add(env.id);
   try {
     const info = await sharingController().observe(env);
@@ -1452,6 +1480,9 @@ function refreshApplicationMenu() {
       onAddFromClipboard: () => void addServerFromClipboard(),
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
+      onOpenSettings: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
+      },
     }),
   );
 }
@@ -2174,14 +2205,22 @@ const savedWorkspace = id => {
   if (!env) throw new Error("This workspace is no longer connected");
   return env;
 };
-ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", (_event, id) => sharingController().state(savedWorkspace(id).id)));
+ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
+  await requireSharedComputers();
+  return sharingController().state(savedWorkspace(id).id);
+}));
 ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
+  await requireSharedComputers();
   const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder to share", properties: ["openDirectory"] });
   if (picked.canceled || !picked.filePaths[0]) return null;
   return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
 }));
-ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", (_event, id) => sharingController().revoke(savedWorkspace(id))));
+ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_event, id) => {
+  await requireSharedComputers();
+  return sharingController().revoke(savedWorkspace(id));
+}));
 ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event, id, input) => {
+  await requireSharedComputers();
   const env = savedWorkspace(id);
   const info = await sharingController().identity(env);
   const folders = await validateSharedFolders(input?.folders);
@@ -2484,7 +2523,9 @@ app.whenReady().then(async () => {
     return appPermissionAllowed(permission, requesting, rendererOrigin(), details);
   });
   environmentsState = readEnvironments();
-  sharingController().start();
+  // The outbound connector never starts while computer sharing is off: no
+  // poll loop, no registration, no grant replay from disk.
+  void refreshSharedComputersAllowed().then((allowed) => { if (allowed) sharingController().start(); });
   createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing

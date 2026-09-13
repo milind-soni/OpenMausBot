@@ -24,10 +24,14 @@ jobs:
         # supported host platforms. POSIX-only process tests self-skip.
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # The full serial suite plus packaging/cleanup now reaches ~15m on
-    # healthy macOS/Linux runs; Windows needs a little more runner margin.
+    # vite.config.ts runs the suite with fileParallelism:false on purpose, so
+    # wall time is the sum of every file and grows with each one added. The
+    # 20m cap was set when healthy macOS/Linux runs took ~15m; they now reach
+    # ~20m and cancel mid-`Run tests`, which reads as a red PR for a reason
+    # no PR caused. These caps exist to catch a hang, not to ration normal
+    # growth, so give each platform real margin over its observed run.
     # Keep every check and each test's own timeout unchanged.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 25 || 20 }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 35 || 30 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10

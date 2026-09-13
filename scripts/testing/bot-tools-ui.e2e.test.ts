@@ -146,7 +146,10 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Optional ways to customize this bot. You can start chatting now.");
     await click("Access");
     await click("Add an MCP server…");
+    // The registry loads on mount; Paste config is disabled until it finishes.
+    await expect.poll(() => evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Paste config')?.disabled"), { timeout: 10_000 }).toBe(false);
     await click("Paste config");
+    await expect.poll(() => evaluate("Boolean(document.querySelector('textarea[aria-label=\"Paste config\"]'))"), { timeout: 10_000 }).toBe(true);
     const pasted = await ui("snapshot", "--interactive");
     const textarea = Object.entries(pasted.refs as Record<string, { role: string; name: string }>)
       .find(([, entry]) => entry.role === "textbox" && entry.name === "Paste config");

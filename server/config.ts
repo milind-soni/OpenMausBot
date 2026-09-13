@@ -228,6 +228,10 @@ const featureConfigSchema = z.object({
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
+  /** Opt-in computer sharing (a desktop lending folders, a terminal or
+   * computer control to a workspace). Off until explicitly enabled; there is
+   * no Settings toggle — see sharedComputersEnabled. */
+  sharedComputers: z.boolean().optional(),
 });
 /** First-run progress. Kept in the workspace config rather than a browser so
  * it survives cleared site data and is shared by every paired client. Hint
@@ -386,7 +390,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -532,6 +536,19 @@ export function showToolCallsEnabled(cfg: AppConfig): boolean {
  * switch sits under it, so either can withhold the browser. */
 export function builtInBrowserEnabled(cfg: AppConfig): boolean {
   return cfg.features?.browser === true;
+}
+
+/** Opt-in computer sharing: the routes, the agent tools, the advertised
+ * capability and the desktop connector. Off unless an explicit `true` turns
+ * it on, because the reviewed feature still has open security holes (a
+ * read-only folder grant could be escalated to a shell).
+ *
+ * Deliberately NOT a Settings toggle: this is a maintainer-only escape hatch
+ * for an unfinished feature, not a user preference. Someone who needs it
+ * enables it by hand in `~/.openmausbot/config.json`
+ * (`{"features": {"sharedComputers": true}}`) and restarts the server. */
+export function sharedComputersEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.sharedComputers === true;
 }
 
 /** Config sections no provider driver reads. A write that touches only

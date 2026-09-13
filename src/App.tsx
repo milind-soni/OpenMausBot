@@ -196,6 +196,14 @@ function Shell() {
     state.appSettingsOpen ||
     state.pluginsOpen;
 
+  // The macOS app menu's Preferences… item lives in the desktop shell, so the
+  // shell signals the request over the bridge (Cmd+, accelerates the item).
+  // Local-shell only: remote server pages never receive the channel, and ogb
+  // is absent in the browser.
+  useEffect(() => {
+    return window.ogb?.onOpenAppSettings?.(() => dispatch({ type: "toggleAppSettings", open: true }));
+  }, [dispatch]);
+
   // The viewer outlives ComputerPanel and can target any bot, so release control
   // here (always mounted) when a bot's viewer closes. release() is idempotent.
   useEffect(() => {

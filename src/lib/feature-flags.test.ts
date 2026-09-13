@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
+import { builtInBrowserEnabled, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -29,5 +29,13 @@ describe("experimental feature flags", () => {
 
   it("shows tool-call chips only after explicit opt-in", () => {
     expect(showToolCallsEnabled({ features: { showToolCalls: true } })).toBe(true);
+  });
+
+  it("keeps computer sharing off unless the server says it is on", () => {
+    expect(sharedComputersEnabled(null)).toBe(false);
+    expect(sharedComputersEnabled({})).toBe(false);
+    expect(sharedComputersEnabled({ features: {} })).toBe(false);
+    expect(sharedComputersEnabled({ features: { sharedComputers: false } })).toBe(false);
+    expect(sharedComputersEnabled({ features: { sharedComputers: true } })).toBe(true);
   });
 });

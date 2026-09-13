@@ -46,6 +46,9 @@ const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
 const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
 const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
+// Opt-in computer sharing (server features.sharedComputers). Off unless the
+// harness says "1", the same way skill authoring is gated above.
+const SHARED_COMPUTERS_ENABLED = process.env.OMB_SHARED_COMPUTERS_ENABLED === "1";
 const MAX_CREATED_PER_TURN = 4;
 let createdThisTurn = 0;
 // Same spirit as MAX_CREATED_PER_TURN above and MAX_QUEUED_PER_THREAD in
@@ -809,6 +812,13 @@ const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 const AUTHORING_TOOLS = SKILL_AUTHORING_ENABLED
   ? TOOLS
   : TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
+// A workspace with computer sharing off refuses the routes behind these two,
+// so they must not be advertised at all: a model that sees a tool it cannot
+// use spends turns discovering that.
+const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_computer"]);
+const SHAREABLE_TOOLS = SHARED_COMPUTERS_ENABLED
+  ? AUTHORING_TOOLS
+  : AUTHORING_TOOLS.filter((tool) => !SHARED_COMPUTER_TOOL_NAMES.has(tool.name));
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
@@ -817,7 +827,7 @@ const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegatio
 const COORDINATING = process.env.OMB_ROOM_TURN === "1";
 const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
 const AVAILABLE_TOOLS = COORDINATING
-  ? AUTHORING_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
+  ? SHAREABLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
     .map(tool => tool.name === "start_thread" ? {
       ...tool,
       description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
@@ -825,7 +835,7 @@ const AVAILABLE_TOOLS = COORDINATING
         bot_id: { type: "string", enum: [BOT_ID], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." },
       } },
     } : tool)
-  : AUTHORING_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
+  : SHAREABLE_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -1590,6 +1600,14 @@ async function handle(msg: Json) {
       const name = params.name as string;
       if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
+        // Second lock. With sharing off the tool is not in AVAILABLE_TOOLS, so
+        // a call is already refused above as an unknown tool — the same answer
+        // a build without the feature gives. This keeps the handler itself
+        // refusing if that list is ever assembled differently.
+        if (SHARED_COMPUTER_TOOL_NAMES.has(name) && !SHARED_COMPUTERS_ENABLED) {
+          textResult(id, "Computer sharing is turned off in this workspace. There are no shared computers to use.", true);
+          return;
+        }
         if (name === "list_shared_computers") {
           textResult(id, JSON.stringify(await api("/api/internal/shared-computers")));
           return;

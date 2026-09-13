@@ -104,6 +104,13 @@ const bridge = {
     ipcRenderer.on("speech:end", handler);
     return () => ipcRenderer.removeListener("speech:end", handler);
   },
+  /** The app menu's Preferences… item; local shell only (the remote-safe
+   * subset never sees it). */
+  onOpenAppSettings: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on("app:open-settings", handler);
+    return () => ipcRenderer.removeListener("app:open-settings", handler);
+  },
   /** Absolute path of a dropped File — Electron 32 removed File.path, and
    * only the preload can ask. "" when the drag carried no file on disk. */
   getPathForFile: (file) => {
