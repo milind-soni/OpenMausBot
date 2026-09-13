@@ -148,6 +148,22 @@ describe("CLI startup lifecycle", () => {
     }
   });
 
+  it("passes OMB_PORT_PINNED to the server child and returns promptly when the child exits", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 503 })));
+    mocks.spawn.mockImplementation(() => {
+      const child = childProcess();
+      queueMicrotask(() => child.emit("exit", 1, null));
+      return child;
+    });
+    const log = vi.fn();
+    expect(await runServe(options, log)).toBe(1);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    const call = mocks.spawn.mock.calls[0] as [string, string[], { env: NodeJS.ProcessEnv }];
+    expect(call[2].env.OMB_PORT_PINNED).toBe("1");
+    expect(call[2].env.OMB_PORT).toBe(String(options.port));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("OpenMausBot could not start"));
+  });
+
   it("does not start a tunnel after SIGINT during the final readiness response", async () => {
     let healthRequests = 0;
     vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
