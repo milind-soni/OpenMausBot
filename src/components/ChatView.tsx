@@ -1003,12 +1003,13 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     }, 520);
   }, [lastMessage?.id, lastMessage?.role, lastMessage?.kind]);
   const presenceVisible = waiting || popping !== null;
-  // Wall-clock anchor for the working row's elapsed readout — set when the
-  // turn starts, cleared when it settles, reset on bot switch.
+  // Wall-clock anchor for the working row's elapsed readout — the server
+  // stamps the turn's real start (turnStartedAt), so switching threads keeps
+  // the count truthful; Date.now() only covers servers without the stamp.
   const [busySince, setBusySince] = useState<number | null>(null);
   useEffect(() => {
-    setBusySince(bot.busy ? Date.now() : null);
-  }, [bot.busy, bot.id, bot.threadId]);
+    setBusySince(bot.busy ? bot.turnStartedAt ?? Date.now() : null);
+  }, [bot.busy, bot.id, bot.threadId, bot.turnStartedAt]);
 
   // regenerate = fork the last user message with the same text — reuses the
   // existing branch machinery, so the old answer stays reachable via ‹ ›

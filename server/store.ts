@@ -579,6 +579,7 @@ export class Store {
     }
     for (const g of this.groups) {
       g.busyBotId = null;
+      delete g.turnStartedAt;
       const normalized = normalizeGroupDefaultResponder(g.defaultResponder, g.memberIds, Boolean(g.dm));
       if (JSON.stringify(normalized) !== JSON.stringify(g.defaultResponder)) groupsMigrated = true;
       g.defaultResponder = normalized;
@@ -671,9 +672,10 @@ export class Store {
           delete task.approvalMode;
           botsMigrated = true;
         }
-        if (task.busy !== undefined || task.activity !== undefined) botsMigrated = true;
+        if (task.busy !== undefined || task.activity !== undefined || task.turnStartedAt !== undefined) botsMigrated = true;
         task.busy = false;
         task.activity = "idle";
+        task.turnStartedAt = undefined;
       }
       this.mirrorActiveTask(b, active);
       b.unread = b.tasks.some((task) => task.unread);
@@ -697,13 +699,13 @@ export class Store {
     this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
-      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, ...task }) => task),
+      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => task),
     })), null, 2));
   }
 
   private saveGroups() {
     this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, ...g }) => g), null, 2));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => g), null, 2));
   }
 
   get sections(): string[] { return readSections(); }
@@ -823,7 +825,17 @@ export class Store {
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
       this.rememberSections([patch.section]);
     }
+    const previousBusyBotId = group.busyBotId;
     Object.assign(group, patch);
+    // The group's elapsed readout counts the busy member's turn from the
+    // claim time — the group-side twin of a task's turnStartedAt. Derived,
+    // never patched directly: stamp it on every transition into a busy
+    // speaker and clear it when the group goes idle, so each member's turn
+    // counts from its own start.
+    if (Object.prototype.hasOwnProperty.call(patch, "busyBotId")) {
+      if (patch.busyBotId && patch.busyBotId !== previousBusyBotId) group.turnStartedAt = Date.now();
+      else if (!patch.busyBotId) delete group.turnStartedAt;
+    }
     if (!group.dm && Object.prototype.hasOwnProperty.call(patch, "pinnedMessageId")) {
       const active = this.activeGroupTask(group.id);
       if (active) active.pinnedMessageId = patch.pinnedMessageId;
@@ -1560,8 +1572,11 @@ export class Store {
     if (!bot || !task) return null;
     const busy = ACTIVITY_BUSY.has(activity);
     if ((task.activity ?? "idle") === activity && Boolean(task.busy) === busy) return bot;
+    const wasBusy = Boolean(task.busy);
     task.activity = activity;
     task.busy = busy;
+    if (busy && !wasBusy) task.turnStartedAt = Date.now();
+    else if (!busy) delete task.turnStartedAt;
     this.refreshBotActivity(bot);
     this.emit({ type: "bot", botId });
     return bot;

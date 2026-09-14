@@ -210,6 +210,9 @@ export interface Group {
   /** auto-created bot⇄bot channel (ask_bot exchanges mirror here) */
   dm?: boolean;
   busyBotId?: string | null;
+  /** when the busy member's turn started — the group-side twin of a task's
+   * turnStartedAt; stamped by the server when the speaker claims the turn */
+  turnStartedAt?: number | null;
   /** True for the whole orchestrated run, including hand-offs between members. */
   working?: boolean;
   /** the room's shared desk — where member turns run their shell tools,
@@ -268,6 +271,9 @@ export interface Task {
   alwaysAllow?: string[];
   activity?: Bot["activity"];
   busy?: boolean;
+  /** Epoch ms when this task's current turn became busy; the chat's elapsed
+   * readout anchors here so it survives thread switches. Absent while idle. */
+  turnStartedAt?: number;
   unread?: boolean;
   pinnedMessageId?: string;
   /** where this conversation works, when pinned: by the person from the
@@ -344,6 +350,9 @@ export interface Bot {
   busy?: boolean;
   /** what the bot is doing, as the harness sees it; busy is derived from it */
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
+  /** The selected thread's turn-start anchor (epoch ms) while busy, else null;
+   * fed to the Thinking timer so elapsed time survives thread switches. */
+  turnStartedAt?: number | null;
   modelSelection: ModelSelection;
   /** Where this bot works: a computer, only the built-in browser tab, or
    * nowhere; unset = auto (cloud box if one exists, else local). */
@@ -424,6 +433,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
     busy: task.busy ?? (task.activity ? task.activity === "working" || task.activity === "waiting-on-you" : bot.busy),
     unread: task.unread ?? bot.unread,
     pinnedMessageId: task.pinnedMessageId,
+    turnStartedAt: task.turnStartedAt ?? null,
   };
 }
 

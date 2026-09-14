@@ -129,6 +129,10 @@ export interface WireTask {
   /** Runtime-only state, reset on load and never persisted. */
   activity?: BotActivity;
   busy?: boolean;
+  /** Epoch ms when this task's current busy stretch began — the chat anchors
+   * its elapsed readout here, so the count survives thread switches. Stamped
+   * by setTaskActivity on an idle→busy transition; runtime-only like busy. */
+  turnStartedAt?: number;
   /** Where this conversation works when pinned; absent = follow the bot. */
   surface?: Surface;
   /** what this task has spent, banked once per turn */
@@ -409,6 +413,10 @@ export interface WireGroup {
   dm?: boolean;
   /** transient: the member currently running a turn. */
   busyBotId?: string | null;
+  /** transient: when the busy member's turn started, for the elapsed
+   * readout — the group-side twin of a task's turnStartedAt, stamped on
+   * every transition into a busy speaker (never persisted) */
+  turnStartedAt?: number;
   /** the room's shared desk; absent = each member's own default. */
   cwd?: string;
   /** Compatibility mirror of the active task's pinned folder. */

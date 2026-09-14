@@ -120,7 +120,7 @@ describe("independent bot threads", () => {
       { threadId: "first", title: "First", createdAt: 1, activity: "idle", busy: false, unread: false,
         modelSelection: { instanceId: "codex", model: "thread-model", effort: "high" }, approvalMode: "auto", alwaysAllow: ["Read"] },
       { threadId: "second", title: "Second", createdAt: 2, activity: "waiting-on-you", busy: true, unread: true,
-        modelSelection: { instanceId: "claude", model: "other-model" }, approvalMode: "ask" },
+        modelSelection: { instanceId: "claude", model: "other-model" }, approvalMode: "ask", turnStartedAt: 5_000 },
     ],
   };
   const start = () => ({ ...initialState, bots: [bot], selectedId: bot.id });
@@ -130,7 +130,9 @@ describe("independent bot threads", () => {
     expect(current).toMatchObject({ busy: false, activity: "idle", unread: false, approvalMode: "auto", alwaysAllow: ["Read"] });
     expect(current.modelSelection).toEqual(bot.tasks?.[0]?.modelSelection);
     expect(bot.busy).toBe(true);
-    expect(currentTaskBot(bot, "second")).toMatchObject({ busy: true, activity: "waiting-on-you", approvalMode: "ask" });
+    expect(currentTaskBot(bot, "second")).toMatchObject({ busy: true, activity: "waiting-on-you", approvalMode: "ask", turnStartedAt: 5_000 });
+    expect(currentTaskBot(bot).turnStartedAt).toBeNull();
+    expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).turnStartedAt).toBeNull();
     expect(currentTaskBot({ ...bot, tasks: [{ threadId: "first", title: "Legacy", createdAt: 1 }] }).modelSelection).toEqual(bot.modelSelection);
   });
 

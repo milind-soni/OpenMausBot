@@ -5,11 +5,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { isProjectEmoji, Store, type BotRecord, type TaskPatch } from "./store.ts";
+import { isProjectEmoji, Store, type BotRecord, type GroupRecord, type TaskPatch } from "./store.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "default" });
 const savedBots = (): BotRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8"));
+const savedGroups = (): GroupRecord[] => JSON.parse(readFileSync(join(DATA_DIR, "groups.json"), "utf8"));
 
 describe("independent bot task state", () => {
   // The shared Vitest setup gives this file its own disposable home.
@@ -185,14 +186,20 @@ describe("independent bot task state", () => {
     const seen: string[] = [];
     store.onChange((change) => seen.push(change.type));
     store.setTaskActivity(bot.id, first, "working");
+    const firstTurnStarted = store.tasks(bot.id).find((task) => task.threadId === first)?.turnStartedAt;
+    expect(firstTurnStarted).toBeGreaterThan(0);
     store.setTaskActivity(bot.id, second.threadId, "waiting-on-you");
+    const secondTurnStarted = store.tasks(bot.id).find((task) => task.threadId === second.threadId)?.turnStartedAt;
+    expect(secondTurnStarted).toBeGreaterThan(0);
     store.setTaskActivity(bot.id, second.threadId, "waiting-on-you");
+    expect(store.tasks(bot.id).find((task) => task.threadId === second.threadId)?.turnStartedAt).toBe(secondTurnStarted);
     expect(seen).toEqual(["bot", "bot"]);
     expect(bot).toMatchObject({ activity: "waiting-on-you", busy: true });
     store.setActivity(bot.id, "working");
     store.setActivity(bot.id, "idle");
     expect(bot).toMatchObject({ activity: "waiting-on-you", busy: true });
     store.setTaskActivity(bot.id, first, "idle");
+    expect(store.tasks(bot.id).find((task) => task.threadId === first)?.turnStartedAt).toBeUndefined();
     expect(bot.busy).toBe(true);
     expect(store.projectBotForTask(bot.id, first)).toMatchObject({ activity: "idle", busy: false });
     store.switchTask(bot.id, second.threadId);
@@ -202,12 +209,47 @@ describe("independent bot task state", () => {
     for (const task of savedBots()[0]!.tasks!) {
       expect(task).not.toHaveProperty("busy");
       expect(task).not.toHaveProperty("activity");
+      expect(task).not.toHaveProperty("turnStartedAt");
     }
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)).toMatchObject({ activity: "idle", busy: false });
-    expect(reloaded.tasks(bot.id).every((task) => task.activity === "idle" && !task.busy)).toBe(true);
+    expect(reloaded.tasks(bot.id).every((task) => task.activity === "idle" && !task.busy && task.turnStartedAt === undefined)).toBe(true);
     store.deleteTask(bot.id, second.threadId);
     expect(bot).toMatchObject({ activity: "idle", busy: false });
+  });
+
+  it("stamps a group's busy member turn without persisting it", async () => {
+    const store = new Store(selection);
+    const lead = store.createBot({}, { seedMessages: false });
+    const other = store.createBot({}, { seedMessages: false });
+    const group = store.createGroup("Timer group", [lead.id, other.id], false);
+    expect(group.busyBotId).toBeNull();
+    expect(group.turnStartedAt).toBeUndefined();
+    // Patches that never touch the speaker leave the stamp alone.
+    store.patchGroup(group.id, { unread: true });
+    expect(group.turnStartedAt).toBeUndefined();
+    store.patchGroup(group.id, { busyBotId: lead.id });
+    const started = group.turnStartedAt!;
+    expect(started).toBeGreaterThan(0);
+    // An unrelated patch mid-turn, or re-claiming the same member, is the
+    // same turn: the stamp must not move.
+    store.patchGroup(group.id, { bulletin: "changed" });
+    store.patchGroup(group.id, { busyBotId: lead.id });
+    expect(group.turnStartedAt).toBe(started);
+    // A different speaker is a new turn: the count restarts.
+    await new Promise((done) => setTimeout(done, 3));
+    store.patchGroup(group.id, { busyBotId: other.id });
+    expect(group.turnStartedAt!).toBeGreaterThan(started);
+    store.patchGroup(group.id, { busyBotId: null });
+    expect(group.turnStartedAt).toBeUndefined();
+    // Neither the speaker nor the stamp survives persistence or a reload.
+    const saved = savedGroups().find((row) => row.id === group.id)!;
+    expect(saved).not.toHaveProperty("busyBotId");
+    expect(saved).not.toHaveProperty("turnStartedAt");
+    const reloaded = new Store(selection);
+    const restored = reloaded.group(group.id)!;
+    expect(restored.busyBotId).toBeNull();
+    expect(restored.turnStartedAt).toBeUndefined();
   });
 
   it("keeps background unread after reading the selected task, including across restart", () => {

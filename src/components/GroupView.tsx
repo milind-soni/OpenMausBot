@@ -1356,6 +1356,7 @@ export function GroupView({ group }: { group: Group }) {
               visible={presenceVisible}
               label={activityLabel}
               answering={popping !== null}
+              since={speaker ? group.turnStartedAt ?? null : null}
             />
           )}
         </div>
