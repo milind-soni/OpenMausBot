@@ -24,6 +24,7 @@ appendFileSync(join(configDir, "calls.ndjson"), JSON.stringify({
 }) + "\\n");
 const out = value => process.stdout.write(JSON.stringify(value) + "\\n");
 if (args[0] === "--version") { console.log("fixture-claude"); process.exit(0); }
+if (args[0] === "--help") { console.log("Options:\\n  --version\\n  --strict-mcp-config\\n  --setting-sources"); process.exit(0); }
 if (args[0] === "auth") { out(auth); process.exit(auth.loggedIn ? 0 : 1); }
 if (args.includes("text")) {
   process.stdin.resume();
@@ -113,7 +114,8 @@ describe("Claude account configuration", () => {
       recorder.stop();
       expect(await provider.reviewPermission?.("review fixture only")).toBe(`${name}@example.test`);
       const recorded = calls(dirs[index]!);
-      expect(recorded).toHaveLength(4);
+      expect(recorded).toHaveLength(5);
+      expect(recorded.some(call => call.args[0] === "--help")).toBe(true);
       for (const call of recorded) {
         expect(call.configDir).toBe(dirs[index]);
         expect(call.home).toBe(process.env.HOME);
@@ -163,6 +165,7 @@ describe("Claude account configuration", () => {
     expect(await provider.snapshot()).toEqual({
       state: "available", version: "fixture-claude", authenticated: true,
       account: { email: "person@example.test", organization: "Team" }, billing: "subscription",
+      features: { autocompact: false },
     });
     for (const auth of [
       { loggedIn: false, email: "person@example.test", orgName: "Team" },

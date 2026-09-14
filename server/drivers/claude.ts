@@ -343,6 +343,33 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
   };
 }
 
+/** Whether `claude --help` output lists `flag` as a supported option.
+ *
+ * A wrapper may print its own banner before the real options list, and the
+ * flag may appear only in an example or description rather than as an
+ * option. We scan for a line that begins with the flag (after optional
+ * leading whitespace), which is how the real CLI formats its `--help`.
+ */
+export function claudeCliHelpSupportsFlag(help: string | null | undefined, flag: string): boolean {
+  if (!help) return false;
+  const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*${escaped}\\b`, "m").test(help);
+}
+
+/** Whether the installed CLI supports `--autocompact`.
+ *
+ * When `snapshot()` has already probed `claude --help`, use that. If the
+ * probe has not run or `--help` failed, fall back to the version floor so
+ * the pre-snapshot behavior is preserved.
+ */
+export function claudeAutoCompactSupported(
+  version: ClaudeCliVersion | null,
+  help: string | null,
+): boolean {
+  if (help !== null) return claudeCliHelpSupportsFlag(help, "--autocompact");
+  return claudeCliSupports(version, "--autocompact");
+}
+
 const DRIVER_KIND = "claudeAgent";
 
 export interface ClaudeConfig {
@@ -884,15 +911,16 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     };
     await refreshModels();
 
-    // The installed CLI's version as snapshot() last read it, so a flag the
-    // CLI does not know is never passed to it (CLAUDE_FLAG_FLOORS). The
-    // harness snapshots every instance whenever it describes them — app
-    // load, the Engines page, and right after `claude update`, which is
-    // exactly when the answer changes — so a turn normally finds it filled.
-    // A turn before any snapshot assumes a current CLI rather than paying a
-    // CLI start-up of its own: the flags are the default, the exception is
-    // the older install, and the next snapshot corrects it.
+    // The installed CLI's version and `--help` output as snapshot() last read
+    // them, so a flag the CLI does not know is never passed to it. The harness
+    // snapshots every instance whenever it describes them — app load, the
+    // Engines page, and right after `claude update` — which is exactly when
+    // the answer changes, so a turn normally finds it filled. A turn before
+    // any snapshot falls back to the version floor for the flags that are not
+    // known yet.
     let cliVersion: ClaudeCliVersion | null = null;
+    let cliHelp: string | null = null;
+    let cliHelpVersion: string | null = null;
     const listeners = new Set<RuntimeEventListener>();
     // one active turn per thread; a second send while busy is a caller bug
     const active = new Map<string, { stop: () => void; turnId: string; broker?: Awaited<ReturnType<typeof createPermissionBroker>> }>();
@@ -1073,7 +1101,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (claudeCliSupports(cliVersion, "--setting-sources")) args.push("--setting-sources", "project");
       }
       const compactWindow = autoCompactWindow(turnEnvironment);
-      if (compactWindow && claudeCliSupports(cliVersion, "--autocompact")) {
+      if (compactWindow && claudeAutoCompactSupported(cliVersion, cliHelp)) {
         args.push("--autocompact", compactWindow);
       }
       const turnModel = await resolveClaudeTurnModel(turn.model, turnEnvironment);
@@ -1817,12 +1845,30 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
       if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
       cliVersion = parseClaudeCliVersion(version);
+
+      if (version !== cliHelpVersion) {
+        cliHelp = await new Promise<string | null>((resolve) => {
+          execCli(config.cli, ["--help"], { timeout: 8000, env }, (err, stdout) =>
+            resolve(err ? null : stdout),
+          );
+        });
+        cliHelpVersion = version;
+      }
+      const features = cliHelp !== null ? { autocompact: claudeCliHelpSupportsFlag(cliHelp, "--autocompact") } : undefined;
+
       const auth = await claudeAuthStatus(config.cli, env);
       // claudeEnvironment strips ANTHROPIC_API_KEY, so turns run on the
       // CLI's own login (Pro/Max): the cost it reports is what the call
       // WOULD bill, not a charge
       const update = claudeCliUpdate(version, config.cli);
-      return { state: "available", version, ...auth, ...(update ? { update } : {}), billing: "subscription" };
+      return {
+        state: "available",
+        version,
+        ...auth,
+        ...(update ? { update } : {}),
+        ...(features ? { features } : {}),
+        billing: "subscription",
+      };
     };
 
     /** One-shot Claude call with the prompt on stdin, never argv. Approval

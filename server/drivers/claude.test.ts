@@ -19,6 +19,8 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
+  claudeAutoCompactSupported,
+  claudeCliHelpSupportsFlag,
   claudeCliSupports,
   claudeCliUpdate,
   ClaudeDriver,
@@ -1032,6 +1034,45 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).toContain("--autocompact");
   });
 
+  it("withholds --autocompact from a current CLI when its --help omits it", async () => {
+    // 2.1.129 ships publicly without --autocompact even though its version
+    // number is past the 2.1.122 floor. Detect from --help, not the floor,
+    // so the turn does not fail with "unknown option --autocompact".
+    const helpWithoutAutocompact = [
+      "MausBot wrapper for Claude Code 2.1.129",
+      "",
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config         Only use the harness MCP config",
+      "  --setting-sources <source>  Where to read settings",
+      "  -h, --help                  Display help",
+      "",
+    ].join("\n");
+    const dump = join(scratch, "current-cli-missing-autocompact.json");
+    await create(undefined, {
+      FAKE_CLAUDE_DUMP: dump,
+      FAKE_CLAUDE_VERSION: "2.1.129",
+      FAKE_CLAUDE_HELP: helpWithoutAutocompact,
+    });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-129-missing", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv).not.toContain("--autocompact");
+    expect(seen.argv).toContain("--strict-mcp-config");
+    expect(seen.argv).toContain("--setting-sources");
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+    const snap = await instance.snapshot();
+    expect(snap).toMatchObject({
+      state: "available",
+      version: "2.1.129 (Claude Code)",
+      features: { autocompact: false },
+    });
+    expect(snap.update).toBeUndefined();
+  });
+
   it("maps a CLI version onto the flags it accepts", () => {
     expect(parseClaudeCliVersion("2.1.232 (Claude Code)")).toEqual([2, 1, 232]);
     expect(parseClaudeCliVersion("banner\n1.0.60 (Claude Code)")).toEqual([1, 0, 60]);
@@ -1057,6 +1098,60 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.message).toContain("this machine's own Claude Code setup");
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.command).toBe("/opt/bin/claude update");
+  });
+
+  it("detects --autocompact from claude --help fixtures", () => {
+    const withFlag = [
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config",
+      "  --setting-sources <source>",
+      "  --autocompact <count>     Auto-compact session",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    const withoutFlag = [
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config",
+      "  --setting-sources <source>",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    const withBanner = [
+      "MausBot wrapper for Claude Code 2.1.129",
+      "",
+      "Usage: claude [options]",
+      "",
+      "Options:",
+      "  --strict-mcp-config",
+      "  --setting-sources <source>",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    const withDescriptionMention = [
+      "Options:",
+      "  --some-flag   Use --autocompact for compaction",
+      "  -h, --help",
+      "",
+    ].join("\n");
+
+    expect(claudeCliHelpSupportsFlag(withFlag, "--autocompact")).toBe(true);
+    expect(claudeCliHelpSupportsFlag(withoutFlag, "--autocompact")).toBe(false);
+    expect(claudeCliHelpSupportsFlag(withBanner, "--autocompact")).toBe(false);
+    expect(claudeCliHelpSupportsFlag(withDescriptionMention, "--autocompact")).toBe(false);
+
+    // Feature detection wins over the version floor.
+    expect(claudeAutoCompactSupported([2, 1, 129], withFlag)).toBe(true);
+    expect(claudeAutoCompactSupported([2, 1, 129], withoutFlag)).toBe(false);
+    // Falls back to the floor when the help probe has not run.
+    expect(claudeAutoCompactSupported([2, 1, 129], null)).toBe(true);
+    expect(claudeAutoCompactSupported([2, 1, 121], null)).toBe(false);
   });
 
   it("forwards the bot project's own .mcp.json, which strict mode would drop", async () => {

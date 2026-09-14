@@ -97,11 +97,60 @@ const argAfter = (flag: string): string | null => {
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
+function versionTuple(): [number, number, number] | null {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(process.env.FAKE_CLAUDE_VERSION ?? "");
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
+}
+
+function versionAtLeast(installed: [number, number, number], floor: [number, number, number]): boolean {
+  for (let i = 0; i < 3; i += 1) {
+    if (installed[i] !== floor[i]) return installed[i] > floor[i];
+  }
+  return true;
+}
+
+function defaultClaudeHelp(): string {
+  const v = versionTuple();
+  const has = (floor: [number, number, number]) => !v || versionAtLeast(v, floor);
+  const lines = [
+    "Usage: claude [options]",
+    "",
+    "Options:",
+    "  -p, --prompt <prompt>     Prompt to send",
+    "  --output-format <format>  Output format",
+    "  --input-format <format>   Input format",
+    "  --verbose                 Verbose output",
+    "  --permission-mode <mode>  Permission mode",
+    "  --tools <tools>           Comma-separated builtin tools",
+    "  --disallowedTools <tools> Comma-separated disallowed tool patterns",
+  ];
+  if (has([1, 0, 60])) lines.push("  --strict-mcp-config       Only use the harness MCP config");
+  if (has([1, 0, 122])) lines.push("  --setting-sources <source>  Where to read settings");
+  if (has([2, 1, 122])) lines.push("  --autocompact <count>     Auto-compact session at token count");
+  lines.push(
+    "  --model <model>           Model to use",
+    "  --effort <level>          Reasoning effort",
+    "  --session-id <id>         Session ID",
+    "  --resume <id>             Resume a session",
+    "  --append-system-prompt-file <file>  Append to system prompt",
+    "  -h, --help                Display help",
+    "",
+  );
+  return lines.join("\n");
+}
+
 // Snapshot probes: both answer on argv alone and exit without reading stdin.
 if (argv[0] === "--version") {
   // FAKE_CLAUDE_VERSION lets a test stand in for an older CLI: the driver
   // withholds flags that version predates (CLAUDE_FLAG_FLOORS).
   process.stdout.write(`${process.env.FAKE_CLAUDE_VERSION ?? "2.1.232"} (Claude Code)\n`);
+  process.exit(0);
+}
+
+if (argv[0] === "--help") {
+  // FAKE_CLAUDE_HELP lets a test stand in for a CLI whose help does not
+  // match the version floor (e.g. 2.1.129 lacks --autocompact).
+  process.stdout.write(process.env.FAKE_CLAUDE_HELP ?? defaultClaudeHelp());
   process.exit(0);
 }
 

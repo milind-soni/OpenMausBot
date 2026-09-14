@@ -385,6 +385,11 @@ export interface ProviderSnapshot {
   /** How this instance is paid for, when the driver can tell: a reported
    * cost on a subscription is notional and the UI labels it as such. */
   billing?: "metered" | "subscription";
+  /** Capability flags the driver learned by probing the installed CLI. */
+  features?: {
+    /** Whether `claude --help` lists the `--autocompact` option. */
+    autocompact?: boolean;
+  };
 }
 
 // ── engine install descriptor ───────────────────────────────────────────
