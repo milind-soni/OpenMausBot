@@ -203,6 +203,32 @@ const bridge = {
    * focus stays with the window holding the composer). */
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
 
+  /** Call-mode streaming STT: open-mic Deepgram session delivering one
+   * utterance event per endpointed phrase — the Windows (and any non-mac)
+   * counterpart of Apple Speech's finals for the call loop. Same key
+   * custody as dictation: the renderer captures audio; the main process
+   * owns the socket and the key. */
+  callStt: {
+    start: () => ipcRenderer.invoke("call-stt:start"),
+    audio: (id, chunk) => ipcRenderer.invoke("call-stt:audio", id, chunk),
+    stop: (id) => ipcRenderer.invoke("call-stt:stop", id),
+    onOpen: (cb) => {
+      const handler = (_e, id) => cb(id);
+      ipcRenderer.on("call-stt:open", handler);
+      return () => ipcRenderer.removeListener("call-stt:open", handler);
+    },
+    onUtterance: (cb) => {
+      const handler = (_e, id, utterance) => cb(id, utterance);
+      ipcRenderer.on("call-stt:utterance", handler);
+      return () => ipcRenderer.removeListener("call-stt:utterance", handler);
+    },
+    onError: (cb) => {
+      const handler = (_e, id, message) => cb(id, message);
+      ipcRenderer.on("call-stt:error", handler);
+      return () => ipcRenderer.removeListener("call-stt:error", handler);
+    },
+  },
+
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",
    *    version?, percent?, message? }. onState fires immediately with the

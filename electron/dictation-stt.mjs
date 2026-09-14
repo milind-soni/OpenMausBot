@@ -86,7 +86,7 @@ export function transcriptText(state) {
  * transport keeps the wire swappable for tests. Exactly ONE message listener
  * owns the state: live partials and the finalize handshake both flow through
  * it, so no server message is ever accumulated twice. */
-export function startDictationSession({ socket, onPartial, onError, onOpen }) {
+export function startDictationSession({ socket, onPartial, onError, onOpen, onUtterance }) {
   // Reassigned as results arrive; helpers take/return the value so the
   // accumulation logic itself stays pure and testable.
   let state = { finalText: "", partialText: "" };
@@ -106,6 +106,19 @@ export function startDictationSession({ socket, onPartial, onError, onOpen }) {
     state = accumulate(state, message);
     const after = transcriptText(state);
     if (after !== before && onPartial) onPartial(after);
+    // Call-mode session: Deepgram endpointed an utterance (speech_final).
+    // Deliver the utterance's own text — the words since the last boundary —
+    // exactly like a speech recognizer's final result, and let the caller
+    // decide the next move (relisten, answer, send). Both boundary kinds
+    // reset the window: an is_final followed by no words yet keeps the
+    // utterance open, so the boundary message itself ends the utterance.
+    if (onUtterance && isSpeechFinal(message)) {
+      const utterance = state.partialText.trim();
+      if (utterance) {
+        onUtterance(utterance);
+        state = { finalText: "", partialText: "" };
+      }
+    }
     // Finalize's flush ends in an is_final result; that (or a close) ends
     // the wait.
     if (finalizeWaiter && isFinalResult(message)) {

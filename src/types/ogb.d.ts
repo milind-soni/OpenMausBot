@@ -141,6 +141,18 @@ const __APP_VERSION__: string;
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
       onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
+      /** Call-mode streaming STT (Deepgram, main-process socket): an
+       * open-mic session delivering one utterance per endpointed phrase.
+       * Present on desktop builds; the call loop prefers it over Apple
+       * Speech so calls work on Windows and any platform with a mic. */
+      callStt?: {
+        start(): Promise<number>;
+        audio(id: number, chunk: ArrayBuffer): Promise<void>;
+        stop(id: number): Promise<void>;
+        onOpen(cb: (id: number) => void): () => void;
+        onUtterance(cb: (id: number, utterance: { text: string; partial: boolean }) => void): () => void;
+        onError(cb: (id: number, message: string) => void): () => void;
+      };
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;

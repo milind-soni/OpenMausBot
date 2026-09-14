@@ -60,6 +60,12 @@ function localComputerReady(platform, connection) {
   if (platform === "darwin") {
     return connection?.mode === "embedded" || connection?.mode === "standalone";
   }
+  // Windows: the bundled cua-driver launches as a standalone daemon (or the
+  // embedded host) at app start; a live descriptor of either mode means
+  // local control is ready. No TCC-style grants exist to pre-check.
+  if (platform === "win32") {
+    return connection?.mode === "embedded" || connection?.mode === "standalone";
+  }
   if (
     platform !== "linux" ||
     connection?.schemaVersion !== 1 ||

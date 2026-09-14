@@ -26,6 +26,7 @@ import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
+import { floatToPcm16 } from "@/lib/clipboard-dictation";
 import { BotAvatar } from "./Avatar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { cn } from "@/lib/cn";
@@ -74,7 +75,10 @@ export function CallTargetButton({
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
-  const supported = capabilities.dictation.available && Boolean(window.ogb?.speechStart);
+  // Calls listen two ways: Apple Speech on macOS (on-device dictation) and
+  // the Deepgram call stream (window.ogb.callStt) everywhere else the
+  // desktop build ships — Windows included. Either ear is enough.
+  const supported = (capabilities.dictation.available && Boolean(window.ogb?.speechStart)) || Boolean(window.ogb?.callStt);
   const localVoice = localSystemVoiceActive();
   const configured = localVoice || Boolean(state.config?.tts?.configured);
   const everyTargetHasVoice = voices.length > 0 && voices.every((voice) => Boolean(voice));
@@ -101,9 +105,9 @@ export function CallTargetButton({
 
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
-    : !capabilities.dictation.available
-      ? "Calls require OpenMausBot for macOS because speech recognition runs on-device."
-      : !window.ogb?.speechStart
+    : !capabilities.dictation.available && !window.ogb?.callStt
+      ? "Calls need a Deepgram key (Settings → Connections) on this platform — speech recognition runs in the cloud here."
+      : !window.ogb?.speechStart && !window.ogb?.callStt
         ? "The speech service is unavailable in this app build. Restart or update OpenMausBot."
         : !configured
           ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
@@ -197,6 +201,9 @@ export function CallOverlay({ bot }: { bot: Bot }) {
   return <Call bot={bot} />;
 }
 
+const PCM_SAMPLE_RATE = 16000;
+const PCM_CHUNK_FRAMES = 4096;
+
 function Call({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const speech = useSpeech();
@@ -253,17 +260,99 @@ function Call({ bot }: { bot: Bot }) {
     void window.ogb?.speechStop();
   }, []);
 
+  // The two listening engines share this guard: mute the mic while the bot
+  // speaks (a half-duplex call — see the header comment), so the renderer
+  // stops feeding the Deepgram stream and the main process stops recognizing.
+  const callSttSession = useRef<number | null>(null);
+  const callSttStream = useRef<MediaStream | null>(null);
+  const callSttContext = useRef<AudioContext | null>(null);
+  const callSttProcessor = useRef<ScriptProcessorNode | null>(null);
+  const callSttMuted = useRef(false);
+
+  const closeCallSttAudio = useCallback(() => {
+    try {
+      callSttProcessor.current?.disconnect();
+    } catch {}
+    callSttProcessor.current = null;
+    void callSttContext.current?.close().catch(() => {});
+    callSttContext.current = null;
+    for (const track of callSttStream.current?.getTracks() ?? []) track.stop();
+    callSttStream.current = null;
+  }, []);
+
+  const stopCallStt = useCallback(() => {
+    const id = callSttSession.current;
+    callSttSession.current = null;
+    if (id !== null) void window.ogb?.callStt?.stop(id).catch(() => {});
+    closeCallSttAudio();
+  }, [closeCallSttAudio]);
+
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== bot.id) return;
     move("listening");
     setHeard("");
     setNote(null);
+    // Deepgram call stream (Windows and every non-mac desktop build).
+    if (window.ogb?.callStt) {
+      void (async () => {
+        try {
+          callSttMuted.current = false;
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          if (!alive.current || currentCall() !== bot.id || callSttSession.current !== null) {
+            for (const track of stream.getTracks()) track.stop();
+            return;
+          }
+          callSttStream.current = stream;
+          const id = await window.ogb!.callStt!.start();
+          if (!alive.current || currentCall() !== bot.id) {
+            void window.ogb?.callStt?.stop(id).catch(() => {});
+            closeCallSttAudio();
+            return;
+          }
+          callSttSession.current = id;
+          // 16 kHz capture — exactly what Deepgram's linear16/16000 contract
+          // expects (same pipeline as hold-to-dictate).
+          const context = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+          callSttContext.current = context;
+          const source = context.createMediaStreamSource(stream);
+          const processor = context.createScriptProcessor(PCM_CHUNK_FRAMES, 1, 1);
+          callSttProcessor.current = processor;
+          processor.onaudioprocess = (event) => {
+            if (callSttSession.current !== id) return;
+            if (callSttMuted.current) return;
+            const pcm = floatToPcm16(event.inputBuffer.getChannelData(0));
+            void window.ogb?.callStt?.audio(id, pcm).catch(() => {});
+          };
+          source.connect(processor);
+          // Muted output feeds the destination so the graph runs to pull the
+          // mic, but raw capture never reaches the speakers.
+          const mute = context.createGain();
+          mute.gain.value = 0;
+          processor.connect(mute);
+          mute.connect(context.destination);
+        } catch (error) {
+          stopCallStt();
+          if (alive.current && currentCall() === bot.id) {
+            const message = error instanceof Error ? error.message : String(error);
+            setNote(
+              /permission|denied/i.test(message)
+                ? "Microphone access was denied — allow it, then call again."
+                : /No Deepgram key/i.test(message)
+                  ? message
+                  : "The microphone couldn't start. Check Microphone access and your Deepgram key.",
+            );
+          }
+        }
+      })();
+      return;
+    }
+    // Apple Speech (macOS).
     void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
     });
-  }, [bot.id, move]);
+  }, [bot.id, closeCallSttAudio, move, stopCallStt]);
 
   /** Speak, with the microphone closed for the duration (see the header
    * comment — an open mic during playback is a feedback loop). */
@@ -275,7 +364,11 @@ function Call({ bot }: { bot: Bot }) {
       // never observe an old "listening" phase and reopen the mic.
       move("speaking");
       hush();
+      // Deepgram path: stop FEEDING the stream while speaking (the session
+      // stays open — cheap) so the bot never transcribes its own voice.
+      callSttMuted.current = true;
       await speaker.speak(text, { botId: bot.id, voiceId: bot.voice });
+      callSttMuted.current = false;
       return alive.current && currentCall() === bot.id && sayGeneration.current === mine;
     },
     [bot.id, bot.voice, hush, move],
@@ -305,21 +398,12 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   // ── the microphone ───────────────────────────────────────────────────
-  useEffect(() => {
-    const bridge = window.ogb;
-    if (!bridge) return;
-    const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
-      if (line.error) {
-        setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
-        return;
-      }
-      if (typeof line.text !== "string") return;
-      setHeard(line.text);
-      if (line.partial !== false) return;
-      // final result — Apple's recognizer decided the turn ended
-      const said = line.text.trim();
-      if (!said) return listen();
+  // One shared "an utterance was finalized" path: Apple Speech delivers it
+  // through onSpeechTranscript(partials→final), the Deepgram call stream
+  // through callStt.onUtterance. The body below is that shared path.
+  const handleUtterance = useCallback(
+    (said: string) => {
+      setHeard(said);
 
       const open = askedApproval.current;
       if (open) {
@@ -382,11 +466,31 @@ function Call({ bot }: { bot: Bot }) {
 
       move("sending");
       dispatch({ type: "send", botId: bot.id, text: said, threadId: bot.threadId });
+    },
+    [bot.id, bot.threadId, dispatch, hush, move, sayThenListen],
+  );
+
+  useEffect(() => {
+    const bridge = window.ogb;
+    if (!bridge) return;
+    const offTranscript = bridge.onSpeechTranscript((line) => {
+      if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
+      if (line.error) {
+        setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
+        return;
+      }
+      if (typeof line.text !== "string") return;
+      setHeard(line.text);
+      if (line.partial !== false) return;
+      // final result — Apple's recognizer decided the turn ended
+      const said = line.text.trim();
+      if (!said) return listen();
+      handleUtterance(said);
     });
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== bot.id) return;
       if (code === 2) {
-        setNote("Calls need macOS dictation, which isn't available here yet.");
+        if (!window.ogb?.callStt) setNote("Calls need macOS dictation, which isn't available here yet.");
         return;
       }
       if (code === 1) {
@@ -401,17 +505,34 @@ function Call({ bot }: { bot: Bot }) {
       // to be listening, that means the user's turn ended — start the next
       if (phaseRef.current === "listening") listen();
     });
+    // Deepgram call stream: one event per endpointed utterance, feeding the
+    // same shared path Apple Speech's finals use. The session keeps running
+    // for the whole call — phases gate whether utterances are consumed.
+    const offUtterance = window.ogb?.callStt?.onUtterance((id, utterance) => {
+      if (!alive.current || currentCall() !== bot.id) return;
+      if (callSttSession.current !== id || phaseRef.current !== "listening") return;
+      const said = utterance.text.trim();
+      if (!said) return;
+      handleUtterance(said);
+    });
+    const offCallSttError = window.ogb?.callStt?.onError((id, message) => {
+      if (!alive.current || currentCall() !== bot.id || callSttSession.current !== id) return;
+      setNote(message);
+    });
     if (bot.busy && !approval && !question) move("working");
     else listen();
     return () => {
       offTranscript();
       offEnd();
+      offUtterance?.();
+      offCallSttError?.();
       void window.ogb?.speechStop();
+      stopCallStt();
     };
     // busy/approval are intentionally initial snapshots. Their live changes
     // are handled below without tearing down native event listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id, bot.threadId, dispatch, hush, listen, move, sayThenListen]);
+  }, [bot.id, bot.threadId, dispatch, handleUtterance, listen, move, stopCallStt]);
 
   // ── narrate the work, speak the answer, read the approvals ───────────
   useEffect(() => {
