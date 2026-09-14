@@ -173,8 +173,9 @@ test("Windows terminal preserves command syntax, pipeline output and exit status
   assert.equal(returned.exitCode, 0); assert.match(returned.output, /fixture-return/);
   const paths = await run("[Console]::WriteLine($env:PSModulePath)");
   assert.equal(paths.exitCode, 0);
-  assert.ok(paths.output.trim().startsWith(path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules")), "built-in modules must be first");
-  assert.ok(paths.output.includes(path.join(process.env.ProgramFiles, "WindowsPowerShell", "Modules")), "installed modules must remain available");
+  const modulePaths = paths.output.trim().toLowerCase();
+  assert.ok(modulePaths.startsWith(path.join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules").toLowerCase()), "built-in modules must be first");
+  assert.ok(modulePaths.includes(path.join(process.env.ProgramFiles, "WindowsPowerShell", "Modules").toLowerCase()), "installed modules must remain available");
   const failed = await run("throw 'fixture-command-failed'");
   assert.notEqual(failed.exitCode, 0); assert.match(failed.output, /fixture-command-failed/);
 });
