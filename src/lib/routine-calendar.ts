@@ -60,6 +60,17 @@ export function toLocalTimeInput(at: number): string {
   return date.toISOString().slice(11, 16);
 }
 
+/** The inverse of `toLocalDateInput`: the start of the local day that a
+ * `YYYY-MM-DD` field names.
+ *
+ * Parsed at LOCAL midnight deliberately. `new Date("2026-09-14")` is parsed as
+ * UTC midnight, which in a negative-offset timezone is still the 13th — a day
+ * picker that would store the wrong day for half the world. */
+export function fromLocalDateInput(date: string): number {
+  const [year, month, day] = date.split("-").map(Number);
+  return new Date(year!, (month ?? 1) - 1, day ?? 1).getTime();
+}
+
 export function fromLocalDateAndTime(date: string, time: string, originalAt?: number): number {
   // Date/time inputs display minutes, but agent-created schedules can carry
   // seconds and milliseconds. A title-only save must not move the anchor or
