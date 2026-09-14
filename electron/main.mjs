@@ -24,7 +24,7 @@ import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
-import { defaultSaveName, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
 import {
@@ -2368,6 +2368,9 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  session.defaultSession.on("will-download", (_event, item) => {
+    item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
+  });
   if (app.isPackaged) {
     try {
       // Acquire before either plaintext credential migration reads or writes
