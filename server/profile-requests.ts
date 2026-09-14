@@ -1,5 +1,6 @@
 // propose_profile: a bot proposes changes to its own name, title, description,
-// SOUL.md, or working folder; the change lands only when the user confirms the card. Same
+// SOUL.md, or working folder; confirmed cards and Full Access submissions share
+// the same validated commit path. Same
 // shape as routine-requests.ts, much smaller: the profile commits in one
 // store call, and staleness is a hash of the five fields instead of a
 // scheduler revision. Everything here is re-validated at confirm time —
@@ -59,6 +60,8 @@ export interface ProfileRequestStore {
 export interface ProfileRequestServiceOptions {
   store: ProfileRequestStore;
   now?: () => number;
+  /** Server-owned effective mode of the source conversation, never request input. */
+  autoApply?: (botId: string, threadId: string) => boolean;
   canPersist?: (botId: string, threadId: string) => { ok: true } | { ok: false; status: number; error: string };
   /** Chief targeting another bot: returns a refusal sentence or null. Checked at propose AND confirm. */
   validateTarget?: (proposerBotId: string, targetBotId: string) => string | null;
@@ -217,6 +220,7 @@ export class ProfileRequestService {
   private readonly store: ProfileRequestStore;
   private readonly now: () => number;
   private readonly canPersist?: ProfileRequestServiceOptions["canPersist"];
+  private readonly autoApply?: ProfileRequestServiceOptions["autoApply"];
   /** Public: a caller's section membership can change between propose and
    * confirm, and tests flip this mid-scenario to model that. */
   validateTarget?: ProfileRequestServiceOptions["validateTarget"];
@@ -225,6 +229,7 @@ export class ProfileRequestService {
     this.store = options.store;
     this.now = options.now ?? Date.now;
     this.canPersist = options.canPersist;
+    this.autoApply = options.autoApply;
     this.validateTarget = options.validateTarget;
   }
 
@@ -236,6 +241,18 @@ export class ProfileRequestService {
     reason: unknown;
     from?: { botId: string; name: string; color: string };
   }): { requestId: string; messageId: string; title: string; summary: string; detail: string } {
+    return this.prepare(args);
+  }
+
+  submit(args: Parameters<ProfileRequestService["propose"]>[0]) {
+    const proposal = this.prepare(args, true);
+    return { ...proposal, state: proposal.result ? "applied" as const : "pending" as const };
+  }
+
+  private prepare(args: Parameters<ProfileRequestService["propose"]>[0], submitted = false): {
+    requestId: string; messageId: string; title: string; summary: string; detail: string;
+    result?: Extract<ResolveProfileRequestResult, { state: "applied" }>;
+  } {
     const reason = reasonText(args.reason);
     const changes = parseChanges(args.changes);
 
@@ -283,13 +300,15 @@ export class ProfileRequestService {
     if (persistence && !persistence.ok) {
       throw new ProfileRequestError(persistence.error, persistence.status);
     }
+    const automatic = submitted && this.autoApply?.(args.botId, args.threadId) === true;
     const messageInput: Parameters<ProfileRequestStore["appendMessage"]>[1] = {
       role: "bot",
       kind: "options",
       card: {
         title: copy.title,
         subtitle: copy.detail,
-        options: ["Confirm", "Cancel"],
+        options: automatic ? [] : ["Confirm", "Cancel"],
+        ...(automatic ? { dismissed: true } : {}),
         requestId,
         tool: "update_profile",
         profileRequest: payload,
@@ -297,7 +316,13 @@ export class ProfileRequestService {
     };
     if (args.from) messageInput.from = args.from;
     const message = this.store.appendMessage(args.threadId, messageInput);
-    return { requestId, messageId: message.id, title: copy.title, summary: copy.summary, detail: copy.detail };
+    const proposal = { requestId, messageId: message.id, title: copy.title, summary: copy.summary, detail: copy.detail };
+    if (!automatic) return proposal;
+    // The hidden receipt is persisted before the profile changes. The same
+    // validation and durable commit marker serve both automatic and human decisions.
+    const result = this.resolve({ botId: args.botId, threadId: args.threadId, requestId, behavior: "allow" });
+    if (result.state === "applied") return { ...proposal, result };
+    throw new ProfileRequestError(result.state === "invalid" ? result.error : "The profile change could not be applied", result.state === "invalid" ? result.status : 409);
   }
 
   /** Claims a profile card even after it was settled, so a duplicate click
@@ -376,7 +401,9 @@ export class ProfileRequestService {
       const status = error instanceof ProfileRequestError ? error.status : 400;
       const detail = error instanceof Error ? error.message : String(error);
       const saved = this.store.bot(payload.targetBotId)?.lastProfileRequestId === payload.requestId;
-      const notice = "Profile saved. Confirm again to finish recording this decision; the changes will not be applied again.";
+      const notice = card.dismissed && card.options.length === 0
+        ? "Profile saved. Recording the operation receipt could not finish; the changes will not be applied again."
+        : "Profile saved. Confirm again to finish recording this decision; the changes will not be applied again.";
       try {
         this.store.patchMessage(args.threadId, message.id, {
           card: { ...card, held: saved ? notice : redactSecretsInText(detail).slice(0, 500) },

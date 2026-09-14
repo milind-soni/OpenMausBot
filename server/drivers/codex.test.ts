@@ -177,6 +177,13 @@ describe("CodexDriver turns (fake app-server)", () => {
       { type: "item.started", itemType: "tool", title: "web_search" },
       { type: "item.completed", itemType: "tool", ok: true },
     ]);
+    expect(recorder.events.filter((event) => event.itemId === "i1")).toMatchObject([
+      { type: "item.started", input: expect.stringContaining("ls -la") },
+      { type: "item.completed", output: expect.stringContaining("README.md") },
+    ]);
+    const commandResult = recorder.events.find((event) => event.itemId === "i1" && event.type === "item.completed");
+    expect(JSON.stringify(commandResult)).toContain("exitCode");
+    expect(JSON.stringify(commandResult)).not.toContain("codex-output-secret");
     // codex reports the THREAD total; the driver turns it into this turn's
     // figure so the harness never sums a running total
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });

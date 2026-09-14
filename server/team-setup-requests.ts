@@ -54,11 +54,20 @@ interface Options {
   canAccessTeam(from: BotRecord, target?: string): boolean;
   canPersist(botId: string, threadId: string): { ok: true } | { ok: false; status: number; error: string };
   validateModel(selection: ModelSelection, current?: BotRecord): string | null;
-  targetBusy(botId: string): boolean;
+  targetBusy(botId: string, sourceThreadId?: string): boolean;
+  /** The caller resolves the effective mode of this exact conversation. */
+  autoApply?(botId: string, threadId: string): boolean;
+  validateChange?(before: BotRecord, fields: TeamSetupFields): void;
   maxBots: number;
   ownsThread(botId: string, threadId: string): boolean;
   deleteBot(botId: string, revalidate: () => void, request: TeamSetupRequest): Promise<void>;
 }
+
+type RequestFrom = { botId: string; name: string; color: string };
+type SetupArgs = { botId: string; threadId: string; plan: unknown; from?: RequestFrom };
+type DeletionArgs = { botId: string; threadId: string; targetBotId: string; reason: string; from?: RequestFrom };
+/** Server-only invocation lease. Never saved on a request or approval card. */
+type SubmitAuthority = { canCommit?: () => boolean };
 
 export class TeamSetupRequestService {
   private readonly resolving = new Set<string>();
@@ -87,10 +96,11 @@ export class TeamSetupRequestService {
     return result;
   }
 
-  private validate(request: TeamSetupRequest, confirming: boolean): void {
+  private validate(request: TeamSetupRequest, confirming: boolean, immediate = false): void {
     const chief = this.chief(request.botId);
     if (!this.options.ownsThread(request.botId, request.threadId)) throw new TeamSetupError("The requesting conversation no longer exists", 409);
-    if (confirming && !this.options.store.messagesFor(request.threadId).some((message) => message.card?.requestId === request.requestId && !message.card.answered && !message.card.dismissed)) throw new TeamSetupError("This setup card is no longer pending", 409);
+    if (immediate && !this.options.autoApply?.(request.botId, request.threadId)) throw new TeamSetupError("Full Access is no longer enabled for this conversation", 409);
+    if (confirming && !immediate && !this.options.store.messagesFor(request.threadId).some((message) => message.card?.requestId === request.requestId && !message.card.answered && !message.card.dismissed)) throw new TeamSetupError("This setup card is no longer pending", 409);
     if (confirming && teamSetupRevision(chief) !== request.requesterRevision) throw new TeamSetupError("The Chief's settings changed. This setup was cancelled; review a new proposal.", 409);
     const existingTeams = new Set(this.options.teams().map(section));
     if (new Set([...(chief.managedSections ?? []), ...request.newTeams]).size > 100) throw new TeamSetupError("A Chief may coordinate at most 100 additional teams", 409);
@@ -108,9 +118,11 @@ export class TeamSetupRequestService {
       } else {
         if (!target || target.hidden || !this.options.canAccessTeam(chief, target.section) || (target.id !== chief.id && Array.isArray(chief.peers) && !chief.peers.includes(target.id))) throw new TeamSetupError("A target bot is outside this Chief's authorized team and peer scope", 403);
         if (teamSetupRevision(target) !== operation.expectedRevision) throw new TeamSetupError(`@${target.name} changed. This setup was cancelled; review a new proposal.`, 409);
-        if (this.options.targetBusy(target.id) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
+        const sourceThreadId = immediate && target.id === chief.id ? request.threadId : undefined;
+        if (this.options.targetBusy(target.id, sourceThreadId) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
       }
       const fields = this.fields(operation.fields, target ?? undefined);
+      if (confirming && target) this.options.validateChange?.(target, fields);
       const destination = fields.section ?? target?.section ?? chief.section;
       if (!allowed(destination)) throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);
       if (!request.newTeams.includes(section(destination)) && !existingTeams.has(section(destination))) throw new TeamSetupError("The destination team no longer exists", 409);
@@ -132,7 +144,7 @@ export class TeamSetupRequestService {
     }
   }
 
-  propose(args: { botId: string; threadId: string; plan: unknown; from?: { botId: string; name: string; color: string } }) {
+  private prepare(args: SetupArgs) {
     const parsed = planSchema.safeParse(args.plan);
     if (!parsed.success) throw new TeamSetupError(parsed.error.issues[0]?.message ?? "Invalid team setup");
     const chief = this.chief(args.botId);
@@ -155,10 +167,10 @@ export class TeamSetupRequestService {
       reason: redactSecretsInText(parsed.data.reason), createdAt: Date.now(), requesterRevision: teamSetupRevision(chief),
       newTeams: [...new Set(parsed.data.newTeams)], operations };
     this.validate(request, false);
-    return this.card(request, args.from);
+    return request;
   }
 
-  proposeDeletion(args: { botId: string; threadId: string; targetBotId: string; reason: string; from?: { botId: string; name: string; color: string } }) {
+  private prepareDeletion(args: DeletionArgs) {
     const chief = this.chief(args.botId);
     const target = this.options.store.bot(args.targetBotId);
     if (!target) throw new TeamSetupError("That bot no longer exists", 404);
@@ -167,10 +179,23 @@ export class TeamSetupRequestService {
       reason: redactSecretsInText(args.reason), createdAt: Date.now(), requesterRevision: teamSetupRevision(chief), newTeams: [], operations: [],
       deletion: { botId: target.id, name: target.name, expectedRevision: teamSetupRevision(target) } };
     this.validate(request, false);
-    return this.card(request, args.from);
+    return request;
   }
 
-  private card(request: TeamSetupRequest, from?: { botId: string; name: string; color: string }) {
+  propose(args: SetupArgs) { return this.card(this.prepare(args), args.from); }
+  proposeDeletion(args: DeletionArgs) { return this.card(this.prepareDeletion(args), args.from); }
+
+  async submit(args: SetupArgs & SubmitAuthority) {
+    if (this.options.autoApply?.(args.botId, args.threadId)) return this.applyImmediately(this.prepare(args), args.from, args.canCommit);
+    return { ...this.propose(args), applied: false, state: "pending" as const };
+  }
+
+  async submitDeletion(args: DeletionArgs & SubmitAuthority) {
+    if (this.options.autoApply?.(args.botId, args.threadId)) return this.applyImmediately(this.prepareDeletion(args), args.from, args.canCommit);
+    return { ...this.proposeDeletion(args), applied: false, state: "pending" as const };
+  }
+
+  private cardData(request: TeamSetupRequest, immediate = false): OptionCardData {
     const permission = this.options.canPersist(request.botId, request.threadId);
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
@@ -186,14 +211,63 @@ export class TeamSetupRequestService {
       }
     }
     if (!request.deletion) lines.push("\nDefault models apply to groups and new threads. Every existing thread keeps its current model and permissions.", "New bots start in Ask with connected apps disabled. Existing execution permissions are unchanged.");
-    lines.push("After this decision the Chief continues once with the result.");
+    lines.push(immediate ? "Full Access applies this request in the current turn without another confirmation." : "After this decision the Chief continues once with the result.");
     const title = request.deletion ? `Delete @${request.deletion.name}?` : `Apply setup for ${request.operations.length} ${request.operations.length === 1 ? "bot" : "bots"}?`;
     const detail = lines.join("\n");
-    const message = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: {
+    return {
       title, subtitle: detail, options: [request.deletion ? "Delete bot" : "Apply setup", "Cancel"], requestId: request.requestId,
       tool: request.deletion ? "delete_bot" : "set_up_team", teamSetupRequest: request,
-    } });
+    };
+  }
+
+  private card(request: TeamSetupRequest, from?: RequestFrom) {
+    const card = this.cardData(request);
+    const message = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card });
+    const { title, subtitle: detail } = card;
     return { requestId: request.requestId, messageId: message.id, title, summary: title, detail };
+  }
+
+  private async apply(request: TeamSetupRequest, immediate = false, canCommit?: () => boolean): Promise<TeamSetupResult> {
+    const receipt = this.options.store.bot(request.botId)?.lastTeamSetupReceipt;
+    if (receipt?.requestId === request.requestId) return receipt.result;
+    try {
+      const revalidate = () => {
+        // Deletion awaits inventory and teardown. A still-Full conversation
+        // is not authority for an invocation that Stop/replacement revoked.
+        if (immediate && canCommit && !canCommit()) throw new TeamSetupError("The requesting turn has expired; this setup was cancelled", 409);
+        this.validate(request, true, immediate);
+      };
+      revalidate();
+      if (!request.deletion) return this.options.store.applyTeamSetup(request);
+      await this.options.deleteBot(request.deletion.botId, revalidate, request);
+      return { state: "applied", bots: [{ id: request.deletion.botId, name: request.deletion.name, action: "deleted" }], newTeams: [] };
+    } catch (error) {
+      const saved = this.options.store.bot(request.botId)?.lastTeamSetupReceipt;
+      const detail = redactSecretsInText(error instanceof Error ? error.message : String(error));
+      return saved?.requestId === request.requestId
+        ? { ...saved.result, error: `The changes were saved, but cleanup needs attention: ${detail}` }
+        : { state: error instanceof TeamSetupError ? "cancelled" : "failed", bots: [], newTeams: [], error: detail };
+    }
+  }
+
+  private async applyImmediately(request: TeamSetupRequest, from?: RequestFrom, canCommit?: () => boolean) {
+    // Capture the before/after description before applying. Only a settled
+    // receipt is published, so no interactive card or second turn can start.
+    const card = this.cardData(request, true);
+    let result = await this.apply(request, true, canCommit);
+    const title = result.state === "applied" ? (request.deletion ? `Deleted @${request.deletion.name}` : "Team setup applied") : "Team setup not applied";
+    let messageId: string | undefined;
+    try {
+      messageId = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: {
+        ...card, title, options: [], answered: result.state === "applied" ? "allow" : "deny", held: result.error,
+        teamSetupRequest: { ...request, result, resumed: true },
+      } }).id;
+    } catch (error) {
+      // The atomic bot receipt remains authoritative if the chat write fails.
+      const detail = redactSecretsInText(error instanceof Error ? error.message : String(error));
+      result = { ...result, error: [result.error, `The result could not be added to the conversation: ${detail}`].filter(Boolean).join(" ") };
+    }
+    return { requestId: request.requestId, messageId, title, summary: title, detail: card.subtitle, applied: result.state === "applied", state: result.state, result };
   }
 
   async resolve(args: { botId: string; threadId: string; requestId: string; behavior: string }) {
@@ -215,21 +289,7 @@ export class TeamSetupRequestService {
       let result: TeamSetupResult;
       if (receipt?.requestId === request.requestId) result = receipt.result;
       else if (args.behavior === "deny") result = { state: "denied", bots: [], newTeams: [] };
-      else {
-        try {
-          this.validate(request, true);
-          if (request.deletion) {
-            await this.options.deleteBot(request.deletion.botId, () => this.validate(request, true), request);
-            result = { state: "applied", bots: [{ id: request.deletion.botId, name: request.deletion.name, action: "deleted" }], newTeams: [] };
-          } else result = this.options.store.applyTeamSetup(request);
-        } catch (error) {
-          const saved = this.options.store.bot(request.botId)?.lastTeamSetupReceipt;
-          const detail = redactSecretsInText(error instanceof Error ? error.message : String(error));
-          result = saved?.requestId === request.requestId
-            ? { ...saved.result, error: `The changes were saved, but cleanup needs attention: ${detail}` }
-            : { state: error instanceof TeamSetupError ? "cancelled" : "failed", bots: [], newTeams: [], error: detail };
-        }
-      }
+      else result = await this.apply(request);
       this.options.store.patchMessage(args.threadId, message.id, { card: { ...card, answered: result.state === "applied" ? "allow" : "deny", held: result.error, teamSetupRequest: { ...request, result } } });
       return { result, request: { ...request, result }, messageId: message.id, duplicate: false };
     } finally { this.resolving.delete(request.requestId); }

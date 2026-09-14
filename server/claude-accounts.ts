@@ -16,6 +16,7 @@ export const instanceSettingsSchema = z.object({
   cli: z.string().max(4096).refine((value) => !/\p{Cc}/u.test(value), "CLI cannot contain control characters").optional(),
   displayName: displayName.optional(),
   configDir: configDir.optional(),
+  tools: z.boolean().optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 function rawConfig(entry: InstanceConfig): Record<string, unknown> {

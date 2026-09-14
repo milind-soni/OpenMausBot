@@ -13,7 +13,10 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: fixture.state ?? original.initialState, dispatch: fixture.dispatch }) };
 });
-vi.mock("./DesktopCapabilities", () => ({
+// The real useCaptionChrome rides along: it only asks this module for the
+// window chrome, and these tests render the desktop-neutral layout.
+vi.mock("./DesktopCapabilities", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { host: {}, dictation: { available: false } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));

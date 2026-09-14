@@ -177,6 +177,26 @@ describe("bot packages", () => {
     })).toThrow(/expected number to be >=5/);
   });
 
+  it("round-trips monthly cron in JSON and Markdown without enabling imported routines", () => {
+    const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "Asia/Kolkata" };
+    const document = {
+      ...validPackage,
+      package: { ...validPackage.package, routines: [{
+        key: "monthly", name: "Monthly report", agent: "lead", prompt: "Prepare the report.",
+        runOn: "maus", schedule, durationMinutes: 30, enabledAfterInstall: false,
+      }] },
+    };
+    const parsed = parseBotPackage(document);
+    const markdown = renderBotPackageMarkdown(parsed);
+    expect(markdown).toContain("Monthly on day 1 at 09:00 · Asia/Kolkata");
+    expect(parseBotPackage(markdown).package.routines?.[0]).toMatchObject({ schedule, enabledAfterInstall: false });
+    for (const invalid of [{ ...schedule, expression: "0 9 31 2 *" }, { ...schedule, timeZone: "Invalid/Zone" }]) {
+      expect(() => parseBotPackage({ ...document, package: { ...document.package,
+        routines: [{ ...document.package.routines[0], schedule: invalid }],
+      } })).toThrow();
+    }
+  });
+
   it("round-trips interval routine schedules", () => {
     const document = {
       ...validPackage,

@@ -24,7 +24,7 @@ import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
-import { defaultSaveName, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
 import {
@@ -58,7 +58,7 @@ import {
   withDesktopCompanionAccess,
   withoutDesktopCompanionAccess,
 } from "./desktop-companion-client.mjs";
-import { isKnownSkin } from "./skin-overlay.cjs";
+import { isKnownSkin, skinChrome } from "./skin-overlay.cjs";
 import { readSecureCredentials } from "./secure-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
 import {
@@ -70,6 +70,7 @@ import capabilitiesModule from "./capabilities.cjs";
 import environmentsModule from "./environments.cjs";
 import localOriginModule from "./local-origin.cjs";
 import { buildApplicationMenu } from "./menu.mjs";
+import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
@@ -149,6 +150,16 @@ function installWindowStatePersistence(win) {
   };
   win.on("resize", schedule);
   win.on("move", schedule);
+  // The renderer's caption buttons track the native maximize state (the
+  // restore/maximize glyph flips); a lost push just leaves a stale glyph
+  // until the next toggle, so a send failure is not fatal.
+  const pushMaximized = () => {
+    try {
+      if (!win.isDestroyed()) win.webContents.send("window:maximized-changed", win.isMaximized());
+    } catch {}
+  };
+  win.on("maximize", pushMaximized);
+  win.on("unmaximize", pushMaximized);
   win.on("maximize", schedule);
   win.on("unmaximize", schedule);
   win.on("close", flush);
@@ -207,7 +218,7 @@ function deliverPackageInstall(win) {
     showingLocal = new URL(win.webContents.getURL()).origin === rendererOrigin();
   } catch {}
   if (!showingLocal) {
-    if (activeEnvironment(environmentsState)) switchEnvironment(LOCAL_ID);
+    if (activeEnvironment(environmentsState)) void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
     return;
   }
   win.webContents.send("package:install", pendingPackageInstallUrl);
@@ -1352,8 +1363,79 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 // The app switches by loading the chosen server's own UI (electron/menu.mjs).
 // Only {id, name, origin} is stored here; the session credential is the
 // HttpOnly cookie /pair set for that origin, kept by Chromium's cookie jar.
-const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parsePairingLink, serializeEnvironments, withActive, withEnvironment, withoutEnvironment } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, withActive, withEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
+let computerSharing;
+const sharingPrompts = new Set();
+
+// Opt-in computer sharing is gated by the server this desktop runs, the same
+// way every other server setting reaches this process: the booleans-only
+// /api/config status (server/index.ts configStatus → features). It is read
+// before the connector could start and again whenever a workspace control is
+// used, so a maintainer who edits config.json and restarts the server does not
+// have to reinstall the app. Unreachable or older server → off.
+let sharedComputersAllowed = false;
+
+async function refreshSharedComputersAllowed() {
+  sharedComputersAllowed = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/config`, { signal: AbortSignal.timeout(3_000) })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((status) => status?.features?.sharedComputers === true)
+    .catch(() => false);
+  return sharedComputersAllowed;
+}
+
+/** Refuse a workspace sharing control the server would refuse anyway. */
+async function requireSharedComputers() {
+  if (await refreshSharedComputersAllowed()) return;
+  throw new Error("Computer sharing is turned off on this server.");
+}
+
+function sharingController() {
+  computerSharing ??= createComputerSharing({
+    file: path.join(app.getPath("userData"), "computer-sharing.json"),
+    // The harness server's data directory holds provider API keys and
+    // sessions.json, so a broad share must never reach it either.
+    protectedPaths: [desktopDataDir()],
+    fetch: (...args) => session.defaultSession.fetch(...args),
+    environments: () => environmentsState.environments,
+    enabled: refreshSharedComputersAllowed,
+    cuaConnection: () => cuaReady,
+    hostControl: async (id, signal) => {
+      const lease = async action => {
+        const response = await fetch(`http://127.0.0.1:${SERVER_PORT}/api/desktop/shared-computer-control`, {
+          method: "POST",
+          headers: desktopServerHeaders({ "content-type": "application/json" }, { packaged: app.isPackaged, token: desktopMutationToken }),
+          body: JSON.stringify({ id, action }),
+          signal: action === "release" ? AbortSignal.timeout(3000) : AbortSignal.any([signal, AbortSignal.timeout(3000)]),
+        });
+        if (!response.ok) throw new Error("This computer is in use locally or held by a person. Wait, then observe it again before acting.");
+      };
+      await lease("acquire");
+      return { renew: () => lease("acquire"), release: () => lease("release") };
+    },
+  });
+  return computerSharing;
+}
+
+async function offerComputerSharing(win) {
+  const env = activeEnvironment(environmentsState);
+  if (!env || sharingPrompts.has(env.id) || win.isDestroyed()) return;
+  // Never offer a grant this build's server will not honour.
+  if (!(await refreshSharedComputersAllowed()) || win.isDestroyed()) return;
+  sharingPrompts.add(env.id);
+  try {
+    const info = await sharingController().observe(env);
+    if (!info || win.isDestroyed() || activeEnvironment(environmentsState)?.id !== env.id || new URL(win.webContents.getURL()).origin !== env.origin) return;
+    const choice = await dialog.showMessageBox(win, {
+      type: "question", message: `Share this computer with ${env.name}?`,
+      detail: "Let this workspace’s bots use folders and capabilities you choose while this desktop app is running. Nothing is shared unless you enable it. You can change this later in Settings → Connected workspaces.",
+      buttons: ["Choose access", "Not now"], defaultId: 1, cancelId: 1,
+    });
+    sharingController().decline(env, info);
+    if (choice.response === 0) openWorkspaceSettings(env.id);
+  } catch { /* Not paired yet, an older server, or offline: no grant, no prompt. */ }
+  finally { sharingPrompts.delete(env.id); }
+}
 
 function environmentsFile() {
   return path.join(app.getPath("userData"), "environments.json");
@@ -1379,6 +1461,7 @@ function writeEnvironments(state) {
       fs.rmSync(temporary, { force: true });
     } catch {}
     slog(`environments save failed: ${error?.message ?? error}`);
+    throw new Error("Could not save workspace connections on this computer. Please try again.");
   }
 }
 
@@ -1393,39 +1476,64 @@ function refreshApplicationMenu() {
     buildApplicationMenu({
       environments: environmentsState.environments,
       activeId: environmentsState.activeId,
-      onSwitch: (id) => switchEnvironment(id),
+      onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
       onAddFromClipboard: () => void addServerFromClipboard(),
-      onForget: (id) => void forgetEnvironment(id),
+      onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
+      onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
+      onOpenSettings: () => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
+      },
     }),
   );
 }
 
 function persistEnvironments(next) {
+  writeEnvironments(next);
   environmentsState = next;
-  writeEnvironments(environmentsState);
   refreshApplicationMenu();
+}
+
+async function workspaceMenuAction(action) {
+  try { await action(); } catch (error) {
+    await dialog.showMessageBox({ type: "error", message: "Could not update workspaces", detail: error.message });
+  }
 }
 
 function navigateMainWindow(url) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  void mainWindow.loadURL(url);
+  // did-fail-load shows the connection error and returns to the local app.
+  void mainWindow.loadURL(url).catch(() => {});
 }
 
 function switchEnvironment(id) {
+  if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   persistEnvironments(withActive(environmentsState, id));
   navigateMainWindow(activeOrigin());
 }
 
+function openWorkspaceSettings(computerId) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (senderIsLocal({ sender: mainWindow.webContents })) {
+    mainWindow.webContents.send("workspaces:open-settings", typeof computerId === "string" ? computerId : null);
+  } else {
+    persistEnvironments(withActive(environmentsState, LOCAL_ID));
+    navigateMainWindow(`${rendererOrigin()}/?desktop-settings=workspaces${typeof computerId === "string" ? `&share-computer=${encodeURIComponent(computerId)}` : ""}`);
+  }
+}
+
 async function addServerFromClipboard() {
-  const link = parsePairingLink(clipboard.readText());
+  try {
+    return await connectHostedWorkspace(clipboard.readText());
+  } catch (error) {
+    await dialog.showMessageBox({ type: "info", message: "Could not connect workspace", detail: `${error.message}\nYou can also choose Connect hosted workspace to enter an address in Settings.` });
+    return false;
+  }
+}
+
+async function connectHostedWorkspace(input, name) {
+  const link = parseHostedWorkspaceLink(input);
   if (!link) {
-    await dialog.showMessageBox({
-      type: "info",
-      message: "Copy a pairing link first",
-      detail:
-        "On the server run `pnpm pair` (or `node dist-server/pair-cli.js` in Docker), copy the printed https://…/pair#code=… link, then choose this item again.",
-    });
-    return;
+    throw new Error("Enter an HTTPS workspace address or a full pairing link. Keep the pairing code after #, not in the URL query.");
   }
   const host = new URL(link.origin).host;
   const { response } = await dialog.showMessageBox({
@@ -1438,12 +1546,13 @@ async function addServerFromClipboard() {
       ? "The pairing code in the link is used once, then this app stays signed in to that server."
       : "The link has no pairing code; the server will ask for one.",
   });
-  if (response !== 0) return;
-  let next = withEnvironment(environmentsState, { origin: link.origin, name: host }, () => randomUUID());
+  if (response !== 0) return false;
+  let next = withEnvironment(environmentsState, { origin: link.origin, name }, () => randomUUID());
   const added = next.environments.find((e) => e.origin === link.origin);
   next = withActive(next, added.id);
   persistEnvironments(next);
   navigateMainWindow(link.url);
+  return true;
 }
 
 async function forgetEnvironment(id) {
@@ -1458,19 +1567,27 @@ async function forgetEnvironment(id) {
     detail: "This app signs out of that server. The server keeps its own session list; revoke it there too if the device is gone.",
   });
   if (response !== 0) return;
+  sharingController().forget(env);
+  const wasActive = environmentsState.activeId === id;
   persistEnvironments(withoutEnvironment(environmentsState, id));
+  // Leave a removed workspace immediately; forgetting an inactive connection
+  // must not reload the local app or discard a Settings form/chat draft.
+  if (wasActive) navigateMainWindow(activeOrigin());
   try {
     // Revoke the session on the server while the cookie is still here.
-    await session.defaultSession.fetch(`${env.origin}/api/auth/logout`, { method: "POST", signal: AbortSignal.timeout(5_000) });
+    const response = await session.defaultSession.fetch(`${env.origin}/api/auth/logout`, { method: "POST", credentials: "include", headers: { origin: env.origin }, signal: AbortSignal.timeout(5_000) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
   } catch (error) {
     slog(`forget server: logout skipped (${error?.message ?? error})`);
+    await dialog.showMessageBox({ type: "warning", message: "Connection forgotten; server sign-out could not be confirmed", detail: "Computer sharing is stopped. Revoke this desktop’s session on that server when it is reachable again." });
   }
   try {
-    await session.defaultSession.clearStorageData({ origin: env.origin, storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] });
+    // Logout clears this server's exact cookie. Cookie storage is host-wide,
+    // not port-scoped: clearing it here would sign out other saved workspaces.
+    await session.defaultSession.clearStorageData({ origin: env.origin, storages: ["localstorage", "indexdb", "serviceworkers", "cachestorage"] });
   } catch (error) {
     slog(`forget server: storage clear failed: ${error?.message ?? error}`);
   }
-  navigateMainWindow(activeOrigin());
 }
 
 /**
@@ -1581,16 +1698,16 @@ function createWindow() {
     }
     return { action: "deny" };
   });
-  // The window shows Local or a saved server, nothing else: a page cannot
-  // walk the preload-bearing window to a stranger's origin.
+  // Only the selected workspace may navigate this window. Switching is a
+  // native action, not a redirect/link from a remote page to the local bridge.
   const guardNavigation = (event, url) => {
     let origin = null;
     try {
       origin = new URL(url).origin;
     } catch {}
-    if (origin && allowedOrigins(environmentsState, rendererOrigin()).has(origin)) return;
+    if (workspaceNavigationAllowed(url, environmentsState, rendererOrigin())) return;
     event.preventDefault();
-    slog(`blocked navigation to ${url}`);
+    slog(`blocked navigation to ${origin ?? "an invalid address"}`);
   };
   win.webContents.on("will-navigate", guardNavigation);
   win.webContents.on("will-redirect", guardNavigation);
@@ -1625,9 +1742,10 @@ function createWindow() {
       message: `${remote.name} is not reachable`,
       detail: `${errorDescription}. Showing the local server instead; choose it again from the Server menu when it is back.`,
     });
-    switchEnvironment(LOCAL_ID);
+    void workspaceMenuAction(() => switchEnvironment(LOCAL_ID));
   });
   win.webContents.on("did-finish-load", () => deliverPackageInstall(win));
+  win.webContents.on("did-finish-load", () => void offerComputerSharing(win));
 
   // Native context menu for text inputs — without this, right-click does
   // nothing in the Electron window (no Cut/Copy/Paste/Select All).
@@ -1749,7 +1867,7 @@ function createWindow() {
   if (desktopRemoteAccess) {
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
   } else if (remote) {
-    win.loadURL(remote.origin);
+    void win.loadURL(remote.origin).catch(() => {});
   } else if (app.isPackaged) {
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
   } else {
@@ -1863,12 +1981,39 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
   });
 }));
 
-// The renderer owns the skin. Native Windows/Linux chrome is intentionally
-// outside that surface; acknowledge the renderer handshake without creating
-// a frameless caption overlay that can cover page controls.
-ipcMain.handle("desktop:skin", (_event, skin) => {
+// The renderer owns the skin, including the Windows caption buttons it draws
+// itself (titleBarStyle hidden, no native overlay). Keep syncing the window
+// background so a light skin never flashes the Midnight-black cold start.
+ipcMain.handle("desktop:skin", (event, skin) => {
   if (!isKnownSkin(skin)) return false;
+  try {
+    const { color } = skinChrome(skin);
+    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (win && !win.isDestroyed()) {
+      try { win.setBackgroundColor(color); } catch {}
+    }
+  } catch {}
   return true;
+});
+
+// Caption controls for the overlay-less frameless window. The renderer's
+// buttons are the only way to act on the window, so the channels stay
+// open for the local page; a remote server's page never has them.
+for (const [channel, act] of [
+  ["window:minimize", (win) => win.minimize()],
+  ["window:toggle-maximize", (win) => (win.isMaximized() ? win.unmaximize() : win.maximize())],
+  ["window:close", (win) => win.close()],
+]) {
+  ipcMain.handle(channel, (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+    if (!win || win.isDestroyed()) return false;
+    act(win);
+    return true;
+  });
+}
+ipcMain.handle("window:state", (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
+  return { maximized: Boolean(win && !win.isDestroyed() && win.isMaximized()) };
 });
 
 ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async (_event, rawUrl) => {
@@ -2049,20 +2194,79 @@ ipcMain.handle("companion-account:verify-code", localOnly("companion-account:ver
 ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", () => ensureCompanionAccountService().retry()));
 ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));
 
-ipcMain.handle("environments:state", (event) => ({
+const workspaceOnly = (handler) => (event, ...args) => {
+  if (!workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin())) throw new Error("Workspace controls are only available in the main desktop window");
+  return handler(event, ...args);
+};
+const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnly(handler));
+
+const savedWorkspace = id => {
+  const env = environmentsState.environments.find(entry => entry.id === id);
+  if (!env) throw new Error("This workspace is no longer connected");
+  return env;
+};
+ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
+  await requireSharedComputers();
+  return sharingController().state(savedWorkspace(id).id);
+}));
+ipcMain.handle("sharing:folder", localWorkspaceOnly("sharing:folder", async () => {
+  await requireSharedComputers();
+  const picked = await dialog.showOpenDialog(mainWindow, { title: "Choose a folder to share", properties: ["openDirectory"] });
+  if (picked.canceled || !picked.filePaths[0]) return null;
+  return (await validateSharedFolders([{ id: randomUUID(), path: picked.filePaths[0], write: false }]))[0];
+}));
+ipcMain.handle("sharing:revoke", localWorkspaceOnly("sharing:revoke", async (_event, id) => {
+  await requireSharedComputers();
+  return sharingController().revoke(savedWorkspace(id));
+}));
+ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event, id, input) => {
+  await requireSharedComputers();
+  const env = savedWorkspace(id);
+  const info = await sharingController().identity(env);
+  const folders = await validateSharedFolders(input?.folders);
+  const detail = [
+    `Workspace: ${env.origin}`,
+    ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}`),
+    input?.terminal === true ? "Terminal: UNRESTRICTED commands as your user. Can access files outside the folders above, including credentials." : "Terminal: off",
+    input?.computer === true ? "Computer control: can view your screen and operate logged-in apps. Can access information outside the folders above." : "Computer control: off",
+    "Shared content is sent to this hosted workspace and may reach its model provider. Bots from this workspace can use these permissions until you revoke them. Closing the desktop stops access.",
+  ].join("\n\n");
+  const confirmation = await dialog.showMessageBox(mainWindow, { type: "warning", message: `Allow computer access for ${env.name}?`, detail, buttons: ["Allow access", "Cancel"], defaultId: 1, cancelId: 1 });
+  if (confirmation.response !== 0) return null;
+  savedWorkspace(id);
+  return sharingController().save(env, { folders, terminal: input?.terminal === true, computer: input?.computer === true }, info);
+}));
+
+ipcMain.handle("environments:state", localWorkspaceOnly("environments:state", (event) => ({
   localOrigin: rendererOrigin(),
   remote: !senderIsLocal(event),
   activeId: environmentsState.activeId,
   environments: environmentsState.environments,
+})));
+ipcMain.handle("environments:switch", localWorkspaceOnly("environments:switch", (_event, id) => switchEnvironment(typeof id === "string" ? id : LOCAL_ID)));
+ipcMain.handle("environments:add-from-link", localWorkspaceOnly("environments:add-from-link", (_event, link, name) => {
+  return connectHostedWorkspace(link, typeof name === "string" ? name : undefined);
 }));
-ipcMain.handle("environments:switch", localOnly("environments:switch", (_event, id) => switchEnvironment(typeof id === "string" ? id : LOCAL_ID)));
-ipcMain.handle("environments:add-from-link", localOnly("environments:add-from-link", async (_event, link) => {
-  const parsed = parsePairingLink(typeof link === "string" ? link : "");
-  if (!parsed) throw new Error("that is not a pairing link (expected https://host/pair#code=…)");
-  clipboard.writeText(parsed.url);
-  await addServerFromClipboard();
+ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", (_event, id) => forgetEnvironment(typeof id === "string" ? id : "")));
+
+// A cloud page can ask for the native chooser, not choose a destination or
+// mutate the desktop's saved list. Only native menu clicks perform those acts.
+ipcMain.handle("workspaces:state", workspaceOnly(() => workspaceSummary(environmentsState)));
+let workspaceMenuOpen = false;
+ipcMain.handle("workspaces:menu", workspaceOnly(async () => {
+  if (workspaceMenuOpen) return;
+  workspaceMenuOpen = true;
+  try {
+    const menu = Menu.buildFromTemplate(workspaceMenuTemplate(environmentsState, {
+      onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
+      onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
+      onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
+    }));
+    await new Promise((resolve) => menu.popup({ window: mainWindow, callback: resolve }));
+  } finally {
+    workspaceMenuOpen = false;
+  }
 }));
-ipcMain.handle("environments:forget", localOnly("environments:forget", (_event, id) => forgetEnvironment(typeof id === "string" ? id : "")));
 
 ipcMain.handle("desktop:capabilities", async (event) =>
   desktopCapabilities({
@@ -2164,6 +2368,9 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  session.defaultSession.on("will-download", (_event, item) => {
+    item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
+  });
   if (app.isPackaged) {
     try {
       // Acquire before either plaintext credential migration reads or writes
@@ -2274,7 +2481,7 @@ app.whenReady().then(async () => {
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
   cuaReady =
-    !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux")
+    !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")
       ? startCua().catch((e) => {
           console.error("[cua] start failed:", e);
           return { mode: "unavailable", reason: String(e) };
@@ -2319,6 +2526,9 @@ app.whenReady().then(async () => {
     return appPermissionAllowed(permission, requesting, rendererOrigin(), details);
   });
   environmentsState = readEnvironments();
+  // The outbound connector never starts while computer sharing is off: no
+  // poll loop, no registration, no grant replay from disk.
+  void refreshSharedComputersAllowed().then((allowed) => { if (allowed) sharingController().start(); });
   createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing
@@ -2382,6 +2592,7 @@ process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
   desktopShutdownStarted = true;
+  computerSharing?.close();
   if (cuaCleanedUp) return;
   e.preventDefault();
   // Cancel a scheduled recovery before yielding, and stop the owned child

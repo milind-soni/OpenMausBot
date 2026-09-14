@@ -13,6 +13,7 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
+import { toolLabel } from "./ApprovalCard";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
 
 interface ApprovalLabels {
@@ -88,7 +89,10 @@ export function spokenApprovalPrompt(pending: Pending, requester: string): strin
     return t("approval.voice.profile", { requester, title });
   }
   if (!isRoutineRequest) {
-    return t("approval.voice.command", { requester, tool: pending.tool, detail: pending.detail });
+    // pending.tool can be an ACP toolCall kind rather than a tool name —
+    // speak the same verb phrase the card header shows, so voice never
+    // reads "wants to other".
+    return t("approval.voice.command", { requester, tool: toolLabel(pending.tool), detail: pending.detail });
   }
   const title = pending.message.card?.title.trim() || t("approval.voice.defaultConfirmRoutine");
   return t("approval.voice.routine", {

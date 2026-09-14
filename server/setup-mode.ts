@@ -1,15 +1,13 @@
 // Setup mode: optional coaching when the user asks for it with /setup.
 // An empty profile is not a request to interview the user. The bot says
-// what it intends, and then configures itself only through proposal cards
-// (propose_profile, propose_routine, skill_manage, request_credential) — so
-// nothing changes without the user's approval. Mirrors skill-learn.ts:
+// what it intends, and then configures itself through the harness tools
+// (propose_profile, propose_routine, skill_manage, request_credential), which
+// enforce the granted approval level. Mirrors skill-learn.ts:
 // /setup is a turn-text rewrite plus a prompt block, never a hidden mode.
 //
-// Setup mode is card-gated, not provenance-gated: it doesn't matter who sent
-// the message that entered it — a peer message or a routine trigger that
-// happens to begin with /setup enters it exactly like a message the user
-// typed, and nothing about the bot actually changes until a card is
-// confirmed. And like /learn, only the current turn's text is rewritten —
+// This coaching block grants no additional authority: the services still
+// check the actual caller, target and effective conversation permissions.
+// Like /learn, only the current turn's text is rewritten —
 // the transcript keeps the raw "/setup …" user message verbatim, so replay
 // and history read the same thing the user sent.
 
@@ -53,11 +51,11 @@ function buildSetupPrompt(profileAside: string, cwd?: string): string {
   return (
     "\n\nThe user explicitly asked you to set yourself up. For this setup request, help configure the bot from what the user tells you." +
     ` First ask at most four questions that change what you would build: what the job is, when it should happen (on demand, on a schedule, or when something arrives), which apps or accounts it touches, and ${folderClause(cwd)}.` +
-    " Then, before any tool call, tell the user in plain language what you intend: who you will be, what you will do and when, where you will work, what you will need from them, and what you will not do. Wait for a yes." +
-    " When they say yes, first send one message that lists the cards you are about to raise, then make the tool calls — the cards must appear after that message, never before it. After the tool calls add at most one short line and do not repeat the list." +
-    ` The proposals, each of which the user must confirm: propose_profile for your identity, standing rules ${profileAside}, and the working folder (cwd), propose_routine for anything scheduled (propose it paused), request_credential for any token.` +
-    " Never claim something is set up until its card is confirmed." +
-    " Finish by saying exactly what remains for the user to do by hand — authorizing an app or account (OAuth), creating a third-party application or bot token, or enabling a routine — and point them to the Access section of the bot's settings for the app connections."
+    " Then, before any tool call, tell the user in plain language what you intend: who you will be, what you will do and when, where you will work, what you will need from them, and what you will not do. Ask for missing choices, not an extra yes for already-requested actions under granted Full Access." +
+    " First send one message describing the changes you are about to request, then make the tool calls. Follow each result: if applied, continue without another confirmation; if pending, end the turn and wait for its in-app decision. Do not repeat the list or claim success from the permission mode alone." +
+    ` Use propose_profile for your identity, standing rules ${profileAside}, and the working folder (cwd), propose_routine only for a schedule the user requested, and request_credential for any missing token.` +
+    " Full Access does not supply answers, credentials, or broader permissions for another bot. A credential request still needs the user's secure entry. Report failed or cancelled changes honestly." +
+    " Finish by saying exactly what remains for the user to do by hand — authorizing an app or account (OAuth), creating a third-party application or bot token, or deciding a pending review — and point them to the Access section of the bot's settings for the app connections."
   );
 }
 

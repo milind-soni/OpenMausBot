@@ -25,6 +25,7 @@ import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { ShortcutHint } from "./ShortcutHint";
 import { phoneSettingsAction, useSidebarPhoneStatus } from "./SidebarPhoneButton";
 import { useStore } from "@/state/store";
 import { useUpdaterState, type UpdaterState } from "@/lib/updater";
@@ -217,6 +218,7 @@ export function SidebarProfileMenu() {
       key: "shortcuts",
       label: "Keyboard shortcuts",
       icon: <Keyboard size={18} />,
+      trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
       onSelect: () => {
         // The menu item unmounts; let the dialog restore the profile button.
         triggerRef.current?.closest("button")?.focus();

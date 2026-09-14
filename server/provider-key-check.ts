@@ -1,12 +1,14 @@
-// Does this key open the provider's door? One cheap, read-only request (the
-// models list) with a short timeout, from the server that will use the key.
+// One cheap, read-only request with a short timeout, from the server that
+// will use the key. OpenRouter's model catalog is public, so authenticate
+// there through /key. Other compatible servers retain their models probe,
+// whose success proves only catalog access, not authentication or chat.
 // The answer is a verdict and, on success, a few model ids; never the key,
 // never the raw response. Keys travel only over TLS, except to a loopback
 // test double.
 export type ProviderKeyKind = "anthropic" | "openaiCompat" | "xai";
 
 export type ProviderKeyVerdict =
-  | { ok: true; models: string[] }
+  | { ok: true; check: "authentication" | "models"; models: string[] }
   | { ok: false; reason: "rejected" | "unreachable" | "unexpected"; status?: number };
 
 export const PROVIDER_KEY_KINDS: readonly ProviderKeyKind[] = ["anthropic", "openaiCompat", "xai"];
@@ -49,6 +51,7 @@ export async function checkProviderKey(
   fetchImpl: typeof fetch = fetch,
   timeoutMs = 10_000,
 ): Promise<ProviderKeyVerdict> {
+  if (!input.key.trim()) return { ok: false, reason: "rejected" };
   let url: URL;
   try {
     url = new URL(providerModelsUrl(input.provider, input.url));
@@ -58,6 +61,9 @@ export async function checkProviderKey(
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback(url.hostname))) {
     return { ok: false, reason: "unexpected" };
   }
+  const authenticate = input.provider === "openaiCompat"
+    && url.origin === "https://openrouter.ai" && url.pathname === "/api/v1/models";
+  if (authenticate) url.pathname = "/api/v1/key";
   const headers: Record<string, string> =
     input.provider === "anthropic"
       ? { "x-api-key": input.key, "anthropic-version": "2023-06-01" }
@@ -71,7 +77,17 @@ export async function checkProviderKey(
     if (response.status === 401 || response.status === 403) return { ok: false, reason: "rejected", status: response.status };
     if (!response.ok) return { ok: false, reason: "unexpected", status: response.status };
     const body: unknown = await response.json().catch(() => null);
-    return { ok: true, models: modelIds(body) };
+    if (!body || typeof body !== "object") return { ok: false, reason: "unexpected", status: response.status };
+    if (authenticate) {
+      const data = (body as { data?: unknown }).data;
+      if (!data || typeof data !== "object" || Array.isArray(data)
+        || typeof (data as { is_free_tier?: unknown }).is_free_tier !== "boolean") {
+        return { ok: false, reason: "unexpected", status: response.status };
+      }
+      // /key also returns account and usage details; none belong in this verdict.
+      return { ok: true, check: "authentication", models: [] };
+    }
+    return { ok: true, check: "models", models: modelIds(body) };
   } catch {
     return { ok: false, reason: "unreachable" };
   } finally {

@@ -6,6 +6,8 @@ import { isSkillName, parseSkillMd, SKILL_FILE_MAX_BYTES } from "./skills.ts";
 import type { MausColor } from "./store.ts";
 import type { TeamManifestMember } from "./team-manifest.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { normalizeCronSchedule } from "../shared/routine-schedule.ts";
+import { cronScheduleLabel } from "../shared/cron-label.ts";
 
 export const BOT_PACKAGE_FORMAT = "openmaus.package" as const;
 export const BOT_PACKAGE_VERSION = 1 as const;
@@ -74,6 +76,7 @@ const intervalWindow = z.object({
   message: "must end later on the same day",
 });
 const packageRoutineScheduleSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("cron"), expression: requiredText(256), timeZone: requiredText(100) }).strict(),
   z.object({ type: z.literal("once"), at: z.number().int() }),
   z.object({
     type: z.literal("daily"),
@@ -89,6 +92,11 @@ const packageRoutineScheduleSchema = z.discriminatedUnion("type", [
     endsAt: z.number().int().nonnegative().max(MAX_DATE_MS).optional(),
   }),
 ]).superRefine((schedule, context) => {
+  if (schedule.type === "cron") {
+    try { normalizeCronSchedule(schedule); }
+    catch (error) { context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "Invalid cron schedule" }); }
+    return;
+  }
   if (schedule.type !== "interval") return;
   if (schedule.window) {
     const [startHour, startMinute] = schedule.window.start.split(":").map(Number);
@@ -338,6 +346,8 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
     `**Schedule:** ${
       routine.schedule.type === "daily"
         ? `${routine.schedule.time} on weekdays ${routine.schedule.weekdays.join(", ")}`
+        : routine.schedule.type === "cron"
+          ? `${cronScheduleLabel(routine.schedule)} (\`${routine.schedule.expression}\`)`
         : routine.schedule.type === "interval"
           ? intervalScheduleText(routine.schedule)
           : `once at ${routine.schedule.at}`

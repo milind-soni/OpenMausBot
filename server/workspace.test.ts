@@ -18,6 +18,7 @@ import {
   listMemoryTopics,
   loadMemory,
   memorySystemPrompt,
+  supportsWorkspaceFiles,
   readMemoryFile,
   readMemoryTopic,
   searchMemoryFiles,
@@ -496,6 +497,29 @@ describe("workspace", () => {
       expect(prompt).toContain(`pointers to files in ${JSON.stringify(join(workspaceDir(BOT), "memory"))}`);
       expect(prompt).not.toContain("<topicDir>");
     }
+  });
+
+  it("API drivers retain supplied memory without inventing filesystem tools", () => {
+    writeMemoryFile(BOT, "# Memory\n- The user prefers CSV exports.\n");
+    for (const driver of ["grok", "openai-compat", "minimax", "boxAgent"]) {
+      expect(supportsWorkspaceFiles(driver)).toBe(false);
+      const prompt = memorySystemPrompt(BOT, { fileTools: supportsWorkspaceFiles(driver) });
+      expect(prompt).toContain("The user prefers CSV exports.");
+      expect(prompt).not.toContain("update it with your file tools");
+      expect(prompt).not.toContain("memory_update");
+    }
+    expect(supportsWorkspaceFiles("claudeAgent")).toBe(true);
+    expect(supportsWorkspaceFiles("codex")).toBe(true);
+  });
+
+  it("agents MCP enables targeted memory writes without promising native file reads", () => {
+    writeMemoryFile(BOT, "# Memory\n- The user prefers CSV exports.\n");
+    const prompt = memorySystemPrompt(BOT, { managedWrites: true, fileTools: false });
+    expect(prompt).toContain("The user prefers CSV exports.");
+    expect(prompt).toContain("Use memory_update");
+    expect(prompt).toContain("use session_search to find the current passage");
+    expect(prompt).not.toContain("read the current file");
+    expect(prompt).not.toContain("update it with your file tools");
   });
 
   it("opts concurrent agents into targeted memory updates while retaining legacy guidance", () => {

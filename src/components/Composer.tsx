@@ -375,16 +375,13 @@ export function Composer({
     botId: string;
     threadId: string;
   } | null>(null);
-  const [applyingThreadAccess, setApplyingThreadAccess] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   // Approval mode belongs to one bot; a room has several, each with its own.
   const modeBot = group ? undefined : bot;
   const approvalEngine = modeBot
     ? state.instances.find((instance) => instance.instanceId === modeBot.modelSelection.instanceId)
     : undefined;
-  const canApplyBotFullAccess = Boolean(modeBot && profile && !remoteClient && window.ogb?.approvals && capabilities.host.packaged &&
-    approvalModeFor(profile) === "full" && approvalModeFor(modeBot) !== "full" &&
-    approvalEngine?.driverKind === state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId)?.driverKind);
+  const trustedThreadAccess = Boolean(!remoteClient && window.ogb?.approvals && capabilities.host.packaged);
   const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
     const optimistic = optimisticImageAttachment(file);
     if (!optimistic) return null;
@@ -427,7 +424,11 @@ export function Composer({
   };
   const setApprovalMode = (mode: ApprovalMode) => {
     if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
-    if (mode === "full" || mode === "custom") return;
+    if ((mode === "full" || mode === "custom") && !trustedThreadAccess) return;
+    if (mode === "full") {
+      setApprovalWarning({ mode, botId: modeBot.id, threadId: modeBot.threadId });
+      return;
+    }
     // Safe Auto still needs its dedicated warning when it can drive the host.
     if (mode === "auto" && modeBot.computer === "local") {
       setApprovalWarning({ mode: "auto", botId: modeBot.id, threadId: modeBot.threadId });
@@ -800,19 +801,6 @@ export function Composer({
             className="pointer-events-none absolute -left-5 -right-5 -bottom-3 top-1/2 bg-app"
           />
         <div data-tour="composer" className="relative z-[1] rounded-3xl bg-composer px-2 py-1.5 ring-1 ring-composer-ring">
-        {canApplyBotFullAccess && modeBot && !locked && (
-          <button
-            type="button"
-            disabled={Boolean(profile?.busy || modeBot.busy || applyingThreadAccess)}
-            onClick={() => setApprovalWarning({ mode: "full", botId: modeBot.id, threadId: modeBot.threadId })}
-            className="block max-w-full px-3 pb-2 pt-1 text-left text-[12px] text-ink-secondary hover:text-ink disabled:opacity-50"
-            title={profile?.busy || modeBot.busy
-              ? "Stop this bot’s current work before changing this thread’s access"
-              : "Other existing threads keep their current approval levels"}
-          >
-            Use bot’s Full access for this thread
-          </button>
-        )}
         <div className="flex items-end gap-1">
           <input
             ref={fileInput}
@@ -876,8 +864,7 @@ export function Composer({
                   driverKind={approvalEngine.driverKind}
                   onSelect={setApprovalMode}
                   disabled={Boolean(modeBot.busy)}
-                  trustedModesAvailable={false}
-                  trustedModesNotice={t("approvalMode.threadTrustedNotice")}
+                  trustedModesAvailable={trustedThreadAccess}
                 />
               )}
             </div>
@@ -1049,13 +1036,9 @@ export function Composer({
         onConfirm={() => {
           const target = approvalWarning;
           setApprovalWarning(null);
-          if (target?.mode !== "full" || !window.ogb?.approvals || applyingThreadAccess) return;
-          setApplyingThreadAccess(true);
-          // The private reply predates commit. SSE supplies the final task;
-          // applying that early reply here could overwrite its new mode.
-          void window.ogb.approvals.setMode(target.botId, "full", { threadId: target.threadId })
-            .catch((error) => dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) }))
-            .finally(() => setApplyingThreadAccess(false));
+          if (target?.mode !== "full" || !trustedThreadAccess) return;
+          dispatch({ type: "updateTask", botId: target.botId, threadId: target.threadId,
+            patch: { approvalMode: "full", confirmFullAccess: true } });
         }}
       />
       <LocalComputerAutoWarning

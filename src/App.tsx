@@ -20,7 +20,8 @@ import { InspectorPanel } from "@/components/InspectorPanel";
 import { SettingsModal } from "@/components/SettingsModal";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
+import { DesktopCapabilitiesProvider, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
 import { RoutinesPage } from "@/components/RoutinesPage";
 import { NoEngines } from "@/components/NoEngines";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -32,10 +33,29 @@ import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 
 function Shell() {
   const { state, dispatch } = useStore();
+  const { capabilities } = useDesktopCapabilities();
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden && bot.unread).length +
     state.groups.filter((group) => group.unread).length;
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  useEffect(() => {
+    if (!window.ogb?.environments) return;
+    const open = (computerId?: string | null) => {
+      if (computerId) {
+        const target = new URL(window.location.href);
+        target.searchParams.set("share-computer", computerId);
+        window.history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
+      }
+      dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
+    };
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("desktop-settings") === "workspaces") {
+      url.searchParams.delete("desktop-settings");
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+      open();
+    }
+    return window.ogb.environments.onOpenSettings?.(open);
+  }, [dispatch]);
   // Mobile-only drawer state. Above md, none of these properties are emitted
   // at all — Sidebar scopes every mobile class with max-md: rather than
   // cancelling them with md:, which would still emit a translate value and
@@ -176,6 +196,14 @@ function Shell() {
     state.appSettingsOpen ||
     state.pluginsOpen;
 
+  // The macOS app menu's Preferences… item lives in the desktop shell, so the
+  // shell signals the request over the bridge (Cmd+, accelerates the item).
+  // Local-shell only: remote server pages never receive the channel, and ogb
+  // is absent in the browser.
+  useEffect(() => {
+    return window.ogb?.onOpenAppSettings?.(() => dispatch({ type: "toggleAppSettings", open: true }));
+  }, [dispatch]);
+
   // The viewer outlives ComputerPanel and can target any bot, so release control
   // here (always mounted) when a bot's viewer closes. release() is idempotent.
   useEffect(() => {
@@ -289,6 +317,16 @@ function Shell() {
           palette on top when one of them is open underneath */}
       <CommandPalette onOpenChange={setPaletteOpen} />
       </div>
+      {/* Renderer-drawn caption buttons for the overlay-less frameless
+          Windows window. Deliberately the LAST child of the shell: Blink
+          resolves -webkit-app-region in DOM-walk order, so these no-drag
+          buttons must come after every drag-region header to actually
+          subtract from it — earlier placement let the header's drag region
+          swallow the buttons (dead clicks, no hover). z-40 keeps true
+          modals (z-50, later in DOM) painting above the buttons. */}
+      <WindowCaptionButtons
+        visible={capabilities.windowChrome === "win-caption" && Boolean(window.ogb?.windowControls)}
+      />
     </div>
   );
 }
@@ -305,6 +343,9 @@ function WelcomeGate() {
       remoteClient: window.ogb?.remoteClient?.active === true,
       legacyDone: emailGateDone(),
     });
+  // A fresh desktop can connect to an existing hosted workspace without
+  // completing local provider onboarding. Closing Settings resumes the tour.
+  if (state.appSettingsOpen && state.appSettingsSection === "desktopWorkspaces") return null;
   if (!state.welcomeOpen && !due) return null;
   const bot = state.bots.find((b) => !b.hidden) ?? null;
   const replay = state.welcomeOpen && !due;

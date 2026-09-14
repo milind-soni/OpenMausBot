@@ -23,7 +23,10 @@ export function localComputerSelectable({
 }): boolean {
   if (!providerSupportsLocal) return false;
   if (capabilities.localComputer.available) return true;
-  return capabilities.host.platform === "darwin";
+  // macOS and Windows both keep the destination clickable before the driver
+  // is live, so the user can pick it and then finish the permission/setup
+  // step instead of hunting for why the button is greyed out.
+  return capabilities.host.platform === "darwin" || capabilities.host.platform === "win32";
 }
 
 export function localComputerDisabledReason({
@@ -52,6 +55,9 @@ export function localComputerDisabledReason({
   if (capabilities.host.label === "Browser") {
     return "Local computer control requires the desktop app.";
   }
+  if (capabilities.host.platform === "win32") {
+    return "The bundled Cua Driver could not start. Restart OpenMausBot and check Diagnostics if it still fails.";
+  }
   return "CUA Driver is not ready for local computer control.";
 }
 
@@ -61,6 +67,7 @@ export function linuxAutoDescription(): string {
 
 export type BoxPanelAction =
   | "ensure-box"
+  | "team-box"
   | "show-ready-box"
   | "show-sleeping-box"
   | "show-pending-box"
@@ -82,13 +89,18 @@ export function resolveBoxPanelAction({
   boxState,
   canUseCloud,
   autoLocal,
+  teamComputer = false,
 }: {
   computer: Bot["computer"];
   configured: boolean;
   boxState: string | null;
   canUseCloud: boolean;
   autoLocal: boolean;
+  teamComputer?: boolean;
 }): BoxPanelAction {
+  // A team's explicit grant wins over Auto's private-Box/local fallback.
+  // This panel reports it; paid lifecycle and shared access stay in Team map.
+  if (computer === undefined && teamComputer) return "team-box";
   const explicitCloud = computer === "cloud";
 
   if (!configured) {

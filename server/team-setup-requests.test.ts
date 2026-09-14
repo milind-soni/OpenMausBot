@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { TeamSetupRequestService } from "./team-setup-requests.ts";
+import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import { canAccessTeam } from "./peer-roster.ts";
 import type { BotRecord, OptionCardData } from "./store.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
@@ -30,17 +30,27 @@ function harness() {
     applyTeamSetup: apply,
   };
   let sourceExists = true;
-  const deleteBot = vi.fn(async (id: string, revalidate: () => void) => { revalidate(); bots.splice(bots.findIndex((item) => item.id === id), 1); });
+  const deleteBot = vi.fn(async (id: string, revalidate: () => void, request: TeamSetupRequest) => {
+    revalidate();
+    const target = bots.find((item) => item.id === id)!;
+    chief.lastTeamSetupReceipt = { requestId: request.requestId, result: { state: "applied", bots: [{ id, name: target.name, action: "deleted" }], newTeams: [] } };
+    bots.splice(bots.indexOf(target), 1);
+  });
+  const autoApply = vi.fn(() => false);
+  const targetBusy = vi.fn((id: string, _sourceThreadId?: string) => Boolean(store.bot(id)?.busy));
+  const validateChange = vi.fn();
+  const canPersist = vi.fn((): { ok: true } | { ok: false; status: number; error: string } => ({ ok: true }));
   const service = new TeamSetupRequestService({ store, teams: () => teams, maxBots: 100, canAccessTeam,
-    canPersist: () => ({ ok: true }), ownsThread: () => sourceExists, targetBusy: (id) => Boolean(store.bot(id)?.busy), deleteBot,
+    canPersist, ownsThread: () => sourceExists, targetBusy, deleteBot, autoApply, validateChange,
     validateModel: (selection, current) => {
       if (!({ claude: ["sonnet", "opus"], codex: ["gpt-fixture"] }[selection.instanceId]?.includes(selection.model))) return "Model is not in the current catalog";
       return current?.approvalMode === "full" && selection.instanceId !== current.modelSelection.instanceId ? "Existing permissions are incompatible" : null;
     },
   });
   const propose = (operations: unknown[], newTeams: string[] = []) => service.propose({ botId: chief.id, threadId: chief.threadId, plan: { reason: "Requested specialist setup", operations, newTeams } });
+  const submit = (operations: unknown[], newTeams: string[] = []) => service.submit({ botId: chief.id, threadId: chief.threadId, plan: { reason: "Requested specialist setup", operations, newTeams } });
   const resolve = (requestId: string, behavior = "allow") => service.resolve({ botId: chief.id, threadId: chief.threadId, requestId, behavior });
-  return { service, store, chief, peer, bot, teams, propose, resolve, apply, deleteBot, messages, removeSource: () => { sourceExists = false; } };
+  return { service, store, chief, peer, bot, teams, propose, submit, resolve, apply, deleteBot, messages, autoApply, targetBusy, validateChange, canPersist, removeSource: () => { sourceExists = false; } };
 }
 const specialist = (key: string, section: string, modelSelection = { instanceId: "claude", model: "sonnet" }) => ({ action: "create", key,
   fields: { name: key, title: "Specialist", soul: "Finish the assigned work.", section, modelSelection } });
@@ -140,5 +150,189 @@ describe("reviewed Chief team setup", () => {
     Object.assign(h.messages[0].card!, { answered: "unavailable", dismissed: true });
     expect(await h.resolve(card.requestId)).toMatchObject({ result: { state: "cancelled" }, duplicate: true });
     expect(h.apply).not.toHaveBeenCalled();
+  });
+});
+
+describe("Full Access team setup", () => {
+  it("creates and updates immediately with one settled receipt and an explicit result", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    const append = vi.spyOn(h.store, "appendMessage");
+    const response = await h.submit([specialist("Mira", "Research"), { action: "update", botId: h.peer.id, fields: { title: "Research lead" } }], ["Research"]);
+    expect(response).toMatchObject({ applied: true, state: "applied", result: { state: "applied", newTeams: ["Research"], bots: [
+      { name: "Mira", action: "created" }, { name: "Ada", action: "updated" },
+    ] } });
+    expect(h.autoApply).toHaveBeenCalledWith(h.chief.id, h.chief.threadId);
+    expect(h.peer.title).toBe("Research lead");
+    expect(h.apply).toHaveBeenCalledTimes(1);
+    expect(h.messages).toHaveLength(1);
+    expect(append.mock.calls[0][1].card).toMatchObject({ answered: "allow", options: [], teamSetupRequest: { resumed: true, result: { state: "applied" } } });
+    expect(h.messages.some(({ card }) => card && !card.answered && !card.dismissed)).toBe(false);
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "applied" } });
+    expect(h.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Ask pending even when the bot default is Full, and applies only after approval", async () => {
+    const h = harness(); h.chief.approvalMode = "full";
+    const response = await h.submit([specialist("Mira", "Work")]);
+    expect(response).toMatchObject({ applied: false, state: "pending" });
+    expect(h.apply).not.toHaveBeenCalled();
+    expect(h.messages[0].card?.answered).toBeUndefined();
+    expect(h.messages[0].card?.options).toEqual(["Apply setup", "Cancel"]);
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: false, result: { state: "applied" } });
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "applied" } });
+    expect(h.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes through the same guarded lifecycle without publishing a pending confirmation", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    const response = await h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.peer.id, reason: "User requested deletion" });
+    expect(response).toMatchObject({ state: "applied", applied: true, result: { bots: [{ id: h.peer.id, name: "Ada", action: "deleted" }] } });
+    expect(h.store.bot(h.peer.id)).toBeUndefined();
+    expect(h.messages[0].card).toMatchObject({ answered: "allow", options: [], teamSetupRequest: { resumed: true } });
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "applied" } });
+    expect(h.deleteBot).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not apply setup or start deletion with an expired invocation", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    const canCommit = vi.fn(() => false);
+    const source = { botId: h.chief.id, threadId: h.chief.threadId, canCommit };
+    expect(await h.service.submit({ ...source, plan: { reason: "Requested setup", operations: [specialist("Mira", "Work")] } }))
+      .toMatchObject({ state: "cancelled", applied: false, result: { error: expect.stringContaining("turn has expired") } });
+    expect(await h.service.submitDeletion({ ...source, targetBotId: h.peer.id, reason: "remove" }))
+      .toMatchObject({ state: "cancelled", applied: false, result: { error: expect.stringContaining("turn has expired") } });
+    expect(h.apply).not.toHaveBeenCalled(); expect(h.deleteBot).not.toHaveBeenCalled();
+    expect(h.store.bots).toHaveLength(2);
+    expect(h.messages.every(({ card }) => card?.answered === "deny" && card.options.length === 0)).toBe(true);
+    expect(h.messages.every(({ card }) => !("canCommit" in card!.teamSetupRequest!))).toBe(true);
+  });
+
+  it.each(["stopped", "replaced"])("cancels deletion when its invocation is %s during lifecycle checks", async (change) => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    let generation: string | undefined = "original";
+    let resume!: () => void;
+    const inventory = new Promise<void>((resolve) => { resume = resolve; });
+    const remove = h.deleteBot.getMockImplementation()!;
+    h.deleteBot.mockImplementation(async (...parameters) => {
+      parameters[1]();
+      await inventory;
+      await remove(...parameters);
+    });
+    const pending = h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId,
+      targetBotId: h.peer.id, reason: "remove", canCommit: () => generation === "original" });
+    expect(h.deleteBot).toHaveBeenCalledTimes(1);
+    expect(h.store.bot(h.peer.id)).toBe(h.peer);
+    generation = change === "stopped" ? undefined : "replacement";
+    resume();
+    const response = await pending;
+    expect(response).toMatchObject({ state: "cancelled", applied: false, result: { error: expect.stringContaining("turn has expired") } });
+    expect(h.store.bot(h.peer.id)).toBe(h.peer);
+    expect(h.chief.lastTeamSetupReceipt).toBeUndefined();
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "cancelled" } });
+    expect(h.deleteBot).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves saved deletion when its invocation expires during post-commit cleanup", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    let active = true;
+    let resume!: () => void;
+    const cleanup = new Promise<void>((resolve) => { resume = resolve; });
+    const remove = h.deleteBot.getMockImplementation()!;
+    h.deleteBot.mockImplementation(async (...parameters) => {
+      await remove(...parameters);
+      await cleanup;
+      parameters[1]();
+    });
+    const pending = h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId,
+      targetBotId: h.peer.id, reason: "remove", canCommit: () => active });
+    expect(h.store.bot(h.peer.id)).toBeUndefined();
+    active = false;
+    resume();
+    const response = await pending;
+    expect(response).toMatchObject({ state: "applied", applied: true, result: {
+      bots: [{ id: h.peer.id, action: "deleted" }], error: expect.stringContaining("changes were saved"),
+    } });
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "applied" } });
+    expect(h.deleteBot).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retain the invocation lease on an Ask card awaiting a human", async () => {
+    const h = harness(); let active = true;
+    const response = await h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId,
+      targetBotId: h.peer.id, reason: "remove", canCommit: () => active });
+    expect(response.state).toBe("pending");
+    expect(h.messages[0].card?.teamSetupRequest).not.toHaveProperty("canCommit");
+    active = false;
+    expect(await h.resolve(response.requestId)).toMatchObject({ result: { state: "applied" } });
+    expect(h.deleteBot).toHaveBeenCalledTimes(1);
+  });
+
+  it("exempts only the requesting self-update turn, not siblings or other bots", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true); h.chief.busy = true;
+    h.targetBusy.mockImplementation((id, sourceThreadId) => Boolean(h.store.bot(id)?.busy) && sourceThreadId !== h.chief.threadId);
+    expect(await h.submit([{ action: "update", botId: h.chief.id, fields: { title: "Updated Chief" } }])).toMatchObject({ state: "applied" });
+    expect(h.targetBusy).toHaveBeenCalledWith(h.chief.id, h.chief.threadId);
+    h.targetBusy.mockReturnValue(true); // Sibling work remains busy after excluding the source.
+    expect(await h.submit([{ action: "update", botId: h.chief.id, fields: { title: "Must not apply" } }])).toMatchObject({ state: "cancelled", applied: false });
+    expect(h.chief.title).toBe("Updated Chief");
+    h.peer.busy = true;
+    await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { title: "Must not apply" } }])).rejects.toThrow(/Stop @Ada/);
+    expect(h.targetBusy).toHaveBeenCalledWith(h.peer.id, undefined);
+    expect(h.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains model, scope, source, permission-field and deletion safety checks", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    await expect(h.submit([specialist("Mira", "Private")])).rejects.toThrow(/authorized/);
+    await expect(h.submit([specialist("Mira", "Work", { instanceId: "claude", model: "unknown" })])).rejects.toThrow(/catalog/);
+    await expect(h.submit([{ action: "update", botId: h.peer.id, fields: { approvalMode: "full" } }])).rejects.toThrow();
+    await expect(h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.chief.id, reason: "remove" })).rejects.toThrow(/authorized/);
+    h.peer.busy = true;
+    await expect(h.service.submitDeletion({ botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.peer.id, reason: "remove" })).rejects.toThrow(/working/);
+    h.removeSource();
+    await expect(h.submit([specialist("Mira", "Work")])).rejects.toThrow(/conversation/);
+    expect(h.messages).toHaveLength(0); expect(h.apply).not.toHaveBeenCalled(); expect(h.deleteBot).not.toHaveBeenCalled();
+  });
+
+  it("keeps shared-computer change guards and rechecks Full Access before mutation", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    h.validateChange.mockImplementation(() => { throw new TeamSetupError("Team computer is in use", 409); });
+    expect(await h.submit([{ action: "update", botId: h.peer.id, fields: { section: "Engineering" } }])).toMatchObject({ state: "cancelled", applied: false, result: { error: "Team computer is in use" } });
+    expect(h.validateChange).toHaveBeenCalledWith(h.peer, expect.objectContaining({ section: "Engineering" }));
+    h.autoApply.mockReset().mockReturnValueOnce(true).mockReturnValue(false);
+    expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "cancelled", applied: false, result: { error: expect.stringContaining("Full Access") } });
+    expect(h.apply).not.toHaveBeenCalled();
+  });
+
+  it("returns failure without an approval card or success claim when storage fails", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    h.apply.mockImplementation(() => { throw new Error("fixture disk full"); });
+    const response = await h.submit([specialist("Mira", "Work")]);
+    expect(response).toMatchObject({ state: "failed", applied: false, result: { state: "failed", bots: [], error: "fixture disk full" } });
+    expect(h.store.bots).toHaveLength(2);
+    expect(h.messages[0].card).toMatchObject({ answered: "deny", options: [], teamSetupRequest: { resumed: true } });
+    expect(await h.resolve(response.requestId)).toMatchObject({ duplicate: true, result: { state: "failed" } });
+    expect(h.apply).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes an unapplied deletion failure from saved deletion with cleanup failure", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    const args = { botId: h.chief.id, threadId: h.chief.threadId, targetBotId: h.peer.id, reason: "remove" };
+    const remove = h.deleteBot.getMockImplementation()!;
+    h.deleteBot.mockImplementation(async () => { throw new Error("fixture write failed"); });
+    expect(await h.service.submitDeletion(args)).toMatchObject({ state: "failed", applied: false });
+    expect(h.store.bot(h.peer.id)).toBe(h.peer);
+    h.deleteBot.mockImplementation(async (...parameters) => { await remove(...parameters); throw new Error("fixture cleanup failed"); });
+    expect(await h.service.submitDeletion(args)).toMatchObject({ state: "applied", applied: true, result: { error: expect.stringContaining("cleanup needs attention") } });
+    expect(h.store.bot(h.peer.id)).toBeUndefined();
+  });
+
+  it("preserves an applied result when only writing its settled chat receipt fails", async () => {
+    const h = harness(); h.autoApply.mockReturnValue(true);
+    vi.spyOn(h.store, "appendMessage").mockImplementation(() => { throw new Error("fixture transcript write failed"); });
+    expect(await h.submit([specialist("Mira", "Work")])).toMatchObject({ state: "applied", applied: true, result: { error: expect.stringContaining("could not be added") } });
+    expect(h.chief.lastTeamSetupReceipt?.result.state).toBe("applied");
+    expect(h.apply).toHaveBeenCalledTimes(1);
+    expect(h.messages).toHaveLength(0);
   });
 });

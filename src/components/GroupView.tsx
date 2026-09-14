@@ -18,6 +18,7 @@ import {
 } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { ThreadChip } from "./ThreadChip";
+import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
@@ -34,7 +35,7 @@ import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
 import { GoalRunCard } from "./GoalRunCard";
-import { AttachedFileChips, AttachedImageGallery } from "./AttachmentPreview";
+import { AttachmentGallery, MessageAttachmentGallery } from "./AttachmentGallery";
 import { OptionCard } from "./OptionCard";
 import { GroupCallButton, GroupCallOverlay } from "./GroupCallView";
 
@@ -43,7 +44,7 @@ import { QuestionCard } from "./QuestionCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
 import { groupActivityRuns } from "@/lib/activity-runs";
 import { ActivityRun } from "./ActivityRun";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { useDesktopCapabilities, useCaptionChrome } from "./DesktopCapabilities";
 import { cn } from "@/lib/cn";
 import { useFocusMessage } from "@/lib/focus-message";
 import { shortPath } from "@/lib/short-path";
@@ -107,6 +108,7 @@ export function RoomToolChip({ message, roomId }: { message: Message; roomId?: s
       </div>
     );
   }
+  if (!comm) return <ToolActivity tool={tool} />;
   return (
     <div className="flex justify-start">
       <div
@@ -316,19 +318,7 @@ const Transcript = memo(function Transcript({
                   })()}
                   {user ? (
                     <>
-                      {attachments && attachments.images.length > 0 && (
-                        <AttachedImageGallery
-                          paths={attachments.images}
-                          eager={m.id === newestMessageId || m.id === newestUserMessageId}
-                        />
-                      )}
-                      {attachments && attachments.files.length > 0 && (
-                        <AttachedFileChips
-                          files={attachments.files}
-                          message={{ threadId: group.threadId, messageId: m.id }}
-                          className={!attachments.display ? "mb-0" : undefined}
-                        />
-                      )}
+                      {attachments && <AttachmentGallery images={attachments.images} files={attachments.files} message={{ threadId: group.threadId, messageId: m.id }} eager={m.id === newestMessageId || m.id === newestUserMessageId} className={!attachments.display ? "mb-0" : undefined} />}
                       <ThreadRefText text={attachments?.display ?? m.text ?? ""} peers={members} everyone={!group.dm} />
                       {m.via === "api" && (
                         <div className="mt-1 text-[11px] text-ink-secondary">Sent through the API, not typed here</div>
@@ -336,13 +326,7 @@ const Transcript = memo(function Transcript({
                     </>
                   ) : (
                     <>
-                      {m.attachments?.length ? (
-                        <AttachedImageGallery
-                          paths={m.attachments.map((attachment) => attachment.path)}
-                          className={m.text ? "justify-start" : "mb-0 justify-start"}
-                          eager={m.id === newestMessageId || m.id === newestUserMessageId}
-                        />
-                      ) : null}
+                      <MessageAttachmentGallery text={m.text ?? ""} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={m.id === newestMessageId || m.id === newestUserMessageId} />
                       {m.text ? <ChatMarkdown text={m.text} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
                     </>
                   )}
@@ -903,6 +887,9 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
 export function GroupView({ group }: { group: Group }) {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
+  // Same Windows caption handling as ChatView: drag on the header, shift the
+  // right-hand controls below the renderer-drawn caption buttons.
+  const { dragStyle: headerDragStyle, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const stream = useStreaming();
   const streaming = stream.streaming[group.threadId];
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1120,17 +1107,23 @@ export function GroupView({ group }: { group: Group }) {
       )}
       {/* Header: static member avatars; a ring + dot marks the working bot. */}
       <div
+        style={headerDragStyle}
         className={cn(
           "flex items-center justify-between px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2" style={headerNoDragStyle}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div
+          className="flex items-center gap-1.5"
+          // The caption buttons sit over the header's right end; drop this
+          // control row 16px (visual only) below the 26px overlay.
+          style={controlsShiftStyle}
+        >
           <button
             type="button"
             onClick={() => setFindOpen((open) => !open)}

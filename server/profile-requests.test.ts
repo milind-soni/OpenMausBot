@@ -107,6 +107,66 @@ function harness(options: { name: string; chiefOfStaff?: boolean }) {
 }
 
 describe("ProfileRequestService", () => {
+  it("applies Full Access from the source thread without exposing an unanswered card and claims replays", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    bot.approvalMode = "full";
+    const autoApply = vi.fn((_botId: string, threadId: string) => threadId === "full-thread");
+    const service = new ProfileRequestService({ store, autoApply });
+    const appended: OptionCardLike[] = [];
+    const append = store.appendMessage.bind(store);
+    vi.spyOn(store, "appendMessage").mockImplementation((threadId, message) => {
+      appended.push(structuredClone(message.card));
+      return append(threadId, message);
+    });
+    const patch = vi.spyOn(store, "patchBotProfile");
+    const ask = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { title: "Review me" }, reason: "requested" });
+    expect(ask.state).toBe("pending");
+    expect(bot.title).toBe("");
+    expect(appended[0]).toMatchObject({ options: ["Confirm", "Cancel"] });
+
+    const full = service.submit({ botId: bot.id, threadId: "full-thread", changes: { name: "Kiwi" }, reason: "requested" });
+    expect(full).toMatchObject({ state: "applied", result: { state: "applied", targetBotId: bot.id, fields: ["name"] } });
+    expect(bot.name).toBe("Kiwi");
+    expect(autoApply).toHaveBeenLastCalledWith(bot.id, "full-thread");
+    expect(appended[1]).toMatchObject({ options: [], dismissed: true });
+    expect(store.messagesFor("full-thread")[0]?.card).toMatchObject({ answered: "allow", dismissed: true });
+    expect(service.resolve({ botId: bot.id, threadId: "full-thread", requestId: full.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "already_settled", behavior: "allow" });
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains Full Access validation and reports application failures without a pending approval", () => {
+    const { store, bot, addBot } = harness({ name: "Chief" });
+    const peer = addBot({ name: "Peer" });
+    const service = new ProfileRequestService({ store, autoApply: () => true, validateTarget: () => "Outside your team" });
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { name: "Changed" }, reason: "requested" }))
+      .toThrow("Outside your team");
+    expect(store.messagesFor(bot.threadId)).toHaveLength(0);
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { approvalMode: "full" }, reason: "requested" }))
+      .toThrow("unsupported profile field");
+    vi.spyOn(store, "patchBotProfile").mockImplementationOnce(() => { throw new Error("profile write failed"); });
+    expect(() => service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi" }, reason: "requested" }))
+      .toThrow("profile write failed");
+    expect(bot.name).toBe("Chief");
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ dismissed: true, options: [] });
+  });
+
+  it("reports a committed Full Access profile accurately when its receipt cannot settle", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const service = new ProfileRequestService({ store, autoApply: () => true });
+    const patch = vi.spyOn(store, "patchBotProfile");
+    const settle = vi.spyOn(store, "patchMessage").mockImplementation(() => { throw new Error("receipt write failed"); });
+    const result = service.submit({ botId: bot.id, threadId: bot.threadId, changes: { name: "Kiwi" }, reason: "requested" });
+    expect(result).toMatchObject({ state: "applied", result: { settlementPending: true } });
+    expect(result.result?.message).not.toContain("Confirm");
+    expect(bot.name).toBe("Kiwi");
+    expect(store.messagesFor(bot.threadId)[0]?.card).toMatchObject({ dismissed: true, options: [] });
+    settle.mockRestore();
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: result.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "already_settled", behavior: "allow" });
+    expect(patch).toHaveBeenCalledTimes(1);
+  });
+
   it("validates through the profile boundary, pins a revision, and appends a durable card", () => {
     const { service, store, bot } = harness({ name: "Scout" });
     const result = service.propose({

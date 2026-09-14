@@ -24,6 +24,7 @@ import {
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queueSteeredMessage,
+  restoreSteeredMessages,
   _queuedCount,
   type SteerStore,
 } from "./steer-queue.ts";
@@ -73,6 +74,22 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
 }
 
 describe("steer-queue module", () => {
+  it("preserves self-opened request provenance through persistence and a capacity wait", () => {
+    const bot = fakeBot("bot-self-provenance", "thread-self-provenance", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const peerAsk = { botId: bot.id, name: "Planner" };
+    queueSteeredMessage(bot.id, bot.threadId, "Review this independent job", { reason: "capacity", peerAsk });
+    restoreSteeredMessages();
+    drainSteeredMessages(store, run);
+    expect(run).not.toHaveBeenCalled();
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(store.messages).toHaveLength(1);
+    expect(store.messages[0].peerAsk).toEqual(peerAsk);
+    expect(run.mock.calls[0][3].peerAsk).toEqual(peerAsk);
+  });
+
   it("keeps queue operations and other listeners working when a listener throws", () => {
     const bot = fakeBot("bot-listener-error", "thread-listener-error", false);
     const store = fakeStore([bot]);

@@ -47,8 +47,12 @@ export function approvalModeFor(bot: {
   /** Server-only two-phase grant marker. Until Electron confirms it, the
    * stored elevated selection is deliberately executable only as Ask. */
   approvalGrant?: unknown;
+  threadId?: string;
 }): ApprovalMode {
-  if (bot.approvalGrant) return "ask";
+  const grant = bot.approvalGrant;
+  const otherThread = grant && typeof grant === "object" && "threadOnly" in grant && grant.threadOnly === true &&
+    "threadId" in grant && typeof grant.threadId === "string" && typeof bot.threadId === "string" && grant.threadId !== bot.threadId;
+  if (grant && !otherThread) return "ask";
   if (isApprovalMode(bot.approvalMode)) return bot.approvalMode;
   return bot.autoApprove === true ? "auto" : "ask";
 }

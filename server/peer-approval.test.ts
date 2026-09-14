@@ -153,6 +153,25 @@ describe("peer approval card lifecycle", () => {
     expect(store.bot(from.id)?.activity).toBe("working");
   });
 
+  it("honors Full only for the exact source conversation without prompting or notifying", async () => {
+    const frames: Array<Notification | null> = [];
+    const fullThread = from.threadId;
+    const askThread = store.createTask(from.id, "Ask sibling")!.threadId;
+    store.patchBot(from.id, { approvalMode: "full" });
+    bus = { store, broadcast: () => {}, notify: frame => frames.push(frame),
+      autoApply: (botId, threadId) => botId === from.id && threadId === fullThread };
+    for (const action of ["ask_bot", "delegate_bot", "post_to_room"] as const) {
+      await expect(requestPeerApproval(bus, from, target, "ping", action, fullThread)).resolves.toBe("allow");
+    }
+    expect(store.messagesFor(fullThread).some(message => message.card?.requestId)).toBe(false);
+    expect(frames).toEqual([]);
+    const pending = requestPeerApproval(bus, from, target, "ask sibling", "ask_bot", askThread);
+    const card = store.messagesFor(askThread).find(message => message.card?.requestId)!.card!;
+    expect(card.answered).toBeUndefined();
+    resolvePeerComms(bus, card.requestId!, "deny");
+    await expect(pending).resolves.toBe("deny");
+  });
+
   it("answers an unknown requestId as not-ours, so provider cards still route", () => {
     expect(resolvePeerComms(bus, "not-a-peer-request", "allow")).toBe(false);
   });

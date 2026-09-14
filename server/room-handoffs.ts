@@ -9,13 +9,15 @@ const nodeSchema = z.object({
   key: z.string(), text: z.string(), createdAt: z.number(),
   status: z.enum(["source", "queued", "running", "waiting", "resume", "completed", "failed", "cancelled"]),
   result: z.string().default(""), reported: z.boolean().default(false),
-  executions: z.number().int().nonnegative().default(0),
+  executions: z.number().int().nonnegative().default(0), startedAt: z.number().optional(),
   approvalGranted: z.boolean().default(false),
   kind: z.enum(["work", "assignment"]).default("work"),
 });
 export type RoomHandoff = z.infer<typeof nodeSchema>;
 export type RoomAddress = Pick<RoomHandoff, "groupId" | "threadId" | "botId">;
-export const ROOM_HANDOFF_LIMITS = { depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000 };
+export const ROOM_HANDOFF_LIMITS = { depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000 };
+/** Renders elapsed milliseconds as whole minutes, or seconds under one minute. */
+const duration = (ms: number) => ms >= 60_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 1000)}s`;
 const terminal = (n: RoomHandoff) => ["completed", "failed", "cancelled"].includes(n.status);
 
 export interface RoomHandoffHooks {
@@ -73,6 +75,30 @@ export class RoomHandoffs {
     return path;
   }
 
+  /** The earliest moment this node may be failed for lifetime: the tree
+   * ceiling or, for a running node, its own start plus a minimum runway. */
+  private deadline(n: RoomHandoff): number {
+    const anchor = n.status === "running" ? n.startedAt ?? n.createdAt : n.createdAt;
+    return Math.max(this.root(n).createdAt + ROOM_HANDOFF_LIMITS.lifetimeMs, anchor + ROOM_HANDOFF_LIMITS.minRunwayMs);
+  }
+  /** An ancestor past its ceiling is not failed while a descendant is still
+   * running inside its own runway; cancelling would cascade into that work. */
+  private protectsRunner(n: RoomHandoff): boolean {
+    return this.children(n.id).some(c => !terminal(c) && ((c.status === "running" && this.now() <= this.deadline(c)) || this.protectsRunner(c)));
+  }
+  /** A parent still owes the follow-up execution that decides on its
+   * children's results; the ceiling defers to that execution's own runway. */
+  private owesFollowUp(n: RoomHandoff): boolean {
+    if (n.status === "resume") return true;
+    if (n.status !== "waiting") return false;
+    const children = this.children(n.id);
+    return (children.length > 0 && children.every(c => terminal(c))) || children.some(c => this.owesFollowUp(c));
+  }
+  /** Names the budget, the node's status, and the elapsed tree time. */
+  private lifetimeError(n: RoomHandoff): string {
+    return `Room handoff lifetime budget exhausted: node was ${n.status} after ${duration(this.now() - this.root(n).createdAt)} of the ${duration(ROOM_HANDOFF_LIMITS.lifetimeMs)} tree lifetime`;
+  }
+
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
     target: RoomAddress, key: string, text: string, approvalGranted = false,
     rework = false, sourceText = ""): { node: RoomHandoff; duplicate: boolean } {
@@ -105,7 +131,13 @@ export class RoomHandoffs {
     if (kind === "work" && path.filter(n => n.kind === "work").length > ROOM_HANDOFF_LIMITS.depth) throw new Error("Room handoff depth limit reached");
     const root = fresh ? parent : this.root(parent);
     const count = [...this.nodes.values()].filter(n => n.rootId === parent!.rootId && n.parentId).length;
-    if (count >= ROOM_HANDOFF_LIMITS.requests || this.now() - root.createdAt > ROOM_HANDOFF_LIMITS.lifetimeMs) throw new Error("Room handoff budget exhausted");
+    if (count >= ROOM_HANDOFF_LIMITS.requests) throw new Error("Room handoff budget exhausted");
+    // Refuse work the tree's lifetime budget cannot honestly serve: a node
+    // accepted in the root's last minutes would be doomed at enqueue time.
+    const remaining = ROOM_HANDOFF_LIMITS.lifetimeMs - (this.now() - root.createdAt);
+    if (remaining < ROOM_HANDOFF_LIMITS.minRunwayMs) {
+      throw new Error(`Room handoff budget exhausted: only ${duration(Math.max(remaining, 0))} of the ${duration(ROOM_HANDOFF_LIMITS.lifetimeMs)} tree lifetime remains`);
+    }
     // Retain a bounded audit history without evicting active requests.
     if (this.nodes.size >= 1000) {
       const oldRoots = [...this.nodes.values()].filter(n => !n.parentId && terminal(n)).sort((a, b) => a.createdAt - b.createdAt);
@@ -154,17 +186,49 @@ export class RoomHandoffs {
   activeDirect(threadId: string) {
     return [...this.nodes.values()].some(n => !n.groupId && n.threadId === threadId && !terminal(n));
   }
+  /** Work this conversation handed out that has not settled yet. The
+   * conversation's own node is not outstanding — only what it waits on. */
+  outstandingDirect(threadId: string): RoomHandoff[] {
+    return [...this.nodes.values()].filter(node => {
+      if (terminal(node) || !node.parentId) return false;
+      const parent = this.nodes.get(node.parentId);
+      return Boolean(parent && !parent.groupId && parent.threadId === threadId);
+    });
+  }
+  /** Stop this conversation without reaching into a teammate that is already
+   * working. Its provider process is left alone: it finishes and its result
+   * is still reported here. Work that never started is cancelled, because
+   * nothing is lost. This conversation stops being awaited either way, so no
+   * teammate result resumes a stopped chat. Returns what was left running. */
+  stopAwaitingDirect(threadId: string, reason = "Stopped by user"): RoomHandoff[] {
+    const left: RoomHandoff[] = [];
+    for (const node of this.nodes.values()) {
+      if (node.groupId || node.threadId !== threadId || terminal(node)) continue;
+      for (const child of this.children(node.id)) {
+        if (terminal(child)) continue;
+        if (child.status === "queued") this.cancelTree(child, "Stopped before it started");
+        else left.push(child);
+      }
+      node.status = "cancelled"; node.result = reason;
+      this.controllers.get(node.id)?.abort();
+      this.publish(node);
+    }
+    return left;
+  }
 
   tick() {
     if (this.loadError) return;
+    // Validate and expire deepest nodes first so each one is failed with its
+    // own status; an ancestor's cancellation then only sweeps what is left.
+    for (const n of [...this.nodes.values()].reverse()) {
+      if (terminal(n)) continue;
+      const error = this.hooks.validate(n, n.parentId ? this.nodes.get(n.parentId) : undefined);
+      if (error || (this.now() > this.deadline(n) && !this.protectsRunner(n) && !this.owesFollowUp(n))) {
+        this.cancelTree(n, error ?? this.lifetimeError(n), "failed");
+      }
+    }
     for (const n of this.nodes.values()) {
       const parent = n.parentId ? this.nodes.get(n.parentId) : undefined;
-      if (!terminal(n)) {
-        const error = this.hooks.validate(n, parent);
-        if (error || this.now() - this.root(n).createdAt > ROOM_HANDOFF_LIMITS.lifetimeMs) {
-          this.cancelTree(n, error ?? "Room request timed out", "failed");
-        }
-      }
       if (terminal(n) && parent && !n.reported) {
         this.hooks.report(n, parent); n.reported = true; this.publish(n, parent);
       }
@@ -175,14 +239,16 @@ export class RoomHandoffs {
       if (n.status !== "queued" && n.status !== "resume") continue;
       // A newly queued child starts only after its author has settled.
       if (parent && (parent.status === "source" || parent.status === "running")) continue;
-      if (parent && terminal(parent)) { this.cancelTree(n, "Originating request has ended"); continue; }
+      // A stopped source stops waiting; only work that never started is
+      // dropped with it. A teammate mid-turn keeps its process and reports.
+      if (parent && terminal(parent) && n.status === "queued") { this.cancelTree(n, "Originating request has ended"); continue; }
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);
       const executionCost = 1;
       if (root.executions + executionCost > ROOM_HANDOFF_LIMITS.executions) { this.cancelTree(n, "Room execution budget exhausted", "failed"); continue; }
       const resumed = n.status === "resume";
       const childCount = this.children(n.id).length;
-      root.executions += executionCost; n.status = "running";
+      root.executions += executionCost; n.status = "running"; n.startedAt = this.now();
       this.publish(n, root);
       const controller = new AbortController();
       this.controllers.set(n.id, controller);

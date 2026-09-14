@@ -207,6 +207,26 @@ function revokeObjectUrlLater(url: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/** Downloads and explicit media previews share the message-scoped capability.
+ * Never request a transcript path directly, even when it looks like a URL. */
+export async function requestMessageFile(
+  filePath: string,
+  message: MessageAttachmentContext,
+  signal: AbortSignal,
+): Promise<Response> {
+  const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ path: filePath }),
+    signal,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { error?: string } | null;
+    throw new Error(body?.error ?? t("attach.downloadFailed"));
+  }
+  return response;
+}
+
 /** Shared save state for transcript file chips and bot-authored file links. */
 export function useLocalFileSave(filePath: string, name?: string, message?: MessageAttachmentContext) {
   const [state, setState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
@@ -253,16 +273,7 @@ export function useLocalFileSave(filePath: string, name?: string, message?: Mess
     const controller = new AbortController();
     request.current = controller;
     try {
-      const response = await fetch(`/api/threads/${encodeURIComponent(message.threadId)}/messages/${encodeURIComponent(message.messageId)}/file`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ path: filePath }),
-        signal: controller.signal,
-      });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(body?.error ?? t("attach.downloadFailed"));
-      }
+      const response = await requestMessageFile(filePath, message, controller.signal);
       const blob = await response.blob();
       if (!mounted.current || controller.signal.aborted) return;
       const url = URL.createObjectURL(blob);
@@ -508,7 +519,7 @@ export function AttachmentPreviewDialog({
   );
 }
 
-function Thumbnail({
+export function AttachmentThumbnail({
   image,
   onPreview,
   className,
@@ -623,7 +634,7 @@ export function AttachedImageGallery({
     <>
       <div className={cn("mb-2 grid max-w-full gap-2", imageGalleryLayout(images.length), className)}>
         {images.map((image, index) => (
-          <Thumbnail key={`${image.src}:${index}`} image={image} onPreview={() => setSelectedIndex(index)} eager={eager} />
+          <AttachmentThumbnail key={`${image.src}:${index}`} image={image} onPreview={() => setSelectedIndex(index)} eager={eager} />
         ))}
       </div>
       {selectedIndex !== null && images[selectedIndex] && (
@@ -719,7 +730,7 @@ export function MarkdownImagePreview({
             <ImageOff size={17} /> {t("attach.oldImage")}
           </span>
         ) : visibleSource ? (
-          <Thumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager />
+          <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager />
         ) : (
           <span className="flex aspect-[4/3] max-h-96 animate-pulse items-center justify-center rounded-xl border border-hairline/40 bg-inset" role="status">
             <LoaderCircle size={17} className="animate-spin text-ink-secondary/65" />
@@ -737,12 +748,18 @@ export function MarkdownImagePreview({
   );
 }
 
-function AttachedFileChip({ file, message }: { file: TranscriptFileAttachment; message?: MessageAttachmentContext }) {
+export function AttachedFileChip({ file, message, linked = false, className }: {
+  file: TranscriptFileAttachment;
+  message?: MessageAttachmentContext;
+  /** A rendered bot-authored Markdown link, still checked by the server on click. */
+  linked?: boolean;
+  className?: string;
+}) {
   const save = useLocalFileSave(file.path, file.name, message);
   const failed = save.state === "failed";
-  if (!message || !file.private) {
+  if (!message || (!file.private && !linked)) {
     return (
-      <div title={t("attach.legacyFile", { name: file.name })} className="flex max-w-[280px] items-center gap-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 px-2.5 py-2 text-[12px] text-ink-secondary">
+      <div title={t("attach.legacyFile", { name: file.name })} className={cn("flex max-w-[280px] items-center gap-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 px-2.5 py-2 text-[12px] text-ink-secondary", className)}>
         <FileText size={14} className="shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
         <span className="text-[10.5px]">{t("attach.unavailable")}</span>
@@ -752,7 +769,7 @@ function AttachedFileChip({ file, message }: { file: TranscriptFileAttachment; m
   return (
     <div
       title={save.state === "saved" && save.savedTo ? t("attach.savedTo", { path: save.savedTo }) : file.name}
-      className="max-w-[280px] overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 text-[12px] text-ink-secondary"
+      className={cn("max-w-[280px] overflow-hidden rounded-lg border border-hairline/40 bg-inset/70 text-[12px] text-ink-secondary", className)}
     >
       <button
         type="button"
@@ -763,7 +780,7 @@ function AttachedFileChip({ file, message }: { file: TranscriptFileAttachment; m
             ? t("attach.retrySaveAria", { name: file.name })
             : t("attach.saveAria", { name: file.name })
         }
-        className="flex w-full items-center gap-2 px-2.5 py-2 text-left hover:bg-raised/70 disabled:cursor-wait"
+        className="flex min-h-10 w-full items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
       >
         <FileText size={14} className="shrink-0" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>

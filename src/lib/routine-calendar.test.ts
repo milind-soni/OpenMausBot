@@ -170,6 +170,44 @@ describe("routine calendar geometry", () => {
 });
 
 describe("routine calendar projection", () => {
+  const monthly: Routine = {
+    id: "monthly", name: "Monthly report", prompt: "Report", target: "bot", botId: "b1",
+    runOn: "maus", enabled: true, durationMinutes: 30, createdAt: Date.UTC(2026, 8, 1), updatedAt: 1,
+    schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "Asia/Kolkata" },
+    nextRunAt: Date.UTC(2026, 9, 1, 3, 30),
+  };
+
+  it("projects true monthly dates in the chosen timezone, not weekly approximations", () => {
+    const items = projectedRoutineItems([monthly], [], Date.UTC(2026, 8, 1), Date.UTC(2027, 0, 1));
+    expect(items.map(item => new Date(item.at).toISOString())).toEqual([
+      "2026-10-01T03:30:00.000Z", "2026-11-01T03:30:00.000Z", "2026-12-01T03:30:00.000Z",
+    ]);
+  });
+
+  it("keeps cron receipts without duplicating them and never projects paused work", () => {
+    const at = monthly.nextRunAt!;
+    const run: RoutineRun = { id: "cron-run", routineId: monthly.id, routineName: monthly.name,
+      target: "bot", botId: "b1", runOn: "maus", scheduledFor: at, status: "completed", manual: false, createdAt: at };
+    const items = projectedRoutineItems([monthly], [run], at, Date.UTC(2026, 10, 2));
+    expect(items).toHaveLength(2);
+    expect(items[0]?.run?.id).toBe(run.id);
+    expect(projectedRoutineItems([{ ...monthly, enabled: false }], [], at, Date.UTC(2026, 10, 2))).toEqual([]);
+  });
+
+  it("bounds dense cron projections and refuses to silently drag-convert an expression", () => {
+    const from = monthly.nextRunAt!;
+    const dense: Routine = { ...monthly, schedule: { type: "cron", expression: "* * * * *", timeZone: "UTC" } };
+    expect(projectedRoutineItems([dense], [], startOfDay(from), startOfDay(from) + 86_400_000)).toHaveLength(12);
+    expect(() => scheduleAt(monthly.schedule, from, from + 86_400_000)).toThrow("Edit this routine");
+  });
+
+  it("keeps daily cron projections visible throughout a full month", () => {
+    const first = new Date(2026, 9, 1).getTime();
+    const nextMonth = new Date(2026, 10, 1).getTime();
+    const daily: Routine = { ...monthly, nextRunAt: first, schedule: { type: "cron", expression: "0 9 * * *", timeZone: "UTC" } };
+    expect(projectedRoutineItems([daily], [], first, nextMonth)).toHaveLength(31);
+  });
+
   it("projects future recurring entries but does not duplicate run receipts", () => {
     const monday = startOfDay(new Date(2026, 7, 31, 12).getTime());
     const routine: Routine = {

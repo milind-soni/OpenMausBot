@@ -4,6 +4,9 @@ declare global {
 /** The package.json version, inlined by Vite's define at build time. */
 const __APP_VERSION__: string;
 
+  type DesktopSharedFolder = import("../../electron/computer-sharing.mjs").SharedFolder;
+  type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
+
   type DesktopCapabilities = {
     host: {
       platform: "darwin" | "linux" | "win32" | "other";
@@ -13,7 +16,7 @@ const __APP_VERSION__: string;
       session: "x11" | "wayland" | "headless" | "unknown";
       packaged: boolean;
     };
-    windowChrome: "mac-inset" | "native";
+    windowChrome: "mac-inset" | "win-caption" | "native";
     screenPreview: {
       available: boolean;
       interaction: "direct" | "portal-picker" | "none";
@@ -80,6 +83,10 @@ const __APP_VERSION__: string;
   interface Window {
     ogb?: {
       platform: NodeJS.Platform;
+      workspaces?: {
+        state: () => Promise<{ local: boolean; name: string; origin?: string }>;
+        menu: () => Promise<void>;
+      };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
       environments?: {
@@ -90,8 +97,16 @@ const __APP_VERSION__: string;
           environments: Array<{ id: string; name: string; origin: string }>;
         }>;
         switch: (id: string) => Promise<void>;
-        addFromLink: (link: string) => Promise<void>;
+        addFromLink: (link: string, name?: string) => Promise<boolean | void>;
         forget: (id: string) => Promise<void>;
+        onOpenSettings?: (callback: (computerId?: string | null) => void) => () => void;
+      };
+      /** Local main-window only. Hosted renderers cannot grant themselves access. */
+      computerSharing?: {
+        state(id: string): Promise<DesktopComputerSharing>;
+        chooseFolder(): Promise<DesktopSharedFolder | null>;
+        save(id: string, grant: Pick<DesktopComputerSharing, "folders" | "terminal" | "computer">): Promise<DesktopComputerSharing | null>;
+        revoke(id: string): Promise<DesktopComputerSharing>;
       };
       getCapabilities(): Promise<DesktopCapabilities>;
       onCapabilitiesChanged(cb: (capabilities: DesktopCapabilities) => void): () => void;
@@ -114,7 +129,7 @@ const __APP_VERSION__: string;
         setMode(
           botId: string,
           mode: import("../../shared/approval-mode").ApprovalMode,
-          options?: { acknowledgeLocalAuto?: boolean; threadId?: string;
+          options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean;
             modelSelection?: import("../state/store").ModelSelection; updateBotDefault?: boolean },
         ): Promise<import("../state/store").Bot>;
       };
@@ -160,8 +175,21 @@ const __APP_VERSION__: string;
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
+      /** The renderer-drawn Windows caption buttons; absent outside the
+       * frameless Windows shell (macOS/Linux/browser keep native chrome). */
+      windowControls?: {
+        minimize(): Promise<boolean>;
+        toggleMaximize(): Promise<boolean>;
+        close(): Promise<boolean>;
+        state(): Promise<{ maximized: boolean }>;
+        onMaximizedChanged(cb: (maximized: boolean) => void): () => void;
+      };
       /** Receives a GitHub package URL opened through openmausbot://install. */
       onPackageInstall?(cb: (url: string) => void): () => void;
+      /** The desktop shell's app-menu Preferences… item was activated; open
+       * app Settings. Local-shell only: remote server pages never receive
+       * the channel, and the bridge is absent in the browser. */
+      onOpenAppSettings?(cb: () => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */

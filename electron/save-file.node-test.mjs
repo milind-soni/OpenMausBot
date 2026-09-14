@@ -5,7 +5,7 @@ import path from "node:path";
 import { after, before, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { defaultSaveName, resolveSavablePath, withSavableFile } from "./save-file.mjs";
+import { collisionFreeDownloadPath, defaultSaveName, resolveSavablePath, withSavableFile } from "./save-file.mjs";
 
 // Creating a symlink on Windows needs elevation or developer mode, so the
 // symlink cases only run where the runner can actually make one.
@@ -107,6 +107,50 @@ describe("save-file dialog default name", () => {
     assert.equal(path.extname(await defaultSaveName(downloads, source)), ".docx");
 
     fs.rmSync(downloads, { recursive: true, force: true });
+  });
+});
+
+describe("attachment download destination", () => {
+  it("uses Chromium-style suffixes without replacing an existing download", () => {
+    const downloads = fs.mkdtempSync(path.join(os.tmpdir(), "omb-attachment-downloads-"));
+    try {
+      assert.equal(
+        collisionFreeDownloadPath(downloads, "report.tar.gz"),
+        path.join(downloads, "report.tar.gz"),
+      );
+      fs.writeFileSync(path.join(downloads, "report.tar.gz"), "first");
+      assert.equal(
+        collisionFreeDownloadPath(downloads, "report.tar.gz"),
+        path.join(downloads, "report.tar (1).gz"),
+      );
+      fs.writeFileSync(path.join(downloads, "report.tar (1).gz"), "second");
+      assert.equal(
+        collisionFreeDownloadPath(downloads, "report.tar.gz"),
+        path.join(downloads, "report.tar (2).gz"),
+      );
+    } finally {
+      fs.rmSync(downloads, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps renderer-supplied directories outside the destination", () => {
+    const downloads = fs.mkdtempSync(path.join(os.tmpdir(), "omb-attachment-basename-"));
+    try {
+      assert.equal(
+        collisionFreeDownloadPath(downloads, "../../outside.txt"),
+        path.join(downloads, "outside.txt"),
+      );
+    } finally {
+      fs.rmSync(downloads, { recursive: true, force: true });
+    }
+  });
+
+  it("is installed on the default session before the primary window is created", () => {
+    const main = fs.readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+    const handler = main.indexOf('session.defaultSession.on("will-download"');
+    assert.notEqual(handler, -1);
+    assert.match(main.slice(handler), /item\.setSavePath\(collisionFreeDownloadPath\(/);
+    assert.ok(handler < main.indexOf("createWindow();"));
   });
 });
 

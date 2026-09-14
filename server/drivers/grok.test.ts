@@ -188,3 +188,11 @@ describe("GrokDriver turns (fake fetch)", () => {
     await expect(instance.adapter.respondToRequest("t-x", "r", { behavior: "allow" })).resolves.toBe("unavailable");
   });
 });
+
+
+it("grok preserves an explicit tools-off connection and rejects ambiguous flags", () => {
+  expect(GrokDriver.decodeConfig({})).not.toHaveProperty("tools");
+  expect(GrokDriver.decodeConfig({ tools: false })).toMatchObject({ tools: false });
+  expect(GrokDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
+  expect(() => GrokDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
+});

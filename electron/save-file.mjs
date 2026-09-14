@@ -130,3 +130,13 @@ export async function defaultSaveName(dir, sourcePath, { fsp = fs.promises } = {
   }
   return path.join(dir, `${stem}${ext}`);
 }
+
+export function collisionFreeDownloadPath(dir, sourcePath, { existsSync = fs.existsSync } = {}) {
+  const fileName = path.basename(sourcePath);
+  const ext = path.extname(fileName);
+  const stem = path.basename(fileName, ext);
+  for (let n = 0; ; n += 1) {
+    const candidate = path.join(dir, n === 0 ? fileName : `${stem} (${n})${ext}`);
+    if (!existsSync(candidate)) return candidate;
+  }
+}

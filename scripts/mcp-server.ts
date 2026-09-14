@@ -630,7 +630,9 @@ function projectMessage(message: Record<string, any>) {
       }
     : undefined;
   const tool = isRecord(message.tool)
-    ? { name: message.tool.name, ok: message.tool.ok, spoken: message.tool.spoken, setup: message.tool.setup }
+    ? { name: message.tool.name, ok: message.tool.ok, spoken: message.tool.spoken, setup: message.tool.setup,
+        ...(message.tool.terminal === true ? { terminal: true } : {}),
+      }
     : undefined;
   const connector = isRecord(message.connector)
     ? {
@@ -694,6 +696,9 @@ function messageNeedsInput(message: Record<string, any>): boolean {
 function dispatchFailedAfterLatestUser(messages: Array<Record<string, any>>): boolean {
   const lastUser = messages.findLastIndex((message) => message.role === "user");
   const turnMessages = messages.slice(lastUser + 1);
+  // Only an explicit terminal receipt overrides prose. Existing providers
+  // also emit diagnostics on intentional cancellation, which remain settled.
+  if (turnMessages.some((message) => message.tool?.terminal === true && message.tool.ok === false)) return true;
   if (turnMessages.some((message) => message.role === "bot" && message.kind === "text" && message.text?.trim())) {
     return false;
   }

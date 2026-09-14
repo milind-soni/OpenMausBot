@@ -52,6 +52,13 @@ const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 const execFileAsync = promisify(execFile);
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";
 
+// Where cua-driver installs itself on Windows: under the user profile, with
+// the packages directory holding the versioned releases. The installer's own
+// directory is kept as a fallback for machines where the layout differs.
+const WIN_INSTALLED_DRIVERS = [
+  path.join(app.getPath("home"), ".cua-driver", "packages", "current", "cua-driver.exe"),
+  path.join(app.getPath("home"), "AppData", "Local", "Programs", "CuaDriver", "cua-driver.exe"),
+];
 let embeddedHost = null; // EmbeddedCuaDriverHost | null
 let startupAbort = null;
 let lifecycleGeneration = 0;
@@ -120,13 +127,24 @@ function persistAndNotify(next) {
   return connection;
 }
 
+export function resolveWindowsDriver() {
+  for (const candidate of WIN_INSTALLED_DRIVERS) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
 export function resolveDriverBinary() {
   if (process.env.CUA_DRIVER_PATH) return process.env.CUA_DRIVER_PATH;
   if (app.isPackaged) {
-    const bundled = path.join(process.resourcesPath, "cua-driver");
+    const bundled = path.join(process.resourcesPath, "cua-driver" + (process.platform === "win32" ? ".exe" : ""));
     if (fs.existsSync(bundled)) return bundled;
   }
-  if (fs.existsSync(INSTALLED_DRIVER)) return INSTALLED_DRIVER;
+  if (process.platform === "darwin" && fs.existsSync(INSTALLED_DRIVER)) return INSTALLED_DRIVER;
+  if (process.platform === "win32") {
+    const staged = path.join(app.getAppPath(), "dist-native", "cua-win32-x64", "cua-driver.exe");
+    return fs.existsSync(staged) ? staged : resolveWindowsDriver();
+  }
   return null;
 }
 
@@ -149,22 +167,26 @@ function socketAlive(sockPath) {
 
 async function loadEmbeddedSdk() {
   if (!app.isPackaged) {
+    if (process.platform === "win32") return import("@trycua/cua-driver/embedded");
     const [embedded, permissions] = await Promise.all([
       import("@trycua/cua-driver/embedded"),
       import("@trycua/cua-driver/electron"),
     ]);
     return { ...embedded, ...permissions };
   }
+  const isWindows = process.platform === "win32";
   process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(
     process.resourcesPath,
     "cua-sdk",
     "native",
-    "libcua_driver_sdk.dylib",
+    isWindows ? "cua_driver_sdk.dll" : "libcua_driver_sdk.dylib",
   );
   return import(pathToFileURL(path.join(process.resourcesPath, "cua-sdk", "cua-sdk.mjs")).href);
 }
 
 async function attachStandalone(signal) {
+  // Windows must stay on the owned embedded host, never an unrelated daemon.
+  if (process.platform !== "darwin") return null;
   const driver = fs.existsSync(INSTALLED_DRIVER) ? INSTALLED_DRIVER : null;
   if (!driver) return null;
   if (!(await socketAlive(STANDALONE_SOCKET))) {
@@ -206,13 +228,15 @@ async function startEmbedded(binary, signal) {
   // CUA's embedding contract requires grants before the child daemon starts;
   // these SDK calls execute in Electron main so macOS attributes them to
   // OpenMausBot rather than to a terminal or helper process.
-  const permissionStatus = sdk.requestMacOSPermissions();
-  if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
-    const missing = [
-      !permissionStatus.accessibility && "Accessibility",
-      !permissionStatus.screenRecording && "Screen Recording",
-    ].filter(Boolean).join(" and ");
-    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+  if (process.platform === "darwin") {
+    const permissionStatus = sdk.requestMacOSPermissions();
+    if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
+      const missing = [
+        !permissionStatus.accessibility && "Accessibility",
+        !permissionStatus.screenRecording && "Screen Recording",
+      ].filter(Boolean).join(" and ");
+      throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+    }
   }
   const host = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);
   try {
@@ -252,7 +276,7 @@ export async function startCua() {
   }
 
   const wantEmbedded =
-    app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
+    process.platform === "win32" || app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
   let nextConnection;
 
   if (wantEmbedded) {
@@ -276,8 +300,10 @@ export async function startCua() {
         };
       }
     }
-  } else if (await socketAlive(STANDALONE_SOCKET)) {
-    // Dev machine with CuaDriver.app's daemon already running.
+  } else if (process.platform === "darwin" && (await socketAlive(STANDALONE_SOCKET))) {
+    // Dev machine with the platform CuaDriver daemon already running. Windows
+    // is deliberately excluded: there the shared pipe belongs to whatever
+    // driver the user happens to have, so it is never adopted implicitly.
     nextConnection = {
       mode: "standalone",
       socketPath: STANDALONE_SOCKET,
@@ -372,9 +398,10 @@ export function registerCuaIpc() {
     return ensureLinuxRuntime().getStatus();
   }));
   ipcMain.handle("cua:linux-retry", localOnly("cua:linux-retry", async () => {
-    if (process.platform === "darwin") {
+    if (process.platform === "darwin" || process.platform === "win32") {
       // Concurrent IPC requests share the whole stop/start sequence. A later
       // explicit Stop (including quit) or startup cancels its delayed restart.
+      const platformLabel = process.platform === "darwin" ? "macOS" : "Windows";
       macRetry ??= (async () => {
         try {
           const stopping = stopCua();
@@ -390,7 +417,7 @@ export function registerCuaIpc() {
             message: connection?.reason,
           };
         } catch (error) {
-          console.error("[cua] macOS retry failed:", error);
+          console.error(`[cua] ${platformLabel} retry failed:`, error);
           return {
             enabled: false,
             status: "error",

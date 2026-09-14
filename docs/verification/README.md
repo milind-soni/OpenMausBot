@@ -38,8 +38,10 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [OpenAI-compatible structured tools](openai-tools.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
+- [Full Access without duplicate approvals](full-access.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
@@ -90,6 +92,10 @@ desktop app or controlling the user's computer.
 
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
+
+The [chat and settings polish fixture](chat-polish.md) exercises attachment
+galleries, opt-in video playback, persisted tool details, and responsive settings
+through the real renderer in an isolated fake-engine workspace.
 
 The [people invitation fixture](people.md) checks hosted workspace sign-in,
 roles and device revocation through the real HTTP API with a stubbed email

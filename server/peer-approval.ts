@@ -31,6 +31,8 @@ export interface ApprovalBus {
   /** Where a "blocked on you" frame goes. Optional: the boot-time cleanup
    * and the settle paths only ever answer cards, and never raise one. */
   notify?: (notification: Notification | null) => void;
+  /** Effective server-resolved Full Access for this exact source thread. */
+  autoApply?: (botId: string, threadId: string) => boolean;
 }
 
 interface Pending {
@@ -160,7 +162,7 @@ export function requestPeerApproval(
   action: PeerAction,
   sourceThreadId = from.threadId,
 ): Promise<"allow" | "deny"> {
-  if (allowKeyAllowed(from, peerAllowKey(action, target.id))) {
+  if (bus.autoApply?.(from.id, sourceThreadId) || allowKeyAllowed(from, peerAllowKey(action, target.id))) {
     return Promise.resolve("allow");
   }
   return new Promise((resolve) => {

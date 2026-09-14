@@ -1,0 +1,34 @@
+name: Shared terminal smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - electron/shared-computer-access*
+      - server/shared-computers.e2e.test.ts
+      - .github/workflows/shared-terminal-smoke.yml
+  pull_request:
+    paths:
+      - electron/shared-computer-access*
+      - server/shared-computers.e2e.test.ts
+      - .github/workflows/shared-terminal-smoke.yml
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows shared terminal
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+      - name: Shared terminal and authority regressions
+        run: node --test electron/shared-computer-access.node-test.mjs
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3
+      - run: pnpm install --frozen-lockfile
+      - name: Shared computer real connector
+        run: pnpm exec vitest run server/shared-computers.e2e.test.ts

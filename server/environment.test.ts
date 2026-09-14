@@ -126,6 +126,12 @@ describe("environment identity", () => {
       capabilities: { remoteSessions: true, selfUpdate: "desktop-managed", emailSignIn: false },
     });
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false }).capabilities.selfUpdate).toBe("operator");
+    // Computer sharing is advertised only while its opt-in gate is on, so a
+    // client is never told this server speaks a protocol it would refuse.
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
+      .not.toHaveProperty("sharedComputers");
+    expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)
+      .toEqual({ remoteSessions: true, sharedComputers: true, selfUpdate: "desktop-managed", emailSignIn: false });
   });
 
   it("falls back to the checkout's package.json version, then to unknown", () => {

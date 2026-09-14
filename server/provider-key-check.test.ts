@@ -53,7 +53,7 @@ describe("provider key check", () => {
 
   it("sends the provider's own header shape and returns a few model ids on success", async () => {
     const anthropic = await checkProviderKey({ provider: "anthropic", key: "good-key", url: base });
-    expect(anthropic).toEqual({ ok: true, models: ["model-a", "model-b", "named-c"] });
+    expect(anthropic).toEqual({ ok: true, check: "models", models: ["model-a", "model-b", "named-c"] });
     expect(seen[0]).toMatchObject({ path: "/v1/models", headers: { "x-api-key": "good-key", "anthropic-version": "2023-06-01" } });
     expect(seen[0]!.headers.authorization).toBeUndefined();
 
@@ -67,6 +67,58 @@ describe("provider key check", () => {
     expect(await checkProviderKey({ provider: "xai", key: "bad-key", url: base })).toEqual({ ok: false, reason: "rejected", status: 401 });
     expect(await checkProviderKey({ provider: "xai", key: "broken-key", url: base })).toEqual({ ok: false, reason: "unexpected", status: 500 });
     expect(await checkProviderKey({ provider: "xai", key: "good-key", url: "http://127.0.0.1:1" })).toEqual({ ok: false, reason: "unreachable" });
+  });
+
+  it("never approves an absent key even when a provider's catalog is public", async () => {
+    let calls = 0;
+    const publicCatalog: typeof fetch = async () => { calls++; return Response.json({ data: [] }); };
+    for (const key of ["", "   "]) {
+      expect(await checkProviderKey({ provider: "openaiCompat", key }, publicCatalog)).toEqual({ ok: false, reason: "rejected" });
+    }
+    expect(calls).toBe(0);
+  });
+
+  it("authenticates OpenRouter at /key even when /models would accept an invalid key", async () => {
+    const paths: string[] = [];
+    const openRouter: typeof fetch = async (input, init) => {
+      const url = String(input);
+      paths.push(url);
+      expect(init?.redirect).toBe("manual");
+      if (url.endsWith("/models")) return Response.json({ data: [{ id: "public-model" }] });
+      expect(url).toBe("https://openrouter.ai/api/v1/key");
+      const authorized = new Headers(init?.headers).get("authorization") === "Bearer valid-fixture-key";
+      return authorized
+        ? Response.json({ data: { is_free_tier: false, label: "private-key-label", usage: 42 } })
+        : Response.json({ error: { message: "Missing Authentication header" } }, { status: 401 });
+    };
+    expect(await checkProviderKey({ provider: "openaiCompat", key: "invalid-fixture-key" }, openRouter))
+      .toEqual({ ok: false, reason: "rejected", status: 401 });
+    expect(await checkProviderKey({ provider: "openaiCompat", key: "valid-fixture-key", url: "https://openrouter.ai/api/v1/" }, openRouter))
+      .toEqual({ ok: true, check: "authentication", models: [] });
+    expect(paths).toHaveLength(2);
+    expect(paths.every((path) => path.endsWith("/key"))).toBe(true);
+  });
+
+  it("does not call a custom compatible server's nonexistent /key endpoint", async () => {
+    const paths: string[] = [];
+    const custom: typeof fetch = async (input) => { paths.push(String(input)); return Response.json({ data: [] }); };
+    for (const url of ["https://api.groq.com/openai/v1", "https://api.openai.com/v1", "https://openrouter.ai.example.test/api/v1"]) {
+      expect(await checkProviderKey({ provider: "openaiCompat", key: "fixture", url }, custom))
+        .toEqual({ ok: true, check: "models", models: [] });
+      expect(paths.at(-1)).toBe(`${url}/models`);
+    }
+  });
+
+  it("does not authenticate from a redirect, HTML or a model catalog returned by /key", async () => {
+    for (const response of [
+      new Response("", { status: 302, headers: { location: "https://elsewhere.example.test" } }),
+      new Response("<html>Login</html>"),
+      Response.json({ data: [] }),
+      Response.json({ error: { message: "private provider detail" } }),
+    ]) {
+      expect(await checkProviderKey({ provider: "openaiCompat", key: "fixture" }, async () => response))
+        .toEqual({ ok: false, reason: "unexpected", status: response.status });
+    }
   });
 
   it("gives up on a hanging provider and never follows a redirect with the key", async () => {

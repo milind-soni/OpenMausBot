@@ -182,11 +182,16 @@ export function clearSessionCookie(name: string): string {
  * deliberately listed here. Two client-allowed PATCH routes carry a body
  * filter in the handler (bot and room edits: display fields only). Loopback
  * holds both scopes. */
-export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp }> = [
+export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: "sharedComputers" }> = [
   // own session
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },
+  // Own outbound desktop connector, additionally bound to a private secret.
+  // Only honoured while features.sharedComputers is on (see requiredScope):
+  // with the feature off these paths are as unlisted as any other, so a
+  // client session is refused exactly the way an unknown route refuses it.
+  { methods: ["POST"], path: /^\/api\/shared-computers\/(?:connect|[\w-]+\/(?:poll|lease|result|disconnect))$/, feature: "sharedComputers" },
   // liveness, identity, the stream
   { methods: ["GET"], path: /^\/api\/health$/ },
   { methods: ["GET"], path: /^\/api\/edition$/ },
@@ -249,9 +254,10 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/config$/ },
 ];
 
-export function requiredScope(method: string, path: string): Scope {
+export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {
   const upper = method.toUpperCase();
   for (const rule of CLIENT_ALLOW) {
+    if (rule.feature && features[rule.feature] !== true) continue;
     if (rule.path.test(path) && rule.methods.includes(upper)) return "client";
   }
   return "admin";
@@ -286,6 +292,9 @@ export interface ResolveOptions {
   loopbackMutationToken?: string;
   /** Separate private capability held by the authenticated phone relay. */
   companionMutationToken?: string;
+  /** Feature gates that decide whether a client-scoped route exists at all.
+   * Absent means off, so an ungated build refuses like one without it. */
+  features?: { sharedComputers?: boolean };
 }
 
 const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
@@ -341,7 +350,7 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
 
   if (session && via) {
     if (via === "cookie" && !isSameOrigin(req)) return deny(403, "forbidden: cross-origin request");
-    const needed = requiredScope(method, path);
+    const needed = requiredScope(method, path, options.features ?? {});
     if (!session.scopes.includes(needed)) {
       return deny(403, `forbidden: this session lacks the ${needed} scope`);
     }

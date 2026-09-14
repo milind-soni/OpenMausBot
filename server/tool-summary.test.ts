@@ -1,6 +1,46 @@
 import { describe, expect, it } from "vitest";
 
-import { askInputSummary, commandSummary } from "./tool-summary.ts";
+import { askInputSummary, commandSummary, toolDetailPreview } from "./tool-summary.ts";
+
+describe("toolDetailPreview", () => {
+  it("keeps useful input and results while removing nested credentials and binary data", () => {
+    const preview = toolDetailPreview({ command: "echo hello", password: "short", headers: { Cookie: "session=private", Authorization: "Bearer secret" }, result: [{ type: "text", text: "hello" }, { type: "image", data: "private-base64" }] });
+    expect(preview).toContain("echo hello");
+    expect(preview).toContain("hello");
+    for (const secret of ["short", "session=private", "Bearer secret", "private-base64"]) expect(preview).not.toContain(secret);
+    expect(preview).toContain("[redacted]");
+    expect(preview).toContain("[binary content omitted]");
+  });
+  it("redacts before shortening and bounds recursive or oversized payloads", () => {
+    const token = `ghp_${"a".repeat(36)}`;
+    const preview = toolDetailPreview(`${"x".repeat(5998)} ${token}`)!;
+    expect(preview).not.toContain("ghp_");
+    expect(preview).toContain("preview shortened");
+    expect(preview.length).toBeLessThan(6050);
+    expect(toolDetailPreview("x".repeat(256001))).toBe("[large content omitted]");
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    expect(toolDetailPreview(cycle)).toContain("additional data omitted");
+    expect(toolDetailPreview(Array.from({ length: 100 }, () => "item"))).toContain("additional items omitted");
+    expect(toolDetailPreview({ first: " ".repeat(255_999), second: `ghp_${"a".repeat(36)}` })).not.toContain("ghp_");
+    expect(toolDetailPreview({ url: "data:image/png;base64,private-pixels", blob: "more-pixels" })).not.toContain("pixels");
+  });
+  it("does not invent output and preserves failure text or primitive results", () => {
+    expect(toolDetailPreview(undefined)).toBeUndefined();
+    expect(toolDetailPreview({})).toBeUndefined();
+    expect(toolDetailPreview("permission denied")).toBe("permission denied");
+    expect(toolDetailPreview(false)).toBe("false");
+    expect(toolDetailPreview({ api_key: 1234 })).not.toContain("1234");
+    expect(toolDetailPreview(1234n)).toBe("1234");
+  });
+  it("scrubs structured JSON inside native text results without changing ordinary prose", () => {
+    const preview = toolDetailPreview([{ type: "text", text: JSON.stringify({ message: "request completed", password: "tiny", headers: { Cookie: "sid=x" }, env: [{ name: "API_KEY", value: "small" }] }) }]);
+    expect(preview).toContain("request completed");
+    for (const secret of ["tiny", "sid=x", "small"]) expect(preview).not.toContain(secret);
+    expect(toolDetailPreview("[1,2 invalid json")).toBe("[1,2 invalid json");
+    expect(toolDetailPreview("plain output\nsecond line")).toBe("plain output\nsecond line");
+  });
+});
 
 describe("commandSummary", () => {
   it("is the shell command, cut at 200", () => {

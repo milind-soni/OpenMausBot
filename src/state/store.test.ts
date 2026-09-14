@@ -9,6 +9,7 @@ import {
   openNotificationTarget,
   openThread,
   persistBotUpdate,
+  persistTaskApproval,
   pinBotThreadAction,
   reducer,
   requestConfirmedBotDeletion,
@@ -22,6 +23,29 @@ import {
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { RoutineRun } from "../lib/routines";
+
+describe("composer thread approval persistence", () => {
+  it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
+    const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;
+    const bridge = { setMode: vi.fn().mockResolvedValue(bot) };
+    const request = vi.fn();
+    expect(await persistTaskApproval("bot", "thread", { approvalMode: mode, confirmFullAccess: true }, bridge, request)).toBe(bot);
+    expect(bridge.setMode).toHaveBeenCalledExactlyOnceWith("bot", mode, { threadId: "thread", threadOnly: true, acknowledgeLocalAuto: false });
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("never falls back to HTTP for Full or Custom, or grants Full without confirmation", async () => {
+    const request = vi.fn(), bridge = { setMode: vi.fn() };
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full" }, bridge, request)).rejects.toThrow("Confirm Full");
+    for (const mode of ["full", "custom"] as const) await expect(persistTaskApproval("bot", "thread", { approvalMode: mode, confirmFullAccess: true }, undefined, request)).rejects.toThrow("packaged desktop");
+    expect(request).not.toHaveBeenCalled(); expect(bridge.setMode).not.toHaveBeenCalled();
+  });
+  it("does not send local confirmation metadata over HTTP and propagates failed grants", async () => {
+    const request = vi.fn().mockResolvedValue({ bot: { id: "bot" } });
+    await persistTaskApproval("bot", "thread", { approvalMode: "ask", confirmFullAccess: true }, undefined, request);
+    expect(JSON.parse(request.mock.calls[0][1].body)).toEqual({ approvalMode: "ask" });
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full", confirmFullAccess: true }, { setMode: vi.fn().mockRejectedValue(new Error("gone")) }, request)).rejects.toThrow("gone");
+  });
+});
 
 describe("stream delta flushing", () => {
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -1678,6 +1702,63 @@ describe("bot settings section", () => {
     expect(next.botSettingsSection).toBe("soul");
     // Bare reopen (mascot) must not auto-expand a leftover section.
     expect(next.botSettingsExpandAccordion).toBe(false);
+  });
+
+  it.each(["identity", "model"] as const)("opens a bot's %s settings without leaving the team map or reading its conversations", (section) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: "room",
+      bots: [{ ...bot, unread: true }],
+      groups: [{ id: "room", unread: true } as Group],
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: bot.id, section });
+    expect(next.selectedId).toBe(bot.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe(section);
+    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(next.bots).toBe(state.bots);
+    expect(next.groups).toBe(state.groups);
+  });
+
+  it("switches an open settings panel to another bot without toggling it closed", () => {
+    const other = { ...bot, id: "other-bot" };
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, other],
+      settingsOpen: true,
+      botSettingsSection: "soul" as const,
+      botSettingsExpandAccordion: true,
+    };
+    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    expect(next.selectedId).toBe(other.id);
+    expect(next.activeView).toBe("team-map");
+    expect(next.settingsOpen).toBe(true);
+    expect(next.botSettingsSection).toBe("overview");
+    expect(next.botSettingsExpandAccordion).toBe(false);
+
+    const model = reducer(next, { type: "toggleSettings", botId: bot.id, section: "model" });
+    expect(model.settingsOpen).toBe(true);
+    expect(model.botSettingsSection).toBe("model");
+    expect(model.botSettingsExpandAccordion).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id }).settingsOpen).toBe(true);
+    expect(reducer(model, { type: "toggleSettings", botId: bot.id, open: false }).settingsOpen).toBe(false);
+    expect(reducer(model, { type: "toggleSettings" }).settingsOpen).toBe(false);
+  });
+
+  it.each(["missing-bot", "hidden-bot", "room"])("ignores unavailable settings target %s", (botId) => {
+    const state = {
+      ...initialState,
+      activeView: "team-map" as const,
+      selectedId: bot.id,
+      bots: [bot, { ...bot, id: "hidden-bot", hidden: true }],
+      groups: [{ id: "room" } as Group],
+      settingsOpen: true,
+    };
+    expect(reducer(state, { type: "toggleSettings", botId, section: "identity" })).toBe(state);
   });
 
   it("selecting a different bot resets botSettingsSection to overview", () => {

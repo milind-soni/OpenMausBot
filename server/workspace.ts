@@ -20,6 +20,11 @@ import { DATA_DIR } from "./config.ts";
 export const WORKSPACES_DIR = join(DATA_DIR, "workspaces");
 export const TASK_WORKSPACES_DIR = join(DATA_DIR, "task-workspaces");
 
+/** MCP support does not imply native filesystem tools or a local working directory. */
+export function supportsWorkspaceFiles(driverKind: string): boolean {
+  return !["grok", "openai-compat", "minimax", "boxAgent"].includes(driverKind);
+}
+
 /** Default task files are private to the thread, outside the bot's shared
  * memory folder. This is directory organization, not a shell sandbox. */
 export function ensureTaskWorkspace(botId: string, threadId: string): string {
@@ -573,13 +578,18 @@ export const MEMORY_ROUTING_GUIDANCE =
  * it has written anything. Content from other bots or imported files must
  * never be recorded as fact — memory is a prompt-injection persistence
  * vector the moment a bot copies untrusted text into it. */
-export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolean } = {}): string {
+export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolean; fileTools?: boolean } = {}): string {
   const memory = loadMemory(botId);
   const memoryFile = join(workspaceDir(botId), "MEMORY.md");
   const topicDir = join(workspaceDir(botId), "memory");
+  if (opts.fileTools === false && !opts.managedWrites) {
+    if (!memory) return "";
+    return ` Your saved memory is supplied as context; this turn has no memory editing tools.\n\nYour memory (MEMORY.md):\n${memory.text}${memory.truncated ? " [Only the initial memory excerpt is visible.]" : ""}`;
+  }
   const writeGuidance = opts.managedWrites
     ? " This memory is shared across your independent threads. Use memory_update for every change to MEMORY.md, never direct file tools or whole-file overwrites." +
-      " Append new facts, or replace/remove an exact unique old_text passage. If it conflicts, read the current file and retry only your intended change."
+      " Append new facts, or replace/remove an exact unique old_text passage. If it conflicts, " +
+      (opts.fileTools === false ? "use session_search to find the current passage" : "read the current file") + " and retry only your intended change."
     : " When you learn something worth keeping, update it with your file tools; remove notes that turn out to be wrong.";
   const guidance =
     ` Your private long-term memory file is ${JSON.stringify(memoryFile)}.` +
@@ -592,7 +602,7 @@ export function memorySystemPrompt(botId: string, opts: { managedWrites?: boolea
   const truncatedNote = memory.truncated
     ? ` [MEMORY.md is ${memory.lines} lines and ${memory.bytes} bytes; only the first ${MEMORY_MAX_LINES} lines / ${MEMORY_MAX_BYTES} bytes are shown above and the rest is not visible to you. ${
       opts.managedWrites
-        ? "Consolidate it now with memory_update: replace or remove older entries, or move detail to a memory/<topic>.md file."
+        ? "Consolidate it now with memory_update: replace or remove older entries" + (opts.fileTools === false ? "." : ", or move detail to a memory/<topic>.md file.")
         : "Trim it with your file tools: merge or remove older entries, or move detail to a memory/<topic>.md file."
     }]`
     : "";

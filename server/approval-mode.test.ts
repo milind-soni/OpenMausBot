@@ -85,4 +85,11 @@ describe("approval modes", () => {
     expect(isEmergencyApprovalDowngrade("ask", "auto")).toBe(false);
     expect(isEmergencyApprovalDowngrade("auto", "ask")).toBe(false);
   });
+
+  it("holds only the explicitly targeted thread during a composer grant", () => {
+    const approvalGrant = { requestId: "pending", mode: "full", phase: "prepared", threadOnly: true, threadId: "target" };
+    expect(approvalModeFor({ approvalMode: "full", approvalGrant, threadId: "target" })).toBe("ask");
+    expect(approvalModeFor({ approvalMode: "full", approvalGrant, threadId: "other" })).toBe("full");
+    expect(approvalModeFor({ approvalMode: "full", approvalGrant })).toBe("ask");
+  });
 });

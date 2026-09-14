@@ -126,9 +126,11 @@ export type RuntimeEvent = RuntimeEventBase &
          * 200 characters, for the chip and the Verify card. Absent for calls
          * that run no command (a Read, a fetch). */
         summary?: string;
+        /** Bounded, redacted display preview; never raw tool arguments. */
+        input?: string;
       }
     | { type: "item.updated"; itemType: "tool" | "reasoning"; tokens?: number | null }
-    | { type: "item.completed"; itemType: "tool"; ok: boolean }
+    | { type: "item.completed"; itemType: "tool"; ok: boolean; output?: string }
     | { type: "item.completed"; itemType: "assistant_text"; text: string }
     /** Provider-generated raster bytes. This event is folded into the
      * private attachment store and is never forwarded to renderer SSE: a
@@ -175,7 +177,9 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number }
     // `setup: true` marks a failure the user fixes by installing or
     // configuring something, not by retrying — the UI offers setup instead.
-    | { type: "runtime.error"; message: string; setup?: boolean }
+    // `terminal: true` records failure of the complete turn, rather than a
+    // transient error or a legacy provider's diagnostic during cancellation.
+    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

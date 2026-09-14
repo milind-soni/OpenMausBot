@@ -68,6 +68,16 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).not.toContain("delegate_bot");
   });
 
+  it.each([false, true])("follows staffing result states with bounded coordination %s", boundedCoordination => {
+    const prompt = chiefOfStaffSystemPrompt("chief", bots, true, "", boundedCoordination);
+    expect(prompt).toContain("after an applied result, continue already-requested work without another confirmation");
+    expect(prompt).toContain("Only if review is pending, end your turn");
+    expect(prompt).toContain("Report failed or cancelled results honestly");
+    expect(prompt).toContain("Existing thread models and other bots' execution permissions stay unchanged");
+    expect(prompt).toContain("For explicitly requested bot deletion");
+    expect(prompt).not.toContain("End your turn after the proposal:");
+  });
+
   it("includes trusted OpenMaus status only when the Chief caller supplies it", () => {
     const status = "TRUSTED OPENMAUSBOT STATUS\nfreshness=fresh; runtime_state=degraded";
 
@@ -87,7 +97,7 @@ describe("chiefOfStaffSystemPrompt", () => {
         "Own the outcome: understand the request, decide what to handle yourself, coordinate the right specialists when useful, and return one concise consolidated answer.",
         "Do not delegate trivial work merely to appear busy. Never invent a teammate's progress or result. Normal permission and approval rules still apply.",
         "Use list_bots to confirm the live roster and IDs. When assigning work to a teammate, use delegate_bot: it returns immediately, keeps you available to the user, and delivers the teammate's outcome back into this conversation automatically — success or failure. When the result arrives you are woken with it: report it to the user and act. If the teammate fails or stalls, tell the user plainly and decide the next step yourself. After delegate_bot accepts the task, acknowledge the handoff and continue with any independent work or end your turn. Do not call wait_delegation or repeatedly poll check_delegation in the same turn. Use ask_bot only for a brief consultation whose answer you must have before writing your current response. Never use ask_bot for an assigned task, background work, or anything potentially long-running. Delegate with a clear, self-contained brief. Say that the task is assigned, not completed; only claim completion after the teammate's result has actually arrived. You may assign work to more than one teammate when the request genuinely benefits. Stay responsive while they work, then combine their returned results when the user asks for a synthesis.",
-        "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the combined card reviews their creation and your access. Existing thread models stay unchanged. End your turn after the proposal: the user's decision automatically resumes you once with a structured result. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. Use create_bot only for a single specialist when no combined setup was requested. For explicitly requested bot deletion, use propose_bot_deletion separately. Do not create duplicate or unnecessary bots.",
+        "When the user asks you to assemble or configure a team, use list_team_setup for the exact authorized teams, bot IDs and model catalog, then propose_team_setup once with all named specialists and their profile/model changes. Include new teams explicitly; the plan covers their creation and your access. Existing thread models and other bots' execution permissions stay unchanged. Follow the tool result: granted Full Access may apply the plan immediately; after an applied result, continue already-requested work without another confirmation. Only if review is pending, end your turn: the user's decision automatically resumes you once with a structured result. Report failed or cancelled results honestly. Do not ask for another yes, poll, or repeat the proposal. After successful setup, use the available coordination tools for already requested work. Use create_bot only for a single specialist when no combined setup was requested. For explicitly requested bot deletion, use propose_bot_deletion separately and follow its applied or pending result too. Do not create duplicate or unnecessary bots.",
         "Current Work section team:",
         "- Quill — Writer: Drafts concise copy (available)",
         "- Patch — Engineer (working right now)",

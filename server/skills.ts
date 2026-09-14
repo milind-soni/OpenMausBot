@@ -1354,6 +1354,30 @@ export function applyStagedSkillWrite(
   return installed;
 }
 
+/** Full Access uses the same exact-content apply path. Once installed, a
+ * receipt or staging-cleanup failure must not tell the caller to apply again. */
+export function applySkillWriteWithReceipt(
+  botId: string,
+  staged: Pick<StagedSkillWrite, "id" | "sha256">,
+  recordApplied: (skill: SkillListing) => void,
+): { result: SkillListing; settlementPending?: true; message?: string } | { error: string } {
+  let installed: SkillListing | undefined;
+  try {
+    const result = applyStagedSkillWrite(botId, staged.id, {
+      expectedSha256: staged.sha256,
+      onApplied: (skill) => {
+        installed = skill;
+        recordApplied(skill);
+      },
+    });
+    return "error" in result ? result : { result };
+  } catch (error) {
+    if (!installed) throw error;
+    return { result: installed, settlementPending: true,
+      message: "Skill change applied. Recording its receipt or cleaning up staging could not finish; do not apply it again." };
+  }
+}
+
 /** The skills block appended to a bot's system prompt: enabled skills only,
  * index lines only — the same progressive-disclosure shape the spec asks
  * agents for. Bodies never ride the prompt; the bot reads the file when a

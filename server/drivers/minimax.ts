@@ -22,6 +22,7 @@ const MODELS: ModelCatalog = {
 };
 
 export interface MinimaxConfig {
+  tools?: boolean;
   url: string;
 }
 
@@ -61,9 +62,12 @@ export function loadLocalMiniMaxConfig(home = homedir()): LocalMiniMaxConfig {
 }
 
 export function decodeMinimaxConfig(raw: unknown): MinimaxConfig {
+  const tools = ((raw ?? {}) as Record<string, unknown>).tools;
+  if (tools !== undefined && typeof tools !== "boolean") throw new Error("tools must be a boolean");
   const parsed = driverConfigSchema.safeParse(raw ?? {});
   const config = parsed.success ? parsed.data : {};
   return {
+    ...(tools !== undefined ? { tools } : {}),
     url: normalizedApiUrl(config.url?.trim() || process.env.MINIMAX_BASE_URL?.trim() || DEFAULT_URL),
   };
 }
@@ -103,6 +107,7 @@ export const MinimaxDriver: ProviderDriver<MinimaxConfig> = {
       driverKind: DRIVER_KIND,
       apiKey,
       apiUrl,
+      tools: input.config.tools,
       models: () => models,
       requestBody: (model, messages, stream) => ({
         model,

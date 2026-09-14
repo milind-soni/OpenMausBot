@@ -7,7 +7,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -57,8 +57,14 @@ let routinesResponse: unknown = {
   ],
 };
 let lastRoutineRequestBody: any = null;
+const DEFAULT_ROUTINE_RESPONSE = { requestId: "routine-request-1", summary: "Weekdays at 09:00 (Asia/Kolkata)" };
+let routineRequestResponse: unknown = DEFAULT_ROUTINE_RESPONSE;
 let lastProfileRequestBody: any = null;
-let profileRequestResponse: unknown = { requestId: "profile-request-1", summary: "Name → Kiwi" };
+const DEFAULT_PROFILE_RESPONSE = { requestId: "profile-request-1", summary: "Name → Kiwi" };
+let profileRequestResponse: unknown = DEFAULT_PROFILE_RESPONSE;
+const DEFAULT_TEAM_RESPONSE = { requestId: "team-request-1", title: "Requested team change" };
+let teamRequestResponse: unknown = DEFAULT_TEAM_RESPONSE;
+let lastTeamRequestBody: any = null;
 let lastSessionSearchUrl = "";
 let lastSessionReadUrl = "";
 let lastMemoryBody: any = null;
@@ -93,7 +99,32 @@ let skillsResponse: unknown = {
   ],
   staged: [{ name: "pending-skill", action: "create", gist: "UNREVIEWED GIST", source: "UNREVIEWED SOURCE" }],
 };
-let skillStageResponse: unknown = { name: "file-expense", action: "create", gist: "Files an expense.", warnings: [] };
+const DEFAULT_SKILL_RESPONSE = { name: "file-expense", action: "create", gist: "Files an expense.", warnings: [] };
+let skillStageResponse: unknown = DEFAULT_SKILL_RESPONSE;
+
+afterEach(() => {
+  routineRequestResponse = DEFAULT_ROUTINE_RESPONSE;
+  profileRequestResponse = DEFAULT_PROFILE_RESPONSE;
+  teamRequestResponse = DEFAULT_TEAM_RESPONSE;
+  skillStageResponse = DEFAULT_SKILL_RESPONSE;
+});
+
+function setProposalResponse(tool: string, response: unknown) {
+  if (tool === "propose_profile") profileRequestResponse = response;
+  else if (tool === "propose_team_setup" || tool === "propose_bot_deletion") teamRequestResponse = response;
+  else if (tool === "skill_manage") skillStageResponse = response;
+  else routineRequestResponse = response;
+}
+
+const proposalCases = [
+  { tool: "propose_profile", args: { name: "Kiwi" } },
+  { tool: "propose_routine", args: { name: "Brief", instructions: "Summarize the queue.", schedule: { type: "daily", time: "09:00" } } },
+  { tool: "propose_routine_action", args: { action: "pause", routine_id: "routine-1" } },
+  { tool: "propose_team_setup", args: { operations: [] } },
+  { tool: "propose_bot_deletion", args: { bot_id: "bot-helper", reason: "User requested deletion" } },
+  { tool: "skill_manage", args: { action: "create", skill_md: "---\nname: fixture-skill\ndescription: Fixture only\n---\n# Fixture\n", source: "conversation" } },
+  { tool: "skill_manage", args: { action: "update", skill_name: "fixture-skill", skill_md: "---\nname: fixture-skill\ndescription: Updated fixture\n---\n# Fixture\n", source: "conversation" } },
+];
 
 let child: ChildProcess;
 const pending = new Map<number, (msg: any) => void>();
@@ -228,7 +259,7 @@ beforeAll(async () => {
       req.on("end", () => {
         lastRoutineRequestBody = JSON.parse(data);
         res.writeHead(201, { "content-type": "application/json" });
-        res.end(JSON.stringify({ requestId: "routine-request-1", summary: "Weekdays at 09:00 (Asia/Kolkata)" }));
+        res.end(JSON.stringify(routineRequestResponse));
       });
       return;
     }
@@ -239,6 +270,16 @@ beforeAll(async () => {
         lastProfileRequestBody = JSON.parse(data);
         res.writeHead(201, { "content-type": "application/json" });
         res.end(JSON.stringify(profileRequestResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && ["/api/internal/team-setup-requests", "/api/internal/bot-deletion-requests"].includes(req.url ?? "")) {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastTeamRequestBody = JSON.parse(data);
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify(teamRequestResponse));
       });
       return;
     }
@@ -308,6 +349,7 @@ beforeAll(async () => {
       OMB_COMMS_TOKEN: TOKEN,
       OMB_TURN_DEPTH: "0",
       OMB_SKILL_AUTHORING_ENABLED: "1",
+      OMB_SHARED_COMPUTERS_ENABLED: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -332,11 +374,98 @@ afterAll(async () => {
 });
 
 describe("agents-proxy MCP surface", () => {
+  it("describes all configuration tools as result-aware without changing credential requirements", async () => {
+    const list = await rpc("tools/list");
+    for (const tool of new Set(proposalCases.map(entry => entry.tool))) {
+      const description = list.result.tools.find((entry: { name: string }) => entry.name === tool).description;
+      expect(description).toContain("granted Full Access may apply the change immediately");
+      expect(description).toContain("If applied, continue the requested work without another confirmation");
+      expect(description).toContain("Only a pending result requires ending the turn");
+      expect(description).toContain("Never claim success from the permission mode alone");
+      expect(description).toContain("does not elevate another bot's execution permissions");
+    }
+    const credential = list.result.tools.find((entry: { name: string }) => entry.name === "request_credential");
+    expect(credential.description).toContain("after the user saves or declines");
+    expect(credential.description).not.toContain("apply the change immediately");
+    for (const name of ["create_room", "manage_room"]) {
+      const description = list.result.tools.find((entry: { name: string }) => entry.name === name).description;
+      expect(description).toContain("Follow the tool result under the effective access level");
+      expect(description).not.toContain("If peer approval is enabled");
+      expect(description).toContain("without trying another route");
+    }
+  });
+
+  it.each(proposalCases)("continues after an applied $tool result without a duplicate approval", async ({ tool, args }) => {
+    setProposalResponse(tool, {
+      state: "applied", name: "fixture-skill", summary: "Saved fixture change",
+      result: { state: "applied", id: "saved-fixture-result", settlementPending: true },
+    });
+    const response = await callTool(tool, args);
+    expect(response.result.isError).toBeFalsy();
+    const text = response.result.content[0].text;
+    expect(text).toContain("Applied");
+    expect(text).toContain("saved-fixture-result");
+    expect(text).toContain("Continue the requested work");
+    expect(text).not.toContain("End this turn");
+    expect(text).not.toContain("card is now visible");
+    expect(text).not.toContain("Nothing has been applied");
+    expect(text).not.toContain("staged and inactive");
+  });
+
+  it.each(proposalCases.flatMap(entry => [
+    { ...entry, state: "pending" }, { ...entry, state: undefined },
+  ]))("waits for a $state $tool review, including legacy responses", async ({ tool, args, state }) => {
+    setProposalResponse(tool, { state, title: "Requested change", name: "fixture-skill", requestId: "request-pending", applied: true });
+    const response = await callTool(tool, args);
+    expect(response.result.isError).toBeFalsy();
+    expect(response.result.content[0].text).toContain("End this turn");
+    expect(response.result.content[0].text).not.toContain("No additional confirmation is needed");
+  });
+
+  it.each(["failed", "cancelled", "denied"])("does not misreport a %s team result as applied or pending", async state => {
+    teamRequestResponse = { state, result: { state, error: "Fixture target changed", bots: [], newTeams: [] } };
+    const response = await callTool("propose_team_setup", { operations: [] });
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("Fixture target changed");
+    expect(response.result.content[0].text).toContain("Do not claim it was applied");
+    expect(response.result.content[0].text).not.toContain("review card is visible");
+  });
+
+  it("reports committed deletion cleanup attention without asking to apply deletion again", async () => {
+    teamRequestResponse = { state: "applied", result: { state: "applied", error: "Saved, but cleanup needs attention", bots: [{ id: "bot-helper", action: "deleted" }], newTeams: [] } };
+    const response = await callTool("propose_bot_deletion", { bot_id: "bot-helper" });
+    expect(response.result.isError).toBeFalsy();
+    expect(response.result.content[0].text).toContain("Applied the requested bot deletion");
+    expect(response.result.content[0].text).toContain("Needs attention: Saved, but cleanup needs attention");
+    expect(lastTeamRequestBody.targetBotId).toBe("bot-helper");
+    expect(lastTeamRequestBody).not.toHaveProperty("approvalMode");
+  });
+
+  it("retains the skill's post-commit receipt warning without requesting another approval", async () => {
+    setProposalResponse("skill_manage", { state: "applied", name: "fixture-skill", result: { name: "fixture-skill", enabled: true },
+      settlementPending: true, message: "Skill applied; recording its receipt failed." });
+    const scenario = proposalCases.find(item => item.tool === "skill_manage")!;
+    const response = await callTool(scenario.tool, scenario.args);
+    expect(response.result.isError).toBeFalsy();
+    expect(response.result.content[0].text).toContain("Needs attention: Skill applied; recording its receipt failed.");
+    expect(response.result.content[0].text).toContain("No additional confirmation is needed");
+  });
+
+  it("does not infer an applied result from an error-only response", async () => {
+    profileRequestResponse = { error: "Fixture write failed" };
+    const response = await callTool("propose_profile", { name: "Kiwi" });
+    expect(response.result.isError).toBe(true);
+    expect(response.result.content[0].text).toContain("Fixture write failed");
+    expect(response.result.content[0].text).not.toContain("card is now visible");
+  });
+
   it("answers the MCP handshake and lists the agents tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
+      "list_shared_computers",
+      "shared_computer",
       "list_bots",
       "list_rooms",
       "ask_bot",
@@ -381,6 +510,7 @@ describe("agents-proxy MCP surface", () => {
   it("advertises read annotations only for the reviewed built-in reads", async () => {
     const list = await rpc("tools/list");
     const readNames = [
+      "list_shared_computers",
       "list_bots", "list_rooms", "check_delegation", "wait_delegation", "list_threads",
       "list_team_setup",
       "session_search", "session_read", "list_routines", "skills_list",
@@ -415,7 +545,11 @@ describe("agents-proxy MCP surface", () => {
     expect(JSON.stringify(create.inputSchema)).not.toMatch(/"oneOf"|"anyOf"|"allOf"|"const"/);
     expect(schedule.type).toBe("object");
     expect(schedule.required).toEqual(["type"]);
-    expect(schedule.properties.type.enum).toEqual(["once", "weekly", "daily", "interval"]);
+    expect(schedule.properties.type.enum).toEqual(["once", "weekly", "daily", "interval", "cron"]);
+    expect(schedule.properties.expression.description).toContain("0 9 L * *");
+    expect(schedule.properties.expression.description).toContain("MON#2");
+    expect(schedule.properties.timeZone.description).toContain("IANA");
+    expect(create.description).toContain("Never approximate unsupported requests");
     expect(schedule.properties.weekdays.items.enum).toEqual([
       "monday",
       "tuesday",
@@ -436,7 +570,7 @@ describe("agents-proxy MCP surface", () => {
     expect(schedule.properties.every_day.type).toBe("boolean");
     expect(schedule.properties.all_day.type).toBe("boolean");
     expect(schedule.properties.never_ends.type).toBe("boolean");
-    expect(create.description).toContain("does NOT enable");
+    expect(create.description).toContain("Only a pending result requires ending the turn");
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {
@@ -1187,6 +1321,36 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  it("normalizes cron proposals and updates without losing the explicit zone", async () => {
+    const schedule = { type: "cron", expression: "0 9 1 * *", timeZone: "America/New_York" };
+    const result = await callTool("propose_routine", {
+      name: "Monthly report", instructions: "Summarize the previous month.",
+      schedule: JSON.stringify({ ...schedule, expression: "  0 9  1 * *  " }),
+    });
+    expect(result.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.schedule).toEqual(schedule);
+    const update = await callTool("propose_routine_action", {
+      action: "update", routine_id: "routine-1", changes: { schedule: { ...schedule, expression: "0 9 L * *" } },
+    });
+    expect(update.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.changes.schedule).toEqual({ ...schedule, expression: "0 9 L * *" });
+  });
+
+  it.each([
+    { expression: "0 9 1 * *" },
+    { expression: "0 9 1 * *", timeZone: "EST" },
+    { expression: "0 9 1 * *", timeZone: "Fake/Zone" },
+    { expression: "0 0 9 1 * *", timeZone: "UTC" },
+    { expression: "@monthly", timeZone: "UTC" },
+    { expression: "0 9 31 2 *", timeZone: "UTC" },
+    { expression: "0 9 1 * *", timeZone: "UTC", weekdays: ["monday"] },
+  ])("rejects unsafe cron input before calling the harness: %j", async (schedule) => {
+    lastRoutineRequestBody = null;
+    const result = await callTool("propose_routine", { name: "Bad cron", instructions: "Do not run.", schedule: { type: "cron", ...schedule } });
+    expect(result.result.isError).toBe(true);
+    expect(lastRoutineRequestBody).toBeNull();
+  });
+
   it.each([
     { window: { from: "09:00", to: "17:00" } },
     { window: "09:00-17:00" },
@@ -1452,5 +1616,73 @@ describe("agents-proxy MCP surface", () => {
     expect(missingTarget.result.isError).toBe(true);
     expect(missingTarget.result.content[0].text).toContain("needs skill_name");
     expect(lastSkillStageBody).toBeNull();
+  });
+});
+
+// Opt-in computer sharing is off unless the harness turns it on. A separate
+// child is the only honest check: the tool list is frozen at module load.
+describe("with computer sharing off (the default)", () => {
+  let gated: ChildProcess;
+  const gatedPending = new Map<number, (msg: any) => void>();
+  let gatedId = 500;
+  const gatedRpc = (method: string, params?: unknown): Promise<any> =>
+    new Promise((resolve, reject) => {
+      const id = gatedId++;
+      gatedPending.set(id, resolve);
+      gated.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => {
+        if (gatedPending.delete(id)) reject(new Error(`${method} timed out`));
+      }, 10_000).unref?.();
+    });
+
+  beforeAll(async () => {
+    gated = spawn(process.execPath, [PROXY], {
+      env: {
+        ...process.env,
+        OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+        OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine",
+        OMB_COMMS_TOKEN: TOKEN,
+        OMB_TURN_DEPTH: "0",
+        OMB_SKILL_AUTHORING_ENABLED: "1",
+        // deliberately no OMB_SHARED_COMPUTERS_ENABLED
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    gated.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        gatedPending.get(msg.id)?.(msg);
+        gatedPending.delete(msg.id);
+      }
+    });
+    await gatedRpc("initialize", { protocolVersion: "2024-11-05" });
+  });
+
+  afterAll(() => {
+    gated?.kill();
+  });
+
+  it("does not advertise the shared-computer tools at all", async () => {
+    const list = await gatedRpc("tools/list");
+    const names = list.result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).not.toContain("list_shared_computers");
+    expect(names).not.toContain("shared_computer");
+    // the rest of the surface is untouched — this is a gate, not a removal
+    expect(names).toContain("list_bots");
+    expect(names).toContain("skills_list");
+  });
+
+  it("refuses the handlers if a model calls them by name anyway", async () => {
+    for (const name of ["list_shared_computers", "shared_computer"]) {
+      const refused = await gatedRpc("tools/call", { name, arguments: { computer_id: "x", action: "list_files" } });
+      expect(refused.error?.message ?? refused.result?.content?.[0]?.text).toMatch(/unknown tool|turned off/i);
+    }
   });
 });

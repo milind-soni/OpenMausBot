@@ -5,6 +5,8 @@
 // separate preview remains explicitly user-initiated. Auto only reads an
 // existing Box's state: opening this panel never creates, wakes, bootstraps,
 // screenshots, or opens one, regardless of engine.
+// An inherited team Box is shown as a shared resource, managed from Team map;
+// it must never fall back to this host or become a private Cloud selection.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import {
@@ -29,6 +31,7 @@ import { api, ApiError, useStore, type Bot } from "@/state/store";
 import type { CloudBackend } from "../../server/contracts.ts";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
+import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
@@ -102,6 +105,7 @@ type Phase =
   | "local"
   | "local-unavailable"
   | "auto-unavailable"
+  | "team-box"
   | "show-ready-box"
   | "show-sleeping-box"
   | "show-pending-box"
@@ -153,6 +157,8 @@ export function ComputerPanel({
   bot: Bot;
   onOpenVmWorkspace?: (botId: string) => void;
 }) {
+  // Docked flush under the Windows caption corner: drop the header 16px.
+  const { padClass } = useCaptionChrome();
   // The panel is a fixed column by default; a drag handle on its left edge
   // makes it wide enough to actually read a page in the Browser tab.
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
@@ -189,18 +195,23 @@ export function ComputerPanel({
     botId: string;
     computer: Bot["computer"];
     cloudBackend: CloudBackend;
+    section: string;
   } | null>(null);
   const [resolvedComputerSelection, setResolvedComputerSelection] = useState<{
     botId: string;
     computer: Bot["computer"];
     cloudBackend: CloudBackend;
   } | null>(null);
+  const [teamComputer, setTeamComputer] = useState<{
+    id: string; name: string; botId: string; section: string;
+  } | null>(null);
   const cloudBackend = bot.cloudBackend ?? "box";
   const computerSelectionPersisted = Boolean(
     persistedComputerSelection
       && persistedComputerSelection.botId === bot.id
       && persistedComputerSelection.computer === bot.computer
-      && persistedComputerSelection.cloudBackend === cloudBackend,
+      && persistedComputerSelection.cloudBackend === cloudBackend
+      && persistedComputerSelection.section === (bot.section?.trim() ?? ""),
   );
   const computerStatusCurrent = Boolean(
     resolvedComputerSelection
@@ -208,6 +219,9 @@ export function ComputerPanel({
       && resolvedComputerSelection.computer === bot.computer
       && resolvedComputerSelection.cloudBackend === cloudBackend,
   );
+  const currentTeamComputer = computerStatusCurrent && bot.computer === undefined && cloudBackend === "box"
+    && teamComputer?.botId === bot.id && teamComputer.section === (bot.section?.trim() ?? "")
+    ? teamComputer : null;
   const cloudPreviewReady = shouldPollCloudPreview({
     computer: bot.computer,
     cloudBackend,
@@ -226,6 +240,7 @@ export function ComputerPanel({
     // Clear old-provider UI in the same render as the optimistic profile
     // change. The resolving effect waits for its PATCH before doing any work.
     setResolvedComputerSelection(null);
+    setTeamComputer(null);
     setPhase("checking");
     dispatch({ type: "updateBot", botId: bot.id, patch });
   }, [bot.id, dispatch]);
@@ -239,16 +254,18 @@ export function ComputerPanel({
         cloudBackend,
         persistedBot,
       })) return;
+      if (persistedBot && (persistedBot.section?.trim() ?? "") !== (bot.section?.trim() ?? "")) return;
       setPersistedComputerSelection({
         botId: bot.id,
         computer: bot.computer,
         cloudBackend,
+        section: bot.section?.trim() ?? "",
       });
     });
     return () => {
       alive = false;
     };
-  }, [bot.id, bot.computer, cloudBackend, flushBotPatches]);
+  }, [bot.id, bot.computer, bot.section, cloudBackend, flushBotPatches]);
   const [boxState, setBoxState] = useState<string | null>(null);
   const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);
   const [previewError, setPreviewError] = useState<Error | string | null>(null);
@@ -365,6 +382,7 @@ export function ComputerPanel({
     if (panelView !== "computer") return;
     let alive = true;
     setResolvedComputerSelection(null);
+    setTeamComputer(null);
     setPhase("checking");
     setPolledFrame(null);
     setPreviewError(null);
@@ -557,12 +575,21 @@ export function ComputerPanel({
           boxState: typeof status.box?.state === "string" ? status.box.state : null,
           canUseCloud: cloudSupported,
           autoLocal,
+          teamComputer: typeof status.teamComputer?.id === "string" && typeof status.teamComputer?.name === "string",
         });
         setResolvedComputerSelection({
           botId: bot.id,
           computer: bot.computer,
           cloudBackend,
         });
+        if (action === "team-box") {
+          setTeamComputer({ id: status.teamComputer.id, name: status.teamComputer.name,
+            botId: bot.id, section: bot.section?.trim() ?? "" });
+          setBoxState(typeof status.box?.state === "string" ? status.box.state : status.configured ? "missing" : "unavailable");
+          setError(typeof status.problem === "string" ? status.problem : null);
+          setPhase("team-box");
+          return;
+        }
         if (action !== "ensure-box") {
           if (action === "show-ready-box" || action === "show-sleeping-box" || action === "show-pending-box") {
             setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
@@ -593,6 +620,7 @@ export function ComputerPanel({
   }, [
     bot.id,
     bot.computer,
+    bot.section,
     bot.autoStartVps,
     cloudBackend,
     retry,
@@ -989,6 +1017,7 @@ export function ComputerPanel({
     starting: t("computer.phase.starting"),
     unconfigured: t("computer.phase.unconfigured"),
     "auto-unavailable": t("computer.phase.autoUnavailable"),
+    "team-box": "This bot uses a shared team computer. Open Team map to view or manage it.",
     "show-ready-box": t("computer.phase.showReadyBox"),
     "show-sleeping-box": t("computer.phase.showSleepingBox"),
     "show-pending-box": t("computer.phase.showPendingBox"),
@@ -1019,7 +1048,7 @@ export function ComputerPanel({
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40"
       />
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3">
+      <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <button
           onClick={() => {
             // Keep the panel/modal states exclusive at this entry point. That
@@ -1112,6 +1141,7 @@ export function ComputerPanel({
           {/* Screen preview */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{t("computer.screenOf", { name: bot.name })}</span>
+            {currentTeamComputer && <span className="text-[11px]">Team default</span>}
             {phase === "local" && <span className="text-[11px]">{t("computer.badge.local")}</span>}
             {phase === "vm" && <span className="text-[11px]">{t("vm.dest.vm")}</span>}
             {(phase === "show-ready-box" || phase === "show-sleeping-box" || phase === "show-pending-box") && (
@@ -1176,7 +1206,9 @@ export function ComputerPanel({
                 <Monitor size={22} />
               )}
               <span className="text-[12px]">
-                {cloudPreviewReady
+                {currentTeamComputer
+                  ? `${currentTeamComputer.name} · ${boxState ?? "unavailable"}`
+                  : cloudPreviewReady
                   ? t("computer.waitingFrame")
                   : phase === "ready"
                     ? t("computer.autoChooseCloudOpen")
@@ -1190,6 +1222,13 @@ export function ComputerPanel({
                       : t("computer.capturingLocal")
                     : emptyState[phase]}
               </span>
+              {currentTeamComputer && <>
+                <p className="text-[12px]">Shared files and signed-in accounts. Auto uses this Box, not a private computer.</p>
+                <button type="button" onClick={() => dispatch({ type: "showTeamMap" })}
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover">Open Team map</button>
+                <button type="button" onClick={() => setRetry(n => n + 1)}
+                  className="text-[11px] text-ink-secondary hover:text-ink">Refresh shared computer status</button>
+              </>}
               {phase === "local" && !isLinux && localMisses >= 3 && (
                 <button
                   onClick={() => window.ogb?.permOpenSettings?.("screen")}
@@ -1323,7 +1362,7 @@ export function ComputerPanel({
           )}
 
         {/* Who is driving — take the wheel / hand it back */}
-        {(cloudPreviewReady || phase === "vm") && control.helpReason && !control.held && (
+        {(cloudPreviewReady || phase === "vm" || currentTeamComputer) && control.helpReason && !control.held && (
           <div className="mt-3 rounded-xl border border-warning/25 bg-warning/10 p-4">
             <div className="text-[13px] leading-relaxed text-warning">
               <b>{bot.name}</b> {t("computer.askedHands")} {control.helpReason}
@@ -1349,7 +1388,7 @@ export function ComputerPanel({
             </div>
           </div>
         )}
-        {(cloudPreviewReady || phase === "vm") && control.held && (
+        {(cloudPreviewReady || phase === "vm" || currentTeamComputer) && control.held && (
           <div className="mt-3 rounded-xl border border-accent/25 bg-accent/10 p-4">
             <div className="text-[13px] leading-relaxed text-ink">
               {t("computer.youHaveWheel")}
@@ -1442,9 +1481,11 @@ export function ComputerPanel({
           </div>
         )}
 
-        <LocalScreenPreview />
-        <LinuxLocalControl />
-        <MacLocalControl />
+        {phase !== "team-box" && (bot.computer !== undefined || computerStatusCurrent) && <>
+          <LocalScreenPreview />
+          <LinuxLocalControl />
+          <MacLocalControl />
+        </>}
 
         {/* Computer source */}
           <div className="mt-4 rounded-xl bg-card p-4">
@@ -1528,7 +1569,9 @@ export function ComputerPanel({
           {bot.computer !== "cloud" && (
             <div className="mt-3 border-t border-hairline/40 pt-3 text-[11.5px] leading-5 text-ink-secondary" aria-live="polite">
               {!bot.computer ? (
-                cloudBackend === "vps" && bot.autoStartVps
+                currentTeamComputer
+                  ? `Auto uses ${currentTeamComputer.name}, shared with this team's other Auto bots. Choosing another destination overrides the team default.`
+                  : cloudBackend === "vps" && bot.autoStartVps
                   ? t("computer.hint.vpsAuto")
                   : localSelectable && !isLinux
                     ? t("computer.hint.autoLocal")

@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 
 import { createBotPackageExport } from "./package-export.ts";
+import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import type { BotRecord } from "./store.ts";
 
 describe("package export", () => {
+  it("preserves the exact cron and timezone through export and import", () => {
+    const schedule = { type: "cron" as const, expression: "0 9 L * *", timeZone: "America/New_York" };
+    const exported = createBotPackageExport({
+      name: "Monthly team", authorName: "Tester", groups: [],
+      bots: [{ id: "b1", threadId: "t1", name: "Lead", color: "green", createdAt: 1 } as BotRecord],
+      routines: [{ id: "r1", name: "Close the month", prompt: "Prepare a report", target: "bot", botId: "b1",
+        runOn: "maus", enabled: true, schedule, durationMinutes: 30, nextRunAt: 1, createdAt: 1, updatedAt: 1 }],
+    });
+    expect(exported.package.routines?.[0]).toMatchObject({ schedule, enabledAfterInstall: false });
+    expect(parseBotPackage(renderBotPackageMarkdown(exported)).package.routines?.[0]?.schedule).toEqual(schedule);
+  });
+
   it("keeps collaboration structure while excluding runtime authority and state", () => {
     const exported = createBotPackageExport({
       name: "Launch Crew",

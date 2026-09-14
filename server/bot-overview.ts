@@ -7,6 +7,7 @@ import type { BotRecord } from "./store.ts";
 import type { Routine } from "./routines.ts";
 import type { RoutineRequestSchedule } from "../shared/routine-request.ts";
 import { approvalModeFor } from "../shared/approval-mode.ts";
+import { cronScheduleLabel } from "../shared/cron-label.ts";
 
 export interface BotOverview {
   who: { name: string; title: string; blurb: string; soulLead: string };
@@ -104,6 +105,7 @@ function clockTime(hhmm: string): string {
  * approval card's scheduleText() carries the anchor instant and timezone
  * name because a card must be exact; a plain-language overview must not. */
 function schedulePhrase(schedule: OverviewFacts["routines"][number]["schedule"], timeZone: string): string {
+  if (schedule.type === "cron") return cronScheduleLabel(schedule);
   if (schedule.type === "once") {
     const date = new Date(schedule.at).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone });
     return `Once on ${date} at ${time(schedule.at, timeZone)}`;
@@ -244,7 +246,7 @@ function wontLines(facts: OverviewFacts): string[] {
   if (mode === "ask") lines.push("Command approvals use Ask mode; saved permissions and provider rules still apply.");
   if (mode === "custom") lines.push("Command approvals follow the provider's custom configuration.");
   if (facts.bot.peers?.length === 0) lines.push("Cannot initiate contact with other bots.");
-  else if (facts.bot.approvePeerComms) lines.push("Asks before contacting other bots.");
+  else if (mode !== "full" && facts.bot.approvePeerComms) lines.push("Asks before contacting other bots.");
   // "Has no connected apps." is definite when apps are off for this bot,
   // not configured, or unsupported by its engine — no inventory needed. Only
   // the "configured but nothing connected" case rests on the inventory, so
@@ -254,7 +256,7 @@ function wontLines(facts: OverviewFacts): string[] {
   }
   if (facts.bot.computer === "off") lines.push("Can't use a computer.");
   if (!facts.routines.some((routine) => routine.enabled)) lines.push("Won't act on a schedule.");
-  lines.push("Profile proposal cards require your approval.");
+  if (mode !== "full") lines.push("Profile proposal cards require your approval.");
   return lines;
 }
 

@@ -41,6 +41,22 @@ it("refuses a disallowed peer without starting the recipient", () => withRooms(a
   expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
 }), 45_000);
 
+it("runs room-destined work in the room's own conversation, opening no thread on the recipient", () => withRooms(async f => {
+  const tasksOf = async (botId: string) => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === botId).tasks ?? [];
+  const before = await tasksOf(f.target.id);
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  // a room is already a destination: pair conversations are for the
+  // direct case only and must not appear beside one
+  const node = f.nodes().find((n: any) => n.botId === f.target.id);
+  expect(node.groupId).toBe(f.destination.id);
+  expect(node.threadId).toBe(f.destination.activeTaskId);
+  const after = await tasksOf(f.target.id);
+  expect(after.map((task: any) => task.threadId)).toEqual(before.map((task: any) => task.threadId));
+  expect(after.some((task: any) => task.openedBy)).toBe(false);
+  expect((await f.messages(f.destination.activeTaskId)).some((m: any) => m.text?.includes("Please build CSV"))).toBe(true);
+  expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+}), 45_000);
+
 it("lets an explicitly authorized Chief coordinate another team, which can consult its own specialist", () => withRooms(async f => {
   await f.api(`/api/bots/${f.target.id}`, { section: "Engineering" }, "PATCH");
   await f.api(`/api/bots/${f.sender.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true }, "PATCH");

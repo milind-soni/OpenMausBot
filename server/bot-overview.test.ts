@@ -67,6 +67,20 @@ describe("buildBotOverview", () => {
       .toContain("Command approvals follow the provider's custom configuration.");
   });
 
+  it("does not promise duplicate profile or peer approvals in Full Access", () => {
+    const bot = { ...baseFacts().bot, peers: undefined, approvePeerComms: true, approvalMode: "full" as const, autoApprove: false };
+    const full = buildBotOverview(baseFacts({ bot })).wont;
+    expect(full).not.toContain("Asks before contacting other bots.");
+    expect(full).not.toContain("Profile proposal cards require your approval.");
+    for (const approvalMode of ["ask", "custom"] as const) {
+      const reviewed = buildBotOverview(baseFacts({ bot: { ...bot, approvalMode, autoApprove: true } })).wont;
+      expect(reviewed).toContain("Asks before contacting other bots.");
+      expect(reviewed).toContain("Profile proposal cards require your approval.");
+    }
+    expect(buildBotOverview(baseFacts({ bot: { ...bot, peers: [] } })).wont)
+      .toContain("Cannot initiate contact with other bots.");
+  });
+
   it("does not advertise a browser disabled globally or unsupported by the engine", () => {
     const facts = baseFacts({ bot: { ...baseFacts().bot, computer: "browser" }, browserEnabled: true, engine: { browserMcp: false } });
     expect(buildBotOverview(facts).reaches).not.toContain("Has the built-in browser.");

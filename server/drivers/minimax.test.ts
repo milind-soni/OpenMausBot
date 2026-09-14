@@ -150,3 +150,11 @@ describe("MinimaxDriver", () => {
     await instance.dispose();
   });
 });
+
+
+it("minimax preserves an explicit tools-off connection and rejects ambiguous flags", () => {
+  expect(MinimaxDriver.decodeConfig({})).not.toHaveProperty("tools");
+  expect(MinimaxDriver.decodeConfig({ tools: false })).toMatchObject({ tools: false });
+  expect(MinimaxDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
+  expect(() => MinimaxDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
+});

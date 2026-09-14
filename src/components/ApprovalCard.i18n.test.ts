@@ -89,7 +89,7 @@ describe("German approval cards", () => {
     const { pending } = commandApproval();
 
     expect(spokenApprovalPrompt(pending, "Mochi")).toBe(
-      "Mochi möchte Bash ausführen. pnpm test. Soll ich das erlauben?",
+      "Mochi möchte einen Befehl ausführen. pnpm test. Soll ich das erlauben?",
     );
   });
 
@@ -199,7 +199,7 @@ describe("Brazilian Portuguese approval cards", () => {
     const { pending } = commandApproval();
 
     expect(spokenApprovalPrompt(pending, "Mochi")).toBe(
-      "Mochi quer executar Bash. pnpm test. Devo permitir?",
+      "Mochi quer executar um comando. pnpm test. Devo permitir?",
     );
   });
 

@@ -613,6 +613,32 @@ describe("MCP tool execution", () => {
     expect(partialResult.status).toBe("settled");
   });
 
+  it.each([
+    { terminal: true, status: "failed", name: "explicit terminal operation failure" },
+    { terminal: undefined, status: "settled", name: "legacy cancellation diagnostic" },
+  ])("preserves $name after the model has produced text", async ({ terminal, status }) => {
+    const fetcher = vi.fn(async (path: string) => {
+      if (path === "/api/bots?messages=0") return {
+        bots: [{ id: "bot-1", name: "Mira", busy: false, activity: "idle", threadId: "task-1", tasks: [] }],
+        groups: [],
+      };
+      if (path === "/api/threads/task-1/messages?limit=10") return {
+        messages: [
+          { id: "u1", at: 1, role: "user", kind: "text", text: "Create the requested file" },
+          { id: "m1", at: 2, role: "bot", kind: "text", text: "The operation was denied; the file was not created." },
+          { id: "e1", at: 3, role: "bot", kind: "activity", tool: { name: "error: A requested tool operation failed or was denied", ok: false, terminal } },
+        ],
+      };
+      throw new Error(`unexpected path ${path}`);
+    });
+    const result: any = await handleToolCall("wait_for_conversation", {
+      target_type: "bot", target_id: "bot-1", timeout_seconds: 1,
+    }, fetcher);
+    expect(result.status).toBe(status);
+    expect(result.messages.some((message: any) => message.text?.includes("operation was denied"))).toBe(true);
+    if (terminal) expect(result.messages.some((message: any) => message.tool?.terminal === true)).toBe(true);
+  });
+
   it("detects durable channel blockers and interrupts the exact target thread", async () => {
     const fetcher = vi.fn(async (path: string, options?: RequestInit) => {
       if (path === "/api/bots?messages=0") return {

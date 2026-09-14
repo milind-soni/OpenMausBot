@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DesktopWorkspaceSwitcher } from "../components/DesktopWorkspaceSwitcher";
 
 import {
   defaultDeviceLabel,
@@ -88,6 +89,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-app px-6 text-ink">
+      <div className="absolute left-3 top-12 max-w-[280px]"><DesktopWorkspaceSwitcher /></div>
       <div className="w-full max-w-[420px]">
         <h1 className="text-[20px] font-semibold">{mode === "email" ? "Sign in to" : "Connect to"} {environment?.label ?? "this OpenMausBot"}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">

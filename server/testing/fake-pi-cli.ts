@@ -105,8 +105,8 @@ const streamErrorTurn = () => {
 const streamToolTurn = () => {
   send({ type: "agent_start" });
   send({ type: "turn_start" });
-  send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi" } });
-  send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false });
+  send({ type: "tool_execution_start", toolCallId: "call_1", toolName: "bash", args: { command: "echo hi", password: "pi-input-secret" } });
+  send({ type: "tool_execution_end", toolCallId: "call_1", toolName: "bash", isError: false, result: { content: [{ type: "text", text: "hi" }], api_key: "pi-output-secret" } });
   send({ type: "turn_end", message: { stopReason: "toolUse", usage: { input: 5, output: 1 } }, usage: { input: 5, output: 1 } });
   // pi auto-continues within the same prompt to synthesize the reply
   send({ type: "turn_start" });

@@ -55,6 +55,18 @@ describe("local computer UI eligibility", () => {
     ).toBe(false);
   });
 
+  it("keeps This computer selectable on Windows before the driver is live", () => {
+    const capabilities = {
+      host: { platform: "win32" as const, label: "Windows" },
+      localComputer: { available: false, enabled: false, status: "unavailable" },
+    } as DesktopCapabilities;
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
+    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toContain(
+      "Cua Driver",
+    );
+  });
+
   it("states that Linux Auto never selects this computer", () => {
     expect(linuxAutoDescription()).toContain("otherwise computer use stays off");
     expect(
@@ -101,6 +113,19 @@ describe("local computer UI eligibility", () => {
         localSelectable: true,
       }),
     ).toBe(false);
+  });
+
+  it("reports an inherited team Box without choosing a private Box or local fallback", () => {
+    for (const configured of [false, true]) {
+      for (const boxState of [null, "idle", "archived", "provisioning"]) {
+        for (const canUseCloud of [false, true]) {
+          expect(resolveBoxPanelAction({ computer: undefined, configured, boxState, canUseCloud,
+            autoLocal: true, teamComputer: true })).toBe("team-box");
+        }
+      }
+    }
+    expect(resolveBoxPanelAction({ computer: "cloud", configured: true, boxState: "idle",
+      canUseCloud: true, autoLocal: true, teamComputer: true })).toBe("ensure-box");
   });
 
   it("never creates a missing Box merely because an Auto panel opened", () => {

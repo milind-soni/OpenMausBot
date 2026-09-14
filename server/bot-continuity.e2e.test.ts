@@ -40,7 +40,7 @@ it("keeps ordinary work out of setup and carries explicit bot defaults and file 
       return receipt();
     };
     const ordinary = await direct("What is 17 + 25? Answer with the number.");
-    expect(ordinary.system).not.toContain("Wait for a yes");
+    expect(ordinary.system).not.toContain("at most four questions");
     expect(ordinary.system).not.toContain("The user explicitly asked you to set yourself up");
     const oldFile = join(fixture.info.dataDir, "workspaces", bot.id, "garden-plan.txt");
     writeFileSync(oldFile, "Water the garden on Friday. Fixture code: MOSS-42.\n");
@@ -50,10 +50,10 @@ it("keeps ordinary work out of setup and carries explicit bot defaults and file 
 
     const setup = await direct("/setup Help me track garden watering");
     expect(setup.system).toContain("The user explicitly asked you to set yourself up");
-    expect(setup.system).toContain("Wait for a yes");
+    expect(setup.system).toContain("at most four questions");
     // /setup is not sticky; a subsequent task must not carry its coaching.
     const afterSetup = await direct("Never mind setup. Summarize: the garden needs water Friday.");
-    expect(afterSetup.system).not.toContain("Wait for a yes");
+    expect(afterSetup.system).not.toContain("at most four questions");
     expect(JSON.stringify(afterSetup.prompt)).toContain("Never mind setup");
 
     await api("PATCH", `/api/bots/${bot.id}`, { soul: "You look after the garden. Keep its watering plan.", description: "Garden helper" });

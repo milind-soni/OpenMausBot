@@ -211,7 +211,7 @@ export async function runSetup(
         } else {
           io.log("Connect an API key");
           io.log("API usage is billed separately from ChatGPT/Claude subscriptions.");
-          io.log("This connection supports chat, not agent tools or computer use. Choose Codex or Claude for those.");
+          io.log("This connection supports chat and approved MCP tools when the model supports tool calling. Native computer use requires another engine.");
           let url: string;
           let key: string;
           let label: string;

@@ -1,6 +1,6 @@
 // `/learn` — turn a described workflow, URL, folder, or "what we just did"
-// into a staged SKILL.md. The live agent authors the skill with skill_manage;
-// the harness lands it DISABLED until a person confirms the in-app card.
+// into a reusable SKILL.md. The live agent authors the skill with skill_manage;
+// the harness applies it under granted Full Access or stages a pending review.
 //
 // There is no separate distillation engine. This module only builds the
 // prompt and recognises the slash command, so it works on every engine
@@ -64,13 +64,13 @@ export function buildLearnPrompt(userRequest: string): string {
     "the workflow we just went through in this conversation — review the steps taken and distill them into a reusable skill";
 
   return (
-    `${LEARN_PROMPT_MARKER} The user wants you to learn a reusable skill from the request below, and stage it for their review.\n\n` +
+    `${LEARN_PROMPT_MARKER} The user wants you to learn a reusable skill from the request below, using the granted access level.\n\n` +
     `THE REQUEST:\n${req}\n\n` +
     "Do this:\n" +
     "1. Inventory every source the user named, using the tools you already have — file tools for local paths, web fetch for URLs, and this conversation if they referred to something you just did. If the request is ambiguous about scope, make a reasonable choice and note it; do not stall.\n" +
     "2. Check existing skills with skills_list. If one already covers this topic, leave it alone unless the user explicitly asked to revise that named learned/editable skill. For an explicit revision, read only the exact SKILL.md path listed for that skill in your system prompt (the native .agents/skills/<exact-name>/SKILL.md link is a fallback), preserve every still-valid step, re-verify what changed, then call skill_manage with action=\"update\" and skill_name set to that exact name. If you cannot read or verify the current skill, stop instead of replacing it from memory. For a genuinely new skill, use action=\"create\".\n" +
     "3. Pass source as the exact URL or folder you used, or \"conversation\" when the conversation is the source.\n" +
-    "4. skill_manage only STAGES the change. A create stays inactive and an update leaves the current version untouched until the user approves the review card.\n\n" +
+    "4. Follow the skill_manage result: with granted Full Access it may apply immediately. After an applied result, continue the requested work without another confirmation. If review is pending, a create stays inactive and an update leaves the current version untouched; end the turn and wait for the in-app decision. Never claim success from the permission mode alone, and report failed or cancelled changes honestly.\n\n" +
     AUTHORING_STANDARDS +
     "\n\nWhen done, tell the user the skill name and a one-line summary of what it captured."
   );

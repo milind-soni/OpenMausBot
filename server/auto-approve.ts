@@ -9,6 +9,27 @@
 // Questions never come through here: a bot's question always reaches a human.
 
 import { type ApprovalMode } from "../shared/approval-mode.ts";
+import type { ProviderAdapter, RequestOutcome } from "./contracts.ts";
+
+/** A failed delivery is a runtime error, not another permission decision.
+ * An expired ask must never become a fresh Allow/Deny card. */
+export async function deliverFullAccessApproval(
+  adapter: Pick<ProviderAdapter, "respondToRequest" | "interruptTurn"> | undefined,
+  threadId: string,
+  requestId: string,
+  turnId?: string,
+  isCurrent: () => boolean = () => false,
+): Promise<RequestOutcome | "failed"> {
+  if (!adapter) return "failed";
+  try {
+    return await adapter.respondToRequest(threadId, requestId, { behavior: "allow" });
+  } catch {
+    // Some adapters ignore the optional native turn id. Recheck the
+    // server's owning generation before interrupting that thread.
+    if (turnId && isCurrent()) await adapter.interruptTurn(threadId, turnId).catch(() => {});
+    return "failed";
+  }
+}
 
 /** Full access is the person's explicit grant to this receiving bot, including
  * delegated work. It never inherits the sender's mode or elevates another bot.

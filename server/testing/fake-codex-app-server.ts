@@ -59,7 +59,7 @@ const dump = () => {
 };
 
 const finishTurn = () => {
-  notify("item/completed", { item: { id: "i1", type: "commandExecution", status: "completed" } });
+  notify("item/completed", { item: { id: "i1", type: "commandExecution", status: "completed", aggregatedOutput: "README.md\nAPI_KEY=codex-output-secret", exitCode: 0 } });
   notify("item/completed", { item: { id: "w1", type: "webSearch", status: "completed" } });
   if (mode === "stream") {
     // token deltas, then the whole message — the driver must not double-emit

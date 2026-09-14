@@ -38,7 +38,7 @@ function fixture() {
   const strangers = store.createTask(chief.id, "Opened by a deleted bot", false, undefined, { botId: "gone-bot", name: "Gone", at: 98 })!;
   store.setTaskClosedBy(chief.id, strangers.threadId, { botId: "gone-bot", name: "Gone", at: 102 });
   const active = store.createTask(chief.id, "Second conversation")!;
-  store.setTaskOpenedBy(chief.id, active.threadId, { botId: scout.id, name: scout.name, delegationId: "do-not-resume-delegation", at: 99 });
+  store.setTaskOpenedBy(chief.id, active.threadId, { botId: scout.id, name: scout.name, delegationId: "do-not-resume-delegation", kind: "pair", at: 99 });
   store.setTaskClosedBy(chief.id, active.threadId, { botId: scout.id, name: scout.name, at: 103 });
   store.appendMessage(active.threadId, { role: "user", kind: "text", text: "Current question", queued: true, queueId: "do-not-replay" });
   store.appendMessage(active.threadId, { role: "bot", kind: "options", card: {
@@ -137,7 +137,7 @@ describe("additive portable team backups", () => {
     // who opened a thread travels with it, remapped like a message's `from`;
     // the handoff id stays behind with the ledger it belongs to
     expect(importedChief.tasks!.find((task) => task.title === "Second conversation")!.openedBy)
-      .toEqual({ botId: importedScout.id, name: scout.name, at: 99 });
+      .toEqual({ botId: importedScout.id, name: scout.name, kind: "pair", at: 99 });
     expect(importedChief.tasks!.find((task) => task.title === "Opened by a deleted bot")).not.toHaveProperty("openedBy");
     expect(importedChief.tasks!.find((task) => task.title === "First conversation")).not.toHaveProperty("openedBy");
     // a thread the opener closed stays closed after import, closer remapped the same way

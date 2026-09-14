@@ -146,8 +146,18 @@ describe("shared sentences", () => {
     );
   });
 
-  it("PROFILE_PROMPT names the tool and the confirmation rule", () => {
+  it("configuration prompts follow actual applied or pending results without elevating another bot", () => {
     expect(PROFILE_PROMPT).toContain("propose_profile");
-    expect(PROFILE_PROMPT).toContain("nothing changes until the user confirms");
+    for (const prompt of [PROFILE_PROMPT, ROUTINE_PROMPT, LEARN_PROMPT]) {
+      expect(prompt).toContain("with granted Full Access it may report applied immediately");
+      expect(prompt).toContain("continue the requested work without asking for another confirmation");
+      expect(prompt).toContain("If it reports a pending review, end the turn and wait");
+      expect(prompt).toContain("Never claim success before an applied result");
+      expect(prompt).toContain("Full Access does not grant another bot broader permissions");
+      expect(prompt).not.toContain("nothing changes until the user confirms");
+    }
+    expect(LEARN_PROMPT).toContain("only when the user explicitly asks to revise that exact name");
+    expect(CREDENTIAL_PROMPT).toContain("secure credential request");
+    expect(CREDENTIAL_PROMPT).not.toContain("applied immediately");
   });
 });

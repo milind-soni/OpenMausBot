@@ -20,6 +20,7 @@ const DEFAULT_MODELS: ModelCatalog = {
 };
 
 export interface OpenAICompatConfig {
+  tools?: boolean;
   url: string;
   apiKeyEnv: string;
   key?: string;
@@ -38,8 +39,10 @@ function isOpenRouterUrl(url: string): boolean {
 
 function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
+  if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   const envUrl = process.env.OPENAI_COMPAT_URL;
   return {
+    ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
     url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
       .replace(/\/+$/, ""),
     apiKeyEnv: typeof config.apiKeyEnv === "string" && config.apiKeyEnv
@@ -137,6 +140,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       driverKind: DRIVER_KIND,
       apiKey,
       apiUrl: config.url,
+      tools: config.tools,
       models: () => catalog,
       refreshModels: fetchModels,
       requestBody: (model, messages, stream) => ({

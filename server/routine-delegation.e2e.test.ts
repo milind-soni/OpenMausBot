@@ -156,7 +156,7 @@ describe("routine delegation through the isolated harness", () => {
     evidence.push({ busyRetriesPreservedWakeBudget: true, capacity, resume, runId: run.id, transcript: await messages(run.threadId) });
   }, 60_000);
 
-  it("resumes a new user's delegation on a completed routine's execution thread", async () => {
+  it("coordinates a new user request on a completed routine's thread without changing its recorded result", async () => {
     const run = await start();
     finish(run.threadId);
     await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
@@ -168,11 +168,22 @@ describe("routine delegation through the isolated harness", () => {
     unlinkSync(file(run.threadId, "gate"));
     unlinkSync(file(run.threadId, "json"));
     await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "A new request: ask the peer for a fresh report." });
-    await delegate(run.threadId);
+    const launched = await dump(run.threadId);
+    const coordinated = await api("POST", "/api/internal/coordinate-bots", {
+      botIds: [peer.id], requestKey: "fresh-report", message: "Produce a fresh fixture report.",
+    }, launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN);
+    expect(coordinated.accepted).toHaveLength(1);
+    const requestId = coordinated.accepted[0].requestId;
+    const handoff = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8"))
+      .find((node: any) => node.id === requestId);
     finish(run.threadId);
+    await dump(handoff().threadId);
+    finish(handoff().threadId);
     await expect.poll(async () => (await messages(run.threadId)).some(
-      (message) => message.role === "bot" && message.text?.includes("[A delegated task just completed]"),
+      (message) => message.from?.botId === peer.id && message.roomRequest?.id === requestId && message.roomRequest.phase === "result",
     ), { timeout: 20_000 }).toBe(true);
+    await control(["wait", "--bot", source.id, "--task", run.threadId]);
+    expect(handoff().status).toBe("completed");
     expect(await runState(run.id)).toMatchObject({ status: "completed", finishedAt: finished.finishedAt, output: finished.output });
     evidence.push({ reusedCompletedExecution: true, transcript: await messages(run.threadId) });
   }, 45_000);

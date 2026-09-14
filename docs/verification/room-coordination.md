@@ -8,8 +8,8 @@ handoff loop inside those turns.
 
 The tools are `list_room_targets` and `coordinate_bots`. Discovery includes
 reachable bots as well as rooms. The latter addresses 1–4 existing bots in this
-room (default), another allowed room, or separate recipient tasks when used in
-ordinary direct chat without a room. A Chief can reach additional teams only
+room (default), or — in ordinary direct chat without a room — the sender's one
+standing conversation with each recipient. A Chief can reach additional teams only
 after the owner grants that access in [team settings](team-access.md).
 Recipients run sequentially per room, with their own models, permissions and
 working environments. Busy recipients queue. Once all requested results arrive,
@@ -18,6 +18,17 @@ specialists; it never inherits the parent Chief's cross-team access or permissio
 Advice is not a verification
 receipt: the lead must ask the reviewer to run the requested checks.
 
+Outside a room there is exactly one conversation per pair of bots, titled after
+the sender (“@Clive”), reused by every later assignment from that sender so the
+recipient still has the earlier context, and never closed automatically. A
+recipient still carrying one thread per assignment from an older version has its
+most recently active one adopted as that conversation rather than gaining
+another row; nothing is deleted or closed. A second assignment that arrives
+while the first is still running gets its own thread beside it, named by the
+optional `label` (otherwise “@Clive · parallel work”), and that thread closes
+itself once its result has been reported. `request_key` is only a within-turn
+idempotency token; it never selects a conversation.
+
 The chat shows an avatar and “Sent to Eli · Delivery”; clicking opens the
 receiving conversation. Same-room receipts have no unnecessary navigation.
 Receipts remain visible when tool calls are hidden. Files are not copied between
@@ -25,11 +36,29 @@ computers: briefs must include accessible absolute paths or the required content
 Returned reports stay available to subsequent model turns behind the compact
 receipt, subject to the bounded retention and fresh peer/section access checks.
 Direct-chat receipts use the existing avatar/thread pill, opening the exact
-recipient task without changing other tasks. Stop cancels that conversation's
-tree; a new message supersedes its pending coordination. Deleting a waiting
-source never recreates it. Provider work and waiting-on-teammate status stay
-separate internally, so waiting does not hold a provider session or block another
-independent conversation.
+recipient task without changing other tasks.
+
+Steering is not cancelling. A message sent while teammates are still working
+runs straight away — it is not queued behind them — and the assignments stay
+out: they keep running and each result still returns to this conversation and
+resumes it. That turn's context names what is still outstanding, so the bot
+answers the new instruction without assuming its fan-out died or sending the
+same work again.
+
+Stop is scoped to the conversation it was pressed in. It ends that bot's turn
+and stops the conversation awaiting its teammates, so nothing resumes into a
+stopped chat. An assignment that had not started yet is cancelled, since
+nothing is lost. A teammate already mid-turn keeps its own provider process:
+it finishes, and its result is still recorded and reported back here as the
+usual receipt. Each teammate Stop leaves running gets its own pill in the
+transcript — "Stopped here — Eli is still working; open to stop it too" —
+which survives Tool calls being hidden and opens that teammate's conversation,
+where Stop reaches its turn for real. Deleting a waiting source still cancels
+its whole tree, and never recreates the conversation.
+
+Provider work and waiting-on-teammate status stay separate internally, so
+waiting does not hold a provider session or block another independent
+conversation.
 
 ## Repeatable checks
 
@@ -39,6 +68,7 @@ pnpm exec vitest run server/group-goal-run.e2e.test.ts server/group-goal-wait-ca
 pnpm exec vitest run server/room-recovery.e2e.test.ts server/testing/room-handoff-agent.test.ts
 pnpm exec vitest run server/direct-coordination.e2e.test.ts --maxWorkers=1
 pnpm exec vitest run server/turn-dispatch-guard.test.ts
+pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/peer-allowlist.e2e.test.ts server/steer-queue.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
 ```
 
@@ -50,16 +80,22 @@ approvals and validation. Multiple required approvals are presented together;
 no recipient starts until all are allowed. It does not claim model judgment or artifact correctness.
 The direct-chat suite exercises Clive → lead → specialist → lead → Clive with
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
-checks recipient model/permission defaults, idempotency without extra tasks,
-busy queues, pinned parent selection, Stop, source deletion, access revocation,
-and fresh transcript replay after revocation. The UI test sends from the real
+checks one conversation per bot pair across separate user turns, its title,
+labelled concurrent work that closes itself, recipient model/permission
+defaults, idempotency without extra tasks, busy queues, pinned parent
+selection, steering a live coordination (including an automation turn
+landing in the same conversation), conversation-scoped Stop, source
+deletion, access revocation, and fresh transcript replay after
+revocation. The UI test sends from the real
 composer and clicks the existing handoff receipt into the exact recipient task,
 with ordinary tool chips hidden. Screenshots and JSON are retained beside the
 fixture's printed server log; all fixture processes and temporary data are closed.
 Follow-up checks cover retained report context and withholding after peer access
 is revoked, without mirroring a second visible transcript.
 Unit checks cover bounded depth/fan-out, idempotent retry, original request
-retention, automatic return, cancellation and restart without replay.
+retention, automatic return, cancellation and restart without replay, and the
+scoped stop: unstarted work cancelled, a running teammate left with its
+process, its result still reported, and no resume of the stopped conversation.
 Turn-correlation checks cover completion before the provider's dispatch ACK,
 late completion after Stop and a replacement turn, cross-thread isolation, and
 bounded single-use early receipts. Coordination uses the exact provider turn's
@@ -72,6 +108,11 @@ The recovery fixture restarts the same disposable server with an interrupted
 routine and verifies its source-room card and error-free recovery broadcasts.
 The subprocess fixture checks malformed output, unexpected exit and bounded
 cleanup so an agent-process failure cannot silently pass or hang these tests.
+Legacy comms checks enter through real routine execution, where ask/delegate
+remain supported. Ordinary-chat checks assert that calling a replaced tool is
+an explicit protocol error, never an empty successful reply. Thread checks also
+cover self-owned jobs, queued provenance and the transition from a completed
+routine back to a normal user conversation.
 
 ## Real-model and UI checks
 
@@ -96,11 +137,19 @@ preview/server processes afterward; retain evidence without credentials.
 ## Limits and safety
 
 Existing peer allow-lists/approvals and every room reader's section still apply.
-Ordinary chats replace competing ask/delegate/start-thread execution paths with
-one bounded coordination tool. Direct routines, webhooks and legacy peer delivery
+Ordinary chats use one bounded coordination tool for teammate work instead of
+the competing ask/delegate/peer-thread execution paths. A top-level direct turn
+can still use `start_thread` to open separate work on itself, without moving the
+person's selected conversation. That tool is not an alternative way to dispatch
+teammates or recursively fan out from model-opened threads and coordinated children.
+Direct routines, webhooks and legacy peer delivery
 retain their existing lifecycle: their completion is not claimed early by this
-new loop. Finish together remains separate too. Cancellation
-stops descendants; restart records interruption without replaying side effects.
+new loop, and a turn of theirs that lands in a conversation cancels no
+coordination there. Finish together remains separate too. Cancelling a request
+stops the descendants it is still waiting on, except a teammate whose turn had
+already started when the person stopped the conversation above it: that process
+is left alone and reports its result. Restart records interruption without
+replaying side effects.
 Limits: four cross-room edges, 24 child requests, 48 executions, 30 minutes per
 root. Failures return to the sender, not a false success. Model quality and
 provider availability still matter; this is not a guarantee of autonomous

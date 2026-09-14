@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   RoutineRequestError,
@@ -61,6 +61,7 @@ function harness(
     botId: string,
     threadId: string,
   ) => { ok: true } | { ok: false; status: number; error: string },
+  autoApply?: (botId: string, threadId: string) => boolean,
 ) {
   const clock = { now: start };
   const dir = mkdtempSync(join(tmpdir(), "omb-routine-request-"));
@@ -80,6 +81,7 @@ function harness(
     timeZone: () => "Asia/Kolkata",
     cloudReady,
     canPersist,
+    autoApply,
   });
   return { clock, routines, service, store };
 }
@@ -108,6 +110,162 @@ function cardFingerprint(card: RoutineRequestOptionCard, messageId: string): str
 }
 
 describe("RoutineRequestService", () => {
+  it("applies Full Access routine actions using only the source thread grant and settles replay receipts", async () => {
+    const autoApply = vi.fn((_botId: string, threadId: string) => threadId === "full-thread");
+    const { service, routines, store } = harness(undefined, undefined, undefined, autoApply);
+    const appended: RoutineRequestOptionCard[] = [];
+    const append = store.appendMessage.bind(store);
+    vi.spyOn(store, "appendMessage").mockImplementation((threadId, message) => {
+      appended.push(structuredClone(message.card));
+      return append(threadId, message);
+    });
+    const ask = await service.submit({ botId: "bot-a", threadId: "ask-thread", proposal: createProposal() });
+    expect(ask.state).toBe("pending");
+    expect(routines.listRoutines()).toHaveLength(0);
+    expect(appended[0]).toMatchObject({ options: ["Confirm", "Cancel"] });
+
+    const submit = (proposal: RoutineProposalInput) => service.submit({ botId: "bot-a", threadId: "full-thread", proposal });
+    const created = await submit(createProposal());
+    expect(created).toMatchObject({ state: "applied", result: { action: "create" } });
+    const routineId = created.result!.resultId;
+    expect(routines.listRoutines()).toHaveLength(1);
+    expect(await submit({ action: "update", routineId, changes: { name: "Updated brief" } }))
+      .toMatchObject({ state: "applied", result: { action: "update", resultId: routineId } });
+    expect(routines.listRoutines().find((routine) => routine.id === routineId)?.name).toBe("Updated brief");
+    expect(await submit({ action: "pause", routineId })).toMatchObject({ state: "applied" });
+    expect(routines.listRoutines().find((routine) => routine.id === routineId)?.enabled).toBe(false);
+    expect(await submit({ action: "resume", routineId })).toMatchObject({ state: "applied" });
+    const run = await submit({ action: "run_now", routineId });
+    expect(run).toMatchObject({ state: "applied", result: { action: "run_now" } });
+    expect(routines.listRuns()).toHaveLength(1);
+    expect(service.resolve({ botId: "bot-a", threadId: "full-thread", requestId: run.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "already_settled", behavior: "allow" });
+    expect(routines.listRuns()).toHaveLength(1);
+    expect(await submit({ action: "delete", routineId })).toMatchObject({ state: "applied" });
+    expect(routines.listRoutines().find((routine) => routine.id === routineId)).toBeUndefined();
+    expect(appended.slice(1).every((card) => card.dismissed && card.options.length === 0)).toBe(true);
+    expect(store.messagesFor("full-thread").every((message) => message.card?.answered === "allow")).toBe(true);
+    expect(autoApply).toHaveBeenLastCalledWith("bot-a", "full-thread");
+  });
+
+  it("rechecks the Full Access grant after cloud readiness and preserves scope validation", async () => {
+    let full = true;
+    const { service, routines, store } = harness(undefined, async () => {
+      full = false;
+      return { ready: true };
+    }, undefined, () => full);
+    const changed = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ runOn: "cloud" }) });
+    expect(changed.state).toBe("pending");
+    expect(routines.listRoutines()).toHaveLength(0);
+    expect(store.messagesFor("thread-a")[0]?.card?.dismissed).toBeUndefined();
+    full = true;
+    const own = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal() });
+    await expect(service.submit({ botId: "bot-b", threadId: "thread-b", proposal: { action: "delete", routineId: own.result!.resultId } }))
+      .rejects.toThrow();
+    expect(routines.listRoutines()).toHaveLength(1);
+    expect(store.messagesFor("thread-b")).toHaveLength(0);
+    await expect(service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal(), canCommit: () => false }))
+      .rejects.toThrow("requesting turn ended");
+  });
+
+  it("reports a committed Full Access routine even if receipt settlement fails and never runs it twice", async () => {
+    const { service, routines, store } = harness(undefined, undefined, undefined, () => true);
+    const created = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal() });
+    const settle = vi.spyOn(store, "patchMessage").mockImplementation(() => { throw new Error("receipt write failed"); });
+    const run = await service.submit({ botId: "bot-a", threadId: "thread-a", proposal: { action: "run_now", routineId: created.result!.resultId } });
+    expect(run).toMatchObject({ state: "applied", result: { action: "run_now", settlementPending: true } });
+    expect(routines.listRuns()).toHaveLength(1);
+    expect(store.messagesFor("thread-a").at(-1)?.card).toMatchObject({ dismissed: true, options: [] });
+    settle.mockRestore();
+    expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: run.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "applied", resultId: run.result!.resultId });
+    expect(routines.listRuns()).toHaveLength(1);
+    expect(routines.routineRequestReceipt(run.requestId)).toBeNull();
+  });
+
+  it("does not report Full Access success when the scheduler commit fails", async () => {
+    const { service, routines, store } = harness(undefined, undefined, undefined, () => true);
+    vi.spyOn(routines, "create").mockImplementationOnce(() => { throw new Error("scheduler write failed"); });
+    await expect(service.submit({ botId: "bot-a", threadId: "thread-a", proposal: createProposal() }))
+      .rejects.toThrow("scheduler write failed");
+    expect(routines.listRoutines()).toHaveLength(0);
+    expect(store.messagesFor("thread-a")[0]?.card).toMatchObject({ dismissed: true, options: [] });
+  });
+
+  it("keeps a monthly cron rule and its own timezone through confirmation, update, pause and resume", async () => {
+    const { service, store, routines, clock } = harness(Date.parse("2026-08-28T10:00:00Z"));
+    const schedule = { type: "cron" as const, expression: "0 9 1 * *", timeZone: "America/New_York" };
+    const proposed = await service.propose({
+      botId: "bot-a", threadId: "thread-a",
+      proposal: createProposal({ name: "Monthly report", schedule: { ...schedule, expression: " 0  9 1 * * " } }),
+    });
+    expect(routines.listRoutines()).toHaveLength(0);
+    expect(proposed.timeZone).toBe("America/New_York");
+    expect(proposed.summary).toContain("0 9 1 * *");
+    expect(proposed.summary).toContain("America/New_York");
+    expect(proposed.detail).toContain("Next 3 runs (America/New_York): Sep 1, 2026, 9:00 AM · Oct 1, 2026, 9:00 AM · Nov 1, 2026, 9:00 AM");
+    expect(proposed.nextRunAt).toBe(Date.parse("2026-09-01T13:00:00Z"));
+    const message = store.messagesFor("thread-a")[0]!;
+    // Persisted JSON cards retain the original version and exact executable rule.
+    message.card = JSON.parse(JSON.stringify(message.card)) as RoutineRequestOptionCard;
+    expect(message.card.routineRequest).toMatchObject({ version: 1, operation: { routine: { schedule } } });
+    expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "applied", action: "create" });
+    const routineId = routines.listRoutines()[0]!.id;
+    expect(routines.listRoutines()[0]).toMatchObject({ schedule, enabled: true, nextRunAt: proposed.nextRunAt });
+    const apply = async (proposal: RoutineProposalInput) => {
+      clock.now += 1;
+      const card = await service.propose({ botId: "bot-a", threadId: "thread-a", proposal });
+      expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: card.requestId, behavior: "allow" }).state).toBe("applied");
+      return card;
+    };
+    const lastDay = { ...schedule, expression: "0 9 L * *" };
+    const update = await apply({ action: "update", routineId, changes: { schedule: lastDay } });
+    expect(update.detail).toContain("Aug 31, 2026, 9:00 AM");
+    expect(routines.listRoutines()[0]!.schedule).toEqual(lastDay);
+    const paused = await apply({ action: "pause", routineId });
+    expect(paused.detail).not.toContain("Next 3 runs");
+    expect(routines.listRoutines()[0]).toMatchObject({ schedule: lastDay, enabled: false, nextRunAt: null });
+    const whilePaused = await apply({ action: "update", routineId, changes: { schedule: { ...schedule, expression: "0 9 * * MON#2" } } });
+    expect(whilePaused.detail).toContain("remains paused");
+    expect(whilePaused.detail).not.toContain("Next 3 runs");
+    const resumed = await apply({ action: "resume", routineId });
+    expect(resumed.detail).toContain("Sep 14, 2026, 9:00 AM");
+    expect(routines.listRoutines()[0]).toMatchObject({ enabled: true, nextRunAt: Date.parse("2026-09-14T13:00:00Z") });
+  });
+
+  it.each<Record<string, JsonValue>>([
+    { expression: "0 9 1 * *" },
+    { expression: "0 9 1 * *", timeZone: "+05:30" },
+    { expression: "0 9 1 * *", timeZone: "Mars/Olympus" },
+    { expression: "0 0 9 1 * *", timeZone: "UTC" },
+    { expression: "@monthly", timeZone: "UTC" },
+    { expression: "0 9 31 2 *", timeZone: "UTC" },
+    { expression: "0 9 1 * *", timeZone: "UTC", weekdays: ["monday"] },
+  ])("refuses invalid or extra cron constraints before saving a card: %j", async (schedule) => {
+    const { service, store, routines } = harness();
+    await expect(service.propose({ botId: "bot-a", threadId: "thread-a", proposal: malformedProposal({
+      action: "create", routine: { name: "Bad schedule", instructions: "Do not run", schedule: { type: "cron", ...schedule } },
+    }) })).rejects.toMatchObject({ status: 400 });
+    expect(store.messagesFor("thread-a")).toHaveLength(0);
+    expect(routines.listRoutines()).toHaveLength(0);
+  });
+
+  it("revalidates a corrupted stored cron card without creating a routine", async () => {
+    const { service, store, routines } = harness();
+    const proposed = await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({
+      schedule: { type: "cron", expression: "0 9 1 * *", timeZone: "UTC" },
+    }) });
+    const card = store.messagesFor("thread-a")[0]!.card!;
+    const operation = card.routineRequest!.operation;
+    if (operation.action !== "create") throw new Error("Expected create");
+    Object.assign(operation.routine.schedule, { expression: "0 9 31 2 *" });
+    expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "invalid", status: 400 });
+    expect(routines.listRoutines()).toHaveLength(0);
+    expect(card.answered).toBeUndefined();
+  });
+
   it("normalizes weekly input, scrubs hidden payload text, and creates a durable confirmation card", async () => {
     const { service, store, routines } = harness();
     const secret = "sk-proj-abcdefghijklmnopqrstuv";
@@ -184,7 +342,9 @@ describe("RoutineRequestService", () => {
                   everyMinutes: routine.schedule.everyMinutes,
                   type: "interval",
                 }
-              : { weekdays: [...routine.schedule.weekdays], time: routine.schedule.time, type: "daily" },
+              : routine.schedule.type === "cron"
+                ? { ...routine.schedule }
+                : { weekdays: [...routine.schedule.weekdays], time: routine.schedule.time, type: "daily" },
           instructions: routine.instructions,
           runOn: routine.runOn,
           name: routine.name,

@@ -471,7 +471,8 @@ describe("OpenAICompatDriver", () => {
       await vi.advanceTimersByTimeAsync(185_000);
 
       const completed = await recorder.until((e) => e.type === "turn.completed");
-      expect(completed).toMatchObject({ ok: false, stopReason: "interrupted" });
+      // A provider that stops delivering chunks failed; the person did not press Stop.
+      expect(completed).toMatchObject({ ok: false, stopReason: "error" });
 
       recorder.stop();
       await inst.dispose();
@@ -568,4 +569,12 @@ describe("OpenAICompatDriver", () => {
       await inst.dispose();
     }
   });
+});
+
+
+it("openai-compat preserves an explicit tools-off connection and rejects ambiguous flags", () => {
+  expect(OpenAICompatDriver.decodeConfig({})).not.toHaveProperty("tools");
+  expect(OpenAICompatDriver.decodeConfig({ tools: false })).toMatchObject({ tools: false });
+  expect(OpenAICompatDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
+  expect(() => OpenAICompatDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
 });

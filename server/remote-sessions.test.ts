@@ -192,7 +192,16 @@ describe("before pairing", () => {
     expect(descriptor.body.environmentId).toMatch(/^[0-9a-f-]{36}$/);
     expect(descriptor.body.label).toBe("cab mini");
     expect(descriptor.body.version).toBe("9.9.9-test");
-    expect(descriptor.body.capabilities).toEqual({ remoteSessions: true, selfUpdate: "operator", emailSignIn: false });
+    // Exact, so a new pre-pairing field has to be added here on purpose.
+    // sharedComputers says this build OFFERS the protocol, never whether this
+    // machine is sharing anything — a stranger learns no more than the
+    // version. This fixture sets no features, so the opt-in gate is off and
+    // the key is absent: the server never advertises what it would refuse.
+    expect(descriptor.body.capabilities).toEqual({
+      remoteSessions: true,
+      selfUpdate: "operator",
+      emailSignIn: false,
+    });
     const refused = await call("/api/bots", { headers: remote("10.0.0.1") });
     expect(refused.status).toBe(403);
     expect(refused.body.error).toMatch(/pair this device/);

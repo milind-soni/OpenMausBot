@@ -15,13 +15,16 @@ const MODELS = {
 };
 
 export interface GrokConfig {
+  tools?: boolean;
   url: string;
   apiKeyEnv: string;
 }
 
 function decodeConfig(raw: unknown): GrokConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
+  if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   return {
+    ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
     url: typeof config.url === "string" ? config.url : DEFAULT_URL,
     apiKeyEnv: typeof config.apiKeyEnv === "string" ? config.apiKeyEnv : "XAI_API_KEY",
   };
@@ -42,6 +45,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       driverKind: DRIVER_KIND,
       apiKey,
       apiUrl: config.url,
+      tools: config.tools,
       models: () => MODELS,
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "xAI",

@@ -62,7 +62,11 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       // Who opened the thread travels; the handoff id does not — the
       // delegation ledger is process-local and never part of a backup.
       openedBy: "openedBy" in task && task.openedBy
-        ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at }
+        ? { botId: task.openedBy.botId, name: task.openedBy.name, at: task.openedBy.at,
+            // What kind of conversation it is travels: a restored pair
+            // conversation is still the standing line between those two
+            // bots, so the import does not read as one more loose row.
+            ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) }
         : undefined,
       closedBy: "closedBy" in task && task.closedBy
         ? { botId: task.closedBy.botId, name: task.closedBy.name, at: task.closedBy.at }
@@ -181,7 +185,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         // imported twin, and an opener outside this backup leaves no record
         // rather than a bot id that resolves to a stranger.
         const opener = task.openedBy && botIds.get(task.openedBy.botId);
-        if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at };
+        if (task.openedBy && opener) record.openedBy = { botId: opener, name: task.openedBy.name, at: task.openedBy.at, ...(task.openedBy.kind ? { kind: task.openedBy.kind } : {}) };
         // A closed thread stays closed after import — the pile the person
         // tidied does not come back as a pile — with the closer remapped
         // the same way, or absent when it was a stranger.
