@@ -65,8 +65,19 @@ export interface WorkItem {
   approvalMode?: string;
   createdAt: number;
   updatedAt: number;
+  /** The day this card is for, as the start of that local day. A card with no
+   * day belongs to the day it was made, which is how the board's day filter
+   * can be switched on without migrating anything. */
+  day?: number;
+  /** When the work should be finished by. Display only — nothing starts,
+   * moves or fails because of it. */
+  dueAt?: number;
   /** When the last start was dispatched, so a card can show elapsed time. */
   startedAt?: number;
+  /** When that start finished. Set together with clearing `startedAt`, so the
+   * card can show how long the run TOOK rather than counting up forever.
+   * Absent while the run is still going. */
+  finishedAt?: number;
   /** Why the last start failed. Kept on the item so a failure is visible on
    * the board and not only in a transcript nobody is looking at. */
   lastError?: string;
@@ -90,10 +101,6 @@ export function isWorkStatus(value: unknown): value is WorkStatus {
   return typeof value === "string" && (WORK_STATUSES as readonly string[]).includes(value);
 }
 
-export function isWorkOrigin(value: unknown): value is WorkOrigin {
-  return value === "manual" || value === "routine";
-}
-
 /** The default board. Cards created before boards were a concept, and every
  * card a client creates without naming one, belong here. */
 export const DEFAULT_BOARD_ID = "default";
@@ -110,6 +117,10 @@ export interface WorkItemInput {
   boardId?: string;
   ownerBotId?: string | null;
   approvalMode?: string | null;
+  /** The day the card is for, as the start of that local day. */
+  day?: number | null;
+  /** A finish-by time. Display only. */
+  dueAt?: number | null;
   /** Routine run that produced this card. Present only on cards the server
    * creates from a run; a client never sets it on a hand-made card. */
   routineId?: string | null;
@@ -124,6 +135,11 @@ export interface WorkItemPatch {
   ownerBotId?: string | null;
   approvalMode?: string | null;
   artifacts?: WorkArtifact[];
+  /** The day the card is for. `null` clears it, which returns the card to its
+   * creation day rather than leaving it undated. */
+  day?: number | null;
+  /** A finish-by time. `null` clears it. */
+  dueAt?: number | null;
 }
 
 const MAX_TITLE = 200;
@@ -168,6 +184,17 @@ function cleanOrder(value: unknown): number {
 function cleanBotId(value: unknown): string | undefined {
   const id = typeof value === "string" ? value.trim() : "";
   return id || undefined;
+}
+
+/** A day or a due time from a client. Anything that is not a usable timestamp
+ * becomes absent rather than a bogus epoch — a card dated 1970 because a
+ * client sent null would sort to the bottom of every view forever. */
+function cleanTime(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
+  // Bounded to a plausible window so a unit mix-up (seconds sent as ms) is
+  // dropped instead of dating the card to 1970.
+  if (value < 1_000_000_000_000 || value > 4_000_000_000_000) return undefined;
+  return Math.round(value);
 }
 
 /**
@@ -224,7 +251,13 @@ export class WorkItems {
           ...(typeof item.approvalMode === "string" && item.approvalMode ? { approvalMode: item.approvalMode } : {}),
           createdAt,
           updatedAt: typeof item.updatedAt === "number" ? item.updatedAt : createdAt,
+          // Read back through the same cleanTime the write path uses: a file
+          // hand-edited to hold `day: 1e3` would otherwise date the card to
+          // 1970 and sort it into a day nobody can navigate to.
+          ...(cleanTime(item.day) !== undefined ? { day: cleanTime(item.day) } : {}),
+          ...(cleanTime(item.dueAt) !== undefined ? { dueAt: cleanTime(item.dueAt) } : {}),
           ...(typeof item.startedAt === "number" ? { startedAt: item.startedAt } : {}),
+          ...(typeof item.finishedAt === "number" ? { finishedAt: item.finishedAt } : {}),
           ...(typeof item.lastError === "string" && item.lastError ? { lastError: scrub(item.lastError.slice(0, 2_000)) } : {}),
         }];
       });
@@ -282,6 +315,11 @@ export class WorkItems {
     const routineId = cleanBotId(input.routineId);
     const at = this.now();
     const origin: WorkOrigin = routineId ? "routine" : "manual";
+    // Only a usable timestamp is stored. `day` is normalised to the start of
+    // that local day so two cards made for the same date always compare equal,
+    // whatever time of day the client happened to pick.
+    const day = input.day == null ? undefined : cleanTime(input.day);
+    const dueAt = input.dueAt == null ? undefined : cleanTime(input.dueAt);
     const item: WorkItem = {
       id: newId(),
       boardId,
@@ -297,6 +335,8 @@ export class WorkItems {
       ...(input.approvalMode ? { approvalMode: input.approvalMode } : {}),
       createdAt: at,
       updatedAt: at,
+      ...(day !== undefined ? { day } : {}),
+      ...(dueAt !== undefined ? { dueAt } : {}),
     };
     this.items.push(item);
     this.save();
@@ -323,10 +363,29 @@ export class WorkItems {
     }
     if (patch.status !== undefined) {
       next.status = patch.status;
-      if (TERMINAL.has(patch.status)) next.startedAt = undefined;
-      else if (patch.status === "in_progress") next.startedAt = next.startedAt ?? this.now();
+      // Moving a card by hand ends any run-clock it was showing: the two
+      // timestamps describe one run and must never survive into another.
+      if (TERMINAL.has(patch.status)) {
+        next.startedAt = undefined;
+      } else if (patch.status === "in_progress") {
+        next.startedAt = next.startedAt ?? this.now();
+      } else {
+        next.startedAt = undefined;
+        next.finishedAt = undefined;
+      }
     }
     if (patch.order !== undefined) next.order = cleanOrder(patch.order);
+    // Two dates, one rule each: a value sets it, `null` clears it. A malformed
+    // value is ignored rather than stored, and is NOT read as "clear" — a
+    // typo must not silently wipe a deadline the person set deliberately.
+    if (patch.day !== undefined) {
+      const day = patch.day === null ? undefined : cleanTime(patch.day);
+      if (patch.day === null || day !== undefined) next.day = day;
+    }
+    if (patch.dueAt !== undefined) {
+      const dueAt = patch.dueAt === null ? undefined : cleanTime(patch.dueAt);
+      if (patch.dueAt === null || dueAt !== undefined) next.dueAt = dueAt;
+    }
     if (patch.approvalMode !== undefined) {
       next.approvalMode = patch.approvalMode ? patch.approvalMode : undefined;
     }
@@ -339,6 +398,15 @@ export class WorkItems {
         next.ownerBotId = owner;
         next.threadId = undefined;
         next.startedAt = undefined;
+        next.finishedAt = undefined;
+        // The failure belonged to the bot that is being taken off this card.
+        // Keeping it made a freshly assigned card read "Needs attention" for
+        // a bot that had never run it, and the alert face followed the card
+        // rather than the thing that actually failed.
+        next.lastError = undefined;
+        // Off the blocked column too, unless a person put it in a terminal
+        // one: a card that was blocked BY its old bot is no longer blocked.
+        if (item.status === "blocked") next.status = "todo";
       }
     }
     if (patch.artifacts !== undefined) next.artifacts = cleanArtifacts(patch.artifacts);
@@ -371,6 +439,9 @@ export class WorkItems {
       ...item,
       threadId,
       startedAt: at,
+      // A new run starts a new clock: leaving the previous finish time would
+      // make a card that was restarted show the length of the run BEFORE it.
+      finishedAt: undefined,
       updatedAt: at,
       lastError: undefined,
       // Restarting a blocked card clears the block: it is running again, so
@@ -449,6 +520,43 @@ export class WorkItems {
       lastError: scrub(reason).slice(0, 2_000),
       updatedAt: this.now(),
     };
+    this.items = this.items.map((candidate) => (candidate.id === id ? next : candidate));
+    this.save();
+    return next;
+  }
+
+  /** The card's own turn finished — reconcile the card with what happened.
+   *
+   * `attachThread` marks a card in_progress when its run is dispatched, and
+   * that was the only transition: a bot that then failed mid-turn left the
+   * card in_progress forever, because `fail` is reached only when the
+   * DISPATCH throws, not when the turn it started goes wrong. A card that
+   * looks like it is still working after the bot has stopped is worse than a
+   * card that admits it failed, so the turn's own outcome closes it.
+   *
+   * Only a card that is actually mid-run is settled. A card a person moved to
+   * done, cancelled or blocked by hand is their decision, and a late
+   * completion must not overwrite it — the same rule the routine projection
+   * follows. */
+  settle(id: string, outcome: { ok: boolean; reason?: string | null }): WorkItem | null {
+    const item = this.get(id);
+    if (!item) return null;
+    if (item.status !== "in_progress") return item;
+
+    const at = this.now();
+    // A successful turn stops the clock but does NOT claim the work is
+    // finished: only a person knows whether the job is done, and the board
+    // already has a Done column for them to say so.
+    const next: WorkItem = outcome.ok
+      ? { ...item, startedAt: undefined, finishedAt: at, lastError: undefined, updatedAt: at }
+      : {
+        ...item,
+        status: "blocked",
+        startedAt: undefined,
+        finishedAt: at,
+        lastError: scrub(outcome.reason?.trim() || "The bot stopped without finishing this card").slice(0, 2_000),
+        updatedAt: at,
+      };
     this.items = this.items.map((candidate) => (candidate.id === id ? next : candidate));
     this.save();
     return next;

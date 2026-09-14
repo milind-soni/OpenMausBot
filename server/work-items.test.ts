@@ -164,6 +164,83 @@ describe("WorkItems", () => {
     expect(restarted.status).toBe("in_progress");
   });
 
+  it("stops the clock when the card's turn ends, without claiming the work is done", () => {
+    const items = board().open();
+    const card = items.create({ title: "finish the report", status: "todo", ownerBotId: "bot-1" });
+    expect(items.attachThread(card.id, "thread-1").startedAt).toBeTypeOf("number");
+
+    const settled = items.settle(card.id, { ok: true })!;
+    // Only a person knows whether the job is finished, so a settled turn
+    // leaves the card where they can still move it to Done themselves.
+    expect(settled.status).toBe("in_progress");
+    expect(settled.startedAt).toBeUndefined();
+    expect(settled.lastError).toBeUndefined();
+  });
+
+  it("blocks a card whose bot failed mid-turn instead of leaving it working", () => {
+    const items = board().open();
+    const card = items.create({ title: "will explode", status: "todo", ownerBotId: "bot-1" });
+    items.attachThread(card.id, "thread-1");
+
+    // The dispatch succeeded and the turn then failed, which the run route
+    // cannot see — this is the case that used to hang in In progress.
+    const settled = items.settle(card.id, { ok: false, reason: "the provider refused the turn" })!;
+    expect(settled.status).toBe("blocked");
+    expect(settled.lastError).toBe("the provider refused the turn");
+    expect(settled.startedAt).toBeUndefined();
+  });
+
+  it("says something useful when a failed turn gives no reason", () => {
+    const items = board().open();
+    const card = items.create({ title: "quiet failure", status: "in_progress", ownerBotId: "bot-1" });
+    items.attachThread(card.id, "thread-1");
+
+    const settled = items.settle(card.id, { ok: false, reason: null })!;
+    expect(settled.status).toBe("blocked");
+    expect(settled.lastError).toBeTruthy();
+  });
+
+  it("leaves a card a person moved alone when its late turn settles", () => {
+    const items = board().open();
+    const card = items.create({ title: "already done", status: "done", ownerBotId: "bot-1" });
+
+    // A turn that finishes after the person tidied the board must not reopen
+    // or re-block the card they already decided about.
+    const settled = items.settle(card.id, { ok: false, reason: "too late" })!;
+    expect(settled.status).toBe("done");
+    expect(settled.lastError).toBeUndefined();
+  });
+
+  it("clears the old bot's failure when the card is given to another bot", () => {
+    // The failure belonged to the bot being taken off the card. Keeping it
+    // made a freshly assigned card read "Needs attention" — and wear the
+    // alert face — for a bot that had never run it.
+    const items = board().open();
+    const card = items.create({ title: "hand it over", ownerBotId: "bot-1", status: "in_progress" });
+    items.attachThread(card.id, "thread-1");
+    items.settle(card.id, { ok: false, reason: "the provider refused the turn" });
+
+    const moved = items.update(card.id, { ownerBotId: "bot-2" });
+    expect(moved.ownerBotId).toBe("bot-2");
+    expect(moved.lastError).toBeUndefined();
+    // And off the blocked column, because it was blocked by the old bot.
+    expect(moved.status).toBe("todo");
+  });
+
+  it("does not move a card a person already finished just because it changed hands", () => {
+    const items = board().open();
+    const card = items.create({ title: "done and handed over", ownerBotId: "bot-1", status: "done" });
+    const moved = items.update(card.id, { ownerBotId: "bot-2" });
+    expect(moved.status).toBe("done");
+  });
+
+  it("does nothing for a card that is not running", () => {
+    const items = board().open();
+    const card = items.create({ title: "still waiting", status: "todo" });
+    expect(items.settle(card.id, { ok: false, reason: "nope" })!.status).toBe("todo");
+    expect(items.settle("no-such-card", { ok: true })).toBeNull();
+  });
+
   it("abandons the old thread when a card is given to a different bot", () => {
     const items = board().open();
     const card = items.create({ title: "move it", ownerBotId: "bot-1", status: "in_progress" });
