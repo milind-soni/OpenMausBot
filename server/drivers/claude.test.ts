@@ -514,6 +514,36 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
+  it("flattens ask_user choices a model sends as {label, description} rows", async () => {
+    // The ask_user schema says strings, but MiniMax M3 (through the
+    // Anthropic-compatible endpoint) answers with AskUserQuestion-shaped
+    // rows. Passed through as-is they were persisted on the card and the
+    // chat view could not draw them, blanking the window on every open.
+    await create("hang");
+    await instance.adapter.sendTurn({ threadId: "t-object-choices", text: "go" });
+    const conn = await connectSocket(permissionSocketPath("t-object-choices"));
+    try {
+      conn.write(JSON.stringify({
+        t: "ask",
+        kind: "question",
+        id: "object-choices",
+        tool: "ask_user",
+        input: {
+          question: "Email the Persun COGS breakdown with PDF template now?",
+          choices: [
+            { label: "Yes, email it now", description: "Generate the PDF and send it." },
+            { label: "No, skip the email", description: "Leave it as file-only." },
+          ],
+        },
+      }) + "\n");
+      const opened = await recorder.until((e) => e.type === "request.opened") as { requestId: string; choices?: unknown };
+      expect(opened.choices).toEqual(["Yes, email it now", "No, skip the email"]);
+      expect(await instance.adapter.respondToRequest("t-object-choices", opened.requestId, { behavior: "answer", message: "No, skip the email" })).toBe("answered");
+    } finally {
+      conn.destroy();
+    }
+  });
+
   it("turns Claude's own AskUserQuestion into a question card, not an approval", async () => {
     // The CLI routes AskUserQuestion through --permission-prompt-tool like
     // any other tool use. Left as a permission it offers Deny / Always allow

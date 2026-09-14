@@ -48,6 +48,7 @@ import {
   ASK_USER_QUESTION_TOOL,
   askQuestionSummary,
   parseAskQuestions,
+  parseChoices,
   questionChoices,
   type AskQuestion,
 } from "../../shared/ask-question.ts";
@@ -1343,9 +1344,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                 questions: questions ?? undefined,
                 // A structured ask still offers flat labels, for the phone
                 // companions and any client that predates the question card.
-                choices: questions
-                  ? questionChoices(questions)
-                  : Array.isArray(ask.input?.choices) ? (ask.input.choices as string[]).slice(0, 5) : undefined,
+                choices: questions ? questionChoices(questions) : parseChoices(ask.input?.choices),
               });
             },
             onResolve: (resolved) => {

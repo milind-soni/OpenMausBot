@@ -7,6 +7,7 @@ import {
   MAX_OPTIONS,
   MAX_QUESTIONS,
   parseAskQuestions,
+  parseChoices,
   questionAnswersByQuestion,
   questionChoices,
   type AskQuestion,
@@ -107,6 +108,33 @@ describe("askQuestionSummary", () => {
     expect(askQuestionSummary(questions)).toBe("Which model? (+2 more questions)");
     expect(askQuestionSummary(questions.slice(0, 2))).toBe("Which model? (+1 more question)");
     expect(askQuestionSummary(questions.slice(0, 1))).toBe("Which model?");
+  });
+});
+
+describe("parseChoices", () => {
+  it("keeps the documented string shape", () => {
+    expect(parseChoices(["Yes", " No "])).toEqual(["Yes", "No"]);
+  });
+
+  it("takes the label from AskUserQuestion-shaped rows, which MiniMax M3 sends", () => {
+    expect(
+      parseChoices([
+        { label: "Yes, email it now", description: "Generate the PDF and send it." },
+        { label: "No, skip the email", description: "Leave it as file-only." },
+      ]),
+    ).toEqual(["Yes, email it now", "No, skip the email"]);
+  });
+
+  it("drops what cannot be drawn instead of handing it to the card", () => {
+    expect(parseChoices(["Yes", 3, null, { description: "no label" }, "", "Yes"])).toEqual(["Yes"]);
+    expect(parseChoices([{ nope: true }])).toBeUndefined();
+    expect(parseChoices("Yes")).toBeUndefined();
+    expect(parseChoices(undefined)).toBeUndefined();
+  });
+
+  it("caps the list at the advertised size", () => {
+    expect(parseChoices(["a", "b", "c", "d", "e", "f", "g"])).toEqual(["a", "b", "c", "d", "e"]);
+    expect(parseChoices(["a", "b", "c"], 2)).toEqual(["a", "b"]);
   });
 });
 

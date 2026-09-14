@@ -119,6 +119,33 @@ export function askQuestionSummary(questions: readonly AskQuestion[]): string {
   return rest > 0 ? `${first} (+${rest} more question${rest > 1 ? "s" : ""})` : first;
 }
 
+/** How many one-tap answers an `ask_user` card offers; the tool advertises
+ * "2-5 suggested answers". */
+export const MAX_CHOICES = 5;
+
+/**
+ * Flat labels from a bot-authored `ask_user` `choices` array.
+ *
+ * The tool schema says strings, but a model that has also seen Claude's
+ * AskUserQuestion will hand over `{ label, description }` rows instead
+ * (MiniMax M3 does). The label is the choice either way. Anything else is
+ * dropped: a non-string choice that reached the card was drawn as a React
+ * child, which React refuses, taking the whole chat page down with it.
+ */
+export function parseChoices(input: unknown, limit = MAX_CHOICES): string[] | undefined {
+  if (!Array.isArray(input)) return undefined;
+  const choices: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of input) {
+    const label = typeof raw === "string" ? text(raw, MAX_LABEL) : isRecord(raw) ? text(raw.label, MAX_LABEL) : undefined;
+    if (!label || seen.has(label)) continue;
+    seen.add(label);
+    choices.push(label);
+    if (choices.length === limit) break;
+  }
+  return choices.length ? choices : undefined;
+}
+
 /** Flat labels for clients that only know how to render a list of choices
  * (the phone companions, and any older desktop build). Only a single
  * question can be answered that way without losing which one was answered. */
