@@ -90,3 +90,97 @@ it("saving and replacing a workspace key reaches an existing bot's next request 
     await new Promise<void>((resolve) => provider.close(() => resolve()));
   }
 });
+
+
+it("managed provider connections pass their saved key without treating the preset as an OpenRouter route pin", async () => {
+  const receivedAuth: string[] = [];
+  const receivedBodies: Array<Record<string, unknown>> = [];
+  const provider = createServer((req, res) => {
+    if (req.url === "/v1/models") {
+      receivedAuth.push(req.headers.authorization ?? "");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: [{ id: "fixture-model" }] }));
+      return;
+    }
+    if (req.url !== "/v1/chat/completions") { res.writeHead(404).end(); return; }
+    receivedAuth.push(req.headers.authorization ?? "");
+    let raw = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      receivedBodies.push(JSON.parse(raw) as Record<string, unknown>);
+      if (req.headers.authorization !== "Bearer managed-fixture-key") {
+        res.writeHead(401, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "Invalid fixture credential" } }));
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(`data: ${JSON.stringify({ choices: [{ delta: { content: "managed fixture reply" } }] })}\n\ndata: [DONE]\n\n`);
+    });
+  });
+  await new Promise<void>((resolve) => provider.listen(0, "127.0.0.1", resolve));
+  const address = provider.address();
+  if (!address || typeof address === "string") throw new Error("fixture provider has no port");
+  const fixture = await launchVerificationServer();
+  const api = fixtureApi(fixture.info.url);
+  const sse = await openSse(`${fixture.info.url}/api/events`);
+  try {
+    await api("PATCH", "/api/config", {
+      providerConnections: {
+        "api-openrouter-fixture": {
+          displayName: "OpenRouter fixture",
+          apiKey: "managed-fixture-key",
+          url: `http://127.0.0.1:${address.port}/v1`,
+          providerPreset: "openrouter",
+          model: "fixture-model",
+        },
+      },
+    });
+    const disk = JSON.parse(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8"));
+    const stored = disk.instances["api-openrouter-fixture"];
+    expect(stored.config.managedProviderPreset).toBe("openrouter");
+    expect(stored.config.provider).toBeUndefined();
+    expect(stored.environment[stored.config.apiKeyEnv]).toBe("managed-fixture-key");
+
+    const { bot } = await api("POST", "/api/bots", {
+      name: "Managed provider fixture",
+      modelSelection: { instanceId: "api-openrouter-fixture", model: "fixture-model" },
+    });
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Exercise the managed provider key." });
+    await sse.until((frame) => frame.kind === "message" && frame.threadId === bot.threadId
+      && frame.message?.role === "bot" && frame.message?.text === "managed fixture reply");
+
+    expect(receivedAuth).toContain("Bearer managed-fixture-key");
+    expect(receivedBodies).toHaveLength(1);
+    expect(receivedBodies[0]?.provider).toBeUndefined();
+    const publicState = JSON.stringify([await api("GET", "/api/instances"), await api("GET", "/api/config"), sse.frames]);
+    expect(publicState).not.toContain("managed-fixture-key");
+  } finally {
+    sse.close();
+    await fixture.close();
+    await new Promise<void>((resolve) => provider.close(() => resolve()));
+  }
+});
+
+it("rejects insecure remote URLs for managed provider connections", async () => {
+  const fixture = await launchVerificationServer();
+  try {
+    const response = await fetch(`${fixture.info.url}/api/config`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        providerConnections: {
+          "api-insecure-fixture": {
+            displayName: "Insecure fixture",
+            apiKey: "fixture-key",
+            url: "http://example.com/v1",
+            providerPreset: "custom-openai-compatible",
+          },
+        },
+      }),
+    });
+    expect(response.status).toBe(400);
+  } finally {
+    await fixture.close();
+  }
+});

@@ -28,8 +28,8 @@ interface Completion {
 
 interface CompletionJson {
   choices?: Array<{
-    message?: { content?: unknown; reasoning_content?: unknown };
-    delta?: { content?: unknown; reasoning_content?: unknown };
+    message?: { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown };
+    delta?: { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown };
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
@@ -69,6 +69,28 @@ const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
 
+function originOf(value: string): string {
+  return new URL(value).origin;
+}
+
+async function fetchSameOrigin(
+  input: string,
+  init: RequestInit & { headers: Record<string, string> },
+): Promise<Response> {
+  const initial = new URL(input);
+  const origin = originOf(input);
+  const first = await fetch(input, { ...init, redirect: "manual" });
+  if (first.status < 300 || first.status >= 400) return first;
+  const location = first.headers.get("location");
+  if (!location) throw new Error("provider returned a redirect without a location");
+  const next = new URL(location, input);
+  if (next.origin !== origin) throw new Error("provider redirect changed origin; request refused");
+  if (initial.protocol === "https:" && next.protocol !== "https:") {
+    throw new Error("provider redirect cannot downgrade an HTTPS API request to HTTP");
+  }
+  return fetch(next, { ...init, redirect: "manual" });
+}
+
 /** Shared runtime for the three providers that speak OpenAI chat completions. */
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
@@ -93,7 +115,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
   ): Promise<Completion> => {
-    // Idle timer that is renewed on every received chunk during streaming
+    // Idle timer that is renewed on every received chunk during streaming.
     const timeoutController = new AbortController();
     let idleTimer: NodeJS.Timeout | null = null;
     const resetIdleTimer = () => {
@@ -102,15 +124,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         timeoutController.abort(new DOMException("Streaming idle timeout elapsed", "AbortError"));
       }, options.timeoutMs);
     };
-
     resetIdleTimer();
-
     try {
       const activeSignal = signal
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
-
-      const response = await fetch(`${options.apiUrl}/chat/completions`, {
+      const response = await fetchSameOrigin(`${options.apiUrl}/chat/completions`, {
         method: "POST",
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify(options.requestBody(model, messages, stream)),
@@ -120,10 +139,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const body = await response.text().catch(() => "");
         throw new Error(`${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`);
       }
-
       if (!stream) {
         const json = await response.json() as CompletionJson;
         const message = json.choices?.[0]?.message;
+        if (Array.isArray(message?.tool_calls) && message.tool_calls.length > 0) {
+          throw new Error("provider returned tool calls, but this OpenAI-compatible driver does not support tool execution yet");
+        }
         return {
           text: typeof message?.content === "string" ? message.content : "",
           reasoning: options.reasoning && typeof message?.reasoning_content === "string"
@@ -132,7 +153,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           usage: usageFrom(json.usage),
         };
       }
-
       if (!response.body) {
         throw new Error(options.noBodyError ?? `${options.httpErrorLabel} returned no response body`);
       }
@@ -165,6 +185,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               continue;
             }
             const delta = chunk.choices?.[0]?.delta;
+            if (Array.isArray(delta?.tool_calls) && delta.tool_calls.length > 0) {
+              throw new Error("provider returned tool calls, but this OpenAI-compatible driver does not support tool execution yet");
+            }
             const reasoningDelta = options.reasoning && typeof delta?.reasoning_content === "string"
               ? delta.reasoning_content
               : "";
@@ -206,6 +229,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const abort = new AbortController();
     const messages = messagesFor(turn);
     const model = turn.model || options.models().default;
+    if (!model) throw new Error("no model is configured for this provider connection");
     active.set(turn.threadId, abort);
     appendNative(turn.threadId, {
       dir: "out",
@@ -318,6 +342,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     },
     generateText: async (prompt) => {
       const model = options.generateModel?.() ?? options.models().default;
+      if (!model) throw new Error("no model is configured for this provider connection");
       const { text, reasoning } = await complete([{ role: "user", content: prompt }], model, false);
       return text.trim() ? text : reasoning;
     },
