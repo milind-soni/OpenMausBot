@@ -11,7 +11,7 @@
 // and the card slide to the new control instead of dimming everything
 // again. Under reduced motion everything simply appears. With no anchor
 // the card sits centred over the dimmed window.
-import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
@@ -82,6 +82,19 @@ export function Spotlight({
 }) {
   const [rect, setRect] = useState<Rect | null>(null);
   const [settled, setSettled] = useState(false);
+  const primaryRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus the primary button for keyboard users — but never steal focus
+  // from an editor the user is already typing in (the composer, a rename
+  // field): the promise above is that they can keep working while the
+  // spotlight is up, and a stolen focus swallows their Enter.
+  useEffect(() => {
+    const current = document.activeElement;
+    const editing =
+      current instanceof HTMLElement &&
+      (current.tagName === "TEXTAREA" || current.tagName === "INPUT" || current.isContentEditable);
+    if (!editing) primaryRef.current?.focus();
+  }, []);
 
   // Follow the anchor: layout, scroll, resize, and the anchor's own size.
   // A new anchor that is not on screen yet (a menu still opening) keeps
@@ -133,7 +146,9 @@ export function Spotlight({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onDone();
+      // an Escape already claimed by an editor (closing a mention popup,
+      // cancelling dictation) must not also dismiss the tour
+      if (e.key === "Escape" && !e.defaultPrevented) onDone();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -249,7 +264,7 @@ export function Spotlight({
               {primary && (
                 <button
                   type="button"
-                  autoFocus
+                  ref={primaryRef}
                   onClick={primary.onClick}
                   className="rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white transition-transform duration-150 active:scale-[0.98]"
                 >
