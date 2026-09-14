@@ -11574,7 +11574,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const allowed = new Set(["title", "brief", "status", "ownerBotId", "approvalMode", "boardId"]);
+      const allowed = new Set(["title", "brief", "status", "ownerBotId", "approvalMode", "boardId", "day", "dueAt"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) {
         return json(res, 400, { error: "unsupported card setting" });
       }
@@ -11596,6 +11596,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         boardId: typeof body.boardId === "string" ? body.boardId : undefined,
         ownerBotId: body.ownerBotId ?? null,
         approvalMode: typeof body.approvalMode === "string" ? body.approvalMode : null,
+        // `undefined` means "no date given"; an explicit `null` means "no date
+        // wanted". Both end up absent on the card, which is the creation day.
+        day: typeof body.day === "number" ? body.day : undefined,
+        dueAt: typeof body.dueAt === "number" ? body.dueAt : undefined,
       });
       broadcast({ kind: "task-board" });
       return json(res, 201, { item });
@@ -11609,7 +11613,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const allowed = new Set(["title", "brief", "status", "order", "ownerBotId", "approvalMode", "artifacts"]);
+      const allowed = new Set(["title", "brief", "status", "order", "ownerBotId", "approvalMode", "artifacts", "day", "dueAt"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) {
         return json(res, 400, { error: "unsupported card setting" });
       }
@@ -11635,6 +11639,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ownerBotId: body.ownerBotId,
         approvalMode: body.approvalMode,
         artifacts: body.artifacts,
+        // The distinction the model needs: `undefined` is "not mentioned, keep
+        // what is there", `null` is "clear the date". Coercing a missing field
+        // to null here would clear both dates on every unrelated patch — which
+        // is exactly what a drag between columns is.
+        day: body.day === undefined ? undefined : (typeof body.day === "number" ? body.day : null),
+        dueAt: body.dueAt === undefined ? undefined : (typeof body.dueAt === "number" ? body.dueAt : null),
       });
       broadcast({ kind: "task-board" });
       return json(res, 200, { item });
