@@ -21,7 +21,9 @@ describe("readClaudeModelCatalog", () => {
   });
 
   it("lists ANTHROPIC_MODEL from the instance environment when settings are missing", () => {
-    const catalog = readClaudeModelCatalog({ HOME: join(tmpdir(), "omb-claude-missing-home"), ANTHROPIC_MODEL: "MiniMax-M3" });
+    const home = mkdtempSync(join(tmpdir(), "omb-claude-missing-home-"));
+    scratchDirs.push(home);
+    const catalog = readClaudeModelCatalog({ HOME: join(home, "missing"), ANTHROPIC_MODEL: "MiniMax-M3" });
     expect(catalog.options).toEqual([...STATIC_CLAUDE_MODELS.options, { id: "MiniMax-M3", label: "MiniMax-M3", custom: true }]);
   });
 
