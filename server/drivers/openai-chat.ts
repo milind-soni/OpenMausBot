@@ -47,7 +47,22 @@ interface CompletionJson {
     finish_reason?: string | null;
   }>;
   error?: unknown;
+  base_resp?: { status_code?: unknown; status_msg?: unknown };
   usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+/** The message of a JSON error body a provider returned with HTTP 200.
+ *  MiniMax reports auth, balance, and parameter failures as `base_resp`. */
+function providerError(json: CompletionJson): string | null {
+  if (typeof json.error === "string") return json.error;
+  const error = object(json.error);
+  if (error) return typeof error.message === "string" ? error.message : "unknown error";
+  const code = json.base_resp?.status_code;
+  if (typeof code === "number" && code !== 0) {
+    const msg = typeof json.base_resp?.status_msg === "string" ? json.base_resp.status_msg : "";
+    return `upstream error ${code}${msg ? `: ${msg}` : ""}`;
+  }
+  return null;
 }
 
 interface NativeLog {
@@ -150,7 +165,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       if (!stream || response.headers.get("content-type")?.includes("application/json")) {
         const json = await response.json() as CompletionJson;
-        if (json.error) throw new ChatProtocolError("provider returned a completion error");
+        const bodyError = providerError(json);
+        if (bodyError) throw new ChatProtocolError(`provider returned a completion error: ${bodyError.slice(0, 200)}`);
         const message = json.choices?.[0]?.message;
         if (!message || !object(message) || !["content", "reasoning_content", "reasoning", "reasoning_details", "tool_calls", "function_call"].some((key) => key in message)) {
           throw new ChatProtocolError("provider returned no completion message");
@@ -195,7 +211,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         readLoop: for (;;) {
           const { done, value } = await reader.read();
           if (done) {
-            if (buffer.trim() === "data: [DONE]") break;
+            buffer += decoder.decode();
+            // MiniMax's api.minimax.io/v1 closes the connection after the
+            // finish_reason chunk and never sends `[DONE]`.
+            if (buffer.trim() === "data: [DONE]" || finishReason) break;
+            if (!sawChoice) {
+              let body: CompletionJson | undefined;
+              try { body = JSON.parse(buffer) as CompletionJson; } catch { body = undefined; }
+              const bodyError = body ? providerError(body) : null;
+              if (bodyError) throw new ChatProtocolError(`provider returned a completion error: ${bodyError.slice(0, 200)}`);
+            }
             throw new ChatProtocolError("Stream ended before completion");
           }
           resetIdleTimer();
@@ -215,7 +240,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               malformedFrame = true;
               continue;
             }
-            if (chunk.error) throw new ChatProtocolError("provider returned a streaming completion error");
+            const chunkError = providerError(chunk);
+            if (chunkError) throw new ChatProtocolError(`provider returned a streaming completion error: ${chunkError.slice(0, 200)}`);
             const choice = chunk.choices?.find((row) => row.index === undefined || row.index === 0);
             const delta = choice?.delta;
             if (object(delta)) sawChoice = true;
