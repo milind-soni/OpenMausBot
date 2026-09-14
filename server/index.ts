@@ -322,7 +322,7 @@ import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
-import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunStatus, type RoutineRunTrigger } from "./routines.ts";
 import { WorkItems, isWorkStatus, type WorkItem, type WorkStatus } from "./work-items.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
@@ -11588,6 +11588,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.ownerBotId !== "string" || !store.bot(body.ownerBotId)) {
           return json(res, 400, { error: "no such bot to assign this card to" });
         }
+      }
+      // Creating is an owner action for the same reason editing is: a card
+      // carries a bot and a brief, and a paired device that could add one could
+      // hand work to any agent while the board told it it was read-only. The
+      // check sits with the other mutations' checks, after the body has been
+      // validated, so a malformed request is refused as malformed rather than
+      // as forbidden.
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can change the board" });
       }
       const item = workItems.create({
         title: body.title,

@@ -127,8 +127,11 @@ function DayLabelButton({
   onChange: (day: number) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The wrapper, not the popover, is the click-away boundary: it contains the
+  // trigger as well, so pressing the trigger dismisses instead of reopening.
+  const anchorRef = useRef<HTMLDivElement>(null);
   return (
-    <div className="relative shrink-0">
+    <div ref={anchorRef} className="relative shrink-0">
       <button
         type="button"
         onClick={() => setOpen((was) => !was)}
@@ -149,6 +152,7 @@ function DayLabelButton({
           counts={counts}
           onChange={onChange}
           onClose={() => setOpen(false)}
+          anchorRef={anchorRef}
         />
       )}
     </div>
@@ -167,12 +171,16 @@ function DayCalendarPopover({
   counts,
   onChange,
   onClose,
+  anchorRef,
 }: {
   value: number;
   now: number;
   counts: Map<number, number>;
   onChange: (day: number) => void;
   onClose: () => void;
+  /** The element that counts as "inside" for the outside-click test — the
+   * wrapper holding both this popover and the button that opens it. */
+  anchorRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const [month, setMonth] = useState(() => startOfMonth(value));
   const ref = useRef<HTMLDivElement>(null);
@@ -181,8 +189,13 @@ function DayCalendarPopover({
    * it except by choosing something is a trap. */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
+    // The boundary is the wrapper, not this popover. Measured against the
+    // popover alone, the "Day" button sits OUTSIDE it — so pressing the button
+    // closed the calendar on mousedown and its own onClick then reopened it,
+    // making the control impossible to dismiss with the button that opened it.
     const onDown = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) onClose();
+      const anchor = anchorRef.current;
+      if (anchor && !anchor.contains(event.target as Node)) onClose();
     };
     window.addEventListener("keydown", onKey);
     // `mousedown`, not `click`: a click that starts inside and ends outside
@@ -192,7 +205,7 @@ function DayCalendarPopover({
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousedown", onDown);
     };
-  }, [onClose]);
+  }, [onClose, anchorRef]);
 
   const today = startOfDay(now);
   const first = startOfMonth(month);
