@@ -772,12 +772,44 @@ function idempotentCreateInProgress(result: Awaited<ReturnType<typeof boxJson>>)
   return result.status === 409 && code === "idempotency_in_progress";
 }
 
-async function requestBoxCreate(cfg: AppConfig, botId: string, ttlSeconds: number): Promise<BoxCreateResult> {
-  // The bot's turns run ON this box, so the box receives the account's harness
-  // logins (the same ones the ascii.dev Agents page holds). The exact
-  // serialized body is also the idempotency identity: a trial-TTL retry must
-  // receive a different key.
-  const body = JSON.stringify({ ttlSeconds });
+/** The keys this OpenMausBot already holds, as the environment its bots'
+ * agents read on the box. The box is created with `noEnv: true`, so the
+ * ascii.dev account's own logins never land in the guest: the box has exactly
+ * these and nothing else (see "Whose keys" in the Box integrated-agents docs). */
+export function boxCredentialEnv(cfg: AppConfig, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const out: Record<string, string> = {};
+  const put = (name: string, value: string | undefined) => {
+    if (typeof value === "string" && value.trim()) out[name] = value.trim();
+  };
+  // The workspace key only: an ANTHROPIC_API_KEY in the server's own env is
+  // never the workspace key (see loadConfig), so it is not forwarded either.
+  put("ANTHROPIC_API_KEY", cfg.anthropic?.key);
+  for (const name of BOX_FORWARDED_CREDENTIAL_ENV) put(name, env[name]);
+  return out;
+}
+
+/** Names the box's agents read (Claude Code, Codex, pi, OpenCode, Prime
+ * Agent, Kimi), forwarded verbatim from this server's environment when set. */
+const BOX_FORWARDED_CREDENTIAL_ENV = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "OPENAI_API_KEY",
+  "OPENROUTER_API_KEY",
+  "LLMGATEWAY_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "MOONSHOT_API_KEY",
+  "KIMI_CODE_ACCESS_TOKEN",
+  "KIMI_CODE_REFRESH_TOKEN",
+] as const;
+
+async function requestBoxCreate(cfg: AppConfig, botId: string, ttlSeconds: number, env: Record<string, string>): Promise<BoxCreateResult> {
+  // The computer needs the user's desktop session, not the account owner's
+  // host credentials. Keep provider-side env injection off; the only keys the
+  // guest ever has are the ones this OpenMausBot forwards (`env`), which its
+  // agents need now that the turn runs on the box. The idempotency identity
+  // stays the secret-free part: a trial-TTL retry must receive a different
+  // key, and the journal on disk never carries a credential.
+  const body = JSON.stringify({ ttlSeconds, noEnv: true });
+  const wireBody = JSON.stringify({ ttlSeconds, noEnv: true, ...(Object.keys(env).length ? { env } : {}) });
   let attempt = beginBoxCreate(botId, body);
   let request = attempt.request;
   let createdThisAttempt = attempt.startedNow;
@@ -809,7 +841,7 @@ async function requestBoxCreate(cfg: AppConfig, botId: string, ttlSeconds: numbe
         method: "POST",
         headers: { "Idempotency-Key": request.idempotencyKey },
         signal: AbortSignal.timeout(45_000),
-        body,
+        body: wireBody,
       });
     } catch (error) {
       // A dropped response is ambiguous: ascii.dev may already have created
@@ -839,11 +871,11 @@ async function requestBoxCreate(cfg: AppConfig, botId: string, ttlSeconds: numbe
   }
 }
 
-async function createBox(cfg: AppConfig, botId: string) {
-  const first = await requestBoxCreate(cfg, botId, DEFAULT_BOX_TTL_SECONDS);
+async function createBox(cfg: AppConfig, botId: string, env: Record<string, string>) {
+  const first = await requestBoxCreate(cfg, botId, DEFAULT_BOX_TTL_SECONDS, env);
   if (first.ok) return first;
   const trialTtl = trialBoxTtlSeconds(first.body);
-  return trialTtl === null ? first : requestBoxCreate(cfg, botId, trialTtl);
+  return trialTtl === null ? first : requestBoxCreate(cfg, botId, trialTtl, env);
 }
 
 /** Box state for the Computer panel. */
@@ -862,6 +894,7 @@ export async function boxStatus(cfg: AppConfig, botId: string) {
  * desktop URL. The box ships its own computer-use driver and agent runner.
  */
 export async function provisionBox(cfg: AppConfig, botId: string, _botName: string) {
+  const credentialEnv = boxCredentialEnv(cfg);
   cfg = snapshotBoxConfig(cfg);
   if (!boxConfigured(cfg)) {
     throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
@@ -875,7 +908,7 @@ export async function provisionBox(cfg: AppConfig, botId: string, _botName: stri
       // Provider-side backstop: archives itself (billing pauses, disk
       // survives) if every stop path dies. Trial accounts get one narrower
       // retry when ascii.dev reports their shorter TTL ceiling.
-      const createRes = await createBox(cfg, botId);
+      const createRes = await createBox(cfg, botId, credentialEnv);
       if (!createRes.ok || !createRes.body?.box?.id) {
         throw new Error(boxErrorMessage(createRes.status, "box create", createRes.body));
       }

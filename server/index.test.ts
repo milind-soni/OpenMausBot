@@ -2269,7 +2269,7 @@ describe("harness HTTP API", () => {
       expect(failed.body.error).toMatch(/fixture refused create/);
       expect(await record()).toMatchObject({ id: requestId, name: "Build machine", section: null, problem: expect.stringMatching(/fixture refused create/) });
       expect(managedBoxCreateBodies).toHaveLength(1);
-      expect(managedBoxCreateBodies[0]).not.toHaveProperty("noEnv");
+      expect(managedBoxCreateBodies[0]).toMatchObject({ noEnv: true });
       const persisted = JSON.parse(readFileSync(join(home, ".openmausbot", "team-computers.json"), "utf8"));
       expect(persisted.computers).toContainEqual(expect.objectContaining({ id: requestId, name: "Build machine", section: null }));
       expect((await api("POST", "/api/team-computers", { requestId, name: "Different machine", acknowledgeCost: true })).status).toBe(409);
