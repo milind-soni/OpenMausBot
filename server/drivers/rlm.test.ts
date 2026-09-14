@@ -112,4 +112,57 @@ describe("VisionDriver rlm routing", () => {
     recorder.stop();
     await inst.dispose();
   });
+
+  it("closes a harness turn's tool toolbox — the RLM loop consumes no tools, so the mounted MCP servers must not leak", async () => {
+    stubUpstream({ "*": ['final("done")'] });
+    const inst = await makeInstance("rlm:auto");
+    const recorder = recordEvents(inst.adapter);
+    // startTurn only hands over a toolbox when the adapter claims apiToolLoop
+    // (true here through the Vision runtime inheritance) — assert the claim
+    // the ownership contract rests on, then prove the close.
+    expect(inst.adapter.capabilities.apiToolLoop).toBe(true);
+    let closed = 0;
+    const tools = {
+      list: [{ name: "computer_screenshot", execute: async () => ({ isError: false, text: "", images: [] }) }],
+      close: async () => {
+        closed++;
+      },
+    };
+
+    await inst.adapter.sendTurn({ threadId: "t4", text: "go", model: "rlm:auto", tools });
+    const completed = await recorder.until((e) => e.type === "turn.completed");
+
+    expect(completed).toMatchObject({ ok: true });
+    // The harness path closes the toolbox synchronously on entry; either way,
+    // exactly one close per turn and no dangling servers afterwards.
+    expect(closed).toBe(1);
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("delegates a toolbox untouched on non-rlm models — exactly one close, by the base runtime", async () => {
+    stubUpstream({ "*": ["plain reply"] });
+    const inst = await makeInstance("rlm:auto");
+    const recorder = recordEvents(inst.adapter);
+    let closed = 0;
+    const tools = {
+      list: [],
+      close: async () => {
+        closed++;
+      },
+    };
+
+    await inst.adapter.sendTurn({ threadId: "t5", text: "hello", model: "freellm/fast", tools });
+    const completed = await recorder.until((e) => e.type === "turn.completed");
+    expect(completed).toMatchObject({ ok: true });
+    // The wrapper must pass the turn through without closing: the shared
+    // runtime's finally owns the close. Poll so the base's async finally has
+    // landed — one close proves the toolbox traveled intact (a wrapper close
+    // on entry would make this two).
+    await expect
+      .poll(() => closed, { timeout: 2_000, message: "the base runtime never closed the delegated toolbox" })
+      .toBe(1);
+    recorder.stop();
+    await inst.dispose();
+  });
 });

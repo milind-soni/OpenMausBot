@@ -39,7 +39,7 @@ describe("local computer routing", () => {
     ).toBe(true);
   });
 
-  it("never mounts the local desktop for explicit cloud/off or on an unsupported host", () => {
+  it("explicit cloud/off never mounts; explicit local mounts on every desktop platform; auto stays macOS-only", () => {
     for (const requested of ["cloud", "off"] as const) {
       expect(
         shouldMountLocalComputer({
@@ -49,9 +49,28 @@ describe("local computer routing", () => {
         }),
       ).toBe(false);
     }
+    // Explicit "This computer" is opt-in on every platform the bundled
+    // cua-driver serves — including Windows now that the driver ships.
+    for (const hostPlatform of ["darwin", "linux", "win32"] as const) {
+      expect(
+        shouldMountLocalComputer({
+          requested: "local",
+          hostPlatform,
+          providerSupportsLocal: true,
+        }),
+      ).toBe(true);
+    }
+    // Auto remains conservative: quiet host reachability is macOS-only.
     expect(
       shouldMountLocalComputer({
-        requested: "local",
+        requested: undefined,
+        hostPlatform: "darwin",
+        providerSupportsLocal: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldMountLocalComputer({
+        requested: undefined,
         hostPlatform: "win32",
         providerSupportsLocal: true,
       }),

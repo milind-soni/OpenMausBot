@@ -186,9 +186,30 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // becomes onEvent(listener) → unsubscribe; sessions start implicitly on
 // the first turn (the agentcal per-turn-process model) with resumeCursor
 // carrying the provider-native continuation (e.g. a claude session id).
+/** One tool the harness has mounted for this turn, ready to execute.
+ * Built from the same MCP servers CLI engines mount natively; API engines
+ * call execute() and get the result normalized for the model. */
+export interface RuntimeTool {
+  name: string;
+  description?: string;
+  /** JSON Schema for the arguments object, as the MCP server advertises. */
+  parameters?: unknown;
+  execute(args: Record<string, unknown> | undefined): Promise<{
+    isError: boolean;
+    text: string;
+    images: Array<{ data: string; mimeType: string }>;
+  }>;
+}
+
 export interface SendTurnInput {
   threadId: ThreadId;
   text: string;
+  /** Harness-mounted tools for API-driven engines. CLI engines mount
+   * `integrations.*` MCP servers natively; API engines (no CLI process)
+   * receive ready-to-call tool executors instead and drive them through an
+   * OpenAI-compatible tool loop. Present only when a surface was actually
+   * mounted for this turn; the runtime owns closing the toolbox. */
+  tools?: { list: RuntimeTool[]; close(): Promise<void> };
   /** Per-bot approval policy, reasserted by providers on every turn so a
    * resumed native session cannot retain a stale, more permissive mode. */
   approvalMode?: ApprovalMode;
@@ -319,6 +340,11 @@ export interface ProviderAdapter {
      * MCP servers from config). Same rule as composioMcp: an entry in the
      * config says the servers exist, not that this engine can reach them. */
     customMcp?: boolean;
+    /** True when sendTurn consumes `tools` (the harness-built tool executors
+     * for API-driven engines) and runs the OpenAI-compatible tool loop.
+     * computerMcp/browserMcp may be advertised only together with this on
+     * API drivers: the flags promise tools the turn can actually call. */
+    apiToolLoop?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;

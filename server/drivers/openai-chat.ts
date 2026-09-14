@@ -11,8 +11,12 @@ import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 
 export interface OpenAIChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  /** Present on assistant messages that request tool calls (tool loop). */
+  tool_calls?: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }>;
+  /** Present on role:"tool" messages answering one tool_call_id. */
+  tool_call_id?: string;
 }
 
 interface Usage {
@@ -24,11 +28,12 @@ interface Completion {
   text: string;
   reasoning: string;
   usage: Usage | null;
+  toolCalls: Array<{ id: string; name: string; arguments: string }>;
 }
 
 interface CompletionJson {
   choices?: Array<{
-    message?: { content?: unknown; reasoning_content?: unknown };
+    message?: AssistantMessageJson;
     delta?: { content?: unknown; reasoning_content?: unknown };
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
@@ -59,12 +64,45 @@ interface RuntimeOptions<Config> {
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
   retryScale?: number;
+  /** Capabilities this driver instance can honor. `apiToolLoop` must be
+   * true for any tool surface (computer/browser/…) to be advertised: the
+   * flags promise only what sendTurn can actually execute. */
+  capabilities?: {
+    apiToolLoop?: boolean;
+    computerMcp?: boolean;
+    browserMcp?: boolean;
+    localComputerMcp?: boolean;
+    phoneMcp?: boolean;
+    agentsMcp?: boolean;
+    composioMcp?: boolean;
+    images?: boolean;
+  };
 }
 
 const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
   usage
     ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
     : null;
+
+/** Normalize an assistant message's tool_calls (non-streaming responses only;
+ * tool loops on streaming endpoints buffer to a decision first). */
+interface AssistantToolCallJson {
+  id?: unknown;
+  function?: { name?: unknown; arguments?: unknown };
+}
+interface AssistantMessageJson {
+  content?: unknown;
+  reasoning_content?: unknown;
+  tool_calls?: AssistantToolCallJson[];
+}
+const toolCallsFrom = (message: AssistantMessageJson | undefined): Completion["toolCalls"] =>
+  (Array.isArray(message?.tool_calls) ? message!.tool_calls : [])
+    .map((call, index) => ({
+      id: typeof call?.id === "string" && call.id ? call.id : `call_${index}`,
+      name: typeof call?.function?.name === "string" ? call.function.name : "",
+      arguments: typeof call?.function?.arguments === "string" ? call.function.arguments : "{}",
+    }))
+    .filter((call) => call.name);
 
 const asError = (value: unknown): Error =>
   value instanceof Error ? value : new Error(String(value));
@@ -114,6 +152,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           ? message.reasoning_content
           : "",
         usage: usageFrom(json.usage),
+        toolCalls: toolCallsFrom(message),
       };
     }
 
@@ -163,7 +202,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     } finally {
       await reader.cancel().catch(() => {});
     }
-    return { text, reasoning, usage };
+    return { text, reasoning, usage, toolCalls: [] };
   };
 
   const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => [
@@ -195,72 +234,163 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     void (async () => {
       let attempt = 0;
       let streamedText = false;
-      for (;;) {
-        try {
-          const completion = await complete(messages, model, true, abort.signal, (delta, streamKind) => {
-            if (streamKind === "assistant_text") streamedText = true;
-            emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta });
-          });
-          appendNative(turn.threadId, {
-            dir: "in",
-            source: options.nativeLog.source,
-            msg: options.nativeLog.incoming(completion),
-          });
-          const reply = completion.text.trim() ? completion.text : completion.reasoning;
-          if (reply.trim()) {
-            emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: reply });
-          }
-          if (completion.usage) {
-            emit({ ...base(turn.threadId, turnId), type: "thread.token-usage.updated", ...completion.usage });
-          }
-          active.delete(turn.threadId);
-          const completed: RuntimeEvent = {
-            ...base(turn.threadId, turnId),
-            type: "turn.completed",
-            ok: true,
-            stopReason: null,
-            cost: null,
-          };
-          emit(options.includeUsageInCompleted && completion.usage
-            ? { ...completed, usage: completion.usage }
-            : completed);
-          return;
-        } catch (value) {
-          const error = asError(value);
-          const aborted = error.name === "AbortError";
-          const verdict = classifyError(error);
-          if (
-            options.retryScale !== undefined &&
-            !aborted &&
-            !streamedText &&
-            verdict.transient &&
-            attempt < RETRY_MAX_ATTEMPTS - 1
-          ) {
-            const delayMs = computeBackoff(attempt++);
+      // Harness-mounted tools for API engines (computer, browser, …). The
+      // loop below is the ONLY consumer; whatever happens, the toolbox is
+      // closed exactly once, after the last model round-trip.
+      const toolbox = turn.tools;
+      try {
+        for (;;) {
+          try {
+            const completion = await complete(messages, model, true, abort.signal, (delta, streamKind) => {
+              if (streamKind === "assistant_text") streamedText = true;
+              emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta });
+            });
+            appendNative(turn.threadId, {
+              dir: "in",
+              source: options.nativeLog.source,
+              msg: options.nativeLog.incoming(completion),
+            });
+
+            // ── the tool loop ────────────────────────────────────
+            // The model asked for a tool instead of answering: execute every
+            // requested call through the harness executors, feed the results
+            // back as tool messages, and take another model round-trip. The
+            // reply is only final when the model answers without tool_calls.
+            if (toolbox && completion.toolCalls.length > 0) {
+              // Emit the assistant's visible text (often narration before
+              // the calls) so it lands in the transcript once, not per round.
+              if (completion.text.trim()) {
+                emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: completion.text.trim() });
+              }
+              messages.push({
+                role: "assistant",
+                content: completion.text || null,
+                ...(completion.toolCalls.length > 0
+                  ? {
+                      tool_calls: completion.toolCalls.map((call) => ({
+                        id: call.id,
+                        type: "function" as const,
+                        function: { name: call.name, arguments: call.arguments },
+                      })),
+                    }
+                  : {}),
+              });
+              for (const call of completion.toolCalls) {
+                const tool = toolbox.list.find((candidate) => candidate.name === call.name);
+                const toolEvent = base(turn.threadId, turnId);
+                if (!tool) {
+                  emit({ ...toolEvent, type: "item.completed", itemType: "assistant_text", text: `Tool "${call.name}" is not available on this turn.` });
+                  messages.push({ role: "tool", content: `Error: unknown tool "${call.name}".`, tool_call_id: call.id });
+                  continue;
+                }
+                let args: Record<string, unknown> = {};
+                try {
+                  const parsed: unknown = JSON.parse(call.arguments || "{}");
+                  if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) args = parsed as Record<string, unknown>;
+                } catch {
+                  // Malformed arguments reach the tool as empty and the model
+                  // sees the tool's own complaint, keeping the loop convergent.
+                }
+                emit({
+                  ...toolEvent,
+                  type: "item.started",
+                  itemType: "tool",
+                  title: call.name,
+                  summary: call.name,
+                });
+                let result: { isError: boolean; text: string; images: Array<{ data: string; mimeType: string }> };
+                try {
+                  result = await tool.execute(args);
+                } catch (error) {
+                  result = { isError: true, text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`, images: [] };
+                }
+                if (result.text || result.images.length === 0) {
+                  messages.push({
+                    role: "tool",
+                    content: result.text || (result.isError ? "Error: the tool failed." : "Done."),
+                    tool_call_id: call.id,
+                  });
+                }
+                if (result.images.length > 0) {
+                  // Vision-capable models read screenshots as image parts on
+                  // a FOLLOWING user message — the OpenAI wire has no image
+                  // content on role:"tool". The labeled user message keeps
+                  // the turn round-trippable on every OpenAI-compatible
+                  // endpoint and the association unambiguous.
+                  messages.push({
+                    role: "user",
+                    content: [
+                      { type: "text", text: `Screenshot captured by ${call.name}:` },
+                      ...result.images.map((image) => ({
+                        type: "image_url",
+                        image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+                      })),
+                    ] as unknown as string,
+                  });
+                }
+                emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "tool", ok: !result.isError });
+              }
+              continue; // another model round-trip with the results in thread
+            }
+
+            const reply = completion.text.trim() ? completion.text : completion.reasoning;
+            if (reply.trim()) {
+              emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "assistant_text", text: reply });
+            }
+            if (completion.usage) {
+              emit({ ...base(turn.threadId, turnId), type: "thread.token-usage.updated", ...completion.usage });
+            }
+            active.delete(turn.threadId);
+            const completed: RuntimeEvent = {
+              ...base(turn.threadId, turnId),
+              type: "turn.completed",
+              ok: true,
+              stopReason: null,
+              cost: null,
+            };
+            emit(options.includeUsageInCompleted && completion.usage
+              ? { ...completed, usage: completion.usage }
+              : completed);
+            return;
+          } catch (value) {
+            const error = asError(value);
+            const aborted = error.name === "AbortError";
+            const verdict = classifyError(error);
+            if (
+              options.retryScale !== undefined &&
+              !aborted &&
+              !streamedText &&
+              verdict.transient &&
+              attempt < RETRY_MAX_ATTEMPTS - 1
+            ) {
+              const delayMs = computeBackoff(attempt++);
+              emit({
+                ...base(turn.threadId, turnId),
+                type: "turn.retrying",
+                attempt,
+                delayMs,
+                reason: verdict.reason,
+              });
+              const outcome = await interruptibleDelay(delayMs * options.retryScale, abort.signal).promise;
+              if (outcome === "elapsed" && !abort.signal.aborted) continue;
+              active.delete(turn.threadId);
+              emit({ ...base(turn.threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
+              return;
+            }
+            active.delete(turn.threadId);
+            if (!aborted) emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: error.message });
             emit({
               ...base(turn.threadId, turnId),
-              type: "turn.retrying",
-              attempt,
-              delayMs,
-              reason: verdict.reason,
+              type: "turn.completed",
+              ok: false,
+              stopReason: aborted ? "interrupted" : "error",
+              cost: null,
             });
-            const outcome = await interruptibleDelay(delayMs * options.retryScale, abort.signal).promise;
-            if (outcome === "elapsed" && !abort.signal.aborted) continue;
-            active.delete(turn.threadId);
-            emit({ ...base(turn.threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
             return;
           }
-          active.delete(turn.threadId);
-          if (!aborted) emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: error.message });
-          emit({
-            ...base(turn.threadId, turnId),
-            type: "turn.completed",
-            ok: false,
-            stopReason: aborted ? "interrupted" : "error",
-            cost: null,
-          });
-          return;
         }
+      } finally {
+        if (toolbox) await toolbox.close().catch(() => {});
       }
     })();
     return { turnId };
@@ -280,7 +410,21 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : { state: "unavailable", reason: options.unavailableReason },
     adapter: {
       provider: options.driverKind,
-      capabilities: { sessionModelSwitch: "in-session" },
+      capabilities: {
+        sessionModelSwitch: "in-session" as const,
+        ...(options.capabilities?.apiToolLoop
+          ? {
+              apiToolLoop: true,
+              ...(options.capabilities.computerMcp ? { computerMcp: true } : {}),
+              ...(options.capabilities.browserMcp ? { browserMcp: true } : {}),
+              ...(options.capabilities.localComputerMcp ? { localComputerMcp: true } : {}),
+              ...(options.capabilities.phoneMcp ? { phoneMcp: true } : {}),
+              ...(options.capabilities.agentsMcp ? { agentsMcp: true } : {}),
+              ...(options.capabilities.composioMcp ? { composioMcp: true } : {}),
+            }
+          : {}),
+        ...(options.capabilities?.images ? { images: true } : {}),
+      },
       sendTurn,
       interruptTurn: async (threadId) => active.get(threadId)?.abort(),
       respondToRequest: async () => "unavailable" as const,

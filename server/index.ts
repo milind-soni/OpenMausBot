@@ -145,6 +145,7 @@ import {
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
+  type TurnStartResult,
   newId,
 } from "./contracts.ts";
 import { RETRY_MAX_ATTEMPTS } from "./drivers/retry.ts";
@@ -299,6 +300,7 @@ import {
   type JournalEntry,
 } from "./self-modify.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
+import { buildApiToolbox } from "./api-toolbox.ts";
 import { expandSetupTurnText, setupModeActive, setupSystemPrompt } from "./setup-mode.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
@@ -4865,8 +4867,11 @@ async function startTurn(
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
       if (wants === "vm") {
-        if (!mountsComputerMcp || instance.driverKind === "boxAgent") {
-          throw new Error("this model engine cannot use the Local VM — choose Claude or an ACP engine, or select another computer destination");
+        // computerMcp is advertised by CLI drivers that mount the MCP server
+        // themselves AND by API drivers with the harness tool loop (the
+        // toolbox below executes the same container MCP server for them).
+        if ((!mountsComputerMcp && instance.adapter.capabilities.apiToolLoop !== true) || instance.driverKind === "boxAgent") {
+          throw new Error("this model engine cannot use the Local VM — choose Claude, an ACP engine, or an API engine with the tool loop, or select another computer destination");
         }
         const localVmTarget = localVmTargetForBot(bot.id);
         bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
@@ -4910,12 +4915,14 @@ async function startTurn(
           return containerComputerFrame(undefined, undefined, localVmTarget);
         };
       } else if (wants === "local") {
+        const apiToolLoopLocal = instance.adapter.capabilities.apiToolLoop === true &&
+          instance.adapter.capabilities.localComputerMcp === true;
         if (!shouldMountLocalComputer({
           requested: "local",
           hostPlatform: process.platform,
           providerSupportsLocal: mountsLocalComputer,
-        })) {
-          throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+        }) && !apiToolLoopLocal) {
+          throw new Error("this model engine cannot control this computer — choose Claude, an ACP engine, or an API engine with the tool loop, or select another destination");
         }
         const cua = readCuaConnection();
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
@@ -5138,6 +5145,24 @@ async function startTurn(
           browserCapture = () => browserRuntime.withAgentAction(session, () => agentBrowserFrame(frame));
         }
       }
+      // API-driven engines have no agent process to mount MCP servers — the
+      // harness is the host instead. When this turn mounted tool surfaces
+      // (computer/browser/phone/custom), spawn their MCP servers now and hand
+      // the shared runtime a ready-to-call toolbox; the runtime closes it when
+      // the turn settles. CLI engines keep their native mounting and receive
+      // `tools` never — their capabilities don't claim apiToolLoop.
+      // Built AFTER the browser mount above: buildApiToolbox snapshots
+      // `integrations`, so a browser mounted after the build would silently
+      // contribute no tools to this turn.
+      let turnToolbox: Awaited<ReturnType<typeof buildApiToolbox>> | null = null;
+      if (instance.adapter.capabilities.apiToolLoop === true) {
+        turnToolbox = await buildApiToolbox(integrations as Parameters<typeof buildApiToolbox>[0]);
+        if (turnToolbox.toolListProblems.length > 0) {
+          for (const problem of turnToolbox.toolListProblems) {
+            console.warn(`api-tools: ${problem}`);
+          }
+        }
+      }
       // A cancelled adapter can be between accepting sendTurn and revealing
       // its provider turn id. Never overlap a replacement with that ambiguous
       // pre-id window: wait for the old handshake to settle or for its bounded
@@ -5184,30 +5209,48 @@ async function startTurn(
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: mentionPrompt(tagged) },
       ]);
-      const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
-        threadId,
-        text: turnText,
-        images: turnImages,
-        approvalMode: approvalModeForTurn(bot, commsDepth > 0),
-        model,
-        effort,
-        // a rewound thread never resumes the abandoned branch's session
-        // the active task's own session — another task's cursor would
-        // resume the wrong conversation and defeat the context bubble
-        resumeCursor,
-        ...(recoveryText !== undefined ? { recoveryText } : {}),
-        transcript,
-        system: prompt.text,
-        systemStable: prompt.stable,
-        systemVolatile: prompt.volatile,
-        integrations,
-        cwd,
-      }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
-        await instance.adapter.interruptTurn(threadId).catch(() => {});
-      });
+      let dispatch: { value: TurnStartResult; cancelled: boolean };
+      try {
+        dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
+          threadId,
+          text: turnText,
+          images: turnImages,
+          ...(turnToolbox && turnToolbox.tools.length > 0 ? { tools: { list: turnToolbox.tools, close: turnToolbox.close } } : {}),
+          approvalMode: approvalModeForTurn(bot, commsDepth > 0),
+          model,
+          effort,
+          // a rewound thread never resumes the abandoned branch's session
+          // the active task's own session — another task's cursor would
+          // resume the wrong conversation and defeat the context bubble
+          resumeCursor,
+          ...(recoveryText !== undefined ? { recoveryText } : {}),
+          transcript,
+          system: prompt.text,
+          systemStable: prompt.stable,
+          systemVolatile: prompt.volatile,
+          integrations,
+          cwd,
+        }), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+          await instance.adapter.interruptTurn(threadId).catch(() => {});
+        });
+      } catch (error) {
+        // sendTurn refused synchronously (already-running turn, missing key):
+        // the toolbox was never accepted, so its spawned servers are ours to
+        // close before the error propagates.
+        if (turnToolbox) await turnToolbox.close().catch(() => {});
+        throw error;
+      }
       if (dispatch.cancelled) {
         retireProviderTurn(dispatch.value.turnId);
         throw new DirectTurnSetupCancelled("turn stopped during provider setup");
+      }
+      // Ownership moved: sendTurn accepted the toolbox (the runtime's finally
+      // closes it), unless it was dropped because the turn mounted no tools —
+      // then close it here instead of leaking the spawned servers.
+      if (turnToolbox && turnToolbox.tools.length > 0) turnToolbox = null;
+      else if (turnToolbox) {
+        await turnToolbox.close().catch(() => {});
+        turnToolbox = null;
       }
       bindInternalCapabilityToProviderTurn(threadId, dispatchClaimId, dispatch.value.turnId);
       if (directFollowupSettlers.has(dispatchClaimId) && dispatch.value.turnId &&

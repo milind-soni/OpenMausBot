@@ -123,6 +123,14 @@ export function createRlmRouteInstance(input: RlmRouteInput, inherit: ProviderIn
     // model) falls back to the route's default root.
     const rootModel = turn.model && turn.model.length > "rlm:".length ? turn.model.slice("rlm:".length) : input.model;
 
+    // Ownership edge: this wrapper inherits apiToolLoop from the Vision
+    // runtime it wraps, so startTurn hands it a tool toolbox for harness
+    // turns too — but the RLM loop is pure text reasoning over its sandbox
+    // and has no tool consumer yet. Closing immediately keeps the mounted
+    // MCP servers from leaking past the turn; a future harness-tool
+    // integration is where this becomes a pass-through instead of a close.
+    void turn.tools?.close().catch(() => {});
+
     const turnId = newId();
     const abort = new AbortController();
     active.set(turn.threadId, abort);
