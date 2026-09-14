@@ -184,6 +184,23 @@ describe("local computer UI eligibility", () => {
     })).toBe("ensure-box");
   });
 
+  it("watches instead of provisioning while a turn owns the box", () => {
+    const cloud = { computer: "cloud" as const, configured: true, canUseCloud: true, autoLocal: true, busy: true };
+    // a ready box is shown as it is — its frames already stream in mid-turn
+    for (const boxState of ["ready", "idle", "running"]) {
+      expect(resolveBoxPanelAction({ ...cloud, boxState })).toBe("attach-ready-box");
+    }
+    // anything else is the turn's to create or wake; the panel waits
+    for (const boxState of ["archived", "stopped", "provisioning", null]) {
+      expect(resolveBoxPanelAction({ ...cloud, boxState })).toBe("busy-box");
+    }
+    // busy never unlocks the cloud when it is not available
+    expect(resolveBoxPanelAction({ ...cloud, boxState: "ready", canUseCloud: false })).toBe("auto-unavailable");
+    // and Auto stays observation-only regardless of busy
+    expect(resolveBoxPanelAction({ ...cloud, computer: undefined, boxState: "ready" })).toBe("show-ready-box");
+    expect(resolveBoxPanelAction({ ...cloud, computer: undefined, boxState: null, autoLocal: false })).toBe("auto-unavailable");
+  });
+
   it("never gives the box-native engine a passive Auto creation exception", () => {
     // Engine kind intentionally is not an input: every engine follows the
     // same read-only Auto rule, including boxAgent.

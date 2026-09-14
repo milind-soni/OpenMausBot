@@ -7917,6 +7917,7 @@
       "computer.confirm.replaceVps": "77272e145a020a938681f1d35268acc88f0c4b781580849709fe3ff4720b995e",
       "computer.phase.checking": "ec963ffc911b840134fc738b41a8bb0493489c402a4a761efd36c16dea7d984b",
       "computer.phase.starting": "46fc9db7c74e213a1baa3e4a9ee9ba156c0e76219306a80c67e39750e6ab8e9e",
+      "computer.phase.busyBox": "303dca2ae69ef3c9a3f23da72611dbd15028741ce6f7261842d58e3db13f076d",
       "computer.phase.unconfigured": "a1642ac2a1ba78ad608e988c41b410c50c4a534f094d25bfa0aee0e794f95635",
       "computer.phase.autoUnavailable": "d90a1fd7add5248565858ecdc816692fdd09c0aa6034f9f22d8f65d0623a56dd",
       "computer.phase.showReadyBox": "27bc7f265f8ad9fd8dc73f7c5687f62631005f8820c540b4d1702239a4923d51",

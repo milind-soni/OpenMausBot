@@ -34,7 +34,7 @@ import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
-import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
+import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
@@ -53,6 +53,7 @@ import {
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
+  isReadyBoxState,
   resolveBoxPanelAction,
   shouldPollCloudPreview,
 } from "@/lib/local-computer";
@@ -96,6 +97,7 @@ type Phase =
   | "checking"
   | "unconfigured"
   | "starting"
+  | "busy-box"
   | "ready"
   | "vm"
   | "vm-unavailable"
@@ -381,6 +383,7 @@ export function ComputerPanel({
     // or churn preview state while reading routine history.
     if (panelView !== "computer") return;
     let alive = true;
+    let boxRetryTimer: number | undefined;
     setResolvedComputerSelection(null);
     setTeamComputer(null);
     setPhase("checking");
@@ -576,6 +579,7 @@ export function ComputerPanel({
           canUseCloud: cloudSupported,
           autoLocal,
           teamComputer: typeof status.teamComputer?.id === "string" && typeof status.teamComputer?.name === "string",
+          busy: bot.busy,
         });
         setResolvedComputerSelection({
           botId: bot.id,
@@ -588,6 +592,14 @@ export function ComputerPanel({
           setBoxState(typeof status.box?.state === "string" ? status.box.state : status.configured ? "missing" : "unavailable");
           setError(typeof status.problem === "string" ? status.problem : null);
           setPhase("team-box");
+          return;
+        }
+        if (action === "attach-ready-box") {
+          // The turn owns a ready box; provisioning would be refused (409)
+          // and is not needed. Going straight to ready lets the turn's live
+          // frames and the screenshot poll show what the bot is doing.
+          setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
+          setPhase("ready");
           return;
         }
         if (action !== "ensure-box") {
@@ -611,17 +623,35 @@ export function ComputerPanel({
       })
       .catch((e) => {
         if (!alive) return;
+        // A turn that started while provision was in flight: not a fault,
+        // the panel waits for the turn (bot.busy re-runs this effect).
+        if (isActiveTurnRefusal(e)) {
+          setPhase("busy-box");
+          return;
+        }
+        // The panel's own screenshot poll holds this box's lifecycle claim
+        // while it captures, so a provision landing mid-capture is refused
+        // with a *different* 409. It is a wait too: re-resolve shortly
+        // instead of showing the fault this panel exists to stop showing.
+        if (isRemoteScreenshotContention({ status: Number((e as { status?: unknown })?.status ?? 0), message: String(e?.message ?? "") })) {
+          setError(null);
+          setPhase("checking");
+          boxRetryTimer = window.setTimeout(() => setRetry((n) => n + 1), 2000);
+          return;
+        }
         setError(e.message);
         setPhase("error");
       });
     return () => {
       alive = false;
+      if (boxRetryTimer !== undefined) window.clearTimeout(boxRetryTimer);
     };
   }, [
     bot.id,
     bot.computer,
     bot.section,
     bot.autoStartVps,
+    bot.busy,
     cloudBackend,
     retry,
     capabilitiesReady,
@@ -636,6 +666,31 @@ export function ComputerPanel({
     panelView,
     computerSelectionPersisted,
   ]);
+
+  // busy-box waits for the turn's own provisioning. Nothing else re-runs the
+  // resolve effect until the turn ends, so watch the box ourselves and attach
+  // as soon as it is ready — the screen should appear mid-turn, not after.
+  useEffect(() => {
+    if (phase !== "busy-box") return;
+    let alive = true;
+    const check = () => {
+      api(`/api/bots/${bot.id}/computer`)
+        .then((status) => {
+          if (!alive) return;
+          const state = typeof status.box?.state === "string" ? status.box.state : null;
+          if (isReadyBoxState(state)) {
+            setBoxState(state);
+            setPhase("ready");
+          }
+        })
+        .catch(() => { /* the next tick tries again */ });
+    };
+    const timer = window.setInterval(check, 5_000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [phase, bot.id]);
 
   // Only frames received during this connection may replace its preview.
   // A cached SSE frame must never mask every subsequent screenshot poll.
@@ -1015,6 +1070,7 @@ export function ComputerPanel({
   const emptyState = {
     checking: t("computer.phase.checking"),
     starting: t("computer.phase.starting"),
+    "busy-box": t("computer.phase.busyBox"),
     unconfigured: t("computer.phase.unconfigured"),
     "auto-unavailable": t("computer.phase.autoUnavailable"),
     "team-box": "This bot uses a shared team computer. Open Team map to view or manage it.",
@@ -1198,7 +1254,7 @@ export function ComputerPanel({
             />
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
-              {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux) ? (
+              {phase === "checking" || phase === "starting" || phase === "busy-box" || phase === "vm" || (phase === "local" && !isLinux) ? (
                 <Loader2 size={18} className="animate-spin" />
               ) : phase === "off" ? (
                 <Power size={22} />
@@ -1470,7 +1526,8 @@ export function ComputerPanel({
             {(cloudBackend === "vps" || boxState !== "archived") && (
               <button
                 onClick={() => run("sleep")}
-                disabled={pending === "sleep"}
+                // the server refuses sleep while a turn owns the box (409)
+                disabled={pending === "sleep" || bot.busy}
                 className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
                 title={t("computer.sleepTitle")}
               >

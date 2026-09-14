@@ -1021,17 +1021,65 @@ export async function execOnBox(cfg: AppConfig, botId: string, command: string) 
 // Base64 over command stdout is NOT reliable for the panel's full-size
 // frames (probed 2026-08-12: an otherwise-complete payload came back with
 // a corrupted length), so the frame is always fetched over HTTP here.
+//
+// The frame is for a person: it fills the panel and opens in the chat's
+// image viewer, so it keeps the desktop's native size up to 1080p and a
+// quality where page text stays legible. (Sizing it is now the only say
+// OpenMausBot has over any frame off this box: the turn runs on the box's
+// own agent, so the model's own captures never pass through here.) Only
+// wider displays are scaled down, with -resize rather than -thumbnail so
+// the resample is not the fast-and-blurry kind meant for icons. The
+// pointer is drawn into the frame (scrot --pointer, ffmpeg -draw_mouse):
+// watching the bot work means seeing where its cursor is, and X11
+// captures leave it out by default.
 const PANEL_PATH = "/tmp/ogb-panel.jpg";
-const PANEL_WIDTH = 1024;
-const SHOT_CMD = [
-  "export DISPLAY=${DISPLAY:-:0}",
-  `f=${PANEL_PATH}`,
-  'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
-  'case "$w" in ""|*[!0-9]*) w=0;; esac',
-  'scrot -o -q 70 "$f" 2>/dev/null || import -window root -quality 70 "$f" 2>/dev/null || ffmpeg -y -f x11grab -i "$DISPLAY" -frames:v 1 -q:v 7 "$f" >/dev/null 2>&1',
-  `if [ "$w" -gt ${PANEL_WIDTH} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -thumbnail ${PANEL_WIDTH}x -quality 70 "$f" 2>/dev/null || true; fi`,
-  'test -s "$f" && echo captured',
-].join("; ");
+export const PANEL_FRAME_WIDTH = 1920;
+export const PANEL_FRAME_QUALITY = 85;
+// ffmpeg's -q:v runs 2 (best) to 31; 3 lands near JPEG quality 85.
+const PANEL_FRAME_FFMPEG_Q = 3;
+
+// The dynamic cursor: the bot's pointer drawn into the frame in the bot's own
+// colour, at the position X reports, big enough to follow in the panel. The
+// arrow is the app's cursor shape (see CursorAvatar) at 1.5× the 26×36 glyph,
+// hotspot at the tip, with a soft shadow so it reads on light pages too.
+const CURSOR_POINTS: Array<[number, number]> = [[0, 0], [0, 39], [10, 30], [16, 46], [23, 43], [16, 28], [30, 28]];
+const CURSOR_HEX = /^#[0-9a-fA-F]{6}$/;
+
+function cursorPolygon(dx: number, dy: number): string {
+  return CURSOR_POINTS.map(([x, y]) => `$((X+${x + dx})),$((Y+${y + dy}))`).join(" ");
+}
+
+/** The shell that captures one panel frame on the box. Exported for tests.
+ * With `cursor` (a #rrggbb swatch) the frame carries the dynamic cursor in
+ * that colour instead of the plain X pointer. */
+export function panelShotCommand({
+  width = PANEL_FRAME_WIDTH,
+  quality = PANEL_FRAME_QUALITY,
+  cursor,
+}: { width?: number; quality?: number; cursor?: string } = {}): string {
+  const dynamicCursor = cursor !== undefined && CURSOR_HEX.test(cursor);
+  const pointer = dynamicCursor ? "" : "-p ";
+  const drawMouse = dynamicCursor ? 0 : 1;
+  return [
+    "export DISPLAY=${DISPLAY:-:0}",
+    `f=${PANEL_PATH}`,
+    // a stale frame must not pass `test -s` when every capture tool fails
+    'rm -f "$f"',
+    'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
+    'case "$w" in ""|*[!0-9]*) w=0;; esac',
+    `scrot -o ${pointer}-q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -draw_mouse ${drawMouse} -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
+    ...(dynamicCursor
+      ? [
+          'eval "$(xdotool getmouselocation --shell 2>/dev/null)"',
+          'case "$X$Y" in ""|*[!0-9]*) X=;; esac',
+          `if [ -n "$X" ] && command -v convert >/dev/null 2>&1; then convert "$f" -fill "rgba(0,0,0,0.35)" -stroke none -draw "polygon ${cursorPolygon(2, 3)}" -fill "${cursor}" -stroke white -strokewidth 2.5 -draw "polygon ${cursorPolygon(0, 0)}" "$f" 2>/dev/null || true; fi`,
+        ]
+      : []),
+    `if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`,
+    'test -s "$f" && echo captured',
+  ].join("; ");
+}
+const SHOT_CMD = panelShotCommand();
 
 /** Read a file off the box as base64 — raw artifact bytes when the API
  * supports it (33% less transfer, no JSON envelope), else the files API. */
@@ -1052,7 +1100,13 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
 
 /** `knownBoxId` skips box resolution entirely — the screen poller holds
  * the id for the whole turn and must not re-resolve it every frame. */
-export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: string) {
+export async function screenshotBox(
+  cfg: AppConfig,
+  botId: string,
+  knownBoxId?: string,
+  /** `cursor`: the bot's colour swatch; the frame then carries the dynamic cursor. */
+  { cursor }: { cursor?: string } = {},
+) {
   cfg = snapshotBoxConfig(cfg);
   let boxId = knownBoxId;
   if (!boxId) {
@@ -1061,7 +1115,7 @@ export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: 
     if (!READY.has(box.state)) throw new Error(`box is ${box.state}`);
     boxId = box.id as string;
   }
-  const out = await runCommand(cfg, boxId, SHOT_CMD, { timeoutMs: 60_000 });
+  const out = await runCommand(cfg, boxId, cursor ? panelShotCommand({ cursor }) : SHOT_CMD, { timeoutMs: 60_000 });
   if (!/captured/.test(out.stdout)) {
     throw new Error(out.stderr.slice(0, 200) || "screen capture failed on the box");
   }

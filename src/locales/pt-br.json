@@ -1065,6 +1065,7 @@
   "computer.confirm.replaceVps": "Substituir o computador VPS de {name} pela versão exigida por esta atualização do OpenMausBot? Arquivos guardados apenas dentro do contêiner descartável serão apagados.",
   "computer.phase.checking": "Verificando…",
   "computer.phase.starting": "Iniciando o computador do seu bot…",
+  "computer.phase.busyBox": "Seu bot está usando este computador agora — a tela aparece aqui assim que o computador estiver pronto.",
   "computer.phase.unconfigured": "Nenhum computador na nuvem configurado",
   "computer.phase.autoUnavailable": "O Automático não encontrou nenhum computador. Escolha Nuvem para criar um, ou escolha outro destino.",
   "computer.phase.showReadyBox": "O Automático encontrou um computador na nuvem já existente. Ele não foi aberto nem alterado.",

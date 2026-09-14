@@ -1563,6 +1563,7 @@
   "computer.confirm.replaceVps": "Replace {name}'s VPS computer with the version required by this OpenMausBot update? Files stored only inside the disposable container will be deleted.",
   "computer.phase.checking": "Checking…",
   "computer.phase.starting": "Starting your bot's computer…",
+  "computer.phase.busyBox": "Your bot is using this computer right now — the screen appears here as soon as the computer is ready.",
   "computer.phase.unconfigured": "No cloud computer configured",
   "computer.phase.autoUnavailable": "Auto found no existing computer. Choose Cloud to create one, or pick another destination.",
   "computer.phase.showReadyBox": "Auto found an existing cloud computer. It was not opened or changed.",

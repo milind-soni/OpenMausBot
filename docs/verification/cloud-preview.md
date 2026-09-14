@@ -28,27 +28,33 @@ Verify these transitions with computer use:
 5. Turn **Busy** on, then **Publish live frame**. The new live frame appears.
    Stop publishing: within 14 seconds, screenshot polling resumes and restores
    **Cloud screen connected**, even though the bot is still busy.
-6. Select **timeout**, then **Reconnect panel**. After 90 seconds, the loader
+6. Turn **Busy** on, then **Reconnect panel**. The fixture, like the server,
+   refuses `provision` with 409 while a turn is active. The panel must still
+   connect and show the screen (it attaches to the ready box without
+   provisioning) — not **Couldn't reach the computer** with a red
+   "being used by an active turn" alert. Turn **Busy** off: the panel stays
+   connected.
+7. Select **timeout**, then **Reconnect panel**. After 90 seconds, the loader
    becomes a timeout error with **Retry preview**. Choose **connected** and
    retry; the connection must recover without restarting the app.
-7. While **slow** is pending, switch to **connected** and **Reconnect panel**.
+8. While **slow** is pending, switch to **connected** and **Reconnect panel**.
    The new connection must display immediately; the cancelled request must
    neither block it nor overwrite its frame later.
-8. Select **held**, turn **Busy** on, and wait for the next poll. Toggle
+9. Select **held**, turn **Busy** on, and wait for the next poll. Toggle
    **Busy** off: the pending capture must not be canceled. **Reconnect panel**
    does cancel its client request, but the simulated host capture continues.
    The replacement preview must retry contention without a disconnect alert.
    Select **connected**, then **Release held capture**; the preview recovers
    automatically and the old capture never overwrites it.
-9. From a connected frame, select **failed** and turn **Busy** on. After the
+10. From a connected frame, select **failed** and turn **Busy** on. After the
    error appears, select **contended** and **Retry preview**. The last frame
    stays visible while retrying. After ten seconds the continuing contention
    becomes an actionable error, but retries continue: select **connected** to
    recover without clicking Retry again.
-10. Open the live desktop. The fixture holds its join until **Release desktop
+11. Open the live desktop. The fixture holds its join until **Release desktop
     join**; screenshot polling must pause throughout that wait. Repeat with
     **Panel → Remote desktop**. The viewer is simulated, never a native window.
-11. Select **unconfigured** while **Busy** is on. Its permanent HTTP409 must
+12. Select **unconfigured** while **Busy** is on. Its permanent HTTP409 must
     show **VPS is not configured** with Retry, not an endless connecting state.
 
 The automated browser regression runs these contention, cancellation, decoded

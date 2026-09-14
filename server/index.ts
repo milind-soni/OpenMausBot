@@ -12,6 +12,8 @@ import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
+import { mausColorHex } from "../shared/maus-colors.ts";
 import {
   approvalModeFor,
   supportsApprovalMode,
@@ -3536,7 +3538,7 @@ async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner:
       !turnResources.owns(`computer:box:${machine.id}`, owner)) throw new Error("This computer turn ended while its machine was starting");
   return {
     integration: { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(botId, owner.threadId, owner.generation) },
-    capture: () => box.screenshotBox(cfg, ownerId, machine!.id),
+    capture: () => box.screenshotBox(cfg, ownerId, machine!.id, { cursor: botCursorColor(botId) }),
   };
 }
 
@@ -3557,6 +3559,11 @@ function managedBoxOwners(): box.ManagedBoxOwner[] {
   })), ...teamComputers.list().map(computer => ({
     botId: teamComputerOwner(computer.id), name: computer.name, inUse: teamComputerInUse(computer),
   }))];
+}
+
+/** The swatch the dynamic cursor is drawn in: the owning bot's colour. */
+function botCursorColor(botId: string): string | undefined {
+  return mausColorHex(store.bot(botId)?.color);
 }
 
 function botHasActiveTurn(botId: string): boolean {
@@ -5549,7 +5556,7 @@ async function startTurn(
         }
         if (b && lifecycle === "attach") {
           bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
-          previewCapture = () => box.screenshotBox(cfg, bot.id, b!.id);
+          previewCapture = () => box.screenshotBox(cfg, bot.id, b!.id, { cursor: botCursorColor(bot.id) });
           if (mountsCloudComputer) {
             integrations.computer = {
               kind: "box",
@@ -16030,7 +16037,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const release = m[2] === "sleep" ? claimTeamComputerLifecycle(teamComputer) : claimBotComputerLifecycle(key);
         try {
           if (m[2] === "join") return json(res, 200, await box.joinReadyBox(cfg, key));
-          if (m[2] === "screenshot") return json(res, 200, await box.screenshotBox(cfg, key));
+          if (m[2] === "screenshot") return json(res, 200, await box.screenshotBox(cfg, key, undefined, { cursor: botCursorColor(m[1]) }));
           return json(res, 200, await box.sleepBox(cfg, key));
         } finally { release(); }
       }
@@ -16070,7 +16077,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const activeBoxTurn = botHasActiveTurn(botId);
       if (["provision", "sleep"].includes(m[2]) && activeBoxTurn) {
         return json(res, 409, {
-          error: "this bot's cloud computer is being used by an active turn — interrupt it first",
+          error: CLOUD_COMPUTER_BUSY_ERROR,
         });
       }
       // Input validity is independent of destination authorization. Preserve
@@ -16107,7 +16114,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           case "exec":
             return json(res, 200, await box.execOnBox(cfg, botId, boxCommand ?? ""));
           case "screenshot":
-            return json(res, 200, await box.screenshotBox(cfg, botId));
+            return json(res, 200, await box.screenshotBox(cfg, botId, undefined, { cursor: botCursorColor(botId) }));
         }
       } finally {
         releaseComputerLifecycle();

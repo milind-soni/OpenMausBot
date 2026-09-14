@@ -5,6 +5,7 @@ import { BotSettingsDialog } from "../../src/components/BotSettingsDialog";
 import { RemoteDesktopPanel } from "../../src/components/remote-desktop-panel";
 import { StoreProvider, useStore } from "../../src/state/store";
 import { applySkin, readSkin } from "../../src/lib/skins";
+import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 import "../../src/styles.css";
 
 // Deliberately inject a valid but blank cached SSE image before connecting.
@@ -45,6 +46,7 @@ Object.assign(window, { ogb: { desktopViewer: {
     return true;
   },
 } } });
+let turnActive = false;
 const originalFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const path = typeof input === "string" ? input : "";
@@ -52,7 +54,11 @@ window.fetch = async (input, init) => {
     status, headers: { "content-type": "application/json" },
   });
   if (/^\/api\/bots\/[\w-]+\/computer$/.test(path)) return json({ configured: true, box: { state: "idle" } });
-  if (path.endsWith("/computer/provision")) return json({ state: "idle" });
+  // The real server refuses provision/sleep while a turn owns the box.
+  if (path.endsWith("/computer/provision")) {
+    if (turnActive) return json({ error: CLOUD_COMPUTER_BUSY_ERROR }, 409);
+    return json({ state: "idle" });
+  }
   if (path.endsWith("/computer/screenshot")) {
     transport.requests++;
     if (transport.joining) transport.duringJoin++;
@@ -130,7 +136,7 @@ function Fixture() {
         <option value="computer">Computer</option><option value="remote">Remote desktop</option>
       </select></label>
       <button onClick={() => setGeneration((n) => n + 1)}>Reconnect panel</button>
-      <button onClick={() => setBusy(!busy)}>Busy: {String(busy)}</button>
+      <button onClick={() => { turnActive = !busy; setBusy(!busy); }}>Busy: {String(busy)}</button>
       <button onClick={() => transport.releaseCapture()}>Release held capture</button>
       <button onClick={() => transport.releaseJoin()}>Release desktop join</button>
       <button disabled={!bot} onClick={() => dispatch({ type: "screenFrame", botId: bot.id, png: frame("New live frame", "#312e81"), mime: "image/png" })}>Publish live frame</button>
