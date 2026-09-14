@@ -404,11 +404,14 @@ function extrasFromUnknown(value: unknown): Array<{ id: string; label: string }>
  *  ANTHROPIC_API_KEY ("Not logged in · Please run /login"). Live injects
  *  come from mergeLocalInject. */
 export function readClaudeModelCatalog(env: Record<string, string | undefined> = process.env) {
+  // A missing or unreadable settings.json is not fatal: an instance whose
+  // environment sets ANTHROPIC_MODEL (a Claude Code install pointed at an
+  // Anthropic-compatible host) still lists that model as Custom.
   let settings: Record<string, unknown> = {};
   try {
     settings = JSON.parse(readFileSync(join(resolveClaudeConfigDir(undefined, env), "settings.json"), "utf8")) as Record<string, unknown>;
   } catch {
-    return STATIC_CLAUDE_MODELS;
+    settings = {};
   }
 
   const extras = [
