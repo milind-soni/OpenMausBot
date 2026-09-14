@@ -804,6 +804,7 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
     OMB_DATA_DIR: options.dataDir,
     OMB_PORT: String(options.port),
     OMB_WEBHOOK_PORT: process.env.OMB_WEBHOOK_PORT || String(options.port + 1),
+    OMB_PORT_PINNED: "1",
   };
   if (options.local) delete env.OMB_PUBLIC_URL;
   if (entry.staticDir) env.OMB_STATIC_DIR = entry.staticDir;
