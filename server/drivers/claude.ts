@@ -1867,7 +1867,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             resolve(err ? null : stdout),
           );
         });
-        cliHelpVersion = version;
+        // A failed probe must retry on the next refresh: caching null would
+        // leave every turn on the version-floor fallback, which passes flags
+        // this CLI build may reject and then fails the turn outright.
+        if (cliHelp !== null) cliHelpVersion = version;
       }
       const features = cliHelp !== null ? { autocompact: claudeCliHelpSupportsFlag(cliHelp, "--autocompact") } : undefined;
 
