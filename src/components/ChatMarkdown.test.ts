@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ChatMarkdown,
   CodeBlock,
+  samePeers,
   chatUrlTransform,
   markdownImageName,
   markdownImageOpenUrl,
@@ -493,5 +494,28 @@ describe("bidi: message content carries its own direction", () => {
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
     expect(path).toContain('<span dir="ltr"');
+  });
+});
+
+describe("mention roster comparison", () => {
+  const roster = [{ name: "Eve" }, { name: "Scout", color: "teal" as const }];
+
+  it("treats a rebuilt array with the same roster as unchanged", () => {
+    // The reducer rebuilds state.bots with .map() on every bot patch, so the
+    // bubble's useMemo hands ChatMarkdown a fresh array that renders
+    // identically. Reference equality said "changed" and re-parsed the whole
+    // transcript; this is the regression guard for that.
+    expect(samePeers(roster, roster.map((peer) => ({ ...peer })))).toBe(true);
+  });
+
+  it("notices a renamed, newly hidden, or recoloured peer", () => {
+    expect(samePeers(roster, [{ name: "Eve" }, { name: "Scout-2", color: "teal" as const }])).toBe(false);
+    expect(samePeers(roster, [{ name: "Eve", hidden: true }, roster[1]!])).toBe(false);
+    expect(samePeers(roster, [{ name: "Eve" }, { name: "Scout", color: "coral" as const }])).toBe(false);
+  });
+
+  it("notices a peer joining or leaving", () => {
+    expect(samePeers(roster, [...roster, { name: "Kim" }])).toBe(false);
+    expect(samePeers(roster, [roster[0]!])).toBe(false);
   });
 });

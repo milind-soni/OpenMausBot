@@ -621,9 +621,24 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   );
 }
 
+/** Compare the roster by the fields that actually change the render, not by
+ * identity. Both callers derive this list from `state.bots` / group members
+ * with `useMemo`, and the reducer rebuilds those arrays with `.map()` on every
+ * bot patch — so a reference test fails on events that changed nothing here,
+ * and every mounted bubble re-parses its markdown. Rosters are small; this
+ * walk is far cheaper than the re-render it prevents. */
+export function samePeers(previous: readonly MentionPeer[], next: readonly MentionPeer[]): boolean {
+  if (previous === next) return true;
+  if (previous.length !== next.length) return false;
+  return previous.every((peer, index) => {
+    const other = next[index]!;
+    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color;
+  });
+}
+
 export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   previous.text === next.text
-  && previous.mentionPeers === next.mentionPeers
+  && samePeers(previous.mentionPeers ?? NO_MENTION_PEERS, next.mentionPeers ?? NO_MENTION_PEERS)
   && previous.everyone === next.everyone
   && Boolean(previous.streaming) === Boolean(next.streaming)
   && previous.message?.threadId === next.message?.threadId
