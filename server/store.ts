@@ -352,6 +352,11 @@ export interface TaskRecord {
    * stays under show-all and search, and resurfaces the moment it needs them
    * again. Absent = unarchived; reversible, like bot-level hidden. */
   archivedAt?: number;
+  /** When the person snoozed this thread. 0 means "until new activity" and
+   * the store clears it the moment the thread wakes; a future epoch ms means
+   * "until then" and reads treat an expired value as absent, so no timer or
+   * migration is ever needed. Absent = not snoozed. */
+  snoozedUntil?: number;
   /** Defaults are copied when a task is created; older records fall back
    * to the bot until migration seeds their model selection. */
   modelSelection?: ModelSelection;
@@ -388,7 +393,7 @@ export interface TaskRecord {
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "rewound", "archivedAt", "snoozedUntil", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
@@ -1986,6 +1991,13 @@ export class Store {
     if ((task.activity ?? "idle") === activity && Boolean(task.busy) === busy) return bot;
     task.activity = activity;
     task.busy = busy;
+    // Reaching here means the thread just did something — exactly the
+    // "activity" an until-activity snooze waits for, including settling
+    // back to idle after a turn. Persist the wake like any task change.
+    if (task.snoozedUntil === 0) {
+      task.snoozedUntil = undefined;
+      this.saveBots();
+    }
     this.refreshBotActivity(bot);
     this.emit({ type: "bot", botId });
     return bot;
@@ -2257,6 +2269,11 @@ export class Store {
         Object.assign(task, { [key]: structuredClone(patch[key]) });
       }
     }
+    // "Until new activity" ends the moment the thread has something new for
+    // the person, and every unread wake funnels through patchTask — so this
+    // one hook is the whole activity alarm. A time-based snooze is left to
+    // its clock: attention overrides it on screen without clearing it.
+    if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
     bot.unread = bot.tasks!.some((candidate) => candidate.unread);

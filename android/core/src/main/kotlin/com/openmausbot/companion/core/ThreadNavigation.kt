@@ -13,6 +13,17 @@ val BotTask.demandsAttention: Boolean
         "waiting-on-you", "waiting", "working", "running", "queued",
     )
 
+/** The soonest still-future timed snooze in a list, or null when nothing is
+ * scheduled to wake: the 0 sentinel sleeps until activity and never ticks,
+ * and a timestamp already in the past has nothing left to wait for
+ * (`nextSnoozeExpiry` in `SidebarThreadRow.tsx`). */
+fun nextSnoozeExpiry(tasks: List<BotTask>, now: Long = System.currentTimeMillis()): Long? =
+    tasks.asSequence()
+        .mapNotNull { it.snoozedUntil }
+        .filter { it > 0 && it > now }
+        .minOrNull()
+        ?.toLong()
+
 /**
  * Attention outranks recency within a bot: waiting-on-you needs the person
  * most, then working/busy, then queued, then unread. The thread being looked
@@ -43,7 +54,11 @@ val Bot.visibleTasks: List<BotTask>
  * A missing folder leaves its threads unfiled. Search includes closed threads
  * and matches folder names, and keeps relevance (stored) order.
  */
-fun Bot.threadGroups(matching: String = "", includingClosed: Boolean = false): List<BotThreadGroup> {
+fun Bot.threadGroups(
+    matching: String = "",
+    includingClosed: Boolean = false,
+    now: Long = System.currentTimeMillis(),
+): List<BotThreadGroup> {
     val search = matching.trim()
     val threads = when {
         tasks == null -> listOf(BotTask(
@@ -52,10 +67,13 @@ fun Bot.threadGroups(matching: String = "", includingClosed: Boolean = false): L
             approvalMode = approvalMode, autoApprove = autoApprove, alwaysAllow = alwaysAllow,
         ))
         includingClosed || search.isNotEmpty() -> visibleTasks
-        // Closed and archived threads fold away with the same override: one
-        // that starts working, waits on the person, or turns unread is back.
+        // Closed, archived, and snoozed threads fold away with the same
+        // override: one that starts working, waits on the person, or turns
+        // unread is back; a snooze's sentinel sleeps only until activity and
+        // its clock only while it still runs (`visibleSidebarThreads` in
+        // `SidebarThreadRow.tsx`).
         else -> visibleTasks.filter {
-            (!it.isClosed && !it.isArchived) || it.demandsAttention || it.threadId == threadId
+            (!it.isClosed && !it.isArchived && !it.isSnoozed(now)) || it.demandsAttention || it.threadId == threadId
         }
     }
     val ordered = if (search.isEmpty()) orderedThreads(threads, threadId) else threads
