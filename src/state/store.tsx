@@ -267,6 +267,9 @@ export interface Task {
   alwaysAllow?: string[];
   activity?: Bot["activity"];
   busy?: boolean;
+  /** this thread's own turn is done and a dispatched teammate is still
+   * running; a wait, not work — never drives the sidebar spinner */
+  waitingOnTeammate?: boolean;
   unread?: boolean;
   pinnedMessageId?: string;
   /** where this conversation works, when pinned: by the person from the
@@ -341,6 +344,8 @@ export interface Bot {
   avatarCrop?: BotAvatarCrop;
   unread: boolean;
   busy?: boolean;
+  /** a dispatched teammate has not settled yet; the bot itself is waiting, not working */
+  waitingOnTeammate?: boolean;
   /** what the bot is doing, as the harness sees it; busy is derived from it */
   activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   modelSelection: ModelSelection;
@@ -421,6 +426,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
     alwaysAllow: task.alwaysAllow ?? bot.alwaysAllow,
     activity: task.activity ?? bot.activity,
     busy: task.busy ?? (task.activity ? task.activity === "working" || task.activity === "waiting-on-you" : bot.busy),
+    waitingOnTeammate: task.threadId === bot.threadId ? task.waitingOnTeammate ?? bot.waitingOnTeammate : task.waitingOnTeammate,
     unread: task.unread ?? bot.unread,
     pinnedMessageId: task.pinnedMessageId,
   };

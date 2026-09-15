@@ -539,6 +539,8 @@
   "approval.action.enable": "有効にする",
   "approval.action.confirm": "確定",
   "approval.action.allowOnce": "今回だけ許可",
+  "sidebar.preview.waitingOnTeammate": "チームメイトを待っています…",
+  "task.waitingOnTeammate": "チームメイト待ち",
   "onboarding.welcome": "{app} へようこそ",
   "onboarding.intro": "自分のコンピューターで実際に仕事をするボットです。あなたのことを教えてください。大きな更新があればお知らせします。",
   "onboarding.name": "あなたの名前",

@@ -539,6 +539,8 @@
   "approval.action.enable": "Activar",
   "approval.action.confirm": "Confirmar",
   "approval.action.allowOnce": "Permitir una vez",
+  "sidebar.preview.waitingOnTeammate": "Esperando a un compañero…",
+  "task.waitingOnTeammate": "Esperando a un compañero",
   "onboarding.welcome": "Te damos la bienvenida a {app}",
   "onboarding.intro": "Bots que hacen trabajo de verdad en su propio equipo. Cuéntanos quién eres y te avisamos cuando salga algo grande.",
   "onboarding.name": "Tu nombre",
