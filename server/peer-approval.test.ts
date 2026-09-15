@@ -11,6 +11,8 @@ import {
   cancelPeerApprovalsFor,
   cancelPeerApprovalsForThread,
   dismissStalePeerCards,
+  MAX_PENDING_PEER_APPROVALS,
+  MAX_PENDING_PEER_APPROVALS_PER_BOT,
   peerAllowKey,
   requestPeerApproval,
   resolvePeerComms,
@@ -26,6 +28,12 @@ function pendingCard(store: Store, bot: BotRecord) {
   return store
     .messagesFor(bot.threadId)
     .find((m) => m.kind === "options" && m.card?.requestId && !m.card.answered && !m.card.dismissed);
+}
+
+function pendingCards(store: Store, bot: BotRecord) {
+  return store
+    .messagesFor(bot.threadId)
+    .filter((m) => m.kind === "options" && m.card?.requestId && !m.card.answered && !m.card.dismissed);
 }
 
 describe("peer approval card lifecycle", () => {
@@ -306,5 +314,122 @@ describe("peer approval card lifecycle", () => {
     expect(dismissStalePeerCards(bus)).toBe(0);
     expect(pendingCard(store, from)).toBeTruthy();
     cancelPeerApprovalsFor(from.id); // don't leave a timer pending
+  });
+});
+
+// A looping or unattended fleet must never bury the user in approval cards,
+// and a peer request must never gain authority when we cannot ask — the
+// budget refuses ("too_many") rather than failing open. `pendingComms` is a
+// module-level singleton, so every test here must clean up every card it
+// raises (resolve or cancel) or it would bleed into whichever test runs
+// next, in this file or another vitest worker sharing the module.
+describe("peer approval caps", () => {
+  let store: Store;
+  let bus: ApprovalBus;
+
+  beforeEach(() => {
+    store = new Store(selection);
+    bus = { store, broadcast: () => {} };
+  });
+
+  afterEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  function makeBot(name: string): BotRecord {
+    return store.patchBot(store.createBot().id, { name })!;
+  }
+
+  it("refuses a bot's 4th pending approval with too_many, fails closed (not allow), and leaves the first 3 untouched", async () => {
+    const asker = makeBot("Asker");
+    const helper = makeBot("Helper");
+    const verdicts = Array.from({ length: MAX_PENDING_PEER_APPROVALS_PER_BOT }, (_, i) =>
+      requestPeerApproval(bus, asker, helper, `ping ${i}`, "ask_bot"),
+    );
+    expect(pendingCards(store, asker)).toHaveLength(MAX_PENDING_PEER_APPROVALS_PER_BOT);
+
+    const fourth = await requestPeerApproval(bus, asker, helper, "ping 4", "ask_bot");
+
+    expect(fourth).toBe("too_many");
+    expect(fourth).not.toBe("allow"); // fail closed, never open
+    expect(pendingCards(store, asker)).toHaveLength(MAX_PENDING_PEER_APPROVALS_PER_BOT);
+
+    cancelPeerApprovalsFor(asker.id);
+    await Promise.all(verdicts);
+  });
+
+  it("frees a bot's budget once a pending approval is answered", async () => {
+    const asker = makeBot("Asker");
+    const helper = makeBot("Helper");
+    const pending = Array.from({ length: MAX_PENDING_PEER_APPROVALS_PER_BOT }, (_, i) =>
+      requestPeerApproval(bus, asker, helper, `ping ${i}`, "ask_bot"),
+    );
+    const firstCard = pendingCards(store, asker)[0]!;
+    resolvePeerComms(bus, firstCard.card!.requestId!, "allow");
+    await pending[0];
+
+    const next = requestPeerApproval(bus, asker, helper, "ping again", "ask_bot");
+    expect(pendingCards(store, asker)).toHaveLength(MAX_PENDING_PEER_APPROVALS_PER_BOT);
+
+    cancelPeerApprovalsFor(asker.id);
+    await Promise.all([...pending.slice(1), next]);
+  });
+
+  it("caps each bot independently: bot A at its cap does not block bot B", async () => {
+    const botA = makeBot("Asker A");
+    const botB = makeBot("Asker B");
+    const helper = makeBot("Helper");
+    const pendingA = Array.from({ length: MAX_PENDING_PEER_APPROVALS_PER_BOT }, (_, i) =>
+      requestPeerApproval(bus, botA, helper, `ping ${i}`, "ask_bot"),
+    );
+
+    const verdictB = requestPeerApproval(bus, botB, helper, "ping", "ask_bot");
+    expect(pendingCard(store, botB)).toBeTruthy();
+
+    cancelPeerApprovalsFor(botA.id);
+    cancelPeerApprovalsFor(botB.id);
+    await Promise.all([...pendingA, verdictB]);
+  });
+
+  it("refuses a fresh bot once the workspace-wide cap is reached, even under its own per-bot cap", async () => {
+    const helper = makeBot("Helper");
+    // Spread MAX_PENDING_PEER_APPROVALS cards across enough bots that none of
+    // them individually reaches MAX_PENDING_PEER_APPROVALS_PER_BOT.
+    const perBot = MAX_PENDING_PEER_APPROVALS_PER_BOT - 1;
+    const botCount = Math.ceil(MAX_PENDING_PEER_APPROVALS / perBot);
+    const askers = Array.from({ length: botCount }, (_, i) => makeBot(`Asker ${i}`));
+    const pending: Array<Promise<"allow" | "deny" | "too_many">> = [];
+    for (let i = 0; i < MAX_PENDING_PEER_APPROVALS; i++) {
+      const asker = askers[Math.floor(i / perBot)]!;
+      pending.push(requestPeerApproval(bus, asker, helper, `ping ${i}`, "ask_bot"));
+    }
+
+    const freshBot = makeBot("Fresh asker");
+    const verdict = await requestPeerApproval(bus, freshBot, helper, "ping", "ask_bot");
+
+    expect(verdict).toBe("too_many");
+    expect(pendingCard(store, freshBot)).toBeUndefined();
+
+    for (const asker of askers) cancelPeerApprovalsFor(asker.id);
+    await Promise.all(pending);
+  });
+
+  it("still allows a standing grant at or over the cap, and raises no card", async () => {
+    const asker = makeBot("Asker");
+    const helper = makeBot("Helper");
+    store.patchBot(asker.id, { alwaysAllow: [peerAllowKey("ask_bot", helper.id)] });
+    const filler = Array.from({ length: MAX_PENDING_PEER_APPROVALS_PER_BOT }, (_, i) =>
+      requestPeerApproval(bus, asker, helper, `filler ${i}`, "delegate_bot"),
+    );
+    expect(pendingCards(store, asker)).toHaveLength(MAX_PENDING_PEER_APPROVALS_PER_BOT);
+
+    const verdict = await requestPeerApproval(bus, asker, helper, "ping", "ask_bot");
+
+    expect(verdict).toBe("allow");
+    expect(pendingCards(store, asker)).toHaveLength(MAX_PENDING_PEER_APPROVALS_PER_BOT);
+
+    cancelPeerApprovalsFor(asker.id);
+    await Promise.all(filler);
   });
 });

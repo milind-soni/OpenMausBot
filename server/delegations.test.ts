@@ -31,7 +31,7 @@ import {
   threadsWaitingOn,
   _pendingCount,
 } from "./delegations.ts";
-import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import { MAX_PENDING_PEER_APPROVALS_PER_BOT, cancelPeerApprovalsFor, peerAllowKey, requestPeerApproval, resolvePeerComms } from "./peer-approval.ts";
 import { Store, type BotRecord, type GroupRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -616,6 +616,37 @@ describe("drainDelegations", () => {
     );
     expect(chip.tool?.ok).toBe(false);
     expect(runTargetCalls).toEqual([]);
+  });
+
+  it("records a refused-not-denied receipt when too many approvals are already waiting for the user", async () => {
+    store.patchBot(from.id, { approvePeerComms: true });
+    // Fill the asker's own budget so the delegation's approval check hits
+    // the cap immediately — no card, no user answer, and this must not be
+    // reported as though the user denied it.
+    const filler = Array.from({ length: MAX_PENDING_PEER_APPROVALS_PER_BOT }, (_, i) =>
+      requestPeerApproval(approvalBus, from, target, `filler ${i}`, "ask_bot"),
+    );
+
+    const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+    drainDelegations(commsBus, approvalBus, from.threadId, (toBotId, message, commsDepth) => {
+      runTargetCalls.push({ toBotId, message, commsDepth });
+    });
+
+    await waitFor(() => findDelegationReceipt(queued.id!)?.status === "denied");
+    const receipt = findDelegationReceipt(queued.id!)!;
+    expect(receipt.result).not.toMatch(/the user denied/i);
+    expect(receipt.result).toMatch(/too many/i);
+
+    const chip = await waitFor(() =>
+      store
+        .messagesFor(from.threadId)
+        .find((m) => m.kind === "activity" && (m.tool?.name ?? "").includes("too many approvals")),
+    );
+    expect(chip.tool?.ok).toBe(false);
+    expect(runTargetCalls).toEqual([]);
+
+    cancelPeerApprovalsFor(from.id);
+    await Promise.all(filler);
   });
 
   it("auto-allows when alwaysAllow already covers the pair (no card pushed)", async () => {
