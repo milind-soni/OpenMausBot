@@ -99,3 +99,15 @@ describe("summarizeMetrics", () => {
     expect(summary.total).toMatchObject({ turns: 4, tasks: 3, input: 6_500, output: 650 });
   });
 });
+
+describe("recall metrics (Phase 1 part 2)", () => {
+  it("counts turns that carried a recall block, and those whose reply used one", () => {
+    const base = { at: "2026-09-15T10:00:00.000Z", botId: "dev", botName: "Dev", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 10, output: 1, costUsd: null, trigger: { kind: "owner" as const } };
+    const summary = summarizeMetrics([
+      { ...base, recall: { notes: 1, conversations: 0, captures: 0, bytes: 300, used: 1 } },
+      { ...base, recall: { notes: 2, conversations: 1, captures: 0, bytes: 900 } },
+      { ...base },
+    ]);
+    expect(summary.total).toMatchObject({ turns: 3, recalls: 2, recallsUsed: 1 });
+  });
+});

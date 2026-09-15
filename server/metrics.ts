@@ -105,6 +105,12 @@ export interface MetricsGroup {
   filteredCommands: number;
   /** Turns that followed a harness compaction of their thread (Phase 1). */
   compactions: number;
+  /** Turns the harness put a recall block in front of (Phase 1 part 2), and
+   * how many of those replies said they used a passage. */
+  recalls: number;
+  recallsUsed: number;
+  /** Turns the harness restated the first request in front of (Phase 1 part 4). */
+  recitations: number;
 }
 
 export interface MetricsSummary {
@@ -128,9 +134,17 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
   let timed = 0;
   let filteredCommands = 0;
   let compactions = 0;
+  let recalls = 0;
+  let recallsUsed = 0;
+  let recitations = 0;
   for (const row of rows) {
     filteredCommands += row.filteredCommands ?? 0;
     if (row.compacted) compactions += 1;
+    if (row.recited) recitations += 1;
+    if (row.recall) {
+      recalls += 1;
+      if (row.recall.used) recallsUsed += 1;
+    }
     threads.add(row.threadId);
     input += row.input;
     output += row.output;
@@ -163,6 +177,9 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
     durationMs: { average: timed ? Math.round(duration / timed) : 0, turns: timed },
     filteredCommands,
     compactions,
+    recalls,
+    recallsUsed,
+    recitations,
   };
 }
 

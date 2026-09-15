@@ -66,6 +66,7 @@ Use only mapped, tested commands:
 - [Headless bench driver](bench.md)
 - [Harness scorecard: is the harness getting better?](harness-scorecard.md)
 - [Harness-owned compaction (long threads)](context-compaction.md)
+- [Harness recall: the bot uses what it was told or kept](recall.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript

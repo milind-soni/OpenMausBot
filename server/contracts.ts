@@ -543,6 +543,10 @@ export interface ProviderInstance {
   /** `cwd`: where the one-shot call runs, so an engine whose own prompt
    * names its working directory names the task's, not the server's. */
   generateText?(prompt: string, opts?: { cwd?: string }): Promise<string>;
+  /** The same one-shot with what it cost (Phase 1 part 2): the harness books
+   * every call it makes itself. Engines that report no usage leave the
+   * numbers out; the row is then unpriced, never guessed. */
+  generate?(prompt: string, opts?: { cwd?: string }): Promise<{ text: string; input?: number; output?: number; cachedInput?: number; costUsd?: number | null }>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */

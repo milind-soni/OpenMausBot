@@ -28,6 +28,7 @@ import {
   MEMORY_MAX_LINES,
   ensureWorkspace,
   isMemoryTopicName,
+  selectMemory,
   workspaceDir,
 } from "./workspace.ts";
 
@@ -171,21 +172,13 @@ export interface MemoryOverview {
   logs: MemoryFileInfo[];
 }
 
-/** Mirrors loadMemory()'s cut exactly so the gauge never claims something
- * loads that does not: first MEMORY_MAX_LINES lines, then MEMORY_MAX_BYTES
- * bytes, whichever cuts first. */
+/** Mirrors loadMemory()'s cut exactly (selectMemory) so the gauge never
+ * claims something loads that does not. */
 export function memoryCapacity(raw: string): MemoryCapacity {
   const lines = raw === "" ? 0 : raw.split("\n").length;
-  let loaded = raw;
-  let truncated = false;
-  if (lines > MEMORY_MAX_LINES) {
-    loaded = raw.split("\n").slice(0, MEMORY_MAX_LINES).join("\n");
-    truncated = true;
-  }
-  if (Buffer.byteLength(loaded, "utf8") > MEMORY_MAX_BYTES) {
-    loaded = Buffer.from(loaded, "utf8").subarray(0, MEMORY_MAX_BYTES).toString("utf8").replace(/�+$/, "");
-    truncated = true;
-  }
+  const selected = selectMemory(raw);
+  const loaded = selected.text;
+  const truncated = selected.truncated;
   return {
     lines,
     bytes: Buffer.byteLength(raw, "utf8"),

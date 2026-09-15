@@ -16,7 +16,7 @@ import { join, dirname, isAbsolute, normalize } from "node:path";
 
 import { DATA_DIR, stripWorkspaceCredentialEnv } from "../config.ts";
 import { augmentedPath } from "../env-path.ts";
-import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
+import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli, liveCliHeadroom } from "../procs.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { ClaudeLoginController } from "./claude-login-auth.ts";
 
@@ -998,6 +998,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       /** the running turn, or null between turns */
       turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
+      /** When the session went idle (its timer was armed); undefined while a turn runs. */
+      idleSince?: number;
       /** the CLI's `total_cost_usd` is the SESSION total so far. A process
        * that lives across turns (F1) must book each turn's own share: this is
        * the total already booked, so the next result books the difference. */
@@ -1044,8 +1046,30 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const s = sessions.get(threadId);
       if (!s) return;
       if (s.idleTimer) clearTimeout(s.idleTimer);
+      s.idleSince = Date.now();
       s.idleTimer = setTimeout(() => closeSession(threadId, "idle"), SESSION_IDLE_MS);
       s.idleTimer.unref?.();
+    };
+    /** Idle live sessions of OTHER threads count against the process fuse
+     * (procs.ts). A person's new turn must not be refused while idle
+     * processes wait out their timer: close the longest-idle ones first,
+     * until a spawn's worth of headroom exists, and wait for them to exit
+     * (bounded) so the fuse sees the room. Finding F13, Phase 1 part 2. */
+    const evictIdleSessions = async (headroomWanted = 1): Promise<void> => {
+      const idle = [...sessions.entries()]
+        .filter(([, s]) => !s.turn && !s.closing && s.idleSince !== undefined)
+        .sort((a, b) => a[1].idleSince! - b[1].idleSince!);
+      const exits: Promise<void>[] = [];
+      for (const [threadId, s] of idle) {
+        if (liveCliHeadroom() + exits.length >= headroomWanted) break;
+        exits.push(new Promise<void>((resolve) => {
+          const t = setTimeout(resolve, 6_000);
+          t.unref?.();
+          s.child.once("close", () => { clearTimeout(t); resolve(); });
+        }));
+        closeSession(threadId, "evicted: the process cap needs the room");
+      }
+      if (exits.length) await Promise.all(exits);
     };
     const writeUser = (s: Session, threadId: string, promptMsg: ClaudeUserMessage): Promise<boolean> => {
       if (!s.child.stdin.writable || s.child.stdin.destroyed) return Promise.resolve(false);
@@ -1352,6 +1376,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const live = turn.sessionReset ? undefined : sessions.get(threadId);
       if (live && !live.turn && !live.closing && live.child.exitCode === null && live.argsKey === argsKey && (!sessionId || sessionId === live.sessionId)) {
         if (live.idleTimer) clearTimeout(live.idleTimer);
+        live.idleSince = undefined;
         live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false };
         active.set(threadId, { stop: () => {
           closeSession(threadId, "interrupted");
@@ -1387,6 +1412,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         return { turnId };
       }
       if (live) closeSession(threadId, "spawn contract changed");
+      if (liveCliHeadroom() < 1) await evictIdleSessions();
 
       // Until sessions.set() below, this turn owns every launch resource.
       // Any bind, private-config or synchronous spawn failure must release
@@ -1962,11 +1988,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
      * summaries can contain paths, commands, or secrets, so the generic
      * `claude -p "prompt"` shape is not safe for review. No tools or MCP
      * servers are mounted in this isolated process. */
-    const generateReview = (prompt: string, signal?: AbortSignal, opts?: { cwd?: string }): Promise<string> =>
+    const generateReview = (prompt: string, signal?: AbortSignal, opts?: { cwd?: string; format?: "text" | "json" }): Promise<string> =>
       new Promise((resolve, reject) => {
         const child = spawnCli(
           config.cli,
-          ["-p", "--model", "claude-haiku-4-5", "--output-format", "text"],
+          ["-p", "--model", "claude-haiku-4-5", "--output-format", opts?.format ?? "text"],
           {
             stdio: ["pipe", "pipe", "pipe"],
             env: environment("claude-haiku-4-5"),
@@ -2076,6 +2102,28 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         },
       },
       generateText: (prompt, opts) => generateReview(prompt, undefined, opts),
+      // the json result carries the call's usage and cost, which the harness
+      // books (Phase 1 part 2); a result that is not the expected object is
+      // returned as text so a CLI change degrades to "unpriced", not "lost"
+      generate: async (prompt, opts) => {
+        const raw = await generateReview(prompt, undefined, { ...opts, format: "json" });
+        try {
+          const parsed = JSON.parse(raw) as { result?: unknown; usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number }; total_cost_usd?: unknown };
+          if (parsed && typeof parsed === "object" && typeof parsed.result === "string") {
+            const usage = parsed.usage ?? {};
+            return {
+              text: parsed.result,
+              ...(typeof usage.input_tokens === "number" ? { input: usage.input_tokens + (usage.cache_read_input_tokens ?? 0) } : {}),
+              ...(typeof usage.output_tokens === "number" ? { output: usage.output_tokens } : {}),
+              ...(typeof usage.cache_read_input_tokens === "number" ? { cachedInput: usage.cache_read_input_tokens } : {}),
+              costUsd: typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : null,
+            };
+          }
+        } catch {
+          // not json: fall through
+        }
+        return { text: raw, costUsd: null };
+      },
       reviewPermission: generateReview,
       dispose: async () => {
         try {

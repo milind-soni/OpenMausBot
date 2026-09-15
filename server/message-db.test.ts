@@ -353,3 +353,36 @@ describe("recall of digest rows", () => {
     expect(hits[1]?.kind).toBe("digest");
   });
 });
+
+describe("any-term recall (Phase 1 part 2)", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("matches a row that shares one term with the query, best match first", () => {
+    insertMessage("own-a", msg("m1", "the deploy password hint is blue-falcon", { role: "bot" }));
+    insertMessage("own-a", msg("m2", "lunch was fine"));
+    insertMessage("own-a", msg("m3", "the deploy went out at noon and the password rotated", { role: "bot" }));
+    // AND semantics find nothing for a whole sentence…
+    expect(recallMessages("what is the deploy password hint please", ["own-a"])).toEqual([]);
+    // …any-term semantics find both, the richer match first
+    const hits = recallMessages("what is the deploy password hint please", ["own-a"], 12, { mode: "any" });
+    expect(hits.map((hit) => hit.messageId)).toEqual(["m1", "m3"]);
+    expect(recallMemory("deploy password hint", "bot-x", 12, { mode: "any" })).toEqual([]);
+  });
+
+  it("keeps at most sixteen distinct content terms and drops one- and two-letter words", () => {
+    const query = Array.from({ length: 30 }, (_, i) => `term${i}`).join(" ") + " at of ab";
+    insertMessage("own-a", msg("m1", "term29 is the last one"));
+    insertMessage("own-a", msg("m2", "term0 is the first one"));
+    const hits = recallMessages(query, ["own-a"], 12, { mode: "any" });
+    // the first sixteen terms are searched; the thirtieth is not
+    expect(hits.map((hit) => hit.messageId)).toEqual(["m2"]);
+    expect(recallMessages("ab of at", ["own-a"], 12, { mode: "any" })).toEqual([]);
+    // how-to-answer words are not terms either
+    insertMessage("own-a", msg("m3", "please reply in one short line"));
+    expect(recallMessages("Reply in one short line, number only", ["own-a"], 12, { mode: "any" })).toEqual([]);
+  });
+});

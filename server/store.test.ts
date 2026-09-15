@@ -1750,3 +1750,24 @@ describe("soul", () => {
     }
   });
 });
+
+describe("ownThreadIds (Phase 1 part 2)", () => {
+  it("lists the bot's own thread, its tasks, and every task thread of the rooms it belongs to", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const other = store.createBot();
+    const task = store.createTask(bot.id, "Side task", false)!;
+    const room = store.createGroup("Launch", [bot.id, other.id], false, "Work");
+    const roomTask = store.createGroupTask(room.id, "Second room task")!;
+    const outsider = store.createGroup("Elsewhere", [other.id], false, "Work");
+    const own = store.ownThreadIds(bot.id);
+    expect(own).toContain(bot.threadId);
+    expect(own).toContain(task.threadId);
+    expect(own).toContain(room.threadId);
+    expect(own).toContain(roomTask.threadId);
+    expect(own).not.toContain(outsider.threadId);
+    expect(own).not.toContain(other.threadId);
+    expect(new Set(own).size).toBe(own.length);
+    expect(store.ownThreadIds("nobody")).toEqual([]);
+  });
+});

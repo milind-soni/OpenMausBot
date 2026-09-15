@@ -187,7 +187,7 @@ if (argv[0] === "auth" && argv[1] === "status") {
 // One-shot helper mode used by generateText/reviewPermission. The prompt is
 // deliberately read from stdin so sensitive review text never appears in
 // argv or process listings.
-if (argAfter("--output-format") === "text") {
+if (argAfter("--output-format") === "text" || argAfter("--output-format") === "json") {
   const prompt = await new Promise<string>((resolve) => {
     let input = "";
     process.stdin.setEncoding("utf8");
@@ -200,7 +200,12 @@ if (argAfter("--output-format") === "text") {
       JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig: null }, null, 2),
     );
   }
-  process.stdout.write("fake generated text\n");
+  if (argAfter("--output-format") === "json") {
+    // the real CLI's result object: text plus what the call cost
+    process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result: "fake generated text", usage: { input_tokens: 100, cache_read_input_tokens: 20, output_tokens: 30 }, total_cost_usd: 0.0012 }) + "\n");
+  } else {
+    process.stdout.write("fake generated text\n");
+  }
   process.exit(0);
 }
 

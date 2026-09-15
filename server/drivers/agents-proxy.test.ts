@@ -1144,7 +1144,7 @@ describe("agents-proxy MCP surface", () => {
 
     sessionSearchResponse = { hits: [], memoryHits: [] };
     const empty = await callTool("session_search", { query: "nothing like this" });
-    expect(empty.result.content[0].text).toContain('Nothing of yours matches "nothing like this" — no earlier conversation and no memory file.');
+    expect(empty.result.content[0].text).toContain('Nothing of yours matches "nothing like this" — no earlier conversation, no memory file and no capture.');
 
     const missing = await callTool("session_search", {});
     expect(missing.result.isError).toBe(true);

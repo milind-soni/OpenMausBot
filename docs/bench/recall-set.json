@@ -1,0 +1,220 @@
+{
+  "description": "The memory recall set (gap analysis §11b; Phase 1 part 2). Each case seeds a bot, then asks in a NEW task with no tools allowed. pass = the reply matches `expect` (case-insensitive regex) and, when `reject` is set, does not match it. Seeds: `memory` writes MEMORY.md; `say` is a message sent in the bot's first thread (the bot replies; its reply is not checked); `log` appends a memory log line. Cases are built from the shapes our own transcripts show: a fact told once, a fact kept in memory, a fact corrected later, and a question nothing answers. Facts are never credential-shaped: a model may refuse to repeat a password on policy, which would measure refusal, not recall (finding F11).",
+  "cases": [
+    {
+      "id": "told-hint",
+      "kind": "conversation",
+      "say": [
+        "Remember this for later: our release codename is 'blue-falcon-42'. Reply with just OK."
+      ],
+      "ask": "What is our release codename? Reply with the codename only, without running tools.",
+      "expect": "blue-falcon-42"
+    },
+    {
+      "id": "told-name",
+      "kind": "conversation",
+      "say": [
+        "My dog is called Biscuit and she is a beagle. Reply with just OK."
+      ],
+      "ask": "What breed is my dog and what is her name? One line, no tools.",
+      "expect": "biscuit.*beagle|beagle.*biscuit"
+    },
+    {
+      "id": "told-port",
+      "kind": "conversation",
+      "say": [
+        "Note for later: the staging server listens on port 8443, not 443. Reply OK."
+      ],
+      "ask": "Which port does the staging server listen on? Number only, no tools.",
+      "expect": "8443"
+    },
+    {
+      "id": "told-preference",
+      "kind": "conversation",
+      "say": [
+        "For all future work I prefer pnpm over npm and tabs over spaces. Reply OK."
+      ],
+      "ask": "Which package manager do I prefer, and tabs or spaces? One line, no tools.",
+      "expect": "pnpm.*tabs|tabs.*pnpm"
+    },
+    {
+      "id": "told-deadline",
+      "kind": "conversation",
+      "say": [
+        "The invoice for Acme has to go out by Friday the 19th. Reply OK."
+      ],
+      "ask": "When does the Acme invoice have to go out? One line, no tools.",
+      "expect": "19|friday"
+    },
+    {
+      "id": "told-two-turns",
+      "kind": "conversation",
+      "say": [
+        "I am planning a trip. Reply OK.",
+        "The trip is to Lisbon, flying on the 3rd of October. Reply OK."
+      ],
+      "ask": "Where am I travelling and when? One line, no tools.",
+      "expect": "lisbon"
+    },
+    {
+      "id": "told-code-fact",
+      "kind": "conversation",
+      "say": [
+        "In this repo the API routes live under server/routes and the database helper is db.ts. Reply OK."
+      ],
+      "ask": "Where do the API routes live in this repo? One line, no tools.",
+      "expect": "server/routes"
+    },
+    {
+      "id": "told-person",
+      "kind": "conversation",
+      "say": [
+        "Priya is our designer; she owns the onboarding screens. Reply OK."
+      ],
+      "ask": "Who owns the onboarding screens? Name only, no tools.",
+      "expect": "priya"
+    },
+    {
+      "id": "told-decision",
+      "kind": "conversation",
+      "say": [
+        "We decided to ship the settings redesign behind a feature flag called settings_v2. Reply OK."
+      ],
+      "ask": "What is the feature flag for the settings redesign called? Flag name only, no tools.",
+      "expect": "settings_v2"
+    },
+    {
+      "id": "told-number-list",
+      "kind": "conversation",
+      "say": [
+        "The three launch markets are Germany, Brazil and Japan. Reply OK."
+      ],
+      "ask": "Name the three launch markets. One line, no tools.",
+      "expect": "germany.*brazil.*japan|germany.*japan.*brazil|brazil.*germany.*japan|brazil.*japan.*germany|japan.*germany.*brazil|japan.*brazil.*germany"
+    },
+    {
+      "id": "memory-db-name",
+      "kind": "memory",
+      "memory": "- 2026-09-01 · the staging database is called moonbase\n",
+      "ask": "What is the staging database called? One word, no tools.",
+      "expect": "moonbase"
+    },
+    {
+      "id": "memory-style",
+      "kind": "memory",
+      "memory": "- 2026-08-20 · from chat \"Setup\" · the person writes commit messages in the imperative and never uses emoji\n",
+      "ask": "How do I like my commit messages written? One line, no tools.",
+      "expect": "imperative"
+    },
+    {
+      "id": "memory-topic-pointer",
+      "kind": "memory",
+      "memory": "- 2026-08-20 · the release checklist is in memory/release.md\n",
+      "topics": {
+        "release.md": "# Release checklist\n1. bump version\n2. run the full suite\n3. tag as v-<version>\n"
+      },
+      "ask": "What is the third step of the release checklist? One line, no tools.",
+      "expect": "tag"
+    },
+    {
+      "id": "memory-contact",
+      "kind": "memory",
+      "memory": "- 2026-09-02 · the on-call phone for the payments team is extension 4471\n",
+      "ask": "What is the on-call extension for payments? Number only, no tools.",
+      "expect": "4471"
+    },
+    {
+      "id": "memory-two-facts",
+      "kind": "memory",
+      "memory": "- 2026-09-02 · the design system is called Slate\n- 2026-09-03 · Slate's primary colour is #1F4FD8\n",
+      "ask": "What is the primary colour of our design system? Hex only, no tools.",
+      "expect": "1f4fd8"
+    },
+    {
+      "id": "memory-log-event",
+      "kind": "log",
+      "log": "- 14:02 · rolled back the 2.3.1 release because of the login regression\n",
+      "ask": "Why was the 2.3.1 release rolled back? One line, no tools.",
+      "expect": "login"
+    },
+    {
+      "id": "corrected-fact",
+      "kind": "corrected",
+      "say": [
+        "The meeting room for standup is Orion. Reply OK.",
+        "Correction: standup moved to the Vega room from now on. Reply OK."
+      ],
+      "ask": "Which room is standup in? Room name only, no tools.",
+      "expect": "vega",
+      "reject": "^\\s*orion\\s*$"
+    },
+    {
+      "id": "corrected-port",
+      "kind": "corrected",
+      "say": [
+        "The metrics dashboard is on port 3000. Reply OK.",
+        "Update: the metrics dashboard now runs on port 3100. Reply OK."
+      ],
+      "ask": "Which port is the metrics dashboard on now? Number only, no tools.",
+      "expect": "3100"
+    },
+    {
+      "id": "memory-then-told",
+      "kind": "corrected",
+      "memory": "- 2026-08-01 · the CI runner is called buildbox-1\n",
+      "say": [
+        "We replaced buildbox-1; the CI runner is now buildbox-2. Reply OK."
+      ],
+      "ask": "What is the CI runner called now? Name only, no tools.",
+      "expect": "buildbox-2"
+    },
+    {
+      "id": "mixed-sources",
+      "kind": "mixed",
+      "memory": "- 2026-09-01 · the staging database is called moonbase\n",
+      "say": [
+        "The staging database backup runs every Tuesday. Reply OK."
+      ],
+      "ask": "What is the staging database called and how often does its backup run? One line, no tools.",
+      "expect": "moonbase.*tuesday|tuesday.*moonbase"
+    },
+    {
+      "id": "distractor-similar",
+      "kind": "distractor",
+      "say": [
+        "The production database is called sunbase. Reply OK.",
+        "The staging database is called moonbase. Reply OK."
+      ],
+      "ask": "What is the STAGING database called? One word, no tools.",
+      "expect": "moonbase",
+      "reject": "sunbase"
+    },
+    {
+      "id": "distractor-many",
+      "kind": "distractor",
+      "say": [
+        "Team lunch is on Thursdays. Reply OK.",
+        "The office wifi is called mausnet. Reply OK.",
+        "Our release codename is 'blue-falcon-42'. Reply OK.",
+        "The parking code is 7781. Reply OK."
+      ],
+      "ask": "What is the parking code? Number only, no tools.",
+      "expect": "7781"
+    },
+    {
+      "id": "negative-unknown",
+      "kind": "negative",
+      "say": [
+        "Team lunch is on Thursdays. Reply OK."
+      ],
+      "ask": "What is my cat's name? If you were never told, say exactly: I don't know. No tools.",
+      "expect": "don.?t know|not (been )?told|no record|never told|don.?t have"
+    },
+    {
+      "id": "negative-empty",
+      "kind": "negative",
+      "ask": "What is our release codename? If you were never told, say exactly: I don't know. No tools.",
+      "expect": "don.?t know|not (been )?told|no record|never told|don.?t have"
+    }
+  ]
+}

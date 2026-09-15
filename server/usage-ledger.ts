@@ -21,6 +21,9 @@ export type UsageTrigger =
   | { kind: "routine"; routineId?: string; label?: string }
   /** A headless bench run (item 0.8): unattended, budgeted, never a person. */
   | { kind: "bench"; runId?: string }
+  /** A one-shot call the harness itself made (Phase 1 part 2): a compaction
+   * summary, later memory extraction. `call` names which. */
+  | { kind: "harness"; call?: string }
   | { kind: "bot"; botId?: string };
 
 export interface UsageRow {
@@ -49,6 +52,14 @@ export interface UsageRow {
   /** True when the harness compacted the thread right before this turn
    * (Phase 1): the turn started a fresh session on a budgeted replay. */
   compacted?: boolean;
+  /** True when the harness restated the conversation's first request in
+   * front of this turn (Phase 1 part 4: after a compaction, every tenth turn). */
+  recited?: boolean;
+  /** Harness calls only: the idempotent key the call was booked under. */
+  fingerprint?: string;
+  /** What the harness recalled ahead of this turn (Phase 1 part 2), and how
+   * many passages the reply said it used (absent when it wrote no line). */
+  recall?: { notes: number; conversations: number; captures: number; bytes: number; used?: number };
   promptShape?: {
     stableBytes: number;
     volatileBytes: number;
@@ -214,6 +225,8 @@ export function triggerKey(trigger: UsageTrigger): string {
       return `routine:${trigger.routineId ?? trigger.label ?? "unknown"}`;
     case "bench":
       return `bench:${trigger.runId ?? "unknown"}`;
+    case "harness":
+      return `harness:${trigger.call ?? "unknown"}`;
     default:
       return "bot";
   }
@@ -229,6 +242,8 @@ export function triggerLabel(trigger: UsageTrigger): string {
       return `Routine: ${trigger.label ?? trigger.routineId ?? "unknown"}`;
     case "bench":
       return "Bench run";
+    case "harness":
+      return `Harness: ${trigger.call ?? "call"}`;
     default:
       return "Bot to bot";
   }

@@ -20,8 +20,10 @@ export type PromptSection = PromptPart & { bytes: number };
  * split, saving a memory changed the system prompt, which changed the spawn
  * contract, which relaunched the CLI — and the provider then re-uploaded the
  * entire conversation at the cache-write rate. Mentions did the same on any
- * turn that tagged a bot. */
-export const VOLATILE_SECTIONS: ReadonlySet<string> = new Set(["memory", "mentions", "outstanding"]);
+ * turn that tagged a bot. The current working folder (Phase 1 part 3) is
+ * per thread: volatile so a new thread shares the stable prefix with the
+ * last one, and it changes at most once per thread. */
+export const VOLATILE_SECTIONS: ReadonlySet<string> = new Set(["memory", "mentions", "outstanding", "folder"]);
 
 export function buildSystemPrompt(
   persona: string,

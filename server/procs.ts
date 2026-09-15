@@ -71,6 +71,10 @@ export function setProcessCap(cap: number | null): void {
 export function liveCliCount(): number {
   return live.size;
 }
+/** How many more processes the fuse admits right now; Infinity without a cap. */
+export function liveCliHeadroom(): number {
+  return processCap === null ? Number.POSITIVE_INFINITY : Math.max(0, processCap - live.size);
+}
 
 export function spawnCli(
   cli: string,

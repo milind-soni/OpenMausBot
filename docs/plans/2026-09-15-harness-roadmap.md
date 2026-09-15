@@ -166,18 +166,18 @@ on every turn; "newest 100, then filter" memory listing; a project object beside
 per-model context summaries with a "summarised through" cursor for the CLI families; any hosted
 memory dependency (decision 15) or engine-side memory plugin by default (decision 17).
 
-## Decisions (gap analysis §18–§21)
+## Decisions (gap analysis §18–§21; 7–14 taken on the recommendation, Sep 15)
 
 | # | Question | State |
 | --- | --- | --- |
-| 7 | Benchmark first target | open; recommended Terminal-Bench 2.1 |
-| 8 | Who may author skills, who approves promotion | open; recommended any bot writes, one human approves |
+| 7 | Benchmark first target | decided: Terminal-Bench 2.1 |
+| 8 | Who may author skills, who approves promotion | decided: any bot writes a candidate; promotion needs one human approval and a passing mini-benchmark; MCP auto-install from an allowlist only |
 | 9 | Graphs start with routines or goal rooms | decided: routines (Phase 3), goal rooms (Phase 6) |
-| 10 | Browser snapshot-first | open; recommended yes |
-| 11 | Per-task budget default and who raises it | open; recommended money cap, warn 70%, pause at 100% |
-| 12 | Engine fallback or park | open; recommended silent same-class fallback, approval to degrade, park on side effects |
-| 13 | `ask_user` when nobody is there | open; recommended assume the reversible option and note it |
-| 14 | HTTP family first class | open; recommended yes, as the reference implementation |
+| 10 | Browser snapshot-first | decided: yes; screenshot on demand; code over the page |
+| 11 | Per-task budget default and who raises it | decided: money cap, warn at 70%, pause at 100%, only the owner raises; lower default for unattended bots |
+| 12 | Engine fallback or park | decided: silent same-class fallback recorded on the task; approval before degrading; park on side effects |
+| 13 | `ask_user` when nobody is there | decided: assume the most reversible option and write it to the task; block only before destructive actions |
+| 14 | HTTP family first class | decided: yes, the reference implementation; CLI families get the best degraded version |
 | 15 | Memory dependency | decided: none |
 | 16 | Automatic capture | decided: opt-in per bot |
 | 17 | Engine-side memory plugins | decided: no by default; surfaced as an unowned source if installed |

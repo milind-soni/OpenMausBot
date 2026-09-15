@@ -79,14 +79,55 @@ budget is crossed and "in" drops back on the next turn. The two numbers to
 compare between builds are **input at turn 10** and **total tokens over the
 ten turns**. The script prints both.
 
+**T6 — recall (two threads, one bot; Phase 1 part 2).** New bot. Send:
+> Remember this for later: our release codename is 'blue-falcon-42'.
+> Reply with just OK.
+
+Then open a **new task** on the same bot and send:
+> What is our release codename? Reply with the codename only, in one line,
+> without running any tools.
+
+Correct when the reply says `blue-falcon-42`. On the branch a chip
+"recalled 1 conversation" precedes the reply and the asking turn takes no
+tool steps; on main the bot has to think of `session_search` itself. The
+fuller measure is the recall set (`docs/verification/recall.md`).
+
+**T7 — a bundled skill (Phase 1 part 3, F3).** Start the harness with
+`OMB_SKILLS_DIR=server/testing/skills` (a fixture skill whose trigger word is
+`zorblat`). New bot. Send *Please zorblat: what is 2 + 2? Reply in one short
+line.* Correct when the reply begins with `quantum-elk`. Then send *And 3 + 3?
+One short line.* On the branch the second turn keeps the live Claude process
+(the skill body travelled in the turn text, not the system prompt); the
+scorecard's "stable prompt sections that changed" line must say none.
+
+**T8 — a project's AGENTS.md.** Make a folder holding an `AGENTS.md` that
+says "End every reply with the word ZEBRA." and set it as the bot's working
+folder. Send *Say hello in one short line.* Correct when the reply ends with
+ZEBRA, on every engine (Codex reads the file itself; the harness hands it
+to the others).
+
+**T9 — the command filter, off and on (closes F5's gate).** Two bots whose
+working folder is a git checkout with a long history, one with
+`commandFilters: false`, one with `true`. Send *Run exactly `git log` with no
+flags in this folder, then tell me the subject line of the newest commit.*
+Compare "in" between the two; the script prints both.
+
+**T10 — a standing rule across a compaction (Phase 1 part 4).** New bot. Send
+T5's growing-file message twelve times, but start the first one with *For
+this whole conversation, begin every reply with the word LANTERN. Then:*.
+Correct when every reply starts with LANTERN and gives 100 × n. On the branch
+the turn after the "context compacted" chip carries a restated first request
+(no chip; it is in the turn text), so the rule survives the compaction.
+`context.recite: false` turns it off, for comparison.
+
 ## Doing it unattended
 
-The script runs exactly the four tasks above and prints the same table:
+The script runs the tasks above (T6 unless `--skip-recall`; T7–T9 unless `--skip-prefix`, with `--repo DIR` for T9; T10 with `--only-goal`) and prints the same table:
 
 ```sh
 # 1. start the build's harness standalone on its own port and data folder
 #    (the desktop app refuses scripted sends, on purpose)
-OMB_DATA_DIR=$HOME/.openmausbot-score OMB_PORT=28801 \
+OMB_DATA_DIR=$HOME/.openmausbot-score OMB_PORT=28801 OMB_SKILLS_DIR=server/testing/skills \
   node --experimental-strip-types server/index.ts &
 
 # 2. run the scorecard (Claude for T1–T3, Codex takes over for T4)

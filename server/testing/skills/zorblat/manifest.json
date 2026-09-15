@@ -1,0 +1,9 @@
+{
+  "id": "zorblat",
+  "version": "0.1.0",
+  "name": "Zorblat",
+  "description": "A test skill: when the person says zorblat, the reply begins with the word quantum-elk.",
+  "defaultEnabled": true,
+  "triggerTerms": ["zorblat"],
+  "requiredCapabilities": []
+}

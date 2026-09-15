@@ -533,6 +533,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;
     },
+    generate: async (prompt) => {
+      const model = options.generateModel?.() ?? options.models().default;
+      const { text, reasoning, toolCalls, usage } = await complete([{ role: "user", content: prompt }], model, false);
+      if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
+      return { text: text.trim() ? text : reasoning, ...(usage ? { input: usage.input, output: usage.output } : {}), costUsd: null };
+    },
     dispose: async () => {
       const turns = [...active.values()];
       for (const turn of turns) turn.abort.abort();

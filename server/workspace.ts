@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
-import { indexMemoryFile, indexedMemoryFiles, recallMemory, removeMemoryFile, type MemoryHit } from "./message-db.ts";
+import { indexMemoryFile, indexedMemoryFiles, recallMemory, removeMemoryFile, type MemoryHit, type RecallQueryOptions } from "./message-db.ts";
 import { redactSecretsInText } from "./redact.ts";
 
 import { DATA_DIR } from "./config.ts";
@@ -69,14 +69,24 @@ export function workspaceDir(botId: string): string {
  * independent working directories; the same bot can find its earlier output
  * without assuming that a file absent from the current directory was lost. */
 export function workspaceLocationsPrompt(botId: string, cwd: string | undefined, botCwd?: string): string {
+  // The current working folder is per thread, so it is NOT here: this
+  // section is the same bytes on every thread of a bot (Phase 1 part 3); the
+  // folder rides in the volatile `folder` section (currentFolderPrompt).
   return "\n\nFile locations for this bot (absolute paths): " + JSON.stringify({
-    currentWorkingFolder: cwd ?? "Provider default; inspect the working directory before using relative paths",
     sharedBotFolder: workspaceDir(botId),
     otherThreadFiles: join(TASK_WORKSPACES_DIR, botId),
     ...(botCwd ? { configuredProjectFolder: botCwd } : {}),
   }) + ". Different conversations can have different working folders. For an existing file, use the exact path from the conversation; if missing here, check this bot's listed folders before saying it is gone or recreating it." +
     " Follow an explicitly requested destination. Otherwise put new task output in the current working folder and report its absolute path so another thread or room can use it." +
-    " Do not move old files, edit another active thread's work, or read another bot's private folders without authorization. These paths do not grant additional access.";
+    " Do not move old files, edit another active thread's work, or read another bot's private folders without authorization. These paths do not grant additional access." +
+    (cwd === undefined ? " There is no pinned working folder for this conversation: inspect the working directory before using relative paths." : "");
+}
+
+/** The one path that differs between threads, on its own so the stable
+ * half of the prompt stays stable (Phase 1 part 3). Empty when the
+ * conversation has no pinned folder (the locations block says so). */
+export function currentFolderPrompt(cwd: string | undefined): string {
+  return cwd ? `\n\nCurrent working folder for this conversation (absolute path): ${JSON.stringify(cwd)}.` : "";
 }
 
 /** Lines as a person counts them: a file that ends in a newline has no
@@ -91,12 +101,48 @@ export function memoryOverBudget(text: string): boolean {
   return memoryLineCount(text) > MEMORY_MAX_LINES || Buffer.byteLength(text, "utf8") > MEMORY_MAX_BYTES;
 }
 
-/** MEMORY.md under the load budget: first MEMORY_MAX_LINES lines or
- * MEMORY_MAX_BYTES bytes, whichever cuts first. Returns null when the file
- * is missing or effectively empty (seed-only counts as empty). `lines` and
- * `bytes` describe the WHOLE file, so a truncation note can say how far
+/** What loads from a MEMORY.md text under the budget. Under budget the
+ * text is returned as it is, byte for byte. Over budget (Phase 1 part 2,
+ * decision 19): headings, prose and blank lines stay; entry lines are
+ * ranked by importance, then date, then file position, kept while they fit
+ * the line and byte budget, and rendered in file order — so the cut lands
+ * on the least important, oldest line, never on the newest one. `dropped`
+ * counts the lines left out. */
+export function selectMemory(raw: string): { text: string; truncated: boolean; dropped: number } {
+  if (!memoryOverBudget(raw)) return { text: raw, truncated: false, dropped: 0 };
+  const lines = raw.replace(/\n$/, "").split("\n");
+  const structural = new Set<number>();
+  const entries: Array<{ index: number; importance: number; date: string }> = [];
+  lines.forEach((line, index) => {
+    if (BULLET.test(line)) entries.push({ index, importance: entryImportance(line), date: DATED_ENTRY.exec(line)?.[1].slice(2, 12) ?? "0000-00-00" });
+    else structural.add(index);
+  });
+  entries.sort((a, b) => b.importance - a.importance || (a.date < b.date ? 1 : a.date > b.date ? -1 : 0) || a.index - b.index);
+  const kept = new Set(structural);
+  let count = structural.size;
+  let bytes = [...structural].reduce((sum, index) => sum + Buffer.byteLength(lines[index]!, "utf8") + 1, 0);
+  for (const entry of entries) {
+    const size = Buffer.byteLength(lines[entry.index]!, "utf8") + 1;
+    if (count + 1 > MEMORY_MAX_LINES || bytes + size > MEMORY_MAX_BYTES) continue;
+    kept.add(entry.index);
+    count += 1;
+    bytes += size;
+  }
+  const text = lines.filter((_, index) => kept.has(index)).join("\n");
+  // structural lines alone over budget (a file of prose): the old prefix cut
+  if (memoryOverBudget(text)) {
+    let cut = text.split("\n").slice(0, MEMORY_MAX_LINES).join("\n");
+    if (Buffer.byteLength(cut, "utf8") > MEMORY_MAX_BYTES) cut = Buffer.from(cut, "utf8").subarray(0, MEMORY_MAX_BYTES).toString("utf8").replace(/\uFFFD+$/, "");
+    return { text: cut, truncated: true, dropped: Math.max(0, lines.length - memoryLineCount(cut)) };
+  }
+  return { text, truncated: true, dropped: lines.length - kept.size };
+}
+
+/** MEMORY.md under the load budget (see selectMemory). Returns null when the
+ * file is missing or effectively empty (seed-only counts as empty). `lines`
+ * and `bytes` describe the WHOLE file, so a truncation note can say how far
  * over budget it is rather than only that it was cut. */
-export function loadMemory(botId: string): { text: string; truncated: boolean; lines: number; bytes: number } | null {
+export function loadMemory(botId: string): { text: string; truncated: boolean; lines: number; bytes: number; dropped: number } | null {
   let raw: string;
   try {
     raw = readFileSync(join(workspaceDir(botId), "MEMORY.md"), "utf8");
@@ -104,20 +150,8 @@ export function loadMemory(botId: string): { text: string; truncated: boolean; l
     return null;
   }
   if (!raw.trim() || raw === MEMORY_SEED) return null;
-  let truncated = false;
-  let text = raw;
-  const lines = text.split("\n");
-  if (memoryLineCount(text) > MEMORY_MAX_LINES) {
-    text = lines.slice(0, MEMORY_MAX_LINES).join("\n");
-    truncated = true;
-  }
-  if (Buffer.byteLength(text, "utf8") > MEMORY_MAX_BYTES) {
-    text = Buffer.from(text, "utf8").subarray(0, MEMORY_MAX_BYTES).toString("utf8");
-    // a multi-byte character sliced in half decodes as U+FFFD — drop it
-    text = text.replace(/�+$/, "");
-    truncated = true;
-  }
-  return { text, truncated, lines: memoryLineCount(raw), bytes: Buffer.byteLength(raw, "utf8") };
+  const selected = selectMemory(raw);
+  return { ...selected, lines: memoryLineCount(raw), bytes: Buffer.byteLength(raw, "utf8") };
 }
 
 /** Cap on what the memory API will write to MEMORY.md. Far above the load
@@ -215,9 +249,9 @@ export function syncMemoryIndex(botId: string): void {
 }
 
 /** Search one bot's memory files, after syncing the index to the disk. */
-export function searchMemoryFiles(botId: string, query: string, limit = 12): MemoryHit[] {
+export function searchMemoryFiles(botId: string, query: string, limit = 12, options: RecallQueryOptions = {}): MemoryHit[] {
   syncMemoryIndex(botId);
-  return recallMemory(query, botId, limit);
+  return recallMemory(query, botId, limit, options);
 }
 
 export interface MemoryUpdate {
@@ -234,6 +268,9 @@ export interface MemoryUpdateOptions {
   source?: string;
   /** Injectable clock, for tests that pin the date in an entry. */
   now?: Date;
+  /** 1–5, how much the entry matters when the file is over budget; 3 when
+   * absent (Phase 1 part 2). */
+  importance?: number;
 }
 
 /** How many of the newest entries ride back with a budget refusal: enough
@@ -279,11 +316,14 @@ export function memoryDate(now: Date = new Date()): string {
  * A middle dot so a fact that itself contains a hyphen or colon stays
  * readable; sources are scrubbed of it so the prefix parses back. */
 const SEP = " · ";
-const DATED_ENTRY = /^(- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?)(.*)$/;
+const DATED_ENTRY = /^(- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?(?:importance [1-5] · )?)(.*)$/;
+/** Phase 1 part 2: `· importance N ·` (1–5) inside the prefix. Absent means 3. */
+const IMPORTANCE_SEGMENT = / · importance ([1-5]) · /;
+export const DEFAULT_IMPORTANCE = 3;
 const UPDATED_MARK = / · updated \d{4}-\d{2}-\d{2}$/;
 /** A prefix the model typed itself, copying the shape of the file: the
  * entry's real prefix is the harness's to assign, so this one is dropped. */
-const TYPED_PREFIX = /^\s*- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?/;
+const TYPED_PREFIX = /^\s*- \d{4}-\d{2}-\d{2} · (?:from [^·\n]* · )?(?:importance [1-5] · )?/;
 const BULLET = /^(?:[-*•]|\d+[.)])\s+/;
 
 /** A thread title can hold anything; keep it to one short line with no
@@ -316,10 +356,28 @@ export function memorySourceLabel(from: { room?: { name: string }; task?: { titl
 /** Enough of a title to recognise the conversation; titles can be 80. */
 const SOURCE_NAME_MAX = 60;
 
-/** One dated, sourced entry line. `- 2026-09-10 · from chat "Follow-up" · text` */
+/** How much an entry matters, 1–5; a line without the segment is 3. Only
+ * a well-formed segment in the prefix counts — "importance 9" is text. */
+export function entryImportance(line: string): number {
+  const prefix = DATED_ENTRY.exec(line)?.[1];
+  const m = prefix ? IMPORTANCE_SEGMENT.exec(prefix) : null;
+  return m ? Number(m[1]) : DEFAULT_IMPORTANCE;
+}
+
+/** A requested importance clamped to 1–5 and rounded; undefined when it is
+ * the default or not a number, so the entry stays as short as before. */
+export function normaliseImportance(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const n = Math.min(5, Math.max(1, Math.round(value)));
+  return n === DEFAULT_IMPORTANCE ? undefined : n;
+}
+
+/** One dated, sourced entry line. `- 2026-09-10 · from chat "Follow-up" · text`,
+ * with `· importance N ·` before the text when it is not the default. */
 export function memoryEntry(text: string, opts: MemoryUpdateOptions = {}): string {
   const source = cleanSource(opts.source);
-  return `- ${memoryDate(opts.now)}${SEP}${source ? `from ${source}${SEP}` : ""}${normaliseEntryText(text)}`;
+  const importance = normaliseImportance(opts.importance);
+  return `- ${memoryDate(opts.now)}${SEP}${source ? `from ${source}${SEP}` : ""}${importance ? `importance ${importance}${SEP}` : ""}${normaliseEntryText(text)}`;
 }
 
 /** The dated prefix and the body of an entry line, or null for a line the

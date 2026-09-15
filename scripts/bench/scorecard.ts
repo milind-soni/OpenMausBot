@@ -8,14 +8,16 @@
 //   node --experimental-strip-types scripts/bench/scorecard.ts \
 //     --url http://127.0.0.1:PORT --data-dir DIR --label phase0 \
 //     [--engine claude] [--switch-to codex] [--out FILE.json] [--skip-long | --only-long]
+//     [--skip-recall | --only-recall] [--skip-prefix | --only-prefix] [--repo DIR] [--only-goal]
 //
 // Point it at a harness started standalone (`OMB_DATA_DIR=DIR OMB_PORT=PORT
 // node --experimental-strip-types server/index.ts`): the packaged desktop
 // app refuses scripted sends by design.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-interface Args { url: string; dataDir: string; label: string; engine: string; switchTo?: string; out?: string; skipLong?: boolean; onlyLong?: boolean }
+interface Args { url: string; dataDir: string; label: string; engine: string; switchTo?: string; out?: string; skipLong?: boolean; onlyLong?: boolean; skipRecall?: boolean; onlyRecall?: boolean; skipPrefix?: boolean; onlyPrefix?: boolean; repo?: string; onlyGoal?: boolean }
 
 function parseArgs(argv: string[]): Args {
   const a: Partial<Args> = { engine: "claude", label: "run" };
@@ -30,6 +32,12 @@ function parseArgs(argv: string[]): Args {
       case "--out": a.out = v!; i += 1; break;
       case "--skip-long": a.skipLong = true; break;
       case "--only-long": a.onlyLong = true; break;
+      case "--skip-recall": a.skipRecall = true; break;
+      case "--only-recall": a.onlyRecall = true; break;
+      case "--skip-prefix": a.skipPrefix = true; break;
+      case "--only-prefix": a.onlyPrefix = true; break;
+      case "--only-goal": a.onlyGoal = true; break;
+      case "--repo": a.repo = v!; i += 1; break;
       default: throw new Error(`unknown argument ${argv[i]}`);
     }
   }
@@ -132,6 +140,57 @@ async function turn(task: string, n: number, b: { id: string; threadId: string }
 
 const has = (needle: string) => (reply: string) => reply.toLowerCase().includes(needle);
 
+// T7–T9 (Phase 1 part 3): a bundled skill the message trips (the harness
+// must be started with OMB_SKILLS_DIR=server/testing/skills), a folder's
+// AGENTS.md, and the command filter on and off over an unbounded git log
+// in --repo (default: this checkout). Each is one or two turns.
+async function prefixTasks(engine: string) {
+  const t7 = await bot(`Score T7 ${args.label}`, engine);
+  await turn("T7 skill", 1, t7, engine,
+    "Please zorblat: what is 2 + 2? Reply in one short line.",
+    (reply) => /^\W*quantum-elk/i.test(reply.trim()));
+  await turn("T7 skill", 2, t7, engine, "And 3 + 3? One short line.", has("6"));
+  const project = mkdtempSync(join(tmpdir(), "omb-score-agents-"));
+  writeFileSync(join(project, "AGENTS.md"), "# House rules\nEnd every reply with the word ZEBRA.\n");
+  const t8 = await bot(`Score T8 ${args.label}`, engine);
+  await api("PATCH", `/api/bots/${t8.id}`, { cwd: project });
+  await turn("T8 agents-md", 1, t8, engine, "Say hello in one short line.", (reply) => /zebra\W*$/i.test(reply.trim()));
+  const repo = args.repo ?? process.cwd();
+  for (const filters of [false, true]) {
+    const t9 = await bot(`Score T9 ${filters ? "on" : "off"} ${args.label}`, engine);
+    await api("PATCH", `/api/bots/${t9.id}`, { cwd: repo, commandFilters: filters });
+    await turn(`T9 filter-${filters ? "on" : "off"}`, 1, t9, engine,
+      "Run exactly `git log` with no flags in this folder (do not add -n or --oneline), then tell me the subject line of the newest commit, in one line.",
+      (reply) => reply.length > 0);
+  }
+}
+
+// T10 (Phase 1 part 4): a standing rule given at turn one must still hold at
+// turn twelve, across the compaction the growing log file forces (T5's
+// growth). Correct when every reply starts with the word and gives the count.
+async function goalTask(engine: string) {
+  const t10 = await bot(`Score T10 ${args.label}`, engine);
+  const grow = "Append 100 lines of the form 'entry N' (N continuing from where the file ends, starting at 1 if it does not exist) to log.txt with one shell loop, then print the whole file with cat, then reply with only the total number of lines in the file.";
+  for (let n = 1; n <= 12; n += 1) {
+    await turn("T10 standing-rule", n, t10, engine,
+      n === 1 ? `For this whole conversation, begin every reply with the word LANTERN. Then: ${grow}` : grow,
+      (reply) => /^\W*lantern\b/i.test(reply.trim()) && reply.includes(String(100 * n)));
+  }
+}
+
+// a fact that is not credential-shaped, on purpose: a model may refuse to
+// repeat a password on policy, which would measure refusal, not recall
+async function recallTask(engine: string) {
+  const t6 = await bot(`Score T6 ${args.label}`, engine);
+  await turn("T6 recall", 1, t6, engine,
+    "Remember this for later: our release codename is 'blue-falcon-42'. Reply with just OK.",
+    has("ok"));
+  const opened = (await api("POST", `/api/bots/${t6.id}/tasks`, { title: "Later question" })).task;
+  await turn("T6 recall", 2, { id: t6.id, threadId: opened.threadId }, engine,
+    "What is our release codename? Reply with the codename only, in one line, without running any tools.",
+    has("blue-falcon-42"));
+}
+
 async function main() {
   const engine = args.engine;
   if (args.onlyLong) {
@@ -141,6 +200,21 @@ async function main() {
         `Append 100 lines of the form 'entry N' (N continuing from where the file ends, starting at 1 if it does not exist) to log.txt with one shell loop, then print the whole file with cat, then reply with only the total number of lines in the file.`,
         has(String(100 * n)));
     }
+    report();
+    return;
+  }
+  if (args.onlyRecall) {
+    await recallTask(engine);
+    report();
+    return;
+  }
+  if (args.onlyPrefix) {
+    await prefixTasks(engine);
+    report();
+    return;
+  }
+  if (args.onlyGoal) {
+    await goalTask(engine);
     report();
     return;
   }
@@ -169,6 +243,12 @@ async function main() {
         has(String(100 * n)));
     }
   }
+  // T6 — recall (Phase 1 part 2): a fact told in one thread, asked for in a
+  // NEW task with no tools allowed. The harness's recall block is what makes
+  // this answerable on the branch; on main the bot has session_search only
+  if (!args.skipRecall) await recallTask(engine);
+  if (!args.skipPrefix) await prefixTasks(engine);
+  if (args.onlyGoal) { await goalTask(engine); report(); return; }
   // T4 — a different engine takes over T1's thread and must know what happened
   if (args.switchTo) {
     const catalog = (await api("GET", "/api/instances")).instances.find((i: any) => i.instanceId === args.switchTo);
@@ -191,6 +271,15 @@ function report() {
   for (const r of results) {
     console.log(`| ${r.task} | ${r.turn} | ${r.engine} | ${(r.wallMs / 1000).toFixed(1)} | ${fmt(r.input)} | ${fmt(r.output)} | ${fmt(r.cachedInput)} | ${r.costUsd === null ? "—" : r.costUsd.toFixed(3)} | ${r.steps} | ${r.correct === null ? "—" : r.correct ? "yes" : "no"} | ${r.hookCoverage ?? "—"} |`);
   }
+  const filterOff = results.find((r) => r.task === "T9 filter-off");
+  const filterOn = results.find((r) => r.task === "T9 filter-on");
+  if (filterOff && filterOn) console.log(`\nT9: input with the command filter off ${fmt(filterOff.input)}, on ${fmt(filterOn.input)}; both correct: ${filterOff.correct && filterOn.correct ? "yes" : "no"}`);
+  const changed = results.filter((r) => r.stableChanged?.length);
+  console.log(`\nstable prompt sections that changed between turns: ${changed.length ? changed.map((r) => `${r.task} #${r.turn} ${r.stableChanged!.join("+")}`).join("; ") : "none"}`);
+  const goal = results.filter((r) => r.task === "T10 standing-rule");
+  if (goal.length) console.log(`\nT10: replies that kept the standing rule ${goal.filter((r) => r.correct).length}/${goal.length}`);
+  const recall = results.filter((r) => r.task === "T6 recall");
+  if (recall.length) console.log(`\nT6: recalled correctly ${recall.filter((r) => r.turn === 2 && r.correct).length}/${recall.filter((r) => r.turn === 2).length}; steps on the asking turn ${recall.find((r) => r.turn === 2)?.steps ?? "—"}`);
   const long = results.filter((r) => r.task === "T5 long-thread");
   if (long.length) {
     const total = long.reduce((n, r) => n + (r.input ?? 0) + (r.output ?? 0), 0);

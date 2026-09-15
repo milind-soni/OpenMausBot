@@ -206,7 +206,13 @@ posixOnly("work digest e2e (every fake engine)", () => {
     }, "the echo engine to reply after compaction");
     const afterCompaction = (await getBot(created.id)).messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text).at(-1)!.text!;
     expect(afterCompaction).toContain("[Summary of the conversation before this point: The retry limit was raised to 5 in retry.ts.]");
-    expect(afterCompaction).not.toContain("raise the retry limit");
+    // the folded history is not replayed; the first request appears once,
+    // inside the recitation note the turn after a compaction carries
+    // (Phase 1 part 4), and nowhere else
+    const recited = afterCompaction.indexOf("[Where this conversation stands, kept by OpenMausBot:");
+    expect(recited).toBeGreaterThan(-1);
+    expect(afterCompaction.split("raise the retry limit")).toHaveLength(2);
+    expect(afterCompaction.indexOf("raise the retry limit")).toBeGreaterThan(recited);
     expect(afterCompaction).toContain("and now?");
     await removeTempDir(project);
   }, 60_000);

@@ -95,6 +95,12 @@ posixOnly("harness-owned compaction (every fake engine, window forced to 100k)",
     const ledger = readFileSync(join(h.home(), ".openmausbot", "usage", `${new Date().toISOString().slice(0, 7)}.jsonl`), "utf8")
       .split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.threadId === bot.threadId);
     expect(ledger.at(-1)).toMatchObject({ compacted: true, promptShape: { replayed: true } });
+    // the model summary is a harness call: booked once, under a fingerprint
+    // (only the Claude fake offers a one-shot; the others draft none)
+    const harnessRows = ledger.filter((r) => r.trigger?.kind === "harness");
+    expect(harnessRows).toHaveLength(engine.id === "claude" ? 1 : 0);
+    if (engine.id === "claude") expect(harnessRows[0]).toMatchObject({ trigger: { call: "compaction-summary" }, costUsd: 0.0012, input: 120 });
+    if (engine.id === "claude") expect(harnessRows[0].fingerprint).toMatch(/^[a-f0-9]{64}$/);
     // Claude keeps one process per thread; a reset must not land on the one
     // that still holds the whole thread
     if (engine.id === "claude") {
@@ -120,6 +126,11 @@ posixOnly("harness-owned compaction (every fake engine, window forced to 100k)",
     if (engine.id === "claude") {
       const dump = JSON.parse(readFileSync(join(h.home(), "claude.dump.json"), "utf8"));
       expect(JSON.stringify(dump.prompt)).toContain("[Summary of the conversation before this point");
+      // Phase 1 part 4: the turn after a compaction restates where the
+      // conversation began, in the turn text
+      expect(JSON.stringify(dump.prompt)).toContain("[Where this conversation stands, kept by OpenMausBot:");
+      expect(JSON.stringify(dump.prompt)).toContain("first: remember the codeword PLUM");
+      expect(ledger.at(-1)).toMatchObject({ recited: true });
     }
     // measured: the usage row of turn 3 says it followed a compaction
     const metrics = (await h.api("GET", "/api/metrics?from=2026-01-01&to=2026-12-31")).body;
@@ -129,6 +140,11 @@ posixOnly("harness-owned compaction (every fake engine, window forced to 100k)",
     // regrowth floor keeps the harness from compacting on every turn
     const again = await h.turn(bot.id, "fifth: and now?");
     expect((again.messages as Msg[]).filter((m) => m.kind === "compaction")).toHaveLength(1);
+    // and the recitation was for the compaction turn only, not every turn
+    if (engine.id === "claude") {
+      const dump = JSON.parse(readFileSync(join(h.home(), "claude.dump.json"), "utf8"));
+      expect(JSON.stringify(dump.prompt)).not.toContain("[Where this conversation stands");
+    }
   }, 90_000);
 });
 

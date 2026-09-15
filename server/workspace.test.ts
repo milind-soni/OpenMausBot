@@ -25,6 +25,7 @@ import {
   syncMemoryIndex,
   workspaceDir,
   workspaceLocationsPrompt,
+  currentFolderPrompt,
   writeMemoryTopic,
   writeMemoryFile,
   updateMemory,
@@ -57,7 +58,11 @@ describe("workspace", () => {
     const thread = ensureTaskWorkspace(BOT, "thread-first");
     writeFileSync(join(shared, "old.txt"), "existing private file contents");
     const prompt = workspaceLocationsPrompt(BOT, thread, '/projects/quoted "folder"');
-    expect(prompt).toContain(JSON.stringify(thread));
+    // the per-thread folder is in its own section (Phase 1 part 3), so the
+    // locations block is the same bytes on every thread of the bot
+    expect(prompt).not.toContain(JSON.stringify(thread));
+    expect(currentFolderPrompt(thread)).toContain(JSON.stringify(thread));
+    expect(currentFolderPrompt(undefined)).toBe("");
     expect(prompt).toContain(JSON.stringify(shared));
     expect(prompt).toContain(JSON.stringify(join(TASK_WORKSPACES_DIR, BOT)));
     expect(prompt).toContain(JSON.stringify('/projects/quoted "folder"'));

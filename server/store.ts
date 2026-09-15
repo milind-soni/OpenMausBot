@@ -2253,6 +2253,22 @@ export class Store {
     return bot?.tasks?.find((t) => t.threadId === bot.threadId);
   }
 
+  /** Every thread that is this bot's own notebook (Phase 1 part 2): its
+   * default thread, its tasks, and every task thread of a room it belongs
+   * to — so a bot can recall its own room work (#754 left rooms out). Never
+   * another bot's threads; isolation stays a property of this list. */
+  ownThreadIds(botId: string): string[] {
+    const bot = this.bot(botId);
+    if (!bot) return [];
+    const ids = new Set<string>([bot.threadId, ...(bot.tasks ?? []).map((task) => task.threadId)]);
+    for (const group of this.groups) {
+      if (!group.memberIds.includes(botId)) continue;
+      ids.add(group.threadId);
+      for (const task of group.tasks ?? []) ids.add(task.threadId);
+    }
+    return [...ids];
+  }
+
   taskByThread(botId: string, threadId: string): TaskRecord | undefined {
     return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
   }

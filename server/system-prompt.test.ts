@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { soulSystemPrompt } from "./bot-folder.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
+  VOLATILE_SECTIONS,
   buildSystemPrompt,
   computerPrompt,
   mentionPrompt,
@@ -40,6 +41,23 @@ describe("buildSystemPrompt", () => {
     expect(built.volatile).toContain("likes tea");
     expect(built.volatile).toContain("@Fig");
     expect(built.volatile).not.toContain("Search past sessions");
+  });
+
+  it("keeps the stable half byte-identical across threads and across a skill trigger (Phase 1 part 3)", () => {
+    const stableParts = (folder: string) => [
+      { id: "files", label: "File locations", text: "\n\nFile locations for this bot: shared" },
+      { id: "folder", label: "Working folder", text: `\n\nCurrent working folder: ${folder}` },
+      { id: "skills", label: "Skills index", text: "\n\nSkills: zorblat — a test skill" },
+      // skill bodies travel in the turn text now, never here
+      { id: "skill-instructions", label: "Skill instructions", text: "" },
+      { id: "memory", label: "Memory", text: "\n\nYour memory: a" },
+    ];
+    const one = buildSystemPrompt("You are Scout.", "", stableParts("/tmp/thread-1"));
+    const two = buildSystemPrompt("You are Scout.", "", stableParts("/tmp/thread-2"));
+    expect(one.stable).toBe(two.stable);
+    expect(one.volatile).not.toBe(two.volatile);
+    expect(one.volatile).toContain("/tmp/thread-1");
+    expect(VOLATILE_SECTIONS.has("folder")).toBe(true);
   });
 
   it("has an empty volatile half when nothing mid-conversation is present", () => {
