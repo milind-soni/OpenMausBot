@@ -3,6 +3,7 @@ package com.openmausbot.companion.ui
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.demandsAttention
 import com.openmausbot.companion.core.isClosed
 import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.displayTitle
@@ -55,9 +56,7 @@ object TaskRules {
     }
 
     /** Running, needing the person, or holding something they have not read. */
-    fun demandsAttention(task: BotTask): Boolean =
-        task.busy == true || task.unread == true ||
-            task.activity in setOf("waiting-on-you", "waiting", "working", "running", "queued")
+    fun demandsAttention(task: BotTask): Boolean = task.demandsAttention
 
     fun tasks(chat: Chat): List<BotTask> = when (chat) {
         is Chat.BotChat -> tasks(chat.bot)

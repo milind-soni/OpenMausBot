@@ -38,7 +38,8 @@ extension Bot {
             // An explicitly empty modern list must stay empty.
             threads = [BotTask(
                 threadId: threadId, title: "", createdAt: createdAt,
-                modelSelection: modelSelection, busy: busy, unread: unread,
+                modelSelection: modelSelection, busy: busy, waitingOnTeammate: waitingOnTeammate,
+                unread: unread,
                 approvalMode: approvalMode, autoApprove: autoApprove, alwaysAllow: alwaysAllow
             )]
         } else if includingClosed || !search.isEmpty {

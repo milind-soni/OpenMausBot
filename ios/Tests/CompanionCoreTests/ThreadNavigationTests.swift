@@ -135,6 +135,7 @@ final class ThreadNavigationTests: XCTestCase {
         var bot = makeBot()
         bot.busy = true
         bot.unread = true
+        bot.waitingOnTeammate = true
         bot.approvalMode = "custom"
         bot.autoApprove = false
         bot.alwaysAllow = ["Bash:git"]
@@ -145,6 +146,8 @@ final class ThreadNavigationTests: XCTestCase {
         XCTAssertEqual(fallback.createdAt, bot.createdAt)
         XCTAssertEqual(fallback.modelSelection, bot.modelSelection)
         XCTAssertEqual(fallback.busy, true)
+        XCTAssertEqual(fallback.waitingOnTeammate, true)
+        XCTAssertTrue(fallback.isWaitingOnTeammate, "a legacy bot's wait must reach the thread row")
         XCTAssertEqual(fallback.unread, true)
         XCTAssertEqual(fallback.approvalMode, "custom")
         XCTAssertEqual(fallback.autoApprove, false)
