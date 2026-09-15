@@ -534,10 +534,19 @@ export function hookTokenFile(threadId: string, botId?: string): string {
  * event the harness observes. Claude Code runs it with the event JSON on
  * stdin and applies any hookSpecificOutput it prints. The command string is
  * a shell line, so both paths are quoted (this repo's own path has a space). */
-export function claudeHookSettings(helperPath: string): Record<string, unknown> {
+export function claudeHookSettings(helperPath: string, opts: { commandFilters?: boolean } = {}): Record<string, unknown> {
   const command = `${JSON.stringify(process.execPath)} ${JSON.stringify(helperPath)}`;
-  const entry = [{ matcher: "", hooks: [{ type: "command", command, timeout: 5 }] }];
-  return { PostToolUse: entry, PreCompact: entry, SessionStart: entry, Stop: entry };
+  const hook = { type: "command", command, timeout: 5 };
+  const entry = [{ matcher: "", hooks: [hook] }];
+  return {
+    PostToolUse: entry,
+    PreCompact: entry,
+    SessionStart: entry,
+    Stop: entry,
+    // the command filter (hooks/filters.ts) only ever rewrites a Bash
+    // command's input; it is opt-in per bot until the bench shows it pays
+    ...(opts.commandFilters ? { PreToolUse: [{ matcher: "Bash", hooks: [hook] }] } : {}),
+  };
 }
 
 export function permissionSocketPath(threadId: string, botId?: string) {
@@ -1302,7 +1311,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = "1";
       }
       const settings: Record<string, unknown> = { ...authSettings };
-      if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH);
+      if (hooks) settings.hooks = claudeHookSettings(HOOK_HELPER_PATH, { commandFilters: hooks.commandFilters });
       const authSettingsPath = mcpConfigPath && Object.keys(settings).length
         ? join(dirname(mcpConfigPath), "auth-settings.json") : null;
       if (authSettingsPath) args.push("--settings", authSettingsPath);

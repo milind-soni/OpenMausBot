@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   GROUP_GOAL_CONTROL_CLOSE,
   GROUP_GOAL_CONTROL_OPEN,
+  GROUP_GOAL_DECISION_SCHEMA,
   GROUP_GOAL_MAX_TURNS,
   groupGoalAssignmentKey,
+  groupGoalDecisionFromStructured,
   groupGoalCompletionTurnId,
   groupGoalCoordinatorInstructions,
   parseGroupGoalDecision,
@@ -88,6 +90,44 @@ describe("group goal runs", () => {
 
   it("reserves the final bounded turn for coordinator evaluation", () => {
     expect(GROUP_GOAL_MAX_TURNS % 2).toBe(1);
+  });
+});
+
+// Phase 0, item 0.3: the decision is schema-first. A validated object from
+// the typed-turn path becomes the decision directly; the prose envelope
+// stays as the fallback, and the visible text hides both.
+describe("schema-first goal decisions", () => {
+  it("builds a decision from a validated structured object, bounded like the envelope path", () => {
+    expect(groupGoalDecisionFromStructured({ status: "continue", next: "@Scout", instruction: "Verify", detail: "Draft ready" }))
+      .toEqual({ status: "continue", next: "@Scout", instruction: "Verify", detail: "Draft ready" });
+    expect(groupGoalDecisionFromStructured({ status: "completed", detail: "done" })).toEqual({ status: "completed", detail: "done" });
+    expect(groupGoalDecisionFromStructured({ status: "continue", next: "x".repeat(200), instruction: "go" })?.status).toBe("continue");
+    expect((groupGoalDecisionFromStructured({ status: "continue", next: "x".repeat(200), instruction: "go" }) as { next: string }).next).toHaveLength(100);
+  });
+
+  it("fails closed on a continue without an assignment, a status without detail, or no object at all", () => {
+    expect(groupGoalDecisionFromStructured({ status: "continue", next: "Scout" })).toBeNull();
+    expect(groupGoalDecisionFromStructured({ status: "blocked" })).toBeNull();
+    expect(groupGoalDecisionFromStructured(undefined)).toBeNull();
+    expect(groupGoalDecisionFromStructured("completed")).toBeNull();
+  });
+
+  it("publishes the decision schema the harness appends to the coordinator turn", () => {
+    expect(GROUP_GOAL_DECISION_SCHEMA).toMatchObject({ type: "object", required: ["status"], additionalProperties: false });
+    expect((GROUP_GOAL_DECISION_SCHEMA.properties as any).status.enum).toEqual(["continue", "completed", "needs-input", "blocked"]);
+  });
+
+  it("keeps a fenced decision block out of the human-facing text", () => {
+    const parsed = parseGroupGoalDecision('Ship it.\n```json\n{"status":"completed","detail":"Typed."}\n```');
+    expect(parsed.visibleText).toBe("Ship it.");
+    // the prose parser itself still only reads envelopes; the block is the typed path's job
+    expect(parsed.decision).toBeNull();
+  });
+
+  it("tells the coordinator to answer with the decision block and keeps the envelope as the fallback", () => {
+    const text = groupGoalCoordinatorInstructions({ goal: "g", members: [{ id: "lead", name: "Lead" }], turn: 1, maxTurns: 13, remainingTurns: 12 });
+    expect(text).toContain("fenced json block");
+    expect(text).toContain(GROUP_GOAL_CONTROL_OPEN);
   });
 });
 

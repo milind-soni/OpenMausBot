@@ -1,6 +1,7 @@
 # Phase 0 — foundation: the harness sees what a bot did, and starts measuring
 
-Status: plan (Sep 14, 2026). First phase of the harness-upgrade programme described in
+Status: built on branch `phase-0/foundation` (Sep 15, 2026; steps 1–10 below, one commit each;
+findings F1–F5 record what was pulled forward or deferred). First phase of the harness-upgrade programme described in
 `../../../harness-gap-analysis.md` (§17, "foundation first, team last"). Composes with
 `agent-harness-upgrades.md` item 7 (portable context, unbuilt) and item 15 (raw inspector, done).
 Touches no bot-to-bot behaviour: delegation, rooms, peer comms and shared memory are untouched
@@ -377,8 +378,36 @@ baseline run in step 10 is executed for at least Claude, Codex and one ACP engin
   (a transcript chip) and compaction *guidance* has to travel through the CLI's own channels
   (`# Compact instructions` in the generated project instructions, or `/compact <focus>` when the
   harness triggers compaction itself in 0.7).
+- **F4 (Phase 2, task object; as built in 0.3): the native structured-output accelerators are
+  not wired yet — only the engine-agnostic baseline is.** `SendTurnInput.outputSchema` and
+  `turn.completed.structured/structuredError` exist in the contract, the harness appends the
+  instruction and validates the reply in code for every engine, and the goal-room decision is
+  schema-first on all of them (proven on fake Claude, ACP, Codex and pi). Claude `--json-schema`
+  was left out because it is a spawn argument: on a live, reused CLI process it would either
+  force a respawn per schema turn (undoing F1) or need the one-shot path on the same session id,
+  and the version floor for the flag was not verifiable offline. Codex `--output-schema` was left
+  out because it disables the schema when MCP servers are mounted (the agents tools always are).
+  OpenAI-compatible `response_format` was left out because a silent fallback needs a per-endpoint
+  probe. None of them changes correctness: a driver that later sets `structured` natively is
+  re-validated by the same code. Wire them when the task object (Phase 2) makes typed turns the
+  common case and 0.6 can show the token saving.
+- **F5 (Phase 1, measured by 0.6; as built in step 9): the PreToolUse command filter ships OFF
+  by default, and its measurement gate is still open.** `server/hooks/filters.ts` rewrites known
+  noisy shell commands (test runners, installs, unbounded `git log`) to a bounded form through
+  Claude Code's `updatedInput`; a bot opts in with `commandFilters: true` (PATCH /api/bots/:id),
+  and every rewrite is booked on the turn's usage row and summed as `filteredCommands` in
+  `/api/metrics`. The before/after tokens-per-task comparison the plan asks for needs a real
+  engine (the fakes report fixed token counts), so it runs with the bench driver on a live CLI
+  once step 10's baseline exists; until then the default stays off. Codex, pi and the ACP family
+  have no pre-tool hook; the flag is a Claude-driver flag and the other drivers ignore it.
 
 ## Steps (each one PR-sized, in order)
+
+Status, Sep 15: all ten steps are built and tested on `phase-0/foundation`. Deviations from
+the text below, each recorded as a finding above: F1 (Claude CLI reuse) was fixed inside this
+phase; step 8 shipped the engine-agnostic baseline only (F4); step 9 ships off by default with
+its measurement gate open (F5); step 10's live Terminal-Bench numbers are not yet run
+(`docs/bench/2026-09-baseline.md` says exactly what was measured and what was not).
 
 1. `commands.ts` + `command_receipts` table + tests (0.5). No callers yet.
 2. `digest.ts`: build from activity rows + memory-journal + checkpoint `diffStat`; `kind: "digest"`
@@ -435,7 +464,10 @@ Follow `docs/verification/README.md`: every claim below is proven against an iso
 - Recipe added to `docs/verification/digests.md` and `docs/verification/hooks.md` with the exact
   `pnpm control:omb` commands.
 - Measurement gates before merge of step 9: tokens per task on the bench fixture must not
-  increase; cache-hit share must not decrease.
+  increase; cache-hit share must not decrease. (As built: the filter is opt-in and off by
+  default, so the gate applies to flipping the default, not to merging the code — F5.)
+- Recipes as built: `docs/verification/digests.md`, `hooks.md`, `bench.md`; matrix e2e files:
+  `digest.e2e`, `hooks.e2e`, `launch-budget.e2e`, `typed-turns.e2e`, `bench.e2e`.
 
 ## Out of scope (deliberately)
 

@@ -27,6 +27,7 @@ import {
   permissionSocketPath,
   readClaudeAuthSettings,
   type ClaudeConfig,
+  claudeHookSettings,
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
@@ -82,6 +83,16 @@ function answerQueue(conn: ReturnType<typeof connect>) {
   });
   return () => new Promise<any>((resolve) => waiters.push(resolve));
 }
+
+describe("claudeHookSettings", () => {
+  it("registers the observing hooks always and the Bash PreToolUse filter only when the bot asked for it", () => {
+    const base = claudeHookSettings("/x/omb-hook.ts");
+    expect(Object.keys(base).sort()).toEqual(["PostToolUse", "PreCompact", "SessionStart", "Stop"]);
+    const filtered = claudeHookSettings("/x/omb-hook.ts", { commandFilters: true });
+    expect(Object.keys(filtered).sort()).toEqual(["PostToolUse", "PreCompact", "PreToolUse", "SessionStart", "Stop"]);
+    expect((filtered.PreToolUse as Array<{ matcher: string }>)[0]!.matcher).toBe("Bash");
+  });
+});
 
 describe("ClaudeDriver.decodeConfig", () => {
   it("defaults to the claude binary with acceptEdits", () => {

@@ -101,6 +101,8 @@ export interface MetricsGroup {
   /** Average stable/volatile prompt bytes over turns that recorded a shape. */
   promptBytes: { stable: number; volatile: number; turns: number };
   durationMs: { average: number; turns: number };
+  /** Shell commands the PreToolUse filter rewrote (item 0.2, step 9). */
+  filteredCommands: number;
 }
 
 export interface MetricsSummary {
@@ -122,7 +124,9 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
   let shaped = 0;
   let duration = 0;
   let timed = 0;
+  let filteredCommands = 0;
   for (const row of rows) {
+    filteredCommands += row.filteredCommands ?? 0;
     threads.add(row.threadId);
     input += row.input;
     output += row.output;
@@ -153,6 +157,7 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
     coverage,
     promptBytes: { stable: shaped ? Math.round(stableBytes / shaped) : 0, volatile: shaped ? Math.round(volatileBytes / shaped) : 0, turns: shaped },
     durationMs: { average: timed ? Math.round(duration / timed) : 0, turns: timed },
+    filteredCommands,
   };
 }
 

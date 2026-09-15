@@ -120,9 +120,12 @@ const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; comma
 })();
 /** Run every command hook registered for `event`, like the real CLI: JSON on
  * stdin, wait for exit (bounded), ignore its output except to a dump. */
-function runHooks(event: string, payload: Record<string, unknown>): string {
+function runHooks(event: string, payload: Record<string, unknown>, toolName?: string): string {
   let stdout = "";
   for (const entry of settingsHooks[event] ?? []) {
+    // a matcher names the tool(s) the entry applies to; "" matches every tool
+    const matcher = (entry as { matcher?: string }).matcher ?? "";
+    if (matcher && toolName && !new RegExp(`^(${matcher})$`).test(toolName)) continue;
     for (const hook of entry.hooks ?? []) {
       if (hook.type !== "command" || !hook.command) continue;
       const result = spawnSync("sh", ["-c", hook.command], {
@@ -425,9 +428,19 @@ const playTurn = (prompt: JsonValue) => {
     // scripted calls come first, each settled before the reply text
     for (const call of scriptedToolCalls) {
       const id = `tu-${process.pid}-${++toolUseCount}`;
-      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
+      // like the real CLI: a PreToolUse hook may hand back updatedInput,
+      // and that is what the tool then runs with
+      let input = call.input;
+      const pre = runHooks("PreToolUse", { tool_name: call.name, tool_input: call.input, tool_use_id: id }, call.name);
+      try {
+        const updated = pre.trim() ? (JSON.parse(pre) as { hookSpecificOutput?: { updatedInput?: Record<string, unknown> } }).hookSpecificOutput?.updatedInput : undefined;
+        if (updated && typeof updated === "object") input = updated;
+      } catch {
+        /* a non-JSON stdout is just a debug line */
+      }
+      out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input }], usage } });
       out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !call.ok, content: call.output }] } });
-      runHooks("PostToolUse", { tool_name: call.name, tool_input: call.input, tool_response: call.output, tool_use_id: id });
+      runHooks("PostToolUse", { tool_name: call.name, tool_input: input, tool_response: call.output, tool_use_id: id });
     }
     for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
   } else {

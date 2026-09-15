@@ -61,6 +61,10 @@ Use only mapped, tested commands:
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Usage ledger](usage-ledger.md)
 - [Spend cap and sell prices](spend-cap.md)
+- [Work digests and context rebuilds](digests.md)
+- [Engine hooks (Claude Code)](hooks.md)
+- [Headless bench driver](bench.md)
+- [Harness scorecard: is the harness getting better?](harness-scorecard.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript

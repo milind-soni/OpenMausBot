@@ -740,6 +740,11 @@ export interface BotRecord {
    * delegate_bot). Off by default: a chief-of-staff-style bot is most
    * useful when it can coordinate without nagging. */
   approvePeerComms?: boolean;
+  /** Rewrite known noisy shell commands (test runs, installs, unbounded
+   * git log) to a bounded form before they run, through the engine's
+   * PreToolUse hook where it has one (item 0.2). Off by default until the
+   * bench shows it saves tokens. */
+  commandFilters?: boolean;
   /** Bot ids this bot is allowed to contact. Unset keeps the rule the app
    * shipped with — every visible bot in the same section — because that is
    * what every existing workspace already relies on. An explicit list wires

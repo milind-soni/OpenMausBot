@@ -117,6 +117,13 @@ export type RuntimeEvent = RuntimeEventBase &
          * is a live indicator whose meaning differs per driver (a per-call
          * delta, a thread total, a per-step figure) and must never be summed. */
         usage?: { input: number; output: number; cachedInput?: number };
+        /** Typed turns (server/typed-turns.ts): the validated object a turn
+         * with `outputSchema` produced, or the reason there is none. The
+         * harness fills these itself from the reply text on every engine; a
+         * driver with native constrained decoding may set `structured` from
+         * its own parsed output, and the harness re-validates it. */
+        structured?: unknown;
+        structuredError?: string;
       }
     | {
         type: "item.started";
@@ -229,6 +236,13 @@ export interface SendTurnInput {
   recoveryText?: string;
   /** Prior turns for transcript-replay providers (API-backed drivers). */
   transcript?: Array<{ role: "user" | "assistant"; text: string }>;
+  /** Typed turns: the JSON Schema the reply must satisfy. The harness has
+   * already appended the fenced-JSON instruction to `text` and validates the
+   * reply itself, so a driver may ignore this field entirely. A driver with
+   * native constrained decoding (Claude `--json-schema`, OpenAI
+   * `response_format`) may use it as an accelerator and report its parsed
+   * object on turn.completed.structured; it is validated again there. */
+  outputSchema?: Record<string, unknown>;
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
   /** `system` split at the sections that legitimately change mid-conversation
@@ -278,7 +292,14 @@ export interface SendTurnInput {
      * on POST /api/internal/hook. A driver that declares `capabilities.hooks`
      * registers the helper with its engine; the harness only ever observes
      * and injects context through this channel, never decides state. */
-    hooks?: { url: string; token: string };
+    hooks?: {
+      url: string;
+      token: string;
+      /** Register the PreToolUse command filter (server/hooks/filters.ts)
+       * for this bot: known noisy shell commands are rewritten to a bounded
+       * form before they run. Never blocks; opt-in per bot. */
+      commandFilters?: boolean;
+    };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back
      * through the harness so this bot can message other bots. The harness
      * owns turns, permissions, and recursion limits; the proxy only forwards. */

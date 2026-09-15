@@ -1,4 +1,5 @@
 import type { GroupDefaultResponder } from "./store.ts";
+import { stripStructuredBlock, type OutputSchema } from "./typed-turns.ts";
 
 // Odd by design: coordinator/worker alternation must always leave the final
 // bounded turn to the coordinator for an honest completion decision.
@@ -20,6 +21,41 @@ export interface GoalRunMember {
 export interface ParsedGroupGoalDecision {
   visibleText: string;
   decision: GroupGoalDecision | null;
+}
+
+/** The coordinator's decision as a typed turn (Phase 0, item 0.3): the
+ * harness appends this schema to the coordinator's turn and validates the
+ * reply's fenced JSON block against it on every engine. The conditional
+ * rules (continue needs an assignment, the other statuses need a detail)
+ * are enforced in groupGoalDecisionFromStructured, like the envelope path. */
+export const GROUP_GOAL_DECISION_SCHEMA: OutputSchema = {
+  type: "object",
+  properties: {
+    status: { enum: ["continue", "completed", "needs-input", "blocked"] },
+    next: { type: "string", description: "Exact member id from the roster (status continue only)" },
+    instruction: { type: "string", description: "Concrete next assignment (status continue only)" },
+    detail: { type: "string", description: "Short progress note, or the final detail" },
+  },
+  required: ["status"],
+  additionalProperties: false,
+};
+
+/** A validated structured object into a decision; null fails closed. */
+export function groupGoalDecisionFromStructured(value: unknown): GroupGoalDecision | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const status = raw.status;
+  const detail = bounded(raw.detail, 500);
+  if (status === "continue") {
+    const next = bounded(raw.next, 100);
+    const instruction = bounded(raw.instruction, 2_000);
+    if (!next || !instruction) return null;
+    return { status, next, instruction, ...(detail ? { detail } : {}) };
+  }
+  if (status === "completed" || status === "needs-input" || status === "blocked") {
+    return detail ? { status, detail } : null;
+  }
+  return null;
 }
 
 /** Turn-scoped events normally identify themselves. A coordinator completion
@@ -51,7 +87,8 @@ function visibleCoordinatorText(text: string): string {
   // preceded it, but never expose a half-written marker or JSON fragment.
   const danglingOpen = visible.indexOf(GROUP_GOAL_CONTROL_OPEN);
   if (danglingOpen >= 0) visible = visible.slice(0, danglingOpen);
-  return visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "").trim();
+  // the typed-turn decision block is private protocol just like the envelope
+  return stripStructuredBlock(visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "")).trim();
 }
 
 /** Keep the orchestration envelope out of the human transcript while still
@@ -137,10 +174,11 @@ export function groupGoalCoordinatorInstructions(args: {
     ...(args.note ? [`Harness note: ${args.note}`] : []),
     "Use the conversation as the progress ledger. Decide whether the goal is genuinely complete, needs the human, is blocked, or needs one named teammate next.",
     "Do not continue merely to generate discussion. Do not claim completion unless the requested deliverable or answer is present in the conversation.",
-    "Write a brief human-facing update or final answer, then end with exactly one private control envelope on its own line.",
-    `${GROUP_GOAL_CONTROL_OPEN}{"status":"continue","next":"Exact member id from the roster","instruction":"Concrete next assignment","detail":"Short progress note"}${GROUP_GOAL_CONTROL_CLOSE}`,
+    "Write a brief human-facing update or final answer, then end with your decision as exactly one fenced json block matching the schema given at the end of the turn:",
+    `{"status":"continue","next":"Exact member id from the roster","instruction":"Concrete next assignment","detail":"Short progress note"}`,
     `Or use status "completed", "needs-input", or "blocked" with a non-empty "detail" and omit next/instruction.`,
-    "Never mention, quote, or explain the control envelope in your human-facing text.",
+    `If you cannot write a code block, the same object inside ${GROUP_GOAL_CONTROL_OPEN}...${GROUP_GOAL_CONTROL_CLOSE} on its own line is also accepted.`,
+    "Never mention, quote, or explain the decision block or envelope in your human-facing text.",
   ].join("\n");
 }
 

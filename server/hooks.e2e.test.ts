@@ -61,12 +61,13 @@ function harness(label: string, serverEnv: Record<string, string>, instanceEnv: 
         claude: {
           driver: "claudeAgent",
           environment: {
-            ...instanceEnv,
             FAKE_CLAUDE_HOOKS: "1",
             FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([
               { name: "Bash", input: { command: "cat big.log" }, ok: true, output: BIG },
               { name: "Read", input: { file_path: "a.ts" }, ok: true, output: "const a = 1;" },
             ]),
+            // a case's own knobs win over the defaults above
+            ...instanceEnv,
           },
           config: { cli: FAKE_CLAUDE },
         },
@@ -107,6 +108,43 @@ function harness(label: string, serverEnv: Record<string, string>, instanceEnv: 
     },
   };
 }
+
+posixOnly("engine hooks e2e (PreToolUse command filters, per-bot flag)", () => {
+  // the fake's scripted call runs an unbounded test command; with the
+  // bot's commandFilters flag on, the PreToolUse hook rewrites it before
+  // it runs, and the harness counts the rewrite on the turn's usage row
+  const h = harness("filters", {}, {
+    FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "pnpm test" }, ok: true, output: "ok" }]),
+  });
+
+  it("rewrites a known noisy command through updatedInput when the bot's flag is on, and leaves it alone when off", async () => {
+    const on = (await h.api("POST", "/api/bots")).body.bot;
+    expect((await h.api("PATCH", `/api/bots/${on.id}`, { modelSelection: { instanceId: "claude", model: "fake-model" }, commandFilters: true })).status).toBe(200);
+    expect((await h.api("GET", "/api/bots")).body.bots.find((b: any) => b.id === on.id).commandFilters).toBe(true);
+    expect((await h.api("POST", `/api/bots/${on.id}/messages`, { text: "run the tests" })).status).toBe(202);
+    await h.waitFor(async () => {
+      const b = await h.getBot(on.id);
+      return !!b && !b.busy && b.messages.some((m: Msg) => m.kind === "digest");
+    }, "the filtered turn to settle");
+    const filteredRow = (await h.getBot(on.id)).messages.find((m: Msg) => m.kind === "activity" && m.tool?.name === "Bash");
+    expect(JSON.stringify(filteredRow.tool)).toContain("pnpm test 2>&1 | tail -n 200");
+
+    const off = (await h.api("POST", "/api/bots")).body.bot;
+    expect((await h.api("PATCH", `/api/bots/${off.id}`, { modelSelection: { instanceId: "claude", model: "fake-model" } })).status).toBe(200);
+    expect((await h.api("POST", `/api/bots/${off.id}/messages`, { text: "run the tests" })).status).toBe(202);
+    await h.waitFor(async () => {
+      const b = await h.getBot(off.id);
+      return !!b && !b.busy && b.messages.some((m: Msg) => m.kind === "digest");
+    }, "the unfiltered turn to settle");
+    const plainRow = (await h.getBot(off.id)).messages.find((m: Msg) => m.kind === "activity" && m.tool?.name === "Bash");
+    expect(JSON.stringify(plainRow.tool)).not.toContain("tail -n 200");
+
+    // the rewrite is measurable: /api/metrics counts it for the flagged bot only
+    const metrics = (await h.api("GET", "/api/metrics")).body;
+    expect(metrics.bots.find((b: any) => b.botId === on.id)?.filteredCommands).toBe(1);
+    expect(metrics.bots.find((b: any) => b.botId === off.id)?.filteredCommands).toBe(0);
+  }, 90_000);
+});
 
 posixOnly("engine hooks e2e (fake Claude honouring the settings hooks)", () => {
   const h = harness("on", {});
