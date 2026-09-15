@@ -4,7 +4,7 @@
 // transcript AND its own provider session. If resume cursors leaked
 // between tasks, a "fresh" task would silently resume the previous
 // conversation, which is the exact thing tasks exist to prevent.
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -138,6 +138,48 @@ describe("tasks", () => {
     expect(reloaded.bot(bot.id)?.threadId).toBe(replacement.threadId);
     expect(reloaded.tasks(bot.id)).toHaveLength(1);
     expect(reloaded.messagesFor(replacement.threadId)).toHaveLength(0);
+  });
+
+  it("deletes a task's event logs along with its transcript", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const first = bot.threadId;
+    const second = store.createTask(bot.id)!;
+    const { EVENTS_DIR, NATIVE_DIR } = await import("./config.ts");
+    for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${first}.ndjson`), "{}\n");
+      writeFileSync(join(dir, `${second.threadId}.ndjson`), "{}\n");
+    }
+
+    expect(store.deleteTask(bot.id, second.threadId)).toBeTruthy();
+
+    for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
+      expect(existsSync(join(dir, `${second.threadId}.ndjson`))).toBe(false);
+      // the surviving task keeps its logs
+      expect(existsSync(join(dir, `${first}.ndjson`))).toBe(true);
+    }
+  });
+
+  it("deleting a bot removes every member thread's event logs", async () => {
+    const { store } = await freshStore();
+    const bot = store.createBot();
+    const original = bot.threadId;
+    const extra = store.createTask(bot.id)!;
+    const { EVENTS_DIR, NATIVE_DIR } = await import("./config.ts");
+    for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${original}.ndjson`), "{}\n");
+      writeFileSync(join(dir, `${extra.threadId}.ndjson`), "{}\n");
+    }
+
+    expect(store.deleteBot(bot.id)).toBe(true);
+
+    for (const dir of [EVENTS_DIR, NATIVE_DIR]) {
+      for (const threadId of [original, extra.threadId]) {
+        expect(existsSync(join(dir, `${threadId}.ndjson`))).toBe(false);
+      }
+    }
   });
 
   it("adopts a pre-tasks bot's endless thread as its first task", async () => {

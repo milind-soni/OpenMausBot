@@ -12,7 +12,7 @@ import { ensureSections, readSections, changeEmptySection } from "./section-cont
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
 import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
-import { DATA_DIR, loadBrowserProfileIdAliases } from "./config.ts";
+import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type CloudBackend, type ModelSelection, type ThreadId } from "./contracts.ts";
@@ -1285,11 +1285,18 @@ export class Store {
     return group;
   }
 
-  /** A thread's durable record: DB rows plus any legacy JSON leftovers. */
+  /** A thread's durable record: DB rows, legacy JSON leftovers, and the
+   * per-thread event logs. Every delete path funnels here — task, group,
+   * and bot deletion — so the logs cannot outlive the thread anywhere. */
   private deleteThreadRecord(threadId: string) {
     this.threads.delete(threadId);
     mdb.deleteThread(threadId);
-    for (const file of [messagesFile(threadId), `${messagesFile(threadId)}.imported`]) {
+    for (const file of [
+      messagesFile(threadId),
+      `${messagesFile(threadId)}.imported`,
+      join(EVENTS_DIR, `${threadId}.ndjson`),
+      join(NATIVE_DIR, `${threadId}.ndjson`),
+    ]) {
       try {
         unlinkSync(file);
       } catch {}
