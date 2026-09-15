@@ -1771,3 +1771,16 @@ describe("ownThreadIds (Phase 1 part 2)", () => {
     expect(store.ownThreadIds("nobody")).toEqual([]);
   });
 });
+
+describe("task fallback record (Phase 2 part 2)", () => {
+  it("round-trips the engine switch the harness made, and clears with the task's cursors", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const record = { from: { instanceId: "claude", model: "claude-sonnet-5" }, to: { instanceId: "codex", model: "gpt-5" }, reason: "quota", at: 1_800_000_000_000 };
+    store.patchTask(bot.id, bot.threadId, { fallback: record, modelSelection: record.to });
+    expect(store.taskByThread(bot.id, bot.threadId)?.fallback).toEqual(record);
+    expect(new Store(selection).taskByThread(bot.id, bot.threadId)?.fallback).toEqual(record);
+    store.patchBot(bot.id, { fallback: { alternate: record.to } });
+    expect(new Store(selection).bot(bot.id)?.fallback).toEqual({ alternate: record.to });
+  });
+});

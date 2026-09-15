@@ -21,6 +21,23 @@ export interface TurnContextInput {
   replaysNatively: boolean;
 }
 
+/** How long a tool line may run before truncation — long enough to keep the
+ * tool name and outcome readable, short enough that a chatty summary field
+ * cannot let one line dominate the replay. */
+const TOOL_LINE_MAX_LENGTH = 120;
+
+/** One compact line standing in for an activity chip (a tool call) in an
+ * inline replay — server/index.ts folds one of these into the transcript it
+ * hands buildTurnContext for every activity message that carries a `tool`,
+ * so an engine joining mid-thread (a fresh engine, a rewind) can see which
+ * files were read or which commands ran, not just what was said. Pure and
+ * exported so it is unit-testable on its own; the merge into the transcript
+ * — and the cap on how many of these accumulate — stays in server/index.ts. */
+export function formatToolActivityLine(tool: { name: string; ok?: boolean }): string {
+  const line = `[ran: ${tool.name.toLowerCase()} — ${tool.ok === false ? "failed" : "ok"}]`;
+  return line.length > TOOL_LINE_MAX_LENGTH ? `${line.slice(0, TOOL_LINE_MAX_LENGTH - 1)}…` : line;
+}
+
 /** Does this engine need the thread replayed to it? True when a DIFFERENT
  * instance ran the last turn here — a cursor of our own is not enough,
  * because it only proves we once had a session covering some prefix of the

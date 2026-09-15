@@ -103,6 +103,9 @@ export interface OptionCardData {
   /** The model's own questions and options (Claude's AskUserQuestion), so
    * the card offers choices instead of an unanswerable Allow/Deny. */
   questionRequest?: QuestionRequestCardData;
+  /** answers must be one of `options`; no free-text reply — set on a
+   * tool-less card whose options are a closed, meaningful set. */
+  fixedOptions?: boolean;
 }
 
 export interface ConnectorCardData {

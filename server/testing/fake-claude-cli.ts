@@ -4,7 +4,7 @@
 // scripted session. Failure modes are toggled by env var, mirroring how
 // the real thing misbehaves:
 //
-//   FAKE_CLAUDE_MODE   happy (default) | exit-early | hang | malformed |
+//   FAKE_CLAUDE_MODE   happy (default) | exit-early | quota | hang | malformed |
 //                      dead-session (fails only when --resume is passed)
 //                      | resume-dies-after-init (a --resume launch emits
 //                        init, then exits without result or output)
@@ -310,6 +310,13 @@ const playTurn = (prompt: JsonValue) => {
   if (mode === "exit-early") {
     process.stderr.write("fake-claude: simulated crash before result\n");
     process.exit(3);
+  }
+  // A terminal provider failure the way the real CLI reports one when the
+  // account is out of quota: no init, a 402-shaped stderr, exit 1. The
+  // classifier reads "quota" from it; the harness must not retry it.
+  if (mode === "quota") {
+    process.stderr.write("claude: API error (402): quota exceeded for this billing period\n");
+    process.exit(1);
   }
   // transient-failure script for retry tests. FAKE_CLAUDE_TRANSIENTS is how
   // many launches fail transiently (503-shaped stderr, exit 5); the count of

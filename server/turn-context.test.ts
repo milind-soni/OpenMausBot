@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTurnContext, engineIsFresh, buildRecoveryText } from "./turn-context.ts";
+import { buildTurnContext, engineIsFresh, buildRecoveryText, formatToolActivityLine } from "./turn-context.ts";
 
 const transcript = [
   { role: "user" as const, text: "my dog is named Biscuit" },
@@ -64,6 +64,50 @@ describe("buildTurnContext", () => {
     expect(out.turnText).toContain("received an update outside your provider session");
     expect(out.turnText).toContain("@Worker replied to the delegated task");
     expect(out.turnText.endsWith("what did they find?")).toBe(true);
+  });
+});
+
+describe("formatToolActivityLine", () => {
+  it("formats a successful tool call", () => {
+    expect(formatToolActivityLine({ name: "Read", ok: true })).toBe("[ran: read — ok]");
+  });
+
+  it("formats a failed tool call", () => {
+    expect(formatToolActivityLine({ name: "Bash", ok: false })).toBe("[ran: bash — failed]");
+  });
+
+  it("treats a missing ok as success — activity chips default to ok", () => {
+    expect(formatToolActivityLine({ name: "Grep" })).toBe("[ran: grep — ok]");
+  });
+
+  it("truncates a long tool name instead of growing the replay without bound", () => {
+    const line = formatToolActivityLine({ name: "x".repeat(200), ok: true });
+    expect(line.length).toBe(120);
+    expect(line.endsWith("…")).toBe(true);
+    expect(line.startsWith("[ran: " + "x".repeat(10))).toBe(true);
+  });
+});
+
+describe("buildTurnContext with tool-line entries in the transcript", () => {
+  it("carries tool lines into an inline replay", () => {
+    const withTools = [
+      { role: "user" as const, text: "read the config and tell me the port" },
+      { role: "assistant" as const, text: formatToolActivityLine({ name: "Read", ok: true }) },
+      { role: "assistant" as const, text: "The port is 3000." },
+    ];
+    const out = buildTurnContext({ text: "thanks", transcript: withTools, rewound: false, fresh: true, externallyUpdated: false, replaysNatively: false });
+    expect(out.resume).toBe(false);
+    expect(out.turnText).toContain("[ran: read — ok]");
+    expect(out.turnText).toContain("The port is 3000.");
+  });
+
+  it("a resumed (non-replay) turn is unchanged by tool lines in the transcript", () => {
+    const withTools = [
+      { role: "user" as const, text: "read the config" },
+      { role: "assistant" as const, text: formatToolActivityLine({ name: "Read", ok: true }) },
+    ];
+    const out = buildTurnContext({ text: "thanks", transcript: withTools, rewound: false, fresh: false, externallyUpdated: false, replaysNatively: false });
+    expect(out).toEqual({ turnText: "thanks", resume: true });
   });
 });
 

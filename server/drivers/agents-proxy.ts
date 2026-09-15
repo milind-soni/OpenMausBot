@@ -33,6 +33,7 @@
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
+import { isIdempotent, teachingError, TOOL_CALL_TIMEOUT_MS, TOOL_RESULT_HEAD_CHARS, TOOL_RESULT_MAX_CHARS, TOOL_RETRY_DELAY_MS } from "./agents-proxy-reliability.ts";
 import readline from "node:readline";
 import { readTurnToken } from "../turn-token-read.ts";
 
@@ -668,6 +669,20 @@ const TOOLS = [
     },
   },
   {
+    name: "tool_result_read",
+    description:
+      "Read more of a long tool result the harness kept for you. What it does: returns one slice (up to 16,000 characters) of a saved result. When to use: a tool answer ended with \"The whole result is saved as <id>\" and you need the part that was cut. When not to use: the head you already have answers the question. Do not use for: results from other conversations (ids are per conversation). Example: tool_result_read with id \"r-3f…\" and offset 16000.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        id: { type: "string", description: "The saved result's id, copied from the note at the end of the cut result." },
+        offset: { type: "integer", minimum: 0, description: "Where to start reading, in characters. Default 0." },
+      },
+      required: ["id"],
+    },
+  },
+  {
     name: "memory_log",
     description:
       "Write one line to today's log file, memory/log/YYYY-MM-DD.md, stamped with the time and this conversation: what happened, not what is true. Use it for events worth a trace — a deploy went out, a person decided something, a check failed — that should not shape future sessions. Logs are never loaded into your prompt; the person can read them, and session_search finds them later. A fact that should hold in every session goes to memory_update instead.",
@@ -930,14 +945,42 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
 }
 
 /** Like api, but a refusal comes back as its body instead of an Error —
- * for the tools whose refusals carry more than a sentence. */
+ * for the tools whose refusals carry more than a sentence. Bounded by
+ * TOOL_CALL_TIMEOUT_MS; a read that fails on the network is retried once. */
 async function apiResponse(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: Json }> {
-  const res = await fetch(HARNESS + path, {
-    ...init,
-    headers: { "content-type": "application/json", authorization: `Bearer ${token()}`, ...init?.headers },
-  });
-  const body = (await res.json().catch(() => ({}))) as Json;
-  return { ok: res.ok, status: res.status, body };
+  const attempt = async () => {
+    const res = await fetch(HARNESS + path, {
+      ...init,
+      headers: { "content-type": "application/json", authorization: `Bearer ${token()}`, ...init?.headers },
+      signal: AbortSignal.timeout(TOOL_CALL_TIMEOUT_MS),
+    });
+    const body = (await res.json().catch(() => ({}))) as Json;
+    return { ok: res.ok, status: res.status, body };
+  };
+  try {
+    return await attempt();
+  } catch (error) {
+    if (!isIdempotent(path, init)) throw teachingError(path, error, false);
+    await new Promise((r) => setTimeout(r, TOOL_RETRY_DELAY_MS));
+    try {
+      return await attempt();
+    } catch (again) {
+      throw teachingError(path, again, true);
+    }
+  }
+}
+
+/** Cap one tool's text (Phase 2 part 2). The spill is best effort: when
+ * the harness cannot keep it, the head is returned with a plain note. */
+async function capToolText(tool: string, text: string): Promise<string> {
+  if (text.length <= TOOL_RESULT_MAX_CHARS) return text;
+  const head = text.slice(0, TOOL_RESULT_HEAD_CHARS);
+  try {
+    const r = await api("/api/internal/tool-result", { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, tool, text }) });
+    return `${head}\n\n[${tool} returned ${text.length.toLocaleString("en-US")} characters; the first ${TOOL_RESULT_HEAD_CHARS.toLocaleString("en-US")} are above. The whole result is saved as ${String(r.id)}: call tool_result_read with that id and an offset to read the rest, only if you need it.]`;
+  } catch {
+    return `${head}\n\n[${tool} returned ${text.length.toLocaleString("en-US")} characters; only the first ${TOOL_RESULT_HEAD_CHARS.toLocaleString("en-US")} are shown.]`;
+  }
 }
 
 /** "1st", "2nd", "3rd", "4th" — the queue position as a person says it. */
@@ -1564,6 +1607,16 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     if (r.error || r.ok !== true) return { text: String(r.error ?? "The log line was not confirmed."), isError: true };
     return { text: `Logged to ${String(r.file)}: ${String(r.line)}` };
   }
+  if (name === "tool_result_read") {
+    const id = typeof args.id === "string" ? args.id.trim() : "";
+    if (!id) return { text: "tool_result_read needs the saved result's id.", isError: true };
+    const offset = typeof args.offset === "number" && Number.isFinite(args.offset) && args.offset > 0 ? Math.trunc(args.offset) : 0;
+    const r = await api(`/api/internal/tool-result?fromBotId=${encodeURIComponent(BOT_ID)}&fromThreadId=${encodeURIComponent(THREAD_ID)}&id=${encodeURIComponent(id)}&offset=${offset}`);
+    const slice = String(r.text ?? "");
+    const total = Number(r.length ?? slice.length);
+    const end = offset + slice.length;
+    return { text: `${slice}${end < total ? `\n\n[characters ${offset.toLocaleString("en-US")}–${end.toLocaleString("en-US")} of ${total.toLocaleString("en-US")}; call again with offset ${end} for more]` : `\n\n[end of the saved result, ${total.toLocaleString("en-US")} characters]`}` };
+  }
   if (name === "session_search") {
     const q = String(args.query ?? "").trim();
     if (!q) return { text: "session_search needs a query, for example {\"query\":\"site audit broken links\"}.", isError: true };
@@ -1800,7 +1853,7 @@ async function handle(msg: Json) {
           return;
         }
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
-        textResult(id, text, isError);
+        textResult(id, isError ? text : await capToolText(name, text), isError);
       } catch (e) {
         textResult(id, (e as Error).message, true);
       }

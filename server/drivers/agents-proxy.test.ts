@@ -25,6 +25,8 @@ let postCalls = 0;
 let postResponse: unknown = { ok: true, messageId: "msg-1", roomName: "Launch" };
 const DEFAULT_AGENTS = { bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }] };
 let agentsResponse: unknown = DEFAULT_AGENTS;
+const spilled = new Map<string, string>();
+let lastSpill: { tool: string; length: number } | null = null;
 let roomsResponse: unknown = {
   rooms: [
     { id: "room-launch", name: "Launch", members: ["Asker", "Helper"] },
@@ -150,6 +152,29 @@ beforeAll(async () => {
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: "unauthorized" }));
+    }
+    // Phase 2 part 2: the tool-result spill store
+    if (req.method === "POST" && req.url === "/api/internal/tool-result") {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        const body = JSON.parse(raw);
+        const id = `r-${String(spilled.size + 1).padStart(8, "0").replace(/\d/g, (d) => "abcdef0123"[Number(d)] ?? "0")}`;
+        spilled.set(id, String(body.text));
+        lastSpill = { tool: String(body.tool), length: String(body.text).length };
+        res.writeHead(201, { "content-type": "application/json" });
+        res.end(JSON.stringify({ id, length: String(body.text).length }));
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/tool-result?")) {
+      const u = new URL(req.url, "http://x");
+      const whole = spilled.get(u.searchParams.get("id") ?? "");
+      if (whole === undefined) { res.writeHead(404, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "no saved result with that id in this conversation" })); return; }
+      const offset = Number(u.searchParams.get("offset") ?? 0);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: u.searchParams.get("id"), length: whole.length, offset, text: whole.slice(offset, offset + 16_000) }));
+      return;
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -496,6 +521,7 @@ describe("agents-proxy MCP surface", () => {
       "manage_room",
       "request_credential",
       "memory_update",
+      "tool_result_read",
       "memory_log",
       "session_search",
       "session_read",
@@ -1925,5 +1951,40 @@ describe("board tools (task_create / task_list) when features.board is enabled",
     const empty = await boardCallTool("task_list", {});
     expect(lastTaskListBody).toEqual({ mineOnly: false });
     expect(empty.result.content[0].text).toBe("No board tasks match.");
+  });
+});
+
+describe("tool reliability (Phase 2 part 2)", () => {
+  it("cuts a long tool result, keeps the whole text with the harness, and reads it back in slices", async () => {
+    sessionSearchResponse = { hits: [], memoryHits: Array.from({ length: 60 }, (_, i) => ({ file: `memory/topic-${i}.md`, snippet: "y".repeat(600), at: i })) };
+    try {
+      const res = await rpc("tools/call", { name: "session_search", arguments: { query: "deploy" } });
+      const text: string = res.result.content[0].text;
+      expect(text.length).toBeLessThan(17_000);
+      expect(text).toMatch(/The whole result is saved as r-[0-9a-f]{8}: call tool_result_read/);
+      expect(lastSpill).toMatchObject({ tool: "session_search" });
+      expect(lastSpill!.length).toBeGreaterThan(30_000);
+      const id = /saved as (r-[0-9a-f]{8})/.exec(text)![1]!;
+      const first = await rpc("tools/call", { name: "tool_result_read", arguments: { id } });
+      expect(first.result.content[0].text).toContain("call again with offset 16000 for more");
+      const second = await rpc("tools/call", { name: "tool_result_read", arguments: { id, offset: 16_000 } });
+      expect(second.result.content[0].text).toMatch(/call again with offset 32000 for more|\[end of the saved result/);
+      const last = await rpc("tools/call", { name: "tool_result_read", arguments: { id, offset: lastSpill!.length - 100 } });
+      expect(last.result.content[0].text).toContain(`[end of the saved result, ${lastSpill!.length.toLocaleString("en-US")} characters]`);
+      const missing = await rpc("tools/call", { name: "tool_result_read", arguments: { id: "r-00000000" } });
+      expect(missing.result.isError).toBe(true);
+      expect(missing.result.content[0].text).toContain("no saved result");
+    } finally {
+      sessionSearchResponse = { hits: [], memoryHits: [] };
+    }
+  });
+
+  it("tells the model what a timeout or an unreachable harness means, and whether it was retried", async () => {
+    const { teachingError, TOOL_CALL_TIMEOUT_MS } = await import("./agents-proxy-reliability.ts");
+    const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });
+    expect(teachingError("/api/internal/session-search?q=x", timeout, true).message).toBe(
+      `session-search did not answer within ${TOOL_CALL_TIMEOUT_MS / 1000} seconds (tried twice). Do not loop on it: continue with what you have, and tell the person this tool timed out if the task depended on it.`,
+    );
+    expect(teachingError("/api/internal/memory", new Error("fetch failed"), false).message).toContain("could not reach OpenMausBot (fetch failed). This is the app, not your input");
   });
 });
