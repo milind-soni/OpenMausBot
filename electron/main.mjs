@@ -2082,6 +2082,7 @@ const CREDENTIAL_PATCH = {
   boxToken: (value) => ({ box: { token: value } }),
   opencodeGoApiKey: (value) => ({ opencodeGo: { apiKey: value } }),
   dictationApiKey: (value) => ({ dictation: { key: value } }),
+  picovoiceAccessKey: (value) => ({ wakeWord: { accessKey: value } }),
   ttsKey: (value) => ({ tts: { key: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
   customImageApiKey: (value) => ({ imageGen: { customApiKey: value } }),
@@ -2164,6 +2165,12 @@ ipcMain.handle(
       },
       onOpen: () => {
         if (!win.isDestroyed()) win.webContents.send("dictation:open", id);
+      },
+      // Deepgram endpointed an utterance (speech_final). Button-triggered
+      // dictation treats this as "the speaker finished" and stops on its
+      // own; hold-to-dictate has no onUtterance consumer and is unaffected.
+      onUtterance: (utterance) => {
+        if (!win.isDestroyed()) win.webContents.send("dictation:utterance", id, utterance);
       },
     });
     dictationSessions.set(id, session);
@@ -2250,6 +2257,14 @@ ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event
   if (typeof text !== "string") throw new Error("clipboard:write-text needs a string");
   clipboard.writeText(text);
   return { written: true };
+}));
+
+// The wake word needs the Picovoice AccessKey in the renderer (Porcupine
+// runs there), so unlike the Deepgram key this one crosses the bridge —
+// but only on an explicit, local-only request while the user has the
+// feature enabled, and it never lands in config the server echoes back.
+ipcMain.handle("wake-word:access-key", localOnly("wake-word:access-key", () => {
+  return secureCredentials?.picovoiceAccessKey ?? process.env.OMB_PICOVOICE_KEY ?? null;
 }));
 
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {

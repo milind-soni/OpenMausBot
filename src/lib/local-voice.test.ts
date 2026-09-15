@@ -63,9 +63,19 @@ describe("paired desktop voice preferences", () => {
     expect(remoteSystemVoice("bot-1")).toBe("com.apple.voice.samantha");
   });
 
-  it("never offers Mac voices on a Windows client", () => {
+  it("offers a Windows client its own installed voices too", () => {
     vi.stubGlobal("window", {
       ogb: { platform: "win32", remoteClient: { active: true } },
+      SpeechSynthesisUtterance: class {},
+      speechSynthesis: { getVoices: () => voices },
+    });
+    expect(localSystemVoicesAvailable()).toBe(true);
+    expect(listLocalSystemVoices()).toHaveLength(2);
+  });
+
+  it("still offers nothing where the OS has no built-in engine", () => {
+    vi.stubGlobal("window", {
+      ogb: { platform: "linux", remoteClient: { active: true } },
       SpeechSynthesisUtterance: class {},
       speechSynthesis: { getVoices: () => voices },
     });

@@ -39,10 +39,13 @@ function write(next: Preferences): void {
 }
 
 export function localSystemVoicesAvailable(): boolean {
+  if (typeof window === "undefined") return false;
+  // Both desktop platforms ship the engine Chromium exposes:
+  // macOS its voices, Windows the SAPI set. All on-device, no key.
+  const platform = window.ogb?.platform;
   return (
-    typeof window !== "undefined" &&
     window.ogb?.remoteClient?.active === true &&
-    window.ogb?.platform === "darwin" &&
+    (platform === "darwin" || platform === "win32") &&
     typeof window.speechSynthesis !== "undefined" &&
     typeof window.SpeechSynthesisUtterance !== "undefined"
   );

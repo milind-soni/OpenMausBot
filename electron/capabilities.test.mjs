@@ -41,9 +41,9 @@ describe("desktop capabilities", () => {
     });
   });
 
-  it.each(["win32", "freebsd"])("fails closed on %s", (platform) => {
+  it("fails closed on an unknown desktop platform", () => {
     const capabilities = desktopCapabilities({
-      platform,
+      platform: "freebsd",
       env: { DISPLAY: ":0" },
       localConnection: { mode: "embedded" },
     });
@@ -56,6 +56,34 @@ describe("desktop capabilities", () => {
       support: "unsupported",
       reasonCode: "unsupported-platform",
     });
+  });
+
+  it("offers local computer control on win32 with a live driver connection", () => {
+    // The bundled cua-driver ships on Windows; only the dictation engine
+    // (Apple Speech) stays macOS-gated here — Deepgram dictation is gated
+    // separately by the desktop bridge, not by this capability.
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      env: {},
+      localConnection: { mode: "embedded" },
+    });
+
+    expect(capabilities.windowChrome).toBe("native");
+    expect(capabilities.dictation.available).toBe(false);
+    expect(capabilities.localComputer).toMatchObject({
+      available: true,
+      support: "supported",
+      status: "ready",
+    });
+  });
+
+  it("keeps win32 local control unavailable without a live driver connection", () => {
+    const capabilities = desktopCapabilities({
+      platform: "win32",
+      env: {},
+      localConnection: null,
+    });
+    expect(capabilities.localComputer.available).toBe(false);
   });
 
   it("offers direct Xorg preview without enabling local control", () => {

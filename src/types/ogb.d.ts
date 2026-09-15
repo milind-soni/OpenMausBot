@@ -213,7 +213,7 @@ const __APP_VERSION__: string;
       saveFile?(filePath: string): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "visionApiKey" | "dictationApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "visionApiKey" | "dictationApiKey" | "picovoiceAccessKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
       /** Hold-to-dictate streaming STT (Deepgram). The renderer streams mic
@@ -226,9 +226,16 @@ const __APP_VERSION__: string;
         onOpen(cb: (id: number) => void): () => void;
         onPartial(cb: (id: number, partialText: string) => void): () => void;
         onError(cb: (id: number, message: string) => void): () => void;
+        /** Deepgram endpointed an utterance — the auto-stop signal for
+         * button/wake-word dictation. */
+        onUtterance(cb: (id: number, utterance: string) => void): () => void;
       };
       /** Copy dictated text into the system clipboard. Resolves once written. */
       writeClipboardText?(text: string): Promise<{ written: boolean }>;
+      /** The Picovoice AccessKey for the "Luna" wake word, from the OS-backed
+       * encrypted store (or OMB_PICOVOICE_KEY in dev). Null when none is
+       * saved — the wake word then stays off and Settings explains why. */
+      picovoiceAccessKey?(): Promise<string | null>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

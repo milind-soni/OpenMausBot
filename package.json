@@ -84,6 +84,8 @@
   "dependencies": {
     "@clack/prompts": "1.7.0",
     "@hpke/core": "1.9.0",
+    "@picovoice/porcupine-web": "^4.0.1",
+    "@picovoice/web-voice-processor": "^4.0.10",
     "@trycua/cua-driver": "0.22.1",
     "@trycua/cua-driver-win32-x64-msvc": "0.22.1",
     "clsx": "^2.1.1",

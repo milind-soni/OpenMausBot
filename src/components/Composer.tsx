@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction 
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
+import { createVoiceDictationSession, mergeDictatedText } from "@/lib/voice-dictation";
+import { setWakeDraftTarget } from "@/lib/wake-word";
 import { activeLocale, t } from "@/lib/i18n";
 import {
   draftRevision,
@@ -203,6 +205,12 @@ export function Composer({
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
+  // The "Luna" wake word drops its transcript into the thread that is on
+  // screen; registered while mounted, cleared on unmount.
+  useEffect(() => {
+    setWakeDraftTarget(draftId);
+    return () => setWakeDraftTarget(null);
+  }, [draftId]);
   // what was typed before the mic went on — partials append after it
   const baseText = useRef("");
 
@@ -575,45 +583,81 @@ export function Composer({
     editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
   };
 
-  // native dictation: partials stream into the input while the Swift
-  // helper runs; the final transcript stays in the box, ready to edit/send
+  // Voice-note dictation (Deepgram, every desktop platform): the button
+  // next to send records; when the speaker finishes — Deepgram's endpointer
+  // plus a silence watchdog so background noise cannot hold the mic open —
+  // the transcript lands in the box, ready to edit or send. On macOS the
+  // on-device helper keeps its own button; both flows share the same box.
   useEffect(() => {
     if (!recording) return;
     const bridge = window.ogb;
-    if (!bridge) {
-      setRecording(false);
-      return;
+    if (capabilities.dictation.available && bridge?.speechStart) {
+      setSpeechError(null);
+      const offTranscript = bridge.onSpeechTranscript((line) => {
+        if (typeof line.text === "string") {
+          const base = baseText.current;
+          editText(base ? `${base} ${line.text}` : line.text);
+        }
+      });
+      const offEnd = bridge.onSpeechEnd(({ code }) => {
+        setRecording(false);
+        if (code === 2) {
+          setSpeechError(t("composer.dictation.macOnly"));
+        } else if (code === 1) {
+          setSpeechError(t("composer.dictation.permission"));
+        }
+      });
+      void bridge.speechStart();
+      return () => {
+        offTranscript();
+        offEnd();
+        void bridge.speechStop();
+      };
     }
-    setSpeechError(null);
-    const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (typeof line.text === "string") {
-        const base = baseText.current;
-        editText(base ? `${base} ${line.text}` : line.text);
-      }
+    // Deepgram path: one session per recording; onUtterance is the
+    // auto-stop signal, mergeDictatedText appends after what was typed.
+    const session = createVoiceDictationSession({
+      onPartial: (partial) => editText(mergeDictatedText(baseText.current, partial)),
+      onResult: (result) => {
+        setRecording(false);
+        editText(mergeDictatedText(baseText.current, result));
+      },
+      onError: (message) => {
+        setRecording(false);
+        setSpeechError(message);
+      },
     });
-    const offEnd = bridge.onSpeechEnd(({ code }) => {
+    if (!session) {
       setRecording(false);
-      if (code === 2) {
-        setSpeechError(t("composer.dictation.macOnly"));
-      } else if (code === 1) {
-        setSpeechError(t("composer.dictation.permission"));
-      }
-    });
-    void bridge.speechStart();
-    return () => {
-      offTranscript();
-      offEnd();
-      void bridge.speechStop();
-    };
-  }, [recording, editText]);
-
-  const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
       setSpeechError(t("composer.dictation.unavailable"));
       return;
     }
-    baseText.current = text.trim();
-    setRecording((r) => !r);
+    setSpeechError(null);
+    void session.start();
+    return () => {
+      // Unmount or re-record: dispose (cancel + release the mic). The
+      // auto-stop path inside the session calls onResult with the final
+      // text; this cleanup only handles the manual paths.
+      session.dispose();
+    };
+  }, [recording, editText, capabilities.dictation.available]);
+
+  const toggleMic = () => {
+    if (!window.ogb) {
+      setSpeechError(t("composer.dictation.unavailable"));
+      return;
+    }
+    if (!recording) {
+      if (!capabilities.dictation.available && !window.ogb.dictation) {
+        setSpeechError(t("composer.dictation.needKey"));
+        return;
+      }
+      baseText.current = text.trim();
+      setRecording(true);
+      track("voice_note_started");
+      return;
+    }
+    setRecording(false);
   };
 
   return (
@@ -974,7 +1018,9 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && !hasContent && capabilities.dictation.available && (
+        // The Apple-Speech button keeps the empty-composer slot; while
+        // recording the dedicated stop button below owns the row.
+        {!locked && !busy && !hasContent && !recording && capabilities.dictation.available && (
           <button
             onClick={toggleMic}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
@@ -985,6 +1031,26 @@ export function Composer({
                 : "text-ink-secondary hover:bg-raised hover:text-ink",
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
+          >
+            <Mic size={18} />
+          </button>
+        )}
+        {!locked && !busy && hasContent && !recording && window.ogb?.dictation && (
+          <button
+            onClick={toggleMic}
+            aria-label={t("composer.dictation.record")}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+            title={t("composer.dictation.record")}
+          >
+            <Mic size={18} />
+          </button>
+        )}
+        {!locked && recording && (
+          <button
+            onClick={() => setRecording(false)}
+            aria-label={t("composer.dictation.stopRecord")}
+            className="flex size-8 shrink-0 animate-pulse items-center justify-center rounded-full bg-danger/20 text-danger"
+            title={t("composer.dictation.stopRecord")}
           >
             <Mic size={18} />
           </button>

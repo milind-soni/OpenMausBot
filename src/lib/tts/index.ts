@@ -215,12 +215,12 @@ export class Speaker {
       utterance.onend = () => finish(true);
       utterance.onerror = (event) => {
         const interrupted = event.error === "canceled" || event.error === "interrupted";
-        finish(false, interrupted ? undefined : "This Mac could not play its selected voice.");
+        finish(false, interrupted ? undefined : "This device could not play its selected voice.");
       };
       try {
         synth.speak(utterance);
       } catch {
-        finish(false, "This Mac could not start its selected voice.");
+        finish(false, "This device could not start its selected voice.");
       }
     });
   }

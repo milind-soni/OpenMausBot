@@ -340,6 +340,58 @@ function ToolCallsRow() {
   );
 }
 
+/** The "Luna" wake word: a Picovoice AccessKey row plus the on/off switch.
+ * The detector runs in the renderer (see wake-word.ts); the server only
+ * stores the key and the feature flag. */
+function WakeWordSection() {
+  const { state, dispatch } = useStore();
+  const enabled = state.config?.features?.wakeWord === true;
+  // The words after "Luna" are transcribed by Deepgram, so the wake word is
+  // half-useless without that key — say so instead of letting it fail live.
+  const deepgramReady = state.config?.dictation?.configured === true;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const toggle = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ features: { wakeWord: !enabled } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.wakeWord.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card title={t("settings.wakeWord.title")} subtitle={t("settings.wakeWord.subtitle")}>
+      <div className="flex flex-col gap-3">
+        <ApiKeyRow section="wakeWord" />
+        {!deepgramReady ? (
+          <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.wakeWord.needDictationKey")}</p>
+        ) : null}
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-[14px] font-medium text-ink">{t("settings.wakeWord.enable")}</div>
+          <Switch
+            checked={enabled}
+            aria-label={t("settings.wakeWord.enable")}
+            disabled={saving}
+            onClick={() => void toggle()}
+            className="disabled:cursor-wait disabled:opacity-50"
+          />
+        </div>
+        {error ? <p role="alert" className="text-[12px] text-danger">{error}</p> : null}
+      </div>
+    </Card>
+  );
+}
+
 function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
   const skillAuthoring = skillAuthoringEnabled(state.config);
@@ -671,6 +723,7 @@ export function SettingsModal() {
                   <ApiKeyRow section="vision" />
                   <VisionUrl />
                   <ApiKeyRow section="dictation" />
+                  <WakeWordSection />
                   <ApiKeyRow section="xai" testProvider="xai" />
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />

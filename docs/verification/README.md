@@ -85,6 +85,9 @@ desktop app or controlling the user's computer.
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
+The [voice recipe](voice.md) checks the wake-word credential round-trip and
+the built-in zero-key speech engine's real WAV synthesis on an isolated fixture.
+
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.
 

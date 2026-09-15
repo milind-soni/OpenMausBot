@@ -6,6 +6,7 @@
 import type { AppConfig } from "../config.ts";
 import * as elevenlabs from "./elevenlabs.ts";
 import * as systemVoices from "./system-voices.ts";
+import * as windowsVoices from "./windows-voices.ts";
 
 export type VoiceProvider = "elevenlabs" | "system";
 
@@ -29,16 +30,21 @@ export function voiceProvider(cfg: AppConfig): VoiceProvider {
   return cfg.tts?.provider === "system" ? "system" : "elevenlabs";
 }
 
-/** The system provider needs no credential — it is only ever offered where
- * the platform actually has it, so "configured" means "this engine can
- * speak", not "a key is on file". */
+/** The platform's built-in voice engine: `say` on macOS, SAPI via
+ * PowerShell on Windows. The system provider needs no credential — it is
+ * only ever offered where the platform actually has it, so "configured"
+ * means "this engine can speak", not "a key is on file". */
+export function platformVoicesAvailable(platform: string = process.platform): boolean {
+  return systemVoices.systemVoicesAvailable(platform) || windowsVoices.windowsVoicesAvailable(platform);
+}
+
 export function providerConfigured(cfg: AppConfig): boolean {
-  return voiceProvider(cfg) === "system" ? systemVoices.systemVoicesAvailable() : Boolean(cfg.tts?.key);
+  return voiceProvider(cfg) === "system" ? platformVoicesAvailable() : Boolean(cfg.tts?.key);
 }
 
 export function voiceConfigured(cfg: AppConfig): boolean {
   if (voiceProvider(cfg) === "system") {
-    return systemVoices.systemVoicesAvailable() && Boolean(cfg.tts?.voice);
+    return platformVoicesAvailable() && Boolean(cfg.tts?.voice);
   }
   return Boolean(cfg.tts?.key && cfg.tts?.voice);
 }
@@ -47,7 +53,7 @@ export function voiceConfigured(cfg: AppConfig): boolean {
  * because the app-wide fallback has not been selected yet. */
 export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   if (voiceProvider(cfg) === "system") {
-    return systemVoices.systemVoicesAvailable() && Boolean(voiceId || cfg.tts?.voice);
+    return platformVoicesAvailable() && Boolean(voiceId || cfg.tts?.voice);
   }
   return Boolean(cfg.tts?.key && (voiceId || cfg.tts?.voice));
 }
@@ -68,7 +74,13 @@ export function verifyKey(key: string) {
 }
 
 export async function listVoices(cfg: AppConfig, run?: systemVoices.Runner): Promise<elevenlabs.Voice[]> {
-  if (voiceProvider(cfg) === "system") return systemVoices.listSystemVoices(run);
+  if (voiceProvider(cfg) === "system") {
+    // The injected runner is the say-shaped test seam; production routes by
+    // platform: win32 → SAPI via PowerShell, everything else → `say`.
+    if (run) return systemVoices.listSystemVoices(run);
+    if (windowsVoices.windowsVoicesAvailable()) return windowsVoices.listWindowsVoices();
+    return systemVoices.listSystemVoices();
+  }
   const key = cfg.tts?.key;
   if (!key) return [];
   return elevenlabs.listVoices(key);
@@ -79,11 +91,15 @@ export async function listVoices(cfg: AppConfig, run?: systemVoices.Runner): Pro
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner) {
   if (voiceProvider(cfg) === "system") {
     const voice = voiceId || cfg.tts?.voice;
-    // An injected runner is the cross-platform test seam for `/usr/bin/say`;
-    // production calls omit it and remain strictly Darwin-gated.
-    if (!systemVoices.systemVoicesAvailable() && !run) throw new NoVoiceConfigured("key");
+    // An injected runner is the cross-platform test seam, and it mimics
+    // `say`; tests that exercise the PowerShell engine call
+    // windows-voices.ts directly. Production calls omit the runner and are
+    // strictly platform-gated: win32 → SAPI, everything else → `say`.
+    if (!platformVoicesAvailable() && !run) throw new NoVoiceConfigured("key");
     if (!voice) throw new NoVoiceConfigured("voice");
-    return systemVoices.synthesizeSystem(text, voice, run);
+    if (run) return systemVoices.synthesizeSystem(text, voice, run);
+    if (windowsVoices.windowsVoicesAvailable()) return windowsVoices.synthesizeWindows(text, voice);
+    return systemVoices.synthesizeSystem(text, voice);
   }
   const key = cfg.tts?.key;
   if (!key) throw new NoVoiceConfigured("key");

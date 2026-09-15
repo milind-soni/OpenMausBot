@@ -29,10 +29,14 @@ export function dictationQueryUrl() {
     // Punctuation and smart formatting produce paste-ready prose.
     punctuate: "true",
     smart_format: "true",
-    // Endpointing keeps long holds from ballooning the partial buffer;
-    // Finalize alone already covers hold-release semantics.
+    // Endpointing doubles as the auto-stop for button-triggered dictation:
+// 300 ms of trailing silence ends an utterance (the same boundary the call
+// stream uses), and utterance_end_ms=750 keeps natural mid-sentence pauses
+// from firing it while refusing to hold the mic open through background
+// noise. Hold-to-dictate ignores these entirely — Finalize already covers
+// hold-release semantics.
     endpointing: "300",
-    utterance_end_ms: "1000",
+    utterance_end_ms: "750",
   });
   return `${DEEPGRAM_WS_URL}?${params.toString()}`;
 }

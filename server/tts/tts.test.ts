@@ -187,17 +187,19 @@ describe("built-in macOS voices", () => {
   };
 
   const system = { provider: "system" as const, voice: "Albert" };
-  const onMac = process.platform === "darwin";
+  // The built-in engine exists on macOS (`say`) and Windows (SAPI) alike;
+  // the runner seam below mimics `say` on every platform.
+  const onBuiltInPlatform = process.platform === "darwin" || process.platform === "win32";
 
   it("needs no key — only a picked voice — once selected", async () => {
     const { voiceConfigured, voiceReady, describeVoice } = await voice();
-    expect(voiceConfigured(cfg(system))).toBe(onMac);
-    expect(voiceReady(cfg({ provider: "system" }), "Albert")).toBe(onMac);
-    expect(voiceReady(cfg(system))).toBe(onMac);
+    expect(voiceConfigured(cfg(system))).toBe(onBuiltInPlatform);
+    expect(voiceReady(cfg({ provider: "system" }), "Albert")).toBe(onBuiltInPlatform);
+    expect(voiceReady(cfg(system))).toBe(onBuiltInPlatform);
     const described = describeVoice(cfg(system));
     expect(described).toEqual({
-      configured: onMac,
-      ready: onMac,
+      configured: onBuiltInPlatform,
+      ready: onBuiltInPlatform,
       voice: "Albert",
       provider: "system",
     });

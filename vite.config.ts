@@ -17,6 +17,13 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(version),
   },
   test: {
+    alias: {
+      // The Picovoice wake-word engines ship browser-wasm entry points that
+      // Node cannot resolve; tests exercise the logic around them through
+      // Node-resolvable stubs (which individual tests may vi.mock).
+      "@picovoice/porcupine-web": fileURLToPath(new URL("./src/testing/porcupine-web-stub.ts", import.meta.url)),
+      "@picovoice/web-voice-processor": fileURLToPath(new URL("./src/testing/web-voice-processor-stub.ts", import.meta.url)),
+    },
     environment: "node",
     include: [
       "server/**/*.test.ts",

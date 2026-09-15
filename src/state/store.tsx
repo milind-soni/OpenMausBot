@@ -419,6 +419,8 @@ export interface ConfigStatus {
   openaiCompat?: { configured: boolean; url?: string };
   vision?: { configured: boolean; url?: string };
   dictation?: { configured: boolean };
+  /** The "Luna" wake word's Picovoice AccessKey is saved (never echoed). */
+  wakeWord?: { configured: boolean };
   /** what this server is entitled to; Settings shows only what works here */
   edition?: { edition: "oss" | "enterprise"; features: string[] };
   /** a fleet agent exists on this server (Settings → Workspaces) */
@@ -452,7 +454,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean };
+  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; wakeWord?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;

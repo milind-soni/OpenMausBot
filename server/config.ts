@@ -232,6 +232,10 @@ const featureConfigSchema = z.object({
    * the journal + watchdog rollback path. Off until explicitly enabled —
    * also settable with OMB_SELF_MODIFY=1. */
   selfModify: z.boolean().optional(),
+  /** "Luna" wake word: keep an on-device Porcupine detector armed while
+   * the app runs. Off until explicitly enabled; the mic is not opened
+   * before that. */
+  wakeWord: z.boolean().optional(),
 });
 /** First-run progress. Kept in the workspace config rather than a browser so
  * it survives cleared site data and is shared by every paired client. Hint
@@ -326,6 +330,11 @@ const appConfigSchema = z.object({
   /** Composer dictation (hold Ctrl+Space): the Deepgram streaming key. The
    * desktop shell, not a provider driver, consumes it. */
   dictation: z.object({ key: optionalText }).optional(),
+  /** The "Luna" wake word: the Picovoice AccessKey for the renderer's
+   * on-device Porcupine detector. Stored and reported configured-or-not
+   * only; the key never leaves the server except to the user's own
+   * desktop shell. */
+  wakeWord: z.object({ accessKey: optionalText }).optional(),
   /** Avatar provider credentials stay separate; choosing a router never reuses a cloud key. */
   imageGen: z.object({
     provider: z.enum(["openai", "xai", "custom"]).optional(),
@@ -392,6 +401,7 @@ export interface AppConfig {
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" };
   dictation?: { key?: string };
+  wakeWord?: { accessKey?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
@@ -400,7 +410,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; selfModify?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; selfModify?: boolean; wakeWord?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -566,6 +576,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "language",
   "tts",
   "dictation",
+  "wakeWord",
   "imageGen",
   "vps",
   "rooms",
@@ -669,6 +680,8 @@ export function loadConfig(): AppConfig {
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   cfg.dictation = { ...cfg.dictation };
   if (process.env.OMB_DICTATION_KEY !== undefined) cfg.dictation.key = process.env.OMB_DICTATION_KEY;
+  cfg.wakeWord = { ...cfg.wakeWord };
+  if (process.env.OMB_PICOVOICE_KEY !== undefined) cfg.wakeWord.accessKey = process.env.OMB_PICOVOICE_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
@@ -701,6 +714,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.dictation?.key, "OMB_DICTATION_KEY"],
+    [patch.wakeWord?.accessKey, "OMB_PICOVOICE_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
   ];
@@ -743,6 +757,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OPENCODE_API_KEY",
   "OMB_TTS_KEY",
   "OMB_DICTATION_KEY",
+  "OMB_PICOVOICE_KEY",
   "OMB_OPENAI_IMAGE_KEY",
   "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
@@ -795,7 +810,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "openaiCompat", "vision", "composio", "box", "opencodeGo", "tts", "dictation", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
+  for (const key of ["xai", "anthropic", "openaiCompat", "vision", "composio", "box", "opencodeGo", "tts", "dictation", "wakeWord", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

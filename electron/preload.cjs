@@ -198,10 +198,21 @@ const bridge = {
       ipcRenderer.on("dictation:error", handler);
       return () => ipcRenderer.removeListener("dictation:error", handler);
     },
+    /** Deepgram endpointed an utterance — the wake-word and button
+     * dictation flows use this as the "speaker finished" signal. */
+    onUtterance: (cb) => {
+      const handler = (_e, id, utterance) => cb(id, utterance);
+      ipcRenderer.on("dictation:utterance", handler);
+      return () => ipcRenderer.removeListener("dictation:utterance", handler);
+    },
   },
   /** Copy dictated text into the system clipboard (main-process write, so
    * focus stays with the window holding the composer). */
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
+
+  /** The Picovoice AccessKey for the "Luna" wake word, from the encrypted
+   * credential store. Null when none is saved. */
+  picovoiceAccessKey: () => ipcRenderer.invoke("wake-word:access-key"),
 
   /** Call-mode streaming STT: open-mic Deepgram session delivering one
    * utterance event per endpointed phrase — the Windows (and any non-mac)
