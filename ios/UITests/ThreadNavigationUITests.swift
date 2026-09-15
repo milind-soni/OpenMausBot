@@ -145,8 +145,8 @@ final class ThreadNavigationUITests: XCTestCase {
         recordScreenshot("Bulk delete confirmation with count", in: app)
         confirmation.tap()
 
-        XCTAssertFalse(app.buttons["select-thread-preview-icloud"].exists)
-        XCTAssertFalse(app.buttons["select-thread-preview-weekend"].exists)
+        assertMissing(app.buttons["select-thread-preview-icloud"])
+        assertMissing(app.buttons["select-thread-preview-weekend"])
         XCTAssertTrue(app.buttons["thread-preview-gmail"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         assertThread("Triage Gmail", in: app)
@@ -171,7 +171,7 @@ final class ThreadNavigationUITests: XCTestCase {
         XCTAssertTrue(error.waitForExistence(timeout: 5))
         XCTAssertTrue(error.label.contains("Deleted 1 of 2 threads"))
         XCTAssertTrue(error.label.contains("Synthetic deletion failure"))
-        XCTAssertFalse(app.buttons["select-thread-preview-icloud"].exists)
+        assertMissing(app.buttons["select-thread-preview-icloud"])
         let remaining = app.buttons["select-thread-preview-weekend"]
         XCTAssertTrue(remaining.exists)
         XCTAssertTrue(remaining.label.contains("Deselect"))
@@ -240,6 +240,14 @@ final class ThreadNavigationUITests: XCTestCase {
     @MainActor
     private func transcriptContains(_ text: String, in app: XCUIApplication) -> Bool {
         app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+    }
+
+    @MainActor
+    private func assertMissing(_ element: XCUIElement) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: element
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed)
     }
 
     @MainActor
