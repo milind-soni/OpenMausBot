@@ -17,6 +17,7 @@ import { customMcpServers,
   parseConfigPatch,
   parseStoredConfig,
   persistableInstanceConfigs,
+  roomHandoffLimits,
   roomTurnTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
@@ -140,6 +141,20 @@ describe("configuration boundaries", () => {
   ])("rejects an invalid default model selection: %j", (defaultModelSelection) => {
     expect(() => parseStoredConfig({ defaultModelSelection })).toThrow("defaultModelSelection");
     expect(() => parseConfigPatch({ defaultModelSelection })).toThrow("defaultModelSelection");
+  });
+
+  it("exposes room handoff lifetime limits from config with the current defaults", () => {
+    const configured = parseStoredConfig({
+      rooms: { turnTimeoutMinutes: 20, handoffLifetimeMinutes: 60, handoffMinRunwayMinutes: 15, handoffHardCapMinutes: 360 },
+    });
+    expect(roomHandoffLimits(configured)).toEqual({
+      lifetimeMs: 60 * 60_000, minRunwayMs: 15 * 60_000, hardCapMs: 360 * 60_000,
+    });
+    expect(roomHandoffLimits(parseStoredConfig({}))).toEqual({
+      lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000, hardCapMs: 240 * 60_000,
+    });
+    expect(() => parseStoredConfig({ rooms: { turnTimeoutMinutes: 20, handoffMinRunwayMinutes: 10, handoffLifetimeMinutes: 5 } }))
+      .toThrow("rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes");
   });
 
   it("canonicalizes legacy browser profile ids without dropping other stored settings", () => {
