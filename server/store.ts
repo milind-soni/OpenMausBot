@@ -378,6 +378,14 @@ export interface TaskRecord {
   alwaysAllow?: string[];
   unread?: boolean;
   rewound?: boolean;
+  /** true after the harness compacted this thread (Phase 1): the next
+   * dispatch starts a fresh engine session with a budgeted replay instead of
+   * resuming. Cleared, with the resume cursors, once that turn dispatches. */
+  contextReset?: boolean;
+  /** The context reading of the first turn after the last harness
+   * compaction: the floor the thread cannot go under. The next compaction
+   * waits for the context to regrow past it (context-budget.ts). */
+  contextFloor?: number;
   pinnedMessageId?: string;
   /** Runtime-only state, reset on load and never written to bots.json. */
   activity?: BotActivity;
@@ -406,7 +414,7 @@ export interface TaskRecord {
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "rewound", "contextReset", "contextFloor", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
@@ -719,6 +727,8 @@ export interface BotRecord {
    * composer queue until every assignment settles, then run as one
    * follow-up turn. Unset keeps the default steer-immediately behavior. */
   parkDirectMessages?: boolean;
+  /** Compatibility mirror of the active task's contextReset (Phase 1). */
+  contextReset?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation:
    * provider sessions still hold the abandoned branch, so the next turn
    * must start fresh (drop cursors) and replay the surviving path. */
@@ -1899,7 +1909,7 @@ export class Store {
     Object.assign(bot, patch);
     const task = this.activeTask(id);
     if (task) {
-      for (const key of ["resumeCursors", "rewound", "pinnedMessageId", "unread"] as const) {
+      for (const key of ["resumeCursors", "rewound", "contextReset", "pinnedMessageId", "unread"] as const) {
         if (Object.prototype.hasOwnProperty.call(patch, key)) {
           Object.assign(task, { [key]: structuredClone(patch[key]) });
         }
@@ -2264,6 +2274,7 @@ export class Store {
       alwaysAllow: structuredClone(task.alwaysAllow ?? bot.alwaysAllow),
       unread: Boolean(task.unread),
       rewound: task.rewound,
+      contextReset: task.contextReset,
       pinnedMessageId: task.pinnedMessageId,
       activity: task.activity ?? "idle",
       busy: Boolean(task.busy),

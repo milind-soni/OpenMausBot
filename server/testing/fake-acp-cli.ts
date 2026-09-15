@@ -502,8 +502,8 @@ function handle(msg: any) {
           // FAKE_ACP_USAGE_ROOT reproduces opencode 1.18.18's shape: usage at
           // the result root with an empty _meta, instead of usage under _meta.
           process.env.FAKE_ACP_USAGE_ROOT
-            ? { stopReason: "end_turn", usage: { inputTokens: 10, outputTokens: 5 }, _meta: {} }
-            : { stopReason: "end_turn", _meta: { inputTokens: 10, outputTokens: 5 } },
+            ? { stopReason: "end_turn", usage: { inputTokens: Number(process.env.FAKE_ACP_INPUT_TOKENS) || 10, outputTokens: 5 }, _meta: {} }
+            : { stopReason: "end_turn", _meta: { inputTokens: Number(process.env.FAKE_ACP_INPUT_TOKENS) || 10, outputTokens: 5 } },
         );
       };
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");

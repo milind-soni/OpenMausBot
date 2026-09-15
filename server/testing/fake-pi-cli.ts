@@ -13,6 +13,8 @@
 import { appendFileSync, readFileSync } from "node:fs";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
+// FAKE_PI_INPUT_TOKENS: report this many input tokens per turn
+const piInputTokens = () => Number(process.env.FAKE_PI_INPUT_TOKENS) || 12;
 const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/gpt-4o")
   .split(",")
   .filter(Boolean)
@@ -81,7 +83,7 @@ const streamTurn = () => {
   for (const delta of ["Hello", " from", " pi"]) {
     send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta } });
   }
-  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: piInputTokens(), output: 3 } }, usage: { input: piInputTokens(), output: 3 } });
   send({ type: "agent_end" });
 };
 
@@ -111,7 +113,7 @@ const streamToolTurn = () => {
   // pi auto-continues within the same prompt to synthesize the reply
   send({ type: "turn_start" });
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "done" } });
-  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 2 } }, usage: { input: 12, output: 2 } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: piInputTokens(), output: 2 } }, usage: { input: piInputTokens(), output: 2 } });
   send({ type: "agent_end" });
 };
 
@@ -135,7 +137,7 @@ const streamInterleaveTurn = () => {
   send({ type: "tool_execution_start", toolCallId: "call_2", toolName: "bash", args: { command: "echo two" } });
   send({ type: "tool_execution_end", toolCallId: "call_2", toolName: "bash", isError: false });
   send({ type: "message_update", usage: { input: 0, output: 0 }, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "after" } });
-  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 12, output: 3 } }, usage: { input: 12, output: 3 } });
+  send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: piInputTokens(), output: 3 } }, usage: { input: piInputTokens(), output: 3 } });
   send({ type: "agent_end" });
 };
 

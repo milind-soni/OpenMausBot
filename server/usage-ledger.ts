@@ -46,6 +46,9 @@ export interface UsageRow {
   hookCoverage?: "full" | "preview" | "none";
   /** Shell commands the PreToolUse filter rewrote during this turn. */
   filteredCommands?: number;
+  /** True when the harness compacted the thread right before this turn
+   * (Phase 1): the turn started a fresh session on a budgeted replay. */
+  compacted?: boolean;
   promptShape?: {
     stableBytes: number;
     volatileBytes: number;
