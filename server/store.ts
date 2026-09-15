@@ -93,6 +93,11 @@ export interface OptionCardData {
   /** A provider's structured question set (Claude's AskUserQuestion), so the
    * card can offer the model's own options instead of Allow/Deny. */
   questionRequest?: QuestionRequestCardData;
+  /** answers must be one of `options`; no free-text reply. Set on a
+   * tool-less card whose options are a closed, meaningful set (for example
+   * quota-switch's list of engines) rather than an open question a person
+   * could reasonably answer in their own words. */
+  fixedOptions?: boolean;
 }
 
 export interface ConnectorCardData {
