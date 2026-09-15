@@ -1,13 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  SIDEBAR_BOT_ORDER_KEY,
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
   SIDEBAR_DENSITY_KEY,
   SIDEBAR_SECTION_ORDER_KEY,
+  loadBotOrder,
   loadCollapsedSections,
   loadSectionOrder,
   loadSidebarDensity,
   parseSidebarDensity,
+  saveBotOrder,
   saveCollapsedSections,
   saveSectionOrder,
   saveSidebarDensity,
@@ -59,6 +62,11 @@ describe("sidebar section preferences", () => {
       "section:Work",
       "builtin:bots",
     ]);
+
+    const botSet = vi.fn();
+    saveBotOrder(["waffle", "finch"], { setItem: botSet });
+    expect(botSet).toHaveBeenCalledWith(SIDEBAR_BOT_ORDER_KEY, JSON.stringify(["waffle", "finch"]));
+    expect(loadBotOrder({ getItem: () => JSON.stringify(["finch", "waffle"]) })).toEqual(["finch", "waffle"]);
   });
 
   it("ignores malformed storage and toggles ids without mutating the source", () => {

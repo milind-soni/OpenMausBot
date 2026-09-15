@@ -5,6 +5,7 @@ export type SidebarDensity = "comfortable" | "compact" | "icons";
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
 export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
+export const SIDEBAR_BOT_ORDER_KEY = "openmausbot.sidebarBotOrder.v1";
 
 export function parseSidebarDensity(value: string | null): SidebarDensity {
   switch (value) {
@@ -105,4 +106,15 @@ export function saveSectionOrder(
   storage?: Pick<Storage, "setItem"> | null,
 ): void {
   saveStringList(SIDEBAR_SECTION_ORDER_KEY, ids, storage);
+}
+
+export function loadBotOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
+  return loadStringList(SIDEBAR_BOT_ORDER_KEY, storage);
+}
+
+export function saveBotOrder(
+  ids: string[],
+  storage?: Pick<Storage, "setItem"> | null,
+): void {
+  saveStringList(SIDEBAR_BOT_ORDER_KEY, ids, storage);
 }

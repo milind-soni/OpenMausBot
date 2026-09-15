@@ -102,6 +102,7 @@
   "sidebar.section.botChats": "बॉट के थ्रेड",
   "sidebar.section.bots": "बॉट",
   "sidebar.section.moved": "{name} को {count} में से स्थान {position} पर ले जाया गया",
+  "sidebar.bot.moved": "{name} को {count} में से स्थान {position} पर ले जाया गया",
   "sidebar.room.renameAria": "{name} का नाम बदलें",
   "sidebar.room.saveChatName": "थ्रेड का नाम सहेजें",
   "sidebar.room.cancelChatRename": "थ्रेड का नाम बदलना रद्द करें",

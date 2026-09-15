@@ -181,6 +181,7 @@
   "sidebar.section.botChats": "Bot-Threads",
   "sidebar.section.bots": "Bots",
   "sidebar.section.moved": "{name} auf Position {position} von {count} verschoben",
+  "sidebar.bot.moved": "{name} auf Position {position} von {count} verschoben",
   "sidebar.room.renameAria": "{name} umbenennen",
   "sidebar.room.saveChatName": "Threadnamen speichern",
   "sidebar.room.cancelChatRename": "Umbenennen des Threads abbrechen",

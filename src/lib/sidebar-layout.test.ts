@@ -5,12 +5,15 @@ import {
   BOTS_SECTION_ID,
   CHANNELS_SECTION_ID,
   PINNED_SECTION_ID,
+  applyItemOrder,
   mergeSectionOrder,
   moveSection,
   orderedSidebarSections,
   partitionSidebarBots,
   partitionSidebarGroups,
   placeSection,
+  replaceSubsetOrder,
+  sidebarBotsReorderable,
   sidebarLayoutInteractive,
   sidebarGoalRunPreview,
   sidebarSectionCollapsed,
@@ -85,6 +88,8 @@ describe("sidebar virtual sections", () => {
     expect(sidebarLayoutInteractive("comfortable", "")).toBe(true);
     expect(sidebarLayoutInteractive("comfortable", "writer")).toBe(false);
     expect(sidebarLayoutInteractive("icons", "")).toBe(false);
+    expect(sidebarBotsReorderable("")).toBe(true);
+    expect(sidebarBotsReorderable("writer")).toBe(false);
     expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "compact", "")).toBe(true);
     expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "compact", "writer")).toBe(false);
     expect(sidebarSectionCollapsed(PINNED_SECTION_ID, [PINNED_SECTION_ID], "icons", "")).toBe(false);
@@ -172,5 +177,30 @@ describe("sidebar section ordering", () => {
       work,
       PINNED_SECTION_ID,
     ]);
+  });
+});
+
+describe("sidebar bot ordering", () => {
+  it("leaves a list alone until a preference exists", () => {
+    const bots = [{ id: "waffle" }, { id: "finch" }, { id: "churro" }];
+    expect(applyItemOrder(bots, [])).toEqual(bots);
+    expect(applyItemOrder(bots, ["finch", "waffle", "churro"]).map((bot) => bot.id)).toEqual([
+      "finch",
+      "waffle",
+      "churro",
+    ]);
+  });
+
+  it("rewrites one section without moving bots that live elsewhere", () => {
+    expect(
+      replaceSubsetOrder(
+        ["chief", "waffle", "finch", "work-bot", "churro"],
+        ["finch", "waffle", "churro"],
+      ),
+    ).toEqual(["chief", "finch", "waffle", "work-bot", "churro"]);
+  });
+
+  it("appends a subset id that was not in the saved order yet", () => {
+    expect(replaceSubsetOrder(["waffle"], ["churro", "waffle"])).toEqual(["churro", "waffle"]);
   });
 });

@@ -102,6 +102,7 @@
   "sidebar.section.botChats": "机器人讨论串",
   "sidebar.section.bots": "机器人",
   "sidebar.section.moved": "{name} 已移到第 {position} 位，共 {count} 位",
+  "sidebar.bot.moved": "{name} 已移到第 {position} 位，共 {count} 位",
   "sidebar.room.renameAria": "重命名 {name}",
   "sidebar.room.saveChatName": "保存讨论串名称",
   "sidebar.room.cancelChatRename": "取消重命名讨论串",

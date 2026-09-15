@@ -190,6 +190,7 @@
   "sidebar.section.botChats": "機器人對話",
   "sidebar.section.bots": "機器人",
   "sidebar.section.moved": "{name} 已移動到第 {position} 個位置，共 {count} 個",
+  "sidebar.bot.moved": "{name} 已移動到第 {position} 個位置，共 {count} 個",
   "sidebar.room.renameAria": "重新命名 {name}",
   "sidebar.room.saveChatName": "儲存對話名稱",
   "sidebar.room.cancelChatRename": "取消重新命名對話",

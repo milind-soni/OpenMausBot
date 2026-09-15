@@ -14,4 +14,8 @@ describe("botListItemPointerIntent", () => {
   it("ignores unrelated pointer events", () => {
     expect(botListItemPointerIntent("contextmenu", false)).toBe("ignore");
   });
+
+  it("does not select a bot after a long-press drag", () => {
+    expect(botListItemPointerIntent("click", false, true)).toBe("ignore");
+  });
 });

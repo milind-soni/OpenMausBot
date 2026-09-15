@@ -181,6 +181,7 @@
   "sidebar.section.botChats": "Conversas entre bots",
   "sidebar.section.bots": "Bots",
   "sidebar.section.moved": "{name} movido para a posição {position} de {count}",
+  "sidebar.bot.moved": "{name} movido para a posição {position} de {count}",
   "sidebar.room.renameAria": "Renomear {name}",
   "sidebar.room.saveChatName": "Salvar nome da conversa",
   "sidebar.room.cancelChatRename": "Cancelar renomeação da conversa",

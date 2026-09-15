@@ -294,6 +294,7 @@
   "sidebar.section.botChats": "Bot threads",
   "sidebar.section.bots": "Bots",
   "sidebar.section.moved": "{name} moved to position {position} of {count}",
+  "sidebar.bot.moved": "{name} moved to position {position} of {count}",
   "sidebar.section.moveToContext": "Move to team",
   "sidebar.section.newContext": "New team…",
   "sidebar.section.newContextAria": "New team name",

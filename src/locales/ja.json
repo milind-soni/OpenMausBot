@@ -102,6 +102,7 @@
   "sidebar.section.botChats": "ボット間のスレッド",
   "sidebar.section.bots": "ボット",
   "sidebar.section.moved": "{name} を {count} 件中 {position} 番目に移動しました",
+  "sidebar.bot.moved": "{name} を {count} 件中 {position} 番目に移動しました",
   "sidebar.room.renameAria": "{name} の名前を変更",
   "sidebar.room.saveChatName": "スレッド名を保存",
   "sidebar.room.cancelChatRename": "スレッド名の変更をキャンセル",

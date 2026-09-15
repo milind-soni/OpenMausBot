@@ -10,6 +10,7 @@ export const WORKSPACE_BACKUP_CLIENT_KEYS = [
   "openmausbot.sidebarDensity",
   "openmausbot.sidebarCollapsedSections.v1",
   "openmausbot.sidebarSectionOrder.v1",
+  "openmausbot.sidebarBotOrder.v1",
   "omb-analytics-opt-out",
   "openmausbot.remote-voice.v1",
 ] as const;

@@ -102,6 +102,7 @@
   "sidebar.section.botChats": "Fils entre bots",
   "sidebar.section.bots": "Bots",
   "sidebar.section.moved": "{name} déplacé en position {position} sur {count}",
+  "sidebar.bot.moved": "{name} déplacé en position {position} sur {count}",
   "sidebar.room.renameAria": "Renommer {name}",
   "sidebar.room.saveChatName": "Enregistrer le nom du fil",
   "sidebar.room.cancelChatRename": "Annuler le renommage du fil",
