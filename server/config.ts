@@ -26,6 +26,12 @@ export const DEFAULT_LOCAL_VM_MODE = "shared" as const;
 export const DEFAULT_LOCAL_VM_MAX_INSTANCES = 2;
 export const MIN_LOCAL_VM_MAX_INSTANCES = 1;
 export const MAX_LOCAL_VM_MAX_INSTANCES = 4;
+// P1 (budgets) replaces this fixed cap with a budget-derived one; P2 (bot
+// profile) adds a supervisor role that may raise a bot's own share of it.
+// Until either lands, the whole board shares one plain number.
+export const DEFAULT_BOARD_MAX_RUNNING = 2;
+export const MIN_BOARD_MAX_RUNNING = 1;
+export const MAX_BOARD_MAX_RUNNING = 20;
 
 export function isValidSshAlias(value: unknown): value is string {
   return typeof value === "string" && SSH_ALIAS.test(value);
@@ -228,11 +234,20 @@ const featureConfigSchema = z.object({
   /** Experimental built-in browser. Off until explicitly enabled; each bot
    * also has its own switch. */
   browser: z.boolean().optional(),
+  /** The durable task board (server/task-board.ts + task-dispatcher.ts).
+   * Off until explicitly enabled: an existing install must see no new
+   * behavior — no dispatcher tick, no new routes, no board tools on the
+   * agents proxy — until this is switched on. */
+  board: z.boolean().optional(),
   /** Opt-in computer sharing (a desktop lending folders, a terminal or
    * computer control to a workspace). Off until explicitly enabled; there is
    * no Settings toggle — see sharedComputersEnabled. */
   sharedComputers: z.boolean().optional(),
 });
+const boardConfigSchema = z.object({
+  /** Concurrency cap across the whole board. See DEFAULT_BOARD_MAX_RUNNING. */
+  maxRunning: z.number().int().min(MIN_BOARD_MAX_RUNNING).max(MAX_BOARD_MAX_RUNNING).optional(),
+}).optional();
 /** First-run progress. Kept in the workspace config rather than a browser so
  * it survives cleared site data and is shared by every paired client. Hint
  * ids are short renderer-chosen slugs; the list is capped so a buggy client
@@ -356,6 +371,10 @@ const appConfigSchema = z.object({
   threads: z.object({ maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS) }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
+  /** The board's own concurrency cap. Meaningless while features.board is
+   * off, kept separate from that flag because it is a plain setting, not
+   * an experiment. */
+  board: boardConfigSchema,
   onboarding: onboardingConfigSchema.optional(),
   browserProfiles: browserProfilesSchema.optional(),
   instances: instanceConfigMapSchema.optional(),
@@ -402,7 +421,15 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean };
+  features?: {
+    skillAuthoring?: boolean;
+    showToolCalls?: boolean;
+    browser?: boolean;
+    board?: boolean;
+    sharedComputers?: boolean;
+  };
+  /** The board's concurrency cap; see boardEnabled/boardMaxRunning. */
+  board?: { maxRunning?: number };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -550,6 +577,22 @@ export function builtInBrowserEnabled(cfg: AppConfig): boolean {
   return cfg.features?.browser === true;
 }
 
+/** Off by default: an existing install runs no dispatcher tick, exposes no
+ * `/api/tasks*` routes, and mounts no board tools on the agents proxy until
+ * this is switched on. Flip it live with
+ * `PATCH /api/config {"features":{"board":true}}` — no restart required,
+ * the next dispatcher tick (server/task-dispatcher.ts, every 30s) picks it
+ * up because the tick reads this same live config object. */
+export function boardEnabled(cfg: AppConfig): boolean {
+  return cfg.features?.board === true;
+}
+
+/** Concurrency cap across the whole board. See DEFAULT_BOARD_MAX_RUNNING
+ * for why this is a plain number rather than a budget-derived one. */
+export function boardMaxRunning(cfg: AppConfig): number {
+  return cfg.board?.maxRunning ?? DEFAULT_BOARD_MAX_RUNNING;
+}
+
 /** Opt-in computer sharing: the routes, the agent tools, the advertised
  * capability and the desktop connector. Off unless an explicit `true` turns
  * it on, because the reviewed feature still has open security holes (a
@@ -578,6 +621,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "threads",
   "localVm",
   "features",
+  "board",
   "browserProfiles",
   "onboarding",
 ]);
@@ -788,7 +832,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
+  for (const key of ["xai", "anthropic", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "localVm", "features", "board", "budgets", "billing", "onboarding"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

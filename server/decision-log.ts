@@ -38,7 +38,10 @@ export type DecisionKind =
  * straight through from auto-approve.ts; `question` marks cards a rule may
  * never answer, `auto-fallback` a card shown after delivery failed, `routine`
  * a durable chat scheduling proposal, `skill` a staged learned-skill card,
- * `profile` a bot proposed a profile change, `user` the human's answer, and
+ * `profile` a bot proposed a profile change, `user` the human's answer,
+ * `board` the task-board dispatcher handing a claimed task to a bot's turn
+ * (server/task-dispatcher.ts) — nobody is at the keyboard for that dispatch,
+ * so it is audited the same as any other unattended decision, and
  * auto-review sources the isolated model reviewer. */
 export type DecisionSource =
   | AutoVerdictSource
@@ -48,6 +51,7 @@ export type DecisionSource =
   | "skill"
   | "profile"
   | "user"
+  | "board"
   | "auto-review"
   | "auto-review-shadow";
 

@@ -1631,6 +1631,148 @@ describe("agents-proxy MCP surface", () => {
   });
 });
 
+// Board tools get their own process, spawned only with OMB_BOARD_ENABLED=1
+// (mirroring OMB_SKILL_AUTHORING_ENABLED above): the main suite's shared
+// child never sets that env var, so its exact tools/list assertion already
+// proves task_create/task_list stay hidden by default. This block proves
+// the opposite half — what a bot sees and can do once features.board is on.
+describe("board tools (task_create / task_list) when features.board is enabled", () => {
+  let boardChild: ChildProcess;
+  let boardStub: Server;
+  let boardStubPort = 0;
+  let lastTaskCreateBody: any = null;
+  let lastTaskListBody: any = null;
+  let taskCreateResponse: unknown = {
+    task: { id: "task-1", title: "write the changelog", status: "todo", assigneeBotId: null },
+  };
+  let taskListResponse: unknown = { tasks: [] };
+  const boardPending = new Map<number, (msg: any) => void>();
+  let boardNextId = 1;
+
+  function boardRpc(method: string, params?: unknown): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const id = boardNextId++;
+      boardPending.set(id, resolve);
+      boardChild.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => {
+        if (boardPending.delete(id)) reject(new Error(`${method} timed out`));
+      }, 10_000).unref?.();
+    });
+  }
+  const boardCallTool = (name: string, args: unknown) => boardRpc("tools/call", { name, arguments: args });
+
+  beforeAll(async () => {
+    boardStub = createServer((req, res) => {
+      if (req.headers.authorization !== `Bearer ${TOKEN}`) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "unauthorized" }));
+      }
+      if (req.method === "POST" && req.url === "/api/internal/task-create") {
+        let data = "";
+        req.on("data", (c) => (data += c));
+        req.on("end", () => {
+          lastTaskCreateBody = JSON.parse(data);
+          res.writeHead(201, { "content-type": "application/json" });
+          res.end(JSON.stringify(taskCreateResponse));
+        });
+        return;
+      }
+      if (req.method === "POST" && req.url === "/api/internal/task-list") {
+        let data = "";
+        req.on("data", (c) => (data += c));
+        req.on("end", () => {
+          lastTaskListBody = JSON.parse(data);
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify(taskListResponse));
+        });
+        return;
+      }
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "unknown" }));
+    });
+    await new Promise<void>((r) => boardStub.listen(0, "127.0.0.1", r));
+    boardStubPort = (boardStub.address() as { port: number }).port;
+
+    boardChild = spawn(process.execPath, [PROXY], {
+      env: {
+        ...process.env,
+        OMB_HARNESS_URL: `http://127.0.0.1:${boardStubPort}`,
+        OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine",
+        OMB_COMMS_TOKEN: TOKEN,
+        OMB_TURN_DEPTH: "0",
+        OMB_BOARD_ENABLED: "1",
+      },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    boardChild.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        boardPending.get(msg.id)?.(msg);
+        boardPending.delete(msg.id);
+      }
+    });
+  });
+
+  afterAll(async () => {
+    boardChild?.kill();
+    await new Promise<void>((r) => boardStub.close(() => r()));
+  });
+
+  it("advertises task_create and task_list, with read annotations only on task_list", async () => {
+    const list = await boardRpc("tools/list");
+    const names = list.result.tools.map((t: { name: string }) => t.name);
+    expect(names).toContain("task_create");
+    expect(names).toContain("task_list");
+    const listTool = list.result.tools.find((t: { name: string }) => t.name === "task_list");
+    expect(listTool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    const createTool = list.result.tools.find((t: { name: string }) => t.name === "task_create");
+    expect(createTool.annotations).toBeUndefined();
+    expect(createTool.inputSchema.required).toEqual(["title"]);
+  });
+
+  it("files a task with an assignee and reports what happened", async () => {
+    const res = await boardCallTool("task_create", {
+      title: "write the changelog",
+      body: "see PR #1",
+      assignee_bot_id: "bot-helper",
+    });
+    expect(lastTaskCreateBody).toMatchObject({
+      title: "write the changelog",
+      body: "see PR #1",
+      assigneeBotId: "bot-helper",
+    });
+    expect(res.result.content[0].text).toContain("write the changelog");
+    expect(res.result.content[0].text).toContain("task-1");
+  });
+
+  it("refuses to file a task without a title, without calling the harness", async () => {
+    lastTaskCreateBody = null;
+    const res = await boardCallTool("task_create", { body: "no title given" });
+    expect(res.result.isError).toBe(true);
+    expect(lastTaskCreateBody).toBeNull();
+  });
+
+  it("lists tasks with the requested filter and reports when nothing matches", async () => {
+    taskListResponse = { tasks: [{ id: "t1", title: "ship it", status: "ready", attempts: 2, blockedReason: null }] };
+    const res = await boardCallTool("task_list", { mine_only: true, status: ["ready", "running"] });
+    expect(lastTaskListBody).toMatchObject({ status: ["ready", "running"], mineOnly: true });
+    expect(res.result.content[0].text).toContain("ship it");
+    expect(res.result.content[0].text).toContain("attempts: 2");
+
+    taskListResponse = { tasks: [] };
+    const empty = await boardCallTool("task_list", {});
+    expect(lastTaskListBody).toEqual({ mineOnly: false });
+    expect(empty.result.content[0].text).toBe("No board tasks match.");
+  });
+});
+
 // Opt-in computer sharing is off unless the harness turns it on. A separate
 // child is the only honest check: the tool list is frozen at module load.
 describe("with computer sharing off (the default)", () => {
