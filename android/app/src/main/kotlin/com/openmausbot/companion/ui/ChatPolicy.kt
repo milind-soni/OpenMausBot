@@ -477,6 +477,9 @@ object MessageActions {
             ?.joinToString("\n\n")
         // A tool chip is context, and a screenshot is pixels.
         Message.Kind.ACTIVITY, Message.Kind.SCREEN -> null
+        // The receipts are worth copying for their full text.
+        Message.Kind.DIGEST -> message.text?.takeIf { it.isNotBlank() }
+        Message.Kind.COMPACTION -> message.compaction?.summary ?: message.text?.takeIf { it.isNotBlank() }
     }
 
     /**

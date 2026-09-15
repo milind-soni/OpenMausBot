@@ -117,7 +117,20 @@ internal fun previewText(message: Message): String = when (message.kind) {
     }
     Message.Kind.ACTIVITY -> message.tool?.name.orEmpty()
     Message.Kind.SCREEN -> "Screenshot"
+    Message.Kind.DIGEST -> message.digest?.summary ?: message.text.orEmpty()
+    Message.Kind.COMPACTION -> message.compaction?.chipText ?: message.text.orEmpty()
     Message.Kind.UNKNOWN -> message.text.orEmpty()
+}
+
+/**
+ * Rows the harness writes about a turn rather than in it: tool chips and, since
+ * Phase 0, the digest and compaction receipts. Hidden together, because a reader
+ * who turned activity off does not want the summary of exactly those calls either.
+ * Port of `isActivityReceipt` in `ChatPreferences.swift`.
+ */
+fun isActivityReceipt(message: Message): Boolean = when (message.kind) {
+    Message.Kind.ACTIVITY, Message.Kind.DIGEST, Message.Kind.COMPACTION -> true
+    else -> false
 }
 
 /**
@@ -126,7 +139,7 @@ internal fun previewText(message: Message): String = when (message.kind) {
  */
 fun transcriptRows(messages: List<Message>, detail: ActivityDetail): List<TranscriptRow> = when (detail) {
     ActivityDetail.FULL -> messages.map(TranscriptRow::Single)
-    ActivityDetail.HIDDEN -> messages.filterNot { it.kind == Message.Kind.ACTIVITY }.map(TranscriptRow::Single)
+    ActivityDetail.HIDDEN -> messages.filterNot(::isActivityReceipt).map(TranscriptRow::Single)
     ActivityDetail.REDUCED -> buildList {
         val run = mutableListOf<Message>()
         fun flush() {

@@ -417,6 +417,41 @@ class DecodingTest {
         assertEquals("Stripe fired", message.text)
     }
 
+    // Phase 0 receipts: a digest under each reply and a compaction record when
+    // a thread's context is summarised. Both carry readable text; the
+    // structured part is what the chip counts.
+
+    @Test
+    fun aDigestMessageDecodesItsCounts() {
+        val message = CompanionJson.decodeFromString<Message>(
+            """{"id":"d1","role":"bot","kind":"digest","at":1,"text":"[digest] edited 2 files · Bash ×3",
+               "digest":{"turnId":"t1","tools":[{"name":"Bash","count":3},{"name":"Read","count":1}],
+                         "files":{"added":["a.ts"],"changed":["b.ts"],"deleted":[]},"hookCoverage":"full"}}""",
+        )
+        assertEquals(Message.Kind.DIGEST, message.kind)
+        assertEquals("4 tool calls · 2 files", message.digest?.summary)
+        assertEquals("4 tool calls · 2 files", previewText(message))
+    }
+
+    @Test
+    fun aDigestWithoutFilesCountsOnlyCalls() {
+        val message = CompanionJson.decodeFromString<Message>(
+            """{"id":"d1","role":"bot","kind":"digest","at":1,"text":"[digest] Bash ×1","digest":{"turnId":"t1","tools":[{"name":"Bash","count":1}],"hookCoverage":"preview"}}""",
+        )
+        assertEquals("1 tool call", message.digest?.summary)
+    }
+
+    @Test
+    fun aCompactionMessageDecodesItsRecord() {
+        val message = CompanionJson.decodeFromString<Message>(
+            """{"id":"c1","role":"bot","kind":"compaction","at":1,"text":"[compaction] Earlier: …",
+               "compaction":{"summary":"Earlier: the user asked for X.","firstKeptId":"c1","tokensBefore":12345,"by":"person"}}""",
+        )
+        assertEquals(Message.Kind.COMPACTION, message.kind)
+        assertEquals("Earlier: the user asked for X.", message.compaction?.summary)
+        assertEquals("Context compacted · 12,345 tokens summarised", message.compaction?.chipText)
+    }
+
     @Test
     fun unknownRoleIsNotAttributedToTheUser() {
         val message = CompanionJson.decodeFromString<Message>(

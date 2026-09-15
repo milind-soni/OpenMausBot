@@ -142,6 +142,51 @@ data class ToolActivity(
 )
 
 /**
+ * The harness's own record of what a turn DID (desktop: the digest chip under
+ * a reply). `text` on the message carries the readable digest; this is the
+ * structured part the chip counts from. Unknown keys are ignored, so a newer
+ * digest never fails the decode. Port of `WorkDigest` in `Models.swift`.
+ */
+@Serializable
+data class WorkDigest(
+    val tools: List<ToolCount> = emptyList(),
+    val files: Files? = null,
+) {
+    @Serializable
+    data class ToolCount(val name: String, val count: Int)
+
+    @Serializable
+    data class Files(
+        val added: List<String> = emptyList(),
+        val changed: List<String> = emptyList(),
+        val deleted: List<String> = emptyList(),
+    )
+
+    /** "3 tool calls · 2 files", or only the calls when no folder was checkpointed. */
+    val summary: String
+        get() {
+            val calls = tools.sumOf { it.count }
+            val callsText = "$calls tool call" + if (calls == 1) "" else "s"
+            val files = files ?: return callsText
+            val count = files.added.size + files.changed.size + files.deleted.size
+            return "$callsText · $count file" + if (count == 1) "" else "s"
+        }
+}
+
+/**
+ * A compaction record: from this message on, rebuilds of the thread's
+ * context carry [summary] instead of the earlier messages.
+ */
+@Serializable
+data class Compaction(
+    val summary: String,
+    val tokensBefore: Int,
+) {
+    val chipText: String
+        get() = "Context compacted · ${"%,d".format(tokensBefore)} tokens summarised"
+}
+
+/**
  * The thread an activity chip opened — "Opened thread #Title on Scout" — so
  * the phone can go there. Newer computers only; a chip without one is just a
  * receipt.
@@ -181,6 +226,10 @@ data class Message(
     val card: OptionCard? = null,
     val tool: ToolActivity? = null,
     val threadRef: ThreadRef? = null,
+    /** `kind == DIGEST`: the structured half of the digest. */
+    val digest: WorkDigest? = null,
+    /** `kind == COMPACTION`: the record itself. */
+    val compaction: Compaction? = null,
     val parentId: String? = null,
     val from: Sender? = null,
     val reactions: List<Reaction>? = null,
@@ -201,7 +250,8 @@ data class Message(
     val queueId: String? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
-    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, UNKNOWN }
+    /** DIGEST and COMPACTION are the harness's receipts under a reply, shown and hidden with tool activity. */
+    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, UNKNOWN }
 
     @Serializable(with = MessageRoleSerializer::class)
     enum class Role { BOT, USER }
@@ -215,6 +265,8 @@ object MessageKindSerializer : KSerializer<Message.Kind> {
         "options" -> Message.Kind.OPTIONS
         "activity" -> Message.Kind.ACTIVITY
         "screen" -> Message.Kind.SCREEN
+        "digest" -> Message.Kind.DIGEST
+        "compaction" -> Message.Kind.COMPACTION
         else -> Message.Kind.UNKNOWN
     }
 
