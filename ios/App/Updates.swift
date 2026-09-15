@@ -89,6 +89,8 @@ extension CompanionState {
         case .secret: return last.secret?.label ?? last.text ?? "Credential required"
         case .activity: return last.tool?.name ?? ""
         case .screen: return "Screenshot"
+        case .digest: return last.digest?.summary ?? last.text ?? ""
+        case .compaction: return last.compaction?.chipText ?? last.text ?? ""
         }
     }
 }

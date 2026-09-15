@@ -121,6 +121,63 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// The harness's own record of what a turn DID (desktop: the digest chip
+/// under a reply). `text` on the message carries the readable digest; this
+/// is the structured part the chip counts from. Fields the phone does not
+/// read stay unread, so a newer digest never fails the decode.
+public struct WorkDigest: Codable, Hashable, Sendable {
+    public struct ToolCount: Codable, Hashable, Sendable {
+        public var name: String
+        public var count: Int
+        public init(name: String, count: Int) {
+            self.name = name
+            self.count = count
+        }
+    }
+    public struct Files: Codable, Hashable, Sendable {
+        public var added: [String]
+        public var changed: [String]
+        public var deleted: [String]
+        public init(added: [String] = [], changed: [String] = [], deleted: [String] = []) {
+            self.added = added
+            self.changed = changed
+            self.deleted = deleted
+        }
+    }
+    public var tools: [ToolCount]
+    public var files: Files?
+    public init(tools: [ToolCount], files: Files? = nil) {
+        self.tools = tools
+        self.files = files
+    }
+
+    /// The chip's one line: "3 tool calls · 2 files", or without the files
+    /// when the turn ran in a folder the harness does not checkpoint.
+    public var summary: String {
+        let calls = tools.reduce(0) { $0 + $1.count }
+        let callsText = "\(calls) tool call\(calls == 1 ? "" : "s")"
+        guard let files else { return callsText }
+        let count = files.added.count + files.changed.count + files.deleted.count
+        return "\(callsText) · \(count) file\(count == 1 ? "" : "s")"
+    }
+}
+
+/// A compaction record: from this message on, rebuilds of the thread's
+/// context carry `summary` instead of the earlier messages.
+public struct Compaction: Codable, Hashable, Sendable {
+    public var summary: String
+    public var tokensBefore: Int
+    public init(summary: String, tokensBefore: Int) {
+        self.summary = summary
+        self.tokensBefore = tokensBefore
+    }
+
+    public var chipText: String {
+        let tokens = NumberFormatter.localizedString(from: NSNumber(value: tokensBefore), number: .decimal)
+        return "Context compacted · \(tokens) tokens summarised"
+    }
+}
+
 /// The thread an activity chip opened — "Opened thread #Title on Scout" —
 /// so the phone can go there. Newer computers only; a chip without one is
 /// just a receipt.
@@ -170,6 +227,9 @@ public struct CommChip: Codable, Hashable, Sendable {
 public struct Message: Codable, Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case text, options, activity, screen, secret
+        /// The harness's receipts under a reply: what the turn did, and a
+        /// compaction record. Shown and hidden with tool activity.
+        case digest, compaction
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single
@@ -209,6 +269,10 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
     public var threadRef: ThreadRef?
+    /// `kind == .digest`: the structured half of the digest.
+    public var digest: WorkDigest?
+    /// `kind == .compaction`: the record itself.
+    public var compaction: Compaction?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?

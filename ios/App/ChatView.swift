@@ -1432,6 +1432,16 @@ struct MessageRow: View {
             }
         case .activity:
             ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
+        case .digest:
+            // the harness's own record of what the turn did; the full digest
+            // text is one tap away, same as selecting any message
+            ReceiptChip(icon: "list.clipboard", label: message.digest?.summary ?? message.text ?? "") {
+                selecting = SelectableText(text: message.text ?? "")
+            }
+        case .compaction:
+            ReceiptChip(icon: "square.3.layers.3d", label: message.compaction?.chipText ?? message.text ?? "") {
+                selecting = SelectableText(text: message.compaction?.summary ?? message.text ?? "")
+            }
         case .screen:
             ScreenShot(threadId: chat.threadId, message: message)
         case .unknown:
@@ -1653,6 +1663,39 @@ struct ActivityChip: View {
             } else {
                 receipt
             }
+        }
+    }
+}
+
+/// A quiet capsule under a reply for the harness's receipts (the work
+/// digest, a compaction record): one line, and the full text on tap.
+struct ReceiptChip: View {
+    let icon: String
+    let label: String
+    var open: (() -> Void)? = nil
+
+    var body: some View {
+        if !label.isEmpty {
+            Button {
+                Haptics.selection()
+                open?()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .medium))
+                    Text(label)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().strokeBorder(.quaternary))
+                .padding(.leading, 2)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityHint("Shows the full text")
         }
     }
 }

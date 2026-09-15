@@ -740,6 +740,42 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(message.text, "Stripe fired")
     }
 
+    // Phase 0 receipts: the harness writes a digest under each reply and a
+    // compaction record when a thread's context is summarised. Both carry
+    // their readable text; the structured part is what the chip counts.
+
+    func testADigestMessageDecodesItsCounts() throws {
+        let json = """
+        {"id":"d1","role":"bot","kind":"digest","at":1,"text":"[digest] edited 2 files · Bash ×3",
+         "digest":{"turnId":"t1","tools":[{"name":"Bash","count":3},{"name":"Read","count":1}],
+                   "files":{"added":["a.ts"],"changed":["b.ts"],"deleted":[]},"hookCoverage":"full"}}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(message.kind, .digest)
+        XCTAssertEqual(message.digest?.summary, "4 tool calls · 2 files")
+        XCTAssertEqual(previewText(of: message), "4 tool calls · 2 files")
+    }
+
+    func testADigestWithoutFilesCountsOnlyCalls() throws {
+        let json = """
+        {"id":"d1","role":"bot","kind":"digest","at":1,"text":"[digest] Bash ×1","digest":{"turnId":"t1","tools":[{"name":"Bash","count":1}],"hookCoverage":"preview"}}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(message.digest?.summary, "1 tool call")
+    }
+
+    func testACompactionMessageDecodesItsRecord() throws {
+        let json = """
+        {"id":"c1","role":"bot","kind":"compaction","at":1,"text":"[compaction] Earlier: …",
+         "compaction":{"summary":"Earlier: the user asked for X.","firstKeptId":"c1","tokensBefore":12345,"by":"person"}}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(message.kind, .compaction)
+        XCTAssertEqual(message.compaction?.summary, "Earlier: the user asked for X.")
+        XCTAssertTrue(message.compaction?.chipText.hasPrefix("Context compacted · ") == true)
+        XCTAssertTrue(message.compaction?.chipText.hasSuffix("345 tokens summarised") == true)
+    }
+
     func testAnUnknownRoleIsNotAttributedToYou() throws {
         let json = """
         {"id":"m1","role":"system","kind":"text","at":1,"text":"hello"}

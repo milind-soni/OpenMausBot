@@ -161,7 +161,20 @@ func previewText(of message: Message) -> String {
         return message.secret?.label ?? message.text ?? "Credential required"
     case .activity: return message.tool?.name ?? ""
     case .screen: return "Screenshot"
+    case .digest: return message.digest?.summary ?? message.text ?? ""
+    case .compaction: return message.compaction?.chipText ?? message.text ?? ""
     case .unknown: return message.text ?? ""
+    }
+}
+
+/// Rows the harness writes about a turn rather than in it: tool chips and,
+/// since Phase 0, the digest and compaction receipts. Hidden together,
+/// because a reader who turned activity off does not want the summary of
+/// exactly those calls either.
+public func isActivityReceipt(_ message: Message) -> Bool {
+    switch message.kind {
+    case .activity, .digest, .compaction: return true
+    default: return false
     }
 }
 
@@ -175,7 +188,7 @@ public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [Tr
     case .full:
         return messages.map(TranscriptRow.message)
     case .hidden:
-        return messages.filter { $0.kind != .activity }.map(TranscriptRow.message)
+        return messages.filter { !isActivityReceipt($0) }.map(TranscriptRow.message)
     case .reduced:
         var rows: [TranscriptRow] = []
         var run: [Message] = []

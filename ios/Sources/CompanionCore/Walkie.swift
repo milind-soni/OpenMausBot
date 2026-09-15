@@ -34,7 +34,7 @@ public enum Walkie {
             return line.isEmpty ? nil : line
         case .secret:
             return "It needs a credential from you. Open the chat to enter it."
-        case .activity, .screen:
+        case .activity, .screen, .digest, .compaction:
             return nil
         }
     }
