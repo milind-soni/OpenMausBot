@@ -1475,7 +1475,15 @@ function ArchivedBotsPanel({
   );
 }
 
-export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function Sidebar({ open, onClose, collapseToIcons = false }: {
+  open: boolean;
+  onClose: () => void;
+  /** Show the avatar rail regardless of the saved density: a side panel is
+   * open and the window cannot seat the full sidebar, the chat and the
+   * panel (App decides). The saved choice is untouched and returns when the
+   * panel closes or the window grows. */
+  collapseToIcons?: boolean;
+}) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -1503,7 +1511,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     restoreBot?: { id: string; name: string };
   } | null>(null);
   const [query, setQuery] = useState("");
-  const [density, setDensityState] = useState<SidebarDensity>(() => loadSidebarDensity());
+  const [storedDensity, setDensityState] = useState<SidebarDensity>(() => loadSidebarDensity());
+  const density: SidebarDensity = collapseToIcons ? "icons" : storedDensity;
   const [lastExpandedDensity, setLastExpandedDensity] = useState<Exclude<SidebarDensity, "icons">>(() => {
     const saved = loadSidebarDensity();
     return saved === "icons" ? "comfortable" : saved;
