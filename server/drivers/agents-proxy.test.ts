@@ -1988,3 +1988,81 @@ describe("tool reliability (Phase 2 part 2)", () => {
     expect(teachingError("/api/internal/memory", new Error("fetch failed"), false).message).toContain("could not reach OpenMausBot (fetch failed). This is the app, not your input");
   });
 });
+
+// Deferred tool loading (Phase 2 part 3) gets its own child, spawned with
+// OMB_TOOLS_DEFERRED=1: the listed set shrinks to a core plus search_tools
+// and use_tool, and every unlisted tool stays reachable through use_tool.
+describe("deferred tool loading when tools.deferred is on", () => {
+  let child: ChildProcess;
+  let stubServer: Server;
+  let port = 0;
+  const pending = new Map<number, (msg: any) => void>();
+  let nextId = 1;
+  let lastRoomsUrl = "";
+
+  function drpc(method: string, params?: unknown): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const id = nextId++;
+      pending.set(id, resolve);
+      child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
+      setTimeout(() => { if (pending.delete(id)) reject(new Error(`${method} timed out`)); }, 10_000).unref?.();
+    });
+  }
+
+  beforeAll(async () => {
+    stubServer = createServer((req, res) => {
+      if (req.headers.authorization !== `Bearer ${TOKEN}`) { res.writeHead(401); return res.end("{}"); }
+      if (req.method === "GET" && req.url?.startsWith("/api/internal/rooms")) {
+        lastRoomsUrl = req.url;
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ rooms: [{ id: "room-1", name: "Launch", members: ["Asker"] }] }));
+      }
+      res.writeHead(404, { "content-type": "application/json" });
+      res.end(JSON.stringify({ error: "unknown" }));
+    });
+    await new Promise<void>((r) => stubServer.listen(0, "127.0.0.1", r));
+    port = (stubServer.address() as { port: number }).port;
+    child = spawn(process.execPath, [PROXY], {
+      env: { ...process.env, OMB_HARNESS_URL: `http://127.0.0.1:${port}`, OMB_BOT_ID: "bot-asker", OMB_THREAD_ID: "thread-asker", OMB_COMMS_TOKEN: TOKEN, OMB_TURN_DEPTH: "0", OMB_TOOLS_DEFERRED: "1" },
+      stdio: ["pipe", "pipe", "inherit"],
+    });
+    let buf = "";
+    child.stdout!.on("data", (c) => {
+      buf += c;
+      let nl;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line.trim()) continue;
+        const msg = JSON.parse(line);
+        pending.get(msg.id)?.(msg);
+        pending.delete(msg.id);
+      }
+    });
+  });
+  afterAll(async () => { child?.kill(); await new Promise<void>((r) => stubServer.close(() => r())); });
+
+  it("lists a core plus the two meta-tools, finds the rest by what they do, and calls them through use_tool", async () => {
+    await drpc("initialize", { protocolVersion: "2024-11-05" });
+    const names: string[] = (await drpc("tools/list")).result.tools.map((t: { name: string }) => t.name);
+    expect(names).toContain("search_tools");
+    expect(names).toContain("use_tool");
+    expect(names).toContain("list_bots");
+    expect(names).toContain("session_search");
+    expect(names).not.toContain("list_rooms");
+    expect(names).not.toContain("delegate_bot");
+    expect(names.length).toBeLessThan(10);
+    const found = await drpc("tools/call", { name: "search_tools", arguments: { query: "which rooms exist" } });
+    expect(found.result.content[0].text).toContain("- list_rooms:");
+    const none = await drpc("tools/call", { name: "search_tools", arguments: { query: "zzzz" } });
+    expect(none.result.content[0].text).toContain("No unlisted tool matches");
+    const used = await drpc("tools/call", { name: "use_tool", arguments: { name: "list_rooms", arguments: {} } });
+    expect(used.result.content[0].text).toContain("Launch");
+    expect(lastRoomsUrl).toContain("/api/internal/rooms");
+    const bad = await drpc("tools/call", { name: "use_tool", arguments: { name: "no_such_tool", arguments: {} } });
+    expect(bad.result.isError).toBe(true);
+    // an unlisted tool called directly is still unknown to the engine's list, but the proxy accepts it
+    const direct = await drpc("tools/call", { name: "list_rooms", arguments: {} });
+    expect(direct.result.content[0].text).toContain("Launch");
+  });
+});

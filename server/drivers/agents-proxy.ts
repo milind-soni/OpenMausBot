@@ -918,7 +918,7 @@ const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const COORDINATING = process.env.OMB_ROOM_TURN === "1";
 const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
-const AVAILABLE_TOOLS = COORDINATING
+const MOUNTED_TOOLS = COORDINATING
   ? BOARD_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
     .map(tool => tool.name === "start_thread" ? {
       ...tool,
@@ -928,6 +928,52 @@ const AVAILABLE_TOOLS = COORDINATING
       } },
     } : tool)
   : BOARD_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
+
+// ── Deferred tool loading (Phase 2 part 3) ───────────────────────────────
+// Every tool schema rides every model call. With tools.deferred on, the
+// model sees a small core plus two meta-tools: search_tools finds the rest
+// by what they do, use_tool calls one by name. The full list stays callable
+// through use_tool on every engine, so nothing depends on an engine
+// honouring tools/list_changed.
+const TOOLS_DEFERRED = process.env.OMB_TOOLS_DEFERRED === "1";
+const CORE_TOOL_NAMES = new Set(["list_bots", "session_search", "session_read", "memory_update", "tool_result_read", "post_to_room"]);
+const META_TOOLS = [
+  {
+    name: "search_tools",
+    description:
+      "Find the tools that are not listed, by what they do. What it does: returns the names, descriptions and inputs of tools matching your words. When to use: you need to ask a teammate, delegate, schedule a routine, manage skills, open a thread, file a task, or anything the listed tools do not cover. When not to use: a listed tool already does it. Do not use for: web search or files. Example: search_tools with query \"delegate work to a teammate\".",
+    inputSchema: { type: "object", additionalProperties: false, properties: { query: { type: "string", description: "What you want to do, in a few words." } }, required: ["query"] },
+  },
+  {
+    name: "use_tool",
+    description:
+      "Call a tool that search_tools found, by name. What it does: runs that tool with the arguments its description asks for. When to use: right after search_tools named the tool you need. When not to use: for a tool that is already listed — call it directly. Do not use for: tool names you guessed; search first. Example: use_tool with name \"delegate_bot\" and arguments { bot_id, message }.",
+    inputSchema: { type: "object", additionalProperties: false, properties: { name: { type: "string" }, arguments: { type: "object", additionalProperties: true } }, required: ["name"] },
+  },
+];
+const AVAILABLE_TOOLS = TOOLS_DEFERRED
+  ? [...MOUNTED_TOOLS.filter((tool) => CORE_TOOL_NAMES.has(tool.name)), ...META_TOOLS]
+  : MOUNTED_TOOLS;
+/** Every tool a call may reach, listed or not. */
+const CALLABLE_TOOLS = TOOLS_DEFERRED ? [...MOUNTED_TOOLS, ...META_TOOLS] : MOUNTED_TOOLS;
+
+/** Rank the unlisted tools by how many of the query's words their name or
+ * description contains; a word in the name counts double. */
+export function searchTools(query: string, tools: ReadonlyArray<{ name: string; description: string }>): Array<{ name: string; description: string }> {
+  const words = query.toLowerCase().split(/[^a-z0-9_]+/).filter((w) => w.length >= 3);
+  if (!words.length) return [];
+  return tools
+    .map((tool) => {
+      const name = tool.name.toLowerCase();
+      const text = tool.description.toLowerCase();
+      const score = words.reduce((n, w) => n + (name.includes(w) ? 2 : 0) + (text.includes(w) ? 1 : 0), 0);
+      return { tool, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .map((entry) => entry.tool);
+}
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -1831,7 +1877,7 @@ async function handle(msg: Json) {
       return;
     case "tools/call": {
       const name = params.name as string;
-      if (!AVAILABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
+      if (!CALLABLE_TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
         // Second lock. With sharing off the tool is not in AVAILABLE_TOOLS, so
         // a call is already refused above as an unknown tool — the same answer
@@ -1850,6 +1896,26 @@ async function handle(msg: Json) {
           const result = response.result as Json;
           if (Array.isArray(result?.content)) ok(id, result);
           else textResult(id, JSON.stringify(result));
+          return;
+        }
+        if (name === "search_tools") {
+          const query = String((params.arguments as Json | undefined)?.query ?? "").trim();
+          const deferred = MOUNTED_TOOLS.filter((tool) => !CORE_TOOL_NAMES.has(tool.name));
+          const found = searchTools(query, deferred);
+          textResult(id, found.length
+            ? `Tools you can call with use_tool:\n${found.map((tool) => `- ${tool.name}: ${tool.description}\n  inputs: ${JSON.stringify((tool as { inputSchema?: { properties?: Json } }).inputSchema?.properties ?? {})}`).join("\n")}`
+            : `No unlisted tool matches "${query}". The unlisted tools are: ${deferred.map((tool) => tool.name).join(", ")}.`);
+          return;
+        }
+        if (name === "use_tool") {
+          const target = String((params.arguments as Json | undefined)?.name ?? "").trim();
+          const inner = ((params.arguments as Json | undefined)?.arguments ?? {}) as Json;
+          if (!MOUNTED_TOOLS.some((tool) => tool.name === target)) {
+            textResult(id, `No tool named "${target}". Call search_tools first and copy the exact name.`, true);
+            return;
+          }
+          const { text, isError } = await callTool(target, inner);
+          textResult(id, isError ? text : await capToolText(target, text), isError);
           return;
         }
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);

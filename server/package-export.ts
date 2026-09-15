@@ -27,8 +27,9 @@ export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "
 }
 
 /** Export a workspace definition, never its runtime state. Connected-app
- * labels are retained as setup intent, but grants, credentials, approvals,
- * transcripts, memory, paths, engines, and schedules' active state are not. */
+ * labels and the engine preference are retained as setup intent, but grants,
+ * credentials, approvals, transcripts, memory, paths, and schedules' active
+ * state are not. */
 export function createBotPackageExport(input: {
   name: string;
   authorName?: string;
@@ -159,6 +160,9 @@ export function createBotPackageExport(input: {
       description: bot.description,
       ...(bot.soul !== undefined ? { soul: bot.soul } : {}),
       appearance,
+      // the engine preference travels as setup intent (Phase 2 part 4,
+      // §16c), the way connected-app labels do; credentials never do
+      ...(bot.modelSelection ? { engine: { instanceId: bot.modelSelection.instanceId, model: bot.modelSelection.model } } : {}),
     };
     const assigned = agentPlaybooks.get(bot.id);
     if (assigned?.length) agent.playbooks = assigned;

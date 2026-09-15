@@ -99,6 +99,8 @@ export interface TeamManifestMember {
     mascotExpression?: string;
     mascotBody?: string;
   };
+  /** The engine preference a package carried (setup intent, Phase 2 part 4). */
+  engine?: { instanceId: string; model: string };
 }
 
 export type TeamManifestResponder =

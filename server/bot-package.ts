@@ -160,6 +160,10 @@ const packageSchema = z.object({
       }),
       playbooks: z.array(key).max(40).optional(),
       skills: z.array(skillName).max(BOT_PACKAGE_MAX_SKILLS).optional(),
+      /** Phase 2 part 4 (§16c): the engine the bot was set up on, kept as
+       * setup intent like connected-app labels; applied on import only
+       * when the workspace has that engine, never a credential. */
+      engine: z.object({ instanceId: requiredText(64), model: requiredText(200) }).strict().optional(),
     })).min(1).max(200),
     chiefOfStaff: key.optional(),
     rooms: z.array(z.object({
@@ -397,5 +401,6 @@ export function packageAgentAsMember(agent: BotPackageAgent): TeamManifestMember
       ...(agent.appearance.mascotExpression ? { mascotExpression: agent.appearance.mascotExpression } : {}),
       ...(agent.appearance.mascotBody ? { mascotBody: agent.appearance.mascotBody } : {}),
     },
+    ...(agent.engine ? { engine: { instanceId: agent.engine.instanceId, model: agent.engine.model } } : {}),
   };
 }

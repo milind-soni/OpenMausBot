@@ -157,7 +157,11 @@ describe("package export", () => {
         agents: [{ skills: ["source-check"] }],
       },
     });
-    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|approvalMode|autoApprove|alwaysAllow|nextRunAt/);
+    // Phase 2 part 4 (§16c): the engine preference travels as setup intent
+    // (instance and model, never the effort or a credential); everything
+    // else that is runtime state or authority still stays out
+    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|secret-session|private\/path|private-attachment|approvalMode|autoApprove|alwaysAllow|nextRunAt|"effort"/);
+    expect(exported.package.agents[0]?.engine).toEqual({ instanceId: "private-engine", model: "secret-model" });
   });
 
   it.each([
