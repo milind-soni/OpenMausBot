@@ -36,6 +36,11 @@ xcodebuild -project OpenMausCompanion.xcodeproj -scheme OpenMausCompanion \
 threads in Email, one unfiled thread, and one hidden routine run. No companion
 client, tokens or provider process are started. This fixture is separate from
 the captured server contract fixtures under `Tests/CompanionCoreTests/Fixtures`.
+`App/ThreadPreviewPages.json` supplies offline sibling transcripts, so the
+switching check can assert that the body as well as the title changes. The
+bulk-delete UI checks add `-threads-preview-deletion` to update that synthetic
+fleet in memory; `-threads-preview-deletion-fails-weekend` refuses the second
+delete to check partial results. These flags are compiled only in Debug.
 
 Check on iPhone and iPad:
 
@@ -47,6 +52,10 @@ Check on iPhone and iPad:
 4. Open Updates. Active sibling threads must have distinct entries and titles.
 5. In the thread picker, attempt creation while offline. The sheet must stay
    open and show an error. Failed renames must retain the entered title.
+6. Select two idle threads for deletion, confirm the count, and check that the
+   current working thread and its transcript remain. Repeat with the synthetic
+   second-delete failure: only the first thread disappears and the remaining
+   one stays selected with a visible partial-result error.
 
 Keep the `.xcresult` bundle and screenshots as evidence. Shut down and remove
 only the disposable simulators you created.

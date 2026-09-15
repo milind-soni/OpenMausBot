@@ -12,6 +12,9 @@ struct TaskManagerView: View {
     @State private var taskToRename: BotTask?
     @State private var taskToDelete: BotTask?
     @State private var title = ""
+    @State private var isSelecting = false
+    @State private var selectedThreadIDs = Set<String>()
+    @State private var confirmingBulkDelete = false
     @State private var isMutating = false
     @State private var errorMessage: String?
     @FocusState private var renameFocused: Bool
@@ -36,6 +39,13 @@ struct TaskManagerView: View {
     private var matchingRoomTasks: [BotTask] {
         let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
         return tasks.filter { query.isEmpty || $0.displayTitle.localizedCaseInsensitiveContains(query) }
+    }
+
+    private var matchingTasks: [BotTask] {
+        switch current {
+        case let .bot(bot): return bot.threadGroups(matching: search, includingClosed: true).flatMap(\.tasks)
+        case .room: return matchingRoomTasks
+        }
     }
 
     var body: some View {
@@ -84,12 +94,35 @@ struct TaskManagerView: View {
                     Button("Done") { dismiss() }.disabled(isMutating)
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("New thread", systemImage: "plus") {
-                        perform { await create() }
+                    if isSelecting {
+                        Button("Cancel selection") {
+                            isSelecting = false
+                            selectedThreadIDs.removeAll()
+                        }
+                        .disabled(isMutating)
+                        .accessibilityIdentifier("cancel-thread-selection")
+                    } else {
+                        Button("Select") {
+                            taskToRename = nil
+                            renameFocused = false
+                            isSelecting = true
+                        }
+                            .disabled(isMutating || tasks.count < 2)
+                            .accessibilityIdentifier("select-threads")
                     }
-                    .disabled(isMutating || (!current.isBot && current.busy))
-                    .accessibilityIdentifier("new-thread")
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    if !isSelecting {
+                        Button("New thread", systemImage: "plus") {
+                            perform { await create() }
+                        }
+                        .disabled(isMutating || (!current.isBot && current.busy))
+                        .accessibilityIdentifier("new-thread")
+                    }
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if isSelecting { bulkDeleteBar }
             }
             .overlay(alignment: .bottom) {
                 if isMutating {
@@ -100,23 +133,67 @@ struct TaskManagerView: View {
                 }
             }
         }
+        .onChange(of: tasks.map(\.threadId)) { _, liveIDs in
+            selectedThreadIDs.formIntersection(liveIDs)
+        }
         .interactiveDismissDisabled(isMutating)
-        .confirmationDialog("Delete thread?", isPresented: Binding(
-            get: { taskToDelete != nil },
-            set: { if !$0 { taskToDelete = nil } }
-        ), titleVisibility: .visible) {
+        .confirmationDialog(
+            taskToDelete == nil ? "Delete \(selectedThreadIDs.count) threads?" : "Delete thread?",
+            isPresented: Binding(
+                get: { taskToDelete != nil || confirmingBulkDelete },
+                set: { presented in
+                    if !presented {
+                        taskToDelete = nil
+                        confirmingBulkDelete = false
+                    }
+                }
+            ), titleVisibility: .visible) {
             if let task = taskToDelete {
                 Button("Delete thread", role: .destructive) {
                     taskToDelete = nil
                     perform { await delete(task) }
                 }
+            } else if confirmingBulkDelete {
+                Button("Delete \(selectedThreadIDs.count) threads", role: .destructive) {
+                    confirmingBulkDelete = false
+                    perform { await deleteSelectedThreads() }
+                }
             }
-            Button("Cancel", role: .cancel) { taskToDelete = nil }
+            Button("Cancel", role: .cancel) {
+                taskToDelete = nil
+                confirmingBulkDelete = false
+            }
         } message: {
             if let task = taskToDelete {
                 Text("Delete “\(task.displayTitle)” and its conversation? This cannot be undone.")
+            } else {
+                Text("The selected conversations will be deleted. This cannot be undone. The current thread stays open.")
             }
         }
+    }
+
+    private var bulkDeleteBar: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Button("Select all") {
+                    selectedThreadIDs.formUnion(matchingTasks.filter(canSelectForBulkDelete).map(\.threadId))
+                }
+                .disabled(isMutating || !matchingTasks.contains(where: canSelectForBulkDelete))
+                .accessibilityIdentifier("select-all-threads")
+                Spacer()
+                Button("Delete \(selectedThreadIDs.count)", role: .destructive) {
+                    confirmingBulkDelete = true
+                }
+                .disabled(isMutating || selectedThreadIDs.isEmpty)
+                .accessibilityIdentifier("delete-selected-threads")
+            }
+            Text("The current and working threads stay. Switch to a thread you want to keep first.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .background(.regularMaterial)
     }
 
     @ViewBuilder private var threadSections: some View {
@@ -197,58 +274,81 @@ struct TaskManagerView: View {
         ContentUnavailableView.search(text: search)
     }
 
-    private func threadButton(_ task: BotTask) -> some View {
-        Button {
-            perform { await switchTo(task) }
-        } label: {
-            BotThreadRow(task: task, selected: task.threadId == current.threadId)
-        }
-        .disabled(isMutating || (!current.isBot && current.busy && task.threadId != current.threadId))
-        .accessibilityIdentifier("thread-\(task.threadId)")
-        .contextMenu {
-            Button("Rename", systemImage: "pencil") { beginRename(task) }
-                .disabled(isMutating)
-            if current.isBot {
-                Button {
-                    toggleArchive(task)
-                } label: {
-                    Label(
-                        task.isArchived ? "Unarchive" : "Archive",
-                        systemImage: task.isArchived ? "arrow.uturn.backward" : "archivebox"
-                    )
+    @ViewBuilder private func threadButton(_ task: BotTask) -> some View {
+        if isSelecting {
+            let selected = selectedThreadIDs.contains(task.threadId)
+            Button {
+                if selected { selectedThreadIDs.remove(task.threadId) }
+                else { selectedThreadIDs.insert(task.threadId) }
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                    BotThreadRow(task: task, selected: task.threadId == current.threadId)
                 }
-                .disabled(isMutating || task.isWorking)
+                .contentShape(Rectangle())
             }
-            Button("Delete", systemImage: "trash", role: .destructive) { taskToDelete = task }
+            .disabled(isMutating || (!selected && !canSelectForBulkDelete(task)))
+            .accessibilityLabel("\(selected ? "Deselect" : "Select") \(task.displayTitle)")
+            .accessibilityIdentifier("select-thread-\(task.threadId)")
+        } else {
+            Button {
+                perform { await switchTo(task) }
+            } label: {
+                BotThreadRow(task: task, selected: task.threadId == current.threadId)
+            }
+            .disabled(isMutating || (!current.isBot && current.busy && task.threadId != current.threadId))
+            .accessibilityIdentifier("thread-\(task.threadId)")
+            .contextMenu {
+                Button("Rename", systemImage: "pencil") { beginRename(task) }
+                    .disabled(isMutating)
+                if current.isBot {
+                    Button {
+                        toggleArchive(task)
+                    } label: {
+                        Label(
+                            task.isArchived ? "Unarchive" : "Archive",
+                            systemImage: task.isArchived ? "arrow.uturn.backward" : "archivebox"
+                        )
+                    }
+                    .disabled(isMutating || task.isWorking)
+                }
+                Button("Delete", systemImage: "trash", role: .destructive) { taskToDelete = task }
+                    .disabled(!canDelete(task))
+            }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button(role: .destructive) { taskToDelete = task } label: {
+                    Label("Delete", systemImage: "trash")
+                }
                 .disabled(!canDelete(task))
-        }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { taskToDelete = task } label: {
-                Label("Delete", systemImage: "trash")
-            }
-            .disabled(!canDelete(task))
-            if current.isBot {
-                Button {
-                    toggleArchive(task)
-                } label: {
-                    Label(
-                        task.isArchived ? "Unarchive" : "Archive",
-                        systemImage: task.isArchived ? "arrow.uturn.backward" : "archivebox"
-                    )
+                if current.isBot {
+                    Button {
+                        toggleArchive(task)
+                    } label: {
+                        Label(
+                            task.isArchived ? "Unarchive" : "Archive",
+                            systemImage: task.isArchived ? "arrow.uturn.backward" : "archivebox"
+                        )
+                    }
+                    .tint(.orange)
+                    .disabled(isMutating || task.isWorking)
                 }
-                .tint(.orange)
-                .disabled(isMutating || task.isWorking)
+                Button { beginRename(task) } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .tint(.accentColor)
+                .disabled(isMutating)
             }
-            Button { beginRename(task) } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            .tint(.accentColor)
-            .disabled(isMutating)
         }
     }
 
+    private func canSelectForBulkDelete(_ task: BotTask) -> Bool {
+        tasks.count > 1 && task.threadId != current.threadId && !task.isWorking
+            && (current.isBot || !current.busy)
+    }
+
     private func canDelete(_ task: BotTask) -> Bool {
-        !isMutating && tasks.count > 1 && (current.isBot ? task.busy != true : !current.busy)
+        !isMutating && tasks.count > 1 && (current.isBot ? !task.isWorking : !current.busy)
     }
 
     private func beginRename(_ task: BotTask) {
@@ -354,7 +454,7 @@ struct TaskManagerView: View {
         // Recheck after the confirmation; an SSE update may have made it busy.
         guard tasks.count > 1,
               let liveTask = tasks.first(where: { $0.threadId == task.threadId }),
-              current.isBot ? liveTask.busy != true : !current.busy else {
+              current.isBot ? !liveTask.isWorking : !current.busy else {
             showError("This thread can't be deleted while it's working or if it's the last thread.")
             return
         }
@@ -375,5 +475,51 @@ struct TaskManagerView: View {
             taskToRename = nil
             renameFocused = false
         }
+    }
+
+    private func deleteSelectedThreads() async {
+        // No batch endpoint exists. Recheck the whole selection before the
+        // first write, then each thread again after the preceding response.
+        // Keep the current thread so the open chat never loses its target.
+        let pending = tasks.filter { selectedThreadIDs.contains($0.threadId) }
+        guard !pending.isEmpty,
+              pending.count == selectedThreadIDs.count,
+              pending.allSatisfy(canSelectForBulkDelete) else {
+            showError("The selection changed. Deselect unavailable threads and try again.")
+            return
+        }
+
+        let total = pending.count
+        var deleted = 0
+        for task in pending {
+            guard let liveTask = tasks.first(where: { $0.threadId == task.threadId }),
+                  canSelectForBulkDelete(liveTask) else {
+                showBulkDeleteError(deleted: deleted, total: total,
+                                    fallback: "A selected thread changed while deleting. Retry the remaining selection.")
+                return
+            }
+
+            let succeeded: Bool
+            switch current {
+            case let .bot(bot):
+                succeeded = await session.deleteTask(liveTask, for: bot) != nil
+            case let .room(room):
+                succeeded = await session.deleteTask(liveTask, for: room)
+            }
+            guard succeeded else {
+                showBulkDeleteError(deleted: deleted, total: total,
+                                    fallback: "Couldn't delete the next thread. Retry the remaining selection.")
+                return
+            }
+            selectedThreadIDs.remove(task.threadId)
+            deleted += 1
+        }
+        isSelecting = false
+    }
+
+    private func showBulkDeleteError(deleted: Int, total: Int, fallback: String) {
+        let reason = session.actionError ?? fallback
+        session.actionError = nil
+        errorMessage = "Deleted \(deleted) of \(total) threads. \(reason) The remaining selection is kept."
     }
 }
