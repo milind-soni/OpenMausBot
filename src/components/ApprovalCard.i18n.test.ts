@@ -25,6 +25,7 @@ function commandApproval(answered?: "allow" | "deny"): { message: Message; pendi
       answered,
       requestId: "approval-request",
       tool: "Bash",
+      allowSession: true,
     },
   };
   return {
@@ -34,10 +35,32 @@ function commandApproval(answered?: "allow" | "deny"): { message: Message; pendi
       requestId: "approval-request",
       tool: "Bash",
       allowKey: "Bash:pnpm test",
+      allowSession: true,
       detail: "pnpm test",
     },
   };
 }
+
+describe("provider approval grants", () => {
+  it("offers exact persistent and provider-session grants together", () => {
+    const { pending } = commandApproval();
+
+    const markup = renderToStaticMarkup(createElement(
+      StoreProvider,
+      null,
+      createElement(PendingApprovalActions, {
+        pending,
+        threadId: "thread-1",
+        bot: { id: "bot-1", name: "Mochi" } as Bot,
+        onCancelTurn: () => undefined,
+      }),
+    ));
+
+    expect(markup).toContain(">Always allow</button>");
+    expect(markup).toContain(">Always allow this session</button>");
+    expect(markup).toContain(">Allow once</button>");
+  });
+});
 
 afterEach(() => {
   setLocale("en");

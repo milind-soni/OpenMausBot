@@ -433,7 +433,7 @@ export function AccessSection({
 
       <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Always allowed</div>
-        <div className="mt-0.5 text-[13px] text-ink-secondary">Tools this bot no longer asks about.</div>
+        <div className="mt-0.5 text-[13px] text-ink-secondary">Exact actions this bot no longer asks about.</div>
         {alwaysAllow.length === 0 ? (
           <div className="mt-3 rounded-lg bg-inset px-3 py-2 text-[12px] text-ink-secondary">Nothing standing yet.</div>
         ) : (

@@ -72,8 +72,8 @@ export interface OptionCardData {
    * with no key) and on every card saved before this field existed, which is
    * why `held` still carries the English. */
   heldCode?: string;
-  /** the narrow grant "always allow" remembers for a harness-native card
-   * (peer comms: "ask_bot:<botId>"). Provider tool asks never carry one. */
+  /** the narrow grant "always allow" remembers: an exact provider
+   * invocation ("Bash:git status") or a harness-native peer action. */
   allowKey?: string;
   /** the provider can remember an allow for the rest of its session
    * ("Always allow this session"), so the card may offer it */
@@ -686,8 +686,8 @@ export interface BotRecord {
     /** Composer grant: leave the bot default and other threads unchanged. */
     threadOnly?: true;
   };
-  /** Tools this bot may always use without asking, even outside auto mode
-   * (set by "Always allow" on an approval card). */
+  /** Exact provider invocations and harness-native actions this bot may use
+   * without asking, set by "Always allow" on an approval card. */
   alwaysAllow?: string[];
   /** Speak this bot's replies aloud as they settle, without being asked.
    * Off by default: a hosted voice costs money per character, so speaking

@@ -12,6 +12,7 @@ import {
   approvalModeForOrigin,
   autoVerdict,
   deliverFullAccessApproval,
+  rememberableProviderApprovalKey,
 } from "./auto-approve.ts";
 
 describe("Full access delivery", () => {
@@ -60,6 +61,43 @@ describe("autoVerdict", () => {
       expect(autoVerdict(mode, "shell", { requiresExplicitApproval: true }))
         .toEqual({ approve: null, source: "explicit-approval-block" });
     }
+  });
+
+  it("honors a remembered provider grant only for the exact invocation", () => {
+    const alwaysAllow = ["Bash:git status"];
+
+    expect(autoVerdict("ask", "Bash", { summary: "git status", alwaysAllow })).toEqual({
+      approve: expect.any(String),
+      source: "always-allow",
+      rule: "Bash:git status",
+    });
+    expect(autoVerdict("ask", "Bash", { summary: "git status --short", alwaysAllow }))
+      .toEqual({ approve: null, source: "no-grant" });
+  });
+
+  it("keeps meaningful whitespace inside quoted command arguments exact", () => {
+    const allowKey = rememberableProviderApprovalKey("Bash", 'printf "a  b"');
+
+    expect(allowKey).toBe('Bash:printf "a  b"');
+    expect(autoVerdict("ask", "Bash", {
+      summary: 'printf "a b"',
+      alwaysAllow: [allowKey!],
+    })).toEqual({ approve: null, source: "no-grant" });
+  });
+
+  it("never lets a remembered invocation widen the sandbox or control the local computer", () => {
+    const alwaysAllow = ["Bash:git status"];
+
+    expect(autoVerdict("ask", "Bash", {
+      summary: "git status",
+      alwaysAllow,
+      requiresExplicitApproval: true,
+    })).toEqual({ approve: null, source: "explicit-approval-block" });
+    expect(autoVerdict("ask", "Bash", {
+      summary: "git status",
+      alwaysAllow,
+      approvalScope: "local-computer",
+    })).toEqual({ approve: null, source: "no-grant" });
   });
 });
 

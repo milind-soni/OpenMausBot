@@ -89,7 +89,7 @@ export interface OptionCardData {
   /** catalog key for `held` when it is a fixed note, so it reads in the
    * viewer's language; absent for free-text errors and older cards */
   heldCode?: string;
-  /** the narrow grant "always allow" remembers, e.g. "Bash:git" */
+  /** the narrow grant "always allow" remembers, e.g. "Bash:git status" */
   allowKey?: string;
   allowSession?: boolean;
   approvalScope?: "local-computer";

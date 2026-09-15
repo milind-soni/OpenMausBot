@@ -31,7 +31,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, rememberableProviderApprovalKey } from "./auto-approve.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import {
@@ -4027,14 +4027,19 @@ bus.subscribe((event: RuntimeEvent) => {
       const permission = event.requestType === "permission" && !event.questions?.length;
       // A permission request here is one the provider left for a person: its
       // own mode already ran (Ask, Edits, Auto's reviewer, Custom's config).
-      // OpenMausBot decides nothing about the action itself. Only Full access
-      // answers, because that is exactly what the person granted. A QUESTION
-      // always reaches the human — even Full access never invents an answer.
+      // OpenMausBot does not classify the action itself. It answers only for
+      // Full access or an exact invocation the person saved earlier. A
+      // QUESTION always reaches the human — even Full never invents an answer.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
       const unattended = permission && asker && event.requestId ? isUnattended(asker.id, event.threadId) : false;
       const effectiveApprovalMode = asker ? approvalModeForTurn(asker, isInternalTurn(event.threadId)) : "ask";
       const verdict = permission && asker && event.requestId
-        ? autoVerdict(effectiveApprovalMode, event.tool, { requiresExplicitApproval: event.requiresExplicitApproval })
+        ? autoVerdict(effectiveApprovalMode, event.tool, {
+            summary: event.summary,
+            alwaysAllow: asker.alwaysAllow,
+            approvalScope: event.approvalScope,
+            requiresExplicitApproval: event.requiresExplicitApproval,
+          })
         : null;
       // Auto's reviewer is the engine's own. Claude accepts `--permission-mode
       // auto` for any model and starts in Manual without a word when auto is
@@ -4083,8 +4088,8 @@ bus.subscribe((event: RuntimeEvent) => {
             if (outcome !== "unavailable") pushMessage({
               role: "bot", kind: "activity",
               tool: { name: outcome === "rejected"
-                ? "The provider rejected this action despite Full access."
-                : "error: could not deliver Full access to the provider; retry the task after reconnecting.", ok: false },
+                ? "The provider rejected this automatic approval."
+                : "error: could not deliver the automatic approval to the provider; retry the task after reconnecting.", ok: false },
             });
             return;
           }
@@ -4103,11 +4108,12 @@ bus.subscribe((event: RuntimeEvent) => {
             summary,
             decision: "auto-approved",
             source: verdict.source,
+            rule: verdict.rule,
           });
         })().catch(() => {
           // A receipt failure must neither crash the server nor manufacture
           // a new permission request after the provider took our answer.
-          console.error("[full-access] Could not record the provider approval result.");
+          console.error("[automatic-approval] Could not record the provider approval result.");
         });
         break;
       }
@@ -4131,8 +4137,14 @@ bus.subscribe((event: RuntimeEvent) => {
           requestId: event.requestId,
           tool: permission ? event.tool : undefined,
           questionRequest: questions ? { version: 1, questions } : undefined,
-          // the provider can keep an allow for its session; the app keeps
-          // no grant of its own for a provider's tool
+          // The exact invocation may be remembered across sessions, while
+          // providers that support it can also remember it for this session.
+          allowKey: permission && asker
+            ? rememberableProviderApprovalKey(event.tool, event.summary, {
+                approvalScope: event.approvalScope,
+                requiresExplicitApproval: event.requiresExplicitApproval,
+              })
+            : undefined,
           allowSession: permission && event.allowSession && !event.requiresExplicitApproval ? true : undefined,
           // The text stays for cards saved before heldCode existed, and for
           // clients that do not know the key yet.

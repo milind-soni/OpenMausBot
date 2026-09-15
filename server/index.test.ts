@@ -5765,9 +5765,9 @@ describe("harness HTTP API", () => {
         .then(async () => (await messages()).find((m) => m.card?.subtitle === "wc -l notes.md")!.card!);
       expect(card.title).toBe("Approval needed");
       expect(card.heldCode).toBe("approval.held.native");
-      // no app-side grant is offered for a provider's tool; the provider's
-      // own session-wide allow is
-      expect(card.allowKey).toBeUndefined();
+      // The app offers an exact cross-session grant alongside the provider's
+      // own session-wide allow; changed arguments produce a different key.
+      expect(card.allowKey).toBe("Bash:wc -l notes.md");
       expect(card.allowSession).toBe(true);
       expect((await messages()).some((m) => m.tool?.name.startsWith("auto-approved"))).toBe(false);
       // the person is told once who is asking and why, naming the model

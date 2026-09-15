@@ -2,10 +2,11 @@
 
 Approval levels belong to a bot and apply to its next provider turn, including
 when that provider resumes an existing native thread. Each level is one of the
-provider's own permission modes, passed through. OpenMausBot does not judge an
-action itself: there is no app-side allowlist, classifier, or pattern rule. A
-native tool request that reaches you is one the provider left for you. In Full
-Access, OMB also applies its own configuration tools without another approval.
+provider's own permission modes, passed through. OpenMausBot does not classify
+an action as safe: a native tool request that reaches you is one the provider
+left for you unless you previously saved that exact tool and arguments with
+**Always allow**. In Full Access, OMB also applies its own configuration tools
+without another approval.
 
 | Level | Behavior |
 | --- | --- |
@@ -44,8 +45,10 @@ once** answers this request only. **Always allow this session** hands the
 provider its own remembered approval: Claude receives its suggested permission
 rules, and ACP agents such as Grok receive their `allow_always` option, or the
 driver repeats your answer for that exact operation until the native session
-ends. OpenMausBot keeps no standing grant for a provider's tool. It is not
-offered for computer control or for a sandbox change.
+ends. **Always allow** stores the exact tool and arguments for this bot and
+automatically answers an identical request in later provider sessions. Changed
+arguments ask again. Neither standing option is offered for computer control or
+for a sandbox change.
 
 Auto-accept edits and Ask card whatever the provider asks about. Approve for
 me cards whatever the provider's reviewer leaves for you, with the note "The

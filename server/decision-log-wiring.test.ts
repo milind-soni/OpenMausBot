@@ -97,8 +97,8 @@ async function waitForRunThread(runId: string, ms = 20_000) {
 }
 
 /** A bot whose fake engine asks permission to run `echo hi` (the ACP core
- * folds that to tool "shell", summary "echo hi" — so the always-allow key
- * is "shell:echo"). */
+ * folds that to tool "shell", summary "echo hi" — so the exact always-allow
+ * key is "shell:echo hi"). */
 async function makePermissionBot(patch: Record<string, unknown>) {
   const created = await api("POST", "/api/bots");
   expect(created.status).toBe(201);
@@ -178,8 +178,43 @@ posixOnly("authorization decisions are logged", () => {
       expect(row!.requestId).toBeTruthy();
       expect(card.card.held).toBe("The provider requires your approval for this action.");
       expect(card.card.allowSession).toBe(true);
+      expect(card.card.allowKey).toBe("shell:echo hi");
     },
     60_000,
+  );
+
+  it(
+    "auto-approves the same invocation after its exact grant is persisted",
+    async () => {
+      const bot = await makePermissionBot({ name: "Remembered" });
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "first run" })).status).toBe(202);
+
+      const firstCard = await waitForBotCard(bot.id);
+      expect(firstCard, "no first approval card ever appeared").not.toBeNull();
+      const requestId = firstCard.card.requestId as string;
+      const allowKey = firstCard.card.allowKey as string;
+      expect(allowKey).toBe("shell:echo hi");
+      expect((await api("POST", `/api/bots/${bot.id}/always-allow`, {
+        threadId: bot.threadId,
+        allowKey,
+      })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, {
+        requestId,
+        behavior: "allow",
+      })).status).toBe(200);
+
+      const firstAnswer = await waitForDecision((row) => row.requestId === requestId && row.decision === "user-approved");
+      expect(firstAnswer, "the first answer was not recorded").not.toBeNull();
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "second run" })).status).toBe(202);
+
+      const remembered = await waitForDecision((row) =>
+        row.botId === bot.id && row.decision === "auto-approved" && row.source === "always-allow",
+      );
+      expect(remembered, "the repeated invocation was not automatically approved").not.toBeNull();
+      expect(remembered!.rule).toBe("shell:echo hi");
+      expect(remembered!.summary).toBe("echo hi");
+    },
+    90_000,
   );
 
   it(
