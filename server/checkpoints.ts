@@ -327,6 +327,43 @@ export async function snapshot(botId: string, cwd: string, label: string): Promi
   }
 }
 
+export interface CheckpointDiff {
+  changed: string[];
+  added: string[];
+  deleted: string[];
+}
+
+/** Paths that differ between two checkpoints of the same bot+folder, from
+ * `git diff --name-status` against the shadow repo. Null when the hashes
+ * are equal, the folder is refused or checkpoints are off, or git fails —
+ * the digest then simply omits its file list. Never throws (turn path). */
+export async function diffStat(botId: string, cwd: string, fromHash: string, toHash: string): Promise<CheckpointDiff | null> {
+  if (fromHash === toHash) return null;
+  if (disabledBots.has(botId)) return null;
+  if (!(await gitAvailable())) return null;
+  if (refusalReason(cwd) !== null) return null;
+  try {
+    const worktree = realpathSync(resolve(cwd));
+    const shadow = shadowDir(botId, worktree);
+    const env = gitEnv(shadow, worktree);
+    const out = await serialize(shadow, () =>
+      runGit(["diff", "--name-status", "--no-renames", "-z", fromHash, toHash], worktree, env),
+    );
+    const diff: CheckpointDiff = { changed: [], added: [], deleted: [] };
+    const fields = out.split("\0").filter((field) => field.length > 0);
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      const status = fields[i]!;
+      const path = fields[i + 1]!;
+      if (status.startsWith("A")) diff.added.push(path);
+      else if (status.startsWith("D")) diff.deleted.push(path);
+      else diff.changed.push(path);
+    }
+    return diff;
+  } catch {
+    return null;
+  }
+}
+
 /** Every checkpoint for this bot+folder, newest first. Empty when nothing
  * was ever snapshotted (listing never creates the shadow repo). The empty
  * base marker is omitted — it is not a state anyone should return to. */

@@ -159,6 +159,22 @@ describe("bot-first sidebar", () => {
   });
 });
 
+describe("group preview", () => {
+  it("previews the last reply, not the digest receipt that follows it", () => {
+    const group: Group = {
+      id: "group", name: "Planning", threadId: "group-thread", memberIds: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 0,
+      messages: [
+        { id: "b1", role: "bot", kind: "text", text: "Plan drafted.", at: 2, from: { botId: "atlas", name: "Atlas", color: "green" } },
+        { id: "d1", role: "bot", kind: "digest", text: "[digest] · tools: Write ×1", at: 3, digest: { turnId: "t1", tools: [{ name: "Write", count: 1 }], hookCoverage: "full" } },
+      ] as Group["messages"],
+      tasks: [{ threadId: "group-thread", title: "Group conversation", createdAt: 1 }],
+    };
+    const markup = renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }));
+    expect(markup).toContain("Atlas: Plan drafted.");
+    expect(markup).not.toContain("[digest]");
+  });
+});
+
 describe("activity-only escape hatch", () => {
   it("includes waiting approvals even with busy false and never treats aggregate activity as every sibling's status", () => {
     const tasks = sidebarBotActivityTasks({ ...bot, busy: true, activity: "waiting-on-you" }, fixture.state.pendingQueued!);

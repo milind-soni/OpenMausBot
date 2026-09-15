@@ -670,6 +670,11 @@ function handle(msg: any) {
           complete();
         };
         const gate = process.env.FAKE_ACP_GATE_FILE;
+        // FAKE_ACP_STARTED_FILE: written the moment the prompt arrives, so a
+        // test can act "during the turn" (after the harness's pre-turn
+        // checkpoint) without racing the busy flag, which flips at claim.
+        const started = process.env.FAKE_ACP_STARTED_FILE;
+        if (started) writeFileSync(started, String(Date.now()));
         if (gate && !existsSync(gate)) {
           const poll = setInterval(() => {
             if (!existsSync(gate)) return;

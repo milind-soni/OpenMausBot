@@ -273,6 +273,12 @@ export interface SendTurnInput {
       generation?: string;
       scope?: "local-computer";
     };
+    /** Engine lifecycle hooks (Claude Code hooks today): the harness's
+     * loopback URL and a turn-scoped bearer the engine's hook helper presents
+     * on POST /api/internal/hook. A driver that declares `capabilities.hooks`
+     * registers the helper with its engine; the harness only ever observes
+     * and injects context through this channel, never decides state. */
+    hooks?: { url: string; token: string };
     /** Peer-agent comms: an MCP proxy (list_bots / ask_bot) that routes back
      * through the harness so this bot can message other bots. The harness
      * owns turns, permissions, and recursion limits; the proxy only forwards. */
@@ -346,6 +352,10 @@ export interface ProviderAdapter {
      * MCP servers from config). Same rule as composioMcp: an entry in the
      * config says the servers exist, not that this engine can reach them. */
     customMcp?: boolean;
+    /** True when sendTurn can register the harness's hook helper with the
+     * engine (integrations.hooks). Only Claude Code today; other engines
+     * deliver the same information through their protocols. */
+    hooks?: boolean;
   };
   sendTurn(input: SendTurnInput): Promise<TurnStartResult>;
   interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void>;

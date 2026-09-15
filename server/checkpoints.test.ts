@@ -269,3 +269,34 @@ describe("refusals", () => {
     expect(existsSync(shadow)).toBe(false);
   });
 });
+
+describe("diffStat", () => {
+  it("names the files added, changed and deleted between two checkpoints", async () => {
+    const { diffStat } = await import("./checkpoints.ts");
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "keep.txt"), "same");
+    writeFileSync(join(cwd, "edit.txt"), "before");
+    writeFileSync(join(cwd, "gone.txt"), "bye");
+    const before = await snapshot(bot, cwd, "turn aaaaaaaa");
+    writeFileSync(join(cwd, "edit.txt"), "after");
+    writeFileSync(join(cwd, "new.txt"), "hello");
+    execFileSync("rm", [join(cwd, "gone.txt")]);
+    const after = await snapshot(bot, cwd, "settle aaaaaaaa");
+    expect(before).not.toBeNull();
+    expect(after).not.toBeNull();
+    expect(await diffStat(bot, cwd, before!, after!)).toEqual({
+      changed: ["edit.txt"],
+      added: ["new.txt"],
+      deleted: ["gone.txt"],
+    });
+  });
+
+  it("returns null when the two hashes are equal or the folder is refused", async () => {
+    const { diffStat } = await import("./checkpoints.ts");
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const hash = await snapshot(bot, cwd, "turn bbbbbbbb");
+    expect(await diffStat(bot, cwd, hash!, hash!)).toBeNull();
+    expect(await diffStat(bot, homedir(), hash!, hash!)).toBeNull();
+  });
+});
