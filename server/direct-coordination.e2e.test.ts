@@ -165,6 +165,13 @@ it("returns nested results after Claude rejects the source's prior resume cursor
   f.save();
   await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", "Hello before the task");
   expect((await f.wait()).status).toBe("settled");
+  // The live CLI now stays alive across turns (phase 0, F1), so a rejected
+  // resume can only happen on a relaunch: change the model to force one.
+  const chiefNow = (await f.api("/api/bots", undefined, "GET")).bots.find((bot: any) => bot.id === f.chief.id);
+  const engine = (await f.api("/api/instances", undefined, "GET")).instances.find((item: any) => item.instanceId === chiefNow.modelSelection.instanceId);
+  const other = engine.models.options.map((option: any) => option.id).find((id: string) => id !== chiefNow.modelSelection.model);
+  expect(other).toBeTruthy();
+  await f.api(`/api/bots/${f.chief.id}`, { modelSelection: { instanceId: chiefNow.modelSelection.instanceId, model: other } }, "PATCH");
   f.plan[f.chief.id] = coordination;
   await f.start();
   expect((await f.wait()).status).toBe("settled");

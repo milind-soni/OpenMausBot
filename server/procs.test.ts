@@ -41,3 +41,27 @@ describe("Windows CLI argument safety", () => {
     expect(failure.message).not.toContain("private prompt contents");
   });
 });
+
+describe("spawnCli process fuse", () => {
+  it("refuses to spawn past the process cap with a typed error, and frees the slot when a child exits", async () => {
+    const { setProcessCap, spawnCli, liveCliCount } = await import("./procs.ts");
+    setProcessCap(2);
+    const hold = () => spawnCli(process.execPath, ["-e", "setTimeout(() => {}, 5000)"], { stdio: ["pipe", "pipe", "pipe"] });
+    const a = hold();
+    const b = hold();
+    try {
+      expect(liveCliCount()).toBe(2);
+      expect(() => hold()).toThrow(expect.objectContaining({ code: "launch_process_cap" }));
+      a.kill();
+      await new Promise((resolve) => a.once("close", resolve));
+      expect(liveCliCount()).toBe(1);
+      const c = hold();
+      c.kill();
+      await new Promise((resolve) => c.once("close", resolve));
+    } finally {
+      b.kill();
+      await new Promise((resolve) => b.once("close", resolve));
+      setProcessCap(null);
+    }
+  }, 15_000);
+});

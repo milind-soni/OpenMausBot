@@ -21,7 +21,7 @@ export type PromptSection = PromptPart & { bytes: number };
  * contract, which relaunched the CLI — and the provider then re-uploaded the
  * entire conversation at the cache-write rate. Mentions did the same on any
  * turn that tagged a bot. */
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding"]);
+export const VOLATILE_SECTIONS: ReadonlySet<string> = new Set(["memory", "mentions", "outstanding"]);
 
 export function buildSystemPrompt(
   persona: string,

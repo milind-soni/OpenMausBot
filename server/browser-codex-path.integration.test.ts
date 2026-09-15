@@ -116,7 +116,9 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     // process receives no shared profile key or direct browser command.
     expect(dump.argv).toContain(`mcp_servers.browser.command=${JSON.stringify(process.execPath)}`);
     expect(dump.argv.some((arg: string) => arg.startsWith("mcp_servers.browser.args=") && arg.includes("browser-proxy.ts"))).toBe(true);
-    expect(dump.env.OMB_BROWSER_TOKEN).toBeTruthy();
+    // the token travels through a stable file the proxy reads per request (phase 0, F1)
+    expect(dump.env.OMB_BROWSER_TOKEN_FILE).toBeTruthy();
+    expect(readFileSync(dump.env.OMB_BROWSER_TOKEN_FILE, "utf8")).toBeTruthy();
     expect(dump.env.AGENT_BROWSER_SESSION).toBeUndefined();
     expect(dump.env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined();
     expect(dump.calls.some((call: any) => call.method === "turn/start")).toBe(true);

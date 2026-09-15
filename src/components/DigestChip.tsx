@@ -1,4 +1,4 @@
-import { ClipboardList } from "lucide-react";
+import { ClipboardList, Layers } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import type { Message } from "@/state/store";
@@ -23,6 +23,24 @@ export function DigestChip({ message }: { message: Message }) {
       >
         <ClipboardList size={12} />
         <span className="truncate">{label}</span>
+      </span>
+    </div>
+  );
+}
+
+/** A compaction record: from here on, rebuilds of this thread's context
+ * carry the summary instead of the earlier messages. */
+export function CompactionChip({ message }: { message: Message }) {
+  const compaction = message.compaction;
+  if (!compaction) return null;
+  return (
+    <div className="flex justify-start" data-testid="compaction-chip">
+      <span
+        title={`${t("chat.compactionTitle")}\n\n${compaction.summary}`}
+        className="inline-flex max-w-[480px] items-center gap-1.5 rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12px] text-ink-secondary"
+      >
+        <Layers size={12} />
+        <span className="truncate">{t("chat.compactionChip", { tokens: compaction.tokensBefore.toLocaleString() })}</span>
       </span>
     </div>
   );

@@ -4,7 +4,9 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
 it("keeps ordinary work out of setup and carries explicit bot defaults and file locations into rooms", async () => {
-  const fixture = await launchVerificationServer();
+  // the receipt below is "the latest turn"; a live engine process no longer
+  // respawns per turn (phase 0, F1), so the fake rewrites its dump each turn
+  const fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_DUMP_EACH_TURN: "1" });
   const evidence: unknown[] = [{ fixture: fixture.info }];
   const control = async (args: string[]) => {
     const result = await runControlOmb([...args, "--url", fixture.info.url]) as any;

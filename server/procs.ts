@@ -58,6 +58,20 @@ export function assertSafeCliArgv(
 const cliGroups = new WeakSet<ChildProcess>();
 const stopping = new WeakMap<ChildProcess, Promise<boolean>>();
 
+// The process fuse (item 0.4): a hard cap on CLI processes alive at once,
+// across every driver and helper. Policy (per-hour caps, quota pauses, who
+// may launch) lives in the harness's launch budget at turn admission; this
+// is the last line against a fan-out bug, so it is deliberately blunt: a
+// count, a cap, a typed error. null = no cap (tests, or an operator choice).
+const live = new Set<ChildProcess>();
+let processCap: number | null = 32;
+export function setProcessCap(cap: number | null): void {
+  processCap = cap;
+}
+export function liveCliCount(): number {
+  return live.size;
+}
+
 export function spawnCli(
   cli: string,
   args: string[],
@@ -65,6 +79,12 @@ export function spawnCli(
 ): ChildProcessByStdio<Writable, Readable, Readable> {
   const resolved = resolveCli(cli, args);
   assertSafeCliArgv(resolved);
+  if (processCap !== null && live.size >= processCap) {
+    throw Object.assign(
+      new Error(`OpenMausBot is already running ${live.size} engine processes — the cap of ${processCap} stops a runaway launch loop; wait for one to finish`),
+      { code: "launch_process_cap", status: 429, retryAfterMs: 5_000 },
+    );
+  }
   const child = spawn(resolved.command, resolved.args, {
     ...opts,
     // posix: own process group so kill(-pid) reaps child MCP servers;
@@ -72,6 +92,9 @@ export function spawnCli(
     ...(process.platform === "win32" ? { windowsHide: true } : { detached: true }),
   }) as ChildProcessByStdio<Writable, Readable, Readable>; // callers always pipe all three
   if (process.platform !== "win32") cliGroups.add(child);
+  live.add(child);
+  child.once("close", () => live.delete(child));
+  child.once("error", () => live.delete(child));
 
   // A write to a dying child's stdin fails differently per platform, and one
   // of the ways is fatal. On POSIX the kill is synchronous, the stream is

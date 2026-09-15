@@ -51,6 +51,8 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   const context = vm.createContext({
     providerFleetReloading: false, companyShutdown: false, providerInstancesChanging: new Set(),
     providerAuthSessions: { clearInstance() {} }, bus: { detach: (id: string) => detached.push(id) },
+    // the launch budget (phase 0): releaseTurnResources hands a turn's ticket back
+    launchTickets: new Map(), launchBudget: { release() {} },
     store: {
       get bots() { return [...bots.values()]; },
       tasks: (botId: string) => kind === "direct" ? [tasks.get(botId)] : [],

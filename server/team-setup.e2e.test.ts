@@ -8,7 +8,13 @@ import { removeTempDir } from "./testing/cleanup.ts";
 it("Clive reviews multi-provider teams once, continues after each decision, and preserves existing threads through setup and deletion", async () => {
   const gates = mkdtempSync(join(tmpdir(), "omb-team-setup-gates-"));
   const gate = join(gates, "finish");
-  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate }, undefined, undefined, undefined, undefined, undefined, ["codex"]);
+  // One line per prompt the fixture engine receives. The Claude CLI stays
+  // alive across turns now (phase 0, F1), so "a new provider generation"
+  // is a new prompt line, not a new pid.
+  const prompts = join(gates, "prompts.jsonl");
+  const turns = () => (existsSync(prompts) ? readFileSync(prompts, "utf8").split("\n").filter(Boolean).length : 0);
+  const lastPrompt = () => { const lines = readFileSync(prompts, "utf8").split("\n").filter(Boolean); return JSON.parse(lines[lines.length - 1]!); };
+  const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate, FAKE_CLAUDE_PROMPTS: prompts }, undefined, undefined, undefined, undefined, undefined, ["codex"]);
   const evidence: unknown[] = [{ fixture: fixture.info }];
   const api = async (method: string, path: string, body?: unknown, expected = 200, token?: string, fromApp = true) => {
     const response = await fetch(fixture.info.url + path, { method, headers: { "content-type": "application/json",
@@ -32,16 +38,15 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const state = async () => (await api("GET", "/api/bots")).bots;
-    let previousPid: number | undefined;
+    let seenTurns = 0;
     const start = async (text: string) => {
       if (existsSync(gate)) unlinkSync(gate);
       await control("send", "--bot", chief.id, "--task", chief.threadId, "--text", text);
-      await expect.poll(() => {
-        if (!existsSync(fixture.fixtureDumpPath)) return false;
-        return JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid !== previousPid;
-      }, { timeout: 15_000 }).toBe(true);
-      const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")); previousPid = dump.pid;
-      return dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN as string;
+      await expect.poll(() => turns() > seenTurns && existsSync(fixture.fixtureDumpPath), { timeout: 15_000 }).toBe(true);
+      seenTurns = turns();
+      const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
+      // the token file path is stable per thread; its content is this turn's token
+      return readFileSync(dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE as string, "utf8");
     };
     const finish = async () => {
       writeFileSync(gate, "finish");
@@ -52,11 +57,11 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
         const bot = (await state()).find((bot: any) => bot.id === chief.id);
         return !bot.busy && bot.messages.filter((message: any) => message.role === "bot" && message.kind === "text" && message.text?.includes(`team setup decision ${requestId}:`)).length;
       }, { timeout: 20_000 }).toBe(1);
-      const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")); previousPid = dump.pid;
-      evidence.push({ continuation: { requestId, prompt: dump.prompt, provider: "fixture claude", exactlyOneReply: true } });
+      seenTurns = turns();
+      evidence.push({ continuation: { requestId, prompt: lastPrompt(), provider: "fixture claude", exactlyOneReply: true } });
     };
     const stopWithoutResume = async (requestId: string, threadId: string, target: "--bot" | "--channel", id: string) => {
-      const stoppedPid = previousPid;
+      const stoppedTurns = seenTurns;
       await control("interrupt", target, id, "--task", threadId);
       writeFileSync(gate, "finish");
       await control("wait", target, id, "--task", threadId, "--timeout", "15");
@@ -65,7 +70,7 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
       await api("POST", `/api/threads/${threadId}/respond`, { requestId, behavior: "deny" });
       const messages = (await api("GET", `/api/threads/${threadId}/messages`)).messages;
       expect(messages.some((message: any) => message.text?.includes(`team setup decision ${requestId}:`))).toBe(false);
-      expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid).toBe(stoppedPid);
+      expect(turns()).toBe(stoppedTurns);
       expect((await state()).find((bot: any) => bot.id === chief.id).busy).toBe(false);
       evidence.push({ cancellation: { requestId, threadId, noNewProviderGeneration: true, noContinuationReply: true } });
     };
@@ -110,7 +115,7 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     expect(saved.find((bot: any) => bot.id === chief.id).managedSections).toEqual(expect.arrayContaining(plan.newTeams));
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
     expect((await state()).filter((bot: any) => bot.name === "Patch")).toHaveLength(1);
-    expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid).toBe(previousPid);
+    expect(turns()).toBe(seenTurns);
 
     token = await start("Move Patch to Growth and switch its default engine to Claude; retain its existing thread.");
     const updated = await api("POST", "/api/internal/team-setup-requests", { plan: { reason: "Requested default and team change", operations: [
@@ -145,11 +150,14 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     const room = (await control("new-channel", "--name", "Chief review", "--members", chief.id)).channel;
     unlinkSync(gate);
     await control("send-channel", "--channel", room.id, "--task", room.activeTaskId, "--text", "@Clive Review another setup, then wait.");
-    await expect.poll(() => JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid, { timeout: 15_000 }).not.toBe(previousPid);
-    const groupDump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")); previousPid = groupDump.pid;
+    await expect.poll(() => turns() > seenTurns, { timeout: 15_000 }).toBe(true);
+    seenTurns = turns();
+    // a room thread is its own resource owner, so it launched its own process and rewrote the dump
+    await expect.poll(() => JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).mcpConfig?.mcpServers?.agents?.env?.OMB_THREAD_ID, { timeout: 15_000 }).toBe(room.activeTaskId);
+    const groupDump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
     const groupStopped = await api("POST", "/api/internal/team-setup-requests", { plan: { reason: "Check room Stop", operations: [
       build("NoRestart", "Operations", selection(claude)),
-    ] } }, 201, groupDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN);
+    ] } }, 201, readFileSync(groupDump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8"));
     await api("POST", `/api/threads/${room.activeTaskId}/respond`, { requestId: groupStopped.requestId, behavior: "deny" });
     await stopWithoutResume(groupStopped.requestId, room.activeTaskId, "--channel", room.id);
     expect((await state()).some((bot: any) => bot.name === "NoRestart")).toBe(false);

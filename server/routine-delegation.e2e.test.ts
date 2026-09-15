@@ -39,7 +39,7 @@ describe("routine delegation through the isolated harness", () => {
   };
   const delegate = async (threadId: string) => {
     const launched = await dump(threadId);
-    const result = await api("POST", "/api/internal/delegate-bot", { toBotId: peer.id, message: "Produce the fixture report." }, launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN);
+    const result = await api("POST", "/api/internal/delegate-bot", { toBotId: peer.id, message: "Produce the fixture report." }, readFileSync(launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8"));
     expect(result.queued).toBe(true);
     return result;
   };
@@ -171,7 +171,7 @@ describe("routine delegation through the isolated harness", () => {
     const launched = await dump(run.threadId);
     const coordinated = await api("POST", "/api/internal/coordinate-bots", {
       botIds: [peer.id], requestKey: "fresh-report", message: "Produce a fresh fixture report.",
-    }, launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN);
+    }, readFileSync(launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8"));
     expect(coordinated.accepted).toHaveLength(1);
     const requestId = coordinated.accepted[0].requestId;
     const handoff = () => JSON.parse(readFileSync(join(fixture.info.dataDir, "room-handoffs.json"), "utf8"))

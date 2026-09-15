@@ -29,6 +29,9 @@
 //                      one tool_use (fresh id, that name and input) followed
 //                      by its tool_result (is_error unless ok, default true).
 //                      Unset, a turn makes the single default Bash call.
+//   FAKE_CLAUDE_DUMP_EACH_TURN 1: rewrite the dump on every prompt, not only
+//                      the first, for tests that read it as the latest
+//                      turn's receipt on a process that stays alive
 //   FAKE_CLAUDE_HOOKS  1: honour the `hooks` block of the --settings file the
 //                      way the real CLI does — after each tool_result run
 //                      every PostToolUse command with the event JSON on
@@ -52,7 +55,7 @@
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
+import { readLaunchFiles, runRoomHandoffAgent, type LaunchFiles } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 const scriptedReplies = (() => {
@@ -135,6 +138,8 @@ function runHooks(event: string, payload: Record<string, unknown>): string {
   return stdout;
 }
 let turnsPlayed = 0;
+let sessionCostUsd = 0;
+let launchFiles: LaunchFiles | undefined;
 const argAfter = (flag: string): string | null => {
   const i = argv.indexOf(flag);
   return i === -1 ? null : (argv[i + 1] ?? null);
@@ -212,6 +217,7 @@ const autoUnavailableFor = (process.env.FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS ?? "
 const permissionMode =
   requestedPermissionMode === "auto" && autoUnavailableFor.includes(model) ? "default" : requestedPermissionMode;
 let dumped = false;
+let dumpLaunch: { systemPrompt: string | null; mcpConfig: unknown; settings: unknown; settingsMode: number | null } | undefined;
 let turnRunning = false;
 let steered: string[] = [];
 let stdinEnded = false;
@@ -249,6 +255,12 @@ const playTurn = (prompt: JsonValue) => {
   // records only the first, which cannot show what a REUSED session was sent on
   // its second and later turns.
   if (process.env.FAKE_CLAUDE_PROMPTS) appendFileSync(process.env.FAKE_CLAUDE_PROMPTS, `${JSON.stringify(prompt)}\n`);
+  // FAKE_CLAUDE_DUMP_EACH_TURN=1 rewrites the dump on every prompt (same
+  // launch files, this turn's prompt and pid) for tests that read the dump
+  // as "the latest turn's receipt" on a process that stays alive.
+  if (dumped && process.env.FAKE_CLAUDE_DUMP && process.env.FAKE_CLAUDE_DUMP_EACH_TURN === "1" && dumpLaunch) {
+    writeFileSync(process.env.FAKE_CLAUDE_DUMP, JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, ...dumpLaunch }, null, 2));
+  }
   if (!dumped && process.env.FAKE_CLAUDE_DUMP) {
     dumped = true;
     const configPath = argAfter("--mcp-config");
@@ -272,9 +284,10 @@ const playTurn = (prompt: JsonValue) => {
         /* leave null — the test will see it */
       }
     }
+    dumpLaunch = { systemPrompt, mcpConfig, settings, settingsMode };
     writeFileSync(
       process.env.FAKE_CLAUDE_DUMP,
-      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, systemPrompt, mcpConfig, settings, settingsMode }, null, 2),
+      JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, ...dumpLaunch }, null, 2),
     );
   }
 
@@ -326,7 +339,17 @@ const playTurn = (prompt: JsonValue) => {
   }
 
   if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
-    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt).then(text => {
+    // like the real CLI, the launch files are read once per process: the
+    // driver removes them after the first turn and keeps the process alive
+    try {
+      launchFiles ??= readLaunchFiles(argv);
+    } catch (error) {
+      out({ type: "result", is_error: true, result: `launch files unreadable: ${String(error)}`, stop_reason: "error" });
+      turnRunning = false;
+      finishIfDone();
+      return;
+    }
+    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt, launchFiles).then(text => {
       out({ type: "assistant", message: { content: [{ type: "text", text }] } });
       out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
     }).catch(error => {
@@ -421,7 +444,9 @@ const playTurn = (prompt: JsonValue) => {
 
   const finish = () => {
     runHooks("Stop", { stop_hook_active: false });
-    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+    // like the real CLI: total_cost_usd is the session's running total
+    sessionCostUsd = Math.round((sessionCostUsd + 0.01) * 100) / 100;
+    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: sessionCostUsd, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
     turnRunning = false;
     finishIfDone();
   };

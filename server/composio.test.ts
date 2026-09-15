@@ -1,4 +1,5 @@
 import { createServer, type Server } from "node:http";
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "./config.ts";
@@ -732,13 +733,16 @@ describe.sequential("Composio Sessions", () => {
       args: [expect.stringContaining("connector-proxy")],
       env: {
         OMB_CONNECTOR_UPSTREAM_URL: "http://127.0.0.1:8799/api/internal/connectors/mcp",
-        OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer secret" }),
+        // no bearer in the environment: the proxy reads the turn's token from
+        // a stable per-thread file on every call (turn-token.ts)
+        OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({}),
         OMB_HARNESS_URL: "http://127.0.0.1:8799",
-        OMB_CONNECTOR_TOKEN: "secret",
+        OMB_CONNECTOR_TOKEN_FILE: expect.any(String),
         OMB_BOT_ID: "bot-1",
         OMB_THREAD_ID: "thread-1",
       },
     });
+    expect(readFileSync((integration as { env: Record<string, string> }).env.OMB_CONNECTOR_TOKEN_FILE!, "utf8")).toBe("secret");
   });
 
   it("reports connection state, creates auth links and revokes disconnects", async () => {

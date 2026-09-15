@@ -22,7 +22,7 @@ import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
-import { DigestChip } from "./DigestChip";
+import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
@@ -279,6 +279,8 @@ const Transcript = memo(function Transcript({
             ) : null
           ) : m.kind === "digest" ? (
             showToolCalls ? <DigestChip message={m} /> : null
+          ) : m.kind === "compaction" ? (
+            <CompactionChip message={m} />
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (
             <div className={cn("group flex w-full flex-col", user ? "items-end" : "items-start")}>
               <div className={cn("flex w-full items-end gap-1.5", user ? "justify-end" : "justify-start")}>

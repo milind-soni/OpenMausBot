@@ -1,6 +1,7 @@
 // A project API key (ak_…) creates/reuses one Composio Session. That
 // Session owns connection state, auth links and the MCP endpoint.
 import { saveConfig, type AppConfig } from "./config.ts";
+import { writeTurnToken } from "./turn-token.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -547,12 +548,14 @@ export async function mcpIntegration(
       // Project/broker credentials stay in the harness process, so a coding
       // agent that prints its environment cannot export a durable secret.
       OMB_CONNECTOR_UPSTREAM_URL: `${context.harnessUrl}/api/internal/connectors/mcp`,
-      OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: `Bearer ${context.commsToken}` }),
+      // no bearer here: the proxy reads the current turn's token from the
+      // file below on every upstream call, so this env stays stable per thread
+      OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({}),
       OMB_HARNESS_URL: context.harnessUrl,
       // Distinct from the agents proxy token: Codex flattens mounted MCP env
       // variables into one process environment, so a shared name would let
       // the later agents mount overwrite this connector-scoped capability.
-      OMB_CONNECTOR_TOKEN: context.commsToken,
+      OMB_CONNECTOR_TOKEN_FILE: writeTurnToken("connectors", context.botId, context.threadId, context.commsToken),
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
     },

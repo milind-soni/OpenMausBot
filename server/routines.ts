@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isTurnAdmissionBlocked } from "./turn-dispatch-guard.ts";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -1425,11 +1426,14 @@ export class RoutineManager {
         }
         // A webhook is an incoming message, so make its task the bot's live
         // chat immediately. Scheduled work remains detached and unobtrusive.
-        const task = run.target === "room-goal"
-          ? run.groupId
-            ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
-            : null
-          : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
+        // A run parked by an admission refusal keeps the task it already has.
+        const task: { threadId: string } | null = run.threadId
+          ? { threadId: run.threadId }
+          : run.target === "room-goal"
+            ? run.groupId
+              ? this.options.createGoalTask?.(run.groupId, run.routineName) ?? null
+              : null
+            : this.options.createTask(run.botId, run.routineName, run.triggerSource === "webhook");
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"
@@ -1472,6 +1476,16 @@ export class RoutineManager {
             );
           }
         } catch (error) {
+          // A typed admission refusal (busy bot, thread limit, launch budget)
+          // is not a failure: put the run back in the queue on its existing
+          // task and let a later tick try again.
+          if (isTurnAdmissionBlocked(error)) {
+            run.status = "queued";
+            run.startedAt = undefined;
+            this.save();
+            this.emitRun(run);
+            continue;
+          }
           this.failThread(task.threadId, error instanceof Error ? error.message : String(error));
         }
       }

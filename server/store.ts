@@ -133,8 +133,11 @@ export interface Message {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
   text?: string;
+  /** compaction messages: a summary that stands in for everything before
+   * `firstKeptId` when the harness rebuilds this thread's context. */
+  compaction?: { summary: string; firstKeptId: string; tokensBefore: number; by: "person" | "harness" | "bot" };
   /** digest messages: the structured record of what the turn did; `text`
    * carries its rendering so FTS and replays need no special case. */
   digest?: TurnDigest;

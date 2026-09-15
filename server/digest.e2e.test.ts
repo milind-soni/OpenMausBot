@@ -141,6 +141,24 @@ posixOnly("work digest e2e (every fake engine)", () => {
     expect(d!.digest!.tools.reduce((n, t) => n + t.count, 0)).toBe(activities.length);
   }, 45_000);
 
+  it("books per-turn measurement for every engine: shape, coverage, duration, and serves the summary", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const metrics = await api("GET", `/api/metrics?from=${today}&to=${today}`);
+    expect(metrics.status).toBe(200);
+    expect(metrics.body.total.turns).toBeGreaterThanOrEqual(ENGINES.length);
+    for (const engine of ENGINES) {
+      const row = metrics.body.engines.find((e: { driverKind: string }) => e.driverKind === engine.driver);
+      expect(row, `metrics for ${engine.driver}`).toBeTruthy();
+      expect(row.turns).toBeGreaterThanOrEqual(1);
+      expect(row.coverage.preview + row.coverage.full + row.coverage.none).toBe(row.turns);
+      expect(row.promptBytes.turns).toBe(row.turns);
+      expect(row.promptBytes.stable).toBeGreaterThan(0);
+      expect(row.durationMs.turns).toBe(row.turns);
+      // cache share is a number where the engine reports cached tokens, else honestly null
+      expect(row.cacheHitShare.share === null || typeof row.cacheHitShare.share === "number").toBe(true);
+    }
+  });
+
   it("names the project files a turn changed, and a different engine taking over sees that in its replay", async () => {
     const project = mkdtempSync(join(tmpdir(), "omb-digest-project-"));
     writeFileSync(join(project, "README.md"), "hello");
@@ -171,6 +189,25 @@ posixOnly("work digest e2e (every fake engine)", () => {
     const echoed = replies.at(-1)!.text!;
     expect(echoed).toContain("did in an earlier turn");
     expect(echoed).toContain("retry.ts");
+
+    // item 0.7: a compaction record replaces the earlier history in rebuilds
+    const bot = await getBot(created.id);
+    const compacted = await api("POST", `/api/bots/${created.id}/tasks/${bot.threadId}/compact`, { summary: "The retry limit was raised to 5 in retry.ts." });
+    expect(compacted.status).toBe(201);
+    expect(compacted.body.compaction).toMatchObject({ by: "person", summary: "The retry limit was raised to 5 in retry.ts." });
+    expect((await getBot(created.id)).messages.some((m: Msg) => m.kind === "compaction")).toBe(true);
+    // switch engines again so the harness rebuilds the context (the gate is
+    // already open, so the gated instance now echoes its prompt at once)
+    expect((await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "gated", model: "fake-model" } })).status).toBe(200);
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "and now?" })).status).toBe(202);
+    await waitFor(async () => {
+      const b = await getBot(created.id);
+      return !b.busy && b.messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text).length >= 3;
+    }, "the echo engine to reply after compaction");
+    const afterCompaction = (await getBot(created.id)).messages.filter((m: Msg) => m.role === "bot" && m.kind === "text" && m.text).at(-1)!.text!;
+    expect(afterCompaction).toContain("[Summary of the conversation before this point: The retry limit was raised to 5 in retry.ts.]");
+    expect(afterCompaction).not.toContain("raise the retry limit");
+    expect(afterCompaction).toContain("and now?");
     await removeTempDir(project);
   }, 60_000);
 });

@@ -1674,7 +1674,11 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(readFileSync(dump, "utf8")).toBe(dumpBefore);
     expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
-    expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
+    const completed = recorder.events.filter((e) => e.type === "turn.completed") as Array<{ cost: number | null }>;
+    expect(completed).toHaveLength(2);
+    // the CLI's total_cost_usd is the SESSION total; a reused process must
+    // book each turn's own share, not the running total again
+    expect(completed.map((e) => e.cost)).toEqual([0.01, 0.01]);
   });
 
   it("denies late broker asks between retained turns without opening a zombie card", async () => {

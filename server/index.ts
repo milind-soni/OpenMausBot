@@ -43,6 +43,11 @@ import {
 } from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { runCommand } from "./commands.ts";
+import { selectReplay, type ReplayEntry } from "./context-rebuild.ts";
+import { promptShape, stableSectionChanges, summarizeMetrics, type PromptShape } from "./metrics.ts";
+import { writeTurnToken } from "./turn-token.ts";
+import { LaunchBudget, type LaunchKind, type LaunchTicket } from "./launch-budget.ts";
+import { classifyError } from "./drivers/retry.ts";
 import { buildTurnDigest, coverageForDriver, digestPromptLine, renderDigest, toolEvidence } from "./digest.ts";
 import { appendDecision, readDecisions, flushDecisionLog } from "./decision-log.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
@@ -118,6 +123,8 @@ import {
   parseConfigPatch,
   roomTurnTimeoutMinutes,
   maxConcurrentBotThreads,
+  launchLimits,
+  contextRebuildBytes,
   saveConfig,
   showToolCallsEnabled,
   skillAuthoringEnabled,
@@ -489,6 +496,26 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+// Item 0.4: one launch fuse across every bot; limits follow the live config.
+const launchBudget = new LaunchBudget(join(DATA_DIR, "launch-budget.json"), launchLimits(cfg));
+const launchTickets = new Map<string, LaunchTicket>();
+function launchKindFor(opts: { automationSource?: unknown; cardContinuation?: boolean; commsDepth?: number; unattended?: boolean } | undefined): { kind: LaunchKind; attended: boolean } {
+  if (opts?.automationSource === "bench") return { kind: "bench", attended: false };
+  if (opts?.automationSource) return { kind: "routine", attended: false };
+  if ((opts?.commsDepth ?? 0) > 0) return { kind: "peer", attended: false };
+  if (opts?.cardContinuation) return { kind: "wake", attended: false };
+  return { kind: "turn", attended: !opts?.unattended };
+}
+function launchRefusal(decision: { reason: string; retryAfterMs: number }): Error {
+  const why = decision.reason === "concurrent"
+    ? "too many engines are running at once"
+    : decision.reason === "paused"
+      ? "launches are paused after a provider quota error"
+      : `the ${decision.reason} launch cap has been reached`;
+  return Object.assign(new Error(`launch budget: ${why} — try again shortly`), {
+    status: 409, code: "launch_budget", reason: decision.reason, retryAfterMs: decision.retryAfterMs,
+  });
+}
 const customDomainVerifier = createCustomDomainVerifier({ environmentId: ENVIRONMENT_ID });
 // "Sign in with your email" on /pair: the allow-list is read per call so a
 // Settings change or an env bootstrap applies without a restart.
@@ -857,7 +884,9 @@ function agentsIntegration(
       OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
       OMB_BOT_ID: botId,
       OMB_THREAD_ID: threadId,
-      OMB_COMMS_TOKEN: token,
+      // the token rotates every turn; the file path does not, so a reused
+      // engine process and its proxy stay valid (turn-token.ts, finding F1)
+      OMB_COMMS_TOKEN_FILE: writeTurnToken("comms", botId, threadId, token),
       OMB_TURN_DEPTH: String(depth),
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
@@ -939,6 +968,11 @@ function claimTurnResource(owner: TurnOwner, resource: string): boolean {
 
 function releaseTurnResources(owner: TurnOwner | undefined): void {
   if (!owner) return;
+  const ticket = launchTickets.get(`${owner.threadId}:${owner.generation}`);
+  if (ticket) {
+    launchBudget.release(ticket);
+    launchTickets.delete(`${owner.threadId}:${owner.generation}`);
+  }
   if (settlingResourceOwners.get(owner.threadId) === owner.generation) settlingResourceOwners.delete(owner.threadId);
   turnResources.release(owner);
   if (turnResourceOwners.get(owner.threadId)?.generation === owner.generation) turnResourceOwners.delete(owner.threadId);
@@ -1199,7 +1233,7 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
     kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
   return { profile: partitionId, session, spec, integration: {
     command: process.execPath, args: [SPAWNED_PROXIES.browser], env: {
-      ...AGENTS_NODE_FLAG, OMB_BROWSER_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      ...AGENTS_NODE_FLAG, OMB_BROWSER_TOKEN_FILE: writeTurnToken("browser", botId, turn.threadId, token), OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
     },
   } };
 }
@@ -3424,6 +3458,8 @@ bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "turn.completed" || event.type === "session.exited") {
     runningTurnEngines.delete(event.threadId);
     memoryRowsByThread.set(event.threadId, endMemoryTurn(event.threadId));
+    // the launch this thread held is over, for every engine (item 0.4)
+    launchBudget.releaseThread(event.threadId);
   }
 });
 
@@ -3431,6 +3467,10 @@ bus.subscribe((event: RuntimeEvent) => {
 // and the checkpoint taken at dispatch (hash + folder) so settle can diff.
 const turnStartedAt = new Map<string, number>();
 const turnCheckpoints = new Map<string, { cwd: string; hash: string }>();
+// The prompt shape of the turn in flight, and the last one booked, per
+// thread — the second is what "did the stable prefix change?" compares to.
+const promptShapeByThread = new Map<string, PromptShape>();
+const lastPromptSectionsByThread = new Map<string, Array<{ id: string; bytes: number }>>();
 // The turn a thread is in, from the last event that named one. Not every
 // driver stamps every item with a turnId (ACP fakes, some ACP agents), and
 // a digest can only count activity it can attribute — so an unstamped tool
@@ -4345,6 +4385,8 @@ bus.subscribe((event: RuntimeEvent) => {
         kind: "activity",
         tool: { name: `error: ${event.message.slice(0, 160)}`, ok: false, setup: event.setup, ...(event.terminal ? { terminal: true } : {}) },
       });
+      // out of quota: hold unattended launches for a while (item 0.4)
+      if (classifyError({ text: event.message }).reason === "quota") launchBudget.noteQuotaError();
       // a setup error means the engine could not even start: the bot is
       // dead until something changes, not merely idle. The next successful
       // dispatch moves it to working; turn.completed (which follows a setup
@@ -4453,7 +4495,16 @@ bus.subscribe((event: RuntimeEvent) => {
         // the task and answers "what did we spend, by whom" for a period
         const settledTask = store.taskByThread(bot.id, event.threadId);
         const selection = settledTask?.modelSelection ?? bot.modelSelection;
+        const shape = promptShapeByThread.get(event.threadId);
+        promptShapeByThread.delete(event.threadId);
+        if (shape) lastPromptSectionsByThread.set(event.threadId, shape.sections);
+        const startedAt = turnStartedAt.get(event.threadId);
+        const settledDriverKind = registry.get(selection.instanceId)?.driverKind;
         appendUsage(DATA_DIR, {
+          ...(completedTurnId ? { turnId: completedTurnId } : {}),
+          ...(startedAt ? { durationMs: Math.max(0, Date.now() - startedAt) } : {}),
+          ...(completedTurnId ? { hookCoverage: coverageForDriver(settledDriverKind, toolEvidence(store.messagesFor(event.threadId), completedTurnId)) } : {}),
+          ...(shape ? { promptShape: { stableBytes: shape.stableBytes, volatileBytes: shape.volatileBytes, totalBytes: shape.totalBytes, replayed: shape.replayed, replayBytes: shape.replayBytes, ...(shape.stableChanged?.length ? { stableChanged: shape.stableChanged } : {}) } } : {}),
           botId: bot.id,
           botName: bot.name,
           threadId: event.threadId,
@@ -5336,6 +5387,10 @@ async function startTurn(
   if (botAtThreadCapacity(botId)) {
     throw Object.assign(new Error(`this bot has reached its limit of ${maxConcurrentBotThreads(cfg)} parallel threads — wait for one to finish`), { status: 409, code: "thread_limit" });
   }
+  launchBudget.setLimits(launchLimits(cfg));
+  const launchRequest = { ...launchKindFor(opts), botId, threadId };
+  const launchAdmission = launchBudget.peek(launchRequest);
+  if (!launchAdmission.ok) throw launchRefusal(launchAdmission);
   // Steering is never a cancel. A message sent while teammates are working
   // runs now, with their assignments still attached: they keep running and
   // their results still return here (outstandingAssignmentsPrompt tells this
@@ -5443,16 +5498,24 @@ async function startTurn(
   // strictly limited to the selected branch below.
   const messagesById = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
   // digests ride along: a rebuilt context carries what earlier turns DID,
-  // not only what was said (item 0.1)
-  const transcript = activeMessages
-    .filter((m) => ((m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.roomRequest?.phase === "result") && !skipTranscript.has(m.id))
-    .slice(-40)
+  // not only what was said (item 0.1). The rebuild is selected by BYTES,
+  // newest first, after the latest compaction record (item 0.7).
+  const replayEntries: ReplayEntry[] = activeMessages
+    .filter((m) => ((m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result") && !skipTranscript.has(m.id))
     .map((m) => ({
+      id: m.id,
       role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-      text: m.roomRequest?.phase === "result" ? teammateReportContext(m.roomRequest.id, bot.id)
+      text: m.kind === "compaction" ? ""
+        : m.roomRequest?.phase === "result" ? teammateReportContext(m.roomRequest.id, bot.id)
         : m.kind === "digest" && m.digest ? digestPromptLine(m.digest, bot.name)
         : transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
     }));
+  const compactionRecord = [...activeMessages].reverse().find((m) => m.kind === "compaction" && m.compaction)?.compaction;
+  const replay = selectReplay(replayEntries, {
+    budgetBytes: contextRebuildBytes(cfg),
+    ...(compactionRecord ? { compaction: { firstKeptId: compactionRecord.firstKeptId, summary: compactionRecord.summary } } : {}),
+  });
+  const transcript = [...replay.lead, ...replay.transcript.filter((e) => e.text)].map(({ role, text }) => ({ role, text }));
 
   // After a rewind (edit / branch switch) the provider's native session
   // still contains the abandoned branch: start a fresh session instead of
@@ -5472,7 +5535,9 @@ async function startTurn(
   const fresh =
     !rewound &&
     !externalContextMarker &&
-    engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript });
+    // the fresh check needs the thread's real history, not the byte-selected
+    // replay (which may hold no user line at all right after a compaction)
+    engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript: replayEntries });
   // Agent-tool gate shared by skill authoring, the /setup turn-text rewrite,
   // the setup prompt block, and the peer-comms integration below: a driver
   // that never mounts agent tools (or a turn already at the comms-depth cap)
@@ -5528,6 +5593,14 @@ async function startTurn(
   // hang the HTTP request
   const dispatchClaimId = randomUUID();
   const resourceOwner = { threadId, generation: dispatchClaimId };
+  // a person's own turn is outside the budget entirely: it neither takes a
+  // slot (a turn parked on an approval card is not autonomous work) nor is
+  // refused; every unattended launch is counted and capped
+  if (!launchRequest.attended) {
+    const launch = launchBudget.acquire(launchRequest);
+    if (!launch.ok) throw launchRefusal(launch);
+    launchTickets.set(`${threadId}:${dispatchClaimId}`, launch.ticket);
+  }
   turnResourceOwners.set(threadId, resourceOwner);
   directTurnGenerationByThread.set(threadId, dispatchClaimId);
   if (opts?.coordination) directCoordinationSettlers.set(dispatchClaimId, opts.coordination.settle);
@@ -6030,6 +6103,13 @@ async function startTurn(
         { id: "mentions", label: "Mentions", text: boundedCoordination && tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : mentionPrompt(tagged) },
       ]);
       runningTurnEngines.set(threadId, instance);
+      {
+        // item 0.6: what this turn's prompt cost, and whether its stable half
+        // moved since the last turn on this thread (a cache miss when it did)
+        const shape = promptShape(prompt.sections, { replayed: !resume, replayBytes: Buffer.byteLength(turnText, "utf8") });
+        shape.stableChanged = stableSectionChanges(lastPromptSectionsByThread.get(threadId), shape.sections);
+        promptShapeByThread.set(threadId, shape);
+      }
       const dispatch = await guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
         botId: bot.id,
@@ -7071,7 +7151,7 @@ const roomHandoffTimer = setInterval(() => {
   try { roomHandoffs.tick(); } catch (error) { console.error("room handoffs:", error); }
 }, 250);
 roomHandoffTimer.unref();
-const GROUP_CONTEXT_MESSAGES = 30;
+// (the room window is now selected by bytes — see serializeRoomContext and item 0.7)
 const MAX_GROUP_HOPS = 1;
 
 type GroupMemberTurnOutcome =
@@ -7111,10 +7191,18 @@ function serializeRoomContext(
 ): string {
   const messages = store.messagesFor(threadId);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
-  return messages
-    .filter((m) => (m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.roomRequest?.phase === "result")
-    .slice(-GROUP_CONTEXT_MESSAGES)
-    .map((m) => {
+  const compactionRecord = [...messages].reverse().find((m) => m.kind === "compaction" && m.compaction)?.compaction;
+  const entries: ReplayEntry[] = messages
+    .filter((m) => (m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result")
+    .map((m) => ({ id: m.id, role: m.role === "user" ? "user" : "assistant", text: m.kind === "compaction" ? "" : renderRoomLine(m) }));
+  const selection = selectReplay(entries, {
+    budgetBytes: contextRebuildBytes(cfg),
+    ...(compactionRecord ? { compaction: { firstKeptId: compactionRecord.firstKeptId, summary: compactionRecord.summary } } : {}),
+  });
+  return [...selection.lead.map((l) => l.text), ...selection.transcript.filter((e) => e.text).map((e) => e.text)].join("\n");
+
+  function renderRoomLine(m: Message): string {
+    return (() => {
       if (m.kind === "digest" && m.digest) {
         return digestPromptLine(m.digest, m.from ? peerName(m.from.name) : "a bot");
       }
@@ -7137,8 +7225,8 @@ function serializeRoomContext(
       // itself.
       if (!m.peerPost || !m.from || m.from.botId === readerBotId) return line;
       return `${peerProvenanceNote({ botName: m.from.name, delivery: "post_to_room", unattended: m.peerPost.unattended })}\n${line}`;
-    })
-    .join("\n");
+    })();
+  }
 }
 
 
@@ -7252,6 +7340,29 @@ async function runGroupMemberTurn(
   }
   const internalGeneration = beginInternalCapabilityGeneration(threadId);
   const resourceOwner = { threadId, generation: internalGeneration };
+  // the launch budget (item 0.4): a room turn counts like any other launch;
+  // a refusal is a skipped round, the same shape as a busy member
+  launchBudget.setLimits(launchLimits(cfg));
+  const launch = hop > 0
+    ? launchBudget.acquire({ kind: "peer", botId: bot.id, threadId })
+    : ({ ok: true, ticket: null } as const);
+  if (!launch.ok) {
+    revokeInternalCapabilityGeneration(threadId, internalGeneration);
+    if (orchestration) {
+      orchestration.result.outcome = "busy";
+      return true;
+    }
+    const message = `${bot.name} could not start — ${launchRefusal(launch).message}`;
+    store.appendMessage(threadId, {
+      role: "bot",
+      kind: "activity",
+      from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: { name: message, ok: false },
+    });
+    onDispatchError?.(message);
+    return true;
+  }
+  if (launch.ticket) launchTickets.set(`${threadId}:${internalGeneration}`, launch.ticket);
   turnResourceOwners.set(threadId, resourceOwner);
   let roomVmTarget: ReturnType<typeof localVmTargetForBot> | null = null;
   let retainRoomVmLease = false;
@@ -14753,6 +14864,44 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 201, { bot: fresh, task: wireTask(task) });
     }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)\/compact$/);
+    if (m && method === "POST") {
+      // Item 0.7: a compaction record. The summary stands in for everything
+      // before it whenever the harness rebuilds this thread's context. A
+      // person may write the summary; otherwise the engine's one-shot text
+      // helper drafts it where the engine has one.
+      const body = await readBody(req);
+      const bot = store.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const task = store.taskByThread(bot.id, m[2]);
+      if (!task) return json(res, 404, { error: "no such task" });
+      if (threadBusy(bot.id, task.threadId)) return json(res, 409, { error: "this thread is working — wait for it to finish" });
+      const history = store.activePath(task.threadId).filter((msg) => (msg.kind === "text" && msg.text) || (msg.kind === "digest" && msg.digest));
+      if (!history.length) return json(res, 400, { error: "nothing to summarise yet" });
+      let summary = typeof body?.summary === "string" ? body.summary.trim() : "";
+      let by: "person" | "harness" = "person";
+      if (!summary) {
+        const selection = task.modelSelection ?? bot.modelSelection;
+        const instance = registry.get(selection.instanceId);
+        if (!instance?.generateText) return json(res, 400, { error: "this engine cannot draft a summary; send one in the body as { summary }" });
+        const rendered = history.map((msg) => msg.kind === "digest" && msg.digest ? digestPromptLine(msg.digest, bot.name) : `${msg.role === "user" ? "User" : bot.name}: ${msg.text}`).join("\n");
+        summary = (await instance.generateText(
+          "Summarise the conversation below for a colleague who must continue it. Keep, verbatim, any stated constraint or decision; keep file paths, names and numbers; list what is done and what is still open. Plain prose, at most 300 words.\n\n" + rendered.slice(-60_000),
+        )).trim();
+        by = "harness";
+        if (!summary) return json(res, 502, { error: "the engine returned an empty summary" });
+      }
+      const tokensBefore = Math.ceil(history.reduce((n, msg) => n + Buffer.byteLength(msg.text ?? "", "utf8"), 0) / 4);
+      const message = runCommand({ kind: "compaction.append", key: `${task.threadId}:${history.at(-1)!.id}` }, () => {
+        const appended = store.appendMessage(task.threadId, { role: "bot", kind: "compaction", text: `[compaction] ${summary}`, compaction: { summary, firstKeptId: "", tokensBefore, by } });
+        // the record stops before itself: everything after it is kept
+        store.patchMessage(task.threadId, appended.id, { compaction: { summary, firstKeptId: appended.id, tokensBefore, by } });
+        return appended.id;
+      });
+      const fresh = botWithThread(store.bot(bot.id)!);
+      broadcast({ kind: "bot", bot: fresh });
+      return json(res, 201, { compaction: { messageId: message, summary, tokensBefore, by } });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/([\w-]+)$/);
     if (m && method === "POST") {
       const bot = store.bot(m[1]);
@@ -15689,6 +15838,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──
+    if (method === "GET" && path === "/api/metrics") {
+      const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
+      if (!range) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { from: range.from.toISOString(), to: range.to.toISOString(), ...summarizeMetrics(readUsage(DATA_DIR, range)) });
+    }
+    if (method === "GET" && path === "/api/launch-budget") {
+      launchBudget.setLimits(launchLimits(cfg));
+      return json(res, 200, launchBudget.snapshot());
+    }
     if (method === "GET" && path === "/api/config") {
       return json(res, 200, configForAccess(configStatus(), auth.scopes.includes("admin")));
     }
@@ -16514,7 +16673,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
     const status = (e as any)?.status ?? 500;
-    return json(res, status, { error: e instanceof Error ? e.message : String(e) });
+    const typed = e as { code?: unknown; reason?: unknown; retryAfterMs?: unknown } | null;
+    return json(res, status, {
+      error: e instanceof Error ? e.message : String(e),
+      ...(typeof typed?.code === "string" ? { code: typed.code } : {}),
+      ...(typeof typed?.reason === "string" ? { reason: typed.reason } : {}),
+      ...(typeof typed?.retryAfterMs === "number" ? { retryAfterMs: typed.retryAfterMs } : {}),
+    });
   } finally {
     releaseWorkspaceRequest?.();
   }

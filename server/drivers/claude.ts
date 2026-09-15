@@ -989,6 +989,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       /** the running turn, or null between turns */
       turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
+      /** the CLI's `total_cost_usd` is the SESSION total so far. A process
+       * that lives across turns (F1) must book each turn's own share: this is
+       * the total already booked, so the next result books the difference. */
+      costBookedUsd: number;
       closing: boolean;
       stderr: string;
       /** Root close can precede a failed group stop; retry its finalization. */
@@ -1512,6 +1516,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         nativePermissionMode: null,
         turn: { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false },
         idleTimer: null,
+        costBookedUsd: 0,
         closing: false,
         stderr: "",
       };
@@ -1528,6 +1533,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         const t = session.turn;
         if (!t || t.settled) return;
         t.settled = true;
+        // total_cost_usd is cumulative for the session: book this turn's share
+        if (typeof cost === "number") {
+          const share = Math.max(0, cost - session.costBookedUsd);
+          session.costBookedUsd = Math.max(session.costBookedUsd, cost);
+          cost = Math.round(share * 1e6) / 1e6;
+        }
         // Resolve any ask still open for this turn, but keep the broker
         // listening for the next turn on the retained process. Between turns
         // isActive() rejects late background asks without creating cards.

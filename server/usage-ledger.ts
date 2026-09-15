@@ -36,6 +36,20 @@ export interface UsageRow {
    * subscription, null when the engine reports no price at all. */
   costUsd: number | null;
   trigger: UsageTrigger;
+  /** Per-turn measurement (item 0.6). Optional: absent on rows from older
+   * builds and on paths that do not record a shape yet (room turns). */
+  turnId?: string;
+  durationMs?: number;
+  /** How good the tool evidence behind the turn's digest is. */
+  hookCoverage?: "full" | "preview" | "none";
+  promptShape?: {
+    stableBytes: number;
+    volatileBytes: number;
+    totalBytes: number;
+    replayed: boolean;
+    replayBytes: number;
+    stableChanged?: string[];
+  };
 }
 
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine";

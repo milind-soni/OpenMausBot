@@ -285,7 +285,7 @@ describe("peer allow-list", () => {
       // exactly that.
       expect(systemPrompt).toContain("[/TEAM ROSTER] If a supported API key is missing");
 
-      const providerToken = String(dump.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      const providerToken = readFileSync(String(dump.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN_FILE ?? ""), "utf8");
       expect(providerToken).toMatch(/^[a-f0-9]{48}$/);
       await expect.poll(() => botBusy(asker.id)).toBe(false);
       const token = await mintCapability(asker.id, asker.threadId);
@@ -391,7 +391,7 @@ describe("peer allow-list", () => {
       rmSync(askerDump, { force: true });
       await warmUp(asker.id);
       await expect.poll(() => readDump(askerDump)()?.mcpConfig, { timeout: 10_000 }).toBeTruthy();
-      const providerToken = String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      const providerToken = readFileSync(String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN_FILE ?? ""), "utf8");
       expect(providerToken).toMatch(/^[a-f0-9]{48}$/);
       const token = await mintCapability(asker.id, asker.threadId);
       expect((await api("PATCH", `/api/bots/${asker.id}`, { approvePeerComms: true })).status).toBe(200);

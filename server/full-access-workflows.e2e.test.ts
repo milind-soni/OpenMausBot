@@ -140,7 +140,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect((await api("GET", `/api/bots/${chief.id}/skills`)).skills).toEqual(expect.arrayContaining([expect.objectContaining({ name: "monthly-fixture-review", enabled: true })]));
 
     const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
-    const lateToken = dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const lateToken = readFileSync(dump.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8");
     await api("POST", "/api/internal/team-setup-requests", { plan: { reason: "Late fixture token", operations: [specialist("Must not exist", "Operations")] } }, 401, lateToken);
 
     await run(chief, chief.activeTaskId, "Update the named monthly skill, pause the report, update Mira, then delete Mira as requested.", [

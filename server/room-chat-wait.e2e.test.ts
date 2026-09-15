@@ -287,8 +287,9 @@ describe("chat rooms wait for a member busy elsewhere", { timeout: 45_000 }, () 
       const readToken = (): string | undefined => {
         try {
           const dump = JSON.parse(readFileSync(penDump, "utf8"));
-          const value: unknown = dump?.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN;
-          return typeof value === "string" && value ? value : undefined;
+          const file: unknown = dump?.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN_FILE;
+          const value = typeof file === "string" && file ? readFileSync(file, "utf8") : "";
+          return value || undefined;
         } catch {
           // not written yet, or mid-write
           return undefined;

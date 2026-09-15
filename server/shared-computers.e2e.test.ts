@@ -78,7 +78,7 @@ beforeAll(async () => {
   const dump = join(fixture.info.dataDir, "fake-claude-dump.json");
   await vi.waitFor(() => expect(existsSync(dump)).toBe(true), { timeout: 15_000 });
   const agents = JSON.parse(readFileSync(dump, "utf8")).mcpConfig.mcpServers.agents;
-  expect(agents.env.OMB_COMMS_TOKEN).toBeTruthy();
+  expect(readFileSync(agents.env.OMB_COMMS_TOKEN_FILE, "utf8")).toBeTruthy();
   proxy = spawn(agents.command, agents.args, {
     env: { PATH: process.env.PATH, HOME: fixture.info.dataDir, ...agents.env }, stdio: ["pipe", "pipe", "pipe"],
   });

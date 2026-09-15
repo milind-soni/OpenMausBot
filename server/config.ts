@@ -2,6 +2,8 @@
 //   { "xai": {"key":"xai-…"}, "composio": {"apiKey":"ak_…"}, "box": {"token":"…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { DEFAULT_LAUNCH_LIMITS, type LaunchLimits } from "./launch-budget.ts";
+import { DEFAULT_REBUILD_BYTES } from "./context-rebuild.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -354,6 +356,14 @@ const appConfigSchema = z.object({
   language: optionalText,
   rooms: roomConfigSchema.optional(),
   threads: z.object({ maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS) }).strict().optional(),
+  /** Context rebuilds (item 0.7): the byte budget a replayed history may use. */
+  context: z.object({ rebuildBytes: z.number().int().min(2_000).max(400_000).optional() }).strict().optional(),
+  /** The global launch budget (docs/plans/2026-09-14-phase-0-foundation.md, 0.4). */
+  launches: z.object({
+    maxConcurrent: z.number().int().min(1).max(64).optional(),
+    maxPerHour: z.number().int().min(1).max(10_000).optional(),
+    maxPerDay: z.number().int().min(1).max(100_000).optional(),
+  }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -398,6 +408,8 @@ export interface AppConfig {
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
   threads?: { maxConcurrentPerBot: number };
+  launches?: { maxConcurrent?: number; maxPerHour?: number; maxPerDay?: number };
+  context?: { rebuildBytes?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -520,6 +532,19 @@ export function vpsSshAlias(cfg: AppConfig): string | null {
 
 export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
   return cfg.rooms?.turnTimeoutMinutes ?? DEFAULT_ROOM_TURN_TIMEOUT_MINUTES;
+}
+
+export function contextRebuildBytes(cfg: AppConfig): number {
+  return cfg.context?.rebuildBytes ?? DEFAULT_REBUILD_BYTES;
+}
+
+export function launchLimits(cfg: AppConfig): LaunchLimits {
+  return {
+    ...DEFAULT_LAUNCH_LIMITS,
+    ...(cfg.launches?.maxConcurrent ? { maxConcurrent: cfg.launches.maxConcurrent } : {}),
+    ...(cfg.launches?.maxPerHour ? { maxPerHour: cfg.launches.maxPerHour } : {}),
+    ...(cfg.launches?.maxPerDay ? { maxPerDay: cfg.launches.maxPerDay } : {}),
+  };
 }
 
 export function maxConcurrentBotThreads(cfg: AppConfig): number {

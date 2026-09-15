@@ -105,7 +105,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const answers = await permission(models[1], "mailbox-approval");
     await expect.poll(async () => (await botState(peer.id)).activity).toBe("waiting-on-you");
     await control(["send", "--bot", chief.id, "--text", "Ask the reviewer to check the release notes, then return the result here."]);
-    const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const token = readFileSync((await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8");
     const roster = await internal(token, "GET", "/api/internal/agents");
     expect(roster.status).toBe(200);
     expect(roster.body.bots.find((bot: any) => bot.id === peer.id)).toMatchObject({
@@ -199,7 +199,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const threadId = task.body.task.threadId;
     await control(["send", "--bot", botId, "--task", threadId, "--text", "REVIEW_MEMORY_OWNER"]);
     const launched = await dump(models[0]);
-    const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const token = readFileSync(launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8");
     expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact." })).status).toBe(200);
     for (const text of ["", " \n\t "]) {
       expect((await internal(token, "POST", "/api/internal/memory", { action: "replace", oldText: "unique saved fact", text })).status).toBe(400);
@@ -294,8 +294,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect(launchedA.env.OMB_FIXTURE_CWD).toBe(realpathSync(join(session.info.dataDir, "task-workspaces", botId, taskA)));
     expect(launchedB.env.OMB_FIXTURE_CWD).toBe(realpathSync(join(session.info.dataDir, "task-workspaces", botId, taskB)));
 
-    const tokenA = launchedA.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-    const tokenB = launchedB.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const tokenA = readFileSync(launchedA.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8");
+    const tokenB = readFileSync(launchedB.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8");
     expect(tokenA).not.toBe(tokenB);
     const appended = await Promise.all([
       internal(tokenA, "POST", "/api/internal/memory", { botId, threadId: taskA, action: "append", text: "A remembers apples." }),

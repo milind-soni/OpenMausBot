@@ -1,6 +1,7 @@
 // Per-turn MCP entry point. Only a scoped browser capability crosses into the
 // agent process; engine commands, session names, and credentials stay in OMB.
 import { pathToFileURL } from "node:url";
+import { readTurnToken } from "./turn-token-read.ts";
 
 const MAX_INPUT_BYTES = 1_048_576;
 const MAX_OUTPUT_BYTES = 16_777_216;
@@ -69,7 +70,7 @@ export async function browserProxyRequest(
 }
 
 function run(): void {
-  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: process.env.OMB_BROWSER_TOKEN ?? "" };
+  const connection = { url: process.env.OMB_HARNESS_URL ?? "", get token() { return readTurnToken("OMB_BROWSER_TOKEN"); } };
   let input = Buffer.alloc(0);
   let pending = 0;
   const output = (message: unknown) => {

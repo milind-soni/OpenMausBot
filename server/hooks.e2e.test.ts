@@ -140,7 +140,8 @@ posixOnly("engine hooks e2e (fake Claude honouring the settings hooks)", () => {
 });
 
 posixOnly("engine hooks e2e: compaction", () => {
-  const h = harness("compact", {}, { FAKE_CLAUDE_COMPACT: "1", FAKE_CLAUDE_TURN_STATE: join(tmpdir(), `omb-hooks-turns-${process.pid}-${Date.now()}`), FAKE_CLAUDE_PROMPTS: join(tmpdir(), `omb-hooks-prompts-${process.pid}-${Date.now()}.ndjson`) });
+  const dumpPath = join(tmpdir(), `omb-hooks-dump-${process.pid}-${Date.now()}.json`);
+  const h = harness("compact", {}, { FAKE_CLAUDE_DUMP: dumpPath, FAKE_CLAUDE_COMPACT: "1", FAKE_CLAUDE_TURN_STATE: join(tmpdir(), `omb-hooks-turns-${process.pid}-${Date.now()}`), FAKE_CLAUDE_PROMPTS: join(tmpdir(), `omb-hooks-prompts-${process.pid}-${Date.now()}.ndjson`) });
 
   it("records the compaction in the transcript and hands the latest digests back to the engine as plain-text context", async () => {
     const bot = await h.runTurn();
@@ -152,6 +153,11 @@ posixOnly("engine hooks e2e: compaction", () => {
       return !b.busy && b.messages.filter((m: Msg) => m.kind === "digest").length >= 2;
     }, "the second turn to settle with its digest");
     const after = await h.getBot(bot.id);
+    // finding F1: the second turn must have reused the live CLI process. The
+    // fake dumps only the FIRST prompt each process receives, so a dump
+    // holding the first message proves no respawn happened in between.
+    const dump = JSON.parse(readFileSync(dumpPath, "utf8")) as { prompt: { message?: { content?: string } } };
+    expect(dump.prompt.message?.content).toBe("read the big log");
     const chips: Msg[] = after.messages.filter((m: Msg) => m.kind === "activity" && m.tool?.name.startsWith("context compact"));
     expect(chips.map((m) => m.tool!.name)).toEqual([
       "context compaction started (auto)",

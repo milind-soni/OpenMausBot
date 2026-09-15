@@ -7,6 +7,7 @@
 //
 // stdout is the MCP transport. Never log there.
 import readline from "node:readline";
+import { readTurnToken } from "./turn-token-read.ts";
 import { randomUUID } from "node:crypto";
 
 type Json = Record<string, unknown>;
@@ -15,7 +16,7 @@ const UPSTREAM = process.env.OMB_CONNECTOR_UPSTREAM_URL ?? "";
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
-const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? "";
+const token = () => readTurnToken("OMB_CONNECTOR_TOKEN") || readTurnToken("OMB_COMMS_TOKEN");
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
@@ -103,6 +104,9 @@ async function relay(message: Json, timeoutMs = RELAY_TIMEOUT_MS): Promise<Json 
     headers: {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
+      // the loopback bearer rotates every turn; read it now, not at boot. An
+      // explicit upstream authorization header (tests, custom upstreams) wins.
+      authorization: `Bearer ${token()}`,
       ...upstreamHeaders,
       ...(upstreamSessionId ? { "mcp-session-id": upstreamSessionId } : {}),
     },
@@ -155,7 +159,7 @@ function connectorAdds(args: unknown): ConnectorRequest[] {
 async function showConnectorCards(items: ConnectorRequest[]): Promise<void> {
   const response = await fetch(`${HARNESS}/api/internal/connectors/request`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${token()}` },
     body: JSON.stringify({ botId: BOT_ID, threadId: THREAD_ID, items, resumeKey: randomUUID() }),
     signal: AbortSignal.timeout(30_000),
   });

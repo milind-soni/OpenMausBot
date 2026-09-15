@@ -34,6 +34,7 @@
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
+import { readTurnToken } from "../turn-token-read.ts";
 
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
@@ -44,7 +45,8 @@ import { peerName } from "../peer-roster.ts";
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
 const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
-const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
+// read per request: the harness rotates it every turn through a stable file
+const token = () => readTurnToken("OMB_COMMS_TOKEN");
 const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
 const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
 // Opt-in computer sharing (server features.sharedComputers). Off unless the
@@ -881,7 +883,7 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
 async function apiResponse(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: Json }> {
   const res = await fetch(HARNESS + path, {
     ...init,
-    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}`, ...init?.headers },
+    headers: { "content-type": "application/json", authorization: `Bearer ${token()}`, ...init?.headers },
   });
   const body = (await res.json().catch(() => ({}))) as Json;
   return { ok: res.ok, status: res.status, body };

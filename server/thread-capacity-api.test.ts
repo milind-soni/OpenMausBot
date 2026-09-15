@@ -67,7 +67,7 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
   };
   const capabilityStatus = async (launched: any) => {
     const response = await fetch(`${fixture.info.url}/api/internal/agents`, {
-      headers: { authorization: `Bearer ${launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` },
+      headers: { authorization: `Bearer ${readFileSync(launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN_FILE, "utf8")}` },
     });
     await response.arrayBuffer();
     // The evidence records the authorization result, never the bearer token.

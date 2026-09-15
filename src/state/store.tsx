@@ -133,8 +133,10 @@ export interface SecretRequestCardData {
 export interface Message {
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
   text?: string;
+  /** compaction messages: the summary that replaces earlier history in rebuilds. */
+  compaction?: { summary: string; firstKeptId: string; tokensBefore: number; by: "person" | "harness" | "bot" };
   /** digest messages: what the turn did, rendered in `text` and structured here. */
   digest?: {
     turnId: string;

@@ -33,7 +33,7 @@ describe.skipIf(process.platform === "win32")("direct final-screen settlement", 
     expect((await api("POST", `/api/bots/${botId}/messages`, { text: "FIRST_SCREEN", threadId })).status).toBe(202);
     await expect.poll(() => existsSync(join(fixture, "provider.json")), { timeout: 10_000 }).toBe(true);
     const dump = JSON.parse(readFileSync(join(fixture, "provider.json"), "utf8"));
-    const token = dump.mcpConfig.mcpServers.browser.env.OMB_BROWSER_TOKEN;
+    const token = readFileSync(dump.mcpConfig.mcpServers.browser.env.OMB_BROWSER_TOKEN_FILE, "utf8");
     expect((await api("POST", "/api/internal/browser/mcp", {
       method: "tools/call", params: { name: "agent_browser_screenshot", arguments: {} },
     }, token)).status).toBe(200);

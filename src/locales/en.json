@@ -478,6 +478,8 @@
   "chat.digestChip": "Did {tools} tool calls · {files} files changed",
   "chat.digestChipNoFiles": "Did {tools} tool calls",
   "chat.digestTitle": "What this turn did",
+  "chat.compactionChip": "Context summarised · about {tokens} tokens before",
+  "chat.compactionTitle": "Summary that stands in for the earlier conversation",
   "chat.emptyPrompt": "Send a message to start the conversation.",
   "chat.chiefOfStaff": "Chief of Staff",
   "chat.openProfile": "Open agent profile",
