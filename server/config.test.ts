@@ -20,6 +20,7 @@ import { customMcpServers,
   roomTurnTimeoutMinutes,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
+  threadEventLogRetentionDays,
   showToolCallsEnabled,
   saveConfig,
   skillAuthoringEnabled,
@@ -67,6 +68,16 @@ describe("configuration boundaries", () => {
     expect(threadEventLogMaxBytes(parsed)).toBe(50 * 1024 * 1024);
     for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000", null]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: value } })).toThrow("threads.eventLogMaxBytes");
+    }
+  });
+
+  it("keeps thread event logs forever unless a retention window is configured", () => {
+    expect(threadEventLogRetentionDays({})).toBeNull();
+    expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
+    const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: 30 } });
+    expect(threadEventLogRetentionDays(configured)).toBe(30);
+    for (const value of [0, -1, 1.5, "30", null, 3660]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
     }
   });
 

@@ -373,6 +373,9 @@ const appConfigSchema = z.object({
     /** Cap each per-thread events/ and native/ NDJSON log at this many
      * bytes; absent (the default) keeps today's unbounded growth (#1280). */
     eventLogMaxBytes: z.number().int().min(MIN_THREAD_EVENT_LOG_BYTES).max(MAX_THREAD_EVENT_LOG_BYTES).optional(),
+    /** Days a closed or archived thread's event logs survive (#1280).
+     * Absent keeps them forever. */
+    eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
   }).strict().optional(),
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
@@ -417,7 +420,7 @@ export interface AppConfig {
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -551,6 +554,13 @@ export function maxConcurrentBotThreads(cfg: AppConfig): number {
 export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
   const cap = cfg.threads?.eventLogMaxBytes;
   return typeof cap === "number" && Number.isFinite(cap) && cap > 0 ? cap : null;
+}
+
+/** Days a closed or archived bot thread's event logs survive before the
+ * retention sweep removes them (#1280). Null — the default — keeps them
+ * forever. */
+export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
+  return cfg.threads?.eventLogRetentionDays ?? null;
 }
 
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {

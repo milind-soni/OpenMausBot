@@ -115,8 +115,9 @@ import {
   localVmMode,
   parseConfigPatch,
   roomTurnTimeoutMinutes,
-maxConcurrentBotThreads,
   threadEventLogMaxBytes,
+  maxConcurrentBotThreads,
+  threadEventLogRetentionDays,
   saveConfig,
   showToolCallsEnabled,
   claudeUserMcpEnabled,
@@ -135,6 +136,7 @@ maxConcurrentBotThreads,
   NATIVE_DIR,
   customMcpServers,
 } from "./config.ts";
+import { sweepThreadEventLogs, type ThreadLogRetentionCandidate } from "./thread-retention.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -16783,6 +16785,38 @@ try {
 } catch (error) {
   console.warn(`attachments: startup partial cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
 }
+
+// #1280: retention for per-thread event logs. Off unless configured, and
+// even then it only removes log files — transcripts, thread records, and
+// workspace state stay untouched. A thread qualifies only when its newest
+// close or archive stamp is older than the window and it is not busy,
+// unread, or carrying an open direct handoff.
+const THREAD_LOG_RETENTION_SWEEP_MS = 24 * 60 * 60 * 1000;
+
+function sweepThreadEventLogsNow(): void {
+  const retentionDays = threadEventLogRetentionDays(cfg);
+  if (retentionDays === null) return;
+  const candidates: ThreadLogRetentionCandidate[] = store.bots.flatMap((bot) =>
+    (bot.tasks ?? []).map((task) => ({
+      threadId: task.threadId,
+      closedAt: task.closedBy?.at ?? null,
+      archivedAt: task.archivedAt ?? null,
+      unread: task.unread === true,
+      busy: threadBusy(bot.id, task.threadId),
+      openDirectHandoff: roomHandoffs.activeDirect(task.threadId),
+    })));
+  const swept = sweepThreadEventLogs(candidates, retentionDays);
+  if (swept > 0) console.log(`[retention] removed event logs for ${swept} idle thread(s) past ${retentionDays} day(s)`);
+}
+
+try {
+  sweepThreadEventLogsNow();
+} catch (error) {
+  console.warn(`thread event log retention sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+}
+// A days-scale window needs no tighter cadence; unref so the timer never
+// holds the process open.
+setInterval(sweepThreadEventLogsNow, THREAD_LOG_RETENTION_SWEEP_MS).unref();
 
 // A dispatch claim is deliberately committed before transcript/provider work.
 // If we died after that point, its outcome is unknown: recover the user's words
