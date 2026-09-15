@@ -38,5 +38,6 @@ Data and engine credentials persist in the named data volume. For an existing
 volume, set `OMB_DATA_VOLUME` to its name and `OMB_DATA_EXTERNAL=true`.
 Fresh installs create their volume automatically.
 
-Update with `docker compose build --pull` followed by `docker compose up -d`.
+Update the checkout, including reviewed image and engine pins, then run
+`docker compose build --pull` followed by `docker compose up -d`.
 Stop with `docker compose stop`. `docker compose down -v` deletes managed volumes.

@@ -238,6 +238,15 @@ describe("redactSecretsInText", () => {
     }
   });
 
+  it("masks webhook secrets embedded in old capability URLs", () => {
+    const secret = "whsec_abcdefghijklmnopqrstuvwxyz0123456789";
+    const input = `POST https://bots.example.test/hooks/wh_abcdefghijk/${secret}?retry=1`;
+    const once = redactSecretsInText(input);
+    expect(once).not.toContain(secret);
+    expect(once).toContain("/hooks/wh_abcdefghijk/«redacted 42 chars»?retry=1");
+    expect(redactSecretsInText(once)).toBe(once);
+  });
+
   it("leaves ordinary text, code, hashes and URLs alone", () => {
     for (const s of [
       "the keyboard shortcut is cmd-k",

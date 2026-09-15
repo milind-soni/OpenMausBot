@@ -20,5 +20,8 @@ the IDs in `wrangler.jsonc`, deploy under their own Worker name, and set
 `OMB_COMPOSIO_BROKER_URL` in their packaged build. Running only the local
 server with a Composio project key remains the no-Cloudflare self-host path.
 
-Set `REGISTRATION_MODE` to `closed` to stop issuing new installation tokens
-without affecting existing users.
+Production keeps `REGISTRATION_MODE` set to `closed`, which stops issuing new
+installation tokens without affecting existing users. Do not enable open
+registration on an Internet-accessible Worker: `/v1/installations` does not
+authenticate callers. Add control-plane authorization before allowing new
+hosted registrations.
