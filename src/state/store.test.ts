@@ -24,6 +24,143 @@ import {
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { RoutineRun } from "../lib/routines";
 
+describe("mascot task outcomes", () => {
+  const bot: Bot = {
+    id: "mascot-bot", threadId: "mascot-thread", name: "Ada", title: "", description: "",
+    notifications: false, color: "green", unread: false, busy: true, activity: "working",
+    modelSelection: { instanceId: "acp", model: "fake" }, messages: [],
+  };
+  const start = () => ({ ...initialState, bots: [bot], selectedId: bot.id });
+
+  it("waits for a confirmed turn result instead of celebrating a busy flag settling", () => {
+    const settled = reducer(start(), { type: "botPatched", bot: { ...bot, busy: false, activity: "idle" } });
+    expect(settled.mascotMotion).toBeNull();
+    const completed = reducer(settled, { type: "turnCompleted", threadId: bot.threadId, ok: true });
+    expect(completed.mascotMotion).toMatchObject({ botId: bot.id, kind: "celebrate" });
+  });
+
+  it("keeps a terminal failure when the subsequent bot frame becomes idle", () => {
+    const failed = reducer(start(), { type: "turnCompleted", threadId: bot.threadId, ok: false, stopReason: "error" });
+    expect(failed.mascotMotion).toMatchObject({ botId: bot.id, kind: "failure" });
+    const settled = reducer(failed, { type: "botPatched", bot: { ...bot, busy: false, activity: "idle", unread: true } });
+    expect(settled.mascotMotion).toBe(failed.mascotMotion);
+  });
+
+  it.each(["interrupted", "cancelled", "canceled"])("treats %s as neutral even when a provider reports ok", stopReason => {
+    const working = reducer(start(), { type: "send", botId: bot.id, text: "work" });
+    const cancelled = reducer(working, { type: "turnCompleted", threadId: bot.threadId, ok: true, stopReason });
+    expect(cancelled.mascotMotion).toBeNull();
+  });
+
+  it("does not cover a sibling task's live activity with a completed task's reaction", () => {
+    const state = reducer({ ...start(), bots: [{ ...bot, tasks: [
+      { threadId: bot.threadId, title: "Finishing", createdAt: 0, busy: true, activity: "working" },
+      { threadId: "sibling", title: "Approval", createdAt: 1, busy: true, activity: "waiting-on-you" },
+    ] }] }, { type: "send", botId: bot.id, text: "work" });
+    const completed = reducer(state, { type: "turnCompleted", threadId: bot.threadId, ok: true });
+    expect(completed.mascotMotion).toBeNull();
+    expect(completed.bots).toBe(state.bots);
+  });
+
+  it("attributes a terminal result to its task's owner instead of the selected bot", () => {
+    const state = { ...start(), selectedId: "other", bots: [bot, { ...bot, id: "other", threadId: "other-thread" }] };
+    expect(reducer(state, { type: "turnCompleted", threadId: bot.threadId, ok: false }).mascotMotion)
+      .toMatchObject({ botId: bot.id, kind: "failure" });
+    expect(reducer(state, { type: "turnCompleted", threadId: "unknown", ok: true })).toBe(state);
+  });
+
+  it.each([true, false, undefined])("keeps work running when a tool reports ok=%s, including retry receipts", ok => {
+    const working = reducer(start(), { type: "send", botId: bot.id, text: "work" });
+    const message: Message = { id: "tool", role: "bot", kind: "activity", at: 0, tool: { name: "retrying", ok } };
+    const added = reducer(working, { type: "messageAdded", threadId: bot.threadId, message });
+    expect(added.mascotMotion).toBe(working.mascotMotion);
+    const patched = reducer(added, { type: "messagePatched", threadId: bot.threadId, message });
+    expect(patched.mascotMotion).toBe(working.mascotMotion);
+    expect(patched.bots[0].messages[0].tool?.ok).toBe(ok);
+  });
+
+  it("lets approval state speak without a thinking reaction on top", () => {
+    const message: Message = { id: "approval", role: "bot", kind: "options", at: 0 };
+    const added = reducer(start(), { type: "messageAdded", threadId: bot.threadId, message });
+    expect(added.mascotMotion).toBeNull();
+    const idle = { ...start(), bots: [{ ...bot, busy: false, activity: "idle" as const }] };
+    const waiting = reducer(idle, { type: "botPatched", bot: { ...bot, activity: "waiting-on-you", unread: true } });
+    expect(waiting.mascotMotion).toBeNull();
+    const working = reducer(idle, { type: "botPatched", bot: { ...bot, unread: true } });
+    expect(working.mascotMotion?.kind).toBe("working");
+  });
+
+  it("expires a beat without allowing its old timer to clear a newer one", () => {
+    const first = reducer(start(), { type: "send", botId: bot.id, text: "first" });
+    const nonce = first.mascotMotion!.nonce;
+    const expired = reducer(first, { type: "mascotMotionExpired", nonce });
+    expect(expired.mascotMotion).toBeNull();
+    const next = reducer(expired, { type: "send", botId: bot.id, text: "next" });
+    expect(next.mascotMotion!.nonce).toBeGreaterThan(nonce);
+    expect(reducer(next, { type: "mascotMotionExpired", nonce })).toBe(next);
+    expect(reducer(next, { type: "mascotMotionExpired", nonce: next.mascotMotion!.nonce }).mascotMotion).toBeNull();
+  });
+
+  it.each([undefined, "turn-a"])("does not replay a consumed completion after its reaction expires (turnId=%s)", turnId => {
+    const completion: Action = { type: "turnCompleted", threadId: bot.threadId, turnId, eventId: "completed-a", ok: true };
+    const completed = reducer(start(), completion);
+    const expired = reducer(completed, { type: "mascotMotionExpired", nonce: completed.mascotMotion!.nonce });
+    expect(reducer(expired, completion)).toBe(expired);
+    if (turnId) {
+      expect(reducer(expired, { ...completion, eventId: "replayed-a" })).toBe(expired);
+    }
+  });
+
+  it.each([false, true])("does not let an older cancellation clear a newer turn's reaction (completed=%s)", completed => {
+    let state = reducer(start(), { type: "turnStarted", threadId: bot.threadId, turnId: "z-old" });
+    state = reducer(state, { type: "turnStarted", threadId: bot.threadId, turnId: "a-new" });
+    state = reducer(state, { type: "send", botId: bot.id, text: "replacement" });
+    if (completed) state = reducer(state, {
+      type: "turnCompleted", threadId: bot.threadId, turnId: "a-new", eventId: "completed-new", ok: true,
+    });
+    expect(state.mascotMotion?.kind).toBe(completed ? "celebrate" : "working");
+    expect(reducer(state, {
+      type: "turnCompleted", threadId: bot.threadId, turnId: "z-old", eventId: "cancelled-old", ok: true, stopReason: "interrupted",
+    })).toBe(state);
+    expect(reducer(state, { type: "turnStarted", threadId: bot.threadId, turnId: "z-old" })).toBe(state);
+  });
+
+  it("accepts a completion whose start was missed during reconnect", () => {
+    const observed = reducer(start(), { type: "turnStarted", threadId: bot.threadId, turnId: "before-disconnect" });
+    const completed = reducer(observed, {
+      type: "turnCompleted", threadId: bot.threadId, turnId: "unobserved-start", eventId: "after-reconnect", ok: true,
+    });
+    expect(completed.mascotMotion?.kind).toBe("celebrate");
+  });
+
+  it("scopes turn identities to their thread and preserves independent bots' completions", () => {
+    const other = { ...bot, id: "other", threadId: "other-thread" };
+    let state = { ...start(), bots: [bot, other] };
+    state = reducer(state, { type: "turnStarted", threadId: bot.threadId, turnId: "shared-provider-id" });
+    state = reducer(state, { type: "turnStarted", threadId: other.threadId, turnId: "shared-provider-id" });
+    state = reducer(state, { type: "turnCompleted", threadId: bot.threadId, turnId: "shared-provider-id", eventId: "done-first", ok: true });
+    expect(state.mascotMotion?.botId).toBe(bot.id);
+    state = reducer(state, { type: "turnCompleted", threadId: other.threadId, turnId: "shared-provider-id", eventId: "done-other", ok: false });
+    expect(state.mascotMotion).toMatchObject({ botId: other.id, kind: "failure" });
+  });
+
+  it("bounds completion history while retaining protection for the latest result", () => {
+    let state = start();
+    for (let i = 0; i < 100; i++) {
+      state = reducer(state, { type: "turnCompleted", threadId: bot.threadId, turnId: `turn-${i}`, eventId: `event-${i}`, ok: true });
+    }
+    expect(state.mascotTurns).toHaveLength(64);
+    expect(reducer(state, { type: "turnCompleted", threadId: bot.threadId, turnId: "turn-99", eventId: "replayed-last", ok: true })).toBe(state);
+  });
+
+  it("shows an unscoped error without blaming the currently selected avatar", () => {
+    const error = reducer(start(), { type: "error", message: "The previous request failed" });
+    expect(error.error).toBe("The previous request failed");
+    expect(error.mascotMotion).toBeNull();
+    expect(reducer(error, { type: "error", message: null }).error).toBeNull();
+  });
+});
+
 describe("composer thread approval persistence", () => {
   it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
     const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;

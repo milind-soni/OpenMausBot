@@ -7,7 +7,7 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
 import { stateForBot } from "@/lib/mascot";
-import { useStore, type Bot } from "@/state/store";
+import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { approvalModeFor } from "../../../shared/approval-mode";
 
 export type BotPatch = Partial<
@@ -47,7 +47,7 @@ export function useBotSettingsDerived(bot: Bot) {
   const localSelectable = localComputerSelectable({ capabilities, providerSupportsLocal });
   const localDisabledReason = localComputerDisabledReason({ capabilities, providerSupportsLocal });
   const patch = (p: BotPatch) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
-  const activeState = stateForBot(bot);
+  const activeState = stateForBot({ ...bot, messages: visibleMessages(bot) });
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   // The approval level (ask / auto / full / custom) as the shared rule reads

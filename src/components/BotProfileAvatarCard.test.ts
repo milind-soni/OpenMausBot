@@ -38,6 +38,12 @@ function renderCard(bot: Bot) {
 }
 
 describe("BotProfileAvatarCard body picker", () => {
+  it("keeps the chosen expression selected while the preview shows a different live state", () => {
+    const markup = renderCard(makeBot({ mascotExpression: "sleeping", busy: true }));
+    const chosen = markup.match(/<button(?=[^>]*aria-label="Use sleeping expression")[^>]*>/)?.[0];
+    expect(chosen).toContain('aria-pressed="true"');
+  });
+
   it("renders one option per body catalog entry, labeled by name", () => {
     const markup = renderCard(makeBot());
 

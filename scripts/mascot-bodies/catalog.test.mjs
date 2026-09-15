@@ -9,8 +9,8 @@ import {
 } from "../../shared/mascot-bodies.ts";
 
 describe("the generated catalog", () => {
-  it("carries all ten bodies", () => {
-    expect(MASCOT_BODY_IDS).toHaveLength(10);
+  it("carries all thirteen bodies", () => {
+    expect(MASCOT_BODY_IDS).toHaveLength(13);
     for (const id of MASCOT_BODY_IDS) expect(MASCOT_BODIES[id].id).toBe(id);
   });
 
@@ -38,9 +38,10 @@ describe("the generated catalog", () => {
     }
   });
 
-  it("clamps every face to one shared size", () => {
+  it("keeps the shipped face size when adding new bodies", () => {
     const scales = new Set(MASCOT_BODY_IDS.map(id => MASCOT_BODIES[id].anchor.scale));
     expect([...scales]).toHaveLength(1);
+    expect([...scales][0]).toBe(0.791);
   });
 });
 

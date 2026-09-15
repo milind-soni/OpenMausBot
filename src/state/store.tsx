@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
-import type { MausColor, MausMotion } from "@/lib/mascot";
+import { MAUS_MOTION_DURATION_MS, type MausColor, type MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
@@ -726,6 +726,11 @@ export interface AppState {
     nonce: number;
     kind: Exclude<MausMotion, "none">;
   } | null;
+  /** Monotonic even after expiry, so an old timer cannot clear a newer beat. */
+  mascotMotionNonce: number;
+  /** Recent turns observed by this client. Settled includes turns superseded
+   * by a later start in the same thread; opaque IDs are never ordered. */
+  mascotTurns: Array<{ threadId: string; turnId?: string; eventId?: string; settled: boolean }>;
   /** Queued follow-up lines waiting for drain; keyed by threadId.
    * Each entry is identified by the server queueId, not by text. */
   pendingQueued: Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>>;
@@ -738,6 +743,7 @@ export interface AppState {
 }
 
 const MAX_CONSUMED_QUEUE_IDS = 64;
+const MAX_MASCOT_TURNS = 64;
 
 function rememberConsumedQueueId(
   consumed: AppState["consumedQueueIds"],
@@ -923,6 +929,9 @@ export type Action =
   | { type: "duplicateBot"; botId: string }
   | { type: "markUnread"; botId: string }
   | { type: "botPatched"; bot: BotAnnouncement }
+  | { type: "turnStarted"; threadId: string; turnId: string }
+  | { type: "turnCompleted"; threadId: string; turnId?: string; eventId?: string; ok: boolean; stopReason?: string | null }
+  | { type: "mascotMotionExpired"; nonce: number }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
   | { type: "optimisticMessageRemoved"; threadId: string; sendId: string }
@@ -1062,9 +1071,10 @@ function withMascotMotion(
 ): AppState {
   return {
     ...state,
+    mascotMotionNonce: state.mascotMotionNonce + 1,
     mascotMotion: {
       botId,
-      nonce: (state.mascotMotion?.nonce ?? 0) + 1,
+      nonce: state.mascotMotionNonce + 1,
       kind,
     },
   };
@@ -1332,13 +1342,12 @@ export function reducer(state: AppState, action: Action): AppState {
         return reconcileSnapshotQueues(added, [action.bot]);
       }
       const kind =
-        action.bot.unread && !before?.unread
-          ? "surprise"
-          : action.bot.busy === true && !before?.busy
-            ? "working"
-            : action.bot.busy === false && before?.busy
-              ? "celebrate"
-              : null;
+        action.bot.busy === true && !before.busy &&
+          (!action.bot.activity || action.bot.activity === "working")
+          ? "working"
+          : !action.bot.busy && !before.busy && action.bot.unread && !before.unread
+            ? "surprise"
+            : null;
       const animated = kind ? withMascotMotion(state, action.bot.id, kind) : state;
       const next = action.bot.chiefOfStaff
         ? {
@@ -1460,17 +1469,9 @@ export function reducer(state: AppState, action: Action): AppState {
       const motion =
         action.message.role === "user" && action.message.kind === "text" && Boolean(action.message.queueId)
           ? "working"
-          : action.message.kind === "options"
-          ? "thinking"
-          : action.message.kind === "activity"
-            ? action.message.tool?.ok === false
-              ? "failure"
-              : action.message.tool?.ok === true
-                ? "success"
-                : "working"
-            : action.message.role === "bot" && action.message.kind === "text"
-              ? "blink"
-              : null;
+          : action.message.role === "bot" && action.message.kind === "text"
+            ? "blink"
+            : null;
       const animated = motion ? withMascotMotion(next, bot.id, motion) : next;
       return animated;
     }
@@ -1511,16 +1512,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ),
         };
       }
-      const motion =
-        action.message.kind === "activity"
-          ? action.message.tool?.ok === false
-            ? "failure"
-            : action.message.tool?.ok === true
-              ? "success"
-              : "working"
-          : null;
-      const next = motion ? withMascotMotion(state, bot.id, motion) : state;
-      return updateBot(next, bot.id, (b) => ({
+      return updateBot(state, bot.id, (b) => ({
         ...b,
         messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
       }));
@@ -1558,13 +1550,49 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "connected":
       return { ...state, connected: action.value };
-    case "error":
+    case "turnStarted": {
+      if (!state.bots.some((bot) => bot.threadId === action.threadId ||
+        bot.tasks?.some((task) => task.threadId === action.threadId))) return state;
+      if (state.mascotTurns.some((turn) => turn.threadId === action.threadId && turn.turnId === action.turnId)) return state;
       return {
-        ...(action.message && state.selectedId
-          ? withMascotMotion(state, state.selectedId, "alert")
-          : state),
-        error: action.message,
+        ...state,
+        mascotTurns: [
+          ...state.mascotTurns.map((turn) => turn.threadId === action.threadId && !turn.settled
+            ? { ...turn, settled: true } : turn),
+          { threadId: action.threadId, turnId: action.turnId, settled: false },
+        ].slice(-MAX_MASCOT_TURNS),
       };
+    }
+    case "turnCompleted": {
+      const bot = state.bots.find((candidate) => candidate.threadId === action.threadId ||
+        candidate.tasks?.some((task) => task.threadId === action.threadId));
+      if (!bot) return state;
+      const known = state.mascotTurns.find((turn) => turn.threadId === action.threadId &&
+        ((action.turnId !== undefined && turn.turnId === action.turnId) ||
+          (action.eventId !== undefined && turn.eventId === action.eventId)));
+      if (known?.settled) return state;
+      // Accept unobserved starts (e.g. after reconnect), but consume their
+      // completion identity so expiry cannot make a replay animate again.
+      const next = action.turnId !== undefined || action.eventId !== undefined ? {
+        ...state,
+        mascotTurns: [
+          ...state.mascotTurns.filter((turn) => turn !== known),
+          { threadId: action.threadId, turnId: action.turnId, eventId: action.eventId, settled: true },
+        ].slice(-MAX_MASCOT_TURNS),
+      } : state;
+      const interrupted = action.stopReason === "interrupted" ||
+        action.stopReason === "cancelled" || action.stopReason === "canceled";
+      const otherTaskBusy = bot.tasks?.some((task) => task.threadId !== action.threadId &&
+        (task.busy || task.activity === "working" || task.activity === "waiting-on-you" || task.activity === "no-signal"));
+      if (interrupted || otherTaskBusy) {
+        return next.mascotMotion?.botId === bot.id ? { ...next, mascotMotion: null } : next;
+      }
+      return withMascotMotion(next, bot.id, action.ok ? "celebrate" : "failure");
+    }
+    case "mascotMotionExpired":
+      return state.mascotMotion?.nonce === action.nonce ? { ...state, mascotMotion: null } : state;
+    case "error":
+      return { ...state, error: action.message };
     // bot settings, the computer panel, and app settings share the right slot
     case "toggleSettings": {
       if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
@@ -1938,6 +1966,8 @@ export const initialState: AppState = {
   notice: null,
   revealThread: null,
   mascotMotion: null,
+  mascotMotionNonce: 0,
+  mascotTurns: [],
   pendingQueued: {},
   consumedQueueIds: {},
 };
@@ -2246,6 +2276,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
   const [state, rawDispatch] = useReducer(reducer, initialState);
+  useEffect(() => {
+    const nonce = state.mascotMotion?.nonce;
+    if (nonce === undefined) return;
+    const timer = setTimeout(() => rawDispatch({ type: "mascotMotionExpired", nonce }), MAUS_MOTION_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [state.mascotMotion?.nonce]);
   const stateRef = useRef(state);
   stateRef.current = state;
   // per-frame stream-delta batching (see the "runtime" SSE case); stream
@@ -3241,10 +3277,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const event = frame.event;
           if (event.type === "content.delta") {
             deltaBuffer.push(event.threadId, event.streamKind, event.delta);
+          } else if (event.type === "turn.started" && event.turnId !== undefined) {
+            rawDispatch({ type: "turnStarted", threadId: event.threadId, turnId: event.turnId });
           } else if (event.type === "turn.completed") {
             // flush any buffered tail before clearing so no tokens are lost
             flushDeltas();
             clearStream(event.threadId);
+            rawDispatch({ type: "turnCompleted", threadId: event.threadId, turnId: event.turnId, eventId: event.eventId, ok: event.ok, stopReason: event.stopReason });
           }
           break;
         }

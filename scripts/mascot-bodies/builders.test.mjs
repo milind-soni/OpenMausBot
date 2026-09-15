@@ -1,15 +1,25 @@
 import { describe, expect, it } from "vitest";
 
 import { BODY_DEFS, BODY_IDS } from "./builders.ts";
+import { boundsOf, flatten } from "./geometry.ts";
 
 const EXPECTED_IDS = [
   "cursor", "blob", "circle", "squircle", "capsule",
   "drop", "shield", "hexagon", "diamond", "star",
+  "pill", "wedge", "cloud",
 ];
 
 describe("body builders", () => {
   it("produces the catalog in its persisted order, cursor first", () => {
     expect(BODY_IDS).toEqual(EXPECTED_IDS);
+  });
+
+  it("offers a horizontal pill distinct from the existing vertical capsule", () => {
+    const bounds = (id) => boundsOf(flatten(BODY_DEFS.find(body => body.id === id).d));
+    const pill = bounds("pill");
+    const capsule = bounds("capsule");
+    expect((pill.maxX - pill.minX) / (pill.maxY - pill.minY)).toBeCloseTo(1.5, 1);
+    expect(capsule.maxY - capsule.minY).toBeGreaterThan(capsule.maxX - capsule.minX);
   });
 
   it("emits only absolute M, C and Z, which is all the iOS parser understands", () => {

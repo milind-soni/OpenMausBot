@@ -20,6 +20,14 @@ const renderBot = (bot: Partial<BotAvatarProps["bot"]>) =>
   );
 
 describe("MausAvatar body", () => {
+  it("keeps identity legible with a solid body and dark eyes, without a default mouth", () => {
+    const markup = render({ color: "purple" });
+    expect(markup.match(/stop-color="#8057C8"/g)).toHaveLength(3);
+    expect(markup.match(/data-avatar-eye="[01]"[^>]*fill="#17211d"/g)).toHaveLength(2);
+    expect(markup).not.toContain("stroke-linecap");
+    expect(render({ showMouth: true })).toContain("stroke-linecap");
+  });
+
   it("wears the cursor when no body is given", () => {
     expect(render({})).toContain(MASCOT_BODIES.cursor.fit);
   });

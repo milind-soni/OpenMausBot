@@ -26,7 +26,7 @@ enum MausBodies {
     }
 
     /// Every selectable body id, in the order the picker shows them.
-    static let order: [String] = ["cursor", "blob", "circle", "squircle", "capsule", "drop", "shield", "hexagon", "diamond", "star"]
+    static let order: [String] = ["cursor", "blob", "circle", "squircle", "capsule", "drop", "shield", "hexagon", "diamond", "star", "pill", "wedge", "cloud"]
 
     /// The shipped mascot, and the fallback for any unrecognised value.
     static let defaultID = "cursor"
@@ -211,6 +211,43 @@ enum MausBodies {
                 """,
             fit: (scale: 1.226032, tx: -8.3327, ty: 3.1407),
             anchor: (x: 113.82, y: 125.43, scale: 0.791)
+        ),
+        "pill": Body(
+            id: "pill",
+            name: "Pill",
+            path:
+                """
+                M67 33C89 33 111 33 133 33C170.00308 33 200 62.99692 200 100C200 137.00308 170.00308 167 133 167C111
+                167 89 167 67 167C29.99692 167 0 137.00308 0 100C0 62.99692 29.99692 33 67 33Z
+                """,
+            fit: (scale: 1.142705, tx: 0, ty: 0),
+            anchor: (x: 92.17, y: 107.83, scale: 0.791)
+        ),
+        "wedge": Body(
+            id: "wedge",
+            name: "Wedge",
+            path:
+                """
+                M81.81347 21.225C93.93782 -2.925 106.06218 -2.925 118.18653 21.225C134.92969 54.575 151.67285 87.925
+                168.41601 121.275C180.54036 145.425 174.47818 157.5 150.22947 157.5C116.74316 157.5 83.25684 157.5
+                49.77053 157.5C25.52182 157.5 19.45964 145.425 31.58399 121.275C48.32715 87.925 65.07031 54.575
+                81.81347 21.225Z
+                """,
+            fit: (scale: 1.480308, tx: -33.7603, ty: -4.6075),
+            anchor: (x: 112.35, y: 170.2, scale: 0.791)
+        ),
+        "cloud": Body(
+            id: "cloud",
+            name: "Cloud",
+            path:
+                """
+                M50 180C22 180 0 158 0 131C0 109 13 90 33 84C37 82.8 39 79 39 75C39 54 56 37 77 37C81 37 84 35.5 87
+                31C101 10 133 15 143 39C145 43.8 148 45 153 45C177 45 195 63 195 87C195 93 197 99 201 104C213 119
+                208 145 190 156C185.5 158.75 182 162 178 167C165.2 183 145 188 127 179C121 176 115 176 109 179C91
+                188 69 180 50 180Z
+                """,
+            fit: (scale: 1.101195, tx: 0, ty: 3.4786),
+            anchor: (x: 117.4, y: 118.29, scale: 0.791)
         ),
     ]
 

@@ -90,6 +90,8 @@ export const MAUS_MOTIONS = [
 
 export type MausMotion = "none" | (typeof MAUS_MOTIONS)[number];
 
+export const MAUS_MOTION_DURATION_MS = 1400;
+
 /**
  * The face used to be ten hand-drawn SVGs; it is now the engine's 39 states.
  * Bots saved under the old vocabulary still carry one of these ten names, so
@@ -122,30 +124,10 @@ export function normalizeState(value: string | null | undefined): MausState | nu
   return LEGACY_STATES[value] ?? null;
 }
 
-/**
- * The states worth offering in the appearance picker.
- *
- * The engine carries 39, but many are transient beats the app drives itself
- * (`sending`, `alerting`, `powering-down`) and make no sense as a bot's resting
- * face. More importantly, states share resting faces: `happy`, `excited` and
- * `playful` all rest on expression 2, and `curious`, `surprised` and `scared`
- * all rest on 3 — they differ in which faces they *drift* to, which a static
- * swatch cannot show. Offering them all gave 15 buttons showing 8 pictures.
- *
- * Across all 39 states there are only 11 distinct resting faces, so this is one
- * state per face, chosen for the clearest name. Every swatch looks different.
- */
+/** One distinct resting face per picker option; transient states remain event-driven. */
 export const PICKABLE_STATES: MausState[] = [
-  "idle", // expression 0
-  "happy", // 2
-  "curious", // 3
-  "drowsy", // 4
-  "working", // 7
-  "thinking", // 8
-  "listening", // 10
-  "sleeping", // 13
-  "suspicious", // 14
-  "proud", // 15
+  "idle", "happy", "curious", "drowsy", "working",
+  "thinking", "listening", "sleeping", "suspicious", "proud",
 ];
 
 type MascotMessage = {
@@ -158,6 +140,7 @@ export type MascotBotProfile = {
   title?: string;
   description?: string;
   mascotExpression?: string | null;
+  activity?: "working" | "waiting-on-you" | "idle" | "no-signal" | "dead";
   busy?: boolean;
   unread?: boolean;
   messages?: MascotMessage[];
@@ -169,15 +152,23 @@ export type MascotBotProfile = {
  * visual identity stays stable while its title and description are edited.
  */
 export function stateForBot(bot: MascotBotProfile): MausState {
-  const pinned = normalizeState(bot.mascotExpression);
-  if (pinned) return pinned;
-
   const last = bot.messages?.[bot.messages.length - 1];
 
+  if (bot.activity === "waiting-on-you") return "curious";
+  if (bot.activity === "no-signal") return "confused";
+  if (bot.activity === "dead") return "sad";
+  if (bot.busy || bot.activity === "working") {
+    return last?.kind === "activity" && last.tool && last.tool.ok === undefined
+      ? "working"
+      : "thinking";
+  }
   if (last?.kind === "activity" && last.tool?.ok === false) return "alerting";
-  if (bot.busy) return "working";
   if (bot.unread) return "notifying";
   if (last?.kind === "options") return "curious";
+
+  // A chosen face is the bot's resting identity; live activity still has a voice.
+  const pinned = normalizeState(bot.mascotExpression);
+  if (pinned) return pinned;
 
   const profile = `${bot.name} ${bot.title ?? ""} ${bot.description ?? ""}`.toLowerCase();
   const matches = (words: RegExp) => words.test(profile);

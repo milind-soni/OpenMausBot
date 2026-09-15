@@ -1,6 +1,6 @@
 // Bot avatar — the Blob Studio "Cursor" mascot (CursorAvatar.tsx), wrapped
 // in the app's historical MausAvatar API so no call site changes: per-bot
-// color becomes a body gradient, the app's one-shot motion beats borrow the
+// color becomes a solid body, the app's one-shot motion beats borrow the
 // face/state for a moment, and the eyes follow the pointer. The previous
 // hand-built Maus body + face engine (maus-engine/face/driver) is gone;
 // CursorAvatar owns morphing, blinking, drift, body motion and effects.
@@ -13,12 +13,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { MAUS_COLORS, MAUS_MOTION_DURATION_MS, type MascotBotProfile, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { botAvatarProfile, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
 
-export const EYE_SCALE = 1.12;
+export const EYE_SCALE = 0.72;
 export const MOUTH_WEIGHT = 11;
 
 /**
@@ -39,7 +39,7 @@ interface MotionFaces
 const MOTION_FACE: MotionFaces = {
   arrive: { state: "spawning", spin: 900 },
   switch: { state: "waking", spin: 620 },
-  customize: { state: "proud", blink: true },
+  customize: { state: "humming", spin: 900, blink: true },
   alert: { state: "alerting" },
   thinking: { state: "thinking" },
   working: { state: "working" },
@@ -51,31 +51,10 @@ const MOTION_FACE: MotionFaces = {
   failure: { state: "sad" },
 };
 
-/** How long a one-shot motion holds its state before the bot's own returns. */
-const MOTION_FACE_MS = 1400;
-
-/** Channel-wise mix of a hex color toward another, t in 0..1. */
-function mix(hex: string, toward: string, t: number): string {
-  const a = Number.parseInt(hex.slice(1), 16);
-  const b = Number.parseInt(toward.slice(1), 16);
-  const channel = (shift: number) => {
-    const va = (a >> shift) & 0xff;
-    const vb = (b >> shift) & 0xff;
-    return Math.round(va + (vb - va) * t);
-  };
-  return `#${[channel(16), channel(8), channel(0)]
-    .map((part) => part.toString(16).padStart(2, "0"))
-    .join("")}`;
-}
-
-/**
- * Bot color -> the mascot's three-stop body gradient (highlight, base,
- * shadow), with the same light/dark spread as the pack's default green
- * ["#9FE6B5", "#3FAE6E", "#1C7A4C"].
- */
+/** A solid body keeps the small, dark eyes readable at sidebar sizes. */
 const gradientFor = (color: MausColor): [string, string, string] => {
   const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
-  return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
+  return [fill, fill, fill];
 };
 
 export type MausAvatarHandle = CursorAvatarHandle;
@@ -84,6 +63,9 @@ export type MausAvatarProps = {
   color: MausColor;
   /** Named behaviour — drives the expression pool, its cadence and blinking. */
   state?: MausState;
+  /** Runtime activity, separate from a face that may also be a resting choice. */
+  busy?: boolean;
+  activity?: MascotBotProfile["activity"];
   /** Pin one of the 25 faces and stop the state's own drift. */
   expression?: number;
   size?: number;
@@ -116,6 +98,8 @@ function MausAvatarComponent(
   {
     color,
     state = "idle",
+    busy,
+    activity,
     expression,
     size = 44,
     label,
@@ -124,8 +108,8 @@ function MausAvatarComponent(
     turn,
     gaze,
     spring,
-    eyeScale,
-    showMouth,
+    eyeScale = EYE_SCALE,
+    showMouth = false,
     mouthStroke,
     forward = true,
     lookAround,
@@ -140,22 +124,46 @@ function MausAvatarComponent(
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
     spin: (durationMs?: number) => inner.current?.spin(durationMs),
+    cancelMotion: () => inner.current?.cancelMotion(),
     setExpression: (index: number) => inner.current?.setExpression(index),
   }));
 
   // A one-shot motion borrows the state for a moment, then hands it back.
   const [motionState, setMotionState] = useState<MausState | null>(null);
+  // Selecting or customizing a bot must not cover attention with a new beat.
+  const needsAttention = activity === "waiting-on-you" || activity === "no-signal" || activity === "dead";
+  const lastMotion = useRef<{
+    motion: MausMotion; key: number; state: MausState; busy?: boolean;
+    expiresAt: number; canceled: boolean;
+  } | null>(null);
   useEffect(() => {
-    if (motion === "none" || !animated) return;
+    setMotionState(null);
+    const previous = lastMotion.current;
+    const sameEvent = previous?.motion === motion && previous.key === motionKey;
+    const phaseChanged = sameEvent && (previous.state !== state || previous.busy !== busy);
+    // Completion can arrive just before the final idle snapshot. Keep that
+    // confirmed result for its remaining lifetime, but let new work take over.
+    const finishing = phaseChanged && previous.busy === true && busy === false &&
+      ["success", "celebrate", "failure"].includes(motion);
+    const event = {
+      motion, key: motionKey, state, busy,
+      expiresAt: sameEvent ? previous.expiresAt : Date.now() + MAUS_MOTION_DURATION_MS,
+      canceled: !animated || needsAttention || (sameEvent && (previous.canceled || (phaseChanged && !finishing))),
+    };
+    lastMotion.current = event;
+    if (!sameEvent || event.canceled || motion === "none") inner.current?.cancelMotion();
+    const remaining = event.expiresAt - Date.now();
+    if (motion === "none" || event.canceled || remaining <= 0) return;
     const beat = MOTION_FACE[motion];
     if (!beat) return;
-    if (beat.blink) inner.current?.blink();
-    if (beat.spin) inner.current?.spin(beat.spin);
-    if (!beat.state) return;
-    setMotionState(beat.state);
-    const timer = setTimeout(() => setMotionState(null), MOTION_FACE_MS);
+    if (!finishing) {
+      if (beat.blink) inner.current?.blink();
+      if (beat.spin) inner.current?.spin(beat.spin);
+    }
+    if (beat.state) setMotionState(beat.state);
+    const timer = setTimeout(() => setMotionState(null), remaining);
     return () => clearTimeout(timer);
-  }, [motion, motionKey, animated]);
+  }, [motion, motionKey, animated, state, busy, needsAttention]);
 
   // Pointer-follow gaze, composed with any gaze the caller pins.
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
@@ -178,11 +186,12 @@ function MausAvatarComponent(
     >
       <CursorAvatar
         ref={inner}
-        state={motionState ?? state}
+        state={needsAttention ? state : motionState ?? state}
         expression={expression}
         size={size}
         silhouette={silhouette}
         gradient={gradientFor(color)}
+        eyeColor="#17211d"
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
@@ -202,6 +211,8 @@ export const MausAvatar = memo(forwardRef(MausAvatarComponent));
 export type BotAvatarProps = Omit<MausAvatarProps, "color"> & {
   bot: {
     name?: string;
+    busy?: boolean;
+    activity?: MascotBotProfile["activity"];
     color: MausColor;
     avatarUrl?: string | null;
     avatarCrop?: BotAvatarCrop;
@@ -256,6 +267,8 @@ export function BotAvatar({ bot, size = 44, label, ...mascotProps }: BotAvatarPr
     return (
       <MausAvatar
         bodyId={bot.mascotBody ?? undefined}
+        busy={bot.busy}
+        activity={bot.activity}
         {...mascotProps}
         color={bot.color}
         size={size}

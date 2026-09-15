@@ -112,6 +112,9 @@ default focus, keyboard wrapping and focus return against two disposable bots.
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
 
+The [avatar motion fixture](avatar-motion.md) checks expressions, shape transitions,
+task lifecycle reactions and reduced motion in disposable renderer fixtures.
+
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
 

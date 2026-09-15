@@ -1,0 +1,96 @@
+{
+  "running": false,
+  "reducedMotion": false,
+  "checks": [
+    {
+      "name": "Static expression picker",
+      "status": "passed",
+      "detail": "10 selectable expressions paint distinct eyes."
+    },
+    {
+      "name": "Paused props and gaze",
+      "status": "passed",
+      "detail": "Changed face and gaze repaint, then remain still."
+    },
+    {
+      "name": "Body and clipping morph together",
+      "status": "passed",
+      "detail": "Intermediate outline and clip match; shape settles on Star."
+    },
+    {
+      "name": "Rapid shape changes and pause",
+      "status": "passed",
+      "detail": "Rapid destinations retain valid outlines; pause, parked shape changes and resume settle correctly."
+    },
+    {
+      "name": "Cursor keeps visible eyes inside its silhouette",
+      "status": "passed",
+      "detail": "Visible eye contours stay inside Cursor across task expressions, side turns and gaze extremes; intentional back-face hiding is preserved."
+    },
+    {
+      "name": "Appearance survives task, color and pause updates",
+      "status": "passed",
+      "detail": "Cursor artwork, clip and face stay synchronized after a Hexagon mount, task/color changes and pause/resume."
+    },
+    {
+      "name": "Cancel a transient motion",
+      "status": "passed",
+      "detail": "Cancel before timeout restores the habitual state."
+    },
+    {
+      "name": "Late-mounted entrance",
+      "status": "passed",
+      "detail": "A newly mounted avatar starts its own entrance clock."
+    },
+    {
+      "name": "Synthetic task lifecycle and rapid transitions",
+      "status": "passed",
+      "detail": "Two rapid cycles preserve Hexagon identity and finite geometry: sleeping → thinking → working → thinking → curious → working → notifying → sleeping → alerting → sleeping → thinking → confused → sad → thinking."
+    },
+    {
+      "name": "Working persists for six seconds",
+      "status": "passed",
+      "detail": "55 samples over at least six seconds remain working with ongoing motion and fixed Hexagon identity."
+    },
+    {
+      "name": "Explicit pause parks an active task",
+      "status": "passed",
+      "detail": "Pausing preserves working state and identity, removes motion/effects and produces no DOM mutations."
+    },
+    {
+      "name": "New task state preempts a transient reaction",
+      "status": "passed",
+      "detail": "New thinking/working state interrupts success/customize before 1.4s and survives the old timeout."
+    },
+    {
+      "name": "Terminal reaction keeps its original deadline",
+      "status": "passed",
+      "detail": "Completion survives the final idle snapshot without extending its deadline; none cancels; pause/resume does not replay the same key."
+    },
+    {
+      "name": "Selecting a bot preserves existing attention",
+      "status": "passed",
+      "detail": "New selection/customization beats cannot cover attention or spin the head; a curious resting identity still accepts selection motion."
+    },
+    {
+      "name": "StoreProvider expires events before avatar remount",
+      "status": "passed",
+      "detail": "Real StoreProvider emitted and expired a synthetic turn-completion event; remounting only the avatar did not replay it. No expiry action was dispatched by the test."
+    },
+    {
+      "name": "BotAvatar forwards runtime attention",
+      "status": "passed",
+      "detail": "A real store-backed BotAvatar forwards attention even when a new reaction event arrives before the final activity snapshot."
+    },
+    {
+      "name": "Native reduced-motion preference",
+      "status": "skipped",
+      "detail": "Requires browser reduced-motion emulation in the opposite setting."
+    },
+    {
+      "name": "Simulated preference change",
+      "status": "passed",
+      "detail": "Simulated false → true → false: motion/effects stop, no DOM mutations for 4.8s, static state updates, then animation resumes. Native OS behavior is not claimed."
+    }
+  ]
+}

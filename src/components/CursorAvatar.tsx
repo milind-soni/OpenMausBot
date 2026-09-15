@@ -1,7 +1,7 @@
 /**
  * CursorAvatar — an animated mascot built on the "cursor" silhouette.
  *
- * Self-contained: React is the only dependency. Drop this file in and use it.
+ * Uses React, the shared body catalog and the local face/motion helpers.
  *
  *   import CursorAvatar from './CursorAvatar'
  *
@@ -19,9 +19,12 @@
  *
  * Made with Blob Studio.
  */
-import React, { useEffect, useId, useMemo, useRef } from 'react'
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
-import { MASCOT_BODIES } from "../../shared/mascot-bodies"
+import { MASCOT_BODIES, type MascotBodyId } from "../../shared/mascot-bodies"
+import { createBodyMotion, stepBodyMotion, bodyMotionPath, springStep } from "./mascot-body-motion"
+import { createPoseMotion, stepPoseMotion, type BodyPose } from "./mascot-pose-motion"
+import { containFace, createFaceBounds, getFaceBounds, mouthPoints, projectFace, type FacePart, type Projection } from "./mascot-face-projection"
 import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
@@ -51,6 +54,8 @@ export type { Ring }
 /* ------------------------------------------------------------------- shape */
 
 export interface CursorSilhouette {
+  /** Catalog bodies morph; custom artwork still renders directly. */
+  id?: MascotBodyId
   /** Human-readable name, used for the accessible label. */
   name: string
   /** Transform mapping the artwork into the 228.541-unit face box. '' for none. */
@@ -63,18 +68,11 @@ export interface CursorSilhouette {
   anchor: { x: number; y: number; scale: number }
 }
 
-// The generator solves this body's face placement once; `MASCOT_BODIES.cursor`
-// is the single source of truth desktop and iOS both build from. Its shape
-// carries one extra field (`id`) that `CursorSilhouette` does not, so it is
-// derived here rather than assigned directly.
-const { id: _cursorBodyId, ...cursorSilhouette } = MASCOT_BODIES.cursor;
-export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
+export const DEFAULT_SILHOUETTE: CursorSilhouette = MASCOT_BODIES.cursor;
 
 export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]
 
 const VIEW_BOX = `-15 -15 ${FACE_BOX + 30} ${FACE_BOX + 30}`
-const SPHERE_C = 114.2705
-const SPHERE_R = 105
 
 /* ------------------------------------------------------------------ motion */
 
@@ -237,6 +235,8 @@ const GLYPH_QUERY =
   '<circle fill="{{GRADIENT}}" cx="114.3" cy="170" r="13"/>'
 
 export const EFFECTS: EffectsByState = {
+  // A brief customization beat uses this state, then returns to the bot's face.
+  humming: { trails: { count: 3, period: 1100, radius: 108 } },
   // Celebration — the loud burst.
   // Travel is deliberately bounded: the viewBox only carries 15 units of margin, so a
   // piece thrown much past ~130 from centre would be clipped mid-flight.
@@ -538,8 +538,8 @@ export const POOLS = {
     16
   ],
   drowsy: [
-    22,
     4,
+    22,
     13
   ],
   happy: [
@@ -1006,6 +1006,7 @@ export const CURSOR_STATES = Object.keys(POOLS).filter(isCursorState)
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
 const noTimestamp = (): number | null => null
+const expressionIndex = (index: number) => ((index % EXPRESSION_COUNT) + EXPRESSION_COUNT) % EXPRESSION_COUNT
 
 const toPath = (ring: Ring) =>
   'M' + ring.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join('L') + 'Z'
@@ -1023,6 +1024,10 @@ const ringCentre = (ring: Ring): [number, number] => {
   }
   return [x / ring.length, y / ring.length]
 }
+
+const projectionTransform = (p: Projection, offset: [number, number]) =>
+  `translate(${(p.x + offset[0]).toFixed(2)} ${(p.y + offset[1]).toFixed(2)}) ` +
+  `scale(${p.sx.toFixed(4)} ${p.sy.toFixed(4)}) translate(${(-p.cx).toFixed(2)} ${(-p.cy).toFixed(2)})`
 
 export function mouthPath(frame: { x: number; y: number; angle: number }, spec: number[]) {
   const ca = Math.cos(frame.angle)
@@ -1060,10 +1065,8 @@ const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - 2 * (1 - t) * (1 - t
  * `elapsed` is time since the state was entered, which is what one-shot entrances need;
  * loops read it too so every mascot on a page doesn't pulse in lockstep.
  */
-export function bodyTransform(motion: BodyMotion, elapsed: number, strength: number): string {
-  if (strength <= 0) return ''
-  const centre = FACE_BOX / 2
-  const ground = FACE_BOX
+export function bodyPose(motion: BodyMotion, elapsed: number, strength: number): BodyPose {
+  if (strength <= 0) return { dx: 0, dy: 0, rotation: 0, scale: 1, sx: 1, sy: 1 }
   const wave = (period: number, phase = 0) => Math.sin((elapsed / period) * Math.PI * 2 + phase)
 
   let dx = 0
@@ -1113,6 +1116,12 @@ export function bodyTransform(motion: BodyMotion, elapsed: number, strength: num
     scale *= 1 + (motion.settle - 1) * easeInOut(t) * strength
   }
 
+  return { dx, dy, rotation, scale, sx, sy }
+}
+
+export function poseTransform({ dx, dy, rotation, scale, sx, sy }: BodyPose): string {
+  const centre = FACE_BOX / 2
+  const ground = FACE_BOX
   const parts: string[] = []
   if (dx || dy) parts.push(`translate(${dx.toFixed(2)} ${dy.toFixed(2)})`)
   if (rotation) parts.push(`rotate(${rotation.toFixed(2)} ${centre} ${centre})`)
@@ -1124,6 +1133,10 @@ export function bodyTransform(motion: BodyMotion, elapsed: number, strength: num
     parts.push(`translate(${centre} ${ground}) scale(${sx.toFixed(4)} ${sy.toFixed(4)}) translate(${-centre} ${-ground})`)
   }
   return parts.join(' ')
+}
+
+export function bodyTransform(motion: BodyMotion, elapsed: number, strength: number): string {
+  return poseTransform(bodyPose(motion, elapsed, strength))
 }
 
 /* --------------------------------------------------------------- component */
@@ -1165,6 +1178,7 @@ export interface CursorAvatarProps {
 export interface CursorAvatarHandle {
   blink: () => void
   spin: (durationMs?: number) => void
+  cancelMotion: () => void
   setExpression: (index: number) => void
 }
 
@@ -1199,6 +1213,14 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
   ) {
     const reactId = useId()
     const uid = useMemo(() => 'mascot' + reactId.replace(/[^a-zA-Z0-9]/g, ''), [reactId])
+    const svg = useRef<SVGSVGElement | null>(null)
+    const artwork = useRef<SVGGElement | null>(null)
+    const artworkClip = useRef<SVGClipPathElement | null>(null)
+    const morphBody = useRef<SVGPathElement | null>(null)
+    const morphClip = useRef<SVGPathElement | null>(null)
+    const faceClip = useRef<SVGGElement | null>(null)
+    const faceAnchor = useRef<SVGGElement | null>(null)
+    const initialSilhouette = useRef(silhouette).current
     const eye0 = useRef<SVGPathElement | null>(null)
     const eye1 = useRef<SVGPathElement | null>(null)
     const mouth = useRef<SVGPathElement | null>(null)
@@ -1208,43 +1230,61 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const confettiLayer = useRef<SVGGElement | null>(null)
     const glyphLayer = useRef<SVGGElement | null>(null)
 
-    // Respect the OS setting unless the caller states a preference explicitly.
-    const prefersReducedMotion = useMemo(
+    const [prefersReducedMotion, setPrefersReducedMotion] = useState(
       () => globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
-      []
     )
-    const motionStrength = motion ?? (prefersReducedMotion ? 0 : 1)
+    useEffect(() => {
+      const media = globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)')
+      if (!media) return
+      const update = () => setPrefersReducedMotion(media.matches)
+      update()
+      media.addEventListener('change', update)
+      return () => media.removeEventListener('change', update)
+    }, [])
+    const still = paused || prefersReducedMotion
+    const motionStrength = still ? 0 : (motion ?? 1)
+    const wake = useRef<() => void>(() => {})
+    const initialExpression = useRef(expressionIndex(expression ?? POOLS[state][0])).current
     const lastState: CursorState = state
 
     // Frame-loop state lives in a ref so prop changes never restart a morph.
     const engine = useRef({
-      current: clone(EXPRESSIONS[0]),
-      target: EXPRESSIONS[0],
-      currentMouth: MOUTHS[0].slice(),
-      targetMouth: MOUTHS[0],
-      currentGaze: [...GAZE[0]],
-      targetGaze: [...GAZE[0]],
-      expression: 0,
+      current: clone(EXPRESSIONS[initialExpression]),
+      target: EXPRESSIONS[initialExpression],
+      currentMouth: MOUTHS[initialExpression].slice(),
+      targetMouth: MOUTHS[initialExpression],
+      currentGaze: [...GAZE[initialExpression]],
+      targetGaze: [...GAZE[initialExpression]],
+      expression: initialExpression,
       morph: 1,
       velocity: 0,
       blinkStart: noTimestamp(),
       spinStart: noTimestamp(),
       spinDuration: 900,
       last: 0,
-      stateStart: 0,
+      stateStart: noTimestamp(),
       lastState,
       lastBodyTransform: '',
-      // what the parked loop last painted; '' means "never" so a mascot that
-      // mounts paused still gets its one resting-face paint
-      pausedPaint: '',
+      poseMotion: createPoseMotion(),
+      wasPaused: false,
+      bodyMotion: silhouette.id ? createBodyMotion(silhouette.id) : null,
+      paintedSilhouette: silhouette,
+      morphingBody: false,
+      gazeX: gaze?.x ?? 0,
+      gazeY: gaze?.y ?? 0,
+      gazeVX: 0,
+      gazeVY: 0,
+      dt: 0,
       props: {
+        silhouette,
         state,
         expression,
         gaze,
         turn,
         spring,
         eyeScale,
-        paused,
+        mouthStroke,
+        paused: still,
         lookAround,
         motionStrength,
         effects,
@@ -1252,13 +1292,15 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       },
     })
     engine.current.props = {
+      silhouette,
       state,
       expression,
       gaze,
       turn,
       spring,
       eyeScale,
-      paused,
+      mouthStroke,
+      paused: still,
       lookAround,
       motionStrength,
       effects,
@@ -1267,7 +1309,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
 
     const selectExpression = (index: number) => {
       const e = engine.current
-      const i = ((index % EXPRESSION_COUNT) + EXPRESSION_COUNT) % EXPRESSION_COUNT
+      const i = expressionIndex(index)
       if (i === e.expression && e.morph >= 1) return
       e.current = displayed(e)
       e.currentMouth = displayedMouth(e)
@@ -1278,17 +1320,25 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       e.expression = i
       e.morph = 0
       e.velocity = 0
+      wake.current()
     }
 
     React.useImperativeHandle(
       ref,
       () => ({
         blink: () => {
+          if (engine.current.props.paused) return
           engine.current.blinkStart = performance.now()
         },
         spin: (durationMs = 900) => {
+          if (engine.current.props.paused) return
           engine.current.spinDuration = durationMs
           engine.current.spinStart = performance.now()
+        },
+        cancelMotion: () => {
+          engine.current.spinStart = null
+          engine.current.blinkStart = null
+          wake.current()
         },
         setExpression: selectExpression,
       }),
@@ -1300,7 +1350,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     }, [state, expression])
 
     useEffect(() => {
-      if (!autoExpression || expression !== undefined || paused) return
+      if (!autoExpression || expression !== undefined || still) return
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
         const [lo, hi] = EXPR_CADENCE[state]
@@ -1317,11 +1367,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       }
       tick()
       return () => clearTimeout(timer)
-    }, [state, autoExpression, expression, paused])
+    }, [state, autoExpression, expression, still])
 
     useEffect(() => {
       const cadence = BLINK[state]
-      if (!autoBlink || !cadence || paused) return
+      if (!autoBlink || !cadence || still) return
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
         timer = setTimeout(() => {
@@ -1331,15 +1381,46 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       }
       tick()
       return () => clearTimeout(timer)
-    }, [state, autoBlink, paused])
+    }, [state, autoBlink, still])
 
     useEffect(() => {
-      let frame = 0
-      let wake: ReturnType<typeof setTimeout> | undefined
+      let frame: number | null = null
       engine.current.last = performance.now()
 
       const draw = (e: typeof engine.current, now: number, spinTurn: number) => {
         const p = e.props
+        const shape = p.silhouette
+        const id = shape.id
+        let morphing = false
+        if (id) {
+          if (!e.bodyMotion || p.paused) e.bodyMotion = createBodyMotion(id)
+          else morphing = stepBodyMotion(e.bodyMotion, id, e.dt)
+        } else e.bodyMotion = null
+        if (morphing && e.bodyMotion) {
+          const path = bodyMotionPath(e.bodyMotion.points)
+          morphBody.current?.setAttribute('d', path)
+          morphClip.current?.setAttribute('d', path)
+          faceAnchor.current?.setAttribute('transform', anchorTransform(e.bodyMotion.anchor))
+          if (!e.morphingBody) {
+            artwork.current?.setAttribute('display', 'none')
+            morphBody.current?.removeAttribute('display')
+            faceClip.current?.setAttribute('clip-path', `url(#${uid}-morph-clip)`)
+          }
+        } else if (e.morphingBody || e.paintedSilhouette !== shape) {
+          if (artwork.current && artworkClip.current) {
+            artwork.current.innerHTML = shape.body.replace(/\{\{GRADIENT\}\}/g, paintRef.current)
+            artwork.current.setAttribute('transform', shape.fit)
+            artworkClip.current.innerHTML = shape.clip
+            artworkClip.current.setAttribute('transform', shape.fit)
+          }
+          artwork.current?.removeAttribute('display')
+          morphBody.current?.setAttribute('display', 'none')
+          faceClip.current?.setAttribute('clip-path', `url(#${uid}-clip)`)
+          faceAnchor.current?.setAttribute('transform', anchorTransform(shape.anchor))
+          e.paintedSilhouette = shape
+        }
+        if (e.morphingBody !== morphing) svg.current?.setAttribute('data-avatar-morphing', String(morphing))
+        e.morphingBody = morphing
         // Re-apply a fraction of this expression's own look-direction.
         const g = displayedGaze(e)
         const look = p.lookAround ?? 0.35
@@ -1348,68 +1429,52 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         const rings = displayed(e).map(ring =>
           ring.map((pt): [number, number] => [pt[0] + ox, pt[1] + oy])
         )
-        const gx = clamp(p.gaze?.x ?? 0, -1, 1) * GAZE_TRAVEL.x
-        const gy = clamp(p.gaze?.y ?? 0, -1, 1) * GAZE_TRAVEL.y
+        const gx = clamp(e.gazeX, -1, 1) * GAZE_TRAVEL.x
+        const gy = clamp(e.gazeY, -1, 1) * GAZE_TRAVEL.y
         const radians = (((p.turn ?? 0) + spinTurn) * Math.PI) / 180
         const base = p.eyeScale ?? 1
         const blink = blinkScale(e, now)
 
+        const projections = rings.map(ring => {
+          const c = ringCentre(ring)
+          return projectFace(c[0], c[1], radians, gx, gy, base, blink * base)
+        })
+        const parts: FacePart[] = rings.map((points, i) => ({ points, projection: projections[i] }))
+        const mouthEl = mouth.current
+        const spec = displayedMouth(e)
+        const frameGeom = mouthFrame(rings, spec)
+        const mouthProjection = projectFace(frameGeom.x, frameGeom.y, radians, gx, gy)
+        if (mouthEl) parts.push({ points: mouthPoints(frameGeom, spec), projection: mouthProjection, padding: p.mouthStroke / 2 })
+        const anchor = morphing && e.bodyMotion ? e.bodyMotion.anchor : shape.anchor
+        const bounds = id ? (morphing && e.bodyMotion ? createFaceBounds(e.bodyMotion.points, anchor.x) : getFaceBounds(id)) : null
+        const offset = bounds ? containFace(parts, bounds, anchor) : [0, 0] as [number, number]
+
         rings.forEach((ring, index) => {
           const el = index === 0 ? eye0.current : eye1.current
           if (!el) return
-          const c = ringCentre(ring)
-          const baseLongitude = Math.asin(clamp((c[0] - SPHERE_C) / SPHERE_R, -1, 1))
-          const longitude = baseLongitude + radians
-          const depth = Math.cos(longitude)
-          const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
+          const projection = projections[index]
           el.setAttribute('d', toPath(ring))
-          el.setAttribute(
-            'transform',
-            `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
-              c[1] + gy
-            ).toFixed(2)}) scale(${clamp(perspective * base, 0.02, 2.4).toFixed(4)} ${clamp(
-              blink * base,
-              0.02,
-              2.4
-            ).toFixed(4)}) translate(${(-c[0]).toFixed(2)} ${(-c[1]).toFixed(2)})`
-          )
-          el.style.opacity = depth > 0.02 ? '1' : '0'
+          el.setAttribute('transform', projectionTransform(projection, offset))
+          el.style.opacity = projection.visible ? '1' : '0'
         })
 
         // Mouth: same sphere projection as the eyes, but blinking never touches it.
-        const mouthEl = mouth.current
         if (mouthEl) {
-          const spec = displayedMouth(e)
-          const frameGeom = mouthFrame(rings, spec)
-          const baseLongitude = Math.asin(clamp((frameGeom.x - SPHERE_C) / SPHERE_R, -1, 1))
-          const longitude = baseLongitude + radians
-          const depth = Math.cos(longitude)
-          const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
           mouthEl.setAttribute('d', mouthPath(frameGeom, spec))
-          mouthEl.setAttribute(
-            'transform',
-            `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
-              frameGeom.y + gy
-            ).toFixed(2)}) scale(${clamp(perspective, 0.02, 2.4).toFixed(4)} 1) translate(${(
-              -frameGeom.x
-            ).toFixed(2)} ${(-frameGeom.y).toFixed(2)})`
-          )
-          mouthEl.style.opacity = depth > 0.02 ? '1' : '0'
+          mouthEl.setAttribute('transform', projectionTransform(mouthProjection, offset))
+          mouthEl.style.opacity = mouthProjection.visible ? '1' : '0'
         }
 
         // The body. One-shot entrances need time since the state began, so track that here
         // rather than in an effect — the loop already has the clock.
+        if (e.stateStart === null || p.state !== e.lastState) {
+          e.lastState = p.state
+          e.stateStart = now
+        }
         const bodyEl = bodyGroup.current
         if (bodyEl) {
-          if (p.state !== e.lastState) {
-            e.lastState = p.state
-            e.stateStart = now
-          }
-          const transform = bodyTransform(
-            MOTION[p.state] ?? {},
-            now - e.stateStart,
-            p.motionStrength ?? 1
-          )
+          const targetPose = bodyPose(MOTION[p.state] ?? {}, now - e.stateStart, p.motionStrength ?? 1)
+          const transform = poseTransform(stepPoseMotion(e.poseMotion, targetPose, p.state, e.dt, p.paused))
           if (transform !== e.lastBodyTransform) {
             e.lastBodyTransform = transform
             if (transform) bodyEl.setAttribute('transform', transform)
@@ -1427,43 +1492,44 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           strength: p.motionStrength ?? 1,
           paint: paintRef.current,
           showEffects: p.effects !== false,
-          showGlyphs: p.glyphs !== false,
+          showGlyphs: p.glyphs !== false && !p.paused,
         })
       }
 
       const step = (now: number) => {
+        frame = null
         const e = engine.current
         const p = e.props
-        // A paused mascot must not wake at display rate: re-arming BEFORE the
-        // pause check once had N idle sidebar faces ticking at 60fps forever.
-        // While paused, poll for unpause at 4Hz — but the resting face must
-        // still be PAINTED: the SVG layers hold no expression until the first
-        // draw, so a mascot that mounts paused would otherwise stay blank.
-        // One draw per change of what the still face shows, then park.
+        e.dt = Math.max(0, Math.min((now - e.last) / 1000, 0.1))
+        e.last = now
+        // Static previews show the requested face immediately, including changes
+        // made while parked. A prop commit or imperative selection wakes one paint.
         if (p.paused) {
           e.last = now
-          const still = `${p.state}|${p.expression ?? ''}|${paintRef.current}`
-          if (e.pausedPaint !== still) {
-            e.pausedPaint = still
-            draw(e, now, 0)
+          if (!e.wasPaused) {
+            // Pausing settles on the requested face, not the last random drift.
+            const resting = expressionIndex(p.expression ?? POOLS[p.state][0])
+            e.target = EXPRESSIONS[resting]
+            e.targetMouth = MOUTHS[resting]
+            e.targetGaze = GAZE[resting]
+            e.expression = resting
           }
-          wake = setTimeout(() => {
-            frame = requestAnimationFrame(step)
-          }, 250)
-          return
-        }
-        e.pausedPaint = ''
-        frame = requestAnimationFrame(step)
-        const dt = Math.min((now - e.last) / 1000, 0.1)
-        e.last = now
-
-        const f = p.spring ?? 7
-        e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
-        e.morph += e.velocity * dt
-        if (!Number.isFinite(e.morph)) {
+          e.wasPaused = true
           e.morph = 1
           e.velocity = 0
+          e.blinkStart = null
+          e.spinStart = null
+          e.gazeX = p.gaze?.x ?? 0
+          e.gazeY = p.gaze?.y ?? 0
+          e.gazeVX = e.gazeVY = 0
+          draw(e, now, 0)
+          return
         }
+        e.wasPaused = false
+        frame = requestAnimationFrame(step)
+        ;[e.morph, e.velocity] = springStep(e.morph, e.velocity, 1, e.dt, p.spring ?? 7)
+        ;[e.gazeX, e.gazeVX] = springStep(e.gazeX, e.gazeVX, p.gaze?.x ?? 0, e.dt)
+        ;[e.gazeY, e.gazeVY] = springStep(e.gazeY, e.gazeVY, p.gaze?.y ?? 0, e.dt)
 
         let spinTurn = 0
         if (e.spinStart !== null) {
@@ -1475,12 +1541,19 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         draw(e, now, spinTurn)
       }
 
-      frame = requestAnimationFrame(step)
+      wake.current = () => {
+        if (frame === null) frame = requestAnimationFrame(step)
+      }
+      wake.current()
       return () => {
-        cancelAnimationFrame(frame)
-        if (wake !== undefined) clearTimeout(wake)
+        if (frame !== null) cancelAnimationFrame(frame)
+        wake.current = () => {}
       }
     }, [])
+
+    // A parked loop has no polling timer. Every committed prop change may affect
+    // its face, including gaze, scale, silhouette or a newly mounted mouth.
+    useLayoutEffect(() => { wake.current() })
 
     const paint = `url(#${uid}-grad)`
     const paintRef = useRef(paint)
@@ -1488,10 +1561,18 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
 
     const dimension = size.constructor === Number ? `${size}px` : size
     const label = title === undefined ? `${silhouette.name} mascot` : title
-    const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
+    // React supplies the initial artwork; draw owns subsequent shape changes.
+    // Fresh __html objects would restore the initial path on every prop render,
+    // leaving that old path paired with the new body's imperatively updated fit.
+    const initialBodyMarkup = useRef({ __html: initialSilhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`) }).current
+    const initialClipMarkup = useRef({ __html: initialSilhouette.clip }).current
 
     return (
       <svg
+        ref={svg}
+        data-avatar-state={state}
+        data-avatar-shape={silhouette.id}
+        data-avatar-morphing="false"
         viewBox={VIEW_BOX}
         width={dimension}
         height={dimension}
@@ -1510,10 +1591,14 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           {/* The fit goes on the clipPath itself: a <g> inside one is ignored by browsers,
               which is also why silhouette.clip is pre-flattened to bare shapes. */}
           <clipPath
+            ref={artworkClip}
             id={`${uid}-clip`}
-            transform={silhouette.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: silhouette.clip }}
+            transform={initialSilhouette.fit || undefined}
+            dangerouslySetInnerHTML={initialClipMarkup}
           />
+          <clipPath id={`${uid}-morph-clip`}>
+            <path ref={morphClip} data-avatar-clip="" />
+          </clipPath>
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           {/* Ribbons sit behind the mascot, confetti in front of it. */}
@@ -1521,16 +1606,18 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           {/* Body and face move together — the face is painted on the body, not floating
               in front of it, so a squash or a tilt has to carry both. The glyph rides the
               same motion but is not faded with them, since it replaces them. */}
-          <g ref={bodyGroup}>
+          <g ref={bodyGroup} data-avatar-motion="">
           <g ref={bodyContent}>
-          <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
-          <g clipPath={`url(#${uid}-clip)`}>
-            <g transform={anchorTransform(silhouette.anchor)}>
-              <path ref={eye0} fill={eyeColor} />
-              <path ref={eye1} fill={eyeColor} />
+          <g ref={artwork} transform={initialSilhouette.fit || undefined} dangerouslySetInnerHTML={initialBodyMarkup} />
+          <path ref={morphBody} data-avatar-body="" fill={paint} display="none" />
+          <g ref={faceClip} clipPath={`url(#${uid}-clip)`}>
+            <g ref={faceAnchor} transform={anchorTransform(initialSilhouette.anchor)}>
+              <path ref={eye0} data-avatar-eye="0" d={toPath(EXPRESSIONS[initialExpression][0])} fill={eyeColor} />
+              <path ref={eye1} data-avatar-eye="1" d={toPath(EXPRESSIONS[initialExpression][1])} fill={eyeColor} />
               {showMouth && (
                 <path
                   ref={mouth}
+                  d={mouthPath(mouthFrame(EXPRESSIONS[initialExpression], MOUTHS[initialExpression]), MOUTHS[initialExpression])}
                   fill="none"
                   stroke={eyeColor}
                   strokeWidth={mouthStroke}

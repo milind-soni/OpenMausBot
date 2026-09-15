@@ -6,6 +6,7 @@ import { imageAttachmentFromFile } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import {
   PICKABLE_STATES,
+  normalizeState,
   MAUS_COLORS,
   MAUS_COLOR_NAMES,
   type MausMotion,
@@ -49,6 +50,7 @@ export function BotProfileAvatarCard({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const crop = bot.avatarCrop ?? "mascot";
+  const selectedExpression = normalizeState(bot.mascotExpression) ?? activeState;
   const cropRef = useRef(crop);
   cropRef.current = crop;
   const busy = uploading || generating || savingConnection;
@@ -199,11 +201,11 @@ export function BotProfileAvatarCard({
                   key={expression}
                   type="button"
                   disabled={busy}
-                  aria-pressed={activeState === expression}
+                  aria-pressed={selectedExpression === expression}
                   onClick={() => onPatch({ mascotExpression: expression })}
                   className={cn(
                     "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control disabled:opacity-50",
-                    activeState === expression && "ring-2 ring-accent-border",
+                    selectedExpression === expression && "ring-2 ring-accent-border",
                   )}
                   title={expression}
                   aria-label={`Use ${expression} expression`}
