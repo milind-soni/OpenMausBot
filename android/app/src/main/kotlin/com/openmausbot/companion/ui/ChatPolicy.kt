@@ -656,6 +656,15 @@ object PredictiveChips {
     )
 }
 
+/**
+ * The one send failure whose fix is opening the thread picker, not showing an
+ * error dialog: the bot has more than one thread and this chat's pinned
+ * `threadId` no longer satisfies the harness's `requirePinnedClientThread()`
+ * gate. Every other [Session.actionError] still goes to the generic dialog.
+ */
+fun isMultipleThreadsError(message: String?): Boolean =
+    message?.startsWith(Session.MULTIPLE_THREADS_MESSAGE_PREFIX) == true
+
 /** What sits above the composer pill, if anything. */
 enum class ComposerAccessory { HUD, CHIPS, NONE }
 

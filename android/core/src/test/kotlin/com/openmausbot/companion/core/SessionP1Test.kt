@@ -68,6 +68,26 @@ class SessionP1Test {
         assertNull(session.actionError)
     }
 
+    // Regression for a bug found alongside PR #1267 (android-multi-thread-picker):
+    // send(text, to) never cleared actionError on entry, unlike its
+    // attachment-carrying sibling. A caller reading actionError right after a
+    // *successful* send (ChatScreen's multiple-threads check) could see a
+    // stale error left over from an earlier failed send on the same chat.
+    @Test
+    fun plainTextSendClearsAStaleErrorLeftByAnEarlierFailedSend() = runTest {
+        val captured = bot("b1", "task-a", "task-a")
+        val session = session { Fleet(listOf(captured), emptyList()) }
+        val chat = Chat.BotChat(captured)
+
+        server.enqueue(json("""{"error":"This bot has multiple threads."}""", code = 409))
+        session.send("first attempt", chat)
+        assertEquals("This bot has multiple threads.", session.actionError)
+
+        server.enqueue(json("{}"))
+        session.send("retry after picking a thread", chat)
+        assertNull(session.actionError)
+    }
+
     @Test
     fun changingAModelReturnsTheCapturedTaskModelNotTheSiblingOrProfileDefault() = runTest {
         val chosen = ModelSelection("instance", "new-a")

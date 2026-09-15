@@ -674,8 +674,12 @@ private fun LoadedChat(
                     sendingMessage = false
                 }
                 if (!sent) {
-                    attachmentError = session.actionError ?: "Couldn't send this message. Try again."
+                    val error = session.actionError
                     session.actionError = null
+                    // Attachments are still in `attachments` here: `sent = false` skipped the
+                    // clear below, so picking a thread and hitting send again reuses them.
+                    if (isMultipleThreadsError(error)) showingTasks = true
+                    else attachmentError = error ?: "Couldn't send this message. Try again."
                     return@launch
                 }
                 // Compare with what was in the field at tap time, so a newer
@@ -701,7 +705,18 @@ private fun LoadedChat(
         // Deliberately not disabled while the bot is busy: the harness answers
         // 409 and Session surfaces "The bot is busy — stop it first." That is a
         // clearer answer than a dead button.
-        scope.launch { session.send(text, chat) }
+        scope.launch {
+            session.send(text, chat)
+            val error = session.actionError
+            if (isMultipleThreadsError(error)) {
+                session.actionError = null
+                // The draft is already cleared above; restore what was sent so
+                // picking a thread and sending again does not mean retyping it.
+                composer.onTypedChange(text)
+                publishFrom(composer)
+                showingTasks = true
+            }
+        }
     }
 
     fun selectCommand(command: SlashCommand) {

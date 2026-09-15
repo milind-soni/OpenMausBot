@@ -1063,6 +1063,12 @@ class Session(
     // MARK: - Actions
 
     suspend fun send(text: String, to: Chat) {
+        // Cleared up front, matching the attachment-carrying send() below: without
+        // this, a stale error from an earlier failed send lingers in actionError
+        // after this call succeeds silently, and a caller reading it afterward
+        // (ChatScreen's multiple-threads check) mistakes the old failure for this
+        // call's own result.
+        _actionError.value = null
         perform {
             val receipt = when (to) {
                 is Chat.BotChat -> it.sendToBot(to.bot.id, text, to.threadId)
@@ -2112,6 +2118,15 @@ class Session(
         const val SPENT_QR_MESSAGE =
             "That pairing code was already used. Start pairing again on your computer and rescan the new QR code."
         const val THREAD_GONE_MESSAGE = "That thread is no longer on your computer."
+
+        /**
+         * The harness's own wording for `requirePinnedClientThread()` (server/index.ts),
+         * matched by prefix rather than in full so a later reword of the trailing sentence
+         * does not silently break the match. A "the bot is busy" send failure is also a 409
+         * but a different message — status alone cannot tell the two apart, so the caller
+         * must match this text, not just the status code.
+         */
+        const val MULTIPLE_THREADS_MESSAGE_PREFIX = "This bot has multiple threads"
 
         /** High-entropy QR token — distinct from a retryable six-digit code. */
         fun isQrCredential(credential: String): Boolean =

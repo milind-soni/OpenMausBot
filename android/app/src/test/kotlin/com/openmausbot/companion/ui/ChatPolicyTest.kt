@@ -662,3 +662,35 @@ class MessageActionsTest {
         assertNull(MessageActions.editableText(plain.copy(role = Message.Role.BOT)))
     }
 }
+
+/**
+ * Regression for #1132: this is the one 409 message that should open the
+ * thread picker instead of the generic error dialog. A "the bot is busy" 409
+ * is a different message and must not be mistaken for this one.
+ */
+class MultipleThreadsErrorTest {
+    @Test
+    fun `the harness's own multiple-threads wording matches`() {
+        assertTrue(
+            isMultipleThreadsError(
+                "This bot has multiple threads. Update this client and choose a thread before sending this action.",
+            ),
+        )
+    }
+
+    @Test
+    fun `a reworded trailing sentence still matches by prefix`() {
+        assertTrue(isMultipleThreadsError("This bot has multiple threads, pick one first."))
+    }
+
+    @Test
+    fun `a busy-bot 409 is a different message and does not match`() {
+        assertFalse(isMultipleThreadsError("The bot is busy — stop it first."))
+    }
+
+    @Test
+    fun `no error and unrelated errors do not match`() {
+        assertFalse(isMultipleThreadsError(null))
+        assertFalse(isMultipleThreadsError("Couldn't send this message. Try again."))
+    }
+}
