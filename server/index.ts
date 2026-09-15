@@ -323,7 +323,8 @@ import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
-import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
+import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunStatus, type RoutineRunTrigger } from "./routines.ts";
+import { WorkItems, isWorkStatus, type WorkItem, type WorkStatus } from "./work-items.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BrowserRuntime } from "./browser-runtime.ts";
@@ -3448,6 +3449,10 @@ function isInternalTurn(threadId: string): boolean {
 const personAskAt = new Map<string, number>();
 let routines: RoutineManager | null = null;
 let calendarCalls: CalendarCallManager | null = null;
+/** The board. A plain durable store with no scheduler and no dispatcher: it
+ * records what work exists and who owns it, and every action that actually
+ * runs a bot goes through the routes that already own those paths. */
+const workItems = new WorkItems();
 const localVmOwnerBusy = (botId: string) => store.bot(botId)?.busy === true;
 const localVmLeases = new LocalVmLeasePool(30 * 60_000);
 const localVmLifecycleBusy = new Set<string>();
@@ -6058,6 +6063,60 @@ function syncRoutineRunToSource(run: RoutineRun): string | null {
   return sourceThreadId;
 }
 
+/** How a routine run reads on the board. The mapping is deliberately coarse:
+ * a run that is waiting on an approval is still work in flight, and the
+ * board's columns are about where the work stands, not about which subsystem
+ * is currently holding it. */
+function routineRunBoardStatus(status: RoutineRunStatus): WorkStatus {
+  switch (status) {
+    case "queued":
+      return "todo";
+    case "running":
+    case "waiting":
+      return "in_progress";
+    case "completed":
+      return "done";
+    case "cancelled":
+      return "cancelled";
+    case "failed":
+    case "missed":
+      return "blocked";
+  }
+}
+
+/** Put a routine run on the board as the card for its ROUTINE.
+ *
+ * One card per routine, updated in place — a schedule that fires every night
+ * must not leave a trail of cards behind it. Room goals are skipped: their
+ * coordinator owns the run and the work is not a single bot's to show.
+ *
+ * The routines layer calls this; nothing here reaches back into it. A card
+ * never creates, edits or cancels a routine. */
+function projectRoutineRunToBoard(run: RoutineRun): void {
+  if (run.target !== "bot" || !run.botId) return;
+  const bot = store.bot(run.botId);
+  // A hidden bot is off every roster in the app, and its cards fall to the
+  // unsectioned team. Skipping the projection entirely is the honest answer:
+  // a card for a bot nobody can see is work nobody can act on.
+  if (!bot || bot.hidden) return;
+  const detail = run.error ?? run.attention;
+  try {
+    workItems.projectRoutine({
+      routineId: run.routineId,
+      title: run.routineName,
+      ownerBotId: run.botId,
+      threadId: run.threadId ?? null,
+      status: routineRunBoardStatus(run.status),
+      ...(detail ? { detail } : {}),
+    });
+    broadcast({ kind: "task-board" });
+  } catch (error) {
+    // A board that cannot record a run must never fail the run itself: the
+    // schedule is the thing doing the work, and this is only a view of it.
+    console.error("task board: could not project routine run", error);
+  }
+}
+
 async function interruptRoutineGroupGoal(
   groupId: string,
   threadId: string,
@@ -6195,7 +6254,10 @@ routines = new RoutineManager({
     }
   },
   interruptGoal: interruptRoutineGroupGoal,
-  onRunChanged: syncRoutineRunToSource,
+  onRunChanged: (run) => {
+    syncRoutineRunToSource(run);
+    projectRoutineRunToBoard(run);
+  },
   onRunFailed: (run) => {
     if (run.threadId) {
       pendingDelegationWakes.delete(run.threadId);
@@ -11538,6 +11600,266 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return [{ sourceBotId, targetBotId: watch.toBotId, threadId, groupId: channel?.id }];
       });
       return json(res, 200, { collaborations, queued, running });
+    }
+
+    // ── task board ───────────────────────────────────────────────────────
+    // A board is a group of bots, chosen by team. A card reaches a team
+    // through its owner: the bot's `section` is the same field the sidebar
+    // groups by and the team map draws, so a board and a map never disagree
+    // about who is in what. A card with no owner belongs to no team and is
+    // shown only when no team is selected — otherwise it would appear in
+    // every team at once, which is the one thing a filter must not do.
+    const CARD_SECTION = (item: WorkItem): string => {
+      const bot = item.ownerBotId ? store.bot(item.ownerBotId) : undefined;
+      // A hidden bot is not on the board's roster any more, so its cards fall
+      // back to the unsectioned team. Missing owners do the same — see the
+      // agent field below, which reports the SAME answer, so a card's badge
+      // and its filter membership can never disagree.
+      if (!bot || bot.hidden) return "";
+      return bot.section?.trim() ?? "";
+    };
+
+    /** The board a client asked for. `team` names a section, "" is the
+     * unsectioned team, and omitting it entirely means every card. */
+    const teamFilter = url.searchParams.get("team");
+    const wantsTeam = teamFilter !== null;
+
+    const boardPayload = () => {
+      const items = workItems
+        .list()
+        .filter((item) => !wantsTeam || CARD_SECTION(item) === teamFilter)
+        // Newest first inside a column; the client re-sorts by `order` for
+        // its own layout, this is only so the payload reads sensibly.
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .map((item) => {
+          const bot = item.ownerBotId ? store.bot(item.ownerBotId) : undefined;
+          return {
+            ...item,
+            // What the card shows about its agent, and what the Run button
+            // needs to decide whether it can be pressed at all. `section` is
+            // read through CARD_SECTION, not off the bot directly: a hidden
+            // owner falls back to the unsectioned team, so a badge that said
+            // otherwise would contradict the filter that placed the card.
+            agent: bot
+              ? {
+                id: bot.id,
+                name: bot.name,
+                section: CARD_SECTION(item),
+                activity: bot.activity ?? "idle",
+                busy: bot.busy === true || threadBusy(bot.id, item.threadId ?? bot.threadId),
+                hidden: bot.hidden === true,
+              }
+              : null,
+          };
+        });
+      return { items };
+    };
+
+    if (method === "GET" && path === "/api/task-board") {
+      return json(res, 200, boardPayload());
+    }
+
+    // Every section the app currently has, so the board's team switcher is
+    // built from the same source the sidebar is. The unsectioned team is
+    // always first and always offered — it is where a bot lands when nobody
+    // filed it, so it must be reachable even while it is empty. Its position
+    // is forced rather than incidental: a starter bot is seeded on every
+    // boot, so relying on iteration order would put General wherever that
+    // bot happens to fall.
+    if (method === "GET" && path === "/api/task-board/teams") {
+      const seen = new Map<string, number>();
+      for (const bot of store.bots) {
+        if (bot.hidden) continue;
+        const key = bot.section?.trim() ?? "";
+        seen.set(key, (seen.get(key) ?? 0) + 1);
+      }
+      const rest = [...seen]
+        .filter(([key]) => key !== "")
+        .map(([key, count]) => ({ key, name: key, count }));
+      return json(res, 200, { teams: [{ key: "", name: "General", count: seen.get("") ?? 0 }, ...rest] });
+    }
+
+    if (method === "POST" && path === "/api/task-board/items") {
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const allowed = new Set(["title", "brief", "status", "ownerBotId", "approvalMode", "boardId", "day", "dueAt"]);
+      if (Object.keys(body).some((key) => !allowed.has(key))) {
+        return json(res, 400, { error: "unsupported card setting" });
+      }
+      if (typeof body.title !== "string" || !body.title.trim()) {
+        return json(res, 400, { error: "a card needs a title" });
+      }
+      if (body.status !== undefined && !isWorkStatus(body.status)) {
+        return json(res, 400, { error: "unknown status" });
+      }
+      if (body.ownerBotId !== undefined && body.ownerBotId !== null) {
+        if (typeof body.ownerBotId !== "string" || !store.bot(body.ownerBotId)) {
+          return json(res, 400, { error: "no such bot to assign this card to" });
+        }
+      }
+      // Creating is an owner action for the same reason editing is: a card
+      // carries a bot and a brief, and a paired device that could add one could
+      // hand work to any agent while the board told it it was read-only. The
+      // check sits with the other mutations' checks, after the body has been
+      // validated, so a malformed request is refused as malformed rather than
+      // as forbidden.
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can change the board" });
+      }
+      const item = workItems.create({
+        title: body.title,
+        brief: typeof body.brief === "string" ? body.brief : undefined,
+        status: body.status,
+        boardId: typeof body.boardId === "string" ? body.boardId : undefined,
+        ownerBotId: body.ownerBotId ?? null,
+        approvalMode: typeof body.approvalMode === "string" ? body.approvalMode : null,
+        // `undefined` means "no date given"; an explicit `null` means "no date
+        // wanted". Both end up absent on the card, which is the creation day.
+        day: typeof body.day === "number" ? body.day : undefined,
+        dueAt: typeof body.dueAt === "number" ? body.dueAt : undefined,
+      });
+      broadcast({ kind: "task-board" });
+      return json(res, 201, { item });
+    }
+
+    const cardMatch = path.match(/^\/api\/task-board\/items\/([\w-]+)$/);
+    if (cardMatch && method === "PATCH") {
+      const existing = workItems.get(cardMatch[1]);
+      if (!existing) return json(res, 404, { error: "no such card" });
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json(res, 400, { error: "body must be a JSON object" });
+      }
+      const allowed = new Set(["title", "brief", "status", "order", "ownerBotId", "approvalMode", "artifacts", "day", "dueAt"]);
+      if (Object.keys(body).some((key) => !allowed.has(key))) {
+        return json(res, 400, { error: "unsupported card setting" });
+      }
+      if (body.status !== undefined && !isWorkStatus(body.status)) {
+        return json(res, 400, { error: "unknown status" });
+      }
+      if (body.ownerBotId !== undefined && body.ownerBotId !== null) {
+        if (typeof body.ownerBotId !== "string" || !store.bot(body.ownerBotId)) {
+          return json(res, 400, { error: "no such bot to assign this card to" });
+        }
+      }
+      // The board is a view a paired device may read, but rearranging other
+      // people's work is an owner action, the same rule the rest of the app
+      // applies to its own mutating routes.
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can change the board" });
+      }
+      const item = workItems.update(cardMatch[1], {
+        title: body.title,
+        brief: body.brief,
+        status: body.status,
+        order: body.order,
+        ownerBotId: body.ownerBotId,
+        approvalMode: body.approvalMode,
+        artifacts: body.artifacts,
+        // The distinction the model needs: `undefined` is "not mentioned, keep
+        // what is there", `null` is "clear the date". Coercing a missing field
+        // to null here would clear both dates on every unrelated patch — which
+        // is exactly what a drag between columns is.
+        day: body.day === undefined ? undefined : (typeof body.day === "number" ? body.day : null),
+        dueAt: body.dueAt === undefined ? undefined : (typeof body.dueAt === "number" ? body.dueAt : null),
+      });
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { item });
+    }
+
+    if (cardMatch && method === "DELETE") {
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can change the board" });
+      }
+      if (!workItems.remove(cardMatch[1])) return json(res, 404, { error: "no such card" });
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { ok: true });
+    }
+
+    // Starting and stopping a card is a WRAPPER, never a second way to run a
+    // turn. The board calls the same routes the chat calls, so there is one
+    // implementation of "run a turn" and it cannot drift from what a person
+    // gets when they type into the composer themselves.
+    const cardRunMatch = path.match(/^\/api\/task-board\/items\/([\w-]+)\/run$/);
+    if (cardRunMatch && method === "POST") {
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can start work" });
+      }
+      const card = workItems.get(cardRunMatch[1]);
+      if (!card) return json(res, 404, { error: "no such card" });
+      if (!card.ownerBotId) return json(res, 400, { error: "assign this card to a bot before starting it" });
+      const bot = store.bot(card.ownerBotId);
+      if (!bot) return json(res, 400, { error: "the bot this card was assigned to no longer exists" });
+
+      // The turn needs a thread of its own. It is created once and then pinned
+      // to the card for good: a fresh thread per start would scatter one piece
+      // of work's history across many conversations, and "open the chat" would
+      // land on an empty one.
+      let threadId = card.threadId;
+      if (!threadId || !store.taskByThread(bot.id, threadId)) {
+        const task = store.createTask(bot.id, card.title, false);
+        if (!task) return json(res, 400, { error: "this bot could not open a thread for the card" });
+        threadId = task.threadId;
+      }
+
+      const prompt = card.brief.trim() || card.title;
+      try {
+        // A card that is already working is refused here rather than queued.
+        // The composer queues because a person's words must not be lost, but
+        // Run on a busy card is a double press: answering "already working"
+        // tells the person what happened, while a silent second turn in the
+        // queue would start invisible work they never asked for — and would
+        // make Run and Stop disagree about how many turns are in flight.
+        if (threadBusy(bot.id, threadId)) {
+          throw Object.assign(new Error("this agent is already working on the card — stop it first"), {
+            status: 409,
+            code: "thread_busy",
+          });
+        }
+        await startOrQueueDirectMessage(bot.id, threadId, prompt, undefined, parseSendId(newId()));
+      } catch (error) {
+        const status = (error as { status?: number }).status ?? 500;
+        const code = (error as { code?: string }).code;
+        const reason = error instanceof Error ? error.message : String(error);
+        // A card that could not start says so on the card. The board is where
+        // the person who pressed the button is looking, so "nothing happened"
+        // is never the answer — an error that only lands in a transcript
+        // nobody opened reads as a broken button.
+        workItems.fail(card.id, reason);
+        broadcast({ kind: "task-board" });
+        return json(res, status, { error: reason, ...(code ? { code } : {}) });
+      }
+
+      const item = workItems.attachThread(card.id, threadId);
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { item, threadId });
+    }
+
+    const cardStopMatch = path.match(/^\/api\/task-board\/items\/([\w-]+)\/stop$/);
+    if (cardStopMatch && method === "POST") {
+      if (auth.kind !== "loopback") {
+        return json(res, 403, { error: "Only the owner can stop work" });
+      }
+      const card = workItems.get(cardStopMatch[1]);
+      if (!card) return json(res, 404, { error: "no such card" });
+      if (!card.ownerBotId) return json(res, 400, { error: "this card has no bot to stop" });
+      const bot = store.bot(card.ownerBotId);
+      if (!bot) return json(res, 400, { error: "the bot this card was assigned to no longer exists" });
+      // No thread means no turn was ever dispatched from this card. Stopping
+      // the bot instead would reach whatever it is doing for somebody else.
+      if (!card.threadId) return json(res, 409, { error: "this card has not been started yet" });
+
+      // The thread is always named. Without it the stop would land on
+      // bot.threadId — whatever the bot happens to be showing — and could
+      // cancel unrelated work. This route also handles a routine running on
+      // that thread, since /interrupt already does.
+      const routineRun = routines!.activeBotRunForBot(bot.id);
+      if (routineRun?.threadId === card.threadId) await routines!.cancelRun(routineRun.id);
+      else await interruptDirectThread(bot.id, card.threadId);
+      broadcast({ kind: "task-board" });
+      return json(res, 200, { ok: true });
     }
 
     // ── routines calendar ────────────────────────────────────────────────
