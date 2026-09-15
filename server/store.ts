@@ -235,6 +235,9 @@ export interface GroupTaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
+  /** Set once the first message named this task, so a rename that puts a
+   * sentinel back cannot re-arm generated titling on a later message. */
+  titleFromFirstMessage?: true;
   pinnedCwd?: string | null;
   pinnedMessageId?: string;
 }
@@ -338,6 +341,9 @@ export interface TaskRecord {
   threadId: ThreadId;
   title: string;
   createdAt: number;
+  /** Set once the first message named this task, so a rename that puts a
+   * sentinel back cannot re-arm generated titling on a later message. */
+  titleFromFirstMessage?: true;
   /** Organizational grouping only; never a directory or provider context. */
   projectId?: string;
   /** Detached routine execution, reachable through its visible results card. */
@@ -611,6 +617,28 @@ export function threadTitleFrom(title?: string): string {
 export function titleFromMessage(text: string): string {
   const line = text.trim().split("\n")[0]!.trim();
   return line.length > 48 ? `${line.slice(0, 47)}…` : line || UNTITLED_TASK;
+}
+
+/** One usable line out of a model's title reply: the first line, no
+ * surrounding quotes, code fences, or markdown decoration, no trailing
+ * period, single spaces — or null when what came back is empty, too long
+ * to be a title, or otherwise not a plain name. The caller keeps its
+ * fallback then. */
+export function titleFromLlm(raw: string): string | null {
+  const line = raw
+    .trim()
+    .split("\n")[0]!
+    .replace(/^[#*\-\u2022]+/, "")
+    .replace(/^["'\u201C\u201D\u2018\u2019\u0060]+/, "")
+    .replace(/["'\u201C\u201D\u2018\u2019\u0060]+$/, "")
+    // decoration the quotes were hiding: "## Deploy app" keeps its
+    // markers through the strips above, which never reach past a quote
+    .replace(/^[#*\-\u2022]+/, "")
+    .replace(/[#*]+$/, "")
+    .replace(/[.\u3002]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return line.length >= 1 && line.length <= 48 ? line : null;
 }
 
 export interface BotRecord {
@@ -1415,12 +1443,26 @@ export class Store {
     return task;
   }
 
-  titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string) {
+  /** Name a channel task after its first message, once. Returns the task
+   * it named so a caller can later replace exactly that machine-made
+   * title. */
+  titleGroupTaskFromFirstMessage(groupId: string, text: string, threadId?: string): GroupTaskRecord | null {
     const task = threadId ? this.groupTaskByThread(groupId, threadId) : this.activeGroupTask(groupId);
-    if (!task || task.title !== UNTITLED_TASK) return;
+    if (!task || task.titleFromFirstMessage || task.title !== UNTITLED_TASK) return null;
     task.title = titleFromMessage(text);
+    task.titleFromFirstMessage = true;
     this.saveGroups();
     this.emit({ type: "group", groupId });
+    return task;
+  }
+
+  /** Swap a machine-made first-message channel title for a generated one,
+   * once, on the same snippet-equality contract as bot tasks: any rename
+   * by the person breaks that equality first and always wins. */
+  retitleGroupTask(groupId: string, threadId: string, machineTitle: string, title: string): GroupTaskRecord | null {
+    const task = this.groupTaskByThread(groupId, threadId);
+    if (!task || task.title !== machineTitle) return null;
+    return this.renameGroupTask(groupId, threadId, threadTitleFrom(title));
   }
 
   deleteGroupTask(groupId: string, threadId: string): GroupRecord | null {
@@ -2478,13 +2520,27 @@ export class Store {
     return this.patchTask(botId, threadId, { title });
   }
 
-  /** Name a task after its first message, once. */
-  titleTaskFromFirstMessage(botId: string, text: string, threadId?: string) {
+  /** Name a task after its first message, once. Returns the task it named
+   * so a caller can later replace exactly that machine-made title — and
+   * can see the peer provenance it must leave alone. */
+  titleTaskFromFirstMessage(botId: string, text: string, threadId?: string): TaskRecord | null {
     const task = threadId ? this.taskByThread(botId, threadId) : this.activeTask(botId);
-    if (!task || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD)) return;
+    if (!task || task.titleFromFirstMessage || (task.title !== UNTITLED_TASK && task.title !== UNTITLED_THREAD)) return null;
     task.title = titleFromMessage(text);
+    task.titleFromFirstMessage = true;
     this.saveBots();
     this.emit({ type: "bot", botId });
+    return task;
+  }
+
+  /** Swap a machine-made first-message title for a generated one, once.
+   * Equality against the snippet is the whole contract: a rename by the
+   * person, by pair adoption, or by an earlier generated title each break
+   * it, so this never overwrites a name anyone chose. */
+  retitleTask(botId: string, threadId: string, machineTitle: string, title: string): TaskRecord | null {
+    const task = this.taskByThread(botId, threadId);
+    if (!task || task.title !== machineTitle) return null;
+    return this.renameTask(botId, threadId, threadTitleFrom(title));
   }
 
   /** Delete a task and its transcript, retaining generated project files.

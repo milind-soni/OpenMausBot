@@ -22,6 +22,9 @@ const task = z.object({
   key,
   title: z.string().max(2_000),
   createdAt: timestamp,
+  // Travels only when the first message already named this task, so a
+  // restore cannot re-arm one generated title on a row that used it.
+  titleFromFirstMessage: z.literal(true).optional(),
   openedBy: z.object({ botId: key, name, at: timestamp, kind: z.enum(["pair", "work"]).optional() }).optional(),
   closedBy: z.object({ botId: key, name, at: timestamp }).optional(),
   activeLeafId: key.nullable(),

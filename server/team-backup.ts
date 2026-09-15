@@ -59,6 +59,10 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
     const tasks = record.tasks?.length ? record.tasks : [{ threadId: record.threadId, title: "Conversation", createdAt: record.createdAt }];
     return tasks.map((task) => ({
       key: task.threadId, title: task.title, createdAt: task.createdAt,
+      // Whether the first message already named this task travels with it:
+      // without the marker a restore could re-arm one generated title on a
+      // row that had already used it.
+      titleFromFirstMessage: "titleFromFirstMessage" in task && task.titleFromFirstMessage || undefined,
       // Who opened the thread travels; the handoff id does not — the
       // delegation ledger is process-local and never part of a backup.
       openedBy: "openedBy" in task && task.openedBy
@@ -180,6 +184,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         const record: TaskRecord = {
           threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
           modelSelection: structuredClone(selection), activity: "idle" as const, busy: false, unread: false,
+          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
         };
         // Same rule as a message's `from`: the opener is remapped to its
         // imported twin, and an opener outside this backup leaves no record
@@ -215,7 +220,10 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       });
       source.tasks.forEach((task, i) => restore(task, threads[i]));
       if (!source.dm) {
-        group.tasks = source.tasks.map((task, i) => ({ threadId: threads[i], title: task.title, createdAt: task.createdAt }));
+        group.tasks = source.tasks.map((task, i) => ({
+          threadId: threads[i], title: task.title, createdAt: task.createdAt,
+          ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
+        }));
         store.switchGroupTask(group.id, threads[source.tasks.findIndex((task) => task.key === source.activeTask)]);
       }
     }

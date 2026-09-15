@@ -123,6 +123,7 @@ maxConcurrentBotThreads,
   skillAuthoringEnabled,
   sharedComputersEnabled,
   builtInBrowserEnabled,
+  llmThreadTitlesEnabled,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
@@ -226,6 +227,7 @@ import {
   roomResponders,
   sectionKey,
   Store,
+  titleFromLlm,
   type BotRecord,
   type GroupDefaultResponder,
   type GroupRecord,
@@ -5285,6 +5287,43 @@ async function finalScreenFrame(_botId: string, threadId: string): Promise<Frame
   return frame;
 }
 
+/** A short title for a fresh thread, from the provider's cheap one-shot
+ * (generateText — Haiku on Claude, the chat completion endpoint's text
+ * path on OpenAI-compatible engines). Null whenever that call cannot run,
+ * runs long, or answers with something that is not a plain short title;
+ * the caller keeps the snippet it already applied. */
+async function generateThreadTitle(
+  provider: { generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string> },
+  text: string,
+): Promise<string | null> {
+  const prompt = [
+    "Name the conversation that begins with the message below.",
+    "Reply with only a short title: 3 to 6 words, plain text, no quotes, no trailing period.",
+    "Message:",
+    text.trim().slice(0, 1_500),
+  ].join("\n");
+  const expiry = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // the race caps the wait; the signal aborts the provider call itself,
+    // which every generateText driver that can honor it does
+    const reply = await Promise.race([
+      provider.generateText!(prompt, { signal: expiry.signal }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          expiry.abort();
+          reject(new Error("thread title timed out"));
+        }, 10_000);
+      }),
+    ]);
+    return titleFromLlm(reply);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(
   botId: string,
@@ -5418,7 +5457,22 @@ async function startTurn(
   else clearInternalTurn(threadId);
   // a task takes its name from the first thing you asked it to do
   if (resolvedImages.text.trim() && !opts?.cardContinuation) {
-    store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
+    const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
+    // The snippet is only the fallback name. A cheap one-shot may trade it
+    // for a title a person would have typed, but never on a peer-opened
+    // row: adoption recognises those by the exact title their assignment
+    // gave them (openingRequestTitle), and a generated one would break the
+    // comparison it renames under. Everywhere else, the swap happens only
+    // while the row still carries the snippet — a rename by the person or
+    // by adoption has already broken that equality by then.
+    const snippet = titled?.title;
+    if (titled && snippet && !titled.openedBy?.botId && llmThreadTitlesEnabled(cfg) && instance.generateText) {
+      void generateThreadTitle(instance, resolvedImages.text)
+        .then((title) => {
+          if (title) store.retitleTask(bot.id, threadId, snippet, title);
+        })
+        .catch(() => undefined);
+    }
   }
 
   console.error(`[omb-turn] bot=${botId} text=${JSON.stringify(resolvedImages.text.slice(0, 70))} images=${turnImages.length} depth=${commsDepth} card=${Boolean(opts?.cardContinuation)}`);
@@ -8428,7 +8482,8 @@ function startGroupTurn(
     queueId,
     via: options.via,
   });
-  if (!group.dm) store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
+  const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
+  const snippet = titled?.title;
 
   const archived = members.filter((member) => member.hidden);
   const mentionedArchived = mentionedBots(text, archived.map(({ name }) => ({ name })))[0];
@@ -8472,6 +8527,23 @@ function startGroupTurn(
       });
     }
     return message;
+  }
+
+  // The snippet is only the fallback name here too. The member about to
+  // answer supplies the same cheap one-shot the bot path uses, and the
+  // swap lands only while the row still carries the snippet — a rename by
+  // the person always wins. Channel tasks carry no peer provenance (no
+  // assignment opens them), and a member whose engine offers no text
+  // one-shot simply keeps the snippet.
+  const titleBot = goalCoordinator ?? responders[0]!;
+  const titleInstance = registry.get(titleBot.modelSelection.instanceId);
+  const titleText = extractTurnImages(text).text;
+  if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText) {
+    void generateThreadTitle(titleInstance, titleText)
+      .then((title) => {
+        if (title) store.retitleGroupTask(group.id, threadId, snippet, title);
+      })
+      .catch(() => undefined);
   }
 
   const operation = beginGroupTurnOperation(

@@ -551,8 +551,10 @@ export interface ProviderInstance {
   readonly signOut?: () => Promise<void>;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
-  /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */
-  generateText?(prompt: string): Promise<string>;
+  /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries.
+   * The signal is a best-effort cap: drivers that can honor it abort the
+   * underlying provider call; the rest keep their own timeout. */
+  generateText?(prompt: string, options?: { signal?: AbortSignal }): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */
