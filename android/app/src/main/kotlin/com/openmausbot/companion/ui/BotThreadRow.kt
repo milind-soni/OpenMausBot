@@ -30,12 +30,23 @@ import com.openmausbot.companion.core.isArchived
 
 /** Shared by Home and the thread picker, with status taken from this thread alone. */
 @Composable
-internal fun BotThreadRow(task: BotTask, selected: Boolean = false, modifier: Modifier = Modifier) {
+internal fun BotThreadRow(
+    task: BotTask,
+    selected: Boolean = false,
+    modifier: Modifier = Modifier,
+    /** The thread is holding a queued send, from the client's queue state.
+     * The harness reports this out-of-band; the activity string never says
+     * it, so the row derives it here rather than parsing activity. */
+    queued: Boolean = false,
+) {
     val runtime = when (task.activity) {
         "waiting-on-you" -> "Waiting on you"
-        "queued" -> "Queued"
         "working", "running" -> "Working"
-        else -> if (task.busy == true) "Working" else null
+        else -> when {
+            queued -> "Queued"
+            task.busy == true -> "Working"
+            else -> null
+        }
     }
     val dimmed = (task.isClosed || task.isArchived) && runtime == null && task.unread != true
     val foldedState = when {

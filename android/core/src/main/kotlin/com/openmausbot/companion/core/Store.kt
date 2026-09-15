@@ -42,6 +42,11 @@ data class CompanionState(
      */
     val drainedQueueIds: List<String> = emptyList(),
 ) {
+    /** Threads holding at least one queued send. The row label, the Updates
+     * pill, and the closed-thread fold all read this, never task activity. */
+    val queuedThreadIds: Set<String>
+        get() = pendingQueued.keys
+
     fun transcript(threadId: String): List<Message> = messages[threadId].orEmpty()
 
     /** An SSE tail is partial history; only a fetched page establishes its boundary. */

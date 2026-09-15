@@ -744,6 +744,14 @@ struct ChatView: View {
             && !preparingAttachments && !sendingMessage
     }
 
+    /// Messages the harness is holding for this thread. They sit above the
+    /// composer rather than pretending to be part of the transcript: the
+    /// turn that is still running owns the transcript's tail, and these
+    /// words have not been said yet.
+    private var heldSends: [QueuedSend] {
+        session.state.pendingQueued[threadId] ?? []
+    }
+
     /// A vertically growing SwiftUI TextField treats the software keyboard's
     /// Return key as a newline even when the key is labelled “Send”. Intercept
     /// that proposed edit before it reaches the draft. Hardware Shift-Return
@@ -1064,6 +1072,13 @@ struct ChatView: View {
     /// A round + and a glass pill with dictation and send inside it.
     private var composer: some View {
         VStack(spacing: 6) {
+            if !heldSends.isEmpty {
+                QueuedSendList(sends: heldSends) { send in
+                    Task { await session.cancelQueued(send, threadId: threadId, in: current) }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if preparingAttachments || sendingMessage {
                 HStack(spacing: 8) {
                     ProgressView()
@@ -2322,5 +2337,57 @@ struct StreamingBubble: View {
         // No `.textSelection` on purpose: selecting text that is still growing
         // fights the reader, and the settled bubble a frame later is
         // selectable anyway.
+    }
+}
+
+/// The held sends for one thread, as the desktop's composer shows them: one
+/// line each, deletable, with a note when the harness held them for thread
+/// capacity rather than because a turn is running.
+private struct QueuedSendList: View {
+    let sends: [QueuedSend]
+    let cancel: (QueuedSend) -> Void
+
+    private var showsCapacityNote: Bool {
+        sends.contains { $0.reason == "capacity" }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if showsCapacityNote {
+                Text("Queued — starts when this bot has a free thread slot.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.secondary)
+            }
+            ForEach(Array(sends.enumerated()), id: \.element.queueId) { index, send in
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.secondary)
+                    Text(send.text)
+                        .font(.system(size: 14))
+                        .foregroundStyle(Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        cancel(send)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Delete queued message \(index + 1) of \(sends.count)")
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding(.horizontal, 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(sends.count == 1 ? "1 queued message" : "\(sends.count) queued messages")
     }
 }

@@ -52,6 +52,20 @@ class QueuedSendTest {
     }
 
     @Test
+    fun `queued thread ids are the rows the surfaces read`() {
+        var state = CompanionState()
+            .rememberQueued(QueuedSend("q1", "first"), "t1")
+            .rememberQueued(QueuedSend("q2", "second"), "t2")
+        assertEquals(setOf("t1", "t2"), state.queuedThreadIds)
+
+        state = state.forgetQueued("q1", "t1")
+        assertEquals(setOf("t2"), state.queuedThreadIds)
+
+        state = state.forgetQueued("q2", "t2")
+        assertEquals(emptySet(), state.queuedThreadIds)
+    }
+
+    @Test
     fun `a send taken into the running turn decodes as steered`() {
         val body = """{"ok":true,"steered":true,"threadId":"t1"}"""
         assertEquals(

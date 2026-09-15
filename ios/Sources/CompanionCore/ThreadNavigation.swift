@@ -27,10 +27,18 @@ extension Bot {
     /// sidebar folds them: a PM bot that opened ten helper threads and closed
     /// them must not leave ten rows behind. They are never gone — a search
     /// or `includingClosed` (the manage sheet) lists them, and a closed
-    /// thread that is working, unread, or open here stays in the list. A
+    /// thread that is running, unread, or open here stays in the list. A
     /// thread the person archived folds away the same way, with the same
-    /// attention override: a working or waiting archived thread resurfaces.
-    public func threadGroups(matching query: String = "", includingClosed: Bool = false) -> [BotThreadGroup] {
+    /// attention override.
+    /// - Parameter queuedThreadIds: threads holding a queued send, from the
+    ///   client's queue state. A closed or archived thread with a held send
+    ///   stays in the list the way a running one does — activity strings
+    ///   never say this, because the harness reports queues out-of-band.
+    public func threadGroups(
+        matching query: String = "",
+        includingClosed: Bool = false,
+        queuedThreadIds: Set<String> = []
+    ) -> [BotThreadGroup] {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let threads: [BotTask]
         if tasks == nil {
@@ -45,10 +53,12 @@ extension Bot {
             threads = visibleTasks
         } else {
             threads = visibleTasks.filter { task in
-                !(task.isClosed || task.isArchived) || task.demandsAttention || task.threadId == threadId
+                !(task.isClosed || task.isArchived)
+                    || task.demandsAttention(queued: queuedThreadIds.contains(task.threadId))
+                    || task.threadId == threadId
             }
         }
-        let ordered = search.isEmpty ? threadsInAttentionOrder(threads) : threads
+        let ordered = search.isEmpty ? threadsInAttentionOrder(threads, queuedThreadIds: queuedThreadIds) : threads
 
         var projectIDs = Set<String>()
         var groups = (projects ?? []).compactMap { project -> BotThreadGroup? in
@@ -72,15 +82,16 @@ extension Bot {
     }
 
     /// Attention outranks recency within a bot: waiting-on-you needs the
-    /// person most, then working/busy, then queued, then unread. The thread
-    /// being looked at rides just above the idle tail; idle threads keep
-    /// stored order. Mirrors the desktop's attentionRank so the tree and
-    /// the manage sheet agree on what sits on top; searches keep relevance
-    /// order, as on desktop and Android.
-    private func attentionRank(_ task: BotTask) -> Int {
+    /// person most, then working/busy, then queued, then unread. A held send
+    /// is client state, so it ranks in the queued tier the way the wire
+    /// value does. The thread being looked at rides just above the idle
+    /// tail; idle threads keep stored order. Mirrors the desktop's
+    /// attentionRank so the tree and the manage sheet agree on what sits on
+    /// top; searches keep relevance order, as on desktop and Android.
+    private func attentionRank(_ task: BotTask, queued: Bool) -> Int {
         if task.activity == "waiting-on-you" { return 0 }
         if task.busy == true || task.activity == "working" { return 1 }
-        if task.activity == "queued" { return 2 }
+        if task.activity == "queued" || queued { return 2 }
         if task.unread == true { return 3 }
         if task.threadId == threadId { return 4 }
         return 5
@@ -89,12 +100,15 @@ extension Bot {
     /// Order, never filter: whatever the caller passed stays in the list,
     /// only its position changes. The stored index rides along so equal
     /// ranks keep stored order even where sort is not guaranteed stable.
-    private func threadsInAttentionOrder(_ threads: [BotTask]) -> [BotTask] {
+    private func threadsInAttentionOrder(
+        _ threads: [BotTask],
+        queuedThreadIds: Set<String>
+    ) -> [BotTask] {
         threads.enumerated()
             .map { (index: $0.offset, task: $0.element) }
             .sorted {
-                let lhs = attentionRank($0.task)
-                let rhs = attentionRank($1.task)
+                let lhs = attentionRank($0.task, queued: queuedThreadIds.contains($0.task.threadId))
+                let rhs = attentionRank($1.task, queued: queuedThreadIds.contains($1.task.threadId))
                 return lhs == rhs ? $0.index < $1.index : lhs < rhs
             }
             .map(\.task)

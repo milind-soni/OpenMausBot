@@ -536,7 +536,7 @@ struct ChatListView: View {
 
     private func matchesThread(_ chat: Chat) -> Bool {
         guard case let .bot(bot) = chat else { return false }
-        return !bot.threadGroups(matching: query).isEmpty
+        return !bot.threadGroups(matching: query, queuedThreadIds: session.state.queuedThreadIds).isEmpty
     }
 
     private func summaries(for bots: [Bot]) -> [ChatSummary] {

@@ -915,12 +915,19 @@ final class Session: ObservableObject {
     // is a phone that disagrees with the laptop.
 
     func send(_ text: String, to chat: Chat) async {
+        let connectionID = client?.connection.id
+        var receipt: SendReceipt?
         await perform {
             switch chat {
-            case let .bot(bot): try await $0.send(text: text, toBot: bot.id, threadId: bot.threadId)
-            case let .room(room): try await $0.send(text: text, toRoom: room.id)
+            case let .bot(bot): receipt = try await $0.send(text: text, toBot: bot.id, threadId: bot.threadId)
+            case let .room(room): receipt = try await $0.send(text: text, toRoom: room.id)
             }
         }
+        // The receipt describes a queue on the computer this request went
+        // to. A machine switched mid-flight has already reset state for the
+        // computer now on screen, and that row must not land in it.
+        guard client?.connection.id == connectionID else { return }
+        rememberQueuedSend(from: receipt, text: text)
     }
 
     /// Send a composer draft with app-owned attachments. The destination
@@ -936,6 +943,7 @@ final class Session: ObservableObject {
             actionError = "This computer is offline."
             return false
         }
+        let connectionID = client.connection.id
         actionError = nil
         do {
             try AttachmentPolicy.validate(attachments)
@@ -1015,7 +1023,13 @@ final class Session: ObservableObject {
                 urls: [],
                 attachments: uploaded
             )
-            try await client.send(text: message, to: destination, sendId: sendID)
+            let receipt = try await client.send(text: message, to: destination, sendId: sendID)
+            // The send succeeded on the computer it was addressed to, so the
+            // draft clears either way. Its queue row belongs to that computer,
+            // and must not be drawn on one selected mid-upload.
+            if self.client?.connection.id == connectionID {
+                rememberQueuedSend(from: receipt, text: text)
+            }
             attachmentSendIDs.removeValue(forKey: draftKey)
             actionError = nil
             return true
@@ -1028,6 +1042,45 @@ final class Session: ObservableObject {
         } catch {
             actionError = error.localizedDescription
             return false
+        }
+    }
+
+    /// The harness's answer to a send, when it held the message instead of
+    /// delivering it. This is wire state, not optimism: the row exists
+    /// because the computer said it does, identified by its queueId.
+    private func rememberQueuedSend(from receipt: SendReceipt?, text: String) {
+        guard let receipt, receipt.queued == true,
+              let queueId = receipt.queueId, let threadId = receipt.threadId
+        else { return }
+        state.rememberQueued(
+            QueuedSend(
+                queueId: queueId,
+                text: text,
+                reason: receipt.reason == "capacity" ? "capacity" : nil
+            ),
+            threadId: threadId
+        )
+    }
+
+    /// Take back a held message. The row only goes when the computer agrees;
+    /// an entry that already drained counts as agreement.
+    func cancelQueued(_ send: QueuedSend, threadId: String, in chat: Chat) async {
+        let connectionID = client?.connection.id
+        let destination: MessageDestination
+        switch chat {
+        case let .bot(bot): destination = .bot(id: bot.id, threadId: threadId)
+        case let .room(room): destination = .room(id: room.id, threadId: threadId)
+        }
+        var agreed = false
+        await perform {
+            try await $0.cancelQueued(queueId: send.queueId, to: destination)
+            agreed = true
+        }
+        // The cancel landed on the computer that owned the row. One selected
+        // mid-request has already reset state; its rows are not this cancel's
+        // to retire.
+        if agreed, client?.connection.id == connectionID {
+            state.cancelQueued(queueId: send.queueId, threadId: threadId)
         }
     }
 

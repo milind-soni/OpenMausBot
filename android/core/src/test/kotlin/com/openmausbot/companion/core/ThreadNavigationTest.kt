@@ -123,12 +123,29 @@ class ThreadNavigationTest {
     }
 
     @Test
+    fun aHeldSendFloatsARowTheWireNeverMarks() {
+        // the harness reports queues out-of-band, so the client flag floats
+        // rows the wire never marks; the wire value keeps counting, as on
+        // main (Sidebar.tsx 865)
+        val closed = task("held").copy(closedBy = closer)
+        val grouped = bot.copy(tasks = listOf(closed, task("open")))
+        assertEquals(listOf("open"), grouped.threadGroups().single().tasks.map { it.threadId })
+        assertEquals(
+            listOf("held", "open"),
+            grouped.threadGroups(queuedThreadIds = setOf("held")).single().tasks.map { it.threadId },
+        )
+        // the wire value still surfaces a row; the client flag covers the rest
+        assertTrue(task("dead").copy(activity = "queued").demandsAttention())
+        assertTrue(task("held").demandsAttention(queued = true))
+    }
+
+    @Test
     fun missingTaskMetadataHasALegacyConversationButAnExplicitEmptyListDoesNot() {
         val legacy = bot.copy(unread = true, busy = true)
         val thread = legacy.threadGroups().single().tasks.single()
         assertEquals("current", thread.threadId)
         assertEquals("Untitled thread", thread.displayTitle)
-        assertTrue(thread.demandsAttention)
+        assertTrue(thread.demandsAttention())
         assertTrue(bot.copy(tasks = emptyList()).threadGroups().isEmpty())
         assertTrue(bot.copy(tasks = listOf(task("run").copy(routineRunId = "internal"))).threadGroups().isEmpty())
     }

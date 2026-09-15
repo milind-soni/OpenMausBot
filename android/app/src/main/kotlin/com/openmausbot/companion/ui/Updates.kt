@@ -66,11 +66,15 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
         for (conversation in conversations) {
             val chat = Chat.BotChat(conversation)
             if (!seen.add(chat.conversationId)) continue
+            val held = pendingQueued[conversation.threadId]?.size ?: 0
             when {
                 conversation.activity == "waiting-on-you" ->
                     out += ChatUpdate(chat, UpdateKind.NEEDS_YOU, "Waiting on you")
-                conversation.activity == "queued" ->
-                    out += ChatUpdate(chat, UpdateKind.WORKING, "Queued — waiting for an available slot")
+                held > 0 ->
+                    out += ChatUpdate(
+                        chat, UpdateKind.WORKING,
+                        if (held == 1) "Queued — waiting for an available slot" else "$held messages queued",
+                    )
                 conversation.busy == true ->
                     out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(chat.threadId))
                 conversation.unread ->
@@ -79,11 +83,19 @@ internal fun CompanionState.updates(pending: List<PendingApproval>): List<ChatUp
         }
     }
 
-    for (room in rooms) {
-        val chat = Chat.RoomChat(room)
-        if (chat.conversationId in seen) continue
-        when {
-            room.busyBotId != null -> {
+        for (room in rooms) {
+            val chat = Chat.RoomChat(room)
+            if (chat.conversationId in seen) continue
+            val held = pendingQueued[room.threadId]?.size ?: 0
+            when {
+                held > 0 -> {
+                    seen += chat.conversationId
+                    out += ChatUpdate(
+                        chat, UpdateKind.WORKING,
+                        if (held == 1) "Queued — waiting for an available slot" else "$held messages queued",
+                    )
+                }
+                room.busyBotId != null -> {
                 seen += chat.conversationId
                 out += ChatUpdate(chat, UpdateKind.WORKING, workingLine(room.threadId))
             }

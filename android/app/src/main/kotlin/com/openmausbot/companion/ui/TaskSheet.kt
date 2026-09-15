@@ -94,9 +94,14 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
     // an archived thread that starts demanding attention is back above.
     val (groups, archived) = when (current) {
         is Chat.BotChat -> {
-            val all = current.bot.threadGroups(includingClosed = true)
+            val all = current.bot.threadGroups(
+                includingClosed = true,
+                queuedThreadIds = state.queuedThreadIds,
+            )
             val folded = all.flatMap { it.tasks }.filter {
-                it.isArchived && !TaskRules.demandsAttention(it) && !TaskRules.isCurrent(it, current)
+                it.isArchived &&
+                    !TaskRules.demandsAttention(it, queued = it.threadId in state.queuedThreadIds) &&
+                    !TaskRules.isCurrent(it, current)
             }
             val foldedIds = folded.map { it.threadId }.toSet()
             all.mapNotNull { group ->
@@ -205,6 +210,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                 task = task,
                                 chat = current,
                                 enabled = !saving,
+                                queued = task.threadId in state.queuedThreadIds,
                                 onSwitch = {
                                     saving = true
                                     error = null
@@ -242,6 +248,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                 task = task,
                                 chat = current,
                                 enabled = !saving,
+                                queued = task.threadId in state.queuedThreadIds,
                                 onSwitch = {
                                     saving = true
                                     error = null
@@ -335,6 +342,7 @@ private fun TaskRow(
     task: BotTask,
     chat: Chat,
     enabled: Boolean,
+    queued: Boolean,
     onSwitch: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
@@ -353,7 +361,7 @@ private fun TaskRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        BotThreadRow(task, selected = current, modifier = Modifier.weight(1f))
+        BotThreadRow(task, selected = current, modifier = Modifier.weight(1f), queued = queued)
 
         if (onArchive != null) {
             val label = if (task.isArchived) "Unarchive" else "Archive"

@@ -48,6 +48,16 @@ public struct CompanionState: Sendable {
     /// `screens=on`, and only the newest frame is kept — these are hundreds
     /// of kilobytes each and a history of them is worth nothing.
     public var screens: [String: ScreenFrame] = [:]
+    /// Mid-turn sends the harness is holding until the running turn settles,
+    /// by thread. They are deliberately NOT in messages: appending one now
+    /// would make it the active leaf, and the rest of the running turn would
+    /// hang off a line the model never saw. Identified by the harness's
+    /// queueId, never by text.
+    public var pendingQueued: [String: [QueuedSend]] = [:]
+    /// queueIds whose drain frame beat the POST's own continuation. A short,
+    /// bounded tombstone list, so a slow response cannot re-add a row for a
+    /// message that is already in the transcript.
+    public var drainedQueueIds: [String] = []
 
     public init() {}
 
@@ -57,6 +67,12 @@ public struct CompanionState: Sendable {
     /// stored property compiles but reads as if one shadows the other.
     public func transcript(forThread threadId: String) -> [Message] {
         messages[threadId] ?? []
+    }
+
+    /// Threads holding at least one queued send. The row label, the Updates
+    /// pill and the closed-thread fold all read this, never task activity.
+    public var queuedThreadIds: Set<String> {
+        Set(pendingQueued.keys)
     }
 
     /// Live events may create a partial transcript before a conversation is
@@ -231,6 +247,12 @@ public struct CompanionState: Sendable {
         for (threadId, page) in waitingThreads where bot(forThread: threadId) != nil {
             merge(page, intoThread: threadId)
         }
+        // The fleet route returns the whole queue snapshot beside the bots,
+        // so every refresh re-seeds it; landed lines then retire their rows.
+        if let queues = fleet.botQueuedMessages {
+            replaceBotQueues(queues)
+        }
+        reconcileAllQueued()
     }
 
     /// Prepend an older page fetched for scrollback.
@@ -239,6 +261,7 @@ public struct CompanionState: Sendable {
         let known = Set(existing.map(\.id))
         messages[threadId] = page.messages.filter { !known.contains($0.id) } + existing
         hasMore[threadId] = page.hasMore ?? false
+        reconcileQueued(threadId: threadId)
     }
 
     /// Merge a search landing window into the pages already held.
@@ -254,6 +277,7 @@ public struct CompanionState: Sendable {
         // while a sparse landing window preserves an existing boundary.
         hasMore[threadId] = page.hasMore ?? hasMore[threadId] ?? false
         if let leaf = page.activeLeafId { activeLeafIds[threadId] = leaf }
+        reconcileQueued(threadId: threadId)
     }
 
     /// User-message alternatives created by edit-and-retry, oldest first.
@@ -280,6 +304,12 @@ public struct CompanionState: Sendable {
 
         case let .message(threadId, message):
             append(message, to: threadId)
+            // The line a held send finally became. Landing in the transcript
+            // retires the row and leaves a tombstone, so the POST response
+            // that is still in flight cannot re-add it.
+            if message.role == .user, let queueId = message.queueId {
+                consumeQueued(queueId: queueId, threadId: threadId)
+            }
             if let bot = bot(forThread: threadId), message.parentId == bot.activeLeafId {
                 activeLeafIds[threadId] = message.id
                 if let index = bots.firstIndex(where: { $0.threadId == threadId }) {
@@ -329,6 +359,7 @@ public struct CompanionState: Sendable {
                     hasMore[bot.threadId] = bot.hasMore ?? false
                     merged.messages = replacement
                     if bot.currentTaskBusy != true { clearStream(bot.threadId) }
+                    reconcileQueued(threadId: bot.threadId)
                 } else {
                     merged.messages = messages[bot.threadId]
                     merged.activeLeafId = activeLeafIds[bot.threadId]
@@ -350,6 +381,7 @@ public struct CompanionState: Sendable {
                     messages.removeValue(forKey: threadId)
                     hasMore.removeValue(forKey: threadId)
                     activeLeafIds.removeValue(forKey: threadId)
+                    pendingQueued.removeValue(forKey: threadId)
                     clearStream(threadId)
                 }
                 // Everything else keyed by this bot goes too. A deleted bot
@@ -373,6 +405,7 @@ public struct CompanionState: Sendable {
                     messages[room.threadId] = replacement
                     hasMore[room.threadId] = room.hasMore ?? false
                     merged.messages = replacement
+                    reconcileQueued(threadId: room.threadId)
                     clearStream(previous.threadId)
                     if previous.threadId != room.threadId { clearStream(room.threadId) }
                 } else {
@@ -393,6 +426,7 @@ public struct CompanionState: Sendable {
                 let threadId = rooms[index].threadId
                 messages.removeValue(forKey: threadId)
                 hasMore.removeValue(forKey: threadId)
+                pendingQueued.removeValue(forKey: threadId)
                 // Same reasoning as a deleted bot: the thread is gone, so the
                 // half-written reply streaming into it has nowhere to land.
                 clearStream(threadId)
@@ -410,6 +444,9 @@ public struct CompanionState: Sendable {
 
         case let .screen(botId, png, mime):
             screens[botId] = ScreenFrame(png: png, mime: mime)
+
+        case let .botQueued(queues):
+            replaceBotQueues(queues)
 
         // Nothing to fold: config and provisioning state are not part of
         // this client's job yet.
@@ -459,6 +496,101 @@ public struct CompanionState: Sendable {
         streaming.removeValue(forKey: threadId)
         reasoning.removeValue(forKey: threadId)
     }
+
+    // MARK: - Held mid-turn sends
+
+    /// Remember a message the harness said it is holding.
+    ///
+    /// The drain frame can arrive before the POST that created the entry has
+    /// even returned — the harness settles a turn on its own clock. When it
+    /// already has, the words are in the transcript and adding a row for them
+    /// would show the message twice, so the tombstone wins and is spent.
+    public mutating func rememberQueued(_ send: QueuedSend, threadId: String) {
+        if drainedQueueIds.contains(send.queueId) {
+            drainedQueueIds.removeAll { $0 == send.queueId }
+            return
+        }
+        guard !(pendingQueued[threadId] ?? []).contains(where: { $0.queueId == send.queueId }) else { return }
+        pendingQueued[threadId, default: []].append(send)
+    }
+
+    /// A held line landed, or was cancelled on the server: drop its row and
+    /// leave a tombstone behind. The tombstone is written even when there is
+    /// no row — a drain that beats its own POST is exactly the race the
+    /// tombstone exists for.
+    public mutating func consumeQueued(queueId: String, threadId: String) {
+        removeQueuedRow(queueId, threadId: threadId)
+        markDrained(queueId)
+    }
+
+    /// The person took a held message back. Same retirement as a drain: the
+    /// server dropped it, and a late POST continuation must not resurrect it.
+    public mutating func cancelQueued(queueId: String, threadId: String) {
+        consumeQueued(queueId: queueId, threadId: threadId)
+    }
+
+    /// Direct-bot queues are server-owned: a bot.queued frame or the fleet
+    /// snapshot replaces them wholesale. Room queues are a separate queue the
+    /// frame says nothing about, so their rows survive. Entries that vanish
+    /// from the snapshot are tombstoned, so a slow POST response cannot
+    /// resurrect a message another window already cancelled or drained.
+    public mutating func replaceBotQueues(_ queues: [String: [QueuedSend]]) {
+        let roomThreads = Set(rooms.flatMap { room in
+            [room.threadId] + (room.tasks ?? []).map(\.threadId)
+        })
+        let liveIds = Set(queues.values.flatMap { list in list.map(\.queueId) })
+        var next = queues.filter { !$0.value.isEmpty }
+        for (threadId, entries) in pendingQueued where roomThreads.contains(threadId) {
+            next[threadId] = entries
+        }
+        for (threadId, entries) in pendingQueued where !roomThreads.contains(threadId) {
+            for entry in entries where !liveIds.contains(entry.queueId) {
+                markDrained(entry.queueId)
+            }
+        }
+        pendingQueued = next
+    }
+
+    /// Reconcile rows against a transcript that arrived whole — a hydrate, a
+    /// page fetch, or a bot frame carrying its own messages. A window that
+    /// was backgrounded through the drain never saw the message frame, and
+    /// its rows have to go.
+    public mutating func reconcileQueued(threadId: String) {
+        guard pendingQueued[threadId] != nil else { return }
+        let landed = Set(transcript(forThread: threadId).compactMap(\.queueId))
+        guard !landed.isEmpty else { return }
+        for queueId in landed {
+            consumeQueued(queueId: queueId, threadId: threadId)
+        }
+    }
+
+    public mutating func reconcileAllQueued() {
+        for threadId in Array(pendingQueued.keys) {
+            reconcileQueued(threadId: threadId)
+        }
+    }
+
+    private mutating func removeQueuedRow(_ queueId: String, threadId: String) {
+        guard var waiting = pendingQueued[threadId] else { return }
+        waiting.removeAll { $0.queueId == queueId }
+        if waiting.isEmpty {
+            pendingQueued.removeValue(forKey: threadId)
+        } else {
+            pendingQueued[threadId] = waiting
+        }
+    }
+
+    private mutating func markDrained(_ queueId: String) {
+        drainedQueueIds.removeAll { $0 == queueId }
+        drainedQueueIds.append(queueId)
+        if drainedQueueIds.count > Self.maxDrainedQueueIds {
+            drainedQueueIds.removeFirst(drainedQueueIds.count - Self.maxDrainedQueueIds)
+        }
+    }
+
+    /// The tombstone window matches the desktop's: long enough to cover a
+    /// slow POST, short enough that other clients cannot grow it forever.
+    private static let maxDrainedQueueIds = 64
 
     /// Append, unless we already hold it. Replaying a resumed stream can
     /// legitimately deliver a message twice — the cursor is the last frame

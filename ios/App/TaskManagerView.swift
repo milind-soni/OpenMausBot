@@ -28,7 +28,8 @@ struct TaskManagerView: View {
 
     private var tasks: [BotTask] {
         switch current {
-        case let .bot(bot): return bot.threadGroups(includingClosed: true).flatMap(\.tasks)
+        case let .bot(bot):
+            return bot.threadGroups(includingClosed: true, queuedThreadIds: session.state.queuedThreadIds).flatMap(\.tasks)
         case let .room(room): return room.tasks ?? []
         }
     }
@@ -131,13 +132,13 @@ struct TaskManagerView: View {
             let groups = bot.threadGroups(matching: search, includingClosed: true)
             let archived = searching ? [] : bot.threadGroups(includingClosed: true)
                 .flatMap(\.tasks)
-                .filter { $0.isArchived && !$0.demandsAttention && $0.threadId != bot.threadId }
+                .filter { $0.isArchived && !$0.demandsAttention() && $0.threadId != bot.threadId }
             if groups.isEmpty {
                 emptySearch
             } else {
                 ForEach(groups) { group in
                     let rows = searching ? group.tasks : group.tasks.filter {
-                        !$0.isArchived || $0.demandsAttention || $0.threadId == bot.threadId
+                        !$0.isArchived || $0.demandsAttention() || $0.threadId == bot.threadId
                     }
                     if !rows.isEmpty {
                         Section {
@@ -201,7 +202,11 @@ struct TaskManagerView: View {
         Button {
             perform { await switchTo(task) }
         } label: {
-            BotThreadRow(task: task, selected: task.threadId == current.threadId)
+            BotThreadRow(
+                task: task,
+                selected: task.threadId == current.threadId,
+                queued: session.state.pendingQueued[task.threadId]?.isEmpty == false
+            )
         }
         .disabled(isMutating || (!current.isBot && current.busy && task.threadId != current.threadId))
         .accessibilityIdentifier("thread-\(task.threadId)")

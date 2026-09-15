@@ -453,6 +453,26 @@ public enum APIError: Error, LocalizedError, Sendable {
     }
 }
 
+/// What the harness answered about a send. Either the message went straight
+/// in (a message the event stream will deliver), or the thread was busy and
+/// the harness is holding it: queued true plus the queueId and threadId that
+/// identify the held line. Every field is optional because the two shapes
+/// are disjoint and the client reads only the half it got.
+public struct SendReceipt: Decodable, Sendable {
+    public var queued: Bool?
+    public var queueId: String?
+    public var threadId: String?
+    /// "capacity" is the known value; anything else still parses.
+    public var reason: String?
+
+    public init(queued: Bool? = nil, queueId: String? = nil, threadId: String? = nil, reason: String? = nil) {
+        self.queued = queued
+        self.queueId = queueId
+        self.threadId = threadId
+        self.reason = reason
+    }
+}
+
 /// The exact conversation a retriable send belongs to. Carrying the thread
 /// as well as the bot/room id prevents a Share Extension retry from landing
 /// in a different task if the desktop switches tasks while iOS is suspended.
@@ -640,6 +660,16 @@ public struct CompanionClient: Sendable {
     private func send(_ request: URLRequest) async throws {
         let (data, response) = try await perform(request)
         try Self.check(response, data)
+    }
+
+    /// A send that succeeded is a send that succeeded: the harness's own
+    /// message for it arrives on the event stream, so the receipt here is
+    /// best-effort state. A body this build cannot read means "not queued"
+    /// rather than a failed send.
+    private func sendForReceipt(_ request: URLRequest) async throws -> SendReceipt {
+        let (data, response) = try await perform(request)
+        try Self.check(response, data)
+        return (try? JSONDecoder().decode(SendReceipt.self, from: data)) ?? SendReceipt()
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
@@ -1357,24 +1387,27 @@ public struct CompanionClient: Sendable {
         ).bots
     }
 
-    public func send(text: String, toBot botId: String, threadId: String? = nil) async throws {
+    @discardableResult
+    public func send(text: String, toBot botId: String, threadId: String? = nil) async throws -> SendReceipt {
         var body = ["text": text]
         if let threadId { body["threadId"] = threadId }
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages", body: body))
+        return try await sendForReceipt(try makeRequest("POST", "/api/bots/\(botId)/messages", body: body))
     }
 
-    public func send(text: String, toRoom groupId: String) async throws {
-        try await send(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
+    @discardableResult
+    public func send(text: String, toRoom groupId: String) async throws -> SendReceipt {
+        return try await sendForReceipt(try makeRequest("POST", "/api/groups/\(groupId)/messages", body: ["text": text]))
     }
 
     /// Retry-safe send used by short-lived clients such as Share Extensions.
     /// `sendId` names the logical send, while `threadId` freezes the selected
     /// task so a retry can never drift to a newly active conversation.
+    @discardableResult
     public func send(
         text: String,
         to destination: MessageDestination,
         sendId: String
-    ) async throws {
+    ) async throws -> SendReceipt {
         let route: String
         let threadId: String
         switch destination {
@@ -1388,11 +1421,46 @@ public struct CompanionClient: Sendable {
             threadId = selectedThreadId
         }
         guard Self.validRouteID(threadId), Self.validSendID(sendId) else { throw APIError.badURL }
-        try await send(try makeRequest(
+        return try await sendForReceipt(try makeRequest(
             "POST",
             route,
             body: ["text": text, "threadId": threadId, "sendId": sendId]
         ))
+    }
+
+    /// Take back a message the harness is holding.
+    ///
+    /// An entry that drained a moment ago is not an error worth showing —
+    /// that is the outcome the caller wanted. But that is matched positively
+    /// on the harness's own wording and never on the status alone: a computer
+    /// too old to have this route answers 404 for it, and reading that as
+    /// "already drained" would take the message off the phone while it is
+    /// still queued on the computer, and it would then arrive anyway.
+    public func cancelQueued(queueId: String, to destination: MessageDestination) async throws {
+        let route: String
+        let body: [String: Any]?
+        switch destination {
+        case let .bot(id, threadId):
+            guard Self.validRouteID(id), Self.validRouteID(queueId), Self.validRouteID(threadId) else {
+                throw APIError.badURL
+            }
+            route = "/api/bots/\(id)/queue/\(queueId)"
+            body = ["threadId": threadId]
+        case let .room(id, _):
+            guard Self.validRouteID(id), Self.validRouteID(queueId) else { throw APIError.badURL }
+            route = "/api/groups/\(id)/queue/\(queueId)"
+            body = nil
+        }
+        do {
+            try await send(try makeRequest("DELETE", route, body: body))
+        } catch let APIError.status(code, message) where code == 404 {
+            guard message?.localizedCaseInsensitiveContains(Self.alreadyDrainedQueueMessage) == true else {
+                throw APIError.status(
+                    code: 404,
+                    message: "This computer is too old to take back a queued message. Update OpenMausBot on it."
+                )
+            }
+        }
     }
 
     private static func validRouteID(_ value: String) -> Bool {
@@ -1405,6 +1473,10 @@ public struct CompanionClient: Sendable {
     private static func validSendID(_ value: String) -> Bool {
         (16...80).contains(value.utf8.count) && validRouteID(value)
     }
+
+    /// The harness's own answer when the entry is not in its queue. Matched
+    /// positively, never on the status alone — see cancelQueued.
+    private static let alreadyDrainedQueueMessage = "no such queued message"
 
     /// Answer an approval or a question.
     ///
