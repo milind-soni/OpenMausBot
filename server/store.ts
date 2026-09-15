@@ -701,6 +701,10 @@ export interface BotRecord {
    * composer queue until every assignment settles, then run as one
    * follow-up turn. Unset keeps the default steer-immediately behavior. */
   parkDirectMessages?: boolean;
+  /** Per-bot override of the global threads.autoArchiveDays window (#1280):
+   * absent inherits the global setting, 0 disables auto-archive for this
+   * bot alone. Auto-archive itself stays off unless configured somewhere. */
+  autoArchiveDays?: number;
   /** true after an edit/branch-switch rewound the visible conversation:
    * provider sessions still hold the abandoned branch, so the next turn
    * must start fresh (drop cursors) and replay the surviving path. */
