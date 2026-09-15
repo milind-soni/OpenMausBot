@@ -5,7 +5,7 @@
 // compatible — do not remove it); dispose tears an instance down without
 // touching its siblings.
 import { findCliCandidates } from "../env-path.ts";
-import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
+import { engineInstallPhase, installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import type {
   AnyProviderDriver,
   InstanceConfigMap,
@@ -31,9 +31,10 @@ export type RegistryEntry =
   | { instanceId: InstanceId; live?: undefined; shadow: ShadowInstance };
 
 /** The driver's install descriptor plus what this machine can do about it. */
-function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean): AnyProviderDriver["install"] {
+function withServerInstall(install: AnyProviderDriver["install"], npmPresent: boolean, baseDir?: string): AnyProviderDriver["install"] {
   const server = install ? serverInstallFor(install, npmPresent) : null;
-  return server ? { ...install, server } : install;
+  const phase = server ? engineInstallPhase(server.package, baseDir) : undefined;
+  return server ? { ...install, server: { ...server, ...(phase ? { phase } : {}) } } : install;
 }
 
 /** The `cli` field off a driver's default config, when it has one — the
@@ -157,7 +158,7 @@ export class ProviderRegistry {
 
   /** A driver's own installer (a managed download) first; otherwise the
    * app's npm prefix, when the driver's install one-liner is an npm package
-   * and npm is on PATH. False means Settings has nothing to offer here. */
+   * with automatic prerequisites. False means Settings has no installer. */
   async installRuntime(instanceId: InstanceId): Promise<boolean> {
     const entry = this.byId.get(instanceId);
     if (!entry) return false;
@@ -224,7 +225,7 @@ export class ProviderRegistry {
             capabilities: { computerMcp: false, agentsMcp: false, localComputerMcp: false },
             // an unknown driver has no driver record, hence no install path
             access: driver?.metadata.access ?? "subscription",
-            install: withServerInstall(driver?.install, npmPresent),
+            install: withServerInstall(driver?.install, npmPresent, this.enginesBaseDir),
             cli: entry.shadow.cli,
             cliDefault: cliDefaultOf(driver),
             // a shadow is exactly the "your CLI is broken, pick another"
@@ -258,7 +259,7 @@ export class ProviderRegistry {
             approvalReview: inst.reviewPermission !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",
-          install: withServerInstall(driver?.install, npmPresent),
+          install: withServerInstall(driver?.install, npmPresent, this.enginesBaseDir),
           authentication: inst.startAuthentication
             ? {
                 method: inst.getAuthentication && inst.completeAuthentication

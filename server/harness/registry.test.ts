@@ -255,7 +255,7 @@ process.exit(0);
     expect(await registry.installRuntime("missing")).toBe(false);
   });
 
-  it("offers nothing without npm, for a curl installer, or for a managed engine", async () => {
+  it("offers prerequisite setup without npm, but not for curl or managed installers", async () => {
     withFakeNpm(true);
     const fake = makeFakeDriver();
     Object.assign(fake.driver, { install: { command: { linux: "npm install -g fake-engine" } } });
@@ -263,8 +263,7 @@ process.exit(0);
     // injected rather than simulated through PATH.
     const without = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data"), npmAvailable: () => false });
     await without.load({ a: { driver: "fake" } });
-    expect((await without.describe())[0].install?.server).toBeUndefined();
-    expect(await without.installRuntime("a")).toBe(false);
+    expect((await without.describe())[0].install?.server).toEqual({ package: "fake-engine" });
     const registry = new ProviderRegistry([fake.driver], { enginesBaseDir: join(scratch, "data") });
     await registry.load({ a: { driver: "fake" } });
     Object.assign(fake.driver, { install: { command: { linux: "curl -fsSL https://example.test/install.sh | bash" } } });

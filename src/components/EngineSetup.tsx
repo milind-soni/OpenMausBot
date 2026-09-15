@@ -37,6 +37,18 @@ export function needsCli(instance: InstanceInfo | undefined): boolean {
   return instance?.snapshot.state !== "available";
 }
 
+/** Missing inventory is not evidence of a missing executable. */
+export function engineStatus(instance: InstanceInfo): string {
+  const phase = instance.install?.server?.phase;
+  if (phase) return t(phase === "preparing" ? "engineSetup.preparingTools" : "engineSetup.installingShort");
+  if (needsCli(instance)) {
+    const absent = instance.snapshot.state === "unavailable" && !instance.install?.managed && instance.cliDefault && !instance.cli && instance.cliCandidates?.length === 0;
+    return t(absent ? "engineSetup.notInstalled" : "model.setupRequired");
+  }
+  if (instance.access !== "custom" && needsSignIn(instance)) return t("model.signInRequired");
+  return t("model.ready");
+}
+
 export function CommandRow({
   command,
   actionLabel,
@@ -154,14 +166,40 @@ export function CommandRow({
 /** One click installs or updates the engine on the machine running the
  * server, as the server's own user, into the app's own folder. The terminal
  * command stays behind a disclosure for people who prefer it. */
-function ServerEngineInstall({ instance, mode, command }: { instance: InstanceInfo; mode: "install" | "update"; command: string | null }) {
-  const { refreshInstances, refreshModels } = useStore();
+export function ServerEngineInstall({ instance, mode, command }: { instance: InstanceInfo; mode: "install" | "update"; command: string | null }) {
+  const { dispatch, refreshInstances, refreshModels } = useStore();
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshFailed, setRefreshFailed] = useState(false);
+  const phase = instance.install?.server?.phase;
+  const running = busy || Boolean(phase);
+
+  useEffect(() => {
+    if (!running) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      await refreshInstances().catch(() => {});
+      if (!stopped) timer = setTimeout(() => void poll(), 1500);
+    };
+    timer = setTimeout(() => void poll(), 500);
+    return () => { stopped = true; clearTimeout(timer); };
+  }, [running, refreshInstances]);
+
+  const check = async () => {
+    setRefreshFailed(false);
+    try {
+      // Store.refreshInstances intentionally swallows offline errors. This
+      // explicit user check must distinguish failure from a stale snapshot.
+      const { instances } = await api("/api/instances", { signal: AbortSignal.timeout(15_000) });
+      dispatch({ type: "instances", instances });
+      await refreshModels(instance.instanceId);
+    } catch { setRefreshFailed(true); }
+  };
 
   const run = async () => {
-    if (busy) return;
+    if (running) return;
     setBusy(true);
     setDone(false);
     setError(null);
@@ -169,8 +207,7 @@ function ServerEngineInstall({ instance, mode, command }: { instance: InstanceIn
       await api(`/api/instances/${encodeURIComponent(instance.instanceId)}/install`, { method: "POST" });
       setDone(true);
       // The install has happened even if the status refresh fails.
-      await refreshInstances().catch(() => {});
-      await refreshModels(instance.instanceId).catch(() => {});
+      await check();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -182,17 +219,20 @@ function ServerEngineInstall({ instance, mode, command }: { instance: InstanceIn
     <div className="mt-3 space-y-2">
       <button
         type="button"
-        disabled={busy}
-        onClick={() => void run()}
+        disabled={running}
+        onClick={() => void (done ? check() : run())}
         className="flex w-full items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[12.5px] font-semibold text-white hover:brightness-110 disabled:cursor-wait disabled:opacity-70"
       >
-        {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-        {busy
-          ? t("engineSetup.serverInstalling")
+        {running ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+        {running
+          ? t(phase === "installing" ? "engineSetup.serverInstalling" : "engineSetup.preparingTools")
+          : done ? t("engineSetup.checkStatus")
           : t(mode === "update" ? "engineSetup.serverUpdate" : "engineSetup.serverInstall", { name: instance.displayName })}
       </button>
       {done && !busy && <p role="status" className="text-center text-[11px] text-success">{t("engineSetup.serverInstalled")}</p>}
       {error && <p role="alert" className="whitespace-pre-wrap text-[11.5px] leading-relaxed text-danger">{error}</p>}
+      {refreshFailed && <p role="alert" className="text-[11.5px] text-warning">{t("engineSetup.refreshFailed")}</p>}
+      <p className="text-[11.5px] leading-relaxed text-ink-secondary">{t("engineSetup.automaticTools")}</p>
       {command && (
         <details className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[11.5px] text-ink-secondary">
           <summary className="cursor-pointer select-none">{t("engineSetup.preferTerminal")}</summary>
@@ -227,7 +267,7 @@ export function EngineUpdateNotice({
         </div>
       </div>
       {instance?.install?.server
-        ? <ServerEngineInstall instance={instance} mode="update" command={update.command} />
+        ? <ServerEngineInstall key={instance.instanceId} instance={instance} mode="update" command={update.command} />
         : <CommandRow command={update.command} actionLabel={t("engineSetup.openUpdate")} compact />}
     </div>
   );
@@ -462,7 +502,7 @@ export function EngineSetup({
       ) : pasteSignIn ? (
         <ClaudeSignIn key={instance.instanceId} instanceId={instance.instanceId} />
       ) : install.server && !signInOnly ? (
-        <ServerEngineInstall instance={instance} mode="install" command={installCommand} />
+        <ServerEngineInstall key={instance.instanceId} instance={instance} mode="install" command={installCommand} />
       ) : install.managed ? (
         <ManagedEngineSetup instance={instance} signInOnly={signInOnly} />
       ) : command ? (

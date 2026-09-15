@@ -34,6 +34,7 @@ instances[5].install!.server = { package: "kimi-fixture" };
 instances[3].install!.server = { package: "opencode-fixture" };
 instances[3].snapshot.update = { title: "OpenCode update available", message: "A sample update for this isolated preview.", command: "echo 'Preview only'" };
 instances.push({ ...instances[0], instanceId: "claude-local", displayName: "Claude · Local", access: "custom", claudeAccount: undefined, snapshot: { state: "available", authenticated: false } });
+let cleanInstall: "off" | "fail" | "ready" = "off";
 const controller = new AbortController();
 const cancel = () => controller.abort();
 process.once("SIGINT", cancel);
@@ -54,8 +55,42 @@ try {
         const path = req.url?.split("?")[0];
         const json = (value: unknown, status = 200) => { res.statusCode = status; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); };
         if (path === "/api/instances" && req.method === "GET") return json({ instances });
+        if ((path === "/__fixture/clean" || path === "/__fixture/picker") && req.method === "POST") {
+          cleanInstall = path === "/__fixture/clean" ? "fail" : "ready";
+          instances.splice(0, instances.length, {
+            instanceId: "codex", driverKind: "codex", displayName: "Codex", cliDefault: "codex", cliCandidates: [],
+            snapshot: { state: "unavailable" }, models: { default: "fixture", options: [] },
+            install: { needsNode: true, server: { package: "codex-fixture" } },
+            authentication: { method: "device-code" },
+          });
+          if (path === "/__fixture/picker") instances.push({
+            ...instances[0], instanceId: "qwen", driverKind: "qwenAgent", displayName: "Qwen", cliDefault: "qwen",
+            snapshot: { state: "unavailable" }, install: { needsNode: true, server: { package: "qwen-fixture" }, signInCommand: "echo 'Preview only'" },
+            authentication: undefined,
+          });
+          return json({ ok: true });
+        }
+        const installId = /^\/api\/instances\/(codex|qwen)\/install$/.exec(path ?? "")?.[1];
+        if (cleanInstall !== "off" && installId && req.method === "POST") {
+          const engine = instances.find((entry) => entry.instanceId === installId)!;
+          if (engine.install!.server!.phase) return json({ error: "Fixture install already running" }, 409);
+          engine.install!.server!.phase = "preparing";
+          setTimeout(() => { engine.install!.server!.phase = "installing"; }, 2000);
+          setTimeout(() => {
+            delete engine.install!.server!.phase;
+            if (cleanInstall === "fail") {
+              cleanInstall = "ready";
+              return json({ error: "Fixture download interrupted. Retry installation." }, 503);
+            }
+            engine.snapshot = { state: "available", authenticated: false, version: "fixture" };
+            engine.cliCandidates = ["/fixture/codex"];
+            return json({ instances });
+          }, 4500);
+          return;
+        }
+        if (cleanInstall !== "off" && /^\/api\/instances\/(codex|qwen)\/refresh-models$/.test(path ?? "")) return json({ instances });
         if (path === "/__fixture/connect" && req.method === "POST") {
-          instances[4].snapshot.authenticated = !instances[4].snapshot.authenticated;
+          if (instances[4]) instances[4].snapshot.authenticated = !instances[4].snapshot.authenticated;
           return json({ ok: true });
         }
         if (path === "/api/cli-candidates") return json({ candidates: ["/preview/bin/claude"] });

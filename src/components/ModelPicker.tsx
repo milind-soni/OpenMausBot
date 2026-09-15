@@ -11,7 +11,8 @@ import type { EffortLevel } from "../../server/contracts.ts";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { isCustomOnly, splitEngineRail } from "@/lib/engine-rail";
 import { ProviderMark } from "./ProviderIcons";
-import { EngineSetup, EngineUpdateNotice, needsCli, needsSignIn } from "./EngineSetup";
+import { EngineSetup, EngineUpdateNotice, engineStatus, needsCli, needsSignIn } from "./EngineSetup";
+export { engineStatus } from "./EngineSetup";
 import { EngineGroupLabel } from "./EngineGroupLabel";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
@@ -28,12 +29,6 @@ function modelLabel(instance: InstanceInfo | undefined, model: string): string {
 
 function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
   return instance?.models.options.find((option) => option.id === model)?.provider;
-}
-
-export function engineStatus(instance: InstanceInfo): string {
-  if (needsCli(instance)) return t("model.setupRequired");
-  if (needsSignIn(instance)) return t("model.signInRequired");
-  return instance.snapshot.version ?? t("model.ready");
 }
 
 /** The others capitalize cleanly; "xhigh" would read "Xhigh". */
@@ -175,10 +170,11 @@ function ModelSearch({
   );
 }
 
-export function ModelEngineRail({ instances, selectedInstance, claudeInstance, onSelect }: {
+export function ModelEngineRail({ instances, selectedInstance, claudeInstance, activeInstanceId, onSelect }: {
   instances: InstanceInfo[];
   selectedInstance?: InstanceInfo;
   claudeInstance?: InstanceInfo;
+  activeInstanceId?: string;
   onSelect: (instance: InstanceInfo) => void;
 }) {
   const firstClaude = instances.find((instance) => instance.driverKind === "claudeAgent" && instance.claudeAccount?.isDefault)
@@ -191,6 +187,8 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
     const selected = claude ? selectedInstance?.driverKind === "claudeAgent" : instance.instanceId === selectedInstance?.instanceId;
     const label = claude ? "Claude" : instance.displayName;
     const attention = needsCli(target) || needsSignIn(target) || Boolean(target.snapshot.update);
+    const active = target.instanceId === activeInstanceId && !needsCli(target) && (target.access === "custom" || !needsSignIn(target));
+    const status = active && !target.install?.server?.phase ? t("engineSetup.active") : engineStatus(target);
     return (
       <button
         type="button"
@@ -198,16 +196,20 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
         onClick={() => onSelect(target)}
         aria-label={label}
         aria-pressed={selected}
-        title={`${label} · ${engineStatus(target)}`}
-        className={cn("relative flex size-9 items-center justify-center rounded-lg", selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60")}
+        title={`${label} · ${status}`}
+        className={cn("relative flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left", selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60")}
       >
-        <ProviderMark driverKind={instance.driverKind} size={18} />
+        <span className="shrink-0"><ProviderMark driverKind={instance.driverKind} size={16} /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[11.5px] font-medium text-ink">{label}</span>
+          <span className={cn("block text-[10px] leading-tight", active ? "text-success" : "text-ink-secondary")}>{status}</span>
+        </span>
         {attention && <span className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-warning ring-2 ring-panel" />}
       </button>
     );
   };
   return (
-    <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-panel p-2">
+    <div className="flex w-32 shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-panel p-1.5">
       {subscription.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-0.5 text-center text-[9px]">Cloud</EngineGroupLabel>}
       {subscription.map(railButton)}
       {local.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px]">Local</EngineGroupLabel>}
@@ -505,7 +507,7 @@ export function ModelPicker({
               : "absolute right-0 top-full z-30 mt-2 w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(480px,calc(100dvh-7rem))] shadow-2xl shadow-black/50",
           )}
         >
-          <ModelEngineRail instances={state.instances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} onSelect={selectRail} />
+          <ModelEngineRail instances={state.instances} selectedInstance={railInstance} claudeInstance={claudeRailInstance} activeInstanceId={selection.instanceId} onSelect={selectRail} />
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
             {threadId && (

@@ -6,7 +6,7 @@
 // terminal and comes back. The guide reacts to the result.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, RefreshCw } from "lucide-react";
-import { EngineSetup } from "@/components/EngineSetup";
+import { EngineSetup, engineStatus } from "@/components/EngineSetup";
 import { engineReady } from "@/components/EngineLibrary";
 import { ProviderMark } from "@/components/ProviderIcons";
 import { cn } from "@/lib/cn";
@@ -18,7 +18,7 @@ function version(instance: InstanceInfo): string | null {
   return instance.snapshot.version ? instance.snapshot.version.split(" ")[0]! : null;
 }
 
-function StatusPill({ ready }: { ready: boolean }) {
+function StatusPill({ ready, instance }: { ready: boolean; instance: InstanceInfo }) {
   return (
     <span
       className={cn(
@@ -27,7 +27,7 @@ function StatusPill({ ready }: { ready: boolean }) {
       )}
     >
       <span className={cn("size-1.5 rounded-full", ready ? "bg-success" : "bg-warning")} aria-hidden="true" />
-      {ready ? t("onboarding.engines.ready") : t("onboarding.engines.needsSetup")}
+      {engineStatus(instance)}
     </span>
   );
 }
@@ -53,7 +53,7 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
   const [checking, setChecking] = useState(false);
   // Every setup block starts closed; a row opens its own on click. The
   // list stays a scannable summary until the user chooses an engine.
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     const request = ++latestRequest.current;
@@ -82,7 +82,12 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
   const ready = engines.filter(engineReady);
   const setup = engines.filter((e) => !engineReady(e));
   const allReady = instances !== null && ready.length > 0 && setup.length === 0;
-  const expanded = open;
+  // With no ready engine, make one useful action visible without an extra
+  // disclosure click. An existing sign-in wins; otherwise suggest Codex.
+  const suggested = setup.find((e) => e.snapshot.state === "available")
+    ?? setup.find((e) => e.driverKind === "codex" && e.install?.server)
+    ?? setup.find((e) => e.install?.server);
+  const expanded = open === undefined ? (ready.length === 0 ? suggested?.instanceId : null) : open;
 
   // The guide searches while the harness answers, then looks proud or
   // curious depending on whether there is work left for the user.
@@ -102,7 +107,7 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
 
   return (
     <div className="flex min-h-0 flex-col">
-      <p className="animate-rise mt-1 text-[13.5px] text-ink-secondary">{t("onboarding.engines.intro")}</p>
+      <p className="animate-rise mt-1 text-[13.5px] text-ink-secondary">{t("onboarding.engines.serverIntro")}</p>
 
       {/* the whole story in one line, and the way back after a terminal trip */}
       <div className="animate-rise mt-4 flex items-center justify-between gap-3" style={staggerIndex(1)}>
@@ -154,7 +159,7 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
                         <span className="truncate text-[13.5px] font-medium text-ink">{instance.displayName}</span>
                         {v && <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">{v}</span>}
                       </div>
-                      <StatusPill ready />
+                      <StatusPill ready instance={instance} />
                     </div>
                   ) : (
                     <button
@@ -170,7 +175,7 @@ export function EnginesBeat({ onNext, setMascot, bump }: BeatProps) {
                         <span className="truncate text-[13.5px] font-medium text-ink">{instance.displayName}</span>
                         {v && <span className="shrink-0 text-[11.5px] tabular-nums text-ink-secondary">{v}</span>}
                       </div>
-                      <StatusPill ready={false} />
+                      <StatusPill ready={false} instance={instance} />
                       <ChevronDown
                         size={14}
                         className={cn("shrink-0 text-ink-secondary transition-transform duration-200", expanded === instance.instanceId && "rotate-180")}

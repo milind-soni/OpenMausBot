@@ -177,6 +177,17 @@ describe("Claude provider and account selection", () => {
   const personal: InstanceInfo = { ...engine(), instanceId: "claude-personal", driverKind: "claudeAgent", displayName: "Personal" };
   const work: InstanceInfo = { ...engine(), instanceId: "claude-work", driverKind: "claudeAgent", displayName: "Work", access: "custom" };
 
+  it("shows engine status beside its name and keeps active separate from browsing", () => {
+    const missing: InstanceInfo = { ...engine(), instanceId: "qwen", displayName: "Qwen", cliDefault: "qwen", cliCandidates: [], snapshot: { state: "unavailable" } };
+    const markup = renderToStaticMarkup(createElement(ModelEngineRail, {
+      instances: [engine(), missing], selectedInstance: missing, activeInstanceId: "codex", onSelect: () => {},
+    }));
+    expect(markup).toContain(">Codex</span>");
+    expect(markup).toContain(">Active</span>");
+    expect(markup).toContain(">Not installed</span>");
+    expect(markup).toContain('title="Qwen · Not installed"');
+  });
+
   it("renders one Claude provider across Cloud and Local, pressed for either account", () => {
     for (const selectedInstance of [personal, work]) {
       const markup = renderToStaticMarkup(createElement(ModelEngineRail, {
@@ -187,7 +198,6 @@ describe("Claude provider and account selection", () => {
       expect(markup).toContain('aria-label="Codex" aria-pressed="false"');
       expect(markup).not.toContain('aria-label="Personal"');
       expect(markup).not.toContain('aria-label="Work"');
-      expect(markup).toContain("w-14");
     }
   });
 
