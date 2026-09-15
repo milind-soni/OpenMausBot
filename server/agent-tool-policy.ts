@@ -16,6 +16,7 @@ export const READ_ONLY_AGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "session_read",
   "list_routines",
   "skills_list",
+  "task_list",
 ]);
 
 const READ_ONLY_ANNOTATIONS = Object.freeze({

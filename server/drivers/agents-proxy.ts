@@ -830,6 +830,46 @@ const TOOLS = [
       required: ["action", "skill_md", "source"],
     },
   },
+  {
+    name: "task_create",
+    description:
+      "File work on the durable task board — the fleet's shared queue, which survives a restart and is not a message to any one bot. Use this for something that should get done on its own schedule, not for a question you need answered now (ask_bot) or a reply due this turn (delegate_bot). The task starts in \"todo\". Name assignee_bot_id (from list_bots) to say who should do it: the board's own dispatcher hands it to that bot automatically once it is ready and that bot is free, without you doing anything else. Leave assignee_bot_id out to leave it unassigned for a human to pick up. Give parent_task_ids (other task ids) to make this task wait until every one of them reaches done or archived before it can be claimed. There is no tool here to report finishing a task or getting blocked on one from inside a turn — that only happens through the board itself.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", description: "Short, specific summary — this becomes the task's name on the board." },
+        body: { type: "string", description: "Optional detail: what needs to happen and what \"done\" looks like." },
+        assignee_bot_id: { type: "string", description: "Optional: the bot (from list_bots) who should do this. Omit to leave it unassigned." },
+        parent_task_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional: ids of other board tasks that must reach done or archived before this one can be claimed.",
+        },
+        owner: { type: "string", description: "Optional: who is responsible — a bot id, or \"person\" for the user." },
+        due_at: { type: "string", description: "Optional: when it is due, as an ISO date or date-time." },
+        budget_usd: { type: "number", description: "Optional: the most this task may spend, in dollars. The harness pauses the task at that amount; only the person can raise it." },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "task_list",
+    description:
+      "See what is filed on the durable task board, across every status (todo, ready, running, blocked, review, done) unless you ask for specific ones — archived tasks are left out unless you ask for them by name. You see your own tasks, tasks involving a bot you can reach, and unassigned ones a person filed; another section's work is not yours to read. Use mine_only to see just the tasks assigned to you.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        status: {
+          type: "array",
+          items: { type: "string", enum: ["todo", "ready", "running", "blocked", "review", "done", "archived"] },
+          description: "Optional: only these statuses. Omit to see everything except archived.",
+        },
+        mine_only: { type: "boolean", description: "Only tasks assigned to you. Default false." },
+      },
+    },
+  },
 ].map((tool) => {
   const annotations = agentToolAnnotations(tool.name);
   return annotations ? { ...tool, annotations } : tool;
@@ -846,6 +886,16 @@ const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_com
 const SHAREABLE_TOOLS = SHARED_COMPUTERS_ENABLED
   ? AUTHORING_TOOLS
   : AUTHORING_TOOLS.filter((tool) => !SHARED_COMPUTER_TOOL_NAMES.has(tool.name));
+// The durable task board (server/task-board.ts + task-dispatcher.ts) ships
+// off by default; the harness only sets this when features.board is on
+// (server/index.ts agentsIntegration), matching OMB_SKILL_AUTHORING_ENABLED
+// just above. An existing install that never turns the board on never
+// even sees these two tools.
+const BOARD_TOOL_NAMES = new Set(["task_create", "task_list"]);
+const BOARD_ENABLED = process.env.OMB_BOARD_ENABLED === "1";
+const BOARD_TOOLS = BOARD_ENABLED
+  ? SHAREABLE_TOOLS
+  : SHAREABLE_TOOLS.filter((tool) => !BOARD_TOOL_NAMES.has(tool.name));
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
@@ -854,7 +904,7 @@ const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegatio
 const COORDINATING = process.env.OMB_ROOM_TURN === "1";
 const OWN_THREAD_CREATION = process.env.OMB_OWN_THREAD_CREATION === "1";
 const AVAILABLE_TOOLS = COORDINATING
-  ? SHAREABLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
+  ? BOARD_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && OWN_THREAD_CREATION))
     .map(tool => tool.name === "start_thread" ? {
       ...tool,
       description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
@@ -862,7 +912,7 @@ const AVAILABLE_TOOLS = COORDINATING
         bot_id: { type: "string", enum: [BOT_ID], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." },
       } },
     } : tool)
-  : SHAREABLE_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
+  : BOARD_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -1650,6 +1700,56 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     return {
       text: `A confirmation card is now visible to the user for ${proposal}.${warningText}\n\n${status} End this turn and wait for the decision.`,
     };
+  }
+  if (name === "task_create") {
+    const title = typeof args.title === "string" ? args.title.trim() : "";
+    if (!title) return { text: "task_create needs a title.", isError: true };
+    const assigneeBotId = typeof args.assignee_bot_id === "string" && args.assignee_bot_id.trim()
+      ? args.assignee_bot_id.trim()
+      : undefined;
+    const parentTaskIds = Array.isArray(args.parent_task_ids) ? args.parent_task_ids.map(String) : undefined;
+    const r = await api("/api/internal/task-create", {
+      method: "POST",
+      body: JSON.stringify({
+        title,
+        body: typeof args.body === "string" ? args.body : undefined,
+        assigneeBotId,
+        parentTaskIds,
+        ...(typeof args.owner === "string" && args.owner.trim() ? { owner: args.owner.trim() } : {}),
+        ...(typeof args.due_at === "string" && Number.isFinite(Date.parse(args.due_at)) ? { dueAt: Date.parse(args.due_at) } : {}),
+        ...(typeof args.budget_usd === "number" && Number.isFinite(args.budget_usd) && args.budget_usd > 0 ? { budgetUsd: args.budget_usd } : {}),
+      }),
+    });
+    if (r.error) return { text: String(r.error), isError: true };
+    const task = (r.task ?? {}) as Json;
+    const assignment = typeof task.assigneeBotId === "string"
+      ? `assigned to ${task.assigneeBotId}`
+      : "unassigned — a human can assign it, or claim it yourself with task_list + a peer's help";
+    return {
+      text: `Filed task ${task.id} “${task.title}”, status: ${task.status}, ${assignment}.`,
+    };
+  }
+  if (name === "task_list") {
+    const status = Array.isArray(args.status) ? args.status.map(String) : undefined;
+    const r = await api("/api/internal/task-list", {
+      method: "POST",
+      body: JSON.stringify({ status, mineOnly: args.mine_only === true }),
+    });
+    const tasks = (r.tasks as Array<Json>) ?? [];
+    if (!tasks.length) return { text: "No board tasks match." };
+    const lines = tasks.map((task) => {
+      const assignee = typeof task.assigneeBotId === "string" ? `, assignee: ${task.assigneeBotId}` : "";
+      const attempts = typeof task.attempts === "number" && task.attempts > 1 ? `, attempts: ${task.attempts}` : "";
+      const blocked = typeof task.blockedReason === "string" && task.blockedReason ? `, blocked: ${task.blockedReason}` : "";
+      const owner = typeof task.owner === "string" && task.owner ? `, owner: ${task.owner}` : "";
+      const due = typeof task.dueAt === "number" ? `, due ${new Date(task.dueAt).toISOString().slice(0, 10)}` : "";
+      const budget = typeof task.budgetUsd === "number"
+        ? `, spent $${Number(task.spentUsd ?? 0).toFixed(3)} of $${task.budgetUsd.toFixed(3)}`
+        : typeof task.spentUsd === "number" && task.spentUsd > 0 ? `, spent $${task.spentUsd.toFixed(3)}` : "";
+      const result = typeof task.result === "string" && task.result ? `\n  result: ${task.result.slice(0, 200)}` : "";
+      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}`;
+    });
+    return { text: `Board tasks:\n${lines.join("\n")}` };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

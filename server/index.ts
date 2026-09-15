@@ -137,6 +137,8 @@ import {
   skillAuthoringEnabled,
   sharedComputersEnabled,
   builtInBrowserEnabled,
+  boardEnabled,
+  boardMaxRunning,
   browserProfileReplacementConflict,
   browserProfilePartitionTarget,
   syncCredentialEnv,
@@ -147,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -348,6 +350,26 @@ import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
+import {
+  addComment,
+  BOARD_STATUSES,
+  commentsOf,
+  createTask as createBoardTask,
+  getTask as getBoardTask,
+  listTasks as listBoardTasks,
+  openBoard,
+  patchTask as patchBoardTask,
+  setStatus as setBoardTaskStatus,
+  TASK_BODY_MAX,
+  TASK_COMMENT_MAX,
+  TASK_COMMENT_PAGE,
+  TASK_TITLE_MAX,
+  visibleTo as visibleBoardTasks,
+  type BoardStatus,
+  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON } from "./task-board.ts";
+import { createBotDispatch } from "./task-dispatch-bot.ts";
+import { DEFAULT_STALE_AFTER_MS, createDispatcher as createBoardDispatcher } from "./task-dispatcher.ts";
+import { createTaskTurnWatch } from "./task-turn-watch.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BrowserRuntime } from "./browser-runtime.ts";
 import { BrowserLive } from "./browser-live.ts";
@@ -867,6 +889,12 @@ const phoneProxyPath = SPAWNED_PROXIES.phone;
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
+/** Narrow an untrusted status string (an HTTP PATCH body, a tool argument)
+ * before it reaches a typed BoardStatus parameter. */
+function isBoardStatus(value: unknown): value is BoardStatus {
+  return typeof value === "string" && (BOARD_STATUSES as readonly string[]).includes(value);
+}
+
 function agentsIntegration(
   botId: string,
   threadId: string,
@@ -876,6 +904,7 @@ function agentsIntegration(
   roomHandoffId?: string,
   roomCoordination = false,
   ownThreadCreation = false,
+  boardToolsEnabled = false,
 ) {
   const token = mintInternalCapability({
     botId,
@@ -908,6 +937,7 @@ function agentsIntegration(
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
+      OMB_BOARD_ENABLED: boardToolsEnabled ? "1" : "0",
     },
   };
 }
@@ -3825,6 +3855,7 @@ function scheduleTurnDigest(input: {
         });
         return message.id;
       });
+      recordBoardResult(input.threadId, renderDigest(digest));
     } catch (error) {
       console.error(`digest: could not record turn ${input.turnId} on ${input.threadId}:`, error instanceof Error ? error.message : error);
     }
@@ -4778,6 +4809,7 @@ bus.subscribe((event: RuntimeEvent) => {
               : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
         noteSpend(DATA_DIR, event.cost ?? null);
+        bookBoardSpend(event.threadId, event.cost ?? null);
         if (completedTurnId) {
           scheduleTurnDigest({
             botId: bot.id,
@@ -4857,6 +4889,7 @@ bus.subscribe((event: RuntimeEvent) => {
             : turnTriggers.get(event.threadId) ?? { kind: "owner" },
         });
         noteSpend(DATA_DIR, event.cost ?? null);
+        bookBoardSpend(event.threadId, event.cost ?? null);
       }
       if (speaker && group?.busyBotId === speaker.botId) {
         releaseTurnResources(turnResourceOwners.get(event.threadId));
@@ -6253,7 +6286,7 @@ async function startTurn(
           ? store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")
           : userMessage;
         const ownThreadCreation = boundedCoordination && !opts?.coordination && Boolean(origin && !origin.peerAsk);
-        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination, ownThreadCreation);
+        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination, ownThreadCreation, boardEnabled(cfg));
       }
       if (instance.adapter.capabilities.hooks === true && hooksEnabled()) {
         integrations.hooks = hooksIntegration(bot.id, threadId, dispatchClaimId);
@@ -6881,6 +6914,161 @@ calendarCalls = new CalendarCallManager({
   botExists: (botId) => Boolean(store.bot(botId)),
   onDue: deliverCalendarCall,
 });
+
+// ── the durable task board's dispatcher tick ─────────────────────────────
+// Everything here is gated on features.board, off by default: with the flag
+// off no tasks.db is created, no 30s timer exists, and the tick mutates
+// nothing — turning a feature flag off must never mutate the data behind it,
+// and an install that never turns the board on must see no new behaviour at
+// all. Storage opens lazily on the first use while the flag is on, and the
+// timer is started (and stopped) as the flag flips, so no restart is needed
+// either way. The policy that decides WHO may take a board task lives in
+// server/task-dispatch-bot.ts; what stays here is the wiring that supplies
+// it with the store, startTurn, the watch and the decision log.
+let boardOpened = false;
+/** The single gate every board surface goes through: is the board on, and —
+ * if so — is its storage open? Returns false when the flag is off, which is
+ * what every /api/tasks* route turns into a 404 and what makes the tick a
+ * genuine no-op. */
+/** Phase 2 part 1: a settled turn in a board task's thread books its cost
+ * against the task's money cap; never fails the turn it is booking. */
+function bookBoardSpend(threadId: string, costUsd: number | null): void {
+  if (!boardReady()) return;
+  try {
+    const task = taskByThread(threadId);
+    if (!task) return;
+    const booked = bookSpend(task.id, costUsd);
+    if (booked.paused || booked.warned) broadcast({ kind: "board", taskId: task.id } as never);
+    if (booked.paused) console.error(`[omb-board] task ${task.id} ${BUDGET_PAUSED_REASON}: $${booked.task.spentUsd.toFixed(3)} of $${booked.task.budgetUsd?.toFixed(3)}`);
+  } catch (error) {
+    console.error(`[omb-board] could not book spend for ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** The digest is the task's result: what the turn did, not only what it said. */
+function recordBoardResult(threadId: string, digestLine: string): void {
+  if (!boardReady()) return;
+  try {
+    const task = taskByThread(threadId);
+    if (task) setResult(task.id, digestLine);
+  } catch (error) {
+    console.error(`[omb-board] could not record the result for ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function boardReady(): boolean {
+  if (!boardEnabled(cfg)) return false;
+  if (!boardOpened) {
+    openBoard();
+    boardOpened = true;
+  }
+  return true;
+}
+// Resolved ONCE and handed to both the watch and the dispatcher. They are
+// two halves of one agreement — the watch keeps a live turn's heartbeat
+// inside the window the dispatcher reclaims against — so there must be no
+// way to configure them apart: a watch beating against a window the
+// dispatcher no longer uses would let live turns be reclaimed and re-run.
+const boardStaleAfterMs = DEFAULT_STALE_AFTER_MS;
+// Closes the crash-recovery gap the dispatcher deliberately leaves open:
+// nothing else heartbeats a claimed task while its turn runs, or settles it
+// when the turn ends, so a dispatched task whose turn SUCCEEDS would still
+// go cold under staleRunning and be reclaimed, retried, and eventually
+// blocked — indistinguishable from one that actually crashed.
+// task-turn-watch.ts is the observer: the dispatch policy arms it the moment
+// a turn is about to start, and the bus subscriber just under it feeds every
+// runtime event for that thread back in — heartbeat on real activity, settle
+// (review/blocked) the instant the turn ends. Its keepalive is bounded by a
+// silence budget and by threadBusy below, so a wedged turn stops looking
+// alive instead of holding its concurrency slot for the life of the process.
+const boardTurnWatch = createTaskTurnWatch({
+  staleAfterMs: boardStaleAfterMs,
+  isThreadAlive: (botId, threadId) => threadBusy(botId, threadId),
+});
+bus.subscribe((event: RuntimeEvent) => {
+  // Same guard every other terminal-state listener on this bus applies
+  // (see delegationWatch's subscriber above): a quarantined post-stop event,
+  // or a session.exited with no turnId while the bot/group is still busy,
+  // is not real evidence the turn ended — a resumable driver can cycle its
+  // underlying session mid-turn. Treating either as "the turn is over"
+  // would settle a board task to blocked while its turn is still running.
+  if (shouldIgnoreProviderEvent(event)) return;
+  boardTurnWatch.handle(event);
+});
+const boardDispatch = createBotDispatch<BotRecord>({
+  boardEnabled: () => boardEnabled(cfg),
+  bot: (botId) => store.bot(botId),
+  approvalMode: (bot) => approvalModeForTurn(bot),
+  createRunThread: (bot, title) => store.createTask(bot.id, title, false),
+  startTurn: (bot, prompt, opts) => startTurn(bot.id, prompt, opts),
+  watch: (taskId, threadId, botId) => boardTurnWatch.watch(taskId, threadId, { botId }),
+  unwatch: (taskId) => boardTurnWatch.unwatch(taskId),
+  failWatch: (threadId, reason) => boardTurnWatch.fail(threadId, reason),
+  audit: ({ threadId, botId, botName, title }) =>
+    appendDecision(DATA_DIR, {
+      threadId,
+      botId,
+      botName,
+      tool: "board.dispatch",
+      summary: title,
+      decision: "auto-approved",
+      source: "board",
+      unattended: true,
+    }),
+  redact: redactSecretsInText,
+  log: (message) => console.error(message),
+  defaultBudgetUsd: () => boardDefaultBudgetUsd(cfg),
+});
+const boardDispatcher = createBoardDispatcher({
+  maxRunning: boardMaxRunning(cfg),
+  staleAfterMs: boardStaleAfterMs,
+  enabled: boardReady,
+  canDispatch: boardDispatch.canDispatch,
+  dispatch: boardDispatch.dispatch,
+  emit: (payload) => broadcast(payload),
+});
+/** One cap check for both board write paths (the HTTP routes and the
+ * task_create tool). Unbounded titles and bodies are out of step with the
+ * rest of this file — an internal thread title caps at 80, a room post at
+ * ROOM_POST_MAX_CHARS — and a looping bot would otherwise write rows of any
+ * size that every board read and every SSE broadcast then carries. */
+/** owner / dueAt / budgetUsd from a request body (Phase 2 part 1): each
+ * tri-state (absent, null, value); a bad shape is a 400, never a guess. */
+function boardFieldsFromBody(body: any): { owner?: string | null; dueAt?: number | null; budgetUsd?: number | null } | { error: string } {
+  const out: { owner?: string | null; dueAt?: number | null; budgetUsd?: number | null } = {};
+  if (body?.owner !== undefined) {
+    if (body.owner !== null && (typeof body.owner !== "string" || !body.owner.trim() || body.owner.length > 120)) return { error: "owner must be a bot id, \"person\", or null" };
+    out.owner = body.owner === null ? null : body.owner.trim();
+  }
+  if (body?.dueAt !== undefined) {
+    if (body.dueAt !== null && (typeof body.dueAt !== "number" || !Number.isFinite(body.dueAt) || body.dueAt <= 0)) return { error: "dueAt must be a time in milliseconds, or null" };
+    out.dueAt = body.dueAt === null ? null : Math.trunc(body.dueAt);
+  }
+  if (body?.budgetUsd !== undefined) {
+    if (body.budgetUsd !== null && (typeof body.budgetUsd !== "number" || !Number.isFinite(body.budgetUsd) || body.budgetUsd <= 0 || body.budgetUsd > 10_000)) return { error: "budgetUsd must be a positive amount in dollars, or null for no cap" };
+    out.budgetUsd = body.budgetUsd;
+  }
+  return out;
+}
+
+function boardInputTooLong(title?: string, body?: string): string | null {
+  if (title !== undefined && title.length > TASK_TITLE_MAX) {
+    return `a task title is at most ${TASK_TITLE_MAX} characters`;
+  }
+  if (body !== undefined && body.length > TASK_BODY_MAX) {
+    return `a task body is at most ${TASK_BODY_MAX} characters — keep the detail in the task's comments`;
+  }
+  return null;
+}
+
+/** Start or stop the tick as features.board flips, so the flag needs no
+ * restart in either direction and an install with the board off carries no
+ * timer at all. */
+function syncBoardDispatcher(): void {
+  if (boardEnabled(cfg)) boardDispatcher.start();
+  else boardDispatcher.stop();
+}
+
 const recoveryOwners = routines.routineRequestReceiptOwners();
 if (recoveryOwners.length > 0) {
   // A normal launch has no crash-gap receipts, so it must not eagerly load
@@ -7702,7 +7890,7 @@ async function runGroupMemberTurn(
     !cardContinuation &&
     instance.adapter.capabilities.agentsMcp === true;
   if ((hop < MAX_COMMS_DEPTH || orchestration?.roomHandoffId) && instance.adapter.capabilities.agentsMcp === true) {
-    integrations.agents = agentsIntegration(bot.id, threadId, hop, skillAuthoring, internalGeneration, orchestration?.roomHandoffId, !orchestration || Boolean(orchestration.roomHandoffId));
+    integrations.agents = agentsIntegration(bot.id, threadId, hop, skillAuthoring, internalGeneration, orchestration?.roomHandoffId, !orchestration || Boolean(orchestration.roomHandoffId), false, boardEnabled(cfg));
   }
   if (instance.adapter.capabilities.hooks === true && hooksEnabled()) {
     integrations.hooks = hooksIntegration(bot.id, threadId, internalGeneration);
@@ -10785,6 +10973,75 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const result = appendMemoryLog(internalSender.id, body.text, { source: memorySource() });
         return json(res, result.ok ? 200 : 400, result);
       }
+      // ── the durable task board — task_create / task_list ────────────────
+      // Off by default; see boardEnabled in config.ts. The dispatcher that
+      // actually runs a claimed task lives in the boot wiring, not here —
+      // these two tools only file work and read it back.
+      if (method === "POST" && path === "/api/internal/task-create") {
+        if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+        const body = await readInternalBody();
+        const title = typeof body.title === "string" ? body.title.trim() : "";
+        if (!title) return json(res, 400, { error: "title is required" });
+        const taskBody = typeof body.body === "string" ? body.body : undefined;
+        const overLong = boardInputTooLong(title, taskBody);
+        if (overLong) return json(res, 400, { error: overLong });
+        const assigneeBotId = typeof body.assigneeBotId === "string" && body.assigneeBotId.trim()
+          ? body.assigneeBotId.trim()
+          : undefined;
+        if (assigneeBotId) {
+          const target = store.bot(assigneeBotId);
+          if (!target) {
+            return json(res, 404, { error: "no bot with that id — call list_bots and copy the exact id from the result" });
+          }
+          if (!canReachPeer(internalSender, target)) {
+            return json(res, 403, { error: "that bot belongs to a different section" });
+          }
+        }
+        const parentIds = Array.isArray(body.parentTaskIds)
+          ? body.parentTaskIds.filter((id: unknown): id is string => typeof id === "string")
+          : undefined;
+        for (const parentId of parentIds ?? []) {
+          if (!getBoardTask(parentId)) return json(res, 404, { error: `no board task with id ${parentId} — check the id and try again` });
+        }
+        const fields = boardFieldsFromBody(body);
+        if ("error" in fields) return json(res, 400, { error: fields.error });
+        const task = createBoardTask({
+          title,
+          body: taskBody,
+          assigneeBotId,
+          createdByBotId: internalSender.id,
+          ...fields,
+          parentIds,
+        });
+        return json(res, 201, { task });
+      }
+      if (method === "POST" && path === "/api/internal/task-list") {
+        if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+        const body = await readInternalBody();
+        const requestedStatus = Array.isArray(body.status) ? body.status.filter(isBoardStatus) : undefined;
+        const status = requestedStatus?.length
+          ? requestedStatus
+          : BOARD_STATUSES.filter((value) => value !== "archived");
+        // The same section boundary task_create enforces on the assignee.
+        // Without it any bot with the board tools mounted could read the
+        // titles, bodies, assignees and block reasons of every other
+        // section's work — mineOnly is the model's choice, not a guard.
+        // A task with no bot on either side is workspace-level (a human
+        // filed it, unassigned) and stays visible to everyone; the moment a
+        // bot is its creator or its assignee, reaching that bot is the rule.
+        const reachable = new Set([
+          internalSender.id,
+          ...reachablePeers(store.bots, internalSender).map((peer) => peer.id),
+        ]);
+        const tasks = visibleBoardTasks(
+          listBoardTasks({
+            status,
+            ...(body.mineOnly === true ? { assigneeBotId: internalSender.id } : {}),
+          }),
+          (botId) => reachable.has(botId),
+        );
+        return json(res, 200, { tasks });
+      }
       if (method === "POST" && path === "/api/internal/browser/mcp") {
         const body = await readInternalBody();
         const bot = store.bot(internalCapability.botId);
@@ -12287,6 +12544,124 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return [{ sourceBotId, targetBotId: watch.toBotId, threadId, groupId: channel?.id }];
       });
       return json(res, 200, { collaborations, queued, running });
+    }
+
+    // ── durable task board (server/task-board.ts + task-dispatcher.ts) ────
+    // Off by default (config.ts boardEnabled) — every route here answers 404
+    // until the workspace turns features.board on, so an existing install
+    // sees no new surface. A dispatch out of this board is still a decision
+    // with nobody at the keyboard, so the boot wiring below audits every one
+    // through appendDecision exactly like any other unattended approval.
+    if (path === "/api/tasks" && method === "GET") {
+      if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+      const statusParam = url.searchParams.get("status");
+      const askedFor = statusParam
+        ? statusParam.split(",").map((value) => value.trim()).filter((value) => value.length > 0)
+        : undefined;
+      // An unrecognised status used to filter down to an empty array, which
+      // listTasks reads as "no filter" and answers with the whole board —
+      // the opposite of what was asked. Say so instead, exactly as the PATCH
+      // path already does.
+      if (askedFor?.some((value) => !isBoardStatus(value))) {
+        return json(res, 400, { error: `status must be one of ${BOARD_STATUSES.join(", ")}` });
+      }
+      const requestedStatus = askedFor?.filter(isBoardStatus);
+      const assigneeBotId = url.searchParams.get("assigneeBotId") ?? undefined;
+      // Comments are NOT folded in here. One list response used to carry
+      // every comment on every task, growing without limit as bots commented;
+      // they are loaded per task through the route just below instead.
+      const tasks = listBoardTasks({ status: requestedStatus, assigneeBotId });
+      return json(res, 200, { tasks });
+    }
+    const taskCommentsListMatch = path.match(/^\/api\/tasks\/([\w-]+)\/comments$/);
+    if (taskCommentsListMatch && method === "GET") {
+      if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+      if (!getBoardTask(taskCommentsListMatch[1])) return json(res, 404, { error: "no such task" });
+      const limitParam = Number(url.searchParams.get("limit"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0
+        ? Math.min(limitParam, TASK_COMMENT_PAGE)
+        : TASK_COMMENT_PAGE;
+      return json(res, 200, { comments: commentsOf(taskCommentsListMatch[1], limit) });
+    }
+    if (path === "/api/tasks" && method === "POST") {
+      if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+      const body = await readBody(req);
+      const title = typeof body?.title === "string" ? body.title.trim() : "";
+      if (!title) return json(res, 400, { error: "title is required" });
+      const taskBody = typeof body?.body === "string" ? body.body : undefined;
+      const tooLong = boardInputTooLong(title, taskBody);
+      if (tooLong) return json(res, 400, { error: tooLong });
+      const assigneeBotId = typeof body?.assigneeBotId === "string" ? body.assigneeBotId : undefined;
+      if (assigneeBotId && !store.bot(assigneeBotId)) return json(res, 404, { error: "no such bot" });
+      const parentIds = Array.isArray(body?.parentIds)
+        ? body.parentIds.filter((id: unknown): id is string => typeof id === "string")
+        : undefined;
+      for (const parentId of parentIds ?? []) {
+        if (!getBoardTask(parentId)) return json(res, 404, { error: `no board task with id ${parentId}` });
+      }
+      const fields = boardFieldsFromBody(body);
+      if ("error" in fields) return json(res, 400, { error: fields.error });
+      const task = createBoardTask({
+        title,
+        body: taskBody,
+        assigneeBotId,
+        priority: typeof body?.priority === "number" ? body.priority : undefined,
+        parentIds,
+        ...fields,
+      });
+      return json(res, 201, { task });
+    }
+    const taskMatch = path.match(/^\/api\/tasks\/([\w-]+)$/);
+    if (taskMatch && method === "PATCH") {
+      if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+      const existing = getBoardTask(taskMatch[1]);
+      if (!existing) return json(res, 404, { error: "no such task" });
+      const body = await readBody(req);
+      if (body?.assigneeBotId !== undefined && body.assigneeBotId !== null && !store.bot(body.assigneeBotId)) {
+        return json(res, 404, { error: "no such bot" });
+      }
+      try {
+        let updated = existing;
+        if (body?.status !== undefined) {
+          if (!isBoardStatus(body.status)) {
+            return json(res, 400, { error: `status must be one of ${BOARD_STATUSES.join(", ")}` });
+          }
+          updated = setBoardTaskStatus(updated.id, body.status);
+        }
+        const patch: BoardTaskPatch = {};
+        const patchTooLong = boardInputTooLong(
+          typeof body?.title === "string" ? body.title : undefined,
+          typeof body?.body === "string" ? body.body : undefined,
+        );
+        if (patchTooLong) return json(res, 400, { error: patchTooLong });
+        if (typeof body?.title === "string") patch.title = body.title;
+        if (typeof body?.body === "string") patch.body = body.body;
+        if (typeof body?.priority === "number") patch.priority = body.priority;
+        if (body?.assigneeBotId !== undefined) patch.assigneeBotId = body.assigneeBotId;
+        const fields = boardFieldsFromBody(body);
+        if ("error" in fields) return json(res, 400, { error: fields.error });
+        Object.assign(patch, fields);
+        if (Object.keys(patch).length > 0) updated = patchBoardTask(updated.id, patch);
+        return json(res, 200, { task: updated });
+      } catch (error) {
+        // setStatus throws on an illegal transition — that is a client
+        // mistake (a stale board view, a bad request), never a server fault.
+        return json(res, 400, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    const taskCommentMatch = path.match(/^\/api\/tasks\/([\w-]+)\/comments$/);
+    if (taskCommentMatch && method === "POST") {
+      if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
+      if (!getBoardTask(taskCommentMatch[1])) return json(res, 404, { error: "no such task" });
+      const body = await readBody(req);
+      const text = typeof body?.text === "string" ? body.text.trim() : "";
+      if (!text) return json(res, 400, { error: "text is required" });
+      if (text.length > TASK_COMMENT_MAX) {
+        return json(res, 400, { error: `a task comment is at most ${TASK_COMMENT_MAX} characters` });
+      }
+      const botId = typeof body?.botId === "string" ? body.botId : null;
+      const comment = addComment(taskCommentMatch[1], botId, text);
+      return json(res, 201, { comment });
     }
 
     // ── routines calendar ────────────────────────────────────────────────
@@ -16601,6 +16976,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         sharedComputers.close();
         sharedComputerControl.close();
       }
+      if (patch.features?.board !== undefined) syncBoardDispatcher();
       if (disablingBuiltInBrowser) browserLive.closeAll();
       for (const request of browserCleanupRequests) {
         if (request.kind === "profile") browserLive.closeForSession(browserSessionId("", request.partitionId));
@@ -17179,6 +17555,8 @@ server.listen(PORT, "127.0.0.1", () => {
   // ordinary chat. Start only once every registry is initialized and the
   // endpoint is listening; earlier dispatch can hit uninitialized bindings.
   routines!.start();
+  // Only when the board is on; syncBoardDispatcher picks up a later flip.
+  syncBoardDispatcher();
   const leftover = pendingThreads();
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
   for (const threadId of leftover) {

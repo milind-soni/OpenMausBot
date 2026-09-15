@@ -15,6 +15,10 @@ describe("built-in agent tool read policy", () => {
       "session_read",
       "list_routines",
       "skills_list",
+      // The durable task board's read half. task_list returns board rows and
+      // mutates nothing; its write sibling task_create is pinned as a
+      // non-read below, which is the property that actually matters.
+      "task_list",
     ]);
     for (const name of READ_ONLY_AGENT_TOOL_NAMES) {
       expect(isReadOnlyAgentTool(name)).toBe(true);
@@ -31,7 +35,7 @@ describe("built-in agent tool read policy", () => {
     "shared_computer", "ask_bot", "delegate_bot", "start_thread", "close_thread", "post_to_room",
     "create_bot", "request_credential", "memory_update", "propose_routine",
     "propose_routine_action", "propose_profile", "skill_manage",
-    "propose_team_setup", "propose_bot_deletion",
+    "propose_team_setup", "propose_bot_deletion", "task_create",
     "list_secrets", "read_credentials", "list_bots_and_delete", "unknown", "",
     "mcp__agents__list_bots", "agents.list_bots", "LIST_BOTS", " list_bots",
   ])("does not infer read access for %s", (name) => {
