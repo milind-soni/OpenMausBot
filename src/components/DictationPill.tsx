@@ -1,11 +1,14 @@
 // Status surfaces for dictation, bottom-center:
-//   - hold-Ctrl+Space clipboard dictation (unchanged);
+//   - hold-Ctrl+Space clipboard dictation (a border-beam glow marks the
+//     live hold, since it ends the moment the keys release);
 //   - the "Luna" wake word: armed indicator, live partials while a
 //     wake-triggered transcript is captured, and errors.
 // Renders nothing in the browser/dev (no bridge) and when there is nothing
 // to show.
 import { useEffect, useRef, useState } from "react";
 import { Mic } from "lucide-react";
+import { BorderBeam } from "border-beam";
+import { ThinkingOrb } from "thinking-orbs";
 
 import { t } from "@/lib/i18n";
 import { useClipboardDictation } from "@/lib/clipboard-dictation";
@@ -118,18 +121,18 @@ export function DictationPill() {
   if (!active && !note && !(wakeEnabled && wakeArmed) && !wakeListening) return null;
 
   return (
-    <div className="animate-panel-in fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-hairline/40 bg-panel px-3.5 py-1.5 text-[12.5px] text-ink shadow-2xl shadow-black/50">
+    <BorderBeam size="line" colorVariant={active ? "colorful" : "mono"} strength={active ? 0.9 : 0.45} active={active || wakeActive} className="animate-panel-in fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-hairline/40 bg-panel px-3.5 py-1.5 text-[12.5px] text-ink shadow-2xl shadow-black/50">
       {active ? (
         <span className="flex items-center gap-2">
           <Mic size={13} className="text-accent" /> Recording… release to copy
         </span>
       ) : wakeListening ? (
         <span className="flex max-w-[420px] items-center gap-2 truncate" title={wakePartial}>
-          <Mic size={13} className="animate-pulse text-accent" /> {wakePartial}
+          <ThinkingOrb state="listening" size={20} paused={Boolean(speaker.isSpeaking())} /> {wakePartial}
         </span>
       ) : wakeActive ? (
         <span className="flex items-center gap-2 text-ink-secondary">
-          <Mic size={13} className="animate-pulse text-accent" /> {t("wake.detected")}
+          <ThinkingOrb state="listening" size={20} /> {t("wake.detected")}
         </span>
       ) : wakeEnabled && wakeArmed ? (
         <span className="flex items-center gap-2 text-ink-secondary">
@@ -140,6 +143,6 @@ export function DictationPill() {
           {note}
         </span>
       )}
-    </div>
+    </BorderBeam>
   );
 }
