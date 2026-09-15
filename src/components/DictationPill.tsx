@@ -49,6 +49,7 @@ export function DictationPill() {
   const wakeEnabled = state.config?.features?.wakeWord === true && wakeWordSupported();
   const [wakeArmed, setWakeArmed] = useState(false);
   const [wakeActive, setWakeActive] = useState(false);
+  const [wakeTranscribing, setWakeTranscribing] = useState(false);
   const [wakePartial, setWakePartial] = useState("");
   const wakeSessionRef = useRef<ReturnType<typeof createWakeWordSession> | null>(null);
   const controllerRef = useRef<WakeWordController | null>(null);
@@ -58,9 +59,13 @@ export function DictationPill() {
     const wakeSession = createWakeWordSession({
       onActiveChange: (next) => {
         setWakeActive(next);
-        if (!next) setWakePartial("");
+        if (!next) {
+          setWakePartial("");
+          setWakeTranscribing(false);
+        }
       },
       onPartial: setWakePartial,
+      onTranscribing: () => setWakeTranscribing(true),
       onError: (message) => flash(message),
     });
     wakeSessionRef.current = wakeSession;
@@ -118,13 +123,17 @@ export function DictationPill() {
   useEffect(() => () => window.clearTimeout(noteTimer.current), []);
 
   const wakeListening = wakeActive && wakePartial.length > 0;
-  if (!active && !note && !(wakeEnabled && wakeArmed) && !wakeListening) return null;
+  if (!active && !note && !(wakeEnabled && wakeArmed) && !wakeListening && !wakeTranscribing) return null;
 
   return (
     <BorderBeam size="line" colorVariant={active ? "colorful" : "mono"} strength={active ? 0.9 : 0.45} active={active || wakeActive} className="animate-panel-in fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-hairline/40 bg-panel px-3.5 py-1.5 text-[12.5px] text-ink shadow-2xl shadow-black/50">
       {active ? (
         <span className="flex items-center gap-2">
           <Mic size={13} className="text-accent" /> Recording… release to copy
+        </span>
+      ) : wakeTranscribing ? (
+        <span className="flex items-center gap-2 text-ink-secondary">
+          <ThinkingOrb state="weaving" size={20} /> {t("wake.transcribing")}
         </span>
       ) : wakeListening ? (
         <span className="flex max-w-[420px] items-center gap-2 truncate" title={wakePartial}>

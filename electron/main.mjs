@@ -2259,6 +2259,28 @@ ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event
   return { written: true };
 }));
 
+// Reading the clipboard (no renderer clipboard permission exists) — used by
+// the Handy dictation bridge to detect the transcript Handy left behind.
+ipcMain.handle("clipboard:read-text", localOnly("clipboard:read-text", () => {
+  return clipboard.readText();
+}));
+
+// One-way toggle of Handy's dictation (https://handy.computer), the
+// offline speech-to-text app. No status IPC exists upstream, so the caller
+// drives recording off its own mic watchdog and detects the result through
+// the clipboard. Handy's own Tauri global-shortcut hook stays registered:
+// keystroke and spawn both reach the same coordinator, and a rapid second
+// toggle only adds one no-op key event on top.
+ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => {
+  const exe = typeof handyPath === "string" && handyPath.trim() ? handyPath.trim() : "Handy.exe";
+  const { spawn } = require("node:child_process");
+  return new Promise((resolve) => {
+    const child = spawn(exe, ["--toggle-transcription"], { windowsHide: true, stdio: "ignore" });
+    child.once("error", (error) => resolve({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    child.once("spawn", () => resolve({ ok: true }));
+  });
+}));
+
 // The wake word needs the Picovoice AccessKey in the renderer (Porcupine
 // runs there), so unlike the Deepgram key this one crosses the bridge —
 // but only on an explicit, local-only request while the user has the

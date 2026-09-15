@@ -232,6 +232,12 @@ const __APP_VERSION__: string;
       };
       /** Copy dictated text into the system clipboard. Resolves once written. */
       writeClipboardText?(text: string): Promise<{ written: boolean }>;
+      /** Read the system clipboard (the Handy dictation bridge detects the
+       * transcript Handy left there). */
+      readClipboardText?(): Promise<string>;
+      /** Toggle Handy (the offline speech-to-text app) on or off. Resolves
+       * { ok: false, error } when the executable is missing. */
+      handyToggle?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
       /** The Picovoice AccessKey for the "Luna" wake word, from the OS-backed
        * encrypted store (or OMB_PICOVOICE_KEY in dev). Null when none is
        * saved — the wake word then stays off and Settings explains why. */

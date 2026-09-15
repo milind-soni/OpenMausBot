@@ -209,6 +209,12 @@ const bridge = {
   /** Copy dictated text into the system clipboard (main-process write, so
    * focus stays with the window holding the composer). */
   writeClipboardText: (text) => ipcRenderer.invoke("clipboard:write-text", text),
+  /** Read the clipboard — how the Handy dictation bridge detects the
+   * transcript Handy left there when it finished. */
+  readClipboardText: () => ipcRenderer.invoke("clipboard:read-text"),
+  /** One-way toggle of the Handy offline dictation app. Resolves { ok };
+   * { ok: false, error } when the executable is missing. */
+  handyToggle: (handyPath) => ipcRenderer.invoke("handy:toggle", handyPath),
 
   /** The Picovoice AccessKey for the "Luna" wake word, from the encrypted
    * credential store. Null when none is saved. */

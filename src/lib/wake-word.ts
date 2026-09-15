@@ -26,6 +26,8 @@ import { Porcupine, PorcupineWorker, type PorcupineKeyword } from "@picovoice/po
 import { WebVoiceProcessor } from "@picovoice/web-voice-processor";
 
 import { appendComposerDraft } from "./drafts";
+import { wakeDictationEngine } from "./handy";
+import { createHandyDictationSession } from "./handy-dictation";
 import { createVoiceDictationSession } from "./voice-dictation";
 
 export const WAKE_PHRASE = "Luna";
@@ -143,19 +145,31 @@ export class WakeWordController {
 }
 
 /** One wake→dictate cycle. The controller never touches the composer or the
- * Deepgram bridge itself; this object owns both while a transcript is being
- * captured, so a second "Luna" cannot double-open a session. */
+ * transcription engines themselves; this object owns the session while a
+ * transcript is being captured, so a second "Luna" cannot double-open it.
+ * The engine is chosen per start(): the built-in Deepgram bridge (cloud,
+ * needs a key) or the user's own Handy app (offline, transcript arrives via
+ * the clipboard). */
 export function createWakeWordSession(callbacks: {
   onActiveChange?: (active: boolean) => void;
+  /** Live partials (cloud engine only — Handy delivers one final result). */
   onPartial?: (text: string) => void;
+  /** Handy only: recording ended, transcription runs inside Handy. */
+  onTranscribing?: () => void;
   onError: (message: string) => void;
 }) {
-  let session: ReturnType<typeof createVoiceDictationSession> | null = null;
+  type Disposable = { dispose: () => void; stop: () => void };
+  let session: Disposable | null = null;
 
   const teardown = () => {
     session?.dispose();
     session = null;
     callbacks.onActiveChange?.(false);
+  };
+
+  const deliver = (text: string) => {
+    const draftId = currentWakeDraftId();
+    if (draftId) appendComposerDraft(draftId, text);
   };
 
   return {
@@ -164,7 +178,33 @@ export function createWakeWordSession(callbacks: {
     },
     start() {
       if (session) return;
-      session = createVoiceDictationSession({
+      if (wakeDictationEngine() === "handy") {
+        const handy = createHandyDictationSession({
+          onActiveChange: (active) => {
+            if (active) callbacks.onActiveChange?.(true);
+          },
+          onTranscribing: () => callbacks.onTranscribing?.(),
+          onTranscript: (text) => {
+            if (!session) return;
+            deliver(text);
+            teardown();
+          },
+          onError: (message) => {
+            if (!session) return;
+            callbacks.onError(message);
+            teardown();
+          },
+        });
+        if (!handy) {
+          callbacks.onError("Handy dictation isn't available in this build.");
+          return;
+        }
+        session = handy as Disposable;
+        callbacks.onActiveChange?.(true);
+        handy.start();
+        return;
+      }
+      const cloud = createVoiceDictationSession({
         onActiveChange: (active) => {
           if (!active) return;
           callbacks.onActiveChange?.(true);
@@ -174,8 +214,7 @@ export function createWakeWordSession(callbacks: {
           // A disposed session's final event can race the teardown that
           // disposed it; only the live session may write or tear down.
           if (!session) return;
-          const draftId = currentWakeDraftId();
-          if (draftId) appendComposerDraft(draftId, text);
+          deliver(text);
           teardown();
         },
         onError: (message) => {
@@ -184,12 +223,13 @@ export function createWakeWordSession(callbacks: {
           teardown();
         },
       });
-      if (!session) {
+      if (!cloud) {
         callbacks.onError("Dictation isn't available in this build.");
         return;
       }
+      session = cloud as Disposable;
       callbacks.onActiveChange?.(true);
-      void session.start();
+      void cloud.start();
     },
     /** The composer is the destination only while it is mounted; a thread
      * switch mid-dictation ends the capture instead of writing into a
