@@ -33,6 +33,8 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  *   now?: () => number,
  *   sleep?: (ms: number) => Promise<void>,
  *   fetchImpl?: typeof fetch,
+ *   restoreProgress?: () => { phase: string, at: number } | undefined,
+ *   restoreStallTimeoutMs?: number,
  * }} options
  * @returns {Promise<{ outcome: "ready" | "foreign-owner" | "timeout" | "exited" }>}
 */
@@ -44,30 +46,38 @@ export async function pollServerIdentity({
   now = Date.now,
   sleep = defaultSleep,
   fetchImpl = globalThis.fetch,
+  restoreProgress = () => undefined,
+  restoreStallTimeoutMs = 5 * 60_000,
 }) {
   const startedAt = now();
-  const deadline = startedAt + bootTimeoutMs;
+  const deadline = () => {
+    const restore = restoreProgress();
+    return restore ? restore.at + (restore.phase === "done" ? bootTimeoutMs : restoreStallTimeoutMs) : startedAt + bootTimeoutMs;
+  };
   for (;;) {
     if (isExited()) return { outcome: "exited" };
-    const remainingMs = Math.max(0, deadline - now());
+    const remainingMs = Math.max(0, deadline() - now());
     if (remainingMs <= 0) return { outcome: "timeout" };
 
     let res;
+    const signal = AbortSignal.timeout(Math.min(remainingMs, 1_000));
     try {
       res = await fetchImpl(`http://127.0.0.1:${port}/api/health`, {
-        signal: AbortSignal.timeout(remainingMs),
+        // Poll frequently enough to notice progress even when a socket hangs.
+        signal,
       });
     } catch {
       // Not up yet, or this probe ran into the wall-clock budget — either way
       // back off to the poll interval, then let the loop condition decide.
-      await sleep(Math.min(BOOT_PROBE_INTERVAL_MS, Math.max(1, deadline - now())));
+      await sleep(Math.min(BOOT_PROBE_INTERVAL_MS, Math.max(1, deadline() - now())));
       continue;
     }
     const body = await res.json().catch(() => null);
+    if (signal.aborted && now() < deadline()) continue;
     // Body consumption is covered by the same abort signal as fetch. If it
     // reaches the deadline, a null body means the probe timed out—not that a
     // different process answered on the port.
-    if (now() >= deadline) return { outcome: "timeout" };
+    if (now() >= deadline()) return { outcome: "timeout" };
     // Read the expected pid NOW, after the response landed: until the child's
     // `spawn` event fires the getter yields undefined, and a child that has
     // not spawned cannot be the one answering — so an answer during that
@@ -82,7 +92,7 @@ export async function pollServerIdentity({
     if (!identified) return { outcome: "foreign-owner" };
     // A response that finishes after the budget must not count as a healthy
     // boot — re-check the clock before declaring victory.
-    if (now() >= deadline) return { outcome: "timeout" };
+    if (now() >= deadline()) return { outcome: "timeout" };
     return { outcome: "ready", latencyMs: now() - startedAt };
   }
 }

@@ -2,6 +2,47 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { pollServerIdentity } from "./server-boot-probe.mjs";
+import { createRestoreStartupProgress } from "./workspace-restore-startup.mjs";
+
+test("a progressing restore exceeds 60 seconds, then gets a fresh normal boot budget", async () => {
+  let now = 0;
+  const progress = createRestoreStartupProgress(() => now);
+  let sequence = 0;
+  const outcome = await pollServerIdentity({
+    port: 8799, pid: () => 4242, bootTimeoutMs: 60_000,
+    now: () => now, sleep: async ms => { now += ms; }, restoreProgress: progress.get,
+    fetchImpl: async () => {
+      if (now < 120_000) {
+        progress.receive({ type: "workspace-restore-progress", phase: "copying", bytes: now, sequence: ++sequence });
+        throw new Error("Not listening while restoring");
+      }
+      if (now === 120_000) progress.receive({ type: "workspace-restore-progress", phase: "done", bytes: now, sequence: ++sequence });
+      if (now < 150_000) throw new Error("Starting server");
+      return { ok: true, json: async () => ({ app: "openmausbot", pid: 4242, static: true }) };
+    },
+  });
+  assert.equal(outcome.outcome, "ready"); assert.equal(now, 150_000);
+});
+
+test("stalled restoration remains bounded and replayed progress does not extend it", async () => {
+  let now = 0;
+  const progress = createRestoreStartupProgress(() => now);
+  const packet = { type: "workspace-restore-progress", phase: "checking", bytes: 0, sequence: 1 };
+  assert.equal(progress.receive(packet), true);
+  const outcome = await pollServerIdentity({
+    port: 8799, pid: () => 4242, bootTimeoutMs: 60_000,
+    now: () => now, sleep: async ms => { now += ms; }, restoreProgress: progress.get,
+    fetchImpl: async () => { assert.equal(progress.receive(packet), false); throw new Error("stalled"); },
+  });
+  assert.equal(outcome.outcome, "timeout"); assert.equal(now, 300_000);
+  assert.equal(progress.receive({ ...packet, sequence: 2, phase: "done" }), true);
+  assert.equal(progress.receive({ ...packet, sequence: 3 }), false);
+  const completed = await pollServerIdentity({ port: 8799, pid: () => 4242, bootTimeoutMs: 60_000,
+    now: () => now, sleep: async ms => { now += ms; }, restoreProgress: progress.get,
+    fetchImpl: async () => { throw new Error("boot stuck after restore"); },
+  });
+  assert.equal(completed.outcome, "timeout"); assert.equal(now, 360_000);
+});
 
 const OUR_BODY = () => ({ app: "openmausbot", pid: 4242, static: true });
 

@@ -7,7 +7,7 @@ import { createServer, request, type IncomingMessage, type Server } from "node:h
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
+import type { WorkspaceBackupEstimate, WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
 import { resolveRequestAuth } from "./request-auth.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
@@ -104,6 +104,25 @@ afterEach(async () => {
 function post(path: string, body: unknown, token = admin.token) {
   return fetch(`${url}${path}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
 }
+
+it("estimates selected content without a backup job and validates the same selection on export", async () => {
+  mkdirSync(join(dataDir, "attachments"));
+  writeFileSync(join(dataDir, "attachments", "image.png"), Buffer.alloc(1024));
+  const complete = await post("/api/workspace-backup/estimate", {});
+  expect(complete.status).toBe(200);
+  expect((await complete.json() as WorkspaceBackupEstimate).categories.attachments).toBe(1024);
+  const selected = await post("/api/workspace-backup/estimate", { selection: { attachments: false } });
+  expect((await selected.json() as WorkspaceBackupEstimate).categories.attachments).toBe(0);
+  expect(existsSync(join(dataDir, ".backups"))).toBe(false);
+  const client = sessions.issue({ label: "Client", scopes: ["client"] });
+  expect((await post("/api/workspace-backup/estimate", {}, client.token)).status).toBe(403);
+  for (const route of ["estimate", "export"]) {
+    const invalid = await post(`/api/workspace-backup/${route}`, { ...(route === "export" ? { password: PASSWORD } : {}), selection: { from: "2026-09-15", to: "2026-09-14" } });
+    expect(invalid.status).toBe(400);
+  }
+  expect((await post("/api/workspace-backup/export", { password: PASSWORD, selection: { attachments: false, workspaceFiles: false } })).status).toBe(200);
+  expect(archive.create.mock.calls[0][1].selection).toEqual({ conversations: true, attachments: false, workspaceFiles: false });
+});
 
 it.each(["revoke", "logout"])("keeps session controls authenticated and usable during a held export (%s)", async (action) => {
   let started!: () => void;

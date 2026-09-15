@@ -21,6 +21,7 @@ import {
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
+import { createRestoreStartupProgress } from "./workspace-restore-startup.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
@@ -103,6 +104,7 @@ let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
 let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
 let mainWindow = null;
+let restoreWindow;
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
 let unreadOverlayIcon = null;
@@ -1234,9 +1236,26 @@ async function startServerOn(port) {
   }));
   proc.stdout?.on("data", (d) => slog(`[out] ${String(d).trimEnd()}`));
   proc.stderr?.on("data", (d) => slog(`[err] ${String(d).trimEnd()}`));
+  const restoreProgress = createRestoreStartupProgress();
   proc.on("message", (message) => {
     if (!serverSupervisor.isCurrent(proc)) return;
     try {
+      if (restoreProgress.receive(message)) {
+        const progress = restoreProgress.get();
+        const labels = { checking: "Checking your backup…", copying: "Restoring your workspace…", applying: "Finishing your restore…", done: "Starting OpenMausBot…" };
+        const label = labels[progress.phase];
+        slog(`workspace restore: ${progress.phase}, ${progress.bytes} bytes processed`);
+        if (!restoreWindow && progress.phase !== "done") {
+          restoreWindow = new BrowserWindow({ width: 440, height: 230, resizable: false, title: "Restoring OpenMausBot", backgroundColor: "#171717",
+            webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false } });
+          void restoreWindow.loadURL("data:text/html;charset=utf-8," + encodeURIComponent('<body style="margin:0;background:#171717;color:#eee;font:15px system-ui;text-align:center;padding:36px"><h3 id="phase">Restoring your workspace…</h3><p id="size"></p><p style="color:#aaa">Large backups can take a few minutes.</p></body>')).catch(() => {});
+        }
+        if (restoreWindow && !restoreWindow.isDestroyed()) {
+          const size = `${(progress.bytes / 1024 ** 2).toFixed(0)} MB processed`;
+          void restoreWindow.webContents.executeJavaScript(`document.getElementById('phase').textContent=${JSON.stringify(label)};document.getElementById('size').textContent=${JSON.stringify(size)}`).catch(() => {});
+        }
+        return;
+      }
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (receivePhoneSecretSave(proc, message)) return;
@@ -1277,6 +1296,7 @@ async function startServerOn(port) {
     // child a "foreign owner" on its first health answer.
     pid: () => proc.pid,
     bootTimeoutMs: SERVER_BOOT_TIMEOUT_MS,
+    restoreProgress: restoreProgress.get,
     isExited: () => exited || desktopShutdownStarted,
   });
   if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) return { proc };
@@ -1286,14 +1306,19 @@ async function startServerOn(port) {
     slog(
       identity.outcome === "foreign-owner"
         ? `port ${port} answered health checks from another process`
-        : `child on port ${port} did not answer /api/health within ${SERVER_BOOT_TIMEOUT_MS / 1000}s`,
+        : restoreProgress.get() && restoreProgress.get().phase !== "done"
+          ? `workspace restoration stopped reporting progress for five minutes on port ${port}`
+          : `child on port ${port} did not answer /api/health within ${SERVER_BOOT_TIMEOUT_MS / 1000}s${restoreProgress.get() ? " after restoration" : ""}`,
     );
   }
   const stopped = await stopUtilityServer(proc);
   if (!stopped) {
     slog(`child on port ${port} did not exit after termination; refusing to start a sibling server`);
   }
-  return { proc: null, reason: stopped ? identity.outcome : "stuck-child", abort: !stopped };
+  // Another port cannot fix a failed restore. Preserve the staged/safety
+  // trees and surface the error instead of starting the copy six times.
+  if (restoreProgress.get()) slog("workspace restore startup failed; automatic port retries stopped");
+  return { proc: null, reason: stopped ? identity.outcome : "stuck-child", abort: !stopped || Boolean(restoreProgress.get()) };
 }
 
 async function startServerPackaged() {
@@ -1897,6 +1922,10 @@ function createWindow() {
     },
   });
   mainWindow = win;
+  // Keep a window alive until the primary one exists, including on Windows
+  // where closing the last window quits the application.
+  if (restoreWindow && !restoreWindow.isDestroyed()) restoreWindow.destroy();
+  restoreWindow = undefined;
   attachUpdaterWindow(win);
   if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible

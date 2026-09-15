@@ -63,6 +63,7 @@ describe("full backup Settings in the real renderer", () => {
         fixture.calls.push({ path, body, rawFile: init.body instanceof File, type: init.headers?.['content-type'] });
         const reply = (value, status = 200) => Promise.resolve(new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } }));
         if (path.endsWith('/status')) return reply({ busy: false, pendingRestore: fixture.pending });
+        if (path.endsWith('/estimate')) return reply({ bytes: body.selection?.workspaceFiles ? 2097152 : 32768, files: 12, categories: { settings: 4096, conversations: 24576, attachments: 4096, workspaceFiles: body.selection?.workspaceFiles ? 2064384 : 0 } });
         if (path.endsWith('/export')) return reply({ id: 'download-stage', filename: 'fixture.ombbackup' });
         if (path.endsWith('/upload')) return reply({ id: 'uploaded-file' });
         if (path.endsWith('/preview')) {
@@ -91,15 +92,24 @@ describe("full backup Settings in the real renderer", () => {
     await click("You");
     await click("Settings");
     await click("Backups");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Export full backup");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Create backup");
     expect(await snapshot()).toContain("Saved account credentials and connections are not included");
     expect(await snapshot()).toContain("not automatically redacted");
+    // Chromium exposes native <summary> as DisclosureTriangle, which the
+    // fixture's named-button resolver does not index.
+    await evaluate("(() => { document.querySelector('[role=dialog] summary').click(); return true; })()");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Estimated selected data: 2.0 MB");
+    await click("Workspace and managed desktop files");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Estimated selected data: 32 KB");
     await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-settings.png"));
+    await evaluate("(() => { document.querySelector('[role=dialog] summary').scrollIntoView({block:'start'}); return true; })()");
+    await ui("screenshot", "--out", join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-options.png"));
     await type("Backup password", "fixture password 123");
     await type("Confirm backup password", "fixture password 123");
-    await click("Export full backup");
+    await click("Create backup");
     await expect.poll(() => evaluate("window.backupFixture.download"), { timeout: 10_000 }).toEqual({ href: "/api/workspace-backup/download/download-stage", filename: "fixture.ombbackup" });
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['fixture-auth-token'] ?? null")).toBeNull();
+    expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.selection")).toEqual({ conversations: true, attachments: true, workspaceFiles: false });
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/export')).body.clientState['omb-webhook-credentials'] ?? null")).toBeNull();
     expect(await evaluate("Object.values(localStorage).some(value => value.includes('fixture password 123'))")).toBe(false);
 

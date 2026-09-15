@@ -2,11 +2,24 @@
 
 ## User path
 
-Settings → Backups → **Export full backup** → password and confirmation →
+Settings → Backups → **Create backup** → password and confirmation →
 encrypted `.ombbackup` download. Import uses a native file input, password,
 validated preview and an explicit **REPLACE** confirmation. It is replacement,
 not an additive team import. The desktop must fully quit and reopen; a hosted
 server must restart. No restore writes into a running Store.
+
+The default includes all workspace content. **Customize contents** offers
+conversation history, attachments, and workspace/managed-desktop files as
+independent toggles. Bots, teams, instructions, memory, skills and settings stay
+included. Optional inclusive UTC dates select whole conversations active during
+the range, including their earlier context; they do not filter attachments or
+project files. Omissions appear in the validated restore summary. Restoring a
+filtered backup still replaces the workspace; it does not merge omitted data.
+
+The size estimate scans selected source data without copying it. SQLite estimates
+include committed WAL pages and approximate the retained history when filtered.
+This is not a compressed-download prediction: the encrypted archive contains an
+uncompressed tar, and framing/metadata or later file changes affect final size.
 
 The previous workspace is retained under `.backups/safety-<restore-id>/data`.
 Keep this copy until the restored workspace is checked. Do not publish it.
@@ -51,6 +64,9 @@ pnpm exec vitest run server/workspace-backup.test.ts \
   server/workspace-backup-maintenance.test.ts \
   server/webhook-ingress.test.ts server/request-auth.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/workspace-backup-ui.e2e.test.ts
+node --test electron/server-boot-probe.node-test.mjs
+pnpm build:server
+node scripts/verify-restore-startup.mjs
 ```
 
 The archive tests cover authenticated encryption, damaged/wrong-password files,
@@ -61,6 +77,16 @@ ordinary requests, turns, schedulers and the separate webhook receiver from
 writing during a snapshot.
 Unknown external writers cannot be frozen: users must stop external editors and
 managed desktops before exporting.
+
+The startup recipe launches the actual bundled server in one Electron utility
+process with a disposable home and workspace. A test-only filesystem shim slows
+reads of a synthetic 2 MB staged file for 65 seconds. It asserts that restoration
+exceeds the old 60-second limit, completes with one child on one port, retains
+both staged source and destination safety copy, and eventually answers health.
+The normal boot deadline starts after restore completion; a restore that stops
+reporting progress for five minutes fails without cycling fallback ports. On
+Linux run the recipe under an available display/Xvfb. Running it on macOS does
+not establish Windows-specific filesystem or antivirus performance.
 
 All tests use disposable workspaces and synthetic credential values, never the
 user's keychain or live sign-ins. The renderer recipe drives the real Settings

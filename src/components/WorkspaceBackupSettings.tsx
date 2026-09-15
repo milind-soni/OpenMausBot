@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Download, Loader2, Upload } from "lucide-react";
-import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
+import { COMPLETE_WORKSPACE_BACKUP, type WorkspaceBackupSelection, type WorkspaceBackupEstimate, type WorkspaceBackupSummary } from "../../shared/workspace-backup";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { applyWorkspaceClientState, collectWorkspaceClientState, WORKSPACE_RESTORE_MARKER } from "@/lib/workspace-backup-client";
@@ -10,6 +10,7 @@ type BackupStatus = { busy: boolean; pendingRestore?: boolean; lastRestoreId?: s
 const inputClass = "w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink disabled:opacity-50";
 const buttonClass = "inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-accent-ink disabled:opacity-40";
 const validPassword = (value: string) => value.length >= 12 && value.length <= 1024;
+const sizeLabel = (bytes: number) => bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GB` : bytes >= 1024 ** 2 ? `${(bytes / 1024 ** 2).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
 
 export function WorkspaceBackupSummaryView({ summary }: { summary: WorkspaceBackupSummary }) {
   return <div className="rounded-lg border border-hairline/50 bg-inset p-3">
@@ -43,6 +44,10 @@ export function WorkspaceBackupSettings() {
   const [preview, setPreview] = useState<{ id: string; summary: WorkspaceBackupSummary } | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [download, setDownload] = useState<{ url: string; filename: string } | null>(null);
+  const [selection, setSelection] = useState<WorkspaceBackupSelection>(COMPLETE_WORKSPACE_BACKUP);
+  const [estimate, setEstimate] = useState<WorkspaceBackupEstimate | null>(null);
+  const [estimateError, setEstimateError] = useState(false);
+  const invalidDates = Boolean(selection.from && selection.to && selection.from > selection.to);
 
   const refresh = async () => {
     try {
@@ -58,6 +63,18 @@ export function WorkspaceBackupSettings() {
     return () => { alive.current = false; };
   }, []);
 
+  useEffect(() => {
+    let current = true;
+    setEstimate(null); setEstimateError(false);
+    if (!status || status.busy || status.pendingRestore || busy || invalidDates) return;
+    const timer = setTimeout(() => {
+      void api("/api/workspace-backup/estimate", { method: "POST", body: JSON.stringify({ selection }) })
+        .then((value: WorkspaceBackupEstimate) => { if (current) setEstimate(value); })
+        .catch(() => { if (current) setEstimateError(true); });
+    }, 300);
+    return () => { current = false; clearTimeout(timer); };
+  }, [selection, status, busy, invalidDates]);
+
   const perform = async (operation: NonNullable<typeof busy>, work: () => Promise<void>) => {
     if (lock.current || !status || status.busy || status.pendingRestore) return;
     lock.current = true;
@@ -69,9 +86,9 @@ export function WorkspaceBackupSettings() {
   };
 
   const exportBackup = () => perform("export", async () => {
-    if (!validPassword(exportPassword) || exportPassword !== confirmPassword) return;
+    if (!validPassword(exportPassword) || exportPassword !== confirmPassword || invalidDates) return;
     const result: { id: string; filename: string } = await api("/api/workspace-backup/export", {
-      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState() }),
+      method: "POST", body: JSON.stringify({ password: exportPassword, clientState: collectWorkspaceClientState(), selection }),
     });
     if (alive.current) { setExportPassword(""); setConfirmPassword(""); }
     // Native download streams large archives without buffering them in the
@@ -134,11 +151,30 @@ export function WorkspaceBackupSettings() {
     {error && <p role="alert" className="break-words text-[13px] text-danger">{error}</p>}
     {status?.pendingRestore ? <div role="status" className="rounded-xl border border-warning/40 bg-warning/10 p-4 text-[13px] text-ink">{t("backup.restart")}</div> : <>
       {(!status || status.busy) && <div role="status" className="flex items-center gap-3 text-[13px] text-ink-secondary"><span>{status?.busy ? t("backup.serverBusy") : t("backup.checkStatus")}</span><button type="button" onClick={() => void refresh()} className="underline">{t("connectors.action.retry")}</button></div>}
-      <Card title={t("backup.export")} subtitle={t("backup.passwordHint")}>
+      <Card title={t("backup.create")} subtitle={t("backup.passwordHint")}>
         <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void exportBackup(); }}>
+          <details className="rounded-lg border border-hairline/50 p-3">
+            <summary className="cursor-pointer text-[13px] font-medium text-ink">{t("backup.customize")}</summary>
+            <div className="mt-3 flex flex-col gap-3 text-[13px]">
+              <p className="text-ink-secondary">{t("backup.alwaysIncluded")}</p>
+              {(["conversations", "attachments", "workspaceFiles"] as const).map(key => <label key={key} className="flex items-center gap-2 text-ink">
+                <input type="checkbox" aria-label={t(`backup.include.${key}`)} disabled={disabled} checked={selection[key]} onChange={event => setSelection(value => ({ ...value, [key]: event.target.checked, ...(key === "conversations" && !event.target.checked ? { from: undefined, to: undefined } : {}) }))} />
+                <span className="flex-1">{t(`backup.include.${key}`)}</span>
+                {estimate && <span className="text-ink-secondary">{sizeLabel(estimate.categories[key])}</span>}
+              </label>)}
+              {selection.conversations && <>
+                <p className="text-ink-secondary">{t("backup.dateRangeHint")}</p>
+                <div className="grid grid-cols-2 gap-3">{(["from", "to"] as const).map(key => <label key={key} className="text-ink">{t(`backup.range.${key}`)}<input type="date" disabled={disabled} value={selection[key] ?? ""} onChange={event => setSelection(value => ({ ...value, [key]: event.target.value || undefined }))} className={`${inputClass} mt-1`} /></label>)}</div>
+                {invalidDates && <p role="alert" className="text-danger">{t("backup.invalidDates")}</p>}
+              </>}
+              {!selection.attachments && <p className="text-ink-secondary">{t("backup.attachmentsOmitted")}</p>}
+              {!selection.workspaceFiles && <p className="text-ink-secondary">{t("backup.filesOmitted")}</p>}
+            </div>
+          </details>
+          <p role="status" className="text-[13px] text-ink-secondary">{estimate ? t("backup.estimate", { size: sizeLabel(estimate.bytes) }) : estimateError ? t("backup.estimateUnavailable") : t("backup.estimating")}</p>
           <label className="text-[13px] text-ink">{t("backup.exportPassword")}<input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={exportPassword} onChange={(event) => setExportPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
           <label className="text-[13px] text-ink">{t("backup.confirmPassword")}<input type="password" autoComplete="new-password" minLength={12} maxLength={1024} required disabled={disabled} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className={`${inputClass} mt-1`} /></label>
-          <button type="submit" disabled={disabled || !validPassword(exportPassword) || exportPassword !== confirmPassword} className={buttonClass}>{busy === "export" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Download aria-hidden="true" size={15} />}{busy === "export" ? t("backup.exporting") : t("backup.export")}</button>
+          <button type="submit" disabled={disabled || invalidDates || !validPassword(exportPassword) || exportPassword !== confirmPassword} className={buttonClass}>{busy === "export" ? <Loader2 aria-hidden="true" size={15} className="animate-spin" /> : <Download aria-hidden="true" size={15} />}{busy === "export" ? t("backup.exporting") : t("backup.create")}</button>
           {download && <a href={download.url} download={download.filename} className="break-all text-[13px] text-accent-text underline">{t("backup.downloadAgain", { filename: download.filename })}</a>}
         </form>
       </Card>
