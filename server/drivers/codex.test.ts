@@ -1594,22 +1594,28 @@ describe("CodexDriver turns (fake app-server)", () => {
       delete process.env.FAKE_CODEX_RETRY_SCALE;
     }
   }, 20_000);
-  it("banks this turn's usage as the process total minus what it carried before turn/start", async () => {
-    process.env.FAKE_CODEX_RESTORED_USAGE = "1";
-    try {
-      await create();
-      await instance.adapter.sendTurn({ threadId: "t-codex-restored-usage", text: "hi" });
-      await recorder.until((e) => e.type === "turn.completed");
-      // the running indicator still shows the process total …
-      expect(recorder.events.find((e) => e.type === "thread.token-usage.updated")).toMatchObject({ input: 107, output: 13, cachedInput: 54 });
-      // … but the banked figure is this turn alone, not the whole thread again
-      expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
-      // the restored total that arrived before turn/start is a baseline, not an indicator reading
-      expect(recorder.events.filter((e) => e.type === "thread.token-usage.updated")).toHaveLength(1);
-    } finally {
-      delete process.env.FAKE_CODEX_RESTORED_USAGE;
-    }
-  });
+  it.each(["start", "resume"] as const)(
+    "banks this turn's usage after a coalesced thread/%s response and restored usage notification",
+    async (mode) => {
+      process.env.FAKE_CODEX_RESTORED_USAGE = "1";
+      try {
+        await create({ mode: mode === "resume" ? "resume" : undefined });
+        await instance.adapter.sendTurn({
+          threadId: `t-codex-restored-usage-${mode}`, text: "hi",
+          ...(mode === "resume" ? { resumeCursor: "codex-thread-1" } : {}),
+        });
+        await recorder.until((e) => e.type === "turn.completed");
+        // the running indicator still shows the process total …
+        expect(recorder.events.find((e) => e.type === "thread.token-usage.updated")).toMatchObject({ input: 107, output: 13, cachedInput: 54 });
+        // … but the banked figure is this turn alone, not the whole thread again
+        expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, usage: { input: 7, output: 3, cachedInput: 4 } });
+        // the restored total that arrived before turn/start is a baseline, not an indicator reading
+        expect(recorder.events.filter((e) => e.type === "thread.token-usage.updated")).toHaveLength(1);
+      } finally {
+        delete process.env.FAKE_CODEX_RESTORED_USAGE;
+      }
+    },
+  );
   it("uses the explicit login command from the official Codex flow", () => {
     expect(CodexDriver.install?.signInCommand).toBe("codex login");
   });

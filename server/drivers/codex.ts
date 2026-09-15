@@ -680,6 +680,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           rpcPending.set(id, {
             resolve: (v) => {
               clearTimeout(timer);
+              if (method === "thread/start" || method === "thread/resume") {
+                // Notifications can follow the thread response in the same
+                // stdout chunk, before the handshake await resumes.
+                const returnedId = v?.thread?.id;
+                const requestedId = method === "thread/resume"
+                  && params && typeof params === "object" && "threadId" in params
+                  ? params.threadId : null;
+                if (typeof returnedId === "string" && returnedId) codexThreadId = returnedId;
+                else if (typeof requestedId === "string" && requestedId) codexThreadId = requestedId;
+              }
               if (method === "turn/start") {
                 if (typeof v?.turn?.id !== "string" || !v.turn.id) {
                   reject(new Error("Codex did not return a native turn id"));

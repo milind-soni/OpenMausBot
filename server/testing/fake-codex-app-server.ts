@@ -85,6 +85,19 @@ const notify = (method: string, params: any) => out({
   },
 });
 
+// The response and restored usage notification may arrive in one stdout
+// chunk. Force that ordering for the baseline fixture instead of relying on
+// the OS to coalesce two writes under load.
+const threadReply = (response: unknown) => {
+  if (!process.env.FAKE_CODEX_RESTORED_USAGE) return out(response);
+  const restored = {
+    jsonrpc: "2.0", method: "thread/tokenUsage/updated",
+    params: { threadId: nativeThreadId, turnId: nativeTurnId,
+      tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } } },
+  };
+  process.stdout.write(`${JSON.stringify(response)}\n${JSON.stringify(restored)}\n`);
+};
+
 const dump = () => {
   if (process.env.FAKE_CODEX_DUMP) {
     writeFileSync(
@@ -254,8 +267,7 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else if (mode === "resume" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
-          out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
-          if (process.env.FAKE_CODEX_RESTORED_USAGE) notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: `no rollout found for thread id ${msg.params?.threadId}` } });
         }
@@ -275,8 +287,7 @@ process.stdin.on("data", (chunk) => {
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else {
-          out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
-          if (process.env.FAKE_CODEX_RESTORED_USAGE) notify("thread/tokenUsage/updated", { tokenUsage: { total: { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model" } });
         }
         break;
       case "turn/start": {
