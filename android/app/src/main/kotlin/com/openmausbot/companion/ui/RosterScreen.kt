@@ -79,6 +79,7 @@ import com.openmausbot.companion.core.SearchHit
 import com.openmausbot.companion.core.Session
 import com.openmausbot.companion.core.chat
 import com.openmausbot.companion.core.chatSummaries
+import com.openmausbot.companion.core.forTask
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -166,6 +167,8 @@ fun RosterScreen(navigator: CompanionNavigator) {
     // Read by the bar over the list and by nothing inside it, so the rows never
     // recompose for it. `approvals` is handed over rather than walked again.
     val updates = remember(state, approvals) { state.updates(approvals) }
+    // The cross-bot Needs attention section rides above every roster section.
+    val attention = remember(state) { state.crossBotAttention() }
 
     val entry: @Composable (ChatSummary, Boolean) -> Unit = { summary, last ->
         Column {
@@ -261,6 +264,18 @@ fun RosterScreen(navigator: CompanionNavigator) {
                     contentPadding = PaddingValues(bottom = BAR_CLEARANCE),
                 ) {
                     if (RosterLayout.showsGroups(query)) {
+                        if (attention.isNotEmpty()) {
+                            item(key = "attention-label") {
+                                SectionLabel("Needs attention", Modifier.padding(top = 2.dp, bottom = 4.dp))
+                            }
+                            items(attention, key = { "attention-${it.id}" }) { entry ->
+                                AttentionRow(entry = entry, onOpen = {
+                                    state.bots.firstOrNull { it.id == entry.botId }
+                                        ?.let { bot -> Chat.BotChat(bot.forTask(entry.task.threadId) ?: bot) }
+                                        ?.let(navigator::open)
+                                })
+                            }
+                        }
                         state.unsectionedChief?.let { chief ->
                             summariesById[chief.id]?.let { summary ->
                                 item(key = "chief-${chief.id}") {
