@@ -33,7 +33,7 @@
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
-import { isIdempotent, teachingError, TOOL_CALL_TIMEOUT_MS, TOOL_RESULT_HEAD_CHARS, TOOL_RESULT_MAX_CHARS, TOOL_RETRY_DELAY_MS } from "./agents-proxy-reliability.ts";
+import { coreToolNames, isIdempotent, teachingError, TOOL_CALL_TIMEOUT_MS, TOOL_RESULT_HEAD_CHARS, TOOL_RESULT_MAX_CHARS, TOOL_RETRY_DELAY_MS } from "./agents-proxy-reliability.ts";
 import readline from "node:readline";
 import { readTurnToken } from "../turn-token-read.ts";
 
@@ -848,14 +848,14 @@ const TOOLS = [
   {
     name: "task_create",
     description:
-      "File work on the durable task board — the fleet's shared queue, which survives a restart and is not a message to any one bot. Use this for something that should get done on its own schedule, not for a question you need answered now (ask_bot) or a reply due this turn (delegate_bot). The task starts in \"todo\". Name assignee_bot_id (from list_bots) to say who should do it: the board's own dispatcher hands it to that bot automatically once it is ready and that bot is free, without you doing anything else. Leave assignee_bot_id out to leave it unassigned for a human to pick up. Give parent_task_ids (other task ids) to make this task wait until every one of them reaches done or archived before it can be claimed. There is no tool here to report finishing a task or getting blocked on one from inside a turn — that only happens through the board itself.",
+      "File work on the durable task board — the fleet's shared queue, which survives a restart and is not a message to any one bot. Use this for something that should get done on its own schedule, not for a question you need answered now (ask_bot) or a reply due this turn (delegate_bot). The task starts in \"todo\". Name assignee_bot_id to say who should do it — a peer's id from list_bots, or \"me\" to do it yourself later: the board's own dispatcher hands it to that bot automatically once it is ready and that bot is free, without you doing anything else. Leave assignee_bot_id out to leave it unassigned for a human to pick up. Give parent_task_ids (other task ids) to make this task wait until every one of them reaches done or archived before it can be claimed. There is no tool here to report finishing a task or getting blocked on one from inside a turn — that only happens through the board itself.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         title: { type: "string", description: "Short, specific summary — this becomes the task's name on the board." },
         body: { type: "string", description: "Optional detail: what needs to happen and what \"done\" looks like." },
-        assignee_bot_id: { type: "string", description: "Optional: the bot (from list_bots) who should do this. Omit to leave it unassigned." },
+        assignee_bot_id: { type: "string", description: "Optional: who should do this — a peer's id from list_bots, or \"me\" for yourself. Omit to leave it unassigned." },
         parent_task_ids: {
           type: "array",
           items: { type: "string" },
@@ -936,7 +936,7 @@ const MOUNTED_TOOLS = COORDINATING
 // through use_tool on every engine, so nothing depends on an engine
 // honouring tools/list_changed.
 const TOOLS_DEFERRED = process.env.OMB_TOOLS_DEFERRED === "1";
-const CORE_TOOL_NAMES = new Set(["list_bots", "session_search", "session_read", "memory_update", "tool_result_read", "post_to_room"]);
+const CORE_TOOL_NAMES = coreToolNames(BOARD_ENABLED);
 const META_TOOLS = [
   {
     name: "search_tools",
@@ -1823,9 +1823,10 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     const task = (r.task ?? {}) as Json;
     const assignment = typeof task.assigneeBotId === "string"
       ? `assigned to ${task.assigneeBotId}`
-      : "unassigned — a human can assign it, or claim it yourself with task_list + a peer's help";
+      : "unassigned — a human can assign it; to take it yourself, file with assignee_bot_id \"me\"";
+    const hold = typeof r.hold === "string" && r.hold ? ` It will not run yet: ${r.hold}` : "";
     return {
-      text: `Filed task ${task.id} “${task.title}”, status: ${task.status}, ${assignment}.`,
+      text: `Filed task ${task.id} “${task.title}”, status: ${task.status}, ${assignment}.${hold}`,
     };
   }
   if (name === "task_list") {
@@ -1846,7 +1847,8 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
         ? `, spent $${Number(task.spentUsd ?? 0).toFixed(3)} of $${task.budgetUsd.toFixed(3)}`
         : typeof task.spentUsd === "number" && task.spentUsd > 0 ? `, spent $${task.spentUsd.toFixed(3)}` : "";
       const result = typeof task.result === "string" && task.result ? `\n  result: ${task.result.slice(0, 200)}` : "";
-      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}`;
+      const hold = typeof task.hold === "string" && task.hold ? `\n  waiting: ${task.hold}` : "";
+      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}${hold}`;
     });
     return { text: `Board tasks:\n${lines.join("\n")}` };
   }

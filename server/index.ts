@@ -202,6 +202,7 @@ import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type C
 import { readMessageText, recallMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { runHarnessCall, type HarnessCallResult } from "./harness-calls.ts";
+import { raiseBudgetCard, resolveBudgetCard } from "./budget-card.ts";
 import { buildRecall } from "./recall.ts";
 import { resolveMentions, type MentionResolver } from "./mentions.ts";
 import { progressNote } from "./progress.ts";
@@ -336,8 +337,7 @@ import {
   ROUTINE_PROMPT,
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
-  type ComputerPromptKind,
-} from "./system-prompt.ts";
+  type ComputerPromptKind, BOARD_PROMPT } from "./system-prompt.ts";
 import { readCuaConnection, gatedLocalComputer } from "./local-computer.ts";
 import {
   discoverExistingPerBotLocalVms,
@@ -367,7 +367,7 @@ import {
   TASK_TITLE_MAX,
   visibleTo as visibleBoardTasks,
   type BoardStatus,
-  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON } from "./task-board.ts";
+  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON, suggestedBudgetUsd } from "./task-board.ts";
 import { createBotDispatch } from "./task-dispatch-bot.ts";
 import { DEFAULT_STALE_AFTER_MS, createDispatcher as createBoardDispatcher } from "./task-dispatcher.ts";
 import { createTaskTurnWatch } from "./task-turn-watch.ts";
@@ -6456,6 +6456,7 @@ async function startTurn(
         { id: "credential", label: "Credentials", text: credentialPrompt },
         { id: "recall", label: "Recall", text: recallPrompt },
         { id: "routine", label: "Routines", text: routinePrompt },
+        { id: "board", label: "Task board", text: integrations.agents && boardEnabled(cfg) ? BOARD_PROMPT : "" },
         { id: "routine-execution", label: "Routine execution", text: opts?.automationSource === "schedule" || opts?.automationSource === "manual" ? ROUTINE_EXECUTION_PROMPT : "" },
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
@@ -6993,6 +6994,8 @@ function bookBoardSpend(threadId: string, costUsd: number | null): void {
     if (!task) return;
     const booked = bookSpend(task.id, costUsd);
     if (booked.paused || booked.warned) broadcast({ kind: "board", taskId: task.id } as never);
+    // a paused task asks with one card, not a form (budget-card.ts)
+    if (booked.paused) raiseBudgetCard(store, booked.task);
     if (booked.paused) console.error(`[omb-board] task ${task.id} ${BUDGET_PAUSED_REASON}: $${booked.task.spentUsd.toFixed(3)} of $${booked.task.budgetUsd?.toFixed(3)}`);
   } catch (error) {
     console.error(`[omb-board] could not book spend for ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
@@ -7071,7 +7074,9 @@ const boardDispatch = createBotDispatch<BotRecord>({
     }),
   redact: redactSecretsInText,
   log: (message) => console.error(message),
-  defaultBudgetUsd: () => boardDefaultBudgetUsd(cfg),
+  // a configured default wins; otherwise a cap from the bot's own history
+  // (three times its median finished task, floored) — nobody guesses a number
+  defaultBudgetUsd: (task) => boardDefaultBudgetUsd(cfg) ?? suggestedBudgetUsd(task.assigneeBotId),
 });
 const boardDispatcher = createBoardDispatcher({
   maxRunning: boardMaxRunning(cfg),
@@ -11138,13 +11143,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const taskBody = typeof body.body === "string" ? body.body : undefined;
         const overLong = boardInputTooLong(title, taskBody);
         if (overLong) return json(res, 400, { error: overLong });
-        const assigneeBotId = typeof body.assigneeBotId === "string" && body.assigneeBotId.trim()
+        const requestedAssignee = typeof body.assigneeBotId === "string" && body.assigneeBotId.trim()
           ? body.assigneeBotId.trim()
           : undefined;
-        if (assigneeBotId) {
+        // A bot may file work for itself: "me" (the proxy never tells a bot
+        // its own id) or its own id. The peer-reach rule below is for OTHER
+        // bots — it excludes self by design, so it must not gate this.
+        const assigneeBotId = requestedAssignee === "me" || requestedAssignee === "self" ? internalSender.id : requestedAssignee;
+        if (assigneeBotId && assigneeBotId !== internalSender.id) {
           const target = store.bot(assigneeBotId);
           if (!target) {
-            return json(res, 404, { error: "no bot with that id — call list_bots and copy the exact id from the result" });
+            return json(res, 404, { error: "no bot with that id — call list_bots and copy the exact id from the result, or pass \"me\" to do it yourself" });
           }
           if (!canReachPeer(internalSender, target)) {
             return json(res, 403, { error: "that bot belongs to a different section" });
@@ -11166,7 +11175,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ...fields,
           parentIds,
         });
-        return json(res, 201, { task });
+        // Say now if the board will not run it, rather than letting it sit
+        // at "ready" with no message anywhere (found by hand, 2026-09-16).
+        return json(res, 201, { task, hold: boardDispatch.hold(task) });
       }
       if (method === "POST" && path === "/api/internal/task-list") {
         if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
@@ -11192,7 +11203,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             ...(body.mineOnly === true ? { assigneeBotId: internalSender.id } : {}),
           }),
           (botId) => reachable.has(botId),
-        );
+        ).map((task) => ({ ...task, hold: boardDispatch.hold(task) }));
         return json(res, 200, { tasks });
       }
       if (method === "POST" && path === "/api/internal/browser/mcp") {
@@ -15548,6 +15559,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         resolveQuotaSwitch(quotaSwitchBus, String(body.requestId), typeof body.message === "string" ? body.message : undefined)) {
         return json(res, 200, { ok: true, outcome: "answered" });
       }
+      // the board's pause card (budget-card.ts): one tap raises, removes or stops
+      if (resolveBudgetCard(store, String(body.requestId), typeof body.message === "string" ? body.message : undefined)) {
+        return json(res, 200, { ok: true, outcome: "answered" });
+      }
       const outcome = await answerRequest(bot.threadId, bot.modelSelection.instanceId, String(body.requestId), behavior, body.message, { id: bot.id, name: bot.name }, body.always === true);
       return json(res, 200, { ok: true, outcome });
     }
@@ -15628,6 +15643,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // quota-switch intercept (see /api/bots/:id/respond above).
       if (store.messagesFor(threadId).some((message) => message.card?.requestId === requestId) &&
         resolveQuotaSwitch(quotaSwitchBus, requestId, typeof body.message === "string" ? body.message : undefined)) {
+        return json(res, 200, { ok: true, outcome: "answered" });
+      }
+      if (resolveBudgetCard(store, requestId, typeof body.message === "string" ? body.message : undefined)) {
         return json(res, 200, { ok: true, outcome: "answered" });
       }
       const group = store.groupByThread(threadId);

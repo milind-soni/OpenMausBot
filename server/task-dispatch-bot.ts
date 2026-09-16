@@ -51,13 +51,19 @@ export interface BotDispatchDeps<Bot extends DispatchBot> {
   audit: (entry: { threadId: string; botId: string; botName: string; title: string }) => void;
   redact: (text: string) => string;
   log?: (message: string) => void;
-  /** Phase 2 part 1, decision 11: the money cap a task gets when it was
-   * filed without one, read live (board.defaultBudgetUsd); null = no cap. */
-  defaultBudgetUsd?: () => number | null;
+  /** The money cap a task gets when it was filed without one: the
+   * workspace's configured default, else a cap from the bot's own history
+   * (task-board.ts suggestedBudgetUsd); null = no cap. Read live. */
+  defaultBudgetUsd?: (task: BoardTask) => number | null;
 }
 
 export interface BotDispatch {
   canDispatch(task: BoardTask): boolean;
+  /** Why an ASSIGNED task will not run as things stand, in words a bot or a
+   * person can act on — or null when nothing durable is in the way.
+   * Momentary states (the bot is busy) and choices (unassigned, at its cap,
+   * blocked) are not holds; those already show on the task itself. */
+  hold(task: BoardTask): string | null;
   dispatch(task: BoardTask): Promise<{ threadId: string } | null>;
 }
 
@@ -103,7 +109,7 @@ export function createBotDispatch<Bot extends DispatchBot>(deps: BotDispatchDeps
     if (!bot) return null;
     // Board work runs with nobody at the keyboard, so a task filed without
     // a cap gets the unattended default before it spends anything.
-    const fallbackCap = deps.defaultBudgetUsd?.() ?? null;
+    const fallbackCap = deps.defaultBudgetUsd?.(task) ?? null;
     if (task.budgetUsd === null && fallbackCap !== null && fallbackCap > 0) {
       task = patchTask(task.id, { budgetUsd: fallbackCap });
     }
@@ -138,5 +144,17 @@ export function createBotDispatch<Bot extends DispatchBot>(deps: BotDispatchDeps
     return { threadId };
   }
 
-  return { canDispatch: (task) => eligible(task) !== null, dispatch };
+  function hold(task: BoardTask): string | null {
+    if (!task.assigneeBotId) return null;
+    const bot = deps.bot(task.assigneeBotId);
+    if (!bot) return "its assignee bot no longer exists — assign it to another bot";
+    if (bot.hidden) return `${bot.name} is hidden — unhide it or assign the task to another bot`;
+    const mode = deps.approvalMode(bot);
+    if (mode !== "auto") {
+      return `${bot.name} is on the "${mode}" approval setting; the board only runs tasks for a bot set to "Approve for me" (Auto), because nobody is at the keyboard to answer a permission card. Change ${bot.name}'s approval setting, or assign the task to a bot on Auto.`;
+    }
+    return null;
+  }
+
+  return { canDispatch: (task) => eligible(task) !== null, hold, dispatch };
 }

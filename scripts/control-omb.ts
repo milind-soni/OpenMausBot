@@ -418,6 +418,9 @@ export async function launchVerificationServer(
   for (const [key, value] of Object.entries(parentEnv)) {
     // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
     if (key.startsWith("FAKE_CLAUDE_") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
+    // The per-process test key that turns on /api/testing/internal-capability,
+    // so a fixture can call an internal route the way the agents-proxy does.
+    if (key === "OMB_TEST_INTERNAL_CAPABILITY_KEY" && value) childEnv[key] = value;
   }
   // Opt-in live Local VM fixture: keep the temporary home and fake engine,
   // granting only the explicitly selected machine connection and static UI.

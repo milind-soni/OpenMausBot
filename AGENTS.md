@@ -38,3 +38,24 @@ its successors under `docs/plans/`. These rules keep that programme intact.
    the one below, with the Platforms table (`~/.claude/skills/raise-pr`) and the
    scorecard numbers in the body. Findings that were pulled forward or deferred
    are recorded in the plan under "Findings", never left implicit.
+7. **Walk the user's first run before asking the user to.** Fakes and scripted
+   e2e tests only confirm what the author thought of (2026-09-16: three board
+   defects passed every test and failed the first hand test). So before a PR is
+   handed over for hand testing:
+   - **Fresh bot, default settings, real engine, every new flag on together.**
+     A standalone harness on a throwaway data folder (never the user's), one bot
+     created with no settings changed, the phase's flags switched on at once,
+     and the same steps the hand-test guide will give the user, driven through
+     the app's own routes. Record the bot's actual replies in the PR under
+     "Tried by hand".
+   - **Every tool is tested as a bot, not as a person.** A route test that calls
+     the internal route with a minted bot capability (the fixture launcher
+     forwards `OMB_TEST_INTERNAL_CAPABILITY_KEY`), including the case where the
+     bot names itself.
+   - **Nothing waits in silence.** Wherever a rule stops something from running
+     (approval setting, cap, missing peer, flag off), a test asserts the reason
+     is shown to whoever is looking — the bot's reply, the task, the run.
+   - **Say exactly what was tried live.** "Passes live" names the flows run and
+     lists the ones not run. A flag combination that was not run is not tested.
+   - **Write test-folder settings only while the app is closed**, and confirm
+     them after boot through a route that depends on them, not the config view.

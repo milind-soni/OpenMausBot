@@ -93,6 +93,10 @@ export const ROUTINE_EXECUTION_PROMPT =
   " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible." +
   // Phase 2 part 4 (decision 13): nobody is at the keyboard for a routine run
   " Nobody is watching this run, so do not ask clarifying questions: where something is ambiguous, take the most reversible reading, say which one you took, and carry on. If a sign-in, a file, a tool or a permission you need is missing, stop and write a short failure summary that names exactly what was missing; do not guess or retry.";
+/** Phase 2: the board exists and is the place for work filed for later,
+ * so a bot does not wander off to a connected app when asked to "file a task". */
+export const BOARD_PROMPT =
+  " This workspace has a durable task board: work filed for later, run by a bot with nobody watching and paused by its money cap. To file or read it use task_create and task_list (find them with search_tools if they are not listed), never a connected app, unless the person names one.";
 export const LEARN_PROMPT =
   " If the user sends /learn or asks you to save a reusable procedure from this work, use skills_list and skill_manage. Create new skills; update an existing learned skill only when the user explicitly asks to revise that exact name. Include source provenance." + PROPOSAL_RESULT_PROMPT;
 export const WEBHOOK_PROMPT =

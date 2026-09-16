@@ -28,7 +28,7 @@ posixOnly("a board task pauses at its money cap and resumes when it is raised", 
     return { status: res.status, body: await res.json() };
   };
   const task = async (id: string) => (await api("GET", "/api/tasks")).body.tasks.find((t: any) => t.id === id);
-  const until = async (pred: () => Promise<boolean>, what: string, ms = 90_000) => {
+  const until = async (pred: () => Promise<boolean>, what: string, ms = 150_000) => {
     const deadline = Date.now() + ms;
     while (!(await pred())) {
       if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}. stderr: ${stderr.slice(-2000)}`);
@@ -82,15 +82,29 @@ posixOnly("a board task pauses at its money cap and resumes when it is raised", 
     expect(t.spentUsd).toBeCloseTo(0.02, 5);
     comments = (await api("GET", `/api/tasks/${id}/comments`)).body.comments.map((c: any) => c.text);
     expect(comments[1]).toContain("paused, needs a budget increase");
-    // a cap below what is spent is refused; a raised cap resumes the task
+    // a cap below what is spent is refused
     expect((await api("PATCH", `/api/tasks/${id}`, { budgetUsd: 0.015 })).status).toBe(400);
-    const raised = await api("PATCH", `/api/tasks/${id}`, { budgetUsd: 0.05 });
-    expect(raised.status).toBe(200);
-    expect(raised.body.task).toMatchObject({ status: "ready", blockedReason: null, budgetUsd: 0.05 });
+    // the pause raised one card in the run thread; one tap raises the cap
+    // by the step (never under a dollar) and the task runs again
+    const runThread = t.threadId as string;
+    const card = ((await api("GET", `/api/threads/${runThread}/messages?limit=50`)).body.messages as any[]).find((m) => m.kind === "options" && m.card?.fixedOptions);
+    expect(card?.card?.title).toContain("Paused at $0.02");
+    expect(card.card.options).toEqual(["Allow $1.00 more", "Finish without a cap", "Stop this task"]);
+    const answered = await api("POST", `/api/threads/${runThread}/respond`, { requestId: card.card.requestId, behavior: "answer", message: "Allow $1.00 more" });
+    expect(answered.status).toBe(200);
+    const raised = await api("GET", "/api/tasks");
+    expect(raised.body.tasks.find((x: any) => x.id === id)).toMatchObject({ status: "ready", blockedReason: null, budgetUsd: 1.02 });
     await until(async () => (await task(id))?.status === "review", "the resumed task to run again");
     expect((await task(id)).spentUsd).toBeCloseTo(0.03, 5);
     // the ledger booked three priced turns on the task's thread
     const metrics = (await api("GET", "/api/metrics?from=2026-01-01&to=2026-12-31")).body;
     expect(metrics.bots.find((b: any) => b.botId === bot.id)?.turns).toBe(3);
-  }, 240_000);
+    // a task filed with no cap gets one from the bot's history before it
+    // runs: three times the median finished task ($0.01 here), floored at $1
+    const uncapped = await api("POST", "/api/tasks", { title: "No cap given", body: "say hi", assigneeBotId: bot.id });
+    expect(uncapped.body.task.budgetUsd).toBeNull();
+    expect((await api("PATCH", `/api/tasks/${uncapped.body.task.id}`, { status: "ready" })).status).toBe(200);
+    await until(async () => (await task(uncapped.body.task.id))?.status === "review", "the uncapped task to run");
+    expect((await task(uncapped.body.task.id)).budgetUsd).toBe(1);
+  }, 480_000);
 });

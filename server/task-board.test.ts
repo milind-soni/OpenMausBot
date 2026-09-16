@@ -344,3 +344,26 @@ describe("owner, due date, budget and result (Phase 2 part 1)", () => {
     expect(board.setResult(task.id, "[digest] · tools: Bash ×1 · reply: the reply").result).toBe("[digest] · tools: Bash ×1 · reply: the reply");
   });
 });
+
+describe("a cap nobody has to guess (Phase 2, budget defaults)", () => {
+  beforeEach(() => board.openBoard(join(DATA, `auto-${Math.random()}.db`)));
+
+  it("is the floor without history, and three times the median of finished tasks with it", () => {
+    expect(board.suggestedBudgetUsd("bot-1")).toBe(board.AUTO_BUDGET_FLOOR_USD);
+    expect(board.suggestedBudgetUsd(null)).toBe(board.AUTO_BUDGET_FLOOR_USD);
+    for (const spent of [0.4, 0.5, 0.6, 9]) {
+      const task = board.createTask({ title: `t${spent}`, assigneeBotId: "bot-1" });
+      board.setStatus(task.id, "ready");
+      board.claimTask(task.id);
+      board.bookSpend(task.id, spent);
+      board.setStatus(task.id, "review");
+    }
+    // median of 0.4, 0.5, 0.6, 9 is 0.55; three times is 1.65 — the outlier does not drag it
+    expect(board.suggestedBudgetUsd("bot-1")).toBeCloseTo(1.65, 2);
+    // another bot's history is not this bot's; a running task is not history
+    expect(board.suggestedBudgetUsd("bot-2")).toBe(board.AUTO_BUDGET_FLOOR_USD);
+    const small = board.createTask({ title: "small", assigneeBotId: "bot-3" });
+    board.setStatus(small.id, "ready"); board.claimTask(small.id); board.bookSpend(small.id, 0.05); board.setStatus(small.id, "review");
+    expect(board.suggestedBudgetUsd("bot-3")).toBe(board.AUTO_BUDGET_FLOOR_USD);
+  });
+});

@@ -19,17 +19,19 @@ interface Reply {
 describe("the task board routes through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;
   let botId = "";
-  const api = async (method: string, path: string, body?: unknown): Promise<Reply> => {
+  let botThreadId = "";
+  const TEST_CAPABILITY_KEY = "task-routes-fixture-capability";
+  const api = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Reply> => {
     const response = await fetch(`${fixture.info.url}${path}`, {
       method,
-      headers: { "content-type": "application/json", origin: fixture.info.url },
+      headers: { "content-type": "application/json", origin: fixture.info.url, ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     return { status: response.status, body: await response.json() };
   };
 
   beforeAll(async () => {
-    fixture = await launchVerificationServer();
+    fixture = await launchVerificationServer({ ...process.env, OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY });
     const catalog = (await api("GET", "/api/instances")).body.instances.find(
       (instance: { instanceId: string }) => instance.instanceId === "claude",
     );
@@ -37,7 +39,20 @@ describe("the task board routes through an isolated HTTP fixture", () => {
     const created = await api("POST", "/api/bots", { name: "Scout", modelSelection: { instanceId: "claude", model } });
     expect(created.status).toBe(201);
     botId = created.body.bot.id;
+    botThreadId = created.body.bot.threadId;
   });
+
+  /** Call an internal route the way the agents-proxy does: as this bot. */
+  const asBot = async (path: string, body: unknown): Promise<Reply> => {
+    const minted = await api(
+      "POST",
+      "/api/testing/internal-capability",
+      { botId, threadId: botThreadId, kind: "agents" },
+      { "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+    );
+    expect(minted.status).toBe(201);
+    return api("POST", path, body, { authorization: `Bearer ${String(minted.body.token)}` });
+  };
 
   afterAll(async () => {
     await fixture?.close();
@@ -113,6 +128,26 @@ describe("the task board routes through an isolated HTTP fixture", () => {
     expect((await api("POST", "/api/tasks", { title: "bad due", dueAt: "tomorrow" })).status).toBe(400);
     expect((await api("PATCH", "/api/tasks/no-such-task", { priority: 1 })).status).toBe(404);
     expect((await api("POST", "/api/tasks/no-such-task/comments", { text: "x" })).status).toBe(404);
+  });
+
+  it("lets a bot file a task assigned to itself — the peer-reach rule excludes self, the board must not", async () => {
+    // Found by hand (2026-09-16): "assign it to yourself" came back
+    // "that bot belongs to a different section", and list_bots never lists
+    // the caller, so there was no self-assign path at all.
+    const own = await asBot("/api/internal/task-create", { title: "say hello back", assigneeBotId: botId });
+    expect(own.status).toBe(201);
+    expect(own.body.task.assigneeBotId).toBe(botId);
+    // "me" is the spelling the tool offers a bot that does not know its id.
+    const me = await asBot("/api/internal/task-create", { title: "again, as me", assigneeBotId: "me" });
+    expect(me.status).toBe(201);
+    expect(me.body.task.assigneeBotId).toBe(botId);
+    // Scout is on "Ask", so the board will not run this; the filing bot is
+    // told why, and task_list keeps saying so.
+    expect(me.body.hold).toMatch(/Scout.*Approve for me/);
+    const listed = await asBot("/api/internal/task-list", { mineOnly: true });
+    expect(listed.status).toBe(200);
+    const mine = listed.body.tasks.find((task: { id: string }) => task.id === me.body.task.id);
+    expect(mine.hold).toMatch(/Approve for me/);
   });
 
   it("refuses a bad assignee at creation and rejects an internal call without the comms token", async () => {

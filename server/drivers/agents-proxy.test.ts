@@ -1979,6 +1979,14 @@ describe("tool reliability (Phase 2 part 2)", () => {
     }
   });
 
+  it("keeps the board's two tools in the deferred core while the board is on", async () => {
+    const { coreToolNames } = await import("./agents-proxy-reliability.ts");
+    expect(coreToolNames(true).has("task_create")).toBe(true);
+    expect(coreToolNames(true).has("task_list")).toBe(true);
+    expect(coreToolNames(false).has("task_create")).toBe(false);
+    expect(coreToolNames(false).size).toBeLessThan(8);
+  });
+
   it("tells the model what a timeout or an unreachable harness means, and whether it was retried", async () => {
     const { teachingError, TOOL_CALL_TIMEOUT_MS } = await import("./agents-proxy-reliability.ts");
     const timeout = Object.assign(new Error("The operation was aborted due to timeout"), { name: "TimeoutError" });

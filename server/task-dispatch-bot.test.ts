@@ -76,6 +76,24 @@ describe("board dispatch policy", () => {
     expect(dispatch.canDispatch(task("asks"))).toBe(false);
   });
 
+  it("names, in words, why an assigned task is waiting — so a bot or a person can fix it", () => {
+    // Found by hand: a task assigned to a bot on "Ask" sat at ready
+    // forever with no message anywhere. The dispatcher's own rule is the
+    // one place that knows why, so it says so.
+    const bots: TestBot[] = [
+      { id: "free", name: "Free" },
+      { id: "busy", name: "Busy", busy: true },
+      { id: "asks", name: "Asks", approvalMode: "ask" },
+    ];
+    const { dispatch } = harness({}, bots);
+    const task = (assigneeBotId?: string) => board.createTask({ title: "t", assigneeBotId });
+    expect(dispatch.hold(task("free"))).toBeNull();
+    expect(dispatch.hold(task(undefined))).toBeNull(); // unassigned is a choice, not a hold
+    expect(dispatch.hold(task("asks"))).toMatch(/Asks.*Approve for me/);
+    expect(dispatch.hold(task("busy"))).toBeNull(); // busy is momentary, not a hold
+    expect(dispatch.hold(task("no-such-bot"))).toMatch(/no longer exists/);
+  });
+
   it("says no while the board flag is off, whatever the assignee looks like", () => {
     const { dispatch } = harness({ boardEnabled: () => false });
     expect(dispatch.canDispatch(board.createTask({ title: "t", assigneeBotId: "bot-1" }))).toBe(false);
@@ -182,6 +200,12 @@ describe("money caps in the dispatch policy (Phase 2 part 1)", () => {
     expect(await dispatch.dispatch(claimed)).toEqual({ threadId: "thread-for-bot-1" });
     expect(board.getTask(task.id)?.budgetUsd).toBe(0.5);
     expect(calls.started).toHaveLength(1);
+    // without a configured default the cap comes from the bot's history
+    const learned = harness({ defaultBudgetUsd: (task: { assigneeBotId: string | null }) => board.suggestedBudgetUsd(task.assigneeBotId) });
+    const fresh = board.createTask({ title: "fresh", assigneeBotId: "bot-1" });
+    board.setStatus(fresh.id, "ready");
+    await learned.dispatch.dispatch(board.claimTask(fresh.id)!);
+    expect(board.getTask(fresh.id)?.budgetUsd).toBe(board.AUTO_BUDGET_FLOOR_USD);
     // an explicit cap is kept, and no default means no cap
     const explicit = board.createTask({ title: "explicit", assigneeBotId: "bot-1", budgetUsd: 0.2 });
     board.setStatus(explicit.id, "ready");

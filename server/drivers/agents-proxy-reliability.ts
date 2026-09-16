@@ -32,3 +32,11 @@ export function teachingError(path: string, error: unknown, retried: boolean): E
   }
   return new Error(`${tool} could not reach OpenMausBot (${error instanceof Error ? error.message : String(error)})${retried ? ", tried twice" : ""}. This is the app, not your input: continue without it and tell the person the tool was unavailable.`);
 }
+
+/** The tools that stay listed under deferred loading (Phase 2 part 3).
+ * The board's two are core while the board is on: filing work for later
+ * is a front door, and a model that cannot see it reaches for a connected
+ * app instead. */
+export function coreToolNames(boardOn: boolean): Set<string> {
+  return new Set(["list_bots", "session_search", "session_read", "memory_update", "tool_result_read", "post_to_room", ...(boardOn ? ["task_create", "task_list"] : [])]);
+}

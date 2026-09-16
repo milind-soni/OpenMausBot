@@ -40,3 +40,13 @@ Unit (`task-board.test.ts`): columns round-trip and migrate on an old file; `boo
 ## Acceptance
 
 All of the above green; `pnpm typecheck`, `pnpm lint`, `pnpm i18n:check`; T1–T10 and the recall set unchanged (the board is off by default); the PR body names #1185, #59, #1054, #60, #888 with the verdicts above.
+
+## Addendum (Sep 16): a cap nobody has to guess, and a pause that is one tap
+
+Omkar's objection, taken: a cap a person must keep raising is a roadblock, and a cap chosen blind is the wrong shape. Three changes, all on the same seams:
+
+1. **The default comes from history.** A task filed without a cap gets, at dispatch, three times the median spend of its bot's finished tasks, never under $1 (`suggestedBudgetUsd`); a configured `board.defaultBudgetUsd` still wins when set. After a few runs the app knows what a task costs better than the person does, and the cap sits well above the typical task, so pausing means "something is wrong".
+2. **The pause is a card, not a form.** When a task pauses, its run thread gets one fixed-option card: *Allow $X more* (X = the cap, never under $1), *Finish without a cap*, *Stop this task*. One tap raises, removes or archives; the card is answered through the same respond routes as every other card (`server/budget-card.ts`).
+3. **Warn late, pause rarely.** The 70% warning stays as the signal a person reads; with the history-based cap the pause is the exception, not the routine.
+
+Chats a person is watching are still never capped; the monthly cap (#1054) remains the safety net.

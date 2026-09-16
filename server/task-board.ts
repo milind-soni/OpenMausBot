@@ -512,6 +512,26 @@ export function patchTask(id: string, patch: TaskPatch): BoardTask {
   return updated;
 }
 
+/** The floor of an automatic cap, dollars. */
+export const AUTO_BUDGET_FLOOR_USD = 1;
+/** How far above a typical task the automatic cap sits: pausing should mean
+ * "something is wrong", not "this one was a bit bigger than guessed". */
+export const AUTO_BUDGET_MULTIPLIER = 3;
+
+/** A cap nobody had to guess (Phase 2, budget defaults): three times the
+ * median spend of the bot's finished tasks, never under the floor; the floor
+ * alone when the bot has no priced history yet. */
+export function suggestedBudgetUsd(assigneeBotId: string | null | undefined): number {
+  if (!assigneeBotId) return AUTO_BUDGET_FLOOR_USD;
+  const rows = handle()
+    .prepare("SELECT spent_usd FROM tasks WHERE assignee_bot_id = ? AND status IN ('review', 'done', 'archived') AND spent_usd > 0 ORDER BY spent_usd")
+    .all(assigneeBotId) as Array<{ spent_usd: number }>;
+  if (!rows.length) return AUTO_BUDGET_FLOOR_USD;
+  const mid = Math.floor(rows.length / 2);
+  const median = rows.length % 2 ? rows[mid]!.spent_usd : (rows[mid - 1]!.spent_usd + rows[mid]!.spent_usd) / 2;
+  return Math.max(AUTO_BUDGET_FLOOR_USD, Math.round(median * AUTO_BUDGET_MULTIPLIER * 100) / 100);
+}
+
 /** True when the task may spend nothing more: it has a cap and has reached it. */
 export function exhausted(task: Pick<BoardTask, "budgetUsd" | "spentUsd">): boolean {
   return task.budgetUsd !== null && task.spentUsd >= task.budgetUsd;
