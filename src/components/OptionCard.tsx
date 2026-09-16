@@ -102,8 +102,12 @@ export function OptionCard({
       </div>
 
       {/* a permission ask has no free-text answer — the broker only accepts
-          allow/deny, so typing here used to fail silently */}
-      {!card.answered && !card.tool && (
+          allow/deny, so typing here used to fail silently. A closed-choice
+          card (fixedOptions) is the same story with no `tool`: the options
+          ARE the whole answer, and the composer stays unblocked on purpose
+          so free typing elsewhere still works — this just drops the stray
+          input beside these particular buttons. */}
+      {!card.answered && !card.tool && !card.fixedOptions && (
         <input
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
