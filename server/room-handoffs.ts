@@ -192,7 +192,11 @@ export class RoomHandoffs {
     if (count >= this.limits.requests) throw new Error("Room handoff budget exhausted");
     // Refuse work the tree's lifetime budget cannot honestly serve: a node
     // accepted in the root's last minutes would be doomed at enqueue time.
-    const remaining = this.limits.lifetimeMs - this.effectiveAgeMs(root);
+    // The wall-clock hard cap ignores pauses, so the runway actually
+    // available is the shorter of the two remainders.
+    const lifetimeRemaining = this.limits.lifetimeMs - this.effectiveAgeMs(root);
+    const hardCapRemaining = root.createdAt + this.limits.hardCapMs - this.now();
+    const remaining = Math.min(lifetimeRemaining, hardCapRemaining);
     if (remaining < this.limits.minRunwayMs) {
       throw new Error(`Room handoff budget exhausted: only ${duration(Math.max(remaining, 0))} of the ${duration(this.limits.lifetimeMs)} tree lifetime remains`);
     }

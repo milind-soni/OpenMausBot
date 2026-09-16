@@ -303,6 +303,22 @@ describe("room handoff lifetime budget", () => {
       expect(node.result).toContain("node was running");
     }, () => nowMs, { hardCapMs: 45 * 60_000 });
   });
+  it("refuses new work when only the hard-cap remainder is too short to honor the runway", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.run = () => new Promise(() => {});
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      expect(node.status).toBe("running");
+      // 40m of wall clock with the tree paused leaves the full 30m lifetime
+      // budget unspent, but only 5m before the 45m hard cap: less runway than
+      // enqueue promises, so admission must refuse the follow-up.
+      nowMs = 40 * 60_000;
+      expect(() => engine.enqueue(node, "follow", node.id, addr("C"), "work", "more"))
+        .toThrow("Room handoff budget exhausted");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
   it("resumes a waiting parent past the ceiling and gives the follow-up its own runway", async () => {
     let nowMs = 0;
     await fixture(async (engine, hooks) => {
