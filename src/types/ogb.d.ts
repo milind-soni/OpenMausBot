@@ -238,6 +238,9 @@ const __APP_VERSION__: string;
       /** Toggle Handy (the offline speech-to-text app) on or off. Resolves
        * { ok: false, error } when the executable is missing. */
       handyToggle?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
+      /** Headless transcription of WAV bytes through the user's Handy
+       * install (offline model). Returns the transcript text. */
+      handyTranscribeFile?(wav: ArrayBuffer, handyPath: string): Promise<{ ok: boolean; text?: string; error?: string }>;
       /** The Picovoice AccessKey for the "Luna" wake word, from the OS-backed
        * encrypted store (or OMB_PICOVOICE_KEY in dev). Null when none is
        * saved — the wake word then stays off and Settings explains why. */

@@ -18,7 +18,8 @@
 // it happens, which is why waiting feels like listening to someone work
 // rather than listening to nothing.
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Loader2, Phone, PhoneOff, X } from "lucide-react";
+import { Phone, PhoneOff, X } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
 
 import { useStore, visibleMessages, type Bot } from "@/state/store";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -32,6 +33,7 @@ import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPro
 import { cn } from "@/lib/cn";
 import { track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { createOfflineCallStt } from "@/lib/offline-call-stt";
 
 /** Spoken answers to a permission card. Anything else is read as a reply
  * to the bot, not as consent — an approval must never be granted by a
@@ -75,10 +77,13 @@ export function CallTargetButton({
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
-  // Calls listen two ways: Apple Speech on macOS (on-device dictation) and
-  // the Deepgram call stream (window.ogb.callStt) everywhere else the
-  // desktop build ships — Windows included. Either ear is enough.
-  const supported = (capabilities.dictation.available && Boolean(window.ogb?.speechStart)) || Boolean(window.ogb?.callStt);
+  // Calls listen three ways: Apple Speech on macOS (on-device dictation),
+  // the Deepgram call stream (window.ogb.callStt), and — when there is no
+  // Deepgram key — the user's own Handy install, transcribing locally.
+  const supported =
+    (capabilities.dictation.available && Boolean(window.ogb?.speechStart)) ||
+    Boolean(window.ogb?.callStt) ||
+    Boolean(window.ogb?.handyTranscribeFile);
   const localVoice = localSystemVoiceActive();
   const configured = localVoice || Boolean(state.config?.tts?.configured);
   const everyTargetHasVoice = voices.length > 0 && voices.every((voice) => Boolean(voice));
@@ -105,7 +110,7 @@ export function CallTargetButton({
 
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
-    : !capabilities.dictation.available && !window.ogb?.callStt
+    : !capabilities.dictation.available && !window.ogb?.callStt && !window.ogb?.handyTranscribeFile
       ? "Calls need a Deepgram key (Settings → Connections) on this platform — speech recognition runs in the cloud here."
       : !window.ogb?.speechStart && !window.ogb?.callStt
         ? "The speech service is unavailable in this app build. Restart or update OpenMausBot."
@@ -205,7 +210,7 @@ const PCM_SAMPLE_RATE = 16000;
 const PCM_CHUNK_FRAMES = 4096;
 
 function Call({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
@@ -258,11 +263,16 @@ function Call({ bot }: { bot: Bot }) {
 
   const hush = useCallback(() => {
     void window.ogb?.speechStop();
+    // The offline ear finalizes whatever it caught when muted; the cloud
+    // ear just stops being fed (the session stays open — cheap).
+    offlineSttRef.current?.setMuted(true);
   }, []);
 
   // The two listening engines share this guard: mute the mic while the bot
   // speaks (a half-duplex call — see the header comment), so the renderer
   // stops feeding the Deepgram stream and the main process stops recognizing.
+  // The offline ear (Handy) additionally has no persistent session to keep
+  // open: hush() finalizes, and listen() restarts capture for the next turn.
   const callSttSession = useRef<number | null>(null);
   const callSttStream = useRef<MediaStream | null>(null);
   const callSttContext = useRef<AudioContext | null>(null);
@@ -287,11 +297,58 @@ function Call({ bot }: { bot: Bot }) {
     closeCallSttAudio();
   }, [closeCallSttAudio]);
 
+  // Offline ear: the user's own Handy install, no key — created once per
+  // call and only on non-macOS hosts, where Apple Speech has no keyless
+  // call ear to displace (speech.mjs refuses non-darwin, so listen() would
+  // otherwise end in the dead speechStart call at the bottom).
+  const offlineSttRef = useRef<ReturnType<typeof createOfflineCallStt> | null>(null);
+  const stopOfflineStt = useCallback(() => {
+    offlineSttRef.current?.stop();
+    offlineSttRef.current = null;
+  }, []);
+  const ensureOfflineStt = useCallback(() => {
+    if (offlineSttRef.current) return offlineSttRef.current;
+    if (state.config?.dictation?.configured) return null; // cloud is cheaper
+    if (window.ogb?.platform === "darwin") return null; // Apple Speech's call
+    const session = createOfflineCallStt({
+      onUtterance: (said) => {
+        // Phase-independent (not gated on "listening"): the turn may be the
+        // user speaking over the tail of the bot's answer. It is still a
+        // whole utterance the endpointer closed — feed the shared path.
+        if (!alive.current || currentCall() !== bot.id) return;
+        setHeard(said);
+        handleUtterance(said);
+      },
+      onError: (message) => {
+        if (alive.current && currentCall() === bot.id) setNote(message);
+      },
+    });
+    offlineSttRef.current = session;
+    return session;
+    // session callbacks close over refs only (alive, currentCall(), and
+    // the stable handleUtterance captured below); the deps list keeps the
+    // closure honest without re-creating the session every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bot.id]);
+
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== bot.id) return;
     move("listening");
     setHeard("");
     setNote(null);
+    // Offline ear first when the cloud ear has no key (Windows without
+    // Deepgram): Handy listens turn-by-turn, same half-duplex contract.
+    const offline = ensureOfflineStt();
+    if (offline) {
+      void offline.start().catch((error) => {
+        stopOfflineStt();
+        if (alive.current && currentCall() === bot.id) {
+          const message = error instanceof Error ? error.message : String(error);
+          setNote(/permission|denied/i.test(message) ? "Microphone access was denied — allow it, then call again." : message);
+        }
+      });
+      return;
+    }
     // Deepgram call stream (Windows and every non-mac desktop build).
     if (window.ogb?.callStt) {
       void (async () => {
@@ -346,13 +403,15 @@ function Call({ bot }: { bot: Bot }) {
       })();
       return;
     }
-    // Apple Speech (macOS).
+    // Apple Speech (macOS) — the only caller that reaches this line: the
+    // offline ear swallowed non-macOS hosts without a Deepgram key, and the
+    // Deepgram stream took those with one.
     void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
     });
-  }, [bot.id, closeCallSttAudio, move, stopCallStt]);
+  }, [bot.id, closeCallSttAudio, ensureOfflineStt, move, stopCallStt, stopOfflineStt]);
 
   /** Speak, with the microphone closed for the duration (see the header
    * comment — an open mic during playback is a feedback loop). */
@@ -365,7 +424,10 @@ function Call({ bot }: { bot: Bot }) {
       move("speaking");
       hush();
       // Deepgram path: stop FEEDING the stream while speaking (the session
-      // stays open — cheap) so the bot never transcribes its own voice.
+      // stays open — cheap) so the bot never transcribes its own voice. The
+      // offline ear has no idle session to keep; hush() finalizes whatever
+      // the user was saying (delivered even mid-"speaking"), and listen()
+      // reopens capture afterwards.
       callSttMuted.current = true;
       await speaker.speak(text, { botId: bot.id, voiceId: bot.voice });
       callSttMuted.current = false;
@@ -528,11 +590,12 @@ function Call({ bot }: { bot: Bot }) {
       offCallSttError?.();
       void window.ogb?.speechStop();
       stopCallStt();
+      stopOfflineStt();
     };
     // busy/approval are intentionally initial snapshots. Their live changes
     // are handled below without tearing down native event listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id, bot.threadId, dispatch, handleUtterance, listen, move, stopCallStt]);
+  }, [bot.id, bot.threadId, dispatch, handleUtterance, listen, move, stopCallStt, stopOfflineStt]);
 
   // ── narrate the work, speak the answer, read the approvals ───────────
   useEffect(() => {
@@ -669,7 +732,11 @@ function Call({ bot }: { bot: Bot }) {
       <div className="flex flex-col items-center gap-1.5 text-center">
         <div className="text-[20px] font-medium text-ink">{bot.name}</div>
         <div className="flex items-center gap-2 text-[13.5px] text-ink-secondary">
-          {(phase === "working" || phase === "sending") && <Loader2 size={13} className="animate-spin" />}
+          {phase === "sending" || phase === "working" ? (
+            <ThinkingOrb state={phase === "sending" ? "connecting" : "searching"} size={20} />
+          ) : phase === "listening" && heard ? (
+            <ThinkingOrb state="listening" size={20} />
+          ) : null}
           {status}
         </div>
       </div>

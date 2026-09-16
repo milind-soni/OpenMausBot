@@ -215,6 +215,7 @@ const bridge = {
   /** One-way toggle of the Handy offline dictation app. Resolves { ok };
    * { ok: false, error } when the executable is missing. */
   handyToggle: (handyPath) => ipcRenderer.invoke("handy:toggle", handyPath),
+  handyTranscribeFile: (wavPath, handyPath) => ipcRenderer.invoke("handy:transcribe-file", wavPath, handyPath),
 
   /** The Picovoice AccessKey for the "Luna" wake word, from the encrypted
    * credential store. Null when none is saved. */

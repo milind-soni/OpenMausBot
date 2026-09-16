@@ -54,6 +54,9 @@ export function VoiceSettings({
   // macOS, SAPI on Windows. Both are on-device and work offline.
   const hostPlatform = capabilities.host.platform;
   const systemVoicesAvailable = hostPlatform === "darwin" || hostPlatform === "win32";
+  // Piper's availability is what the server reports: the engine is
+  // provisioned per machine, so the option only appears when it exists.
+  const piperAvailable = tts?.piperAvailable === true;
   const hostConfigured = Boolean(tts?.configured);
   const configured = usesLocalSystem || hostConfigured;
 
@@ -102,7 +105,7 @@ export function VoiceSettings({
     onPatch({ voice: voiceId });
   };
 
-  const setProvider = (next: "elevenlabs" | "system") => {
+  const setProvider = (next: "elevenlabs" | "system" | "piper") => {
     if (next === provider || switching || (next === "system" && !systemVoicesAvailable)) return;
     setSwitching(true);
     setError(null);
@@ -149,7 +152,9 @@ export function VoiceSettings({
                 ? systemVoicesAvailable
                   ? " the voices are the ones already installed on this computer — no key, works offline."
                   : " built-in voices are unavailable here. Switch to ElevenLabs to keep using voice."
-                : " the ElevenLabs key is shared by the workspace."}</>}
+                : provider === "piper"
+                  ? " the voice is a neural model that runs on this computer — no key, works offline."
+                  : " the ElevenLabs key is shared by the workspace."}</>}
       </div>
 
       {localDeviceClient && (
@@ -180,13 +185,24 @@ export function VoiceSettings({
         </div>
       )}
 
-      {!workspaceConfigurationLocked && (systemVoicesAvailable || provider === "system") && (
+      {!workspaceConfigurationLocked && (systemVoicesAvailable || provider === "system" || provider === "piper" || piperAvailable) && (
         <div className="mt-4">
           <div className="mb-2 text-[13px] text-ink-secondary">Voice engine</div>
           <div className="inline-flex rounded-xl bg-inset p-1" role="radiogroup" aria-label="Voice engine">
             {([
-              { value: "elevenlabs", label: "ElevenLabs", available: true },
-              { value: "system", label: hostPlatform === "win32" ? "Built-in Windows voices" : "Built-in Mac voices", available: systemVoicesAvailable },
+              { value: "elevenlabs", label: "ElevenLabs", available: true, unavailableReason: null },
+              {
+                value: "piper",
+                label: "Piper · realistic, offline",
+                available: piperAvailable,
+                unavailableReason: "Piper is not provisioned on this machine yet — see the docs for the one-time setup",
+              },
+              {
+                value: "system",
+                label: hostPlatform === "win32" ? "Built-in Windows voices" : "Built-in Mac voices",
+                available: systemVoicesAvailable,
+                unavailableReason: "Built-in voices are available on macOS and Windows",
+              },
             ] as const).map((option) => (
               <button
                 key={option.value}
@@ -194,7 +210,7 @@ export function VoiceSettings({
                 role="radio"
                 aria-checked={provider === option.value}
                 disabled={switching || !option.available}
-                title={!option.available ? "Built-in voices are available on macOS and Windows" : undefined}
+                title={option.unavailableReason ?? undefined}
                 onClick={() => setProvider(option.value)}
                 className={cn(
                   "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors disabled:opacity-50",

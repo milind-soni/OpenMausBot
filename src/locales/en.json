@@ -473,7 +473,7 @@
   "settings.wakeWord.engineCloud": "Cloud · Deepgram",
   "settings.wakeWord.engineHandy": "Handy · offline",
   "settings.wakeWord.handyPath": "Handy executable",
-  "settings.wakeWord.handyPathHint": "Leave empty to try PATH. Handy must run in clipboard mode — the transcript arrives through the clipboard and is typed into the composer.",
+  "settings.wakeWord.handyPathHint": "Leave empty to auto-detect (PATH or the default install location). Handy must run in clipboard mode — the transcript arrives through the clipboard and is typed into the composer. Handy unloads its model after each transcription, so the first moments after “Luna” may not be captured; keep speaking naturally.",
   "wake.transcribing": "Transcribing…",
   "wake.detected": "“Luna” — listening…",
   "wake.micDenied": "Microphone access was denied, so “Luna” can't listen.",

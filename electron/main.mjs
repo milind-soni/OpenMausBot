@@ -2265,6 +2265,61 @@ ipcMain.handle("clipboard:read-text", localOnly("clipboard:read-text", () => {
   return clipboard.readText();
 }));
 
+// Headless transcription through the user's own Handy install: a WAV goes
+// in, the transcript comes back. Used for call turns where there is no
+// Deepgram key — the same offline model the user already runs, no cloud.
+// Handled in this single spot so the toggle and file paths share one
+// resolution of the executable.
+ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async (_event, wavData, handyPath) => {
+  let exe = typeof handyPath === "string" && handyPath.trim() ? handyPath.trim() : null;
+  if (!exe) {
+    exe = "Handy.exe";
+    try {
+      const fallback = path.join(app.getPath("home"), "AppData", "Local", "Handy", "handy.exe");
+      if (!fs.existsSync("Handy.exe") && fs.existsSync(fallback)) exe = fallback;
+    } catch {}
+  }
+  if (!fs.existsSync(exe) && exe === "Handy.exe") {
+    return { ok: false, error: "Handy.exe not found — set its path in Settings → Wake word." };
+  }
+  const bytes = wavData instanceof ArrayBuffer ? Buffer.from(wavData)
+    : ArrayBuffer.isView(wavData) ? Buffer.from(wavData.buffer, wavData.byteOffset, wavData.byteLength)
+    : null;
+  if (!bytes?.length) return { ok: false, error: "No audio data received." };
+  const { mkdtemp } = require("node:fs/promises");
+  const os = require("node:os");
+  let dir;
+  try {
+    dir = await mkdtemp(path.join(os.tmpdir(), "omb-handy-"));
+    const wavPath = path.join(dir, "utterance.wav");
+    await fs.promises.writeFile(wavPath, bytes);
+    const { execFile } = require("node:child_process");
+    const run = await new Promise((resolve) => {
+      execFile(
+        exe,
+        ["--transcribe-file", wavPath, "--json"],
+        { timeout: 90_000, maxBuffer: 1024 * 1024, windowsHide: true },
+        (error, stdout) => resolve({ error, stdout: typeof stdout === "string" ? stdout : "" }),
+      );
+    });
+    if (run.error && !run.stdout) return { ok: false, error: String(run.error) };
+    // Handy prints exactly one JSON object on stdout (verified against its
+    // --json output); parse defensively anyway so a stray log line produces
+    // the visible truth instead of a bare JSON syntax error.
+    let parsed;
+    try {
+      parsed = JSON.parse(run.stdout);
+    } catch {
+      return { ok: false, error: `Handy returned unreadable output: ${run.stdout.slice(0, 200)}` };
+    }
+    return { ok: true, text: String(parsed.text ?? "") };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    if (dir) await fs.promises.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}));
+
 // One-way toggle of Handy's dictation (https://handy.computer), the
 // offline speech-to-text app. No status IPC exists upstream, so the caller
 // drives recording off its own mic watchdog and detects the result through
@@ -2272,7 +2327,16 @@ ipcMain.handle("clipboard:read-text", localOnly("clipboard:read-text", () => {
 // keystroke and spawn both reach the same coordinator, and a rapid second
 // toggle only adds one no-op key event on top.
 ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => {
-  const exe = typeof handyPath === "string" && handyPath.trim() ? handyPath.trim() : "Handy.exe";
+  let exe = typeof handyPath === "string" && handyPath.trim() ? handyPath.trim() : null;
+  if (!exe) {
+    // Empty setting: PATH lookup first, then the standard per-user NSIS
+    // install location (Handy is not on PATH in a default install).
+    exe = "Handy.exe";
+    try {
+      const fallback = path.join(app.getPath("home"), "AppData", "Local", "Handy", "handy.exe");
+      if (!fs.existsSync("Handy.exe") && fs.existsSync(fallback)) exe = fallback;
+    } catch {}
+  }
   const { spawn } = require("node:child_process");
   return new Promise((resolve) => {
     const child = spawn(exe, ["--toggle-transcription"], { windowsHide: true, stdio: "ignore" });

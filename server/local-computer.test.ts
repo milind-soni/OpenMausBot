@@ -302,4 +302,26 @@ describe("local computer descriptor", () => {
     );
     expect(readCuaConnection({ platform: "win32", userData })).toBeNull();
   });
+
+  it("falls back to Electron's default Windows userData when OMB_USER_DATA is unset (dev server)", () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-cua-win-home-"));
+    const appData = join(home, "AppData", "Roaming", "OpenMausBot");
+    mkdirSync(appData, { recursive: true });
+    writeFileSync(
+      join(appData, "cua-connection.json"),
+      JSON.stringify({
+        mode: "embedded",
+        mcpCommand: "C:\\cua-driver.exe",
+        mcpArgs: ["mcp"],
+        mcpEnv: { CUA_DRIVER_EMBEDDED: "1" },
+      }),
+    );
+    expect(readCuaConnection({ platform: "win32", userData: undefined, home })).toEqual({
+      command: "C:\\cua-driver.exe",
+      args: ["mcp"],
+      env: { CUA_DRIVER_EMBEDDED: "1" },
+      platform: "win32",
+      scope: "local-computer",
+    });
+  });
 });

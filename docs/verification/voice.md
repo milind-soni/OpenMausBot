@@ -9,6 +9,10 @@ standard isolated fixture (disposable home, fake engine, no user data):
 2. The built-in (zero-key, offline) voice engine really synthesizes: the
    recipe selects the `system` provider the same way the Settings toggle
    does, then posts to `/api/tts/speak` and requires actual WAV bytes.
+3. The Piper (offline neural) provider stays honest when its engine is
+   absent — the fixture home never has one — reporting `provider: "piper"`
+   and refusing with Piper-specific advice rather than a silent ElevenLabs
+   fallback.
 
 On macOS the engine is `/usr/bin/say`; on Windows it is SAPI driven through
 `System32\WindowsPowerShell\v1.0\powershell.exe` (resolved absolutely, so

@@ -326,7 +326,7 @@ const appConfigSchema = z.object({
   /** Voice credentials and the selected voice id. `provider` picks the
    * engine: "elevenlabs" (default; needs a key) or "system" (the Mac's
    * built-in voices, no key). */
-  tts: z.object({ key: optionalText, voice: optionalText, provider: z.enum(["elevenlabs", "system"]).optional() }).optional(),
+  tts: z.object({ key: optionalText, voice: optionalText, provider: z.enum(["elevenlabs", "system", "piper"]).optional() }).optional(),
   /** Composer dictation (hold Ctrl+Space): the Deepgram streaming key. The
    * desktop shell, not a provider driver, consumes it. */
   dictation: z.object({ key: optionalText }).optional(),
@@ -399,7 +399,7 @@ export interface AppConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" };
+  tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" | "piper" };
   dictation?: { key?: string };
   wakeWord?: { accessKey?: string };
   imageGen?: ImageGenerationConfig;

@@ -61,6 +61,16 @@ const WIN_STANDALONE_SOCKET = path.join(
   "AppData/Local/CuaDriver/cua-driver.sock",
 );
 
+// Dev checkout: `pnpm build:cua:win` stages the driver executable and SDK
+// bundle into <repo>/dist-native/cua-win32-x64 — the same tree packaging copies
+// into Resources. Dev on Windows should drive the identical embedded host the
+// packaged app ships (scripts/smoke-cua-win-embedded.mjs proves the bundle).
+function devStagedWinBinary() {
+  if (app.isPackaged || process.platform !== "win32") return null;
+  const staged = path.join(app.getAppPath(), "dist-native", "cua-win32-x64", "cua-driver.exe");
+  return fs.existsSync(staged) ? staged : null;
+}
+
 let embeddedHost = null; // EmbeddedCuaDriverHost | null
 let startupAbort = null;
 let lifecycleGeneration = 0;
@@ -137,6 +147,8 @@ export function resolveDriverBinary() {
   }
   if (process.platform === "darwin" && fs.existsSync(INSTALLED_DRIVER)) return INSTALLED_DRIVER;
   if (process.platform === "win32" && fs.existsSync(WIN_INSTALLED_DRIVER)) return WIN_INSTALLED_DRIVER;
+  const stagedDev = devStagedWinBinary();
+  if (stagedDev) return stagedDev;
   return null;
 }
 
@@ -324,8 +336,12 @@ export async function startCua() {
     });
   }
 
+  // Embedded is the packaged contract; a dev checkout with the staged win32
+  // bundle runs the same host so local computer control works identically.
   const wantEmbedded =
-    app.isPackaged || process.env.OPENMAUSBOT_CUA_EMBEDDED === "1";
+    app.isPackaged ||
+    process.env.OPENMAUSBOT_CUA_EMBEDDED === "1" ||
+    Boolean(devStagedWinBinary());
   let nextConnection;
 
   if (wantEmbedded) {

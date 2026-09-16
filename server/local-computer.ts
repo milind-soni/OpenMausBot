@@ -352,6 +352,14 @@ export function readCuaConnection({
       candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
     }
   }
+  if (platform === "win32") {
+    // Dev fallback (a standalone `pnpm dev:server` has no OMB_USER_DATA):
+    // Electron's Windows userData default is %APPDATA%/<productName>. The
+    // packaged app always sets OMB_USER_DATA, so this only widens dev.
+    for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot", "Electron"]) {
+      candidates.push(join(home, "AppData", "Roaming", directory, "cua-connection.json"));
+    }
+  }
 
   for (const file of new Set(candidates)) {
     try {

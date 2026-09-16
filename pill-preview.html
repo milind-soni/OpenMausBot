@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dictation pill preview</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      align-items: center;
+      justify-content: center;
+      background: #0d0e10;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      color: #ececec;
+    }
+    .row { display: flex; align-items: center; gap: 14px; }
+    .label { width: 190px; text-align: right; font-size: 12.5px; color: #8a8a8f; }
+    .pill {
+      border-radius: 9999px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: #17181b;
+      padding: 6px 14px;
+      font-size: 12.5px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+    }
+  </style>
+</head>
+<body>
+  <script type="module" src="/src/testing/pill-preview.tsx"></script>
+</body>
+</html>

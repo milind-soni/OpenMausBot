@@ -2,7 +2,11 @@
 //   1. the wake-word credential + feature flag round-trip, write-only;
 //   2. the built-in (zero-key, offline) voice engine — on this machine that
 //      is real PowerShell/System.Speech, so the WAV bytes prove the whole
-//      route: config gate → spawn → synthesis → response.
+//      route: config gate → spawn → synthesis → response;
+//   3. the Piper (offline neural) provider's honest refusal: the fixture
+//      home never has the engine provisioned, so selecting it must report
+//      `provider: "piper"` and refuse with Piper-specific advice — never
+//      ElevenLabs' "add a key".
 // Launches its own fake-engine server; the user's app and data are untouched.
 import { launchVerificationServer } from "./control-omb.ts";
 
@@ -56,6 +60,34 @@ try {
     if (providerRes.ok) fail("the built-in engine answered on a platform that has none");
     findings.push(`built-in voice correctly refused on ${process.platform}`);
   }
+
+  // 3. Piper is provisioned per machine and absent in the fixture home.
+  //    Selecting it must stay honest: status says provider "piper" (not a
+  //    silent ElevenLabs fallback) and speak refuses with Piper advice.
+  await put({ tts: { provider: "piper", voice: "en_US-amy-medium" } });
+  // a status read, not a write: PUT requires a patch, GET is the read path
+  const piperStatus = (await fetch(`${base}/api/config`).then((r) => r.json())) as Record<string, unknown>;
+  const piperTts = piperStatus.tts as { provider?: string; piperAvailable?: boolean } | undefined;
+  if (piperTts?.provider !== "piper") {
+    fail(`selected piper but status reports provider ${JSON.stringify(piperTts)}`);
+  }
+  if (piperTts.piperAvailable !== false) {
+    fail(`fixture home should have no Piper engine, status says ${JSON.stringify(piperTts)}`);
+  }
+  const piperSpeak = await fetch(`${base}/api/tts/speak`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text: "Should not synthesize.", voiceId: "en_US-amy-medium" }),
+  });
+  if (piperSpeak.ok) fail("Piper answered without an engine installed");
+  const piperError = ((await piperSpeak.json()) as { error?: string }).error ?? "";
+  if (!/piper/i.test(piperError) || /elevenlabs/i.test(piperError)) {
+    fail(`Piper refusal should name Piper, not ElevenLabs — got: ${piperError}`);
+  }
+  findings.push(`piper without an engine: provider stays "piper", refusal names Piper (${piperSpeak.status})`);
+  // restore so the run leaves no piper selection behind in the (disposable)
+  // fixture config — mirrors what Settings does when the user switches back.
+  await put({ tts: { provider: "system", voice: process.platform === "darwin" ? "Albert" : "Microsoft David Desktop" } });
 
   console.log(JSON.stringify({ ok: true, platform: process.platform, url: base, dataDir: fixture.info.dataDir, findings }, null, 2));
 } finally {
