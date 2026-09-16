@@ -11,6 +11,37 @@ export function composerCanSteerQueuedMessages(
   return busy && !locked && !approvalPending && pendingCount > 0;
 }
 
+/** How long a just-queued chip accepts a second Enter as "steer it now". */
+export const DOUBLE_ENTER_STEER_WINDOW_MS = 1_500;
+
+/** A new chip on a busy steer-capable thread opens the double-Enter
+ * window: the words queued because the live steer lost its race (or carried
+ * an attachment) can still join the running turn without interrupting it.
+ * Rooms and 1:1 threads share the gesture; capability, not the surface,
+ * decides whether it applies.
+ * Returns the window's expiry, or null when the gesture does not apply. */
+export function doubleEnterSteerWindowExpiresAt(
+  prevPendingCount: number,
+  pendingCount: number,
+  busy: boolean,
+  canSteer: boolean,
+  now = Date.now(),
+): number | null {
+  if (!busy || !canSteer) return null;
+  return pendingCount > prevPendingCount ? now + DOUBLE_ENTER_STEER_WINDOW_MS : null;
+}
+
+/** Whether an Enter press is the second one: empty composer, a chip waiting,
+ * and inside the window opened when that chip arrived. */
+export function doubleEnterSteersQueue(
+  windowExpiresAt: number,
+  now: number,
+  pendingCount: number,
+  hasContent: boolean,
+): boolean {
+  return !hasContent && pendingCount > 0 && now < windowExpiresAt;
+}
+
 /** Messages held by the harness until the running turn settles.
  *
  * The queue sits directly above the composer rather than pretending these
@@ -23,12 +54,16 @@ export function QueuedComposerMessages({
   onSteer,
   steerMode = "all",
   steering = false,
+  steerInterrupts = false,
   onCancel,
 }: {
   items: Array<{ queueId: string; text: string; reason?: "capacity" }>;
   onSteer?: () => void;
   steerMode?: "all" | "next";
   steering?: boolean;
+  /** True when Steer is backed by an interrupt (engine without live steer):
+   * the hint must say what the click really does. */
+  steerInterrupts?: boolean;
   onCancel: (queueId: string) => void;
 }) {
   if (!items.length) return null;
@@ -41,11 +76,17 @@ export function QueuedComposerMessages({
         ? t("composer.queued.steerAll")
         : t("composer.queued.steerNext")
       : t("composer.queued.steer");
-  const steerDescription = multiple
-    ? steerMode === "all"
-      ? t("composer.queued.steerAllHint", { count: items.length })
-      : t("composer.queued.steerNextHint")
-    : t("composer.queued.steerHint");
+  const steerDescription = steerInterrupts
+    ? multiple
+      ? steerMode === "all"
+        ? t("composer.queued.steerAllInterruptHint", { count: items.length })
+        : t("composer.queued.steerNextInterruptHint")
+      : t("composer.queued.steerInterruptHint")
+    : multiple
+      ? steerMode === "all"
+        ? t("composer.queued.steerAllHint", { count: items.length })
+        : t("composer.queued.steerNextHint")
+      : t("composer.queued.steerHint");
 
   return (
     <div

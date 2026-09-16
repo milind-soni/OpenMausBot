@@ -588,6 +588,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     const listeners = new Set<RuntimeEventListener>();
     interface Turn {
       stop: () => Promise<boolean>;
+      /** Fold new user input into the running native turn (turn/steer).
+       * False when this attempt has nothing steerable; the caller queues. */
+      steer?: (text: string) => Promise<boolean>;
       turnId: string;
       asks: Map<string, (behavior: "allow" | "deny" | "answer", message?: string, source?: "user" | "timeout" | "system") => void>;
     }
@@ -782,9 +785,31 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         return stopped;
       });
       let completeStoppedTurn: (() => void) | undefined;
+      // Stop asks the app-server to end the turn itself before any process
+      // signal. Killing first surfaced routine stops as "codex exited null
+      // (signal SIGTERM) before turn/completed"; the protocol interrupt keeps
+      // the session the authority, and the kill below is only escalation for
+      // a server that will not answer. settle() runs with state.settled
+      // already true, so ordinary completion still tears down immediately.
+      let interruptRequested = false;
       const stop = async () => {
         stopRequested = true;
         stopSignal.abort();
+        if (!state.settled && !interruptRequested && codexThreadId && codexTurnId &&
+            child.exitCode === null && child.signalCode === null) {
+          interruptRequested = true;
+          const graceMs = Math.max(1, Number(process.env.FAKE_CODEX_INTERRUPT_GRACE_MS ?? 750) || 750);
+          try {
+            await request("turn/interrupt", { threadId: codexThreadId, turnId: codexTurnId }, graceMs);
+          } catch {
+            // Old CLI without the method, or a wedged server: escalate below.
+          }
+          const deadline = Date.now() + graceMs;
+          while (!state.settled && Date.now() < deadline) {
+            await new Promise((wake) => setTimeout(wake, 15));
+          }
+          if (state.settled) return true;
+        }
         const stopped = await terminate();
         if (stopped) completeStoppedTurn?.();
         return stopped;
@@ -804,6 +829,26 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         completeStoppedTurn = complete;
         if (!(await stop())) {
           emit({ ...base(threadId, turnId), type: "runtime.error", message: "codex did not shut down after termination was requested" });
+        }
+      };
+
+      // Live steering folds new input into the running turn without ending
+      // it. expectedTurnId is the protocol's precondition: a turn that moved
+      // on (or a CLI without turn/steer) answers with an RPC error, which
+      // becomes false here so the caller queues for the next turn — the
+      // child is never killed to steer.
+      const steerActiveTurn = async (text: string): Promise<boolean> => {
+        if (state.settled || abandoned || stopRequested || !codexThreadId || !codexTurnId) return false;
+        if (child.exitCode !== null || child.signalCode !== null) return false;
+        try {
+          await request("turn/steer", {
+            threadId: codexThreadId,
+            input: [{ type: "text", text }],
+            expectedTurnId: codexTurnId,
+          }, 10_000);
+          return true;
+        } catch {
+          return false;
         }
       };
 
@@ -1199,6 +1244,13 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           void stop();
           return;
         }
+        // An intentional stop killed (or outlived) the child before the
+        // turn acknowledged its own end. That is the stop doing its job, not
+        // a crash: settle quietly so Stop never reports the raw signal.
+        if (stopRequested) {
+          void settle(false, "interrupted");
+          return;
+        }
         // The child died before the turn completed. Attribute the exit
         // honestly: name the signal when it was killed, and only quote
         // stderr that arrived after the last protocol message. A stale
@@ -1264,7 +1316,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         void settle(false, "exit_before_result");
       });
 
-      active.set(threadId, { stop, turnId, asks });
+      active.set(threadId, { stop, turnId, asks, steer: steerActiveTurn });
       // Relaunching the app-server is still the same logical turn. Keep the
       // active process current on every attempt, but announce the turn once.
       if (attempt === 0) emit({ ...base(threadId, turnId), type: "turn.started" });
@@ -1503,6 +1555,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       provider: DRIVER_KIND,
       capabilities: {
         sessionModelSwitch: "unsupported",
+        queueing: true,
         computerMcp: true,
         localComputerMcp: true,
         composioMcp: true,
@@ -1517,6 +1570,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       sendTurn,
       interruptTurn: async (threadId) => {
         await active.get(threadId)?.stop();
+      },
+      steer: async (threadId, text) => {
+        const turn = active.get(threadId);
+        return turn?.steer ? await turn.steer(text) : false;
       },
       respondToRequest: async (threadId, requestId, decision) => {
         const turn = active.get(threadId);

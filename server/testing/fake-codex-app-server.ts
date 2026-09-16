@@ -32,6 +32,10 @@
 //   FAKE_CODEX_RESUME_ERROR   JSON-RPC error object to reject thread/resume
 //   FAKE_CODEX_START_ERROR    JSON-RPC error object to reject thread/start
 //   FAKE_CODEX_RESTORED_USAGE report 100/50/10 tokens already used before turn/start, as a resumed thread can
+//   FAKE_CODEX_STEER_ERROR  JSON-RPC error object to reject turn/steer (queue fallback)
+//   FAKE_CODEX_STEER_ERROR_FILE  gate file path: reject turn/steer only while the file exists
+//   FAKE_CODEX_INTERRUPT_SILENT  ignore turn/interrupt entirely (wedged server; driver must escalate)
+//   FAKE_CODEX_INTERRUPT_GRACE_MS  driver-side grace before escalating an interrupt (tests)
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -288,6 +292,33 @@ process.stdin.on("data", (chunk) => {
           break;
         }
         out({ jsonrpc: "2.0", id: msg.id, result: {} });
+        break;
+      case "turn/steer": {
+        dump();
+        const refused = (message: string) =>
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message } });
+        if (process.env.FAKE_CODEX_STEER_ERROR) {
+          out({ jsonrpc: "2.0", id: msg.id, error: JSON.parse(process.env.FAKE_CODEX_STEER_ERROR) });
+          break;
+        }
+        if (process.env.FAKE_CODEX_STEER_ERROR_FILE && existsSync(process.env.FAKE_CODEX_STEER_ERROR_FILE)) {
+          refused("active turn is not steerable");
+          break;
+        }
+        if (msg.params?.expectedTurnId !== nativeTurnId) {
+          refused("active turn is not steerable");
+          break;
+        }
+        out({ jsonrpc: "2.0", id: msg.id, result: { turnId: nativeTurnId } });
+        break;
+      }
+      case "turn/interrupt":
+        dump();
+        // SILENT models a server that accepts stdin but never acts: the
+        // driver must escalate to a kill after its grace window.
+        if (process.env.FAKE_CODEX_INTERRUPT_SILENT) break;
+        out({ jsonrpc: "2.0", id: msg.id, result: {} });
+        notify("turn/completed", { turn: { status: "interrupted" } });
         break;
       case "thread/start":
         dump();

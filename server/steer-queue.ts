@@ -49,6 +49,13 @@ interface QueueEntry {
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
+/** A thread's queue lifted out of the map while a live steer is attempted. */
+export interface HeldSteerQueue {
+  botId: string;
+  threadId: string;
+  items: QueueEntry["items"];
+}
+
 export function restoreSteeredMessages(): void {
   queues.clear();
   for (const row of chatFollowups("bot")) {
@@ -236,6 +243,36 @@ export function cancelSteeredMessage(botId: string, messageId: string, expectedT
     return true;
   }
   return false;
+}
+
+/** Atomically lift a thread's whole queue out of the map for a live steer.
+ * The entry leaves first so a settle that starts draining while the adapter
+ * is still thinking can never also dispatch the same words as a follow-up
+ * turn. The caller must either restore the held queue or settle its rows. */
+export function holdSteeredQueue(botId: string, threadId: string, queueId: string): HeldSteerQueue | null {
+  const entry = queues.get(threadId);
+  if (!entry || entry.botId !== botId || !entry.items.some((item) => item.messageId === queueId)) return null;
+  queues.delete(threadId);
+  changed();
+  return { botId, threadId, items: entry.items };
+}
+
+/** Put a held queue back after the steer was refused. Words queued while the
+ * hold was open keep their place behind the restored items. */
+export function restoreHeldSteeredQueue(held: HeldSteerQueue): void {
+  const existing = queues.get(held.threadId);
+  if (existing && existing.botId !== held.botId) throw new Error("queued task belongs to another bot");
+  queues.set(held.threadId, {
+    botId: held.botId,
+    items: existing ? [...held.items, ...existing.items] : held.items,
+  });
+  changed();
+}
+
+/** Mark a held queue's durable rows delivered: the words were folded into the
+ * running turn, so a restart must not replay them as a fresh follow-up. */
+export function settleHeldSteeredQueue(held: HeldSteerQueue): void {
+  settleChatFollowups(held.items.map((item) => item.messageId), null);
 }
 
 /** Test helper: how many messages remain queued for a thread. */

@@ -93,6 +93,51 @@ export function cancelChannelMessage(groupId: string, queueId: string): boolean 
   return false;
 }
 
+/** A channel thread's queue lifted out of the map while a live steer is
+ * attempted against the room's running speaker. */
+export interface HeldChannelQueue {
+  groupId: string;
+  threadId: string;
+  items: ChannelQueueItem[];
+}
+
+/** Atomically lift a channel thread's whole queue out for a live steer. The
+ * entry leaves first so a room that settles while the adapter is still
+ * thinking can never also drain the same words as a follow-up turn. The
+ * caller must either restore the held queue or settle its head. */
+export function holdChannelQueue(groupId: string, threadId: string, queueId: string): HeldChannelQueue | null {
+  const entry = queues.get(threadId);
+  if (!entry || entry.groupId !== groupId || !entry.items.some((item) => item.id === queueId)) return null;
+  queues.delete(threadId);
+  return { groupId, threadId, items: entry.items };
+}
+
+/** Put a held queue back after the steer was refused. Words queued while the
+ * hold was open keep their place behind the restored items. */
+export function restoreHeldChannelQueue(held: HeldChannelQueue): void {
+  const existing = queues.get(held.threadId);
+  if (existing && existing.groupId !== held.groupId) throw new Error("queued task belongs to another channel");
+  queues.set(held.threadId, {
+    groupId: held.groupId,
+    items: existing ? [...held.items, ...existing.items] : held.items,
+  });
+}
+
+/** Mark a held queue's head delivered — its words were folded into the
+ * running turn — and re-queue the rest for the room's normal one-at-a-time
+ * drain. A restart must not replay the steered head as a fresh follow-up. */
+export function settleHeldChannelQueueHead(held: HeldChannelQueue): void {
+  const [head, ...rest] = held.items;
+  settleChatFollowups([head.id], null);
+  if (rest.length === 0) return;
+  const existing = queues.get(held.threadId);
+  if (existing && existing.groupId !== held.groupId) throw new Error("queued task belongs to another channel");
+  queues.set(held.threadId, {
+    groupId: held.groupId,
+    items: existing ? [...rest, ...existing.items] : rest,
+  });
+}
+
 /**
  * Start at most one follow-up per idle channel. Starting it synchronously
  * marks the channel working again; its completion calls this drain for the

@@ -20,11 +20,14 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
+  holdSteeredQueue,
   onSteeredQueueChange,
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queueSteeredMessage,
+  restoreHeldSteeredQueue,
   restoreSteeredMessages,
+  settleHeldSteeredQueue,
   _queuedCount,
   type SteerStore,
 } from "./steer-queue.ts";
@@ -129,6 +132,64 @@ describe("steer-queue module", () => {
       cancelSteeredMessage("bot-public", owned.id);
       cancelSteeredMessage("bot-orphan", orphan.id);
     }
+  });
+
+  it("holds only the owning bot's queue by one of its own ids, and a held queue cannot drain", () => {
+    const bot = fakeBot("bot-hold", "thread-hold", false);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    const queued = queueSteeredMessage(bot.id, bot.threadId, "steer me");
+    queueSteeredMessage("bot-hold", "thread-hold", "second"); // same bot, same thread
+    try {
+      expect(holdSteeredQueue("other-bot", bot.threadId, queued.id)).toBeNull();
+      expect(holdSteeredQueue(bot.id, bot.threadId, "not-a-queue-id")).toBeNull();
+      expect(holdSteeredQueue(bot.id, "thread-elsewhere", queued.id)).toBeNull();
+      expect(_queuedCount(bot.threadId)).toBe(2); // untouched by failed holds
+
+      // the lift is atomic: while held, a settle draining queues cannot also
+      // dispatch these words as a follow-up turn
+      const held = holdSteeredQueue(bot.id, bot.threadId, queued.id);
+      expect(held?.items.map((item) => item.text)).toEqual(["steer me", "second"]);
+      expect(_queuedCount(bot.threadId)).toBe(0);
+      drainSteeredMessages(store, run);
+      expect(run).not.toHaveBeenCalled();
+
+      restoreHeldSteeredQueue(held!);
+      expect(_queuedCount(bot.threadId)).toBe(2);
+      drainSteeredMessages(store, run);
+      expect(run).toHaveBeenCalledTimes(1);
+    } finally {
+      cancelSteeredMessage(bot.id, queued.id);
+    }
+  });
+
+  it("restores a held queue behind words queued while it was held", () => {
+    const queued = queueSteeredMessage("bot-hold-merge", "thread-hold-merge", "held words");
+    try {
+      const held = holdSteeredQueue("bot-hold-merge", "thread-hold-merge", queued.id)!;
+      const later = queueSteeredMessage("bot-hold-merge", "thread-hold-merge", "queued during the hold");
+      restoreHeldSteeredQueue(held);
+      const snapshot = queuedSteerSnapshot(() => true);
+      expect(snapshot["thread-hold-merge"].map((item) => item.text)).toEqual([
+        "held words",
+        "queued during the hold",
+      ]);
+      cancelSteeredMessage("bot-hold-merge", later.id);
+    } finally {
+      cancelSteeredMessage("bot-hold-merge", queued.id);
+    }
+  });
+
+  it("settling a held queue marks its durable rows delivered: a restart does not replay them", () => {
+    const bot = fakeBot("bot-hold-settle", "thread-hold-settle", true);
+    const first = queueSteeredMessage(bot.id, bot.threadId, "folded into the running turn");
+    const second = queueSteeredMessage(bot.id, bot.threadId, "also folded");
+    const held = holdSteeredQueue(bot.id, bot.threadId, first.id)!;
+    settleHeldSteeredQueue(held);
+    restoreSteeredMessages(); // restart: only still-pending rows come back
+    expect(_queuedCount(bot.threadId)).toBe(0);
+    expect(queuedSteerSnapshot(() => true)).toEqual({});
+    cancelSteeredMessage(bot.id, second.id);
   });
 
   it("publishes enqueue/cancel/drain snapshots before a failed dispatch can leave stale chips", () => {

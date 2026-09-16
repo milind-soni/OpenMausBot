@@ -52,6 +52,8 @@ import { ReplyQuote } from "./ReplyQuote";
 import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
+  doubleEnterSteerWindowExpiresAt,
+  doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { mentionChoicesForQuery } from "@/lib/mentions";
@@ -113,9 +115,14 @@ export function Composer({
   // configured default responder.
   const busy = group ? Boolean(group.working || group.busyBotId) : Boolean(bot?.busy);
   // an engine with a live session takes a message INTO the running turn;
-  // for those the composer never locks — the server steers instead of 409
+  // for those the composer never locks — the server steers instead of 409.
+  // A room steers through its busy speaker's engine, mirroring how the
+  // server's queue-steer route resolves the running turn.
+  const steerInstanceId = group
+    ? members?.find((member) => member.id === group.busyBotId)?.modelSelection.instanceId
+    : bot?.modelSelection.instanceId;
   const canSteer =
-    !group && Boolean(bot) && state.instances.find((i) => i.instanceId === bot!.modelSelection.instanceId)?.capabilities?.queueing === true;
+    state.instances.find((i) => i.instanceId === steerInstanceId)?.capabilities?.queueing === true;
   // a pending approval blocks the prompt until it is answered
   const threadId = group?.threadId ?? bot?.threadId ?? "";
   // The conversation's own place, when pinned; the chip reads it next to the bot default.
@@ -349,17 +356,48 @@ export function Composer({
     if (group) dispatch({ type: "interruptGroup", groupId: group.id, threadId });
     else if (bot) dispatch({ type: "interrupt", botId: bot.id, threadId });
   };
+  const queueHeadId = queuedMessages[0]?.queueId;
   const steerQueued = () => {
+    if (!queueHeadId) return;
     setSteering(true);
+    const settle = () => setSteering(false);
+    if (group && canSteer) {
+      // A steer-capable room folds the queued head into the running turn
+      // through the server; it never interrupts the turn to do it.
+      dispatch({ type: "steerGroupQueued", groupId: group.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
+    } else if (group) {
+      // A room whose running engine cannot steer keeps the old behavior:
+      // Steer ends the running turn so the next queued message starts.
+      dispatch({ type: "interruptGroup", groupId: group.id, threadId, onError: settle });
+    } else if (bot && canSteer) {
+      // A steer-capable engine folds the queued words into the running turn
+      // through the server; it never interrupts the turn to do it.
+      dispatch({ type: "steerQueued", botId: bot.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
+    } else if (bot) {
     // Unlike the general Stop control, Steer belongs to this exact queue.
     // Scoping prevents a 1:1 queue from interrupting the same bot in a room
     // (or a routine) whose work is unrelated to the words shown here.
-    const onError = () => setSteering(false);
-    if (group) dispatch({ type: "interruptGroup", groupId: group.id, threadId, onError });
-    else if (bot) dispatch({ type: "interrupt", botId: bot.id, threadId, onError });
+      dispatch({ type: "interrupt", botId: bot.id, threadId, onError: settle });
+    }
   };
-  const queueHeadId = queuedMessages[0]?.queueId;
   useEffect(() => setSteering(false), [threadId, queueHeadId]);
+  // Double-Enter gesture: when a send lands as a queued chip on a busy
+  // steer-capable thread (live steer lost its race, an attachment, an
+  // older CLI), a second Enter within a short window pulls that queue into
+  // the running turn. Plain sends never consult the window, so they keep
+  // their normal latency.
+  const steerAgainUntilRef = useRef(0);
+  const prevPendingCountRef = useRef(pendingCount);
+  useEffect(() => {
+    const expiresAt = doubleEnterSteerWindowExpiresAt(
+      prevPendingCountRef.current,
+      pendingCount,
+      busy,
+      canSteer,
+    );
+    if (expiresAt !== null) steerAgainUntilRef.current = expiresAt;
+    prevPendingCountRef.current = pendingCount;
+  }, [pendingCount, busy, canSteer]);
   // Most engines acknowledge interruption quickly, but a lost response must
   // not leave a control claiming to steer forever. Queue drain or turn end
   // clears it immediately; twenty seconds is the final recovery floor.
@@ -785,6 +823,7 @@ export function Composer({
         <QueuedComposerMessages
           items={queuedMessages}
           onSteer={canSteerQueued ? steerQueued : undefined}
+          steerInterrupts={!canSteer}
           steerMode={group ? "next" : "all"}
           steering={steering}
           onCancel={(queueId) => {
@@ -946,6 +985,17 @@ export function Composer({
             // Shift+Enter inserts a newline; plain Enter sends
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
+              // The second Enter of the gesture: the chip above is waiting,
+              // the composer is empty, and the window is open — steer the
+              // queue into the running turn instead of waiting it out.
+              if (
+                canSteer &&
+                doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
+              ) {
+                steerAgainUntilRef.current = 0;
+                steerQueued();
+                return;
+              }
               send();
             }
             if (e.key === "Escape" && recording) setRecording(false);
@@ -962,7 +1012,9 @@ export function Composer({
               : recording
               ? t("composer.placeholder.listening")
               : busy && canSteer
-                ? t("composer.placeholder.steer", { name: busyName })
+                ? pendingCount > 0
+                  ? t("composer.placeholder.steerQueued", { name: busyName })
+                  : t("composer.placeholder.steer", { name: busyName })
               : busy
                 ? group
                   ? t("composer.placeholder.queueGroup", { name: busyName })
