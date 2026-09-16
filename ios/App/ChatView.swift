@@ -263,6 +263,7 @@ struct ChatView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
                     .ignoresSafeArea(edges: .top)
+                    .allowsHitTesting(false)
                 }
                 .task {
                     // grow, hold a beat, shrink — the face rides along
@@ -491,13 +492,22 @@ struct ChatView: View {
 
             Spacer(minLength: 4)
 
-            if case .bot = current {
-                GlassButton(systemImage: "display", size: 44, weight: .medium) {
-                    showingComputer = true
+            HStack(spacing: 8) {
+                if current.supportsTasks {
+                    GlassButton(systemImage: "square.stack.3d.up", size: 44, weight: .medium) {
+                        showingTasks = true
+                    }
+                    .accessibilityLabel("Threads")
+                    .accessibilityIdentifier("header-threads")
                 }
-                .accessibilityLabel("Watch \(current.name)'s computer")
-            } else {
-                Color.clear.frame(width: 44, height: 44)
+                if case .bot = current {
+                    GlassButton(systemImage: "display", size: 44, weight: .medium) {
+                        showingComputer = true
+                    }
+                    .accessibilityLabel("Watch \(current.name)'s computer")
+                } else {
+                    Color.clear.frame(width: 44, height: 44)
+                }
             }
         }
         .padding(.horizontal, 16)
@@ -571,7 +581,6 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .glassCapsule()
-            .disabled(preparingAttachments || sendingMessage)
             .accessibilityLabel(current.supportsTasks ? "Switch thread: \(current.threadTitle)" : "Open \(current.name) thread options")
             .accessibilityHint("Choose a conversation or start a new thread")
             .accessibilityIdentifier("thread-switcher")

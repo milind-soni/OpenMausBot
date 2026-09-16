@@ -4,6 +4,29 @@ import XCTest
 /// paired computer, message sends, or server mutations are involved.
 final class ThreadNavigationUITests: XCTestCase {
     @MainActor
+    func testTopBarOpensThreadsWithIslandIntroEnabledAndSwitches() {
+        let app = launchPreview(islandIntro: "always")
+        openGmail(in: app)
+
+        let topBarThreads = app.buttons["header-threads"]
+        XCTAssertTrue(topBarThreads.waitForExistence(timeout: 5))
+        topBarThreads.tap()
+        let iCloud = app.buttons["thread-preview-icloud"]
+        XCTAssertTrue(iCloud.waitForExistence(timeout: 5))
+        recordScreenshot("Top bar opens the thread picker", in: app)
+        iCloud.tap()
+        assertThread("Triage iCloud", in: app)
+        XCTAssertTrue(transcriptContains("I am reviewing iCloud here", in: app))
+
+        app.buttons["thread-switcher"].tap()
+        let weekend = app.buttons["thread-preview-weekend"]
+        XCTAssertTrue(weekend.waitForExistence(timeout: 5))
+        weekend.tap()
+        assertThread("Plan weekend", in: app)
+        XCTAssertFalse(transcriptContains("I am reviewing iCloud here", in: app))
+    }
+
+    @MainActor
     func testRosterShowsFolderThreadsAndSwitchesLocally() {
         let app = launchPreview()
         openGmail(in: app)
@@ -180,7 +203,7 @@ final class ThreadNavigationUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchPreview(extraArguments: [String] = []) -> XCUIApplication {
+    private func launchPreview(extraArguments: [String] = [], islandIntro: String = "never") -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         // Xcode may prelaunch the app after installing an updated build.
@@ -189,7 +212,7 @@ final class ThreadNavigationUITests: XCTestCase {
         app.launchArguments = [
             "-store-preview", "-threads-preview",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-            "-companion.prefs.islandIntro", "never",
+            "-companion.prefs.islandIntro", islandIntro,
             "-companion.onboarding.welcomeSeen", "YES",
             "-companion.onboarding.notificationsSeen", "YES"
         ] + extraArguments

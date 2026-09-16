@@ -47,8 +47,10 @@ Check on iPhone and iPad:
 1. Expand Pepper's Threads row and Email folder. Each visible thread opens
    directly; the routine run is absent. Check working, queued and unread labels.
 2. Search by folder and thread name, then clear the search.
-3. Enter an unsent draft in Gmail, switch to iCloud through the header, and
-   return. iCloud must not inherit Gmail's draft; Gmail must retain it.
+3. Enter an unsent draft in Gmail, switch to iCloud through the thread-name
+   pill, and return. iCloud must not inherit Gmail's draft; Gmail must retain
+   it. With the opening island animation enabled, use the separate Threads
+   button in the top bar to open the same picker and switch again.
 4. Open Updates. Active sibling threads must have distinct entries and titles.
 5. In the thread picker, attempt creation while offline. The sheet must stay
    open and show an error. Failed renames must retain the entered title.
