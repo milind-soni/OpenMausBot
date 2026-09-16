@@ -149,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines, memoryCaptureQuietMs, memoryStaleDays, memoryConsolidateHour } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines, memoryCaptureQuietMs, memoryStaleDays, memoryConsolidateHour, learnReflect } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -346,6 +346,7 @@ import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { discoverGates, runGates, scopeLine } from "./gates.ts";
 import { CaptureBuffer, capturePrompt, dedupeCandidates, MAX_PER_FLUSH, normaliseFact, parseCandidates, type CaptureBatch, type Candidate } from "./capture.ts";
+import { parseSkillDraft, reflectionPrompt, worthReflecting } from "./reflection.ts";
 import { applyPlan, consolidatorPrompt, DEFAULT_FLOOR_SHARE, duplicateIndexes, parseContradictions, parseNotebook, planConsolidation, stampConfirmed, type Contradiction } from "./consolidate.ts";
 import { parseVerdict, verdictLine, verifierPrompt, type Verdict } from "./verifier.ts";
 import { beginNode, bySubject, finishNode, nextPending, nodeOutput, resetRunningNodes, skipNode, startGraphRun } from "./graph-runner.ts";
@@ -7033,6 +7034,60 @@ function recordBoardResult(threadId: string, botId: string, digestLine: string):
   }
 }
 
+// ── Phase 4 part 3: reflection into a candidate skill ──────────────────
+// After a board task is judged complete and took at least three tool
+// steps, one call drafts a skill (when to use / procedure / pitfalls /
+// verification). It is staged through the same store /learn uses and a
+// review card goes to the task's run thread; a person enables it or not.
+async function reflectOnTask(taskId: string, bot: BotRecord, threadId: string, attempt: number): Promise<void> {
+  if (!learnReflect(cfg)) return;
+  const task = getBoardTask(taskId);
+  if (!task) return;
+  const messages = store.activePath(threadId);
+  const activities = messages.filter((m) => m.kind === "activity" && m.tool?.name).map((m) => String(m.tool!.name));
+  if (!worthReflecting({ judgedComplete: true, toolSteps: activities.length })) return;
+  const instance = registry.get(bot.modelSelection.instanceId);
+  const generate = instance ? harnessGenerateFor(instance) : undefined;
+  if (!generate) return;
+  const botSaid = messages.filter((m) => m.role === "bot" && m.kind === "text" && m.text).slice(-5).map((m) => m.text ?? "");
+  const prompt = reflectionPrompt({ title: task.title, body: task.body, result: task.result, botSaid, activities });
+  try {
+    const outcome = await runHarnessCall(DATA_DIR, {
+      kind: "reflect",
+      botId: bot.id,
+      botName: bot.name,
+      threadId,
+      turnKey: `attempt-${attempt}`,
+      prompt,
+      instanceId: bot.modelSelection.instanceId,
+      driverKind: instance?.driverKind ?? "unknown",
+      model: bot.modelSelection.model,
+      call: (text) => generate(text, {}),
+    }, { budgetExhausted: () => Boolean(spendState(cfg, DATA_DIR)?.exceeded) });
+    if (!outcome || !("text" in outcome)) return;
+    const draft = parseSkillDraft(outcome.text);
+    if (!draft) {
+      console.error(`[omb-reflect] ${bot.name}: nothing worth a skill in task "${task.title}"`);
+      return;
+    }
+    const taken = new Set([...listSkills(bot.id).map((s) => s.name), ...listStagedSkillWrites(bot.id).map((s) => s.name)]);
+    if (taken.has(draft.name)) {
+      console.error(`[omb-reflect] ${bot.name}: "${draft.name}" already exists or is staged; nothing new`);
+      return;
+    }
+    const staged = stageSkillWrite(bot.id, { action: "create", files: [{ path: "SKILL.md", content: draft.skillMd }], gist: draft.description, source: `reflection on task "${task.title.slice(0, 80)}"` });
+    if ("error" in staged) {
+      console.error(`[omb-reflect] ${bot.name}: could not stage "${draft.name}": ${staged.error}`);
+      return;
+    }
+    const card = appendSkillRequestCard({ botId: bot.id, threadId, staged });
+    appendDecision(DATA_DIR, { threadId, requestId: card.requestId, botId: bot.id, botName: bot.name, tool: "stage_skill", summary: card.summary, decision: "card-shown", source: "board" });
+    console.error(`[omb-reflect] ${bot.name}: staged candidate skill "${draft.name}" from task "${task.title}"`);
+  } catch (error) {
+    console.error(`[omb-reflect] could not reflect on task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 // ── Phase 4 part 1: fact capture ───────────────────────────────────────
 // After an attended direct turn on a bot with capture on, the turn's words
 // wait in a buffer and go out after a quiet spell (or ten turns) as two
@@ -7287,6 +7342,8 @@ async function runBoardVerifier(taskId: string, botId: string, threadId: string,
     if (!verdict.isComplete && fresh?.status === "review" && task.attempts <= verifyRetries(cfg)) {
       setBoardTaskStatus(taskId, "ready");
     }
+    // Phase 4 part 3: a task done right, with real tool work, may be worth a skill
+    if (verdict.isComplete) void reflectOnTask(taskId, bot, threadId, task.attempts);
   } catch (error) {
     console.error(`[omb-verify] could not judge task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
   }

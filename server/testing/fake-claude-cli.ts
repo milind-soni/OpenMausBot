@@ -228,7 +228,20 @@ if (argAfter("--output-format") === "text" || argAfter("--output-format") === "j
       return JSON.stringify({ pairs });
     })()
     : null;
-  const generated = captured !== null ? captured : consolidated !== null ? consolidated : prompt.includes("You are the VERIFIER")
+  // Phase 4 part 3: the reflector drafts a skill named after the task when
+  // the run took three or more tool steps, else NONE
+  const reflected = prompt.includes("You are the REFLECTOR")
+    ? (() => {
+      const lines = prompt.split("\n");
+      const at = lines.findIndex((l) => l.startsWith("Tool steps taken:"));
+      let steps = 0;
+      for (let i = at + 1; at >= 0 && i < lines.length && lines[i].startsWith("- "); i += 1) steps += 1;
+      const title = /^Task: (.*)$/m.exec(prompt)?.[1]?.trim() ?? "task";
+      if (steps < 3) return "NONE";
+      return JSON.stringify({ name: title, description: `How to do "${title}" again`, skill_md: `## When to use\nWhen asked for "${title}".\n\n## Procedure\n1. Do the steps the run took.\n\n## Pitfalls\nDo not change what was asked.\n\n## Verification\nRun the project's test.` });
+    })()
+    : null;
+  const generated = reflected !== null ? reflected : captured !== null ? captured : consolidated !== null ? consolidated : prompt.includes("You are the VERIFIER")
     ? (prompt.includes("[[fake:incomplete]]")
       ? JSON.stringify({ is_complete: false, confidence: 0.35, evidence_for: [], evidence_against: ["the fake verifier was told this is incomplete"], next_action: "do the missing part" })
       : JSON.stringify({ is_complete: true, confidence: 0.9, evidence_for: ["the fake verifier accepts it"], evidence_against: [], next_action: "" }))

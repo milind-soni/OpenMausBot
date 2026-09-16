@@ -395,6 +395,9 @@ const appConfigSchema = z.object({
   verify: z.object({ auto: z.boolean().optional(), retries: z.number().int().min(0).max(5).optional(), routines: z.boolean().optional() }).strict().optional(),
   /** Phase 4 part 1: how long a thread must be quiet before its buffered
    * turns go out for fact capture (bots that opted in). */
+  /** Phase 4 part 3: draft a candidate skill after a board task judged
+   * complete with real tool work; staged for review, never enabled alone. */
+  learn: z.object({ reflect: z.boolean().optional() }).strict().optional(),
   memory: z.object({
     captureQuietMs: z.number().int().positive().optional(),
     /** Phase 4 part 2: days without a restatement before a low-importance
@@ -470,6 +473,7 @@ export interface AppConfig {
   gates?: { auto?: boolean; timeoutSeconds?: number };
   verify?: { auto?: boolean; retries?: number; routines?: boolean };
   memory?: { captureQuietMs?: number; staleDays?: number; consolidateHour?: number };
+  learn?: { reflect?: boolean };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -651,6 +655,10 @@ export function memoryConsolidateHour(cfg: AppConfig): number {
   const value = cfg.memory?.consolidateHour;
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 23 ? value : 3;
 }
+/** Phase 4 part 3: reflection after judged-complete board tasks; off when skill authoring is off. */
+export function learnReflect(cfg: AppConfig): boolean {
+  return cfg.learn?.reflect !== false && skillAuthoringEnabled(cfg);
+}
 export function gatesTimeoutMs(cfg: AppConfig): number {
   const seconds = cfg.gates?.timeoutSeconds;
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 600_000;
@@ -759,6 +767,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "gates",
   "verify",
   "memory",
+  "learn",
   "board",
   "browserProfiles",
   "onboarding",
