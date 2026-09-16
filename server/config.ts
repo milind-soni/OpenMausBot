@@ -387,6 +387,9 @@ const appConfigSchema = z.object({
   /** Phase 2 part 3: deferred tool loading on the agents proxy — a small
    * core plus search_tools / use_tool instead of every schema on every call. */
   tools: z.object({ deferred: z.boolean().optional() }).strict().optional(),
+  /** Phase 3 part 1: the project's checks, run by the harness when unattended
+   * work finishes. auto:false discovers but never runs. */
+  gates: z.object({ auto: z.boolean().optional(), timeoutSeconds: z.number().int().positive().optional() }).strict().optional(),
   /** Harness recall before a turn (Phase 1 part 2): on by default; captures
    * from SupaMaus included where it runs; the block's size cap. */
   recall: z.object({
@@ -452,6 +455,7 @@ export interface AppConfig {
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; recite?: boolean };
   recall?: { auto?: boolean; captures?: boolean; maxChars?: number };
   tools?: { deferred?: boolean };
+  gates?: { auto?: boolean; timeoutSeconds?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -601,6 +605,15 @@ export function toolsDeferred(cfg: AppConfig): boolean {
   return cfg.tools?.deferred === true;
 }
 
+/** Phase 3 part 1: gates run on finished unattended work unless switched off. */
+export function gatesAuto(cfg: AppConfig): boolean {
+  return cfg.gates?.auto !== false;
+}
+export function gatesTimeoutMs(cfg: AppConfig): number {
+  const seconds = cfg.gates?.timeoutSeconds;
+  return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 600_000;
+}
+
 /** Phase 1 part 2: the harness recalls before every direct turn unless told not to. */
 export function recallAuto(cfg: AppConfig): boolean {
   return cfg.recall?.auto !== false;
@@ -701,6 +714,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "threads",
   "localVm",
   "features",
+  "gates",
   "board",
   "browserProfiles",
   "onboarding",

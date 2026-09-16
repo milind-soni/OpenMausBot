@@ -1848,7 +1848,8 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
         : typeof task.spentUsd === "number" && task.spentUsd > 0 ? `, spent $${task.spentUsd.toFixed(3)}` : "";
       const result = typeof task.result === "string" && task.result ? `\n  result: ${task.result.slice(0, 200)}` : "";
       const hold = typeof task.hold === "string" && task.hold ? `\n  waiting: ${task.hold}` : "";
-      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}${hold}`;
+      const gatesScope = task.gates && typeof task.gates === "object" && typeof (task.gates as Json).scope === "string" ? `\n  ${(task.gates as Json).scope}` : "";
+      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}${gatesScope}${hold}`;
     });
     return { text: `Board tasks:\n${lines.join("\n")}` };
   }

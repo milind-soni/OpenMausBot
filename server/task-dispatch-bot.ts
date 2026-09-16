@@ -16,6 +16,7 @@
 //   - dispatch does the part that cannot be answered synchronously: create
 //     the thread, arm the watch, start the turn. Anything that goes wrong
 //     there returns null, and the tick refunds the claim.
+import { SCOPED_CLAIM_PROMPT } from "./system-prompt.ts";
 import { exhausted, patchTask, type BoardTask } from "./task-board.ts";
 
 /** Just enough of a BotRecord to decide a dispatch — a structural shape so
@@ -73,7 +74,7 @@ export interface BotDispatch {
  * about that instead of promising a tool that is not wired up. */
 export function boardTaskPrompt(task: Pick<BoardTask, "title" | "body">): string {
   const detail = task.body.trim() ? `\n\n${task.body.trim()}` : "";
-  return `A task was filed on the shared task board: "${task.title}"${detail}`;
+  return `A task was filed on the shared task board: "${task.title}"${detail}\n\n${SCOPED_CLAIM_PROMPT.trim()}`;
 }
 
 export function createBotDispatch<Bot extends DispatchBot>(deps: BotDispatchDeps<Bot>): BotDispatch {

@@ -13,6 +13,7 @@
 // are storage primitives on a task row. It does no dispatching and knows
 // nothing about HTTP; the tick that decides what to promote, claim, or
 // reclaim is a separate module built on top of this one.
+import type { GateResult } from "./gates.ts";
 import { chmodSync, closeSync, mkdirSync, openSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -79,6 +80,15 @@ export interface BoardTask {
   spentUsd: number;
   /** Turns in its thread that reported no price and so booked nothing (#59's rule). */
   unpricedTurns: number;
+  /** Phase 3 part 1: the project's checks the harness ran when the task's
+   * turn ended, and the one line that says what ran. Null until a run. */
+  gates: TaskGates | null;
+  gatesAt: number | null;
+}
+
+export interface TaskGates {
+  results: GateResult[];
+  scope: string;
 }
 
 /** The reason a task paused for money carries; a raised cap resumes it. */
@@ -221,6 +231,9 @@ export function openBoard(path: string = join(DATA_DIR, "tasks.db")): void {
     ["spent_usd", "REAL NOT NULL DEFAULT 0"],
     ["unpriced_turns", "INTEGER NOT NULL DEFAULT 0"],
     ["budget_warned", "INTEGER NOT NULL DEFAULT 0"],
+    // Phase 3 part 1
+    ["gates_json", "TEXT"],
+    ["gates_at", "INTEGER"],
   ];
   for (const [column, type] of wanted) if (!present.has(column)) db.exec(`ALTER TABLE tasks ADD COLUMN ${column} ${type}`);
   db.exec("CREATE INDEX IF NOT EXISTS tasks_thread ON tasks (thread_id, updated_at DESC)");
@@ -249,6 +262,18 @@ interface TaskRow {
   spent_usd: number;
   unpriced_turns: number;
   budget_warned: number;
+  gates_json: string | null;
+  gates_at: number | null;
+}
+
+function parseGates(json: string | null): TaskGates | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as TaskGates;
+    return Array.isArray(parsed?.results) && typeof parsed.scope === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function rowToTask(row: TaskRow): BoardTask {
@@ -274,6 +299,8 @@ function rowToTask(row: TaskRow): BoardTask {
     budgetUsd: row.budget_usd ?? null,
     spentUsd: row.spent_usd ?? 0,
     unpricedTurns: row.unpriced_turns ?? 0,
+    gates: parseGates(row.gates_json ?? null),
+    gatesAt: row.gates_at ?? null,
   };
 }
 
@@ -584,6 +611,16 @@ export function taskByThread(threadId: string): BoardTask | null {
  * touching status: what was done, not only what was said. */
 export function setResult(id: string, result: string): BoardTask {
   handle().prepare("UPDATE tasks SET result = ?, updated_at = ? WHERE id = ?").run(clamp(result, TASK_BODY_MAX), Date.now(), id);
+  const task = getTask(id);
+  if (!task) throw new Error(`no such task: ${id}`);
+  return task;
+}
+
+/** Phase 3 part 1: keep a gate run on the task. Replaces the previous run;
+ * the comment trail keeps history. */
+export function setGates(id: string, results: readonly GateResult[], scope: string): BoardTask {
+  const payload: TaskGates = { results: results.map((r) => ({ ...r, tail: r.tail.slice(0, 4_000) })), scope: clamp(scope, TASK_BODY_MAX) };
+  handle().prepare("UPDATE tasks SET gates_json = ?, gates_at = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(payload), Date.now(), Date.now(), id);
   const task = getTask(id);
   if (!task) throw new Error(`no such task: ${id}`);
   return task;

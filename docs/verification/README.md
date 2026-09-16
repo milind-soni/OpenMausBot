@@ -187,3 +187,4 @@ state. A green unit test alone does not prove a user workflow.
 Interrupt the `launch` process with Ctrl-C. It stops the exact child it owns and
 removes only its temporary data directory. The server log remains at the
 printed path. Never kill processes by name and never delete a broad temp root.
+- [gates.md](gates.md) — the project's checks run by the harness when a board task ends, and the scope line on its result (Phase 3 part 1)

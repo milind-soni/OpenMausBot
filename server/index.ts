@@ -149,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -346,6 +346,7 @@ import {
 } from "./local-vm-inventory.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
+import { discoverGates, runGates, scopeLine } from "./gates.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
@@ -367,7 +368,7 @@ import {
   TASK_TITLE_MAX,
   visibleTo as visibleBoardTasks,
   type BoardStatus,
-  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON, suggestedBudgetUsd } from "./task-board.ts";
+  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON, suggestedBudgetUsd, setGates } from "./task-board.ts";
 import { createBotDispatch } from "./task-dispatch-bot.ts";
 import { DEFAULT_STALE_AFTER_MS, createDispatcher as createBoardDispatcher } from "./task-dispatcher.ts";
 import { createTaskTurnWatch } from "./task-turn-watch.ts";
@@ -3859,7 +3860,7 @@ function scheduleTurnDigest(input: {
         });
         return message.id;
       });
-      recordBoardResult(input.threadId, renderDigest(digest));
+      recordBoardResult(input.threadId, input.botId, renderDigest(digest));
     } catch (error) {
       console.error(`digest: could not record turn ${input.turnId} on ${input.threadId}:`, error instanceof Error ? error.message : error);
     }
@@ -7003,13 +7004,36 @@ function bookBoardSpend(threadId: string, costUsd: number | null): void {
 }
 
 /** The digest is the task's result: what the turn did, not only what it said. */
-function recordBoardResult(threadId: string, digestLine: string): void {
+function recordBoardResult(threadId: string, botId: string, digestLine: string): void {
   if (!boardReady()) return;
   try {
     const task = taskByThread(threadId);
-    if (task) setResult(task.id, digestLine);
+    if (!task) return;
+    setResult(task.id, digestLine);
+    void runBoardGates(task.id, botId, threadId, digestLine);
   } catch (error) {
     console.error(`[omb-board] could not record the result for ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Phase 3 part 1: when a board task's turn ends in a project folder with
+ * gates, run them off the turn path, keep the results on the task, prefix
+ * the result with the scope line and leave a comment with the failing
+ * tails. A folder with no gates gets nothing — no noise on the task. */
+async function runBoardGates(taskId: string, botId: string, threadId: string, digestLine: string): Promise<void> {
+  if (!gatesAuto(cfg)) return;
+  const cwd = store.taskByThread(botId, threadId)?.cwd ?? undefined;
+  const gates = discoverGates(cwd);
+  if (!cwd || !gates.length) return;
+  try {
+    const results = await runGates(cwd, gates, { timeoutMs: gatesTimeoutMs(cfg) });
+    const scope = scopeLine(results, gates.map((g) => g.name));
+    setGates(taskId, results, scope);
+    setResult(taskId, `${scope}\n${digestLine}`);
+    const failing = results.filter((r) => r.status !== "pass").map((r) => `${r.name}:\n${r.tail || "(no output)"}`).join("\n\n");
+    addComment(taskId, null, failing ? `${scope}\n\n${failing}` : scope);
+  } catch (error) {
+    console.error(`[omb-gates] could not run gates for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

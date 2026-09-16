@@ -18,6 +18,18 @@ describe("the board", () => {
     expect(statSync(board.boardFile()).mode & 0o777).toBe(0o600);
   });
 
+  it("keeps a gate run on the task, and it survives a reopen (Phase 3 part 1)", () => {
+    const file = join(DATA, "gates.db");
+    board.openBoard(file);
+    const created = board.createTask({ title: "Ship it" });
+    expect(created.gates).toBeNull();
+    const results = [{ name: "typecheck", status: "pass" as const, seconds: 3, tail: "" }, { name: "test", status: "fail" as const, seconds: 9, tail: "2 failed" }];
+    const stamped = board.setGates(created.id, results, "Gates: typecheck pass (3 s), test fail (9 s).");
+    expect(stamped.gates).toEqual({ results, scope: "Gates: typecheck pass (3 s), test fail (9 s)." });
+    expect(stamped.gatesAt).toBeGreaterThan(0);
+    board.openBoard(file);
+    expect(board.getTask(created.id)?.gates?.results[1].tail).toBe("2 failed");
+  });
   it("survives a reopen", () => {
     const file = join(DATA, "persist.db");
     board.openBoard(file);

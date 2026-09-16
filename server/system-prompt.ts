@@ -89,10 +89,14 @@ const PROPOSAL_RESULT_PROMPT =
   " Follow the tool result: with granted Full Access it may report applied immediately; then continue the requested work without asking for another confirmation. If it reports a pending review, end the turn and wait for the in-app decision. Never claim success before an applied result, and report failures honestly. Full Access does not grant another bot broader permissions.";
 export const ROUTINE_PROMPT =
   " If the user explicitly asks to list or review, schedule, run, or change routines, use list_routines and propose_routine or propose_routine_action. Convert calendar requests such as the first or last day of each month or the second Monday to a five-field cron expression with an explicit IANA timezone; use interval for elapsed every-N-minutes work. Never replace a calendar rule with daily AI date checking or an approximate weekly schedule; clarify ambiguous or unsupported requests." + PROPOSAL_RESULT_PROMPT;
+/** Phase 3 part 1: a completion claim states its scope. Text only, every engine. */
+export const SCOPED_CLAIM_PROMPT =
+  " When you report finishing, say what you ran and what you did not run (typecheck, lint, tests, build); never say done without that.";
 export const ROUTINE_EXECUTION_PROMPT =
   " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible." +
   // Phase 2 part 4 (decision 13): nobody is at the keyboard for a routine run
-  " Nobody is watching this run, so do not ask clarifying questions: where something is ambiguous, take the most reversible reading, say which one you took, and carry on. If a sign-in, a file, a tool or a permission you need is missing, stop and write a short failure summary that names exactly what was missing; do not guess or retry.";
+  " Nobody is watching this run, so do not ask clarifying questions: where something is ambiguous, take the most reversible reading, say which one you took, and carry on. If a sign-in, a file, a tool or a permission you need is missing, stop and write a short failure summary that names exactly what was missing; do not guess or retry." +
+  SCOPED_CLAIM_PROMPT;
 /** Phase 2: the board exists and is the place for work filed for later,
  * so a bot does not wander off to a connected app when asked to "file a task". */
 export const BOARD_PROMPT =
