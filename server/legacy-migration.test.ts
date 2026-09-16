@@ -29,6 +29,12 @@ async function bootWithLegacyDir(legacyName: string) {
     instances: { fixture: { driver: "migration-test-shadow" } },
   }));
   writeFileSync(join(legacy, "keep-me.txt"), "carried over");
+  // The provisioned Piper engine is the heaviest thing a rename has to carry:
+  // it lives INSIDE the data dir, so losing it silently downgrades the user to
+  // the robotic built-in voice with no error to explain why.
+  mkdirSync(join(legacy, "piper", "voices"), { recursive: true });
+  writeFileSync(join(legacy, "piper", "piper.exe"), "engine");
+  writeFileSync(join(legacy, "piper", "voices", "en_US-ryan-high.onnx"), "voice");
   const port = 18800 + Math.floor(Math.random() * 10_000);
   const webhookPort = 39000 + Math.floor(Math.random() * 10_000);
   const booted = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
@@ -74,6 +80,13 @@ describe("legacy data dir", () => {
     expect(existsSync(join(home, ".opengrokbot"))).toBe(false);
     expect(readFileSync(join(fresh, "keep-me.txt"), "utf8")).toBe("carried over");
     expect(readFileSync(join(fresh, "environment-id"), "utf8").trim()).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("carries the Piper engine into the new dir", () => {
+    const fresh = join(home, ".astra");
+    // The engine binary is platform-named, so assert the dir it lives in.
+    expect(existsSync(join(fresh, "piper", "piper.exe"))).toBe(true);
+    expect(existsSync(join(fresh, "piper", "voices", "en_US-ryan-high.onnx"))).toBe(true);
   });
 
   it("migrates the OpenMausBot data dir the same way", async () => {
