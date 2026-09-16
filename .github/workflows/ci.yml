@@ -57,6 +57,10 @@ jobs:
       - name: Run tests
         run: pnpm test
       - run: pnpm check:electron
+      - name: Restore past the packaged startup deadline on Windows
+        if: matrix.os == 'windows-latest'
+        timeout-minutes: 4
+        run: node scripts/verify-restore-startup.mjs
       - name: Verify native approval mode transitions
         if: matrix.os == 'macos-latest'
         run: pnpm exec electron scripts/smoke-approval-modes.cjs

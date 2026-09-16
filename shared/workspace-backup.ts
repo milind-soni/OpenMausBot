@@ -18,6 +18,25 @@ export interface WorkspaceBackupSummary {
 
 export type WorkspaceBackupClientState = Record<string, string>;
 
+export interface WorkspaceBackupSelection {
+  conversations: boolean;
+  attachments: boolean;
+  workspaceFiles: boolean;
+  /** Inclusive UTC calendar dates. Keep whole conversations active in this range. */
+  from?: string;
+  to?: string;
+}
+
+export const COMPLETE_WORKSPACE_BACKUP: WorkspaceBackupSelection = {
+  conversations: true, attachments: true, workspaceFiles: true,
+};
+
+export interface WorkspaceBackupEstimate {
+  bytes: number;
+  files: number;
+  categories: Record<"settings" | "conversations" | "attachments" | "workspaceFiles", number>;
+}
+
 export interface WorkspaceBackupPrivateMetadata {
   summary: WorkspaceBackupSummary;
   clientState: WorkspaceBackupClientState;

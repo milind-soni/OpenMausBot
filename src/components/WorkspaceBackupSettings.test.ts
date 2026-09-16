@@ -43,6 +43,20 @@ afterEach(() => vi.unstubAllGlobals());
 async function ready() { fixture.api.mockResolvedValueOnce({ busy: false }); render(); fixture.effects[0](); await flush(); }
 
 describe("Settings full backups", () => {
+  it("defaults to a complete backup, offers file toggles, and blocks reversed dates", async () => {
+    await ready();
+    let view = render();
+    expect(view.html.match(/type="checkbox"[^>]*checked=""/g)).toHaveLength(3);
+    const dates = view.nodes.filter(node => node.props.type === "date");
+    change(dates[0], "2026-09-15"); change(dates[1], "2026-09-14");
+    view = render();
+    expect(view.html).toContain("Choose an end date on or after the start date.");
+    expect(view.nodes.find(node => node.props.type === "submit")!.props.disabled).toBe(true);
+    view.nodes.find(node => node.props.type === "checkbox")!.props.onChange!({ target: { checked: false } });
+    view = render();
+    expect(view.nodes.filter(node => node.props.type === "date")).toHaveLength(0);
+    expect(view.html).not.toContain("Choose an end date on or after the start date.");
+  });
   it("shows a native file input, password fields and validated summary with warnings", () => {
     const html = render().html;
     expect(html).toContain('type="file" accept=".ombbackup"');
@@ -71,7 +85,7 @@ describe("Settings full backups", () => {
     expect(fixture.api).toHaveBeenCalledTimes(2); // one status, one export
     const [path, init] = fixture.api.mock.calls[1];
     expect(path).toBe("/api/workspace-backup/export");
-    expect(JSON.parse(init.body)).toEqual({ password: "correct horse battery", clientState: { "omb-drafts": "private draft" } });
+    expect(JSON.parse(init.body)).toEqual({ password: "correct horse battery", clientState: { "omb-drafts": "private draft" }, selection: { conversations: true, attachments: true, workspaceFiles: true } });
     expect(link.href).toBe("/api/workspace-backup/download/download-id");
     expect(link.click).toHaveBeenCalledOnce();
     expect([...storage.values()]).not.toContain("correct horse battery");

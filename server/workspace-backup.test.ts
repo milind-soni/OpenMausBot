@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup,
   readLastWorkspaceRestore, readPendingWorkspaceRestoreMetadata, readStagedWorkspaceBackup,
-  removeWorkspaceBackupJob, stageWorkspaceBackup,
+  removeWorkspaceBackupJob, stageWorkspaceBackup, estimateWorkspaceBackup,
 } from "./workspace-backup.ts";
 
 const PASSWORD = "correct horse battery staple";
@@ -76,6 +76,84 @@ function tarEntry(path: string, type: "File" | "Directory" | "SymbolicLink" | "L
 afterEach(() => { for (const root of scratch.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("encrypted full workspace backups", () => {
+  it("exports only selected history/files while keeping setup and the destination safety copy", async () => {
+    const source = directory();
+    fixture(source).close();
+    mkdirSync(join(source, "workspaces", "bot", "skills", "test"), { recursive: true });
+    writeFileSync(join(source, "workspaces", "bot", "SOUL.md"), "Keep instructions");
+    writeFileSync(join(source, "workspaces", "bot", "MEMORY.md"), "Keep memory");
+    writeFileSync(join(source, "workspaces", "bot", "skills", "test", "SKILL.md"), "Keep skill");
+    writeFileSync(join(source, "workspaces", "bot", "project.txt"), "Omit project");
+    json(join(source, "messages-thread.json"), [{ id: "legacy", at: 123, text: "Must not resurrect" }]);
+    const before = readFileSync(join(source, "messages.db"));
+    const selection = { conversations: false, attachments: false, workspaceFiles: false };
+    const complete = await estimateWorkspaceBackup(source);
+    const estimate = await estimateWorkspaceBackup(source, selection);
+    expect(complete.categories.workspaceFiles).toBeGreaterThanOrEqual(2 * 1024 ** 2);
+    expect(estimate.categories.workspaceFiles).toBe(0);
+    expect(estimate.categories.attachments).toBe(0);
+    expect(estimate.bytes).toBeLessThan(complete.bytes);
+    expect(existsSync(join(source, ".backups"))).toBe(false);
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD, selection });
+    expect(exported.summary.messages).toBe(0);
+    const target = directory();
+    json(join(target, "bots.json"), [{ id: "previous" }]);
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    const progress: string[] = [];
+    const restored = applyPendingWorkspaceRestore(target, value => progress.push(value.phase));
+    expect(progress).toContain("checking"); expect(progress).toContain("copying");
+    expect(progress.at(-1)).toBe("done");
+    expect(readJson(join(restored.safetyCopyPath!, "data", "bots.json"))).toEqual([{ id: "previous" }]);
+    for (const name of ["attachments", "task-workspaces", "messages-thread.json", "workspaces/bot/project.txt"]) expect(existsSync(join(target, name))).toBe(false);
+    for (const name of ["SOUL.md", "MEMORY.md", "skills/test/SKILL.md"]) expect(existsSync(join(target, "workspaces", "bot", name))).toBe(true);
+    const db = new DatabaseSync(join(target, "messages.db"));
+    try { expect(db.prepare("SELECT count(*) AS n FROM messages").get()?.n).toBe(0); }
+    finally { db.close(); }
+    expect(readFileSync(join(source, "messages.db"))).toEqual(before);
+    const replay: string[] = [];
+    expect(applyPendingWorkspaceRestore(target, value => replay.push(value.phase)).restored).toBe(false);
+    expect(replay).toEqual([]);
+  });
+
+  it("date filters retain whole conversations and cannot resurrect excluded migrated legacy history", async () => {
+    const source = directory();
+    const db = fixture(source);
+    for (const [thread, id, at] of [["thread", "new", "2026-09-14T23:59:59Z"], ["old", "old", "2026-09-13T12:00:00Z"], ["future", "future", "2026-09-15T00:00:00Z"]]) {
+      db.prepare("INSERT INTO messages VALUES (?, ?, ?, ?)").run(thread, id, id, JSON.stringify({ id, at, text: id }));
+    }
+    db.exec("CREATE VIRTUAL TABLE messages_fts USING fts5(text, content='messages', content_rowid='rowid'); INSERT INTO messages_fts(messages_fts) VALUES ('rebuild'); CREATE TABLE memory_files(text TEXT); INSERT INTO memory_files VALUES ('Keep learned memory')");
+    db.close();
+    json(join(source, "messages-old.json"), [{ at: "2026-09-14T12:00:00Z", text: "Old migrated copy must not revive" }]);
+    json(join(source, "messages-legacy.json"), [{ at: "2026-09-14T00:00:00Z", text: "Unmigrated matching thread" }]);
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD, selection: { conversations: true, attachments: true, workspaceFiles: true, from: "2026-09-14", to: "2026-09-14" } });
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    applyPendingWorkspaceRestore(target);
+    const restored = new DatabaseSync(join(target, "messages.db"));
+    try {
+      expect(restored.prepare("SELECT id FROM messages ORDER BY id").all().map(row => row.id)).toEqual(["message", "new"]);
+      expect(restored.prepare("SELECT count(*) AS n FROM messages_fts WHERE messages_fts MATCH 'old'").get()?.n).toBe(0);
+      expect(restored.prepare("SELECT count(*) AS n FROM messages_fts WHERE messages_fts MATCH 'new'").get()?.n).toBe(1);
+      expect(restored.prepare("SELECT text FROM memory_files").get()?.text).toBe("Keep learned memory");
+    } finally { restored.close(); }
+    expect(existsSync(join(target, "messages-old.json"))).toBe(false);
+    expect(existsSync(join(target, "messages-legacy.json"))).toBe(true);
+    expect(existsSync(join(target, "attachments", "image.png"))).toBe(true);
+    expect(staged.summary.exclusions.join(" ")).toContain("Date selection does not filter attachments");
+  });
+
+  it("rejects invalid date selections before copying anything", async () => {
+    const source = directory();
+    fixture(source).close();
+    for (const dates of [{ from: "2026-02-30" }, { from: "2026-09-15", to: "2026-09-14" }]) {
+      await expect(estimateWorkspaceBackup(source, dates)).rejects.toThrow();
+      await expect(createWorkspaceBackup(source, { password: PASSWORD, selection: { conversations: true, attachments: true, workspaceFiles: true, ...dates } })).rejects.toThrow();
+    }
+    expect(existsSync(join(source, ".backups"))).toBe(false);
+  });
+
   it("round-trips WAL conversations, binary files, drafts and IDs; preserves destination identity and connections", async () => {
     const source = directory();
     const db = fixture(source);

@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, parse, posix, relative, resolve, win32 } from "node:path";
 import { homedir } from "node:os";
+import { readdir, lstat } from "node:fs/promises";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
 import * as tar from "tar";
@@ -16,7 +17,8 @@ import { writeFileAtomic } from "./atomic.ts";
 import { escapeAttribute, splitTranscriptAttachments } from "../src/lib/composer-attachments.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import { excludedWorkspaceAuthPath, portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
-import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary } from "../shared/workspace-backup.ts";
+import type { WorkspaceBackupClientState, WorkspaceBackupPrivateMetadata, WorkspaceBackupSummary, WorkspaceBackupSelection, WorkspaceBackupEstimate } from "../shared/workspace-backup.ts";
+import { backupCategory, backupSelectionNotes, backupSelectionSchema, conversationDateMatches, filterBackupDatabase, selectedBackupThreads } from "./workspace-backup-selection.ts";
 
 export type { WorkspaceBackupSummary, WorkspaceBackupPrivateMetadata } from "../shared/workspace-backup.ts";
 export const MAX_WORKSPACE_BACKUP_BYTES = 10 * 1024 ** 3;
@@ -57,6 +59,55 @@ export interface CreateWorkspaceBackupOptions {
   password: string;
   clientState?: WorkspaceBackupClientState;
   appVersion?: string;
+  selection?: WorkspaceBackupSelection;
+}
+
+/** Size of selected source data, before tar framing/encryption. No files are copied. */
+export async function estimateWorkspaceBackup(dataDir: string, rawSelection: unknown = {}): Promise<WorkspaceBackupEstimate> {
+  const selection = backupSelectionSchema.parse(rawSelection);
+  const result: WorkspaceBackupEstimate = { bytes: 0, files: 0, categories: { settings: 0, conversations: 0, attachments: 0, workspaceFiles: 0 } };
+  const walk = async (directory: string, prefix = "") => {
+    for (const name of await readdir(directory)) {
+      const path = prefix ? `${prefix}/${name}` : name;
+      if ((!prefix && excluded(name)) || excludedWorkspaceAuthPath(path)) continue;
+      const category = backupCategory(path);
+      if (path === "messages.db" || category !== "settings" && !selection[category]) continue;
+      const source = join(directory, name);
+      const stat = await lstat(source);
+      if (stat.isSymbolicLink()) continue;
+      if (stat.isDirectory()) await walk(source, path);
+      else if (stat.isFile()) { result.categories[category] += stat.size; result.files++; }
+    }
+  };
+  await walk(dataDir);
+  // page_count includes committed WAL data, unlike stat(messages.db). A
+  // filtered snapshot is vacuumed; estimate its retained transcript fraction
+  // but reserve space for the schema and memory index that always survive.
+  const dbPath = join(dataDir, "messages.db");
+  if (existsSync(dbPath)) {
+    if (lstatSync(dbPath).isSymbolicLink()) throw new Error("The message database must not be a symbolic link.");
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const pageSize = Number(db.prepare("PRAGMA page_size").get()!.page_size);
+      let bytes = Number(db.prepare("PRAGMA page_count").get()!.page_count) * pageSize;
+      const selected = selectedBackupThreads(db, selection);
+      if (selected) {
+        let all = 0, kept = 0;
+        for (const row of db.prepare("SELECT thread_id, length(CAST(json AS BLOB)) AS bytes FROM messages").iterate()) {
+          all += Number(row.bytes); if (selected.has(String(row.thread_id))) kept += Number(row.bytes);
+        }
+        const tables = Number(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type='table'").get()!.n);
+        const memory = db.prepare("SELECT 1 FROM sqlite_master WHERE name='memory_files'").get()
+          ? Number(db.prepare("SELECT coalesce(sum(length(CAST(text AS BLOB))),0) AS n FROM memory_files").get()!.n) * 2 : 0;
+        const core = Math.min(bytes, (tables + 1) * pageSize + memory);
+        bytes = core + (all ? Math.ceil((bytes - core) * kept / all) : bytes - core);
+      }
+      result.categories[selection.conversations ? "conversations" : "settings"] += bytes;
+      result.files++;
+    } finally { db.close(); }
+  }
+  result.bytes = Object.values(result.categories).reduce((sum, bytes) => sum + bytes, 0);
+  return result;
 }
 export interface WorkspaceRestoreResult {
   restored: boolean;
@@ -182,7 +233,7 @@ function passwordKey(password: string, salt: Buffer): Promise<Buffer> {
 
 // Open without following links and copy synchronously so this server cannot
 // interleave a mutation. External writers are detected where stat permits.
-function copyRegular(source: string, destination: string): { size: number; mode: number; sha256: string } {
+function copyRegular(source: string, destination: string, progress?: (bytes: number) => void): { size: number; mode: number; sha256: string } {
   const input = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW);
   let output: number | undefined;
   try {
@@ -201,6 +252,7 @@ function copyRegular(source: string, destination: string): { size: number; mode:
       hash.update(chunk.subarray(0, count));
       let offset = 0;
       while (offset < count) offset += writeSync(output, chunk, offset, count - offset);
+      progress?.(count);
     }
     const after = fstatSync(input);
     const current = lstatSync(source);
@@ -215,7 +267,7 @@ function copyRegular(source: string, destination: string): { size: number; mode:
     if (output !== undefined) closeSync(output);
   }
 }
-function hashFile(path: string): string {
+function hashFile(path: string, progress?: (bytes: number) => void): string {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     if (!fstatSync(fd).isFile()) throw new Error("The workspace archive contains an unsafe file.");
@@ -225,6 +277,7 @@ function hashFile(path: string): string {
       const count = readSync(fd, chunk, 0, chunk.length, null);
       if (!count) return hash.digest("hex");
       hash.update(chunk.subarray(0, count));
+      progress?.(count);
     }
   } finally { closeSync(fd); }
 }
@@ -257,6 +310,7 @@ function databaseCounts(path: string): { threads: number; messages: number } {
 export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions) {
   if (Object.hasOwn(options, "credentials")) throw new Error("Workspace backups do not transfer credentials.");
   assertLocalAuthOutsideSnapshot(dataDir);
+  const selection = backupSelectionSchema.parse(options.selection ?? {});
   const salt = randomBytes(16);
   const key = await passwordKey(options.password, salt);
   const job = newJob(dataDir);
@@ -271,6 +325,7 @@ export async function createWorkspaceBackup(dataDir: string, options: CreateWork
     const sourceDb = join(root, "messages.db");
     // The caller closes its message handle after flushing, while maintenance
     // remains held. The native snapshot includes any committed WAL records.
+    let selectedThreads: Set<string> | null = selection.conversations ? null : new Set();
     if (existsSync(sourceDb)) {
       if (lstatSync(sourceDb).isSymbolicLink()) throw new Error("The message database must not be a symbolic link.");
       const db = new DatabaseSync(sourceDb, { readOnly: true });
@@ -281,13 +336,38 @@ export async function createWorkspaceBackup(dataDir: string, options: CreateWork
       try { await backup(db, join(snapshot, "messages-snapshot.db")); }
       finally { clearInterval(completionPulse); db.close(); }
       const snapshotDb = new DatabaseSync(join(snapshot, "messages-snapshot.db"));
-      try { snapshotDb.exec("PRAGMA journal_mode = DELETE"); } finally { snapshotDb.close(); }
+      try {
+        snapshotDb.exec("PRAGMA journal_mode = DELETE");
+        selectedThreads = selectedBackupThreads(snapshotDb, selection);
+        if (selectedThreads) filterBackupDatabase(snapshotDb, selectedThreads);
+      } finally { snapshotDb.close(); }
     }
     const walk = (directory: string, prefix = "") => {
       for (const name of readdirSync(directory).sort()) {
         if (!prefix && excluded(name)) continue;
         const path = prefix ? `${prefix}/${name}` : name;
         if (excludedWorkspaceAuthPath(path)) continue;
+        const category = backupCategory(path);
+        // Keep an empty database when history is omitted: a valid schema is
+        // still needed on restore, and prevents importing old legacy history.
+        if (path !== "messages.db" && category !== "settings" && !selection[category]) continue;
+        if (/^messages-[^/]+\.json$/.test(path) && (selection.from || selection.to)) {
+          if (lstatSync(join(directory, name)).isSymbolicLink()) throw new Error("Cannot back up a symbolic link as conversation history.");
+          const legacyThread = path.slice(9, -5);
+          if (selectedThreads && !selectedThreads.has(legacyThread)) {
+            // A legacy-only conversation has not entered SQLite yet.
+            const originalDb = new DatabaseSync(sourceDb, { readOnly: true });
+            let migrated: boolean;
+            try { migrated = Boolean(originalDb.prepare("SELECT 1 FROM thread_state WHERE thread_id = ?").get(legacyThread) || originalDb.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(legacyThread)); }
+            finally { originalDb.close(); }
+            if (migrated) continue;
+          }
+          if (!selectedThreads?.has(legacyThread)) {
+            const legacy = privateJson(join(directory, name));
+            const messages = Array.isArray(legacy) ? legacy : record(legacy) && Array.isArray(legacy.messages) ? legacy.messages : [];
+            if (!messages.some(message => record(message) && conversationDateMatches(message.at, selection))) continue;
+          }
+        }
         // Do not silently skip noncanonical source spellings: reject them so
         // a case-sensitive host cannot export auth paths active on Windows/Mac.
         if (forbiddenArchivePath(path)) throw new Error("A workspace filename conflicts with a protected authentication or runtime path.");
@@ -342,7 +422,7 @@ export async function createWorkspaceBackup(dataDir: string, options: CreateWork
       directories: entries.filter((entry) => entry.type === "directory").length, bytes,
       bots: countJsonArray(join(snapshot, "data", "bots.json")), groups: countJsonArray(join(snapshot, "data", "groups.json")),
       ...databaseCounts(join(snapshot, "data", "messages.db")),
-      exclusions: EXCLUSION_NOTES, warnings,
+      exclusions: [...EXCLUSION_NOTES, ...backupSelectionNotes(selection)], warnings,
     };
     const manifest: Manifest = {
       summary, sourceDataDir: resolve(dataDir), clientState: options.clientState ?? {}, entries,
@@ -473,7 +553,7 @@ async function inspectTar(path: string): Promise<Map<string, { type: string; siz
   }
   return entries;
 }
-function validateStaged(directory: string, expected?: Map<string, { type: string; size: number }>): Manifest {
+function validateStaged(directory: string, expected?: Map<string, { type: string; size: number }>, progress?: (bytes: number) => void): Manifest {
   const manifest = validateManifest(privateJson(join(directory, "manifest.json")));
   if (expected && expected.size !== manifest.entries.length + 2) throw new Error("Archive entries do not match the backup manifest.");
   const declared = new Set(manifest.entries.map((entry) => entry.path));
@@ -483,6 +563,7 @@ function validateStaged(directory: string, expected?: Map<string, { type: string
       if (!declared.has(path)) throw new Error("Staged workspace contains files absent from its manifest.");
       const stat = lstatSync(join(root, name));
       if (stat.isSymbolicLink()) throw new Error("Staged workspace contains a symbolic link.");
+      progress?.(0);
       if (stat.isDirectory()) inspect(join(root, name), path);
     }
   };
@@ -497,7 +578,8 @@ function validateStaged(directory: string, expected?: Map<string, { type: string
       const archive = expected.get(`data/${entry.path}`);
       if (!archive || archive.type !== (entry.type === "file" ? "File" : "Directory") || archive.size !== entry.size) throw new Error("Archive contents do not match the backup manifest.");
     }
-    if (entry.type === "file" && hashFile(path) !== entry.sha256) throw new Error("A workspace backup file failed its checksum.");
+    if (entry.type === "file" && hashFile(path, progress) !== entry.sha256) throw new Error("A workspace backup file failed its checksum.");
+    progress?.(0);
     chmodSync(path, entry.mode);
   }
   const data = join(directory, "data");
@@ -658,7 +740,7 @@ function rebaseMessage(message: unknown, source: string, destination: string): v
   for (const edit of edits.reverse()) next = next.slice(0, edit.from) + edit.text + next.slice(edit.to);
   message.text = next;
 }
-function prepareRestore(dataDir: string, id: string, manifest: Manifest): string {
+function prepareRestore(dataDir: string, id: string, manifest: Manifest, progress?: (bytes: number) => void): string {
   assertLocalAuthOutsideSnapshot(dataDir);
   const job = jobPath(dataDir, id);
   const prepared = join(job, "apply", "data");
@@ -669,9 +751,11 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
   for (const entry of manifest.entries.filter((entry) => entry.type === "directory")) folder(join(prepared, entry.path));
   for (const entry of manifest.entries) {
     const destination = join(prepared, entry.path);
-    if (entry.type === "file") copyRegular(join(job, "staged", "data", entry.path), destination);
+    if (entry.type === "file") copyRegular(join(job, "staged", "data", entry.path), destination, progress);
+    progress?.(0);
   }
   const changeJson = (name: string, change: (value: unknown) => void) => {
+    progress?.(0);
     const path = join(prepared, name);
     if (!existsSync(path)) return;
     const value = privateJson(path);
@@ -759,6 +843,7 @@ function prepareRestore(dataDir: string, id: string, manifest: Manifest): string
       if (manifest.sourceDataDir !== resolve(dataDir)) {
         const update = db.prepare("UPDATE messages SET json = ?, text = ? WHERE thread_id = ? AND id = ?");
         for (const row of db.prepare("SELECT thread_id, id, json FROM messages").iterate()) {
+          progress?.(0);
           const message: unknown = JSON.parse(String(row.json));
           rebaseMessage(message, manifest.sourceDataDir, resolve(dataDir));
           const json = JSON.stringify(message);
@@ -812,30 +897,40 @@ function finishRestore(dataDir: string, id: string, consumePending = true): Last
 /** Called after the data-directory lease, before anything reads app state.
  * The DATA_DIR itself and all destination identity/session/lease files stay
  * in place. The previous durable tree is retained under .backups/safety-ID. */
-export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreResult {
+export function applyPendingWorkspaceRestore(dataDir: string, onProgress?: (progress: { phase: "checking" | "copying" | "applying" | "done"; bytes: number }) => void): WorkspaceRestoreResult {
+  let bytes = 0;
+  const progress = (phase: "checking" | "copying" | "applying" | "done", count = 0) => { bytes += count; onProgress?.({ phase, bytes }); };
   const root = backupRoot(dataDir);
   const journalFile = join(root, "restore-journal.json");
   const pendingFile = join(root, "pending-restore.json");
   if (existsSync(journalFile)) {
     const previous = readJournal(journalFile);
     if (previous.phase === "applying") {
+      progress("checking");
       rollback(dataDir, previous);
       writeJson(journalFile, { ...previous, phase: "rolled-back" });
       rmSync(pendingFile, { force: true });
+      progress("done");
       return { restored: false, rolledBack: true, id: previous.id, safetyCopyPath: join(root, `safety-${previous.id}`) };
     }
     if (previous.phase === "committed" && existsSync(pendingFile)) {
       const pending = privateJson(pendingFile);
       if (record(pending) && pending.id === previous.id) {
-        return finishRestore(dataDir, previous.id);
+        progress("checking");
+        const result = finishRestore(dataDir, previous.id);
+        progress("done");
+        return result;
       }
     }
   }
   const pending = readPendingWorkspaceRestoreMetadata(dataDir);
   if (!pending) return { restored: false };
+  progress("checking");
   const staged = join(jobPath(dataDir, pending.id), "staged");
-  const manifest = validateStaged(staged);
-  const prepared = prepareRestore(dataDir, pending.id, manifest);
+  const manifest = validateStaged(staged, undefined, count => progress("checking", count));
+  progress("copying");
+  const prepared = prepareRestore(dataDir, pending.id, manifest, count => progress("copying", count));
+  progress("applying");
   const safetyCopyPath = join(root, `safety-${pending.id}`);
   if (existsSync(safetyCopyPath)) throw new Error("A safety copy already exists for this restore. Original files have not been changed.");
   folder(join(safetyCopyPath, "data"));
@@ -853,8 +948,8 @@ export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreR
   if (existsSync(join(root, "last-restore.json"))) writeJson(join(safetyCopyPath, "previous-restore.json"), privateJson(join(root, "last-restore.json")));
   writeJson(journalFile, journal);
   try {
-    for (const name of journal.existing) renameSync(join(dataDir, name), join(safetyCopyPath, "data", name));
-    for (const name of journal.incoming) if (entryExists(join(prepared, name))) renameSync(join(prepared, name), join(dataDir, name));
+    for (const name of journal.existing) { renameSync(join(dataDir, name), join(safetyCopyPath, "data", name)); progress("applying"); }
+    for (const name of journal.incoming) if (entryExists(join(prepared, name))) { renameSync(join(prepared, name), join(dataDir, name)); progress("applying"); }
     finishRestore(dataDir, pending.id, false);
     writeJson(journalFile, { ...journal, phase: "committed" });
   } catch (error) {
@@ -863,7 +958,9 @@ export function applyPendingWorkspaceRestore(dataDir: string): WorkspaceRestoreR
     rmSync(pendingFile, { force: true });
     throw new Error("The workspace restore failed and the previous workspace was recovered.", { cause: error });
   }
-  return finishRestore(dataDir, pending.id);
+  const result = finishRestore(dataDir, pending.id);
+  progress("done");
+  return result;
 }
 
 /** Delete only an unreferenced upload/export/staging job, never a safety copy

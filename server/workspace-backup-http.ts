@@ -8,10 +8,12 @@ import { z } from "zod";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import {
   createWorkspaceBackup, stageWorkspaceBackup, commitPendingWorkspaceRestore,
+  estimateWorkspaceBackup,
   MAX_WORKSPACE_BACKUP_UPLOAD_BYTES,
   removeWorkspaceBackupJob,
   type WorkspaceBackupSummary,
 } from "./workspace-backup.ts";
+import { backupSelectionSchema } from "./workspace-backup-selection.ts";
 import type { RequestAuth } from "./request-auth.ts";
 
 const PREFIX = "/api/workspace-backup";
@@ -123,18 +125,27 @@ export function createWorkspaceBackupRoutes(options: {
       }
       if (method === "POST" && path === `${PREFIX}/export`) {
         // Allow the full preference budget plus the JSON envelope/password.
-        const body = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}) }).parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
+        const body = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}), selection: backupSelectionSchema.optional() }).parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
         if (Buffer.byteLength(JSON.stringify(body.clientState)) > MAX_CLIENT_STATE_BYTES) throw failure("Saved drafts exceed the 2 MB backup preference limit.", 413);
         const clientState = Object.fromEntries(Object.entries(body.clientState).filter(([key]) => WORKSPACE_BACKUP_CLIENT_KEYS.includes(key as typeof WORKSPACE_BACKUP_CLIENT_KEYS[number])));
         const result = await operate(() => options.exclusive(async () => {
           check(req, auth);
           replacePrevious(auth, ["download"]);
           if (artifacts.size >= 4) throw failure("There are already four backup files in progress. Restart or wait an hour before creating another.", 409);
-          return createWorkspaceBackup(options.dataDir, { password: body.password, clientState, appVersion: options.appVersion });
+          return createWorkspaceBackup(options.dataDir, { password: body.password, clientState, appVersion: options.appVersion, selection: body.selection });
         }));
         try { check(req, auth); } catch (error) { removeWorkspaceBackupJob(options.dataDir, result.id); throw error; }
         artifacts.set(result.id, { owner: owner(auth), kind: "download", path: result.path, summary: result.summary, expires: Date.now() + EXPIRES_MS });
         json(res, 200, { id: result.id, filename: `OpenMausBot-${result.summary.createdAt.slice(0, 10)}.ombbackup`, bytes: statSync(result.path).size, summary: result.summary });
+        return true;
+      }
+      if (method === "POST" && path === `${PREFIX}/estimate`) {
+        const body = z.object({ selection: backupSelectionSchema.optional() }).strict().parse(await options.readBody(req));
+        if (options.status().busy || options.status().pendingRestore) throw failure("Wait for the current workspace operation to finish.", 409);
+        // A read-only estimate must not lock out an export clicked while it scans.
+        const result = await estimateWorkspaceBackup(options.dataDir, body.selection);
+        check(req, auth);
+        json(res, 200, result);
         return true;
       }
       const download = /^\/api\/workspace-backup\/download\/([\w-]+)$/.exec(path);

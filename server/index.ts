@@ -460,7 +460,20 @@ process.once("exit", releaseDataDirLeaseAtExit);
 // objects. Replacing files underneath a live Store would overwrite restored data.
 let workspaceRestore: WorkspaceRestoreResult = { restored: false };
 if (existsSync(join(DATA_DIR, ".backups"))) {
-  workspaceRestore = applyPendingWorkspaceRestore(DATA_DIR);
+  // Synchronous restoration precedes Store construction. Progress travels
+  // over the private process channel; it cannot depend on the unstarted HTTP server.
+  let lastRestoreProgressAt = 0;
+  let lastRestorePhase = "";
+  let sequence = 0;
+  workspaceRestore = applyPendingWorkspaceRestore(DATA_DIR, progress => {
+    if (progress.phase === lastRestorePhase && Date.now() - lastRestoreProgressAt < 500) return;
+    lastRestoreProgressAt = Date.now(); lastRestorePhase = progress.phase;
+    try {
+      (process as NodeJS.Process & { parentPort?: { postMessage(message: object): void } }).parentPort?.postMessage({
+        type: "workspace-restore-progress", ...progress, sequence: ++sequence,
+      });
+    } catch { /* Losing the progress display must not interrupt a restore transaction. */ }
+  });
   if (!workspaceRestore.restored && !workspaceRestore.rolledBack) {
     workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
   }
