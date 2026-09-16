@@ -188,7 +188,9 @@ final class ThreadNavigationUITests: XCTestCase {
         app.buttons["select-threads"].tap()
         app.buttons["select-all-threads"].tap()
         app.buttons["delete-selected-threads"].tap()
-        app.buttons["Delete 2 threads"].tap()
+        let confirmation = app.buttons["Delete 2 threads"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        confirmation.tap()
 
         let error = app.descendants(matching: .any).matching(identifier: "thread-action-error").firstMatch
         XCTAssertTrue(error.waitForExistence(timeout: 5))
