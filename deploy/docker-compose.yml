@@ -13,8 +13,8 @@ services:
       context: ..
       args:
         ENGINES: ${ENGINES:-}
-    # prebuilt on every main push; `docker compose up --build` builds from source instead
-    image: ghcr.io/milind-soni/openmausbot:latest
+    # prebuilt on every main push; set OMB_IMAGE=openmausbot:local when building from source
+    image: ${OMB_IMAGE:-ghcr.io/milind-soni/openmausbot:latest@sha256:5af74ed3254dae9a0cfeb0a1ba5bf86ea7bba8641be427d35f05f5b769edbf4e}
     restart: unless-stopped
     volumes:
       - data:/data
@@ -39,7 +39,7 @@ services:
       retries: 3
 
   caddy:
-    image: caddy:2
+    image: caddy:2.11.4@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d
     restart: unless-stopped
     network_mode: "service:omb"
     depends_on:

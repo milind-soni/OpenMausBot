@@ -5,8 +5,8 @@ services:
     build:
       context: ./deploy/local
       args:
-        BASE_IMAGE: ${OMB_BASE_IMAGE:-ghcr.io/milind-soni/openmausbot:latest}
-        ENGINES: ${ENGINES-@anthropic-ai/claude-code @openai/codex}
+        BASE_IMAGE: ${OMB_BASE_IMAGE:-ghcr.io/milind-soni/openmausbot:latest@sha256:5af74ed3254dae9a0cfeb0a1ba5bf86ea7bba8641be427d35f05f5b769edbf4e}
+        ENGINES: ${ENGINES-@anthropic-ai/claude-code@2.1.263 @openai/codex@0.153.4}
     image: ${OMB_LOCAL_IMAGE:-openmausbot-local:latest}
     restart: unless-stopped
     volumes:
@@ -29,7 +29,7 @@ services:
       start_period: 30s
       retries: 5
   caddy:
-    image: ${CADDY_IMAGE:-caddy:2}
+    image: ${CADDY_IMAGE:-caddy:2.11.4@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d}
     restart: unless-stopped
     network_mode: service:omb
     environment:

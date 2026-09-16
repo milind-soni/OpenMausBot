@@ -244,9 +244,9 @@ posixOnly("authorization decisions are logged", () => {
         runOn: "maus",
       });
       expect(hook.status).toBe(201);
-      const delivered = await fetch(hook.body.credential.url, {
+      const delivered = await fetch(hook.body.credential.endpointUrl, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { authorization: `Bearer ${hook.body.credential.secret}`, "content-type": "application/json" },
         body: JSON.stringify({ status: "failed" }),
       });
       expect(delivered.status).toBe(202);
