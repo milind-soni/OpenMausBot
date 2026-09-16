@@ -19,7 +19,9 @@ public enum ComposerKeyboard {
     }
 
     private static func isLineBreak(_ character: Character) -> Bool {
+        // A bound CharacterSet.contains method reference misclassifies input in
+        // optimized builds; keep the predicate as an explicit closure.
         !character.unicodeScalars.isEmpty
-            && character.unicodeScalars.allSatisfy(CharacterSet.newlines.contains)
+            && character.unicodeScalars.allSatisfy { CharacterSet.newlines.contains($0) }
     }
 }
