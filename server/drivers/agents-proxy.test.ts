@@ -2073,4 +2073,18 @@ describe("deferred tool loading when tools.deferred is on", () => {
     const direct = await drpc("tools/call", { name: "list_rooms", arguments: {} });
     expect(direct.result.content[0].text).toContain("Launch");
   });
+  it("warns on the third identical failing call and refuses the fifth; a success clears it (Phase 3 part 3)", async () => {
+    const { LoopBreaker, LOOP_REFUSE_AT } = await import("./agents-proxy-reliability.ts");
+    const breaker = new LoopBreaker();
+    const key = breaker.key("session_read", { id: "nope" });
+    expect(breaker.record(key, true)).toBeNull();
+    expect(breaker.record(key, true)).toBeNull();
+    expect(breaker.record(key, true)).toMatch(/3rd identical failing call/);
+    expect(breaker.refusal(key)).toBeNull();
+    expect(breaker.record(key, true)).toBeNull();
+    expect(breaker.refusal(key)).toMatch(new RegExp(`failed ${LOOP_REFUSE_AT - 1} times`));
+    expect(breaker.record(breaker.key("session_read", { id: "other" }), false)).toBeNull();
+    breaker.record(key, false);
+    expect(breaker.refusal(key)).toBeNull();
+  });
 });

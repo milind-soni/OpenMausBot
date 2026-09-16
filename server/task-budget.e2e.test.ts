@@ -70,7 +70,8 @@ posixOnly("a board task pauses at its money cap and resumes when it is raised", 
     let t = await task(id);
     expect(t.spentUsd).toBeCloseTo(0.01, 5);
     let comments = (await api("GET", `/api/tasks/${id}/comments`)).body.comments.map((c: any) => c.text);
-    expect(comments).toEqual(["70% of this task's budget is spent ($0.010 of $0.014)."]);
+    // the verifier (Phase 3 part 3) may add its own comment after this one
+    expect(comments[0]).toBe("70% of this task's budget is spent ($0.010 of $0.014).");
     // the digest is the result
     await until(async () => String((await task(id))?.result ?? "").startsWith("[digest]"), "the digest to become the result", 20_000);
     expect((await task(id)).result).toContain("[digest]");
@@ -81,7 +82,7 @@ posixOnly("a board task pauses at its money cap and resumes when it is raised", 
     expect(t).toMatchObject({ status: "blocked", blockedReason: "paused, needs a budget increase" });
     expect(t.spentUsd).toBeCloseTo(0.02, 5);
     comments = (await api("GET", `/api/tasks/${id}/comments`)).body.comments.map((c: any) => c.text);
-    expect(comments[1]).toContain("paused, needs a budget increase");
+    expect(comments.some((c: string) => c.includes("paused, needs a budget increase"))).toBe(true);
     // a cap below what is spent is refused
     expect((await api("PATCH", `/api/tasks/${id}`, { budgetUsd: 0.015 })).status).toBe(400);
     // the pause raised one card in the run thread; one tap raises the cap

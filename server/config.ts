@@ -390,6 +390,9 @@ const appConfigSchema = z.object({
   /** Phase 3 part 1: the project's checks, run by the harness when unattended
    * work finishes. auto:false discovers but never runs. */
   gates: z.object({ auto: z.boolean().optional(), timeoutSeconds: z.number().int().positive().optional() }).strict().optional(),
+  /** Phase 3 part 3: the tool-less verifier on finished unattended work;
+   * retries is how many "not complete" verdicts send the task back to ready. */
+  verify: z.object({ auto: z.boolean().optional(), retries: z.number().int().min(0).max(5).optional() }).strict().optional(),
   /** Harness recall before a turn (Phase 1 part 2): on by default; captures
    * from SupaMaus included where it runs; the block's size cap. */
   recall: z.object({
@@ -456,6 +459,7 @@ export interface AppConfig {
   recall?: { auto?: boolean; captures?: boolean; maxChars?: number };
   tools?: { deferred?: boolean };
   gates?: { auto?: boolean; timeoutSeconds?: number };
+  verify?: { auto?: boolean; retries?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -609,6 +613,15 @@ export function toolsDeferred(cfg: AppConfig): boolean {
 export function gatesAuto(cfg: AppConfig): boolean {
   return cfg.gates?.auto !== false;
 }
+/** Phase 3 part 3: the verifier runs on finished unattended work unless switched off. */
+export function verifyAuto(cfg: AppConfig): boolean {
+  return cfg.verify?.auto !== false;
+}
+/** How many "not complete" verdicts may send a task back to ready. */
+export function verifyRetries(cfg: AppConfig): number {
+  const value = cfg.verify?.retries;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? Math.min(value, 5) : 1;
+}
 export function gatesTimeoutMs(cfg: AppConfig): number {
   const seconds = cfg.gates?.timeoutSeconds;
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 600_000;
@@ -715,6 +728,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "localVm",
   "features",
   "gates",
+  "verify",
   "board",
   "browserProfiles",
   "onboarding",

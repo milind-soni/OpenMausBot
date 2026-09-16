@@ -40,3 +40,46 @@ export function teachingError(path: string, error: unknown, retried: boolean): E
 export function coreToolNames(boardOn: boolean): Set<string> {
   return new Set(["list_bots", "session_search", "session_read", "memory_update", "tool_result_read", "post_to_room", ...(boardOn ? ["task_create", "task_list"] : [])]);
 }
+
+// ── Phase 3 part 3: the loop breaker ────────────────────────────────────
+// A bot that keeps making the same failing call learns nothing from the
+// repeat. The third identical failure gets a note, the fifth is refused
+// before it runs. A success on the same key clears the count, and keys are
+// bounded so one pathological session cannot grow the proxy forever.
+export const LOOP_WARN_AT = 3;
+export const LOOP_REFUSE_AT = 5;
+const LOOP_MAX_KEYS = 256;
+
+export class LoopBreaker {
+  private readonly failures = new Map<string, number>();
+
+  key(name: string, args: unknown): string {
+    let serialized: string;
+    try { serialized = JSON.stringify(args ?? {}); } catch { serialized = String(args); }
+    return `${name}:${serialized}`;
+  }
+
+  /** The refusal text when this call has failed LOOP_REFUSE_AT-1 times already, else null. */
+  refusal(key: string): string | null {
+    const count = this.failures.get(key) ?? 0;
+    if (count < LOOP_REFUSE_AT - 1) return null;
+    this.failures.set(key, count + 1);
+    return `Refused: this exact call has failed ${count} times in a row and was not run again. Stop repeating it — change the arguments or the approach, or say plainly what is blocking you.`;
+  }
+
+  /** Record the outcome. Returns a note to append to the error on the LOOP_WARN_AT-th failure, else null. */
+  record(key: string, failed: boolean): string | null {
+    if (!failed) {
+      this.failures.delete(key);
+      return null;
+    }
+    if (!this.failures.has(key) && this.failures.size >= LOOP_MAX_KEYS) {
+      const oldest = this.failures.keys().next().value;
+      if (oldest !== undefined) this.failures.delete(oldest);
+    }
+    const count = (this.failures.get(key) ?? 0) + 1;
+    this.failures.set(key, count);
+    if (count === LOOP_WARN_AT) return `Note from the harness: this is the ${count}rd identical failing call. Change approach or say what is blocking you; the ${LOOP_REFUSE_AT}th identical call will be refused.`;
+    return null;
+  }
+}

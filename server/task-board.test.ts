@@ -30,6 +30,13 @@ describe("the board", () => {
     board.openBoard(file);
     expect(board.getTask(created.id)?.gates?.results[1].tail).toBe("2 failed");
   });
+  it("keeps the verifier's verdict on the task (Phase 3 part 3)", () => {
+    const created = board.createTask({ title: "Judge me" });
+    expect(created.verdict).toBeNull();
+    const stamped = board.setVerdict(created.id, { isComplete: false, confidence: 0.3, evidenceFor: [], evidenceAgainst: ["no file"], nextAction: "write the file", attempt: 1, line: "Verified: not complete (confidence 0.30) — no file. Next: write the file" });
+    expect(stamped.verdict?.nextAction).toBe("write the file");
+    expect(stamped.verdictAt).toBeGreaterThan(0);
+  });
   it("survives a reopen", () => {
     const file = join(DATA, "persist.db");
     board.openBoard(file);

@@ -85,7 +85,11 @@ export function cacheHitShare(rows: readonly UsageRow[]): CacheHitShare {
 }
 
 export interface MetricsGroup {
+  /** Model calls made for a person's or a routine's turn. Harness-initiated
+   * calls (compaction summaries, verifier verdicts) are counted apart. */
   turns: number;
+  /** Phase 3 part 3: one-shot calls the harness made on its own behalf. */
+  harnessCalls: number;
   /** Distinct threads: a task in the harness's own vocabulary. */
   tasks: number;
   input: number;
@@ -162,12 +166,15 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
     }
   }
   const tokens = input + output;
+  const harnessCalls = rows.filter((row) => row.trigger.kind === "harness").length;
+  const turns = rows.length - harnessCalls;
   return {
-    turns: rows.length,
+    turns,
+    harnessCalls,
     tasks: threads.size,
     input,
     output,
-    tokensPerTurn: rows.length ? Math.round(tokens / rows.length) : 0,
+    tokensPerTurn: turns ? Math.round(tokens / turns) : 0,
     tokensPerTask: threads.size ? Math.round(tokens / threads.size) : 0,
     cacheHitShare: cacheHitShare(rows),
     stablePrefixChanges,

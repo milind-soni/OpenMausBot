@@ -84,11 +84,26 @@ export interface BoardTask {
    * turn ended, and the one line that says what ran. Null until a run. */
   gates: TaskGates | null;
   gatesAt: number | null;
+  /** Phase 3 part 3: the verifier's last verdict on this task, and when. */
+  verdict: TaskVerdict | null;
+  verdictAt: number | null;
 }
 
 export interface TaskGates {
   results: GateResult[];
   scope: string;
+}
+
+export interface TaskVerdict {
+  isComplete: boolean;
+  confidence: number;
+  evidenceFor: string[];
+  evidenceAgainst: string[];
+  nextAction: string;
+  /** The attempt the verdict judged (task.attempts at the time). */
+  attempt: number;
+  /** The one line a person or a bot reads. */
+  line: string;
 }
 
 /** The reason a task paused for money carries; a raised cap resumes it. */
@@ -234,6 +249,9 @@ export function openBoard(path: string = join(DATA_DIR, "tasks.db")): void {
     // Phase 3 part 1
     ["gates_json", "TEXT"],
     ["gates_at", "INTEGER"],
+    // Phase 3 part 3
+    ["verdict_json", "TEXT"],
+    ["verdict_at", "INTEGER"],
   ];
   for (const [column, type] of wanted) if (!present.has(column)) db.exec(`ALTER TABLE tasks ADD COLUMN ${column} ${type}`);
   db.exec("CREATE INDEX IF NOT EXISTS tasks_thread ON tasks (thread_id, updated_at DESC)");
@@ -264,6 +282,18 @@ interface TaskRow {
   budget_warned: number;
   gates_json: string | null;
   gates_at: number | null;
+  verdict_json: string | null;
+  verdict_at: number | null;
+}
+
+function parseVerdictJson(json: string | null): TaskVerdict | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as TaskVerdict;
+    return typeof parsed?.isComplete === "boolean" && typeof parsed.line === "string" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function parseGates(json: string | null): TaskGates | null {
@@ -301,6 +331,8 @@ function rowToTask(row: TaskRow): BoardTask {
     unpricedTurns: row.unpriced_turns ?? 0,
     gates: parseGates(row.gates_json ?? null),
     gatesAt: row.gates_at ?? null,
+    verdict: parseVerdictJson(row.verdict_json ?? null),
+    verdictAt: row.verdict_at ?? null,
   };
 }
 
@@ -621,6 +653,14 @@ export function setResult(id: string, result: string): BoardTask {
 export function setGates(id: string, results: readonly GateResult[], scope: string): BoardTask {
   const payload: TaskGates = { results: results.map((r) => ({ ...r, tail: r.tail.slice(0, 4_000) })), scope: clamp(scope, TASK_BODY_MAX) };
   handle().prepare("UPDATE tasks SET gates_json = ?, gates_at = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(payload), Date.now(), Date.now(), id);
+  const task = getTask(id);
+  if (!task) throw new Error(`no such task: ${id}`);
+  return task;
+}
+
+/** Phase 3 part 3: keep the verifier's verdict on the task. */
+export function setVerdict(id: string, verdict: TaskVerdict): BoardTask {
+  handle().prepare("UPDATE tasks SET verdict_json = ?, verdict_at = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(verdict), Date.now(), Date.now(), id);
   const task = getTask(id);
   if (!task) throw new Error(`no such task: ${id}`);
   return task;

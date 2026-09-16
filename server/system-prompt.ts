@@ -92,10 +92,14 @@ export const ROUTINE_PROMPT =
 /** Phase 3 part 1: a completion claim states its scope. Text only, every engine. */
 export const SCOPED_CLAIM_PROMPT =
   " When you report finishing, say what you ran and what you did not run (typecheck, lint, tests, build); never say done without that.";
+/** Phase 2 part 4 (decision 13): the rule for work with nobody at the
+ * keyboard. Shared by routine runs and board tasks (Phase 3 part 3 found a
+ * board attempt parked on a question card nobody could answer). */
+export const UNATTENDED_PROMPT =
+  " Nobody is watching this run, so do not ask clarifying questions or raise a question card: where something is ambiguous, take the most reversible reading, say which one you took, and carry on. If a sign-in, a file, a tool or a permission you need is missing, stop and write a short failure summary that names exactly what was missing; do not guess or retry.";
 export const ROUTINE_EXECUTION_PROMPT =
   " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible." +
-  // Phase 2 part 4 (decision 13): nobody is at the keyboard for a routine run
-  " Nobody is watching this run, so do not ask clarifying questions: where something is ambiguous, take the most reversible reading, say which one you took, and carry on. If a sign-in, a file, a tool or a permission you need is missing, stop and write a short failure summary that names exactly what was missing; do not guess or retry." +
+  UNATTENDED_PROMPT +
   SCOPED_CLAIM_PROMPT;
 /** Phase 2: the board exists and is the place for work filed for later,
  * so a bot does not wander off to a connected app when asked to "file a task". */

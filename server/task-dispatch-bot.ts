@@ -16,7 +16,7 @@
 //   - dispatch does the part that cannot be answered synchronously: create
 //     the thread, arm the watch, start the turn. Anything that goes wrong
 //     there returns null, and the tick refunds the claim.
-import { SCOPED_CLAIM_PROMPT } from "./system-prompt.ts";
+import { SCOPED_CLAIM_PROMPT, UNATTENDED_PROMPT } from "./system-prompt.ts";
 import { exhausted, patchTask, type BoardTask } from "./task-board.ts";
 
 /** Just enough of a BotRecord to decide a dispatch — a structural shape so
@@ -72,9 +72,14 @@ export interface BotDispatch {
  * or task_block tool in this scope yet — a bot cannot report progress on
  * a board task from inside its own turn — so this is deliberately honest
  * about that instead of promising a tool that is not wired up. */
-export function boardTaskPrompt(task: Pick<BoardTask, "title" | "body">): string {
+export function boardTaskPrompt(task: Pick<BoardTask, "title" | "body"> & { verdict?: BoardTask["verdict"] }): string {
   const detail = task.body.trim() ? `\n\n${task.body.trim()}` : "";
-  return `A task was filed on the shared task board: "${task.title}"${detail}\n\n${SCOPED_CLAIM_PROMPT.trim()}`;
+  // Phase 3 part 3: a retry after "not complete" starts from the verdict,
+  // not from scratch — what was missing and what to do next.
+  const previous = task.verdict && !task.verdict.isComplete
+    ? `\n\nA previous attempt at this task was judged not complete. ${task.verdict.evidenceAgainst.length ? `What was missing: ${task.verdict.evidenceAgainst.join("; ")}.` : ""}${task.verdict.nextAction ? ` Do this: ${task.verdict.nextAction}` : ""}`
+    : "";
+  return `A task was filed on the shared task board: "${task.title}"${detail}${previous}\n\n${UNATTENDED_PROMPT.trim()} ${SCOPED_CLAIM_PROMPT.trim()}`;
 }
 
 export function createBotDispatch<Bot extends DispatchBot>(deps: BotDispatchDeps<Bot>): BotDispatch {
@@ -158,4 +163,13 @@ export function createBotDispatch<Bot extends DispatchBot>(deps: BotDispatchDeps
   }
 
   return { canDispatch: (task) => eligible(task) !== null, hold, dispatch };
+}
+
+/** Phase 3 part 3: a running board task parked on a card nobody will answer
+ * must say so (nothing waits in silence). Given the run thread's newest
+ * message, the reason in words, or null. */
+export function parkedOnCard(last: { kind?: string; card?: { title?: string; answered?: boolean; requestId?: string } | null } | undefined): string | null {
+  if (!last || last.kind !== "options" || !last.card || last.card.answered) return null;
+  const title = (last.card.title ?? "").trim();
+  return `the bot raised a card and is waiting on it${title ? `: "${title.slice(0, 120)}"` : ""} — nobody watches board runs; open the run and answer it, or stop the task`;
 }

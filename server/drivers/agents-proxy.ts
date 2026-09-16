@@ -33,7 +33,7 @@
 //   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
 //   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
 //   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
-import { coreToolNames, isIdempotent, teachingError, TOOL_CALL_TIMEOUT_MS, TOOL_RESULT_HEAD_CHARS, TOOL_RESULT_MAX_CHARS, TOOL_RETRY_DELAY_MS } from "./agents-proxy-reliability.ts";
+import { coreToolNames, isIdempotent, LoopBreaker, teachingError, TOOL_CALL_TIMEOUT_MS, TOOL_RESULT_HEAD_CHARS, TOOL_RESULT_MAX_CHARS, TOOL_RETRY_DELAY_MS } from "./agents-proxy-reliability.ts";
 import readline from "node:readline";
 import { readTurnToken } from "../turn-token-read.ts";
 
@@ -1126,6 +1126,20 @@ function recallSpeaker(hit: Json): string {
   return hit.role === "user" ? "user" : "you";
 }
 
+// Phase 3 part 3: the loop breaker. Identical calls that keep failing are
+// warned at the third and refused at the fifth; a success on the same key
+// clears it. The proxy sees every brokered tool call, so this holds for
+// every engine.
+const loopBreaker = new LoopBreaker();
+async function brokeredCall(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  const key = loopBreaker.key(name, args);
+  const refusal = loopBreaker.refusal(key);
+  if (refusal) return { text: refusal, isError: true };
+  const result = await callTool(name, args);
+  const note = loopBreaker.record(key, Boolean(result.isError));
+  return note ? { ...result, text: `${result.text}\n\n${note}` } : result;
+}
+
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
   if (name === "list_room_targets") {
     const r = await api("/api/internal/room-targets");
@@ -1849,7 +1863,8 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       const result = typeof task.result === "string" && task.result ? `\n  result: ${task.result.slice(0, 200)}` : "";
       const hold = typeof task.hold === "string" && task.hold ? `\n  waiting: ${task.hold}` : "";
       const gatesScope = task.gates && typeof task.gates === "object" && typeof (task.gates as Json).scope === "string" ? `\n  ${(task.gates as Json).scope}` : "";
-      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}${gatesScope}${hold}`;
+      const verdict = task.verdict && typeof task.verdict === "object" && typeof (task.verdict as Json).line === "string" ? `\n  ${(task.verdict as Json).line}` : "";
+      return `- [${task.status}] ${task.title} (id: ${task.id})${assignee}${owner}${due}${budget}${attempts}${blocked}${result}${gatesScope}${verdict}${hold}`;
     });
     return { text: `Board tasks:\n${lines.join("\n")}` };
   }
@@ -1917,12 +1932,12 @@ async function handle(msg: Json) {
             textResult(id, `No tool named "${target}". Call search_tools first and copy the exact name.`, true);
             return;
           }
-          const { text, isError } = await callTool(target, inner);
-          textResult(id, isError ? text : await capToolText(target, text), isError);
+          const brokered = await brokeredCall(target, inner);
+          textResult(id, brokered.isError ? brokered.text : await capToolText(target, brokered.text), brokered.isError);
           return;
         }
-        const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
-        textResult(id, isError ? text : await capToolText(name, text), isError);
+        const brokered = await brokeredCall(name, (params.arguments ?? {}) as Json);
+        textResult(id, brokered.isError ? brokered.text : await capToolText(name, brokered.text), brokered.isError);
       } catch (e) {
         textResult(id, (e as Error).message, true);
       }

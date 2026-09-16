@@ -110,4 +110,14 @@ describe("recall metrics (Phase 1 part 2)", () => {
     ]);
     expect(summary.total).toMatchObject({ turns: 3, recalls: 2, recallsUsed: 1 });
   });
+  it("counts the harness's own one-shot calls apart from turns (Phase 3 part 3)", () => {
+    const summary = summarizeMetrics([
+      row({ botId: "b", threadId: "t", input: 100, output: 10 }),
+      row({ botId: "b", threadId: "t", input: 100, output: 10 }),
+      row({ botId: "b", threadId: "t", input: 50, output: 5, trigger: { kind: "harness", call: "verify" } }),
+    ]);
+    expect(summary.total.turns).toBe(2);
+    expect(summary.total.harnessCalls).toBe(1);
+    expect(summary.total.tokensPerTurn).toBe(Math.round(275 / 2));
+  });
 });

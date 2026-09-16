@@ -200,11 +200,19 @@ if (argAfter("--output-format") === "text" || argAfter("--output-format") === "j
       JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig: null }, null, 2),
     );
   }
+  // Phase 3 part 3: a verifier call is answered with a verdict. The task
+  // body decides it, so one server can hold both outcomes: a body carrying
+  // "[[fake:incomplete]]" is judged not complete, everything else complete.
+  const generated = prompt.includes("You are the VERIFIER")
+    ? (prompt.includes("[[fake:incomplete]]")
+      ? JSON.stringify({ is_complete: false, confidence: 0.35, evidence_for: [], evidence_against: ["the fake verifier was told this is incomplete"], next_action: "do the missing part" })
+      : JSON.stringify({ is_complete: true, confidence: 0.9, evidence_for: ["the fake verifier accepts it"], evidence_against: [], next_action: "" }))
+    : "fake generated text";
   if (argAfter("--output-format") === "json") {
     // the real CLI's result object: text plus what the call cost
-    process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result: "fake generated text", usage: { input_tokens: 100, cache_read_input_tokens: 20, output_tokens: 30 }, total_cost_usd: 0.0012 }) + "\n");
+    process.stdout.write(JSON.stringify({ type: "result", subtype: "success", result: generated, usage: { input_tokens: 100, cache_read_input_tokens: 20, output_tokens: 30 }, total_cost_usd: 0.0012 }) + "\n");
   } else {
-    process.stdout.write("fake generated text\n");
+    process.stdout.write(`${generated}\n`);
   }
   process.exit(0);
 }

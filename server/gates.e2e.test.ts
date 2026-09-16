@@ -72,21 +72,27 @@ posixOnly("a board task's turn ends and the folder's gates run", () => {
     const plain = (await api("POST", "/api/tasks", { title: "Say hi", body: "say hi", assigneeBotId: idle.id })).body.task;
     for (const id of [gated.id, plain.id]) expect((await api("PATCH", `/api/tasks/${id}`, { status: "ready" })).status).toBe(200);
 
-    await until(async () => (await task(gated.id))?.gates !== null && (await task(gated.id))?.gates !== undefined, "the gates to run on the gated task");
+    // A failed gate makes the verdict "not complete" (Phase 3 part 3), so the
+    // task is retried once with the verdict and ends in review on attempt 2.
+    await until(async () => { const t = await task(gated.id); return t?.attempts === 2 && t?.verdict?.attempt === 2; }, "the gates and the verifier to run twice on the gated task", 400_000);
     const g = await task(gated.id);
     expect(g.status).toBe("review");
     expect(g.gates.results.map((r: any) => `${r.name}:${r.status}`)).toEqual(["typecheck:pass", "test:fail"]);
     expect(g.gates.scope).toMatch(/^Gates: typecheck pass \(\d+ s\), test fail \(\d+ s\)\.$/);
     expect(g.result.startsWith(g.gates.scope)).toBe(true);
     expect(g.result).toContain("[digest]");
+    expect(g.verdict.isComplete).toBe(false);
+    expect(g.verdict.evidenceAgainst.join(" ")).toMatch(/gate failed/);
     const comments = (await api("GET", `/api/tasks/${gated.id}/comments`)).body.comments.map((c: any) => c.text);
-    expect(comments.some((c: string) => c.startsWith(g.gates.scope) && c.includes("1 failed"))).toBe(true);
+    expect(comments.filter((c: string) => c.startsWith(g.gates.scope) && c.includes("1 failed")).length).toBe(2);
 
-    await until(async () => (await task(plain.id))?.status === "review", "the plain task to settle");
+    await until(async () => (await task(plain.id))?.verdict != null, "the plain task to settle and be judged");
     const p = await task(plain.id);
+    expect(p.status).toBe("review");
     expect(p.gates).toBeNull();
+    expect(p.verdict.isComplete).toBe(true);
     expect(p.result.startsWith("[digest]")).toBe(true);
     const plainComments = (await api("GET", `/api/tasks/${plain.id}/comments`)).body.comments.map((c: any) => c.text);
     expect(plainComments.some((c: string) => c.startsWith("Gates:"))).toBe(false);
-  }, 240_000);
+  }, 600_000);
 });

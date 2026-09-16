@@ -149,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -347,6 +347,7 @@ import {
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { discoverGates, runGates, scopeLine } from "./gates.ts";
+import { parseVerdict, verdictLine, verifierPrompt } from "./verifier.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
@@ -368,8 +369,9 @@ import {
   TASK_TITLE_MAX,
   visibleTo as visibleBoardTasks,
   type BoardStatus,
-  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON, suggestedBudgetUsd, setGates } from "./task-board.ts";
-import { createBotDispatch } from "./task-dispatch-bot.ts";
+  type BoardTask,
+  type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON, suggestedBudgetUsd, setGates, setVerdict } from "./task-board.ts";
+import { createBotDispatch, parkedOnCard } from "./task-dispatch-bot.ts";
 import { DEFAULT_STALE_AFTER_MS, createDispatcher as createBoardDispatcher } from "./task-dispatcher.ts";
 import { createTaskTurnWatch } from "./task-turn-watch.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
@@ -7021,20 +7023,83 @@ function recordBoardResult(threadId: string, botId: string, digestLine: string):
  * the result with the scope line and leave a comment with the failing
  * tails. A folder with no gates gets nothing — no noise on the task. */
 async function runBoardGates(taskId: string, botId: string, threadId: string, digestLine: string): Promise<void> {
-  if (!gatesAuto(cfg)) return;
-  const cwd = store.taskByThread(botId, threadId)?.cwd ?? undefined;
-  const gates = discoverGates(cwd);
-  if (!cwd || !gates.length) return;
-  try {
-    const results = await runGates(cwd, gates, { timeoutMs: gatesTimeoutMs(cfg) });
-    const scope = scopeLine(results, gates.map((g) => g.name));
-    setGates(taskId, results, scope);
-    setResult(taskId, `${scope}\n${digestLine}`);
-    const failing = results.filter((r) => r.status !== "pass").map((r) => `${r.name}:\n${r.tail || "(no output)"}`).join("\n\n");
-    addComment(taskId, null, failing ? `${scope}\n\n${failing}` : scope);
-  } catch (error) {
-    console.error(`[omb-gates] could not run gates for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+  let gatesFailed = false;
+  if (gatesAuto(cfg)) {
+    const cwd = store.taskByThread(botId, threadId)?.cwd ?? undefined;
+    const gates = discoverGates(cwd);
+    if (cwd && gates.length) {
+      try {
+        const results = await runGates(cwd, gates, { timeoutMs: gatesTimeoutMs(cfg) });
+        const scope = scopeLine(results, gates.map((g) => g.name));
+        setGates(taskId, results, scope);
+        setResult(taskId, `${scope}\n${digestLine}`);
+        const failing = results.filter((r) => r.status !== "pass").map((r) => `${r.name}:\n${r.tail || "(no output)"}`).join("\n\n");
+        addComment(taskId, null, failing ? `${scope}\n\n${failing}` : scope);
+        gatesFailed = results.some((r) => r.status !== "pass");
+      } catch (error) {
+        console.error(`[omb-gates] could not run gates for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
+  await runBoardVerifier(taskId, botId, threadId, gatesFailed);
+}
+
+/** Phase 3 part 3: one tool-less call judges the finished task against
+ * what was asked, the gates and the bot's own words. Not complete with a
+ * retry left: back to ready, the next attempt starting from the verdict.
+ * Otherwise the task stays in review for a person, verdict attached. A bot
+ * has no route to mark a task done, so nothing finishes on a bot's word. */
+async function runBoardVerifier(taskId: string, botId: string, threadId: string, gatesFailed: boolean): Promise<void> {
+  if (!verifyAuto(cfg)) return;
+  const bot = store.bot(botId);
+  const task = getBoardTask(taskId);
+  if (!bot || !task) return;
+  const instance = registry.get(bot.modelSelection.instanceId);
+  const generate = instance ? harnessGenerateFor(instance) : undefined;
+  if (!generate) return; // an engine with no one-shot path: the task stays in review, unjudged
+  const botSaid = store.activePath(threadId).filter((m) => m.role === "bot" && m.kind === "text" && m.text).slice(-5).map((m) => m.text ?? "");
+  const prompt = verifierPrompt({ title: task.title, body: task.body, result: task.result, gates: task.gates, botSaid });
+  try {
+    const outcome = await Promise.race([
+      runHarnessCall(DATA_DIR, {
+        kind: "verify",
+        botId: bot.id,
+        botName: bot.name,
+        threadId,
+        turnKey: `attempt-${task.attempts}`,
+        prompt,
+        instanceId: bot.modelSelection.instanceId,
+        driverKind: instance?.driverKind ?? "unknown",
+        model: bot.modelSelection.model,
+        call: (text) => generate(text, {}),
+      }, { budgetExhausted: () => Boolean(spendState(cfg, DATA_DIR)?.exceeded) }),
+      new Promise<undefined>((resolve) => { const t = setTimeout(() => resolve(undefined), 60_000); t.unref?.(); }),
+    ]);
+    if (!outcome || !("text" in outcome)) return; // budget or failure: unjudged, in review
+    const verdict = parseVerdict(outcome.text, { gatesFailed });
+    const line = verdictLine(verdict);
+    setVerdict(taskId, { ...verdict, attempt: task.attempts, line });
+    addComment(taskId, null, verdict.evidenceFor.length || verdict.evidenceAgainst.length
+      ? `${line}\n${verdict.evidenceFor.map((e) => `+ ${e}`).concat(verdict.evidenceAgainst.map((e) => `- ${e}`)).join("\n")}`
+      : line);
+    const fresh = getBoardTask(taskId);
+    if (!verdict.isComplete && fresh?.status === "review" && task.attempts <= verifyRetries(cfg)) {
+      setBoardTaskStatus(taskId, "ready");
+    }
+  } catch (error) {
+    console.error(`[omb-verify] could not judge task ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Why a task is not moving, in words: the dispatcher's reasons for a task
+ * that has not started, or a running attempt parked on a card nobody will
+ * answer (Phase 3 part 3). */
+function boardHold(task: BoardTask): string | null {
+  const dispatchHold = boardDispatch.hold(task);
+  if (dispatchHold) return dispatchHold;
+  if (task.status !== "running" || !task.threadId) return null;
+  const last = store.activePath(task.threadId).at(-1);
+  return parkedOnCard(last as Parameters<typeof parkedOnCard>[0]);
 }
 
 function boardReady(): boolean {
@@ -11203,7 +11268,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         // Say now if the board will not run it, rather than letting it sit
         // at "ready" with no message anywhere (found by hand, 2026-09-16).
-        return json(res, 201, { task, hold: boardDispatch.hold(task) });
+        return json(res, 201, { task, hold: boardHold(task) });
       }
       if (method === "POST" && path === "/api/internal/task-list") {
         if (!boardReady()) return json(res, 404, { error: "the task board is not enabled" });
@@ -11229,7 +11294,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             ...(body.mineOnly === true ? { assigneeBotId: internalSender.id } : {}),
           }),
           (botId) => reachable.has(botId),
-        ).map((task) => ({ ...task, hold: boardDispatch.hold(task) }));
+        ).map((task) => ({ ...task, hold: boardHold(task) }));
         return json(res, 200, { tasks });
       }
       if (method === "POST" && path === "/api/internal/browser/mcp") {
@@ -12763,7 +12828,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // every comment on every task, growing without limit as bots commented;
       // they are loaded per task through the route just below instead.
       // Phase 3 part 2: the board screen shows why an assigned task waits.
-      const tasks = listBoardTasks({ status: requestedStatus, assigneeBotId }).map((task) => ({ ...task, hold: boardDispatch.hold(task) }));
+      const tasks = listBoardTasks({ status: requestedStatus, assigneeBotId }).map((task) => ({ ...task, hold: boardHold(task) }));
       return json(res, 200, { tasks });
     }
     const taskCommentsListMatch = path.match(/^\/api\/tasks\/([\w-]+)\/comments$/);
