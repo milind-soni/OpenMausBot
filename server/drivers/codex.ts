@@ -9,8 +9,9 @@
 //
 // resumeCursor is the codex thread id; a later turn tries thread/resume
 // and preserves that history or reports a failed resume.
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { stripWorkspaceCredentialEnv } from "../config.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
@@ -1439,6 +1440,36 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     };
   };
 
+  // Phase 3 part 3: the one-shot the harness's verifier (and any other
+  // harness-initiated call) needs. `codex exec` reads the prompt from stdin
+  // (Windows' argv limit), runs read-only and ephemeral, and writes its last
+  // message to a file; that file is the answer. No session, no tools.
+  const codexOneShot = (prompt: string, opts?: { cwd?: string }): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const outFile = join(tmpdir(), `omb-codex-oneshot-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`);
+      const args = ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-m", models.default, "-o", outFile, "-"];
+      let stdout = "";
+      let stderr = "";
+      let done = false;
+      const child = spawnCli(config.cli, args, { cwd: opts?.cwd ?? homedir(), env: childEnv(), stdio: ["pipe", "pipe", "pipe"] });
+      const finish = (error: Error | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        let text = "";
+        try { text = readFileSync(outFile, "utf8"); } catch { text = ""; }
+        try { unlinkSync(outFile); } catch { /* never written */ }
+        if (error) { reject(error); return; }
+        resolve((text.trim() || stdout.trim().split("\n").filter(Boolean).at(-1) || "").trim());
+      };
+      const timer = setTimeout(() => { killCliTree(child); finish(new Error("codex exec did not answer within 180 s")); }, 180_000);
+      child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
+      child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
+      child.on("error", (error) => finish(error));
+      child.on("close", (code) => finish(code === 0 ? null : new Error(`codex exec exited ${code}: ${stderr.trim().slice(-300)}`)));
+      child.stdin?.end(prompt);
+    });
+
   return {
     instanceId,
     driverKind: DRIVER_KIND,
@@ -1452,6 +1483,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     getAuthentication: (flowId) => authentication.get(flowId),
     cancelAuthentication: () => authentication.cancel(),
     signOut: () => authentication.signOut(),
+    generateText: codexOneShot,
     snapshot,
     adapter: {
       provider: DRIVER_KIND,

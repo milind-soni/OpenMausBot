@@ -6673,6 +6673,8 @@ function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
   if (run.threadId) card.executionThreadId = run.threadId;
   if (summary) card.summary = summary;
   if (error) card.error = error;
+  // Phase 3 part 4: what the graph's check and judge said, on the card
+  if (run.verdict) card.verdict = redactSecretsInText(run.verdict).slice(0, 500);
   return card;
 }
 

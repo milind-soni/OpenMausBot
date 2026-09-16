@@ -1791,4 +1791,12 @@ describe("CodexDriver turns (fake app-server)", () => {
     const turnStart = seen.calls.find((c: any) => c.method === "turn/start");
     expect(turnStart.params).not.toHaveProperty("effort");
   });
+  it("answers a one-shot through codex exec, prompt on stdin, last message from the -o file (Phase 3 part 3)", async () => {
+    await create();
+    const complete = await instance.generateText!("You are the VERIFIER. Judge this.");
+    expect(JSON.parse(complete).is_complete).toBe(true);
+    const incomplete = await instance.generateText!("You are the VERIFIER. Judge this. [[fake:incomplete]]");
+    expect(JSON.parse(incomplete).is_complete).toBe(false);
+    expect(await instance.generateText!("Say something")).toBe("fake codex one-shot text");
+  });
 });

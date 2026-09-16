@@ -60,6 +60,27 @@ if (process.argv[2] === "--version") {
   process.stdout.write(`${process.env.FAKE_CODEX_VERSION ?? "codex-cli 0.147.0"}\n`);
   process.exit(0);
 }
+// `codex exec` (Phase 3): the one-shot. The prompt arrives on stdin; the
+// last message goes to the file after -o. A verifier prompt gets a verdict
+// (not complete when it carries "[[fake:incomplete]]"), anything else a
+// fixed line.
+if (process.argv[2] === "exec") {
+  const outIndex = process.argv.indexOf("-o");
+  const outFile = outIndex >= 0 ? process.argv[outIndex + 1] : undefined;
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => { input += chunk; });
+  process.stdin.on("end", () => {
+    const answer = input.includes("You are the VERIFIER")
+      ? (input.includes("[[fake:incomplete]]")
+        ? JSON.stringify({ is_complete: false, confidence: 0.3, evidence_for: [], evidence_against: ["the fake codex verifier was told this is incomplete"], next_action: "do the missing part" })
+        : JSON.stringify({ is_complete: true, confidence: 0.9, evidence_for: ["the fake codex verifier accepts it"], evidence_against: [], next_action: "" }))
+      : "fake codex one-shot text";
+    if (outFile) writeFileSync(outFile, `${answer}\n`);
+    process.stdout.write(`${answer}\n`);
+    process.exit(0);
+  });
+} else
 if (process.argv[2] === "login" && process.argv[3] === "status") {
   if (mode === "logged-out") {
     process.stderr.write("Not logged in\n");

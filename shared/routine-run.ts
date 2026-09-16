@@ -16,4 +16,6 @@ export interface RoutineRunCardData {
   executionThreadId?: string;
   summary?: string;
   error?: string;
+  /** Phase 3 part 4: what the harness's check and judge said about the run. */
+  verdict?: string;
 }

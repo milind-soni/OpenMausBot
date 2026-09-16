@@ -97,6 +97,7 @@ export function RoutineRunCard({
             {routineDateTime(run.scheduledFor ?? message.at)}
           </time>
           {detail && <p className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">{detail}</p>}
+          {run.verdict && run.status !== "failed" && <p className="mt-1 whitespace-pre-wrap text-[12px] leading-relaxed text-ink-secondary">{run.verdict}</p>}
           {run.status === "completed" && run.summary && run.summary.length > DETAIL_LIMIT && <details className="mt-2 text-[12px] text-ink-secondary">
             <summary className="cursor-pointer font-medium text-ink-secondary hover:text-ink">{t("routines.results.showReport")}</summary>
             <p className="mt-2 whitespace-pre-wrap leading-relaxed">{run.summary}</p>
