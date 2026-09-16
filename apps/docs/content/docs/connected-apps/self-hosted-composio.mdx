@@ -4,7 +4,7 @@ description: Configure project-key access, scoped permissions, and headless deve
 icon: KeyRound
 ---
 
-The simplest open-source setup is for each installation owner to create a Composio project and paste that project's key into OpenMausBot. This avoids operating a shared credential broker and keeps usage attached to the user's own Composio account.
+The simplest open-source setup is for each installation owner to create a Composio project and paste that project's key into Astra. This avoids operating a shared credential broker and keeps usage attached to the user's own Composio account.
 
 ## Least-privilege scoped key
 
@@ -24,7 +24,7 @@ Set the key on the harness process:
 COMPOSIO_API_KEY=ak_your_project_key pnpm dev:server
 ```
 
-OpenMausBot creates a stable random Composio user identifier and reuses the returned Session. It does not store raw Gmail, Slack, GitHub, or other provider tokens.
+Astra creates a stable random Composio user identifier and reuses the returned Session. It does not store raw Gmail, Slack, GitHub, or other provider tokens.
 
 ## Managed broker
 

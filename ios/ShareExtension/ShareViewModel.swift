@@ -165,7 +165,7 @@ final class ShareViewModel: ObservableObject {
         } else if items != nil {
             phase = .loading
             do {
-                let registry = OpenMausSharedConnectionStore.loadRegistry()
+                let registry = AstraSharedConnectionStore.loadRegistry()
                 let selected = selectedComputerID.flatMap { registry.connection(id: $0) }
                     ?? registry.activeConnection
                 guard let selected else { throw ShareExtensionError.notPaired }
@@ -196,7 +196,7 @@ final class ShareViewModel: ObservableObject {
     func chooseComputer(_ id: String) async {
         guard id != selectedComputerID,
               phase == .ready || phase == .failed,
-              let selected = OpenMausSharedConnectionStore.loadRegistry().connection(id: id)
+              let selected = AstraSharedConnectionStore.loadRegistry().connection(id: id)
         else { return }
         requestedComputerID = id
         selectedComputerID = id
@@ -346,7 +346,7 @@ final class ShareViewModel: ObservableObject {
                 ignoredCount: loaded.ignoredCount
             )
 
-            let registry = OpenMausSharedConnectionStore.loadRegistry()
+            let registry = AstraSharedConnectionStore.loadRegistry()
             computers = registry.connections.map {
                 ShareComputer(id: $0.id, name: $0.name, routeLabel: "Automatic")
             }
@@ -385,7 +385,7 @@ final class ShareViewModel: ObservableObject {
             }
             try Task.checkCancellation()
             if let connection {
-                OpenMausSharedConfiguration.sharedDefaults?.set(
+                AstraSharedConfiguration.sharedDefaults?.set(
                     delivery.destination.id,
                     forKey: destinationKey(for: connection.id)
                 )
@@ -418,7 +418,7 @@ final class ShareViewModel: ObservableObject {
     }
 
     private func connect(to selectedConnection: Connection) async throws {
-        guard let pairedToken = try OpenMausSharedKeychain.token(for: selectedConnection.id) else {
+        guard let pairedToken = try AstraSharedKeychain.token(for: selectedConnection.id) else {
             throw ShareExtensionError.notPaired
         }
         connection = selectedConnection
@@ -449,7 +449,7 @@ final class ShareViewModel: ObservableObject {
         )
         guard !destinations.isEmpty else { throw ShareExtensionError.noDestinations }
 
-        let remembered = OpenMausSharedConfiguration.sharedDefaults?
+        let remembered = AstraSharedConfiguration.sharedDefaults?
             .string(forKey: destinationKey(for: selectedConnection.id))
         rememberedDestinationID = remembered
         selectedDestinationID = destinations.contains(where: { $0.id == remembered })
@@ -623,14 +623,14 @@ final class ShareViewModel: ObservableObject {
     private func friendlyMessage(for error: Error) -> String {
         if let apiError = error as? APIError {
             if apiError.isUnauthorized {
-                return "This phone's pairing has expired. Open OpenMausBot and pair it again."
+                return "This phone's pairing has expired. Open Astra and pair it again."
             }
             if isAmbiguousTransport(error) {
-                return "Couldn't reach your computer. Keep OpenMausBot open and Phone access on, then try again."
+                return "Couldn't reach your computer. Keep Astra open and Phone access on, then try again."
             }
         }
         return (error as? LocalizedError)?.errorDescription
-            ?? "OpenMausBot couldn't send this. Please try again."
+            ?? "Astra couldn't send this. Please try again."
     }
 
     private func destinationKey(for connectionID: String) -> String {
@@ -701,13 +701,13 @@ private enum ShareExtensionError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .notPaired:
-            return "Open the OpenMausBot app once after updating. If this phone still isn't connected, pair it before sharing."
+            return "Open the Astra app once after updating. If this phone still isn't connected, pair it before sharing."
         case .noDestinations:
             return "There aren't any bots or channels to send this to yet. Create one on your computer first."
         case .imageSupportUnavailable:
-            return "Update OpenMausBot on this computer before sharing images."
+            return "Update Astra on this computer before sharing images."
         case let .offline(name):
-            return "Couldn't reach \(name). Keep OpenMausBot open and Phone access on, then try again."
+            return "Couldn't reach \(name). Keep Astra open and Phone access on, then try again."
         case .sendTimedOut:
             return "Sending took too long. Check your connection and try again."
         }

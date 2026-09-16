@@ -55,7 +55,7 @@ test("adds the identity without changing other secure credentials", async () => 
 test("private key messages never contain the public pairing URL shape", async () => {
   const identity = await createPhoneSecretIdentity();
   assert.deepEqual(phoneSecretPrivateKeyMessage(identity), {
-    type: "openmausbot:phone-secret-key",
+    type: "astra:phone-secret-key",
     version: 1,
     keyId: identity.keyId,
     privateKey: identity.privateKey,
@@ -64,25 +64,25 @@ test("private key messages never contain the public pairing URL shape", async ()
 
 test("accepts only bounded private save requests", () => {
   assert.deepEqual(decodePhoneSecretSaveRequest({
-    type: "openmausbot:phone-secret-save",
+    type: "astra:phone-secret-save",
     requestId: "request_1",
     target: "xaiApiKey",
     value: "  secret  ",
   }), { requestId: "request_1", target: "xaiApiKey", value: "secret" });
   assert.equal(decodePhoneSecretSaveRequest({
-    type: "openmausbot:phone-secret-save",
+    type: "astra:phone-secret-save",
     requestId: "request_1",
     target: "xaiApiKey",
     value: " ",
   }), null);
   assert.equal(decodePhoneSecretSaveRequest({
-    type: "openmausbot:phone-secret-save",
+    type: "astra:phone-secret-save",
     requestId: "request_1",
     target: "xaiApiKey",
     value: "x".repeat(4_097),
   }), null);
   assert.equal(decodePhoneSecretSaveRequest({
-    type: "openmausbot:phone-secret-save",
+    type: "astra:phone-secret-save",
     requestId: 123,
     target: "xaiApiKey",
     value: "secret",
@@ -91,7 +91,7 @@ test("accepts only bounded private save requests", () => {
 
 test("save results expose only a bounded error", () => {
   assert.deepEqual(phoneSecretSaveResult("request_1", true), {
-    type: "openmausbot:phone-secret-save-result",
+    type: "astra:phone-secret-save-result",
     requestId: "request_1",
     ok: true,
   });

@@ -103,14 +103,14 @@ function asEntries(listing: z.infer<typeof CONTENT_LISTING>): ContentEntry[] {
 
 async function fetchListing(url: string, fetcher: typeof fetch): Promise<ContentEntry[]> {
   const response = await fetcher(url, {
-    headers: { accept: "application/vnd.github+json", "user-agent": "OpenMausBot-skills" },
+    headers: { accept: "application/vnd.github+json", "user-agent": "Astra-skills" },
   });
   if (!response.ok) throw new Error(`GitHub API ${response.status} for ${url}`);
   return asEntries(CONTENT_LISTING.parse(await response.json()));
 }
 
 async function fetchText(url: string, fetcher: typeof fetch): Promise<string> {
-  const response = await fetcher(url, { headers: { "user-agent": "OpenMausBot-skills" } });
+  const response = await fetcher(url, { headers: { "user-agent": "Astra-skills" } });
   if (!response.ok) throw new Error(`download failed (${response.status})`);
   const text = await response.text();
   if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES) throw new Error("file is larger than the 256KB import cap");

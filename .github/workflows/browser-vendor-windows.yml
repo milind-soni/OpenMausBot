@@ -31,7 +31,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      # This is upstream's package manager, not OpenMausBot's pnpm version.
+      # This is upstream's package manager, not Astra's pnpm version.
       - run: npm install --global pnpm@11.1.3
       - name: Install the pinned Rust toolchain and upstream Windows linker
         run: |

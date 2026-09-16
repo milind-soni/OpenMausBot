@@ -73,12 +73,12 @@ describe("message-linked files", () => {
     ))
       .toBe(false);
     expect(messageReferencesFile(
-      "[Open it](C:\\Users\\Maus\\report.md)",
-      "C:\\Users\\Maus\\report.md",
+      "[Open it](C:\\Users\\Astra\\report.md)",
+      "C:\\Users\\Astra\\report.md",
     )).toBe(true);
     expect(messageReferencesFile(
-      "[Open it](file:///C:/Users/Maus/release%20notes.md)",
-      "C:\\Users\\Maus\\release notes.md",
+      "[Open it](file:///C:/Users/Astra/release%20notes.md)",
+      "C:\\Users\\Astra\\release notes.md",
     )).toBe(true);
     expect(messageReferencesFile(
       "[Open it](file://server/share/phone%20report.md)",
@@ -98,19 +98,19 @@ describe("message-linked files", () => {
     // Equivalent separators and dot segments are normalised within a path
     // flavour, but distinct path flavours and casing remain distinct.
     expect(messageReferencesFile(
-      "[Open it](C:/Users/Maus/drafts/../report.md)",
-      "C:\\Users\\Maus\\report.md",
+      "[Open it](C:/Users/Astra/drafts/../report.md)",
+      "C:\\Users\\Astra\\report.md",
     )).toBe(true);
-    expect(messageReferencesFile("[Open it](/C:/Users/Maus/report.md)", "C:/Users/Maus/report.md"))
+    expect(messageReferencesFile("[Open it](/C:/Users/Astra/report.md)", "C:/Users/Astra/report.md"))
       .toBe(false);
-    expect(messageReferencesFile("[Open it](C:/Users/Maus/report.md)", "c:/users/maus/report.md"))
+    expect(messageReferencesFile("[Open it](C:/Users/Astra/report.md)", "c:/users/maus/report.md"))
       .toBe(false);
   });
 
   it("normalizes encoded Windows and UNC targets before authorization", () => {
     expect(messageReferencesFile(
-      "[Open it](C:/Users/Maus/release%20notes.md?download=1#latest)",
-      "C:\\Users\\Maus\\release notes.md",
+      "[Open it](C:/Users/Astra/release%20notes.md?download=1#latest)",
+      "C:\\Users\\Astra\\release notes.md",
     )).toBe(true);
     expect(messageReferencesFile(
       "[Web link](//server/share/team%20notes.md?download=1#latest)",
@@ -124,8 +124,8 @@ describe("message-linked files", () => {
     // Decoding is deliberately single-pass: a double-encoded space must not
     // authorize the ordinary decoded path.
     expect(messageReferencesFile(
-      "[Open it](C:/Users/Maus/release%2520notes.md?download=1)",
-      "C:\\Users\\Maus\\release notes.md",
+      "[Open it](C:/Users/Astra/release%2520notes.md?download=1)",
+      "C:\\Users\\Astra\\release notes.md",
     )).toBe(false);
   });
 
@@ -255,10 +255,10 @@ describe("message-linked files", () => {
   it("normalizes an encoded Windows path before opening it", async () => {
     const path = process.platform === "win32"
       ? join(workspace, "release notes.md")
-      : join(workspace, "C:\\Users\\Maus\\release notes.md");
+      : join(workspace, "C:\\Users\\Astra\\release notes.md");
     const href = process.platform === "win32"
       ? `${path.replace("release notes.md", "release%20notes.md")}?download=1#latest`
-      : "C:\\Users\\Maus\\release%20notes.md?download=1#latest";
+      : "C:\\Users\\Astra\\release%20notes.md?download=1#latest";
     writeFileSync(path, "windows path bytes");
 
     const opened = await openMessageFile(href, [workspace]);

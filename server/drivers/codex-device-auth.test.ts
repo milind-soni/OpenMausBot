@@ -118,7 +118,7 @@ describe("Codex server-owned device authentication", () => {
   it("drives the reusable browser fixture only when its local approval marker is created", async () => {
     const controller = create("waiting", {
       cli: fileURLToPath(new URL("../testing/fake-codex-login-cli.ts", import.meta.url)),
-      environment: () => ({ ...process.env, HOME: home, CODEX_HOME: join(home, ".codex"), OMB_DEVICE_AUTH_FIXTURE: "1" }),
+      environment: () => ({ ...process.env, HOME: home, CODEX_HOME: join(home, ".codex"), ASTRA_DEVICE_AUTH_FIXTURE: "1" }),
     });
     const start = await controller.start();
     expect(start.userCode).toBe("TEST-12345");

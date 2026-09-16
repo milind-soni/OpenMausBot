@@ -4,10 +4,10 @@ import { runMcpBridge } from "./mcp-bridge.ts";
 import { augmentedPath } from "./env-path.ts";
 
 const {
-  OMB_CUA_COMMAND: command,
-  OMB_CUA_ARGS: encodedArgs,
-  OMB_CONTROL_URL: url,
-  OMB_CONTROL_TOKEN: token,
+  ASTRA_CUA_COMMAND: command,
+  ASTRA_CUA_ARGS: encodedArgs,
+  ASTRA_CONTROL_URL: url,
+  ASTRA_CONTROL_TOKEN: token,
   ...childEnv
 } = process.env;
 

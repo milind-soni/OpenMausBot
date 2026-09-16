@@ -155,10 +155,10 @@ merges but does not manage.
 
 **Interfaces:**
 - Consumes: `McpServerConfig` (Task 1), `createGateInterceptor` (Task 3), `runMcpBridge` (`server/mcp-bridge.ts:208`).
-- Produces: a process spawned as `node mcp-user-entry.ts <serverName>`, reading its definition and its allowlist from env — `OMB_MCP_SERVER` (JSON definition) and `OMB_MCP_ALLOW` (comma-separated tool names, or `*`).
+- Produces: a process spawned as `node mcp-user-entry.ts <serverName>`, reading its definition and its allowlist from env — `ASTRA_MCP_SERVER` (JSON definition) and `ASTRA_MCP_ALLOW` (comma-separated tool names, or `*`).
 
-- [ ] Write a failing test: with `OMB_MCP_ALLOW="read_file"`, a `tools/call` for `read_file` reaches the fake child and a call for `write_file` is refused with a message naming the tool and saying it is not granted to this bot.
-- [ ] Write a failing test that `OMB_MCP_ALLOW="*"` forwards everything, and that an **absent** `OMB_MCP_ALLOW` refuses everything. Default-deny: a bridge started without a policy must not become a bridge with no policy.
+- [ ] Write a failing test: with `ASTRA_MCP_ALLOW="read_file"`, a `tools/call` for `read_file` reaches the fake child and a call for `write_file` is refused with a message naming the tool and saying it is not granted to this bot.
+- [ ] Write a failing test that `ASTRA_MCP_ALLOW="*"` forwards everything, and that an **absent** `ASTRA_MCP_ALLOW` refuses everything. Default-deny: a bridge started without a policy must not become a bridge with no policy.
 - [ ] Write a failing test that the definition rides in **env, not argv** — assert the spawn arguments contain no token. `server/container-mcp.ts:20` already establishes this rule: argv is world-readable through `ps`.
 - [ ] Write a failing test that an HTTP server's responses are relayed to stdout unchanged and that its `headers` never appear in the bridge's own stderr.
 - [ ] Run; expect FAIL.
@@ -207,7 +207,7 @@ merges but does not manage.
 - [ ] Write a failing test that `argsKey` at `server/drivers/claude.ts:642` includes the custom entries, so changing a grant invalidates the cached session rather than silently reusing a process started under the old policy.
 - [ ] Write a failing test in `server/drivers/antigravity.test.ts` that harness-provided custom servers merge with the user's own pre-existing config file entries and win on a name collision.
 - [ ] Run; expect FAIL.
-- [ ] Add the contract fields. In `server/index.ts`, build `integrations.custom` from `bot.mcpGrants` × the registry, spawning each through `mcp-user-entry.ts` with `OMB_MCP_SERVER` and `OMB_MCP_ALLOW` set. Declare `customMcp: true` on claude, antigravity, and pi; leave it absent everywhere else.
+- [ ] Add the contract fields. In `server/index.ts`, build `integrations.custom` from `bot.mcpGrants` × the registry, spawning each through `mcp-user-entry.ts` with `ASTRA_MCP_SERVER` and `ASTRA_MCP_ALLOW` set. Declare `customMcp: true` on claude, antigravity, and pi; leave it absent everywhere else.
 - [ ] Run `pnpm vitest run server/drivers/`; expect PASS.
 - [ ] Commit `feat(mcp): mount user MCP servers on the drivers that can hold them`.
 

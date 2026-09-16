@@ -1,7 +1,7 @@
 // Status surfaces for dictation, bottom-center:
 //   - hold-Ctrl+Space clipboard dictation (a border-beam glow marks the
 //     live hold, since it ends the moment the keys release);
-//   - the "Luna" wake word: armed indicator, live partials while a
+//   - the "Astra" wake word: armed indicator, live partials while a
 //     wake-triggered transcript is captured, and errors.
 // Renders nothing in the browser/dev (no bridge) and when there is nothing
 // to show.
@@ -145,7 +145,7 @@ export function DictationPill() {
         </span>
       ) : wakeEnabled && wakeArmed ? (
         <span className="flex items-center gap-2 text-ink-secondary">
-          <Mic size={13} className="text-ink-secondary" /> “Luna”
+          <Mic size={13} className="text-ink-secondary" /> “Astra”
         </span>
       ) : (
         <span className="block max-w-[420px] truncate" title={note ?? ""}>

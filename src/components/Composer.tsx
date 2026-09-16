@@ -205,7 +205,7 @@ export function Composer({
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const mentionListRef = useRef<HTMLDivElement>(null);
-  // The "Luna" wake word drops its transcript into the thread that is on
+  // The "Astra" wake word drops its transcript into the thread that is on
   // screen; registered while mounted, cleared on unmount.
   useEffect(() => {
     setWakeDraftTarget(draftId);

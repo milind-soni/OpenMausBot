@@ -1,7 +1,7 @@
 // One owned fake-engine fixture. This command accepts no live server URL.
 import assert from "node:assert/strict";
 import { pathToFileURL } from "node:url";
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { request } from "./mcp-server.ts";
 import { parseTeamBackup } from "../shared/team-backup.ts";
 

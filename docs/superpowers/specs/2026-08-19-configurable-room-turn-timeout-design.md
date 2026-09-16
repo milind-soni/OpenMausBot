@@ -2,7 +2,7 @@
 
 ## Summary
 
-OpenMausBot currently stops every room member turn after five minutes, even when the engine is still producing output. The duration and the error message are hard-coded in `server/index.ts`. This behavior is separate from the activity-based turn stall watchdog controlled by `OMB_TURN_STALL_MS`.
+Astra currently stops every room member turn after five minutes, even when the engine is still producing output. The duration and the error message are hard-coded in `server/index.ts`. This behavior is separate from the activity-based turn stall watchdog controlled by `ASTRA_TURN_STALL_MS`.
 
 Add one global, persisted room turn timeout setting. Keep five minutes as the default, expose the setting in the existing General settings UI, and use the configured value for room turns started after the setting is saved.
 
@@ -18,7 +18,7 @@ Add one global, persisted room turn timeout setting. Keep five minutes as the de
 ## Non-goals
 
 - Per-room or per-bot timeout overrides.
-- Changing `OMB_TURN_STALL_MS` or the semantics of the stall watchdog.
+- Changing `ASTRA_TURN_STALL_MS` or the semantics of the stall watchdog.
 - Changing provider-specific approval or RPC timeouts.
 - Retiming room turns that are already running when the setting changes.
 - Adding an environment-variable override for the room turn ceiling.

@@ -1,5 +1,5 @@
 // Named accounts reuse provider instances. Claude owns login and credentials;
-// removing an OpenMausBot entry never removes its directory or signs it out.
+// removing an Astra entry never removes its directory or signs it out.
 import { randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";

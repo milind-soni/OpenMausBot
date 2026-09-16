@@ -40,7 +40,7 @@ export function commandOf(m: Message): string | undefined {
 }
 
 // ── parsing one command line ─────────────────────────────────────────
-// Position-based, not substring-based: `cat scripts/control-omb.ts` reads
+// Position-based, not substring-based: `cat scripts/control-astra.ts` reads
 // the CLI's source and is not a step. Only the first program of a shell
 // segment counts, after whatever runs it (`node --flags`, `pnpm run`, an
 // env assignment) is dropped.
@@ -56,7 +56,7 @@ const WRAPPER_VALUE_FLAG = new Set(["-u", "-g", "-C"]);
 /** `pnpm run control:omb`, `npm run control:omb -- doctor`, `yarn -s control:omb`. */
 const PACKAGE_RUNNER = new Set(["pnpm", "npm", "yarn", "bun"]);
 const PACKAGE_RUNNER_WORD = new Set(["run", "exec", "-s", "--silent", "-r", "--"]);
-/** `node --experimental-strip-types scripts/control-omb.ts`, `npx tsx …`. */
+/** `node --experimental-strip-types scripts/control-astra.ts`, `npx tsx …`. */
 const SCRIPT_RUNNER = new Set(["node", "npx", "tsx"]);
 const CLI_SCRIPT = /^control:[\w-]+$/;
 const CLI_FILE = /^control-[\w-]+\.(?:mjs|ts|js|cjs)$/;

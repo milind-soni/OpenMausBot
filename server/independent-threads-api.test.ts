@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-astra.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
 import { memoryDate } from "./workspace.ts";
 
@@ -77,7 +77,7 @@ describe("independent bot tasks through the isolated control surface", () => {
       'const at = process.argv.indexOf("--model");',
       'const model = (at < 0 ? "probe" : process.argv[at + 1]).replace(/[^\\w-]/g, "_");',
       'process.env.FAKE_CLAUDE_MODE = "slow";',
-      'process.env.OMB_FIXTURE_CWD = process.cwd();',
+      'process.env.ASTRA_FIXTURE_CWD = process.cwd();',
       `process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = join(${JSON.stringify(session.info.dataDir)}, model + ".gate");`,
       `process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(session.info.dataDir)}, model + ".json");`,
       `await import(${JSON.stringify(fake)});`,
@@ -106,7 +106,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const threadId = task.body.task.threadId;
     await control(["send", "--bot", botId, "--task", threadId, "--text", "REVIEW_MEMORY_OWNER"]);
     const launched = await dump(models[0]);
-    const token = launched.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const token = launched.mcpConfig.mcpServers.agents.env.ASTRA_COMMS_TOKEN;
     expect((await internal(token, "POST", "/api/internal/memory", { action: "append", text: "A unique saved fact." })).status).toBe(200);
     for (const text of ["", " \n\t "]) {
       expect((await internal(token, "POST", "/api/internal/memory", { action: "replace", oldText: "unique saved fact", text })).status).toBe(400);
@@ -198,11 +198,11 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect(launchedA.argv[launchedA.argv.indexOf("--permission-mode") + 1]).toBe("default");
     expect(launchedB.argv[launchedB.argv.indexOf("--permission-mode") + 1]).toBe("auto");
     evidence.push({ providerSelections: [models[0], models[1]], distinctProcesses: true });
-    expect(launchedA.env.OMB_FIXTURE_CWD).toBe(realpathSync(join(session.info.dataDir, "task-workspaces", botId, taskA)));
-    expect(launchedB.env.OMB_FIXTURE_CWD).toBe(realpathSync(join(session.info.dataDir, "task-workspaces", botId, taskB)));
+    expect(launchedA.env.ASTRA_FIXTURE_CWD).toBe(realpathSync(join(session.info.dataDir, "task-workspaces", botId, taskA)));
+    expect(launchedB.env.ASTRA_FIXTURE_CWD).toBe(realpathSync(join(session.info.dataDir, "task-workspaces", botId, taskB)));
 
-    const tokenA = launchedA.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
-    const tokenB = launchedB.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
+    const tokenA = launchedA.mcpConfig.mcpServers.agents.env.ASTRA_COMMS_TOKEN;
+    const tokenB = launchedB.mcpConfig.mcpServers.agents.env.ASTRA_COMMS_TOKEN;
     expect(tokenA).not.toBe(tokenB);
     const appended = await Promise.all([
       internal(tokenA, "POST", "/api/internal/memory", { botId, threadId: taskA, action: "append", text: "A remembers apples." }),
@@ -264,7 +264,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const botId = created.bot.id;
     const selectedThread = created.bot.activeTaskId;
     const routine = await api("POST", "/api/routines", {
-      name: "Captured routine provider", prompt: "ROUTINE_PROVIDER_OWNER", botId, runOn: "maus", enabled: false,
+      name: "Captured routine provider", prompt: "ROUTINE_PROVIDER_OWNER", botId, runOn: "astra", enabled: false,
       schedule: { type: "daily", time: "10:00", weekdays: [1] },
     });
     expect(routine.status).toBe(201);
@@ -321,7 +321,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     mkdirSync(cwd);
     expect((await api("PATCH", `/api/bots/${botId}`, { cwd })).status).toBe(200);
     await control(["send", "--bot", botId, "--task", taskA, "--text", "PROJECT_A"]);
-    expect((await dump(models[0])).env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    expect((await dump(models[0])).env.ASTRA_FIXTURE_CWD).toBe(realpathSync(cwd));
     const second = await tool("create_task", { target_type: "bot", target_id: botId, title: "Project sibling" });
     const taskB = second.task.taskId;
     await control(["set-model", "--bot", botId, "--task", taskB, "--instance", "claude", "--model", models[1]]);
@@ -335,14 +335,14 @@ describe("independent bot tasks through the isolated control surface", () => {
     await control(["interrupt", "--bot", botId, "--task", taskA]);
     await control(["wait", "--bot", botId, "--task", taskA, "--timeout", "10"]);
     await control(["send", "--bot", botId, "--task", taskB, "--text", "PROJECT_B_NOW_OWNS_FOLDER"]);
-    expect((await dump(models[1])).env.OMB_FIXTURE_CWD).toBe(realpathSync(cwd));
+    expect((await dump(models[1])).env.ASTRA_FIXTURE_CWD).toBe(realpathSync(cwd));
     await control(["interrupt", "--bot", botId, "--task", taskB]);
   }, 45_000);
 
   it.skipIf(process.platform !== "darwin")("claims the shared computer only on first use and keeps a sibling stop from releasing it", async () => {
     // The fake provider only receives this inert descriptor; no UI driver is
     // launched and the descriptor lives inside the fixture's disposable home.
-    const descriptorDir = join(session.info.dataDir, "Library", "Application Support", "OpenMausBot");
+    const descriptorDir = join(session.info.dataDir, "Library", "Application Support", "Astra");
     mkdirSync(descriptorDir, { recursive: true });
     writeFileSync(join(descriptorDir, "cua-connection.json"), JSON.stringify({
       mcpCommand: join(session.info.dataDir, "never-launched-computer"), mcpArgs: [], mcpEnv: {},
@@ -360,9 +360,9 @@ describe("independent bot tasks through the isolated control surface", () => {
     const launchedB = await dump(models[1]);
     const gate = (launched: any) => {
       const env = launched.mcpConfig.mcpServers.computer.env;
-      const url = new URL(env.OMB_CONTROL_URL);
+      const url = new URL(env.ASTRA_CONTROL_URL);
       expect(url.origin).toBe(session.info.url);
-      return internal(env.OMB_CONTROL_TOKEN, "GET", `${url.pathname}${url.search}`);
+      return internal(env.ASTRA_CONTROL_TOKEN, "GET", `${url.pathname}${url.search}`);
     };
     // B acquires first although A started first: mounting the tool did not
     // lock the shared computer. A receives an actionable hold, not authority.
@@ -385,7 +385,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     const created = await tool("create_bot", { name: "Unattended fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;
     expect((await api("PATCH", `/api/bots/${botId}`, { approvalMode: "auto" })).status).toBe(200);
-    const hook = await api("POST", "/api/webhooks", { name: "Fixture event", prompt: "UNATTENDED_ONLY", botId, runOn: "maus" });
+    const hook = await api("POST", "/api/webhooks", { name: "Fixture event", prompt: "UNATTENDED_ONLY", botId, runOn: "astra" });
     expect(hook.status).toBe(201);
     const delivered = await fetch(hook.body.credential.url, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
     expect(delivered.status).toBe(202);

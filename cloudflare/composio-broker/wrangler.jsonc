@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "openmausbot-composio",
+  "name": "astra-composio",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat"],
@@ -14,7 +14,7 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "openmausbot-composio",
+      "database_name": "astra-composio",
       "database_id": "435bcde1-c017-416f-b041-7ffc508e9d88",
       "migrations_dir": "migrations"
     }

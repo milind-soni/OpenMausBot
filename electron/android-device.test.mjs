@@ -27,7 +27,7 @@ describe("Android USB device bridge", () => {
     const checked = [];
     const result = resolveAdbBinary({
       platform: "darwin",
-      env: { OMB_ADB_PATH: "/trusted/adb", PATH: "/other/bin" },
+      env: { ASTRA_ADB_PATH: "/trusted/adb", PATH: "/other/bin" },
       homeDir: "/Users/test",
       resourcesPath: "/Resources",
       exists(candidate) {

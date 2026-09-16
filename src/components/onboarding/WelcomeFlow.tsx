@@ -9,13 +9,13 @@
 // whole tour, and completion is written to the workspace config. A failed
 // write still dismisses this visit, but may require retrying on the next launch.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { MausAvatar } from "@/components/Avatar";
+import { AstraAvatar } from "@/components/Avatar";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { setEmailGateDone, track } from "@/lib/analytics";
 import { brand } from "@/lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { MausMotion, MausState } from "@/lib/mascot";
+import type { AstraMotion, AstraState } from "@/lib/mascot";
 import {
   beatWidth,
   beatsFor,
@@ -37,7 +37,7 @@ import { FeatureReel } from "./reel/FeatureReel";
 
 /** The guide's resting face per beat; beats may override it as they learn
  * more (the engines beat looks proud or curious once the harness answers). */
-const MASCOT_FOR_BEAT: Record<BeatId, MausState> = {
+const MASCOT_FOR_BEAT: Record<BeatId, AstraState> = {
   hello: "happy",
   reel: "curious",
   engines: "searching",
@@ -63,7 +63,7 @@ function beatTitle(beat: BeatId): string | null {
   }
 }
 
-type Motion = Exclude<MausMotion, "none">;
+type Motion = Exclude<AstraMotion, "none">;
 
 export function WelcomeFlow({
   bot,
@@ -95,7 +95,7 @@ export function WelcomeFlow({
   const { capabilities } = useDesktopCapabilities();
   const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
-  const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
+  const [mascot, setMascot] = useState<AstraState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
   const cardRef = useRef<HTMLDivElement>(null);
   const finishing = useRef(false);
@@ -228,7 +228,7 @@ export function WelcomeFlow({
             {logo ? (
               <img src={logo} alt="" width={72} height={72} className="h-[72px] w-[72px] object-contain" />
             ) : (
-              <MausAvatar
+              <AstraAvatar
                 color="green"
                 state={mascot}
                 motion={motion.kind}

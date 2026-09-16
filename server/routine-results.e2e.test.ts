@@ -3,7 +3,7 @@ import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, it } from "vitest";
-import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-astra.ts";
 
 it("keeps results together while fresh executions, approvals, deletion and unread stay reachable", async () => {
   const fixture = await launchVerificationServer();
@@ -87,7 +87,7 @@ it("keeps results together while fresh executions, approvals, deletion and unrea
     const active = await runState(pending.id);
     await expect.poll(() => {
       if (!existsSync(fixture.fixtureDumpPath)) return false;
-      return JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).mcpConfig?.mcpServers?.agents?.env?.OMB_THREAD_ID === active.threadId;
+      return JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).mcpConfig?.mcpServers?.agents?.env?.ASTRA_THREAD_ID === active.threadId;
     }, { timeout: 15_000 }).toBe(true);
     const launched = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
     const socketPath = launched.mcpConfig.mcpServers.ogb.args.at(-1);

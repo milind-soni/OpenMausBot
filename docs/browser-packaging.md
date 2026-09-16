@@ -14,8 +14,8 @@ archives and stages `dist-native/browser/PLATFORM-ARCH`, copied as
 Each package includes only its target architecture: macOS ARM64/x64,
 Windows x64, or Linux x64.
 
-The server receives `OMB_RESOURCES_PATH` from Electron. It resolves an explicit
-`OMB_AGENT_BROWSER_PATH` override first, then the complete bundled engine and
+The server receives `ASTRA_RESOURCES_PATH` from Electron. It resolves an explicit
+`ASTRA_AGENT_BROWSER_PATH` override first, then the complete bundled engine and
 browser, then a separately installed engine or PATH. An incomplete bundle
 fails closed with a reinstall/update message. An explicit
 `AGENT_BROWSER_EXECUTABLE_PATH` still overrides the browser executable.
@@ -39,7 +39,7 @@ There is no recording control in OMB's browser panel.
 ## Linux sandbox
 
 Use the `.deb` on Ubuntu 24.04. Its package hooks install a narrowly scoped
-AppArmor policy for the root-owned browser executable under `/opt/OpenMausBot`.
+AppArmor policy for the root-owned browser executable under `/opt/Astra`.
 They do not disable the browser sandbox or change the global user-namespace
 restriction. See [Linux desktop](linux-desktop.md).
 
@@ -63,9 +63,9 @@ Run the real browser check against an unpacked app:
 node scripts/smoke-browser-bundle.mjs --resources /absolute/app/resources
 ```
 
-On macOS, use `/absolute/OpenMausBot.app/Contents/Resources`. On Linux, run as
+On macOS, use `/absolute/Astra.app/Contents/Resources`. On Linux, run as
 an unprivileged user against the installed `.deb` at
-`/opt/OpenMausBot/resources`. This check creates its own empty home and local
+`/opt/Astra/resources`. This check creates its own empty home and local
 web page, checks automatic discovery, navigation, typing/clicking, screenshot
 delivery and two-bot cookie/storage isolation, then removes only its fixture.
 No model account or user browser profile is used. Cross-target `--check-only`
@@ -81,7 +81,7 @@ browser updater in the desktop bundle.
 
 ### Temporary Windows engine backport
 
-Windows uses an explicitly identified OpenMausBot build of agent-browser
+Windows uses an explicitly identified Astra build of agent-browser
 0.36.0, with the handle-inheritance fix from
 [upstream PR #1781](https://github.com/vercel-labs/agent-browser/pull/1781).
 The official 0.37.0 release does not contain this fix, so Windows stays on the

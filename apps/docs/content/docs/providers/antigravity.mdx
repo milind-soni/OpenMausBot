@@ -1,19 +1,19 @@
 ---
 title: Google Antigravity
-description: Install Google's official ACP runtime and use your Google subscription in OpenMausBot.
+description: Install Google's official ACP runtime and use your Google subscription in Astra.
 icon: Sparkles
 ---
 
-OpenMausBot connects to Google Antigravity through Google's official Agent Client Protocol server. It does not ask for your Google password or copy a login from another app.
+Astra connects to Google Antigravity through Google's official Agent Client Protocol server. It does not ask for your Google password or copy a login from another app.
 
 ## Set up
 
 1. Choose an Antigravity model in the model picker.
-2. Select **Install official Antigravity**. The download comes from `dl.google.com` and OpenMausBot verifies its pinned size and SHA-256 before installing it.
+2. Select **Install official Antigravity**. The download comes from `dl.google.com` and Astra verifies its pinned size and SHA-256 before installing it.
 3. Select **Sign in with Google** and finish in your browser.
-4. Return to OpenMausBot, open the model picker, and select **Refresh**. The account's available models appear after discovery completes.
+4. Return to Astra, open the model picker, and select **Refresh**. The account's available models appear after discovery completes.
 
-The runtime download is large because Google ships the ACP server and its local computer harness together. OpenMausBot stores it in its own data directory; it does not modify a system installation.
+The runtime download is large because Google ships the ACP server and its local computer harness together. Astra stores it in its own data directory; it does not modify a system installation.
 
 ## After upgrading from the older agy integration
 
@@ -29,10 +29,10 @@ Create another Antigravity engine instance for another account. Each instance ha
 
 ## Remote servers
 
-When the OpenMausBot server and browser are on different computers, Google's final redirect points to the server's loopback address and may show a page that cannot load locally. Expand **Signing in from another computer?**, copy the complete redirect URL from the browser address bar, and paste it into OpenMausBot. The server accepts only the loopback port and OAuth state created by that exact in-progress sign-in.
+When the Astra server and browser are on different computers, Google's final redirect points to the server's loopback address and may show a page that cannot load locally. Expand **Signing in from another computer?**, copy the complete redirect URL from the browser address bar, and paste it into Astra. The server accepts only the loopback port and OAuth state created by that exact in-progress sign-in.
 
 ## Permissions and tools
 
-Antigravity uses the same OpenMausBot approval cards as other ACP engines. Connected apps, custom MCP servers, the browser, computers, and teammate tools are mounted only for the active session; OpenMausBot no longer edits the user's global Gemini MCP configuration.
+Antigravity uses the same Astra approval cards as other ACP engines. Connected apps, custom MCP servers, the browser, computers, and teammate tools are mounted only for the active session; Astra no longer edits the user's global Gemini MCP configuration.
 
 The normal mode asks before protected actions. Full access maps to Antigravity's native `yolo` mode, but native questions still wait for a person instead of being guessed automatically.

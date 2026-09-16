@@ -1,4 +1,4 @@
-name: ${COMPOSE_PROJECT_NAME:-openmausbot-podman}
+name: ${COMPOSE_PROJECT_NAME:-astra-podman}
 services:
   omb:
     build:
@@ -6,7 +6,7 @@ services:
       dockerfile: deploy/podman/Containerfile
       args:
         ENGINES: ${ENGINES:-}
-    image: localhost/openmausbot-podman:${OMB_IMAGE_TAG:-local}
+    image: localhost/astra-podman:${ASTRA_IMAGE_TAG:-local}
     init: true
     userns_mode: keep-id:uid=1001,gid=1001
     user: "1001:1001"
@@ -15,19 +15,19 @@ services:
     # dynamically allocated, loopback-only desktop ports on that same host.
     network_mode: host
     volumes:
-      - ${OMB_DATA_ROOT:?Run setup.sh first}:${OMB_DATA_ROOT}
+      - ${ASTRA_DATA_ROOT:?Run setup.sh first}:${ASTRA_DATA_ROOT}
       - ${PODMAN_SOCKET:?Run setup.sh first}:/run/omb-podman.sock
     environment:
-      HOME: ${OMB_DATA_ROOT}
-      OMB_DATA_DIR: ${OMB_DATA_ROOT}/.openmausbot
-      OMB_STATIC_DIR: /app/dist
+      HOME: ${ASTRA_DATA_ROOT}
+      ASTRA_DATA_DIR: ${ASTRA_DATA_ROOT}/.astra
+      ASTRA_STATIC_DIR: /app/dist
       CONTAINER_HOST: unix:///run/omb-podman.sock
-      OMB_PORT: ${OMB_PORT:-8799}
-      OMB_WEBHOOK_PORT: ${OMB_WEBHOOK_PORT:-8800}
-      OMB_PUBLIC_URL: ${OMB_PUBLIC_URL:-http://localhost:8080}
-      OMB_WEBHOOK_PUBLIC_URL: ${OMB_PUBLIC_URL:-http://localhost:8080}
+      ASTRA_PORT: ${ASTRA_PORT:-8799}
+      ASTRA_WEBHOOK_PORT: ${ASTRA_WEBHOOK_PORT:-8800}
+      ASTRA_PUBLIC_URL: ${ASTRA_PUBLIC_URL:-http://localhost:8080}
+      ASTRA_WEBHOOK_PUBLIC_URL: ${ASTRA_PUBLIC_URL:-http://localhost:8080}
     healthcheck:
-      test: [CMD-SHELL, 'curl -fsS http://127.0.0.1:$$OMB_PORT/api/health | grep -q openmausbot']
+      test: [CMD-SHELL, 'curl -fsS http://127.0.0.1:$$ASTRA_PORT/api/health | grep -q astra']
       interval: 15s
       timeout: 5s
       start_period: 30s
@@ -40,10 +40,10 @@ services:
       omb:
         condition: service_healthy
     environment:
-      OMB_HTTP_PORT: ${OMB_HTTP_PORT:-8080}
-      OMB_PORT: ${OMB_PORT:-8799}
-      OMB_WEBHOOK_PORT: ${OMB_WEBHOOK_PORT:-8800}
-      OMB_HTTPS_HOST: ${OMB_HTTPS_HOST:-https-disabled.invalid}
+      ASTRA_HTTP_PORT: ${ASTRA_HTTP_PORT:-8080}
+      ASTRA_PORT: ${ASTRA_PORT:-8799}
+      ASTRA_WEBHOOK_PORT: ${ASTRA_WEBHOOK_PORT:-8800}
+      ASTRA_HTTPS_HOST: ${ASTRA_HTTPS_HOST:-https-disabled.invalid}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

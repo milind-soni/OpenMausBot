@@ -73,7 +73,7 @@ describe("login and logout against the control plane", () => {
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), "omb-tunnel-login-"));
     stub = await startControlPlaneStub();
-    vi.stubEnv("OMB_CONTROL_PLANE_URL", stub.url);
+    vi.stubEnv("ASTRA_CONTROL_PLANE_URL", stub.url);
   });
   afterEach(async () => {
     vi.unstubAllEnvs();
@@ -112,10 +112,10 @@ describe("login and logout against the control plane", () => {
   });
 
   it("an unusable control-plane override is a clear error, not a silent default", async () => {
-    vi.stubEnv("OMB_CONTROL_PLANE_URL", "ftp://nope");
+    vi.stubEnv("ASTRA_CONTROL_PLANE_URL", "ftp://nope");
     const io = fakeIo([]);
     expect(await runLogin(options(dir, { email: "a@b.test" }), io.io)).toBe(1);
-    expect(io.err.join("\n")).toMatch(/OMB_CONTROL_PLANE_URL/);
+    expect(io.err.join("\n")).toMatch(/ASTRA_CONTROL_PLANE_URL/);
   });
 });
 
@@ -158,11 +158,11 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
     writeFileSync(fake, `#!/bin/sh\necho $$ > "${pidFile}"\nexec sleep 300\n`, { mode: 0o755 });
     const harness = createServer((req, res) => {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ app: "openmausbot", url: req.url, peer: req.socket.remoteAddress ?? null }));
+      res.end(JSON.stringify({ app: "astra", url: req.url, peer: req.socket.remoteAddress ?? null }));
     });
     await new Promise<void>((done) => harness.listen(origin.socketPath, done));
     const originPort = 20000 + Math.floor(Math.random() * 20000);
-    const endpoint = "https://c-stub.openmausbot.invalid";
+    const endpoint = "https://c-stub.astra.invalid";
     const guardian = guardianEntry();
     expect(guardian).toBeTruthy();
     const states: string[] = [];
@@ -172,7 +172,7 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       originTarget: { pid: process.pid, socketPath: origin.socketPath },
       binaryPath: fake,
       guardian: guardian ?? "",
-      env: { ...process.env, OMB_TUNNEL_ORIGIN_PORT: String(originPort) },
+      env: { ...process.env, ASTRA_TUNNEL_ORIGIN_PORT: String(originPort) },
       // the public address does not exist here; verify through the gateway instead
       fetchImpl: (input, init) => fetch(String(input).replace(endpoint, `http://127.0.0.1:${originPort}`), init),
       onState: (state) => states.push(state.status),
@@ -181,7 +181,7 @@ describe.skipIf(!posix)("startTunnel: guardian, gateway and connector, verified 
       const settled = await tunnel.started;
       expect(settled.status, states.join(",")).toBe("ready");
       const viaGateway: any = await (await fetch(`http://127.0.0.1:${originPort}/api/health`)).json();
-      expect(viaGateway.app).toBe("openmausbot");
+      expect(viaGateway.app).toBe("astra");
       expect(viaGateway.peer).toBeNull();
       // the connector is spawned right after the gateway binds; its shell writes the pid a moment later
       let connectorPid = 0;
@@ -208,17 +208,17 @@ describe("a fleet's credential in the environment", () => {
   it("gets the public address with no account file and no emailed code; a rejected credential is a clear error", async () => {
     const stub = await startControlPlaneStub();
     try {
-      const env = { ...process.env, OMB_CONTROL_PLANE_URL: stub.url };
+      const env = { ...process.env, ASTRA_CONTROL_PLANE_URL: stub.url };
       expect(fleetCredential({})).toBeNull();
-      expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: "   " })).toBeNull();
+      expect(fleetCredential({ ASTRA_INSTALLATION_CREDENTIAL: "   " })).toBeNull();
       const credential = stub.seedInstallation("box-1");
-      expect(fleetCredential({ OMB_INSTALLATION_CREDENTIAL: ` ${credential} ` })).toBe(credential);
+      expect(fleetCredential({ ASTRA_INSTALLATION_CREDENTIAL: ` ${credential} ` })).toBe(credential);
       const access = await fleetAccess({ credential, env });
       expect(access).toEqual({ endpoint: stub.endpointUrl, token: stub.connectorToken });
       expect(stub.calls).toContain("POST /v1/installations/self/endpoint");
       expect(stub.calls.some((call) => call.includes("/api/auth/"))).toBe(false);
       await expect(fleetAccess({ credential: `omb_install_${"x".repeat(22)}.${"y".repeat(43)}`, env })).rejects.toThrow(/rejected/);
-      await expect(fleetAccess({ credential, env: { ...env, OMB_CONTROL_PLANE_URL: "ftp://nope" } })).rejects.toThrow(/OMB_CONTROL_PLANE_URL/);
+      await expect(fleetAccess({ credential, env: { ...env, ASTRA_CONTROL_PLANE_URL: "ftp://nope" } })).rejects.toThrow(/ASTRA_CONTROL_PLANE_URL/);
     } finally {
       await stub.close();
     }

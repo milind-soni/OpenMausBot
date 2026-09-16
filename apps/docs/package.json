@@ -1,5 +1,5 @@
 {
-  "name": "@openmausbot/docs",
+  "name": "@astra/docs",
   "version": "0.1.0",
   "private": true,
   "scripts": {

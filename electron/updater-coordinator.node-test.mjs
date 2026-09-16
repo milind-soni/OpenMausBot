@@ -32,7 +32,7 @@ function harness(options) {
 }
 
 // Drives a successful download so install() has staged paths to hand off.
-async function downloadInto(h, files = ["/tmp/OpenMausBot-2.0.0-amd64.deb"]) {
+async function downloadInto(h, files = ["/tmp/Astra-2.0.0-amd64.deb"]) {
   h.updater.downloadUpdate = () => {
     h.updater.emit("update-downloaded", { version: "2.0.0" });
     return Promise.resolve(files);
@@ -406,7 +406,7 @@ test("the hand-off install opens the staged package instead of quitting", async 
   h.coordinator.install();
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(received, [["/tmp/OpenMausBot-2.0.0-amd64.deb"]]);
+  assert.deepEqual(received, [["/tmp/Astra-2.0.0-amd64.deb"]]);
   assert.equal(h.getState().status, "handed-off");
   // the user watched something happen between the click and the result
   assert.ok(h.states.some((entry) => entry.status === "installing"));
@@ -448,7 +448,7 @@ test("without a hand-off the install still quits and installs", async () => {
     called += 1;
   };
 
-  await downloadInto(h, ["/tmp/OpenMausBot-2.0.0.AppImage"]);
+  await downloadInto(h, ["/tmp/Astra-2.0.0.AppImage"]);
   h.coordinator.install();
 
   assert.equal(called, 1);

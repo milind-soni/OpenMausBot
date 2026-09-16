@@ -324,7 +324,7 @@ describe("persistent routine results destinations", () => {
 
   it("does not route webhook or room-goal executions through bot results tasks", async () => {
     const h = resultsHarness();
-    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "Hook", prompt: "Incoming", botId: "maus-1", runOn: "maus", deliveryId: "delivery", receivedAt: Date.now() });
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "Hook", prompt: "Incoming", botId: "maus-1", runOn: "astra", deliveryId: "delivery", receivedAt: Date.now() });
     const goal = h.manager.create({ ...input(), target: "room-goal", groupId: "room" });
     h.manager.runNow(goal.id);
     await h.manager.tick();
@@ -664,7 +664,7 @@ describe("RoutineManager", () => {
         routineName: "Morning brief",
         status: "failed",
         threadId: "thread-1",
-        error: "OpenMausBot restarted while this routine was running",
+        error: "Astra restarted while this routine was running",
       },
     ]);
   });
@@ -1326,7 +1326,7 @@ describe("RoutineManager", () => {
       webhookName: "Incoming delivery",
       prompt: "Handle the delivery",
       botId: "maus-webhook",
-      runOn: "maus",
+      runOn: "astra",
       deliveryId: "delivery-exact",
       receivedAt: start,
     });
@@ -1381,7 +1381,7 @@ describe("RoutineManager", () => {
       webhookName: "Capacity check",
       prompt: "Keep active receipts",
       botId: "maus-capacity",
-      runOn: "maus",
+      runOn: "astra",
       deliveryId: "delivery-capacity",
       receivedAt: 2_001,
     });
@@ -1417,7 +1417,7 @@ describe("RoutineManager", () => {
       finishedAt: startedAt! + 5 * 60_000,
     });
     expect(h.interruptedTurns).toEqual([
-      { botId: "maus-timeout", threadId: "thread-1", runOn: "maus" },
+      { botId: "maus-timeout", threadId: "thread-1", runOn: "astra" },
     ]);
   });
 
@@ -1797,12 +1797,12 @@ describe("RoutineManager", () => {
       name: "Local review",
       prompt: "Review this",
       botId: "maus-local",
-      runOn: "maus",
+      runOn: "astra",
       schedule: { type: "daily", time: "09:00", weekdays: [1] },
       attachments: [attachment],
     });
     expect(() => h.manager.update(local.id, { runOn: "cloud" })).toThrow(/cloud file staging/i);
-    expect(h.manager.listRoutines()[0]).toMatchObject({ runOn: "maus", attachments: [attachment] });
+    expect(h.manager.listRoutines()[0]).toMatchObject({ runOn: "astra", attachments: [attachment] });
   });
 
   it("keeps room goals local and attachment-free", () => {
@@ -1864,14 +1864,14 @@ describe("RoutineManager", () => {
     });
     h.setNow(routine.nextRunAt!);
     await h.manager.tick();
-    h.manager.update(routine.id, { runOn: "maus" });
+    h.manager.update(routine.id, { runOn: "astra" });
 
     h.setBot("ready");
     await h.manager.tick();
 
     expect(h.runOns).toEqual(["cloud"]);
     expect(h.manager.listRuns()[0]).toMatchObject({ runOn: "cloud" });
-    expect(h.manager.listRoutines()[0]).toMatchObject({ runOn: "maus" });
+    expect(h.manager.listRoutines()[0]).toMatchObject({ runOn: "astra" });
   });
 
   it("opens webhook jobs in the assigned bot's live chat", async () => {

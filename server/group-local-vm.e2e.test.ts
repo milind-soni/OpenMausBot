@@ -36,7 +36,7 @@ async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolea
 const dump = () => until(() => existsSync(dumpFile) ? JSON.parse(readFileSync(dumpFile, "utf8")) : null, Boolean);
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
-const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
+const gate = (c: any) => fetch(c.env.ASTRA_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.ASTRA_CONTROL_TOKEN}` } });
 
 beforeAll(async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), "omb-group-vm-"));
@@ -58,10 +58,10 @@ beforeAll(async () => {
   child = spawn(process.execPath, ["--import", pathToFileURL(join(ROOT, "server/testing/group-local-vm-hooks.mjs")).href, join(ROOT, "server/index.ts")], {
     cwd: ROOT, env: {
       PATH: dirname(process.execPath), ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: fixtureHome, USERPROFILE: fixtureHome, OMB_DATA_DIR: data,
+      HOME: fixtureHome, USERPROFILE: fixtureHome, ASTRA_DATA_DIR: data,
       APPDATA: join(fixtureHome, "appdata"), LOCALAPPDATA: join(fixtureHome, "localappdata"),
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
-      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
+      ASTRA_PORT: String(port), ASTRA_WEBHOOK_PORT: String(port + 1), ASTRA_STATIC_DIR: ui, ASTRA_TEST_VM_STATE: stateFile,
     }, stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout!.on("data", () => {});
@@ -139,8 +139,8 @@ describe("Group Local VM ownership on the real isolated server", () => {
     expect(second.args).toEqual(first.args);
     expect((await gate(second)).status).toBe(200);
     expect((await gate(first)).status).toBe(401);
-    const impersonation = await fetch(second.env.OMB_CONTROL_URL.replace(bots[1].id, bots[0].id), {
-      headers: { authorization: `Bearer ${second.env.OMB_CONTROL_TOKEN}` },
+    const impersonation = await fetch(second.env.ASTRA_CONTROL_URL.replace(bots[1].id, bots[0].id), {
+      headers: { authorization: `Bearer ${second.env.ASTRA_CONTROL_TOKEN}` },
     });
     expect(impersonation.status).toBe(403);
     await stop(group.id); await idle(bots[1].id);

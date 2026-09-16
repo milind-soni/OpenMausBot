@@ -120,7 +120,7 @@ describe("ClaudeDriver.decodeConfig", () => {
 
   it.skipIf(process.platform !== "win32")("names permission pipes per harness process", () => {
     expect(permissionSocketPath("thread-abc")).toMatch(
-      new RegExp(`^\\\\\\\\\\.\\\\pipe\\\\openmausbot-perm-${process.pid}-thre[0-9a-f]{4}$`),
+      new RegExp(`^\\\\\\\\\\.\\\\pipe\\\\astra-perm-${process.pid}-thre[0-9a-f]{4}$`),
     );
   });
 
@@ -331,9 +331,9 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.COMPOSIO_API_KEY;
     delete process.env.BOX_TOKEN;
     delete process.env.OPENCODE_API_KEY;
-    delete process.env.OMB_TTS_KEY;
-    delete process.env.OMB_CLAUDE_SESSION_IDLE_MS;
-    delete process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS;
+    delete process.env.ASTRA_TTS_KEY;
+    delete process.env.ASTRA_CLAUDE_SESSION_IDLE_MS;
+    delete process.env.ASTRA_CLAUDE_SESSION_IDLE_MIN_MS;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -426,7 +426,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // the desktop shell) must never ride into the CLI child
     process.env.XAI_API_KEY = "xai-should-not-leak";
     process.env.BOX_TOKEN = "box-should-not-leak";
-    process.env.OMB_TTS_KEY = "tts-should-not-leak";
+    process.env.ASTRA_TTS_KEY = "tts-should-not-leak";
 
     await instance.adapter.sendTurn({ threadId: "t-hygiene", text: "the secret prompt", system: "You are Testy." });
     await recorder.until((e) => e.type === "turn.completed");
@@ -444,7 +444,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
     expect(seen.env.XAI_API_KEY).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
-    expect(seen.env.OMB_TTS_KEY).toBeUndefined();
+    expect(seen.env.ASTRA_TTS_KEY).toBeUndefined();
   });
 
   it("per-bot Ask restores the broker on a legacy bypass instance", async () => {
@@ -638,7 +638,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         agents: {
           command: process.execPath,
           args: ["/fake/agents-proxy.js"],
-          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", OMB_TURN_DEPTH: "0" },
+          env: { ASTRA_HARNESS_URL: "http://127.0.0.1:1", ASTRA_BOT_ID: "b1", ASTRA_COMMS_TOKEN: "tok", ASTRA_TURN_DEPTH: "0" },
         },
       },
     });
@@ -648,7 +648,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
       alwaysLoad: true,
       args: ["/fake/agents-proxy.js"],
-      env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok" },
+      env: { ASTRA_BOT_ID: "b1", ASTRA_COMMS_TOKEN: "tok" },
     });
     // the config goes in a private file, never on argv, where `ps` would
     // show the comms token to every other user on the machine
@@ -753,18 +753,18 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   it("clamps a configured compaction window into the range the CLI accepts", () => {
     // out of range is a hard argument error in the CLI: it would fail every
     // turn, not degrade
-    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
-    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
-    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "150000" })).toBe("150000");
-    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" })).toBe("200000");
+    expect(autoCompactWindow({ ASTRA_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
+    expect(autoCompactWindow({ ASTRA_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
+    expect(autoCompactWindow({ ASTRA_CLAUDE_AUTOCOMPACT: "150000" })).toBe("150000");
+    expect(autoCompactWindow({ ASTRA_CLAUDE_AUTOCOMPACT: "nonsense" })).toBe("200000");
     expect(autoCompactWindow({})).toBe("200000");
-    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "auto" })).toBe("auto");
-    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
+    expect(autoCompactWindow({ ASTRA_CLAUDE_AUTOCOMPACT: "auto" })).toBe("auto");
+    expect(autoCompactWindow({ ASTRA_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
   });
 
   it("passes no compaction window when it is turned off", async () => {
     const dump = join(scratch, "compact-off.json");
-    await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_AUTOCOMPACT: "off" });
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, ASTRA_CLAUDE_AUTOCOMPACT: "off" });
     await instance.adapter.sendTurn({ threadId: "t-compact-off", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
@@ -788,7 +788,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("inherits the machine's configuration again when the escape hatch is set", async () => {
     const dump = join(scratch, "inherit.json");
-    await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_CLAUDE_INHERIT_USER_CONFIG: "1" });
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, ASTRA_CLAUDE_INHERIT_USER_CONFIG: "1" });
 
     await instance.adapter.sendTurn({ threadId: "t-inherit", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
@@ -905,7 +905,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     // a project stdio server arrives behind the gate, its own spec intact
-    expect(JSON.parse(seen.mcpConfig.mcpServers.shop.env.OMB_GATE_UPSTREAM)).toMatchObject({
+    expect(JSON.parse(seen.mcpConfig.mcpServers.shop.env.ASTRA_GATE_UPSTREAM)).toMatchObject({
       command: "npx",
       args: ["-y", "mcp-remote", "https://example.test/shop"],
     });
@@ -931,13 +931,13 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const shop = seen.mcpConfig.mcpServers.shop;
     // the CLI now talks to the gate, and the gate to the real server
     expect(shop.args[0]).toContain("mcp-gate");
-    expect(JSON.parse(shop.env.OMB_GATE_UPSTREAM)).toMatchObject({
+    expect(JSON.parse(shop.env.ASTRA_GATE_UPSTREAM)).toMatchObject({
       command: "npx",
       args: ["-y", "mcp-remote", "https://example.test/shop"],
       env: { SHOP_TOKEN: "secret" },
     });
-    expect(shop.env.OMB_GATE_NAME).toBe("shop");
-    expect(Number(shop.env.OMB_GATE_BUDGET)).toBeGreaterThan(0);
+    expect(shop.env.ASTRA_GATE_NAME).toBe("shop");
+    expect(Number(shop.env.ASTRA_GATE_BUDGET)).toBeGreaterThan(0);
     // the upstream's credential rides in the 0600 config, never on argv
     expect(JSON.stringify(seen.argv)).not.toContain("secret");
     // harness-owned mounts are already bounded and stay direct
@@ -946,7 +946,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
 
   it("mounts bot servers directly when the result budget is turned off", async () => {
     const dump = join(scratch, "gate-off.json");
-    await create(undefined, { FAKE_CLAUDE_DUMP: dump, OMB_MCP_RESULT_BUDGET: "0" });
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, ASTRA_MCP_RESULT_BUDGET: "0" });
 
     await instance.adapter.sendTurn({
       threadId: "t-gate-off",
@@ -1040,7 +1040,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         agents: {
           command: process.execPath,
           args: ["/fake/agents-proxy.js"],
-          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", OMB_TURN_DEPTH: "0" },
+          env: { ASTRA_HARNESS_URL: "http://127.0.0.1:1", ASTRA_BOT_ID: "b1", ASTRA_COMMS_TOKEN: "tok", ASTRA_TURN_DEPTH: "0" },
         },
       },
     });
@@ -1049,12 +1049,12 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     // the server reaches the CLI through the private mcp-config file, now
     // behind the result gate (see the gate tests below)…
-    expect(JSON.parse(seen.mcpConfig.mcpServers.notes.env.OMB_GATE_UPSTREAM)).toMatchObject({
+    expect(JSON.parse(seen.mcpConfig.mcpServers.notes.env.ASTRA_GATE_UPSTREAM)).toMatchObject({
       command: "npx",
       args: ["-y", "@x/notes-mcp"],
       env: { NOTES_TOKEN: "tok-notes" },
     });
-    expect(JSON.parse(seen.mcpConfig.mcpServers.constructor.env.OMB_GATE_UPSTREAM)).toMatchObject({ command: "fixture-constructor" });
+    expect(JSON.parse(seen.mcpConfig.mcpServers.constructor.env.ASTRA_GATE_UPSTREAM)).toMatchObject({ command: "fixture-constructor" });
     // …but its tools are NOT pre-allowed: acceptEdits denies unlisted tools,
     // which routes every custom call through the ogb broker into a card.
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
@@ -1128,7 +1128,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         composio: {
           command: process.execPath,
           args: ["/tmp/connector-proxy.js"],
-          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+          env: { ASTRA_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
         },
       },
     });
@@ -1138,7 +1138,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.composio).toMatchObject({
       command: process.execPath,
       args: ["/tmp/connector-proxy.js"],
-      env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+      env: { ASTRA_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
     });
     // the user's Composio key must not be readable via `ps`
     expect(JSON.stringify(seen.argv)).not.toContain("ak_test");
@@ -1163,7 +1163,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         composio: {
           command: process.execPath,
           args: ["/tmp/connector-proxy.js"],
-          env: { OMB_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
+          env: { ASTRA_CONNECTOR_UPSTREAM_URL: "https://example.test/mcp" },
         },
       },
     });
@@ -1290,7 +1290,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       await expect(pendingAnswer).resolves.toMatchObject({ id: "before-stop", behavior: "deny" });
       const lateAnswer = nextAnswer();
       conn.write(JSON.stringify({ t: "ask", id: "after-stop", tool: "Bash", input: { command: "echo too late" } }) + "\n");
-      await expect(lateAnswer).resolves.toMatchObject({ id: "after-stop", behavior: "deny", message: "OpenMausBot: the turn ended" });
+      await expect(lateAnswer).resolves.toMatchObject({ id: "after-stop", behavior: "deny", message: "Astra: the turn ended" });
       expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(openedBefore);
       await expect(instance.adapter.respondToRequest(threadId, "after-stop", { behavior: "allow" })).resolves.toBe("unavailable");
     } finally {
@@ -1390,7 +1390,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await expect(answer).resolves.toMatchObject({
       id: "ask-between",
       behavior: "deny",
-      message: "OpenMausBot: the turn ended",
+      message: "Astra: the turn ended",
     });
     expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(opensBefore);
     await expect(
@@ -1420,8 +1420,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("closes an idle session after the configured window", async () => {
-    process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS = "10";
-    process.env.OMB_CLAUDE_SESSION_IDLE_MS = "50";
+    process.env.ASTRA_CLAUDE_SESSION_IDLE_MIN_MS = "10";
+    process.env.ASTRA_CLAUDE_SESSION_IDLE_MS = "50";
     await create();
     await instance.adapter.sendTurn({ threadId: "t-idle", text: "one" });
     await recorder.until((e) => e.type === "turn.completed");
@@ -1782,7 +1782,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(await nextAnswer()).toMatchObject({
       id: "dup-1",
       behavior: "deny",
-      message: "OpenMausBot: duplicate ask id — skipping this request.",
+      message: "Astra: duplicate ask id — skipping this request.",
     });
     expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-1")).toHaveLength(1);
 
@@ -1814,7 +1814,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(await conn2Answer).toMatchObject({
       id: "dup-2",
       behavior: "deny",
-      message: "OpenMausBot: duplicate ask id — skipping this request.",
+      message: "Astra: duplicate ask id — skipping this request.",
     });
     expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-2")).toHaveLength(1);
 
@@ -1872,7 +1872,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(await nextAnswer()).toMatchObject({
       id: "dup-4",
       behavior: "deny",
-      message: "OpenMausBot: duplicate ask id — skipping this request.",
+      message: "Astra: duplicate ask id — skipping this request.",
     });
     expect(recorder.events.filter((e) => e.type === "request.opened" && e.requestId === "dup-4")).toHaveLength(1);
 
@@ -1916,7 +1916,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(await reply).toMatchObject({
       id: "ask-late",
       behavior: "deny",
-      message: "OpenMausBot: the turn ended",
+      message: "Astra: the turn ended",
     });
     expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(opensBefore);
     await expect(instance.adapter.respondToRequest("t-perm-late", "ask-late", { behavior: "allow" })).resolves.toBe(
@@ -1951,7 +1951,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(await reply).toMatchObject({
       id: "q-late",
       behavior: "answer",
-      message: "OpenMausBot: the turn is ending — wrap up.",
+      message: "Astra: the turn is ending — wrap up.",
     });
     expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(opensBefore);
     await expect(
@@ -1992,7 +1992,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await create(undefined, { CLAUDE_CONFIG_DIR: instanceConfigDir });
     const dump = join(scratch, "generate-text-env.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
-    const names = ["XAI_API_KEY", "COMPOSIO_API_KEY", "BOX_TOKEN", "OPENCODE_API_KEY", "OMB_TTS_KEY"] as const;
+    const names = ["XAI_API_KEY", "COMPOSIO_API_KEY", "BOX_TOKEN", "OPENCODE_API_KEY", "ASTRA_TTS_KEY"] as const;
     for (const name of names) process.env[name] = `${name}-must-not-leak`;
 
     await instance.generateText?.("summarize safely");

@@ -5,7 +5,7 @@ import type { UpdaterState } from "@/lib/updater";
 
 const fixture = vi.hoisted(() => ({ state: { status: "idle" } as UpdaterState }));
 vi.mock("@/lib/updater", () => ({ useUpdaterState: () => fixture.state }));
-vi.mock("../lib/brand", () => ({ brand: () => ({ name: "OpenMausBot" }) }));
+vi.mock("../lib/brand", () => ({ brand: () => ({ name: "Astra" }) }));
 import { UpdateBanner } from "./UpdateBanner";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -48,7 +48,7 @@ describe("UpdateBanner", () => {
 
   it.each(["ETIMEDOUT while staging", "native error ".repeat(30)])("preserves restart recovery for a nonretryable error: %s", (message) => {
     const html = render({ status: "error", retryable: false, message });
-    expect(html).toContain("Quit and reopen OpenMausBot before trying the update again.");
+    expect(html).toContain("Quit and reopen Astra before trying the update again.");
     expect(html).not.toContain("Try again");
     expect(html).toContain("Dismiss");
   });
@@ -61,10 +61,10 @@ describe("UpdateBanner", () => {
 
   it("shows the failure cause as well as the required restart without offering a retry", () => {
     const html = render({ status: "error", retryable: false,
-      message: "Not enough disk space to prepare the update. Free some space, then try again. Quit and reopen OpenMausBot before trying the update again.",
+      message: "Not enough disk space to prepare the update. Free some space, then try again. Quit and reopen Astra before trying the update again.",
     });
     expect(html).toContain("Free some space");
-    expect(html).toContain("Quit and reopen OpenMausBot");
+    expect(html).toContain("Quit and reopen Astra");
     expect(html).not.toContain("Try again</button>");
   });
 });

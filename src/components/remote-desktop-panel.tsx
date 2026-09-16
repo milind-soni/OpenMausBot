@@ -172,7 +172,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         `${bot.name}'s live desktop`,
         bot.id,
       );
-      if (!opened) throw new Error("OpenMausBot could not open the live desktop");
+      if (!opened) throw new Error("Astra could not open the live desktop");
     } catch (cause) {
       if (tookControl) {
         await api(`/api/bots/${bot.id}/computer/control`, {
@@ -327,7 +327,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <RoutineEditor
           bots={[bot]}
           lockedBotId={bot.id}
-          defaultRunOn={cloudRoutineReady ? "cloud" : "maus"}
+          defaultRunOn={cloudRoutineReady ? "cloud" : "astra"}
           onClose={() => setCreatingRoutine(false)}
         />
       )}

@@ -50,7 +50,7 @@ beforeAll(async () => {
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const port = (server.address() as { port: number }).port;
-  process.env.OMB_ELEVENLABS_API = `http://127.0.0.1:${port}/v1`;
+  process.env.ASTRA_ELEVENLABS_API = `http://127.0.0.1:${port}/v1`;
 });
 
 afterAll(() => new Promise<void>((r) => server.close(() => r())));

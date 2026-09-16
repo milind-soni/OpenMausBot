@@ -2,8 +2,8 @@ import { parseJson, type JsonValue } from "./schema.ts";
 import { isBotPackage, parseBotPackage, type ParsedBotPackage } from "./bot-package.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
-export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
-export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/milind-soni/openmausbot-teams/main";
+export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/astra-teams";
+export const TEAM_LIBRARY_RAW_ROOT = "https://raw.githubusercontent.com/milind-soni/astra-teams/main";
 export const TEAM_LIBRARY_CATALOG_URL = `${TEAM_LIBRARY_RAW_ROOT}/catalog.json`;
 
 const MAX_CATALOG_BYTES = 256_000;

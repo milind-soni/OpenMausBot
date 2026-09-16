@@ -113,7 +113,7 @@ export function CallTargetButton({
     : !capabilities.dictation.available && !window.ogb?.callStt && !window.ogb?.handyTranscribeFile
       ? "Calls need a Deepgram key (Settings → Connections) on this platform — speech recognition runs in the cloud here."
       : !window.ogb?.speechStart && !window.ogb?.callStt
-        ? "The speech service is unavailable in this app build. Restart or update OpenMausBot."
+        ? "The speech service is unavailable in this app build. Restart or update Astra."
         : !configured
           ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
           : !voiceReady

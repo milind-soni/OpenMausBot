@@ -175,7 +175,7 @@ export function AvatarImageGenerator({
             />
           </label>
           <p className="text-[11px] leading-relaxed text-ink-secondary">
-            OpenAI-compatible Images API. localhost refers to the OpenMausBot server, including when you open this page remotely.
+            OpenAI-compatible Images API. localhost refers to the Astra server, including when you open this page remotely.
           </p>
         </>
       )}

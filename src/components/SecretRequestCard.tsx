@@ -31,7 +31,7 @@ export function SecretRequestCard({
       ? "Saved securely. Your bot is continuing the task."
       : "Saved securely. Your bot will continue when its current turn settles."
     : declined
-      ? "You chose not to provide this credential. OpenMausBot could not resume the bot yet."
+      ? "You chose not to provide this credential. Astra could not resume the bot yet."
       : secret.description;
   const footerLabel = declined
     ? "Continuing without this credential failed"
@@ -122,7 +122,7 @@ export function SecretRequestCard({
             </p>
             {!provided && !declined && (
               <p className="mt-1 flex items-center gap-1 text-[11.5px] text-ink-secondary/80">
-                <LockKeyhole size={11} /> Stored securely by OpenMausBot and never added to chat.
+                <LockKeyhole size={11} /> Stored securely by Astra and never added to chat.
               </p>
             )}
             {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}

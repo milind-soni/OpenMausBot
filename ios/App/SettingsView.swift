@@ -61,7 +61,7 @@ struct SettingsView: View {
                     .accessibilityHint(notificationAccessibilityHint)
                 }
             } footer: {
-                Text("Alerts arrive while OpenMausBot is open or was recently in the background. Closed-app delivery is not available yet.")
+                Text("Alerts arrive while Astra is open or was recently in the background. Closed-app delivery is not available yet.")
             }
 
             Section {
@@ -117,7 +117,7 @@ struct SettingsView: View {
                     }
                 }
             } footer: {
-                Text("Changes the language inside OpenMausMobile. Buttons drawn by iOS itself follow the phone's language, which you can set for this app in iOS Settings.")
+                Text("Changes the language inside AstraMobile. Buttons drawn by iOS itself follow the phone's language, which you can set for this app in iOS Settings.")
             }
 
             if session.connection != nil {
@@ -199,10 +199,10 @@ private struct ComputerSettingsRow: View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(MausPalette.color("blue").opacity(0.14))
+                    .fill(AstraPalette.color("blue").opacity(0.14))
                     .frame(width: 38, height: 38)
                 Image(systemName: "laptopcomputer")
-                    .foregroundStyle(MausPalette.color("blue"))
+                    .foregroundStyle(AstraPalette.color("blue"))
             }
             .accessibilityHidden(true)
 
@@ -292,7 +292,7 @@ struct ConnectedComputersView: View {
                                 Spacer()
                                 Text("Use")
                                     .font(.subheadline.weight(.semibold))
-                                    .foregroundStyle(MausPalette.color("blue"))
+                                    .foregroundStyle(AstraPalette.color("blue"))
                             }
                             .contentShape(Rectangle())
                         }
@@ -302,7 +302,7 @@ struct ConnectedComputersView: View {
                                 pendingRemoval = computer
                             }
                         }
-                        .accessibilityHint("Switches OpenMausMobile to this computer")
+                        .accessibilityHint("Switches AstraMobile to this computer")
                     }
                 }
             }
@@ -470,7 +470,7 @@ struct ConnectionSecurityView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes the connection from this device only. It does not revoke this device on your Mac. To remove Mac-side access, open OpenMausBot → Settings → Phone and remove it there.")
+            Text("This removes the connection from this device only. It does not revoke this device on your Mac. To remove Mac-side access, open Astra → Settings → Phone and remove it there.")
         }
     }
 
@@ -481,7 +481,7 @@ struct ConnectionSecurityView: View {
         case .live:
             return Text("This computer is connected and responding normally.")
         case .connecting:
-            return Text("OpenMausBot is trying the saved connection automatically.")
+            return Text("Astra is trying the saved connection automatically.")
         case let .offline(reason):
             return Text(verbatim: reason)
         case .unauthorized:

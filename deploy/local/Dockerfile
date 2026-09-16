@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/milind-soni/openmausbot:latest
+ARG BASE_IMAGE=ghcr.io/milind-soni/astra:latest
 FROM ${BASE_IMAGE}
 USER root
 ARG ENGINES="@anthropic-ai/claude-code @openai/codex"

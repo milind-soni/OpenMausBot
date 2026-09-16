@@ -31,7 +31,7 @@ import {
 } from "./remote-computer.ts";
 
 // overridable so tests can point at a stub instead of the live provider
-const BOX_API = process.env.OMB_BOX_API || "https://ascii.dev/api/box/v1";
+const BOX_API = process.env.ASTRA_BOX_API || "https://ascii.dev/api/box/v1";
 const READY = new Set(["idle", "ready", "running"]);
 const SLEEPING = new Set(["archived", "archiving", "stopped", "stopping"]);
 const DEFAULT_BOX_TTL_SECONDS = 8 * 60 * 60;
@@ -63,7 +63,7 @@ const BOX_STATES = new Set([
   "error",
 ]);
 // Provider listings are account-wide. Hash the durable local environment id
-// into every new name so another OpenMausBot installation using the same Box
+// into every new name so another Astra installation using the same Box
 // account cannot mistake this installation's computers for abandoned ones.
 // The environment UUID itself never leaves the local data directory.
 let scopedBoxPrefixCache: string | null = null;
@@ -368,7 +368,7 @@ async function listBoxPages(
 
 /**
  * One account listing for Settings and deletion guards. Only boxes
- * carrying OpenMausBot's exact deterministic name shape leave this boundary;
+ * carrying Astra's exact deterministic name shape leave this boundary;
  * provider desktop links, IPs, environment details and other raw fields never
  * reach the renderer. Only names scoped to this installation may become
  * ownerless rows. Legacy names are accepted solely when a current bot proves
@@ -422,11 +422,11 @@ export async function listManagedBoxes(
     if (!owner) continue;
     const boxId = typeof candidate.id === "string" ? candidate.id : "";
     if (!BOX_ID.test(boxId)) {
-      return invalidInventory("ascii.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      return invalidInventory("ascii.dev returned an invalid id for an Astra-managed cloud computer — refresh or repair it in ascii.dev");
     }
     const existing = ownedBoxByBot.get(owner.botId);
     if (existing && existing !== boxId) {
-      return invalidInventory("ascii.dev returned conflicting cloud computers for one OpenMaus bot — repair them in ascii.dev before continuing");
+      return invalidInventory("ascii.dev returned conflicting cloud computers for one Astra bot — repair them in ascii.dev before continuing");
     }
     ownedBoxByBot.set(owner.botId, boxId);
   }
@@ -458,16 +458,16 @@ export async function listManagedBoxes(
     // deterministic name), silently skipping a malformed/duplicated identity
     // could let bot deletion mistake provider corruption for absence.
     if (!BOX_ID.test(boxId)) {
-      return invalidInventory("ascii.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      return invalidInventory("ascii.dev returned an invalid id for an Astra-managed cloud computer — refresh or repair it in ascii.dev");
     }
     if ((boxIdCounts.get(boxId) ?? 0) !== 1 || seenBoxIds.has(boxId)) {
-      return invalidInventory("ascii.dev returned a conflicting id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      return invalidInventory("ascii.dev returned a conflicting id for an Astra-managed cloud computer — refresh or repair it in ascii.dev");
     }
     if (legacyOwner && owner && options.adoptLegacy !== false) {
       try {
         adoptResolvedBox(owner.botId, boxId);
       } catch {
-        return invalidInventory("OpenMausBot could not safely remember this legacy cloud computer's owner — repair it in ascii.dev before continuing");
+        return invalidInventory("Astra could not safely remember this legacy cloud computer's owner — repair it in ascii.dev before continuing");
       }
     }
     seenBoxIds.add(boxId);
@@ -541,7 +541,7 @@ async function revalidateManagedBox(
   if (!inventory.available) throw inventoryFailure(inventory);
   const instance = inventory.instances.find((candidate) => candidate.boxId === boxId);
   if (!instance) {
-    throw Object.assign(new Error("that OpenMaus-managed cloud computer no longer exists"), { status: 404 });
+    throw Object.assign(new Error("that Astra-managed cloud computer no longer exists"), { status: 404 });
   }
   return instance;
 }
@@ -849,7 +849,7 @@ export async function boxStatus(cfg: AppConfig, botId: string) {
 export async function provisionBox(cfg: AppConfig, botId: string, botName: string) {
   cfg = snapshotBoxConfig(cfg);
   if (!boxConfigured(cfg)) {
-    throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
+    throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.astra/config.json');
   }
   const vmName = await boxNameFor(botId);
   let box = await findBox(cfg, botId);

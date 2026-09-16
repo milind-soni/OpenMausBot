@@ -8,7 +8,7 @@ import {
 } from "@hpke/core";
 
 export const PHONE_SECRET_PROTOCOL_VERSION = 1 as const;
-export const PHONE_SECRET_INFO = "OpenMausBot phone credential v1";
+export const PHONE_SECRET_INFO = "Astra phone credential v1";
 export const PHONE_SECRET_MAX_BYTES = 4_096;
 
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
@@ -37,7 +37,7 @@ interface PhoneSecretIdentity {
 }
 
 type SendPrivateMessage = (message: {
-  type: "openmausbot:phone-secret-save";
+  type: "astra:phone-secret-save";
   requestId: string;
   target: string;
   value: string;
@@ -102,7 +102,7 @@ export function phoneSecretAAD(context: Pick<
   "keyId" | "deviceId" | "botId" | "threadId" | "messageId" | "target" | "requestKey"
 >): Uint8Array {
   const fields = [
-    "openmausbot-phone-credential-v1",
+    "astra-phone-credential-v1",
     context.keyId,
     context.deviceId,
     context.botId,
@@ -312,7 +312,7 @@ function decodeSaveResult(raw: unknown): { requestId: string; ok: boolean; error
   const message = (raw as { data?: unknown } | null)?.data ?? raw;
   if (!message || typeof message !== "object" || Array.isArray(message)) return null;
   const value = message as Record<string, unknown>;
-  if (value.type !== "openmausbot:phone-secret-save-result") return null;
+  if (value.type !== "astra:phone-secret-save-result") return null;
   if (typeof value.requestId !== "string" || !ROUTE_ID.test(value.requestId) || typeof value.ok !== "boolean") {
     return null;
   }
@@ -360,7 +360,7 @@ export class PhoneSecretBridge {
     const message = (raw as { data?: unknown } | null)?.data ?? raw;
     if (!message || typeof message !== "object" || Array.isArray(message)) return false;
     const record = message as Record<string, unknown>;
-    if (record.type === "openmausbot:phone-secret-key") {
+    if (record.type === "astra:phone-secret-key") {
       // Keep the rejection inside the promise. A request receives a bounded
       // 503; an invalid parent message must never become an unhandled reject.
       this.identity = importIdentity(record);
@@ -393,13 +393,13 @@ export class PhoneSecretBridge {
   private async provideWithinLimit(context: PhoneSecretContext): Promise<void> {
     if (!this.identity) {
       throw new PhoneSecretError(
-        "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
+        "Secure phone entry is not ready on this computer. Reopen Astra and try again.",
         503,
       );
     }
     const identity = await this.identity.catch(() => {
       throw new PhoneSecretError(
-        "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
+        "Secure phone entry is not ready on this computer. Reopen Astra and try again.",
         503,
       );
     });
@@ -451,7 +451,7 @@ export class PhoneSecretBridge {
       timer.unref?.();
       this.pending.set(requestId, { resolve, reject, timer });
       if (this.send({
-        type: "openmausbot:phone-secret-save",
+        type: "astra:phone-secret-save",
         requestId,
         target: context.target,
         value,

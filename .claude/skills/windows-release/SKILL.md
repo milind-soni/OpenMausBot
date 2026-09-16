@@ -1,12 +1,12 @@
 ---
 name: windows-release
-description: Build and verify the Windows desktop build (NSIS installer + latest.yml) for the canonical OpenMausBot release and its legacy updater mirror. Use when cutting a release, shipping a new version to Windows users, or when a Windows user reports they are stuck on an old version. Windows only — does not cover the macOS dmg/notarization flow.
+description: Build and verify the Windows desktop build (NSIS installer + latest.yml) for the canonical Astra release and its legacy updater mirror. Use when cutting a release, shipping a new version to Windows users, or when a Windows user reports they are stuck on an old version. Windows only — does not cover the macOS dmg/notarization flow.
 ---
 
 # Windows release
 
-Ships `OpenMausBot-<version>-setup.exe` and its update feed to
-[milind-soni/OpenMausBot](https://github.com/milind-soni/OpenMausBot/releases).
+Ships `Astra-<version>-setup.exe` and its update feed to
+[milind-soni/Astra](https://github.com/milind-soni/Astra/releases).
 The unified release workflow mirrors the same bytes to the legacy releases
 repository for apps installed before the updater migration.
 
@@ -43,10 +43,10 @@ Output in `release/`:
 
 | File | Purpose |
 |---|---|
-| `OpenMausBot-<version>-setup.exe` | the installer |
+| `Astra-<version>-setup.exe` | the installer |
 | `latest.yml` | **the update feed** — see step 4 |
-| `OpenMausBot-<version>-setup.exe.blockmap` | differential updates |
-| `OpenMausBot-<version>-x64.zip` | portable, not used by the updater |
+| `Astra-<version>-setup.exe.blockmap` | differential updates |
+| `Astra-<version>-x64.zip` | portable, not used by the updater |
 
 ## 3. Verify before uploading
 
@@ -61,7 +61,7 @@ Get-Content release\win-unpacked\resources\app-update.yml  # feed config
 - Missing `server/index.js` → `utilityProcess.fork` fails → the 🐭 "Couldn't start
   the bot server" page.
 - Missing `ui/index.html` → server has nothing to serve → black window.
-- `app-update.yml` must point at `milind-soni/OpenMausBot` and, while the
+- `app-update.yml` must point at `milind-soni/Astra` and, while the
   build is unsigned, **must not contain `publisherName`** — electron-updater would
   reject every update as untrusted.
 
@@ -69,7 +69,7 @@ Then smoke-test the installer itself. Run it, and confirm:
 
 1. It installs per-user with no UAC prompt and launches.
 2. The chat window renders (not the error page). Server logs land in
-   `%APPDATA%\OpenMausBot\logs\server.log`.
+   `%APPDATA%\Astra\logs\server.log`.
 3. The model picker lists at least one provider — this exercises the `.cmd`-shim
    resolution in `server/procs.ts`, which only ever runs for real on Windows.
 4. No update popup appears on launch. Background check failures are silent by
@@ -81,27 +81,27 @@ Upload to the **same tag** as the macOS release for that version, so one release
 carries both platforms.
 
 ```powershell
-Copy-Item release/OpenMausBot-<version>-setup.exe release/OpenMausBot-setup.exe
-gh release upload v<version> --repo milind-soni/OpenMausBot `
-  release/OpenMausBot-<version>-setup.exe `
-  release/OpenMausBot-setup.exe `
-  release/OpenMausBot-<version>-setup.exe.blockmap `
+Copy-Item release/Astra-<version>-setup.exe release/Astra-setup.exe
+gh release upload v<version> --repo milind-soni/Astra `
+  release/Astra-<version>-setup.exe `
+  release/Astra-setup.exe `
+  release/Astra-<version>-setup.exe.blockmap `
   release/latest.yml
 ```
 
 Prefer the repository's **Release** workflow, which builds all platforms from
 one pinned commit and mirrors the complete, byte-identical asset set safely.
 If this emergency manual path is used, the same four files must also be attached
-to the matching draft in `milind-soni/openmausbot-releases`; never replace the
+to the matching draft in `milind-soni/astra-releases`; never replace the
 bytes of an already-published asset.
 
 Both names are required, for different consumers:
 
-- **`OpenMausBot-<version>-setup.exe`** is what `latest.yml` references by name and
+- **`Astra-<version>-setup.exe`** is what `latest.yml` references by name and
   sha512. The auto-updater downloads exactly this.
-- **`OpenMausBot-setup.exe`** is a byte-identical copy that gives the README's
-  `/releases/latest/download/OpenMausBot-setup.exe` button a stable URL. This
-  mirrors `OpenMausBot.dmg` sitting beside `OpenMausBot-<version>.dmg`.
+- **`Astra-setup.exe`** is a byte-identical copy that gives the README's
+  `/releases/latest/download/Astra-setup.exe` button a stable URL. This
+  mirrors `Astra.dmg` sitting beside `Astra-<version>.dmg`.
 
 ### latest.yml is not optional
 

@@ -28,7 +28,7 @@ final class FailoverTests: XCTestCase {
             url: "http://mac.tail1234.ts.net:8810", kind: .tailnet, priority: 100
         ))
         let bonjour = try XCTUnwrap(CompanionEndpoint(
-            url: "http://openmausbot-aa.local:8810", kind: .bonjour, priority: 200
+            url: "http://astra-aa.local:8810", kind: .bonjour, priority: 200
         ))
         var rotation = CandidateRotation(endpoints: [local, tailnet, bonjour])
 
@@ -176,9 +176,9 @@ final class FailoverTests: XCTestCase {
             name: "Mac",
             host: "192.168.1.42",
             port: 8810,
-            hosts: ["mac.tail1234.ts.net", "192.168.1.42", "openmausbot-aa.local"]
+            hosts: ["mac.tail1234.ts.net", "192.168.1.42", "astra-aa.local"]
         )
-        XCTAssertEqual(connection.orderedHosts, ["192.168.1.42", "mac.tail1234.ts.net", "openmausbot-aa.local"])
+        XCTAssertEqual(connection.orderedHosts, ["192.168.1.42", "mac.tail1234.ts.net", "astra-aa.local"])
     }
 
     func testOrderedHostsFallsBackToTheSingleStoredHost() {
@@ -206,11 +206,11 @@ final class FailoverTests: XCTestCase {
             name: "Mac",
             host: "mac.tail1234.ts.net",
             port: 8810,
-            hosts: ["mac.tail1234.ts.net", "192.168.1.42", "openmausbot-aa.local"]
+            hosts: ["mac.tail1234.ts.net", "192.168.1.42", "astra-aa.local"]
         )
         connection.promote("192.168.1.42")
         XCTAssertEqual(connection.host, "192.168.1.42")
-        XCTAssertEqual(connection.hosts, ["192.168.1.42", "mac.tail1234.ts.net", "openmausbot-aa.local"])
+        XCTAssertEqual(connection.hosts, ["192.168.1.42", "mac.tail1234.ts.net", "astra-aa.local"])
 
         // A hand-typed address the list has never seen joins at the front —
         // the stored fallbacks remain worth walking behind it.
@@ -365,7 +365,7 @@ final class FailoverTests: XCTestCase {
             name: "Mac",
             host: "mac.tail1234.ts.net",
             port: 8810,
-            hosts: ["mac.tail1234.ts.net", "192.168.1.42", "openmausbot-aa.local"]
+            hosts: ["mac.tail1234.ts.net", "192.168.1.42", "astra-aa.local"]
         )
         let lan = try XCTUnwrap(CompanionEndpoint.direct(
             host: "192.168.1.42",
@@ -377,7 +377,7 @@ final class FailoverTests: XCTestCase {
 
         XCTAssertNil(connection.endpoints)
         XCTAssertEqual(connection.orderedEndpoints.map(\.host), [
-            "192.168.1.42", "mac.tail1234.ts.net", "openmausbot-aa.local",
+            "192.168.1.42", "mac.tail1234.ts.net", "astra-aa.local",
         ])
     }
 

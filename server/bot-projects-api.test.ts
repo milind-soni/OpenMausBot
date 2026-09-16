@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, type VerificationServer } from "../scripts/control-astra.ts";
 
 describe("organizational folders through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;

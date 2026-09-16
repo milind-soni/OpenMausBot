@@ -25,19 +25,19 @@ import { killCliTree } from "./procs.ts";
 
 type Json = Record<string, unknown>;
 
-const NAME = process.env.OMB_GATE_NAME || "mcp";
-const SPILL_DIR = process.env.OMB_GATE_SPILL_DIR || "";
-const BUDGET = Number(process.env.OMB_GATE_BUDGET) > 0 ? Number(process.env.OMB_GATE_BUDGET) : DEFAULT_RESULT_BUDGET;
+const NAME = process.env.ASTRA_GATE_NAME || "mcp";
+const SPILL_DIR = process.env.ASTRA_GATE_SPILL_DIR || "";
+const BUDGET = Number(process.env.ASTRA_GATE_BUDGET) > 0 ? Number(process.env.ASTRA_GATE_BUDGET) : DEFAULT_RESULT_BUDGET;
 /** Spilled results older than this are swept at startup: they exist for the
  * turn that produced them, not forever. */
 const SPILL_MAX_AGE_MS = 24 * 60 * 60_000;
 /** Whether the model is told where the untrimmed result was saved. Off by
  * default: offering the path measured WORSE than no trimming, because the
  * model reads the file back in. See TrimInput.spillHint. */
-const SPILL_HINT = process.env.OMB_GATE_SPILL_HINT === "1";
+const SPILL_HINT = process.env.ASTRA_GATE_SPILL_HINT === "1";
 
 /** The gate's own settings never reach the upstream server's environment. */
-const GATE_ENV_KEYS = ["OMB_GATE_NAME", "OMB_GATE_SPILL_DIR", "OMB_GATE_BUDGET", "OMB_GATE_UPSTREAM", "OMB_GATE_SPILL_HINT"];
+const GATE_ENV_KEYS = ["ASTRA_GATE_NAME", "ASTRA_GATE_SPILL_DIR", "ASTRA_GATE_BUDGET", "ASTRA_GATE_UPSTREAM", "ASTRA_GATE_SPILL_HINT"];
 
 function fail(message: string): never {
   process.stderr.write(`mcp-gate(${NAME}): ${message}\n`);
@@ -53,13 +53,13 @@ interface Upstream {
 function upstreamSpec(): Upstream {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(process.env.OMB_GATE_UPSTREAM ?? "");
+    parsed = JSON.parse(process.env.ASTRA_GATE_UPSTREAM ?? "");
   } catch {
-    fail("OMB_GATE_UPSTREAM is not valid JSON");
+    fail("ASTRA_GATE_UPSTREAM is not valid JSON");
   }
   const spec = parsed as Upstream | null;
   if (!spec || typeof spec !== "object" || typeof spec.command !== "string" || !spec.command) {
-    fail("OMB_GATE_UPSTREAM needs a command");
+    fail("ASTRA_GATE_UPSTREAM needs a command");
   }
   return spec;
 }

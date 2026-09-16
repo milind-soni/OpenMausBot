@@ -3,7 +3,7 @@
   Adaptive icon: the system masks the layers to whatever shape the launcher
   uses, so there is one definition and no per-density bitmaps. The foreground is
   the same silhouette the app draws in every roster row, generated from
-  MausSilhouette's path data.
+  AstraSilhouette's path data.
 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/launcher_background" />

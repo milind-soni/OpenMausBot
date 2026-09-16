@@ -3,7 +3,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-astra.ts";
 
 const FAKE_MCP = fileURLToPath(new URL("./testing/fake-mcp-server.ts", import.meta.url));
 const command = { command: process.execPath, args: ["--experimental-strip-types", FAKE_MCP] };

@@ -39,7 +39,7 @@ beforeAll(async () => {
     if (req.method === "GET" && req.url === "/api/repo/status") {
       res.statusCode = repoStatus;
       return res.end(
-        JSON.stringify(repoStatus === 200 ? { repo: "OpenMausBot", branch: "main", commit: "abc123" } : { error: "offline" }),
+        JSON.stringify(repoStatus === 200 ? { repo: "Astra", branch: "main", commit: "abc123" } : { error: "offline" }),
       );
     }
     if (req.method === "GET" && req.url === "/api/opencode/models") {

@@ -85,7 +85,7 @@ if let finishFile {
 /// SFSpeechRecognizer can keep revising/re-emitting a partial transcript
 /// after the user stops talking. Only a changed transcript resets the timer.
 final class SilenceEndpointer {
-  private let queue = DispatchQueue(label: "com.openmausbot.speech.endpoint")
+  private let queue = DispatchQueue(label: "com.astra.speech.endpoint")
   private let gap: TimeInterval
   private let finish: () -> Void
   private var timer: DispatchSourceTimer?

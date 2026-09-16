@@ -7,7 +7,7 @@
 // status SUCCESS. Deterministic, no network.
 //
 //   FAKE_AGY_MODE=ask-peer
-//     reads OpenMausBot's temporary `openmausbot-agents` entry from agy's
+//     reads Astra's temporary `astra-agents` entry from agy's
 //     global MCP config, calls list_bots then ask_bot, and returns the peer's
 //     real reply. This pins the Antigravity/Gemini comms path end to end.
 //
@@ -30,7 +30,7 @@ function agentsMcpEntry(): McpEntry | null {
     const config = JSON.parse(
       readFileSync(join(home, ".gemini", "config", "mcp_config.json"), "utf8"),
     );
-    const entry = config.mcpServers?.["openmausbot-agents"];
+    const entry = config.mcpServers?.["astra-agents"];
     if (!entry?.command) return null;
     return {
       command: String(entry.command),
@@ -121,7 +121,7 @@ function driveMcp(
       params: {
         protocolVersion: "2024-11-05",
         capabilities: {},
-        clientInfo: { name: "openmausbot-fake-antigravity", version: "1.0.0" },
+        clientInfo: { name: "astra-fake-antigravity", version: "1.0.0" },
       },
     });
   });

@@ -176,7 +176,7 @@ export async function runSetup(
     const runtime = instanceConfigs(cfg);
     const existing = Object.entries(runtime).filter(([id, entry]) =>
       !!cfg.instances?.[id] && ["codex", "claudeAgent", "openai-compat"].includes(entry.driver) && entry.enabled !== false);
-    io.log("\nWelcome to OpenMausBot\n");
+    io.log("\nWelcome to Astra\n");
     io.log("Let's connect your AI. Choose a provider, then a model.");
     io.log("Existing bots and conversations stay untouched. Ctrl-C cancels.");
     io.log("You can add integrations and change settings later.\n");

@@ -1,6 +1,6 @@
 // The maintained OpenCode CLI through its ACP stdio interface. OpenCode is
 // the harness; Zen, Go, OpenRouter, and user-configured/local providers are
-// models discovered from that harness rather than separate OpenMaus drivers.
+// models discovered from that harness rather than separate Astra drivers.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

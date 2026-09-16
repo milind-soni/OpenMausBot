@@ -80,7 +80,7 @@ struct PairingView: View {
             .fullScreenCover(isPresented: $showingScanner) {
                 PairingScannerSheet { payload in
                     guard let url = URL(string: payload), let invite = PairingInvite.parse(url) else {
-                        return "That isn't an OpenMausBot pairing QR code."
+                        return "That isn't an Astra pairing QR code."
                     }
                     accept(invite)
                     return nil
@@ -94,11 +94,11 @@ struct PairingView: View {
         VStack(spacing: 16) {
             ZStack {
                 RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .fill(MausPalette.color("blue").opacity(0.12))
+                    .fill(AstraPalette.color("blue").opacity(0.12))
                     .frame(width: 124, height: 124)
                 Image(systemName: "laptopcomputer.and.iphone")
                     .font(.system(size: 46, weight: .medium))
-                    .foregroundStyle(MausPalette.color("blue"))
+                    .foregroundStyle(AstraPalette.color("blue"))
             }
             .accessibilityHidden(true)
 
@@ -106,7 +106,7 @@ struct PairingView: View {
                 Text("Connect to your computer")
                     .font(.title.bold())
                     .multilineTextAlignment(.center)
-                Text("Scan the QR code in OpenMausBot. We'll securely choose the best way to connect.")
+                Text("Scan the QR code in Astra. We'll securely choose the best way to connect.")
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -194,7 +194,7 @@ struct PairingView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "laptopcomputer")
-                                .foregroundStyle(MausPalette.color("blue"))
+                                .foregroundStyle(AstraPalette.color("blue"))
                                 .frame(width: 30, height: 30)
                             Text(service.name)
                                 .font(.body.weight(.medium))
@@ -258,11 +258,11 @@ struct PairingView: View {
         VStack(spacing: 22) {
             ZStack {
                 Circle()
-                    .fill(MausPalette.color("green").opacity(0.12))
+                    .fill(AstraPalette.color("green").opacity(0.12))
                     .frame(width: 92, height: 92)
                 Image(systemName: "desktopcomputer")
                     .font(.system(size: 36, weight: .medium))
-                    .foregroundStyle(MausPalette.color("green"))
+                    .foregroundStyle(AstraPalette.color("green"))
             }
             .accessibilityHidden(true)
 
@@ -272,7 +272,7 @@ struct PairingView: View {
                     .multilineTextAlignment(.center)
                 Label(badge.title, systemImage: badge.systemImage)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(MausPalette.color("green"))
+                    .foregroundStyle(AstraPalette.color("green"))
             }
 
             VStack(alignment: .leading, spacing: 7) {
@@ -295,7 +295,7 @@ struct PairingView: View {
 
             if let credential = scannedCredential {
                 if !connectionIsProtected(connection) {
-                    Text("Only continue on a network you trust. Local connections are authenticated but are not encrypted by OpenMausBot.")
+                    Text("Only continue on a network you trust. Local connections are authenticated but are not encrypted by Astra.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

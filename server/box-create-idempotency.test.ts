@@ -22,7 +22,7 @@ function journalWorker(dataDir: string, source: string) {
     "--eval",
     source,
   ], {
-    env: { ...process.env, OMB_DATA_DIR: dataDir },
+    env: { ...process.env, ASTRA_DATA_DIR: dataDir },
     stdio: ["pipe", "pipe", "pipe"],
   });
   let stderr = "";
@@ -131,7 +131,7 @@ describe("Box create idempotency", () => {
     });
     await new Promise<void>((resolve) => api.listen(0, "127.0.0.1", resolve));
     const port = (api.address() as AddressInfo).port;
-    vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("ASTRA_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
   });
 
   beforeEach(() => {
@@ -493,7 +493,7 @@ describe("Box create idempotency", () => {
         elapsed?: number;
       };
       await expectCleanWorkerExit(worker, "vanishing-lock worker");
-      expect(result.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(result.error).toMatch(/locked by another Astra process/i);
       expect(result.elapsed).toBeGreaterThanOrEqual(1_500);
       expect(result.elapsed).toBeLessThan(5_000);
     } finally {
@@ -556,7 +556,7 @@ describe("Box create idempotency", () => {
         elapsed?: number;
       };
       await expectCleanWorkerExit(worker, "replaced-lock worker");
-      expect(result.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(result.error).toMatch(/locked by another Astra process/i);
       expect(result.elapsed).toBeGreaterThanOrEqual(1_500);
       expect(result.elapsed).toBeLessThan(5_000);
     } finally {
@@ -613,8 +613,8 @@ describe("Box create idempotency", () => {
         expectCleanWorkerExit(second, "second live-reaper contender"),
       ]);
 
-      expect(firstResult.error).toMatch(/locked by another OpenMausBot process/i);
-      expect(secondResult.error).toMatch(/locked by another OpenMausBot process/i);
+      expect(firstResult.error).toMatch(/locked by another Astra process/i);
+      expect(secondResult.error).toMatch(/locked by another Astra process/i);
       expect(readFileSync(lockPath, "utf8")).toBe(lockContents);
       expect(readFileSync(`${lockPath}.reap-${lockToken}`, "utf8")).toBe(reaperContents);
       expect(() => readFileSync(join(dataDir, "box-create-requests.json"), "utf8")).toThrow();

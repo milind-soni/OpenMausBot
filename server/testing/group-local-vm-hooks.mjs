@@ -1,7 +1,7 @@
 // Loaded only by group-local-vm.e2e.test.ts via --import. Replace the container
 // boundary, preserving the real server, lease code, MCP config and fake driver.
 import { registerHooks } from 'node:module';
-const state = process.env.OMB_TEST_VM_STATE;
+const state = process.env.ASTRA_TEST_VM_STATE;
 if (!state) throw new Error('An explicit isolated VM state file is required');
 const actual = new URL('../container-computer.ts?actual', import.meta.url).href;
 const mock = new URL('./group-local-vm-mock.mjs', import.meta.url).href;

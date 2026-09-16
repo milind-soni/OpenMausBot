@@ -35,19 +35,19 @@ describe("the managed Caddy", () => {
     expect(file).toContain("admin off");
   });
 
-  it("resolves OMB_CADDY_PATH, then the pinned download, then PATH", () => {
+  it("resolves ASTRA_CADDY_PATH, then the pinned download, then PATH", () => {
     const pinned = pinnedCaddyPath(dir, "linux", "x64");
     const onPath = join(dir, "bin", "caddy");
     const exists = (p: string) => p === pinned || p === onPath || p === join(dir, "custom");
-    expect(resolveCaddyBinary({ dataDir: dir, env: { OMB_CADDY_PATH: join(dir, "custom") }, platform: "linux", arch: "x64", exists })).toBe(join(dir, "custom"));
-    expect(resolveCaddyBinary({ dataDir: dir, env: { OMB_CADDY_PATH: "relative/caddy" }, platform: "linux", arch: "x64", exists })).toBeNull();
+    expect(resolveCaddyBinary({ dataDir: dir, env: { ASTRA_CADDY_PATH: join(dir, "custom") }, platform: "linux", arch: "x64", exists })).toBe(join(dir, "custom"));
+    expect(resolveCaddyBinary({ dataDir: dir, env: { ASTRA_CADDY_PATH: "relative/caddy" }, platform: "linux", arch: "x64", exists })).toBeNull();
     expect(resolveCaddyBinary({ dataDir: dir, env: { PATH: join(dir, "bin") }, platform: "linux", arch: "x64", exists })).toBe(pinned);
     expect(resolveCaddyBinary({ dataDir: join(dir, "elsewhere"), env: { PATH: join(dir, "bin") }, platform: "linux", arch: "x64", exists })).toBe(onPath);
     expect(resolveCaddyBinary({ dataDir: join(dir, "elsewhere"), env: { PATH: "" }, platform: "linux", arch: "x64", exists })).toBeNull();
   });
 
   it("takes a bare public hostname for --domain", () => {
-    expect(normalizeDomainOption(" HTTPS://Maus.Example.com/ ")).toBe("maus.example.com");
+    expect(normalizeDomainOption(" HTTPS://Astra.Example.com/ ")).toBe("maus.example.com");
     expect(normalizeDomainOption("maus.example.com:443")).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(normalizeDomainOption("localhost")).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(normalizeDomainOption("box.internal")).toEqual({ error: expect.stringContaining("public domain") });

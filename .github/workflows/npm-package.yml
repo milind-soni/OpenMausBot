@@ -41,37 +41,37 @@ jobs:
         run: |
           set -euo pipefail
           cd release/npm && npm pack --silent && cd ../..
-          rm -rf /tmp/omb-pack && mkdir -p /tmp/omb-pack && tar -xzf release/npm/openmausbot-*.tgz -C /tmp/omb-pack
+          rm -rf /tmp/omb-pack && mkdir -p /tmp/omb-pack && tar -xzf release/npm/astra-*.tgz -C /tmp/omb-pack
           cd /tmp/omb-pack/package
           # Every check below is a silent grep/test; say which one failed, and what the server said.
           set -x
           trap 'echo "--- serve.log"; cat serve.log 2>/dev/null; echo "--- tunnel.log"; cat tunnel.log 2>/dev/null' ERR
           test ! -d node_modules
-          node cli.js --help | grep -q "openmausbot serve"
+          node cli.js --help | grep -q "astra serve"
           HOME=/tmp/omb-pack/home node cli.js serve --no-pair --port 18799 --data-dir /tmp/omb-pack/data --label ci --public-url https://ci.example > serve.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18799/api/health >/dev/null && break; sleep 1; done
           grep -q "reachable at https://ci.example" serve.log
-          OMB_PORT=18799 node cli.js status | grep -q "ci ·"
-          OMB_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="
-          OMB_PORT=18799 node cli.js sessions | grep -q "no paired devices yet"
+          ASTRA_PORT=18799 node cli.js status | grep -q "ci ·"
+          ASTRA_PORT=18799 node cli.js pair --label "CI phone" | grep -q "open or scan:  https://ci.example/pair#code="
+          ASTRA_PORT=18799 node cli.js sessions | grep -q "no paired devices yet"
           # the bundles also run directly by path (the image and docs do that), not only through cli.js:
           # a bundled module with a "run when executed directly" block would fire here
-          node dist-server/openmausbot.js --help | grep -q "openmausbot serve"
-          OMB_PORT=1 node dist-server/pair-cli.js > pair.out 2>&1 || true
+          node dist-server/astra.js --help | grep -q "astra serve"
+          ASTRA_PORT=1 node dist-server/pair-cli.js > pair.out 2>&1 || true
           cat pair.out
-          grep -q "no OpenMausBot server" pair.out
+          grep -q "no Astra server" pair.out
           # --tunnel ships its own processes and fails closed without an account
           test -f dist-server/tunnel-guardian.js && test -f dist-server/prepare-cloudflared.js
           # the enterprise layer ships bundled (inert without a key) so a white-label key works on an npm install
           test -f enterprise/server/index.js && test -f enterprise/LICENSE
           if HOME=/tmp/omb-pack/home node cli.js serve --tunnel --port 18798 --data-dir /tmp/omb-pack/data2 > tunnel.log 2>&1; then echo "serve --tunnel should refuse without login"; exit 1; fi
-          grep -q "run \`openmausbot login\` first" tunnel.log
+          grep -q "run \`astra login\` first" tunnel.log
           kill %1; wait %1 || true
       # Trusted publishing: npm trusts this repository's workflow through the
       # OIDC token (`id-token: write` above), so no registry token is stored
       # anywhere and no one-time password is asked for. One-time setup on
       # npmjs.com: package → Settings → Publishing access → GitHub Actions,
-      # owner milind-soni, repository OpenMausBot, workflow npm-package.yml.
+      # owner milind-soni, repository Astra, workflow npm-package.yml.
       # Needs npm ≥ 11.5 (Node 24 ships it).
       - name: Publish to npm (release tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -89,7 +89,7 @@ jobs:
           # successful upload, so do not gate notes/artifacts on an immediate read.
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
-            printf '\n\n**npm:** `npx openmausbot@%s` · https://www.npmjs.com/package/openmausbot/v/%s\n' "$version" "$version" >> "$RUNNER_TEMP/notes.md"
+            printf '\n\n**npm:** `npx astra@%s` · https://www.npmjs.com/package/astra/v/%s\n' "$version" "$version" >> "$RUNNER_TEMP/notes.md"
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
           fi
       # The same tarball beside the desktop installers on the GitHub release,
@@ -102,7 +102,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release/npm/openmausbot-*.tgz --repo "$GITHUB_REPOSITORY" --clobber
+            gh release upload "$GITHUB_REF_NAME" release/npm/astra-*.tgz --repo "$GITHUB_REPOSITORY" --clobber
           else
             echo "no GitHub release named $GITHUB_REF_NAME; tarball not attached"
           fi

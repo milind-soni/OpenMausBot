@@ -1,4 +1,4 @@
-# OpenMausBot Harness Upgrades v2 Implementation Plan
+# Astra Harness Upgrades v2 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -6,7 +6,7 @@
 resilience and visibility primitives, and unlock local models — in an order
 where each round pays for the next.
 
-**Architecture:** OpenMausBot is itself a harness; `server/store.ts` is the
+**Architecture:** Astra is itself a harness; `server/store.ts` is the
 canonical cross-engine record and every path that turns it back into model
 context is load-bearing. This plan keeps v1's reframe and rounds, but corrects
 its scope against the code as it actually is today: two items were partly
@@ -29,7 +29,7 @@ item N", the executor reads that section of v1.
 - Node runs server TS directly via `--experimental-strip-types`; imports use explicit `.ts` extensions.
 - Never break the one-file driver promise: a new provider is one file in `server/drivers/` plus one registration.
 - Nothing is ever deleted from the store record; only model-facing rebuilds are bounded.
-- `~/.openmausbot` is shared across app versions — every new field or message kind must be ignorable by an older build.
+- `~/.astra` is shared across app versions — every new field or message kind must be ignorable by an older build.
 - e2e tests follow the `server/branching.test.ts` pattern: real server, fake CLI (`server/testing/fake-acp-cli.ts`), POSIX-gated.
 - All 59 existing test files must stay green (`pnpm test`); v1's "82 test files" figure was wrong.
 
@@ -123,7 +123,7 @@ included, results land via `switchBranch`).
 ### 3.2 Mid-turn steering *(v1 item 17)* — design as v1, including the stdin-EOF verification gate (`claude.ts:536` — answer open question 3 **before** designing the queue) and the 2.1 prerequisite.
 ### 3.3 Tool deadlines and loop **enforcement** *(v1 item 9, second half)* — with steering available, escalate 2.8's detection: inject the advisory note at the next safe point, terminate past the hard threshold. Per-call deadlines only where the harness actually owns the call; for CLI drivers the deadline remains "interrupt the turn", stated honestly in the UI.
 ### 3.4 Auto-retry in the main drivers *(v1 item 3, was 1.3 — skipped on 2026-08-17 and moved here)* — verified: zero retry in `claude.ts` / `codex.ts` / `grok.ts` while `box.ts`, `webhooks.ts`, and `acp/core.ts` all have it. Design as v1 item 3: classify transient (429, 5xx, overloaded, connection reset) vs terminal (auth, invalid model, quota); backoff + jitter with a small attempt cap; a `turn.retrying` runtime event so the UI shows it (the inspector from 1.2 makes this visible for free); an abort path so an interrupt during a retry cancels the whole turn; a retry after partial output discards the partial rather than duplicating it. Done when a simulated 529 produces a visible retry and a completed turn, and an invalid API key fails immediately without retrying.
-### 3.5 Image attachments *(v1 item 2, was 1.6 — skipped on 2026-08-17 and moved here)* — the paste/file/drop layer already exists in `src/lib/composer-attachments.ts`; only the image path is missing. Design: `POST /api/attachments` (image mimes, ≤10 MB) writes `~/.openmausbot/attachments/<uuid>.<ext>` and returns a path; the composer shows a thumbnail chip and `composeMessage` emits `<attached-image path="…"/>` — every CLI engine opens the file by path, no per-driver encoding; the transcript parses the tag into a thumbnail; `capabilities.images` per driver gates the paste (Claude/Codex/Antigravity/ACP true, grok/boxAgent false); `SendTurnInput.images` for API drivers waits for a second API driver (3.1). Done when a pasted screenshot reaches Claude, renders in the transcript, survives reload, and a grok bot refuses it politely.
+### 3.5 Image attachments *(v1 item 2, was 1.6 — skipped on 2026-08-17 and moved here)* — the paste/file/drop layer already exists in `src/lib/composer-attachments.ts`; only the image path is missing. Design: `POST /api/attachments` (image mimes, ≤10 MB) writes `~/.astra/attachments/<uuid>.<ext>` and returns a path; the composer shows a thumbnail chip and `composeMessage` emits `<attached-image path="…"/>` — every CLI engine opens the file by path, no per-driver encoding; the transcript parses the tag into a thumbnail; `capabilities.images` per driver gates the paste (Claude/Codex/Antigravity/ACP true, grok/boxAgent false); `SendTurnInput.images` for API drivers waits for a second API driver (3.1). Done when a pasted screenshot reaches Claude, renders in the transcript, survives reload, and a grok bot refuses it politely.
 
 ---
 
@@ -356,7 +356,7 @@ distinctive token (e.g. `Biscuit`), patches the bot's
 follow-up, waits for the reply, and asserts the *prompt* the second fake
 received contains `User:` and `Biscuit`. The fake's reply text is fixed, so
 assert via the native protocol log: the driver tees verbatim protocol
-messages **per thread** to `join(home, ".openmausbot", "native",
+messages **per thread** to `join(home, ".astra", "native",
 `${bot.threadId}.ndjson`)`. Read that one file, keep the `dir === "out"`
 entries whose `msg.method === "session/prompt"`, and tell the prompts apart
 by **order and content**: prompt 1 (first engine) carries no replay

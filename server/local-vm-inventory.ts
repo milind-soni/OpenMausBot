@@ -31,7 +31,7 @@ export interface LocalVmInventoryEntry {
 }
 
 /** Idle cleanup is destructive. An exact derived name alone is not ownership:
- * a pre-existing container must also carry OpenMausBot's verified labels. */
+ * a pre-existing container must also carry Astra's verified labels. */
 export function shouldArmLocalVmIdle(
   status: Pick<ContainerComputerStatus, "container" | "managed"> | null,
 ): boolean {

@@ -5,7 +5,7 @@
 // The previous community `agy` print-mode bridge mutated the user's global
 // ~/.gemini MCP config and could not surface interactive approvals. Official
 // ACP mounts MCP servers per session and uses the same trusted approval cards
-// as OpenMausBot's other ACP engines.
+// as Astra's other ACP engines.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type {
   DriverCreateInput,

@@ -44,12 +44,12 @@ createRoot(document.getElementById("root") ?? document.body.appendChild(document
     </Section>
     <Section label="wake detected">
       <span className="flex items-center gap-2 text-neutral-400">
-        <ThinkingOrb state="listening" size={20} /> “Luna” — listening…
+        <ThinkingOrb state="listening" size={20} /> “Astra” — listening…
       </span>
     </Section>
     <Section label="idle (armed)">
       <span className="flex items-center gap-2 text-neutral-400">
-        <Mic size={13} className="text-neutral-400" /> “Luna”
+        <Mic size={13} className="text-neutral-400" /> “Astra”
       </span>
     </Section>
   </StrictMode>,

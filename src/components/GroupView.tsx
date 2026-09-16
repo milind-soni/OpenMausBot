@@ -1074,7 +1074,7 @@ export function GroupView({ group }: { group: Group }) {
   };
 
   // Static profile avatars: one per member, a ring + dot on whoever is working.
-  const memberMauses = members.map((b) => (
+  const memberAstras = members.map((b) => (
     <span
       key={b.id}
       title={`${b.name}${group.busyBotId === b.id ? " — working…" : ""}`}
@@ -1131,7 +1131,7 @@ export function GroupView({ group }: { group: Group }) {
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
           {group.dm || remoteClient ? (
-            memberMauses
+            memberAstras
           ) : (
             // The roster lives where you already look to see who is in the
             // room; a dashed + says the row is editable without shouting.
@@ -1147,7 +1147,7 @@ export function GroupView({ group }: { group: Group }) {
               }
               className="flex items-center gap-1.5 rounded-full py-0.5 pl-1 pr-1.5 hover:bg-raised/60"
             >
-              {memberMauses}
+              {memberAstras}
               <span className="flex size-[18px] items-center justify-center rounded-full border border-dashed border-hairline/70 text-ink-secondary">
                 <Plus size={11} />
               </span>

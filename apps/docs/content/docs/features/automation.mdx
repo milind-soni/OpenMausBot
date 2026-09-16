@@ -8,9 +8,9 @@ icon: CalendarClock
 
 A routine runs once, at a repeating interval, or on selected weekdays. Each run starts a fresh execution using the selected bot's model, permissions, tools, and computer configuration.
 
-<ProductScreenshot name="docs-automations" alt="An empty OpenMausBot automations calendar ready for its first schedule" caption="Review work across a day, three-day, or week view and filter by bot." />
+<ProductScreenshot name="docs-automations" alt="An empty Astra automations calendar ready for its first schedule" caption="Review work across a day, three-day, or week view and filter by bot." />
 
-Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. OpenMausBot must be running when a local routine becomes due.
+Run receipts distinguish queued, active, waiting, completed, missed, failed, and cancelled work. Astra must be running when a local routine becomes due.
 
 ### Keep reports in one thread
 
@@ -28,7 +28,7 @@ Right-click a folder or open its **…** menu, then choose **Mark folder as read
 
 Webhooks start the same queued task executor from an external HTTP request. They are independent from schedules and use a dedicated receiver on `127.0.0.1:8800` by default.
 
-The receiver exposes only health and secret hook routes. It does not expose the broader OpenMausBot API.
+The receiver exposes only health and secret hook routes. It does not expose the broader Astra API.
 
 Bearer authentication is preferred because it keeps the secret out of URLs and most access logs. A capability URL is available for senders that cannot set headers.
 
@@ -36,6 +36,6 @@ Bearer authentication is preferred because it keeps the secret out of URLs and m
 
 To accept events from the public internet, proxy only the webhook receiver through a narrowly configured relay or tunnel. Do not expose the main harness port.
 
-<Callout type="warn" title="OpenMausBot must remain running">
+<Callout type="warn" title="Astra must remain running">
   Local routines and webhook deliveries are not hosted jobs. Closing the desktop app stops the local executor and receiver.
 </Callout>

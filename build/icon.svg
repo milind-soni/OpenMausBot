@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">OpenMausBot</title>
-  <desc id="desc">An oversized silver SupaMaus cursor on a black app tile, tilted toward the top-right corner and cropped by the left and bottom edges.</desc>
+  <title id="title">Astra</title>
+  <desc id="desc">An oversized silver SupaAstra cursor on a black app tile, tilted toward the top-right corner and cropped by the left and bottom edges.</desc>
 
   <defs>
     <clipPath id="tile"><rect width="1024" height="1024" rx="230.4" /></clipPath>
@@ -22,7 +22,7 @@
     <g clip-path="url(#tile)">
       <rect width="1024" height="1024" fill="#000000" />
 
-      <!-- SupaMaus body with the face cut out (evenodd). Oversized on purpose:
+      <!-- SupaAstra body with the face cut out (evenodd). Oversized on purpose:
            it runs off the left and bottom and is cropped by the tile, but the
            cursor's point is held clear of the top-right corner so that corner
            keeps its gap. Geometry is the brand vector's, rotated 71.1 from its

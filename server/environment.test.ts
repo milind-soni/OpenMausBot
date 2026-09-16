@@ -42,7 +42,7 @@ function importComputerProvidersInChild(dataDir: string): Promise<void> {
       process.execPath,
       ["--experimental-strip-types", "--input-type=module", "--eval", source],
       {
-        env: { ...process.env, OMB_DATA_DIR: dataDir },
+        env: { ...process.env, ASTRA_DATA_DIR: dataDir },
         stdio: ["ignore", "ignore", "pipe"],
       },
     );
@@ -60,8 +60,8 @@ function importComputerProvidersInChild(dataDir: string): Promise<void> {
 
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
-  delete process.env.OMB_APP_VERSION;
-  delete process.env.OMB_ENVIRONMENT_LABEL;
+  delete process.env.ASTRA_APP_VERSION;
+  delete process.env.ASTRA_ENVIRONMENT_LABEL;
 });
 
 describe("environment identity", () => {
@@ -115,8 +115,8 @@ describe("environment identity", () => {
   });
 
   it("describes the server for clients without leaking anything secret", () => {
-    process.env.OMB_APP_VERSION = "0.1.99";
-    process.env.OMB_ENVIRONMENT_LABEL = "cab mini";
+    process.env.ASTRA_APP_VERSION = "0.1.99";
+    process.env.ASTRA_ENVIRONMENT_LABEL = "cab mini";
     const d = environmentDescriptor({ environmentId: "abc", desktopManaged: true });
     expect(d).toEqual({
       environmentId: "abc",
@@ -129,7 +129,7 @@ describe("environment identity", () => {
   });
 
   it("falls back to the checkout's package.json version, then to unknown", () => {
-    delete process.env.OMB_APP_VERSION;
+    delete process.env.ASTRA_APP_VERSION;
     expect(serverVersion()).toMatch(/^\d+\.\d+\.\d+/);
   });
 });

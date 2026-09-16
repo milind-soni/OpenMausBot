@@ -24,6 +24,6 @@ describe("folder ordering", () => {
     expect(draggedFolder(JSON.stringify({ botId: "other", projectId: "two" }), "bot", ids)).toBeNull();
     expect(draggedFolder(JSON.stringify({ botId: "bot", projectId: "deleted" }), "bot", ids)).toBeNull();
     for (const raw of ["bots", "two", "{}", "null", "[]", "true"]) expect(draggedFolder(raw, "bot", ids)).toBeNull();
-    expect(FOLDER_DRAG_TYPE).not.toBe("application/x-openmausbot-sidebar-section");
+    expect(FOLDER_DRAG_TYPE).not.toBe("application/x-astra-sidebar-section");
   });
 });

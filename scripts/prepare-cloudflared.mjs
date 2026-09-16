@@ -4,7 +4,7 @@
 // script. The release asset is verified before extraction and the executable
 // is verified again on every reuse.
 // Nothing is installed globally and cloudflared's own updater stays disabled;
-// OpenMausBot updates this dependency with an ordinary reviewed app release.
+// Astra updates this dependency with an ordinary reviewed app release.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -89,7 +89,7 @@ export function parsePrepareCloudflaredArgs(args = []) {
     if (argument === "--current" && !options.current) {
       options.current = true;
     } else if (argument === "--root" && !options.root && typeof next === "string" && next !== "") {
-      // `openmausbot serve --tunnel` stages into its data dir, not a checkout.
+      // `astra serve --tunnel` stages into its data dir, not a checkout.
       options.root = next;
       index += 1;
     } else {
@@ -219,7 +219,7 @@ function extractionFailure(result) {
 
 /** Retry transient download failures; callers still verify the pinned digest. */
 export async function releaseBytes(asset) {
-  const cacheDirectory = process.env.OMB_CLOUDFLARED_ARCHIVE_DIR;
+  const cacheDirectory = process.env.ASTRA_CLOUDFLARED_ARCHIVE_DIR;
   const cached = cacheDirectory ? join(cacheDirectory, asset.name) : "";
   if (cached && existsSync(cached)) return readFileSync(cached);
 

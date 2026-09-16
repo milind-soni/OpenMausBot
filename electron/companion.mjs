@@ -58,7 +58,7 @@ const entryPoint = (resourcesPath) =>
 // stayed closed until the user rediscovered the switch. The position of the
 // toggle is state worth keeping, and it lives in the app's own userData —
 // like cua-connection.json — because the app owns the toggle. Not in the
-// sidecar's ~/.openmausbot-companion, which is the child process's directory,
+// sidecar's ~/.astra-companion, which is the child process's directory,
 // and not in the harness's config.json, which is somebody else's data layout.
 
 const settingsFile = () => path.join(app.getPath("userData"), "companion-settings.json");
@@ -221,13 +221,13 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   // an inherited value would bypass that gate and make Settings claim a dead
   // or attacker-selected route is ready.
   const childEnvironment = { ...process.env };
-  delete childEnvironment.OMB_COMPANION_HOSTED_URL;
-  delete childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN;
-  delete childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY;
-  if (hostedUrl) childEnvironment.OMB_COMPANION_HOSTED_URL = hostedUrl;
-  childEnvironment.OMB_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
+  delete childEnvironment.ASTRA_COMPANION_HOSTED_URL;
+  delete childEnvironment.ASTRA_COMPANION_INTERNAL_ORIGIN;
+  delete childEnvironment.ASTRA_PHONE_SECRET_PUBLIC_KEY;
+  if (hostedUrl) childEnvironment.ASTRA_COMPANION_HOSTED_URL = hostedUrl;
+  childEnvironment.ASTRA_COMPANION_INTERNAL_ORIGIN = allocatedOrigin.socketPath;
   if (/^[A-Za-z0-9_-]{87}$/.test(String(secretPublicKey ?? ""))) {
-    childEnvironment.OMB_PHONE_SECRET_PUBLIC_KEY = secretPublicKey;
+    childEnvironment.ASTRA_PHONE_SECRET_PUBLIC_KEY = secretPublicKey;
   }
 
   let child;
@@ -235,9 +235,9 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
     child = utilityProcess.fork(resolved.entry, [], {
       env: {
         ...childEnvironment,
-        OMB_PORT: String(harnessPort),
-        OMB_COMPANION_PORT: String(COMPANION_PORT),
-        OMB_CONTROL_PORT: String(CONTROL_PORT),
+        ASTRA_PORT: String(harnessPort),
+        ASTRA_COMPANION_PORT: String(COMPANION_PORT),
+        ASTRA_CONTROL_PORT: String(CONTROL_PORT),
       },
       // how the TS-source fallback gets --experimental-strip-types; empty for
       // compiled entries
@@ -252,7 +252,7 @@ async function start({ resourcesPath, harnessPort, mutationToken, hostedUrl = nu
   child.once("spawn", () => {
     // Never expose this capability in argv, environment, logs or the renderer.
     try {
-      child.postMessage({ type: "openmausbot:companion-mutation-token", token: mutationToken });
+      child.postMessage({ type: "astra:companion-mutation-token", token: mutationToken });
     } catch {
       log?.("companion authorization could not be initialized");
       child.kill();
@@ -404,7 +404,7 @@ export async function companionState() {
 }
 
 /** Re-read Tailscale without restarting the sidecar or dropping connected
- * phones. Tailscale may be installed, signed in, or enabled after OpenMausBot
+ * phones. Tailscale may be installed, signed in, or enabled after Astra
  * starts, so startup-only detection makes an otherwise healthy route look
  * permanently unavailable. */
 export async function companionRefreshTailscale() {
@@ -433,7 +433,9 @@ export async function companionPairing(open, expectedToken) {
   if (!proc) return companionState();
   const conditionalClose = !open && expectedToken !== undefined;
   const candidate = String(expectedToken ?? "");
-  const token = /^omb_pair_[A-Za-z0-9_-]{43}$/.test(candidate)
+  // astra_pair_ since the Astra rename; omb_pair_ tokens from a pre-rename
+  // sidecar are still honored so a mixed-version window never bricks.
+  const token = /^(?:astra_pair_|omb_pair_)[A-Za-z0-9_-]{43}$/.test(candidate)
     ? candidate
     : "invalid-pairing-token";
   const path = conditionalClose

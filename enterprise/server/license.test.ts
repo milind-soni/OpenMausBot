@@ -30,7 +30,7 @@ describe("license keys", () => {
     const old = keypair();
     const fresh = keypair();
     const key = issueLicenseKey(claims, old.privateJwk);
-    expect(() => verifyLicenseKey(key, { publicKeys: [fresh.x], now: new Date("2026-12-01") })).toThrow(/does not match any OpenMausBot signing key/);
+    expect(() => verifyLicenseKey(key, { publicKeys: [fresh.x], now: new Date("2026-12-01") })).toThrow(/does not match any Astra signing key/);
     expect(verifyLicenseKey(key, { publicKeys: [fresh.x, old.x], now: new Date("2026-12-01") }).customer).toBe(claims.customer);
   });
 
@@ -69,6 +69,6 @@ describe("license keys", () => {
 
   it("register() turns a key into the layer contract and passes verification errors through", () => {
     expect(register({ licenseKey: undefined })).toBeNull();
-    expect(() => register({ licenseKey: "omb1.bad.key" })).toThrow(/OMB_LICENSE_KEY/);
+    expect(() => register({ licenseKey: "omb1.bad.key" })).toThrow(/ASTRA_LICENSE_KEY/);
   });
 });

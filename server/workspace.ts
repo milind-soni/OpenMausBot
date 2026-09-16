@@ -1,7 +1,7 @@
 // Per-bot workspaces + file-based memory.
 //
 // Every bot that runs a local CLI engine gets its own working directory,
-// ~/.openmausbot/workspaces/<botId>/, instead of the user's home: a bot
+// ~/.astra/workspaces/<botId>/, instead of the user's home: a bot
 // with file tools and acceptEdits should have a desk, not the whole house.
 // The workspace doubles as the bot's memory: MEMORY.md is loaded into the
 // system prompt at the start of every turn (under a hard budget), and

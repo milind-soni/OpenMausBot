@@ -3,7 +3,7 @@ import { initialState, reducer, type AppState, type Bot, type BotAnnouncement, t
 import { folderUnreadThreadIds, markFolderRead } from "./folder-read";
 
 const bot: Bot = {
-  id: "maus", threadId: "elsewhere", name: "Maus", title: "", description: "", notifications: true,
+  id: "maus", threadId: "elsewhere", name: "Astra", title: "", description: "", notifications: true,
   color: "green", unread: true, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   projects: [{ id: "archive", name: "Archived" }, { id: "work", name: "Work" }],
   tasks: [

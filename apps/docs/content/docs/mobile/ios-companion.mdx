@@ -1,6 +1,6 @@
 ---
 title: iOS companion
-description: Pair an iPhone directly with the OpenMausBot instance running on your computer.
+description: Pair an iPhone directly with the Astra instance running on your computer.
 icon: Smartphone
 ---
 
@@ -28,12 +28,12 @@ The computer stores only a digest of the device token. Revoking the phone from d
 - **Hosted HTTPS:** sign in by email on the desktop to provision a private
   Cloudflare Tunnel address; the phone still pairs to that specific computer.
 
-LAN and Tailscale remain available without an OpenMausBot account. The hosted
+LAN and Tailscale remain available without an Astra account. The hosted
 control plane stores account/installation metadata, not transcripts; Cloudflare
 proxies phone traffic to the user's computer. Bonjour does not cross Tailscale,
 so that direct remote option uses manual address entry.
 
-Your computer must remain on, awake, and running OpenMausBot. In desktop Companion Settings, **Keep this computer awake** can prevent system sleep while Companion is enabled; it is off by default, allows the screen to turn off, and may use more battery. A sleeping or powered-off computer cannot be reached even through hosted HTTPS.
+Your computer must remain on, awake, and running Astra. In desktop Companion Settings, **Keep this computer awake** can prevent system sleep while Companion is enabled; it is off by default, allows the screen to turn off, and may use more battery. A sleeping or powered-off computer cannot be reached even through hosted HTTPS.
 
 ## Security boundary
 

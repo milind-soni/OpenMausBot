@@ -21,7 +21,7 @@ export function updateErrorMessage(error) {
     return "The update could not write to the app or its cache. Check folder permissions, or use the official installer.";
   }
   if (/\bEBUSY\b|being used by another process/i.test(detail)) {
-    return "An update file is in use. Close other copies of OpenMausBot, then try again.";
+    return "An update file is in use. Close other copies of Astra, then try again.";
   }
   if (/certificate/i.test(detail)) {
     return "The update connection could not be verified. Check your clock, VPN or proxy; do not disable certificate checks.";

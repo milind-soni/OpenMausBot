@@ -976,7 +976,7 @@ export function ComputerPanel({
   };
 
   const openVmSettings = () => {
-    window.sessionStorage.setItem("openmausbot.settings.section", "computer");
+    window.sessionStorage.setItem("astra.settings.section", "computer");
     dispatch({ type: "toggleAppSettings", open: true });
   };
 
@@ -1085,7 +1085,7 @@ export function ComputerPanel({
 
       {panelView === "routines" ? (
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "maus"} />
+          <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "astra"} />
         </div>
       ) : panelView === "browser" && browserEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">

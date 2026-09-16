@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { removeTempDir } from "../server/testing/cleanup.ts";
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 // Opt in to an actual fake-engine reply containing peer mentions. A shared
@@ -11,7 +11,7 @@ import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/pr
 // lives in this launcher's own scratch directory because the fixture home does
 // not exist until the server is up. The launcher forwards FAKE_CLAUDE_*.
 const reply = "@Juniper please review. @調査担当 確認してください。 @Atlas final check.\n\nReverse: @調査担当 then @Juniper.\n\nPlain prefixes: @調査担当者 @everyone調査. Neutral: @everyone.";
-const scratch = process.argv.includes("--bot-mentions") ? mkdtempSync(join(tmpdir(), "openmausbot-verify-mentions-")) : undefined;
+const scratch = process.argv.includes("--bot-mentions") ? mkdtempSync(join(tmpdir(), "astra-verify-mentions-")) : undefined;
 const fixture = await launchVerificationServer({
   ...process.env,
   ...(scratch ? { FAKE_CLAUDE_REPLIES: JSON.stringify([reply]), FAKE_CLAUDE_REPLY_STATE: join(scratch, "mention-replies.txt") } : {}),

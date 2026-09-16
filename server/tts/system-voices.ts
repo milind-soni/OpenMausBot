@@ -64,7 +64,7 @@ export async function listSystemVoices(run: Runner = defaultRun): Promise<Voice[
 export async function synthesizeSystem(text: string, voiceId: string | undefined, run: Runner = defaultRun): Promise<Audio> {
   const trimmed = text.trim();
   if (!trimmed) return { bytes: new Uint8Array(), mime: "audio/wav" };
-  const dir = await mkdtemp(join(tmpdir(), "openmausbot-say-"));
+  const dir = await mkdtemp(join(tmpdir(), "astra-say-"));
   const out = join(dir, "utterance.wav");
   try {
     const args = ["-o", out, "--data-format=LEI16@22050"];

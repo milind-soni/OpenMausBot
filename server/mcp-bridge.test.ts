@@ -118,7 +118,7 @@ describe("runLivenessProbe", () => {
       runLivenessProbe({ command: process.execPath, args: ["-e", "process.exit(3)"] }),
     ).resolves.toBe(false);
     await expect(
-      runLivenessProbe({ command: "/nonexistent/openmausbot-probe", args: [] }),
+      runLivenessProbe({ command: "/nonexistent/astra-probe", args: [] }),
     ).resolves.toBe(false);
   });
 

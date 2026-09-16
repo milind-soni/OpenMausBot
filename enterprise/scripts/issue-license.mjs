@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Issue OpenMausBot enterprise license keys.
+// Issue Astra enterprise license keys.
 //
-//   node enterprise/scripts/issue-license.mjs keygen [--out ~/.config/openmausbot-enterprise/signing-key.json]
+//   node enterprise/scripts/issue-license.mjs keygen [--out ~/.config/astra-enterprise/signing-key.json]
 //     Creates an Ed25519 signing key (file mode 0600) and prints the public
 //     part to append to LICENSE_PUBLIC_KEYS in enterprise/server/license.ts.
 //
 //   node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features whitelabel,sso \
 //        [--expires 2027-09-02] [--key <path>]
-//     Prints a key for OMB_LICENSE_KEY. Claims are visible to the customer
+//     Prints a key for ASTRA_LICENSE_KEY. Claims are visible to the customer
 //     (base64url JSON); only the signature is secret-derived.
 //
 // The private key never enters the repo, a chat, or a container image.
@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 
 import { issueLicenseKey } from "../server/license.ts";
 
-const DEFAULT_KEY_PATH = join(homedir(), ".config", "openmausbot-enterprise", "signing-key.json");
+const DEFAULT_KEY_PATH = join(homedir(), ".config", "astra-enterprise", "signing-key.json");
 
 function fail(message) {
   console.error(message);

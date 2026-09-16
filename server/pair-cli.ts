@@ -1,4 +1,4 @@
-// Compatibility alias: `openmausbot pair` lives in cli.ts now. Kept because
+// Compatibility alias: `astra pair` lives in cli.ts now. Kept because
 // docs and images reference dist-server/pair-cli.js.
 import { main } from "./cli.ts";
 import { exitAfterFlush } from "./exit.ts";

@@ -67,7 +67,7 @@ describe("chiefOfStaffSystemPrompt", () => {
     expect(prompt).not.toContain("delegate_bot");
   });
 
-  it("includes trusted OpenMaus status only when the Chief caller supplies it", () => {
+  it("includes trusted Astra status only when the Chief caller supplies it", () => {
     const status = "TRUSTED OPENMAUSBOT STATUS\nfreshness=fresh; runtime_state=degraded";
 
     const chiefPrompt = chiefOfStaffSystemPrompt("chief", bots, true, status);

@@ -23,7 +23,7 @@ avatar**. The image provider is independent of the bot's chat engine.
 - **Custom** accepts a compatible Images API. Enter its **Base URL**, its
   **Image model** ID, and an optional API key, then choose **Save connection**.
   Use the model ID supported by that gateway, including any provider prefix
-  it requires. OpenMausBot sends only the custom key to this connection.
+  it requires. Astra sends only the custom key to this connection.
 
 Direct OpenAI and Grok generation require their respective API keys and API
 access. Signing into a ChatGPT, Codex, or Grok subscription does not configure
@@ -33,9 +33,9 @@ see [xAI's account FAQ](https://docs.x.ai/developers/faq/accounts#if-i-already-h
 ### Custom gateway compatibility
 
 For a local gateway such as OmniRoute, a base URL might be
-`http://127.0.0.1:20128/v1`. OpenMausBot appends `/images/generations`; pasting
+`http://127.0.0.1:20128/v1`. Astra appends `/images/generations`; pasting
 that complete endpoint is also accepted. `localhost` and `127.0.0.1` refer to
-the machine running the OpenMausBot server, including when you open the app
+the machine running the Astra server, including when you open the app
 remotely. Public endpoints require HTTPS. HTTP is supported for local/private
 endpoints. URLs must not contain embedded credentials, query parameters, or
 fragments.

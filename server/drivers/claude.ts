@@ -186,7 +186,7 @@ function claudeEnvironment(
  * to give a bot a server is the app's own `mcpServers` config or the bot
  * project's `.mcp.json`. */
 function inheritsUserConfig(env: NodeJS.ProcessEnv): boolean {
-  return env.OMB_CLAUDE_INHERIT_USER_CONFIG === "1";
+  return env.ASTRA_CLAUDE_INHERIT_USER_CONFIG === "1";
 }
 
 /** MCP servers the bot's own project declares in `<cwd>/.mcp.json`.
@@ -224,12 +224,12 @@ function projectMcpServers(cwd: string): Record<string, unknown> {
  * compaction to the CLI, which owns the session and already has a summarizer
  * for it; the harness only decides when it is worth paying for.
  *
- * OMB_CLAUDE_AUTOCOMPACT takes a token count, "auto" to hand the decision
+ * ASTRA_CLAUDE_AUTOCOMPACT takes a token count, "auto" to hand the decision
  * back to the CLI, or "off" to pass nothing at all. The CLI rejects a window
  * outside 100k-1M as a hard argument error, so a configured value is clamped
  * rather than passed through: a mistyped setting must not fail every turn. */
 export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
-  const raw = (env.OMB_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
+  const raw = (env.ASTRA_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
   if (raw === "off") return null;
   if (raw === "auto") return "auto";
   const parsed = raw ? Number(raw) : DEFAULT_AUTOCOMPACT_TOKENS;
@@ -303,7 +303,7 @@ export function claudeCliUpdate(version: string | null, cli: string): ProviderSn
     title: "Update Claude Code for context controls",
     message:
       `Claude Code ${parsed.join(".")} predates ${floor}, so bots run without ${missing.join(", ")}: ` +
-      "no compaction window picked by OpenMausBot" +
+      "no compaction window picked by Astra" +
       (missing.includes("--setting-sources") ? ", and bots still see this machine's own Claude Code setup" : "") +
       ". Update it, then refresh Engines.",
     command: cli === "claude" ? "claude update" : `${cli} update`,
@@ -435,17 +435,17 @@ type AskBehavior = "allow" | "deny" | "answer";
 type AskResolutionSource = "user" | "timeout" | "system";
 
 const DENY_TIMEOUT_NOTE =
-  "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
-const QUESTION_TIMEOUT_NOTE = "OpenMausBot: nobody answered in time. Use your best judgment and continue.";
-const DUPLICATE_ASK_ID_NOTE = "OpenMausBot: duplicate ask id — skipping this request.";
+  "Astra: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+const QUESTION_TIMEOUT_NOTE = "Astra: nobody answered in time. Use your best judgment and continue.";
+const DUPLICATE_ASK_ID_NOTE = "Astra: duplicate ask id — skipping this request.";
 
 /** The system-source reply for an ask that outlives the turn — used both to
  * drain in-flight `pending` asks on close() and to answer one that arrives
  * on an already-closed broker (see the `closed` branch below). */
 function systemEndedReply(kind: Ask["kind"]): { behavior: AskBehavior; message: string } {
   return kind === "question"
-    ? { behavior: "answer", message: "OpenMausBot: the turn is ending — wrap up." }
-    : { behavior: "deny", message: "OpenMausBot: the turn ended" };
+    ? { behavior: "answer", message: "Astra: the turn is ending — wrap up." }
+    : { behavior: "deny", message: "Astra: the turn ended" };
 }
 
 /** One human-readable line for an ask — what the card subtitle shows. */
@@ -881,11 +881,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       finishClose?: () => Promise<void>;
     }
     const sessions = new Map<string, Session>();
-    const configuredIdleMinimum = Number(process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS);
+    const configuredIdleMinimum = Number(process.env.ASTRA_CLAUDE_SESSION_IDLE_MIN_MS);
     const sessionIdleMinimum = Number.isFinite(configuredIdleMinimum) && configuredIdleMinimum > 0
       ? configuredIdleMinimum
       : 10_000;
-    const SESSION_IDLE_MS = Math.max(sessionIdleMinimum, Number(process.env.OMB_CLAUDE_SESSION_IDLE_MS) || 10 * 60_000);
+    const SESSION_IDLE_MS = Math.max(sessionIdleMinimum, Number(process.env.ASTRA_CLAUDE_SESSION_IDLE_MS) || 10 * 60_000);
 
     const stopSession = (session: Session) => {
       void killCliTree(session.child).then((stopped) => {
@@ -1052,7 +1052,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           env: local.env,
         };
         // The isolated Local VM preserves the established pre-allow behavior.
-        // Host tools always route through OpenMausBot's permission broker.
+        // Host tools always route through Astra's permission broker.
         if (!controlsHost) allowed.push("mcp__computer");
       }
       // peer-agent comms (list_bots/ask_bot) — the harness builds the whole

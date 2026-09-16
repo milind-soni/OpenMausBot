@@ -55,12 +55,12 @@ The automated browser regression runs these contention, cancellation, decoded
 frame retention, and join-pause checks against the same fixture:
 
 ```sh
-OMB_UI_E2E=1 node node_modules/vitest/vitest.mjs run scripts/testing/cloud-preview.e2e.test.ts
+ASTRA_UI_E2E=1 node node_modules/vitest/vitest.mjs run scripts/testing/cloud-preview.e2e.test.ts
 ```
 
 It reuses the standard isolated UI harness and prints the temporary data path
 and persistent server log. To reuse already installed test binaries, set
-`OMB_AGENT_BROWSER_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` explicitly.
+`ASTRA_AGENT_BROWSER_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` explicitly.
 
 The fixture tests actual image decoding, request cancellation, fresh frame
 selection, and renderer feedback. Host work continuing after cancellation is

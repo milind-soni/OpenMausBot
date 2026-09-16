@@ -84,10 +84,10 @@ app.whenReady().then(async () => {
     cwd: root,
     execArgv: ["--experimental-strip-types"],
     env: {
-      HOME: home, USERPROFILE: home, OMB_DATA_DIR: home, PATH: "",
+      HOME: home, USERPROFILE: home, ASTRA_DATA_DIR: home, PATH: "",
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
-      OMB_TEST_INTERNAL_CAPABILITY_KEY: testCapabilityKey,
+      ASTRA_PORT: String(port), ASTRA_WEBHOOK_PORT: String(webhookPort),
+      ASTRA_TEST_INTERNAL_CAPABILITY_KEY: testCapabilityKey,
       FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: dump,
       FAKE_ACP_MODE: "permission", FAKE_ACP_AUTH_METHOD: "oauth-personal",
       FAKE_ACP_MODELS: "gemini-3.8-flash-high,gemini-3.8-flash-low", FAKE_ACP_MODES: "default,yolo",
@@ -210,7 +210,7 @@ app.whenReady().then(async () => {
   const peerTarget = (await api("/api/bots", "POST", { modelSelection: { instanceId: "agy", model: "gemini-3.8-flash-high" } })).body.bot;
   await coordinator.request(child, peerTarget.id, "full");
   assert.equal((await api(`/api/bots/${id}`, "PATCH", { approvePeerComms: false })).status, 200);
-  const capability = await api("/api/testing/internal-capability", "POST", { botId: id, threadId: created.body.bot.threadId }, { "x-openmausbot-test-capability": testCapabilityKey });
+  const capability = await api("/api/testing/internal-capability", "POST", { botId: id, threadId: created.body.bot.threadId }, { "x-astra-test-capability": testCapabilityKey });
   assert.equal(capability.status, 201);
   const peerRequest = api("/api/internal/ask-bot", "POST", { toBotId: peerTarget.id, message: "Peer-initiated permission fixture" }, { authorization: `Bearer ${capability.body.token}` });
   void peerRequest.catch(() => {});

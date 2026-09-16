@@ -48,16 +48,16 @@ describe("managed Composio desktop registration", () => {
     expect(
       managedComposioChildEnvironment("http://broker.example", credentials, {
         PATH: "/usr/bin",
-        OMB_COMPOSIO_BROKER_URL: "http://attacker.example",
-        OMB_COMPOSIO_BROKER_TOKEN: "attacker-controlled",
+        ASTRA_COMPOSIO_BROKER_URL: "http://attacker.example",
+        ASTRA_COMPOSIO_BROKER_TOKEN: "attacker-controlled",
       }),
     ).toEqual({ PATH: "/usr/bin" });
     expect(
       managedComposioChildEnvironment("http://[::1]:8787", credentials, { PATH: "/usr/bin" }),
     ).toEqual({
       PATH: "/usr/bin",
-      OMB_COMPOSIO_BROKER_URL: "http://[::1]:8787",
-      OMB_COMPOSIO_BROKER_TOKEN: TOKEN,
+      ASTRA_COMPOSIO_BROKER_URL: "http://[::1]:8787",
+      ASTRA_COMPOSIO_BROKER_TOKEN: TOKEN,
     });
   });
 

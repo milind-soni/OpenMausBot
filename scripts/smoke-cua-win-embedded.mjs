@@ -28,12 +28,12 @@ for (const [label, file] of [["cua-driver.exe", binary], ["cua-sdk bundle", bund
 // library lookup to exactly this path; verify the redirect is present, or the
 // packaged app would fall back to node_modules paths that do not exist.
 const bundledSource = readFileSync(bundle, "utf8");
-if (!bundledSource.includes("OPENMAUSBOT_CUA_SDK_LIBRARY")) {
-  console.error("staged cua-sdk.mjs lacks the OPENMAUSBOT_CUA_SDK_LIBRARY resolver patch — re-run pnpm build:cua:win");
+if (!bundledSource.includes("ASTRA_CUA_SDK_LIBRARY")) {
+  console.error("staged cua-sdk.mjs lacks the ASTRA_CUA_SDK_LIBRARY resolver patch — re-run pnpm build:cua:win");
   process.exit(1);
 }
 
-process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = dll;
+process.env.ASTRA_CUA_SDK_LIBRARY = dll;
 
 const sdk = await import(pathToFileURL(bundle).href);
 if (typeof sdk.EmbeddedCuaDriverHost !== "function") {
@@ -41,7 +41,7 @@ if (typeof sdk.EmbeddedCuaDriverHost !== "function") {
   process.exit(1);
 }
 
-const host = new sdk.EmbeddedCuaDriverHost(binary, "com.openmausbot.app");
+const host = new sdk.EmbeddedCuaDriverHost(binary, "com.astra.app");
 try {
   const conn = await host.start();
   if (!conn?.socketPath) throw new Error("embedded host reported no socketPath");

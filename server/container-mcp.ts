@@ -17,8 +17,8 @@ if (!container || !/^[a-zA-Z0-9_.-]+$/.test(container) || !socket?.startsWith("/
 
 // The who-is-driving pair rides in env, not argv — argv is world-readable
 // through `ps`, and the token guards a loopback endpoint.
-const controlUrl = process.env.OMB_CONTROL_URL ?? "";
-const controlToken = process.env.OMB_CONTROL_TOKEN ?? "";
+const controlUrl = process.env.ASTRA_CONTROL_URL ?? "";
+const controlToken = process.env.ASTRA_CONTROL_TOKEN ?? "";
 
 runMcpBridge({
   command: runtime,

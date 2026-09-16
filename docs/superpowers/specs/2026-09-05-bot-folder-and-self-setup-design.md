@@ -19,7 +19,7 @@ the product contract; tests and implementation define API details.
 ## One source of truth
 
 Canonical instructions live in BotRecord.soul in bots.json.
-~/.openmausbot/bots/<id>/SOUL.md is a readable mirror, not another database.
+~/.astra/bots/<id>/SOUL.md is a readable mirror, not another database.
 The prompt always uses the canonical record. Existing memory, skills, and
 workspace storage stay where they are.
 

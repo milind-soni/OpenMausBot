@@ -13,25 +13,25 @@ import fs from "node:fs";
 // asserts the two lists never drift apart.
 export const CREDENTIAL_ENV_NAMES = [
   "XAI_API_KEY",
-  "OMB_ANTHROPIC_API_KEY",
-  "OMB_ANTHROPIC_API_URL",
+  "ASTRA_ANTHROPIC_API_KEY",
+  "ASTRA_ANTHROPIC_API_URL",
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_URL",
   "FREELLMAPI_API_KEY",
   "VISION_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
-  "OMB_TTS_KEY",
-  "OMB_DICTATION_KEY",
-  "OMB_PICOVOICE_KEY",
-  "OMB_OPENAI_IMAGE_KEY",
-  "OMB_CUSTOM_IMAGE_KEY",
+  "ASTRA_TTS_KEY",
+  "ASTRA_DICTATION_KEY",
+  "ASTRA_PICOVOICE_KEY",
+  "ASTRA_OPENAI_IMAGE_KEY",
+  "ASTRA_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
-  "OMB_COMPOSIO_BROKER_TOKEN",
+  "ASTRA_COMPOSIO_BROKER_TOKEN",
   // Browser capability files and app-owned state paths are private even
   // though they are not traditional API credentials.
-  "OMB_BROWSER_CONNECTION",
-  "OMB_USER_DATA",
+  "ASTRA_BROWSER_CONNECTION",
+  "ASTRA_USER_DATA",
 ];
 
 // Credential-shaped tokens (server/redact.ts parity): unmistakable formats
@@ -287,7 +287,7 @@ export function buildDiagnosticsReport({
   now = new Date().toISOString(),
 } = {}) {
   const lines = [];
-  lines.push("OpenMausBot diagnostics");
+  lines.push("Astra diagnostics");
   lines.push(`Generated: ${now}`);
   lines.push("");
   lines.push("## App");
@@ -334,7 +334,7 @@ export function buildDiagnosticsReport({
 export function diagnosticsFileName(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
   return (
-    `openmausbot-diagnostics-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
+    `astra-diagnostics-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
     `-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}.txt`
   );
 }

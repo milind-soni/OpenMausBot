@@ -10,12 +10,12 @@
 export const WORKSPACE_CREDENTIALS = [
   { section: "xai", field: "key", name: "xaiApiKey", env: "XAI_API_KEY" },
   { section: "box", field: "token", name: "boxToken", env: "BOX_TOKEN" },
-  { section: "tts", field: "key", name: "ttsKey", env: "OMB_TTS_KEY" },
-  { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "OMB_OPENAI_IMAGE_KEY" },
-  { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
+  { section: "tts", field: "key", name: "ttsKey", env: "ASTRA_TTS_KEY" },
+  { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "ASTRA_OPENAI_IMAGE_KEY" },
+  { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "ASTRA_CUSTOM_IMAGE_KEY" },
   { section: "opencodeGo", field: "apiKey", name: "opencodeGoApiKey", env: "OPENCODE_API_KEY" },
-  { section: "dictation", field: "key", name: "dictationApiKey", env: "OMB_DICTATION_KEY" },
-  { section: "wakeWord", field: "accessKey", name: "picovoiceAccessKey", env: "OMB_PICOVOICE_KEY" },
+  { section: "dictation", field: "key", name: "dictationApiKey", env: "ASTRA_DICTATION_KEY" },
+  { section: "wakeWord", field: "accessKey", name: "picovoiceAccessKey", env: "ASTRA_PICOVOICE_KEY" },
 ];
 
 /** One boot-time sweep of config.json: move every plaintext workspace secret

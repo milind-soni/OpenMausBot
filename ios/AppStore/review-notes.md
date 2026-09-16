@@ -1,6 +1,6 @@
 # App Review notes
 
-OpenMausMobile is a companion for the OpenMausBot desktop application. The
+AstraMobile is a companion for the Astra desktop application. The
 primary same-network flow does not require an account. The desktop also offers
 an optional passwordless email sign-in that provisions a private HTTPS address
 for reaching that same computer from another network; the iOS app itself does
@@ -8,7 +8,7 @@ not present a login screen.
 
 To review the primary flow:
 
-1. Install and start OpenMausBot on a Mac, Windows, or Linux computer.
+1. Install and start Astra on a Mac, Windows, or Linux computer.
 2. Open **Settings → Phone**, enable Companion, and choose **Start pairing**.
 3. On the iPhone, choose **Scan QR Code**, scan the code shown by the desktop,
    review the computer and address, and confirm pairing.
@@ -17,18 +17,18 @@ To review the primary flow:
 5. Create a bot on the desktop or with the `+` button in the iPhone roster,
    then send a message.
 6. In Safari, Notes, Photos, or Files, open the system Share sheet and choose
-   **OpenMausBot**. The extension shows the paired computer and asks for a bot
+   **Astra**. The extension shows the paired computer and asks for a bot
    or room before sending the selected link, text, image, or document. The
    containing app does not need to be open, but the paired computer must remain
-   awake with OpenMausBot running.
+   awake with Astra running.
 
 To review optional cross-network HTTPS access, enter an email in **Settings →
 Phone → Use your phone anywhere** on the desktop, enter the eight-digit
 email code, enable Companion, and scan a newly generated QR code. The hosted
 service authenticates and provisions the desktop; the phone still pairs to that
-specific computer and receives no universal OpenMausBot account credential.
+specific computer and receives no universal Astra account credential.
 The reviewer may use any email inbox they control. This optional path uses an
-OpenMausBot-managed Cloudflare Tunnel and does not require Tailscale.
+Astra-managed Cloudflare Tunnel and does not require Tailscale.
 
 Optional cloud-desktop review requires an ascii.dev Box configured on the
 computer. For the paired phone, enable **Cloud desktop** under **Settings →

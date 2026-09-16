@@ -42,8 +42,8 @@ export function resolveAdbPath(env: NodeJS.ProcessEnv = process.env, platform = 
   const executable = executableName(platform);
   const home = homedir();
   const candidates = [
-    env.OMB_ADB_PATH,
-    env.OMB_RESOURCES_PATH && join(env.OMB_RESOURCES_PATH, "android-platform-tools", platform, executable),
+    env.ASTRA_ADB_PATH,
+    env.ASTRA_RESOURCES_PATH && join(env.ASTRA_RESOURCES_PATH, "android-platform-tools", platform, executable),
     ...(env.PATH ?? "").split(delimiter).map((entry) => entry && join(entry, executable)),
     platform === "darwin" && join(home, "Library/Android/sdk/platform-tools/adb"),
     platform === "darwin" && "/opt/homebrew/bin/adb",
@@ -61,7 +61,7 @@ export function resolveAdbPath(env: NodeJS.ProcessEnv = process.env, platform = 
 
 async function runAdb(args: string[], options: { binary?: boolean; timeoutMs?: number } = {}): Promise<Buffer> {
   const adb = resolveAdbPath();
-  if (!adb) throw new Error("Android platform tools are unavailable. Reopen OpenMausBot or install adb.");
+  if (!adb) throw new Error("Android platform tools are unavailable. Reopen Astra or install adb.");
   return new Promise((resolve, reject) => {
     const child = spawn(adb, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     const stdout: Buffer[] = [];
@@ -331,7 +331,7 @@ async function handle(message: Json) {
   const id = message.id;
   const method = message.method;
   const params = (message.params ?? {}) as Json;
-  if (method === "initialize") return ok(id, { protocolVersion: String(params.protocolVersion ?? "2024-11-05"), capabilities: { tools: {} }, serverInfo: { name: "openmausbot-phone", version: "1" } });
+  if (method === "initialize") return ok(id, { protocolVersion: String(params.protocolVersion ?? "2024-11-05"), capabilities: { tools: {} }, serverInfo: { name: "astra-phone", version: "1" } });
   if (method === "notifications/initialized" || method === "notifications/cancelled") return;
   if (method === "ping") return ok(id, {});
   if (method === "tools/list") return ok(id, { tools: TOOLS });

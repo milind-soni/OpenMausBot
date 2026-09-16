@@ -6,14 +6,14 @@
 
 ## Summary
 
-Add OpenCode Go as a first-class OpenMausBot engine by running the maintained
+Add OpenCode Go as a first-class Astra engine by running the maintained
 OpenCode CLI over its official Agent Client Protocol (ACP) interface and selecting
 models from the `opencode-go/*` provider.
 
-The first implementation should reuse OpenMausBot's ACP runtime rather than call
+The first implementation should reuse Astra's ACP runtime rather than call
 the model endpoints directly. That keeps OpenCode's coding tools, sessions, MCP
 support, and permission requests intact. A direct model API driver would only
-provide inference; OpenMausBot does not currently have a provider-independent
+provide inference; Astra does not currently have a provider-independent
 agent/tool loop to replace the functionality the OpenCode CLI supplies.
 
 This plan uses **OpenCode Go** to mean the current subscription/API product
@@ -36,7 +36,7 @@ to a different project and is no longer the current OpenCode implementation.
 - In ACP, OpenCode exposes model selection as the `model` session config option.
   The selected value is the full `opencode-go/<model-id>` string and is set with
   `session/set_config_option` before prompting.
-- OpenCode accepts an `OPENCODE_API_KEY` environment variable. OpenMausBot should
+- OpenCode accepts an `OPENCODE_API_KEY` environment variable. Astra should
   inject it only into the OpenCode child process.
 - The official cross-platform CLI package is `opencode-ai`; `opencode auth login`
   remains an alternative user-managed credential flow.
@@ -71,7 +71,7 @@ existing `createAcpDriver` core:
 
 Do not fork the OpenCode CLI, vendor its SDK, or start a network-listening server
 for the initial integration. ACP already provides a local stdio boundary and fits
-the process lifecycle OpenMausBot uses for Grok and Gemini.
+the process lifecycle Astra uses for Grok and Gemini.
 
 ### Generic ACP changes
 
@@ -145,7 +145,7 @@ Catalog behavior must be fail-safe:
 - cache the last good catalog for the process lifetime;
 - fall back to a small pinned catalog when offline; and
 - refresh on the existing instance re-probe path so upstream additions do not
-  require restarting OpenMausBot.
+  require restarting Astra.
 
 If the current synchronous `ProviderInstance.models` contract prevents honest
 refresh, add a small asynchronous catalog method to the driver/registry contract
@@ -156,7 +156,7 @@ instead of mutating shared objects behind the registry.
 Use the existing ACP mapping as the baseline:
 
 - save the OpenCode session id as the resume cursor;
-- load that session on the next OpenMausBot turn;
+- load that session on the next Astra turn;
 - stream assistant text and reasoning once, without replay duplication;
 - translate tool start/completion updates into canonical runtime events;
 - translate `session/request_permission` into the existing approval cards;
@@ -259,7 +259,7 @@ Automated tests must cover:
 - session load, missing-session fallback, and model switching after resume;
 - cancellation before and after session creation, early process exit, malformed
   JSON-RPC, and process-tree cleanup; and
-- concurrent OpenMausBot threads without shared ACP or credential state.
+- concurrent Astra threads without shared ACP or credential state.
 
 Live tests must be opt-in because they require a private subscription key and may
 consume quota. CI must never print the key or upload native protocol logs from a
@@ -268,8 +268,8 @@ credentialed run.
 ## Definition of done
 
 - OpenCode Go is shown as unavailable until both its CLI and credential are
-  present; OpenMausBot never selects it as a runnable default otherwise.
-- The setup flow works without restarting OpenMausBot and never silently executes
+  present; Astra never selects it as a runnable default otherwise.
+- The setup flow works without restarting Astra and never silently executes
   an installer.
 - A user can select every currently advertised `opencode-go/*` model, and the ACP
   session confirms that exact model before the prompt starts.
@@ -309,4 +309,4 @@ credentialed run.
 5. Should catalog fallback be bundled metadata or the last successful catalog
    persisted on disk?
 6. Can the existing ACP usage metadata distinguish cumulative session totals from
-   per-turn usage so OpenMausBot does not double-count it?
+   per-turn usage so Astra does not double-count it?

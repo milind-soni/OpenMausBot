@@ -15,7 +15,7 @@ const posixIt = it.skipIf(process.platform === "win32");
 
 describe("augmentedPath", () => {
   afterEach(() => {
-    delete process.env.OMB_EXTRA_PATH;
+    delete process.env.ASTRA_EXTRA_PATH;
     resetPathCacheForTests();
   });
 
@@ -23,12 +23,12 @@ describe("augmentedPath", () => {
     resetPathCacheForTests();
     const path = augmentedPath();
     const firstExisting = (process.env.PATH ?? "").split(delimiter).filter(Boolean)[0];
-    // OMB_EXTRA_PATH is unset here, so the inherited PATH leads
+    // ASTRA_EXTRA_PATH is unset here, so the inherited PATH leads
     expect(path.split(delimiter)[0]).toBe(firstExisting);
   });
 
-  it("prepends OMB_EXTRA_PATH and dedupes", () => {
-    process.env.OMB_EXTRA_PATH = ["/tmp/omb-extra", "/tmp/omb-extra"].join(delimiter);
+  it("prepends ASTRA_EXTRA_PATH and dedupes", () => {
+    process.env.ASTRA_EXTRA_PATH = ["/tmp/omb-extra", "/tmp/omb-extra"].join(delimiter);
     resetPathCacheForTests();
     const parts = augmentedPath().split(delimiter);
     expect(parts[0]).toBe("/tmp/omb-extra");
@@ -176,7 +176,7 @@ describe("resolveCli", () => {
 winOnly("resolveCli (Windows)", () => {
   let dir: string;
   const onPath = () => {
-    process.env.OMB_EXTRA_PATH = dir;
+    process.env.ASTRA_EXTRA_PATH = dir;
     resetPathCacheForTests();
   };
   const shimWith = (name: string, body: string, target: string, targetBody: string) => {
@@ -189,7 +189,7 @@ winOnly("resolveCli (Windows)", () => {
     dir = mkdtempSync(join(tmpdir(), "omb-shim-"));
   });
   afterEach(async () => {
-    delete process.env.OMB_EXTRA_PATH;
+    delete process.env.ASTRA_EXTRA_PATH;
     resetPathCacheForTests();
     // These tests spawn the shims out of this directory; a just-exited one can
     // still be holding it for a beat after the call returns.

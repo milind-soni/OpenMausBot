@@ -878,7 +878,7 @@ public struct RoutineInput: Encodable, Sendable {
     public var clearTimeout: Bool
 
     public init(
-        name: String, prompt: String, botId: String, runOn: String = "maus",
+        name: String, prompt: String, botId: String, runOn: String = "astra",
         enabled: Bool? = nil, schedule: RoutineSchedule, durationMinutes: Int = 30,
         timeoutMinutes: Int? = nil, clearTimeout: Bool = false
     ) {
@@ -1142,7 +1142,7 @@ public struct ServerSession: Codable, Hashable, Sendable {
     public var isAdmin: Bool { scopes.contains("admin") }
 }
 
-/// `GET /.well-known/openmausbot/environment`, served without a session.
+/// `GET /.well-known/astra/environment`, served without a session.
 public struct ServerEnvironment: Codable, Hashable, Sendable {
     public var environmentId: String
     public var label: String

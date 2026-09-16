@@ -12,7 +12,7 @@ import {
 } from "./data-dir-lease.mjs";
 
 const MODULE_URL = new URL("./data-dir-lease.mjs", import.meta.url).href;
-const LEASE_NAME = "openmausbot-server.lease";
+const LEASE_NAME = "astra-server.lease";
 const roots = [];
 
 function temporaryDirectory(name = "data") {
@@ -120,7 +120,7 @@ test("an invalid child capability fails closed without acquisition or secret log
     assert.equal(result.code, 0);
     assert.equal(result.stderr, "");
     assert.deepEqual(JSON.parse(result.stdout), {
-      error: "The OpenMausBot desktop lease delegation is invalid; refusing to start to protect its state.",
+      error: "The Astra desktop lease delegation is invalid; refusing to start to protect its state.",
       consumed: true,
     });
     assert.equal(result.stdout.includes(invalidCapability), false);
@@ -305,7 +305,7 @@ test("a foreign-host owner fails closed and identifies the preserved lease recor
 
 test("a foreign-host delegated child fails closed and identifies its preserved lease record", () => {
   const { dataDir } = temporaryDirectory();
-  const childLeasePath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childLeasePath = path.join(dataDir, ".astra-server-child", LEASE_NAME);
   const child = {
     version: 1,
     pid: process.pid,
@@ -366,15 +366,34 @@ test("a foreign-host reaper fails closed and identifies its preserved recovery r
 test("legacy data is moved before lease creation", () => {
   const root = mkdtempSync(path.join(tmpdir(), "omb-electron-legacy-"));
   roots.push(root);
-  const legacyDataDir = path.join(root, ".opengrokbot");
-  const dataDir = path.join(root, ".openmausbot");
+  const legacyDataDir = path.join(root, ".openmausbot");
+  const dataDir = path.join(root, ".astra");
   mkdirSync(legacyDataDir);
   writeFileSync(path.join(legacyDataDir, "keep-me.txt"), "kept");
 
-  const lease = acquireDataDirLease(dataDir, { legacyDataDir });
+  const lease = acquireDataDirLease(dataDir, { legacyDataDirs: [legacyDataDir] });
   try {
     assert.equal(readFileSync(path.join(dataDir, "keep-me.txt"), "utf8"), "kept");
     assert.throws(() => readFileSync(path.join(legacyDataDir, "keep-me.txt")), /ENOENT/);
+  } finally {
+    lease.release();
+  }
+});
+
+test("the newest legacy data dir wins when several exist", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "omb-electron-legacy-"));
+  roots.push(root);
+  const oldest = path.join(root, ".opengrokbot");
+  const newest = path.join(root, ".openmausbot");
+  const dataDir = path.join(root, ".astra");
+  mkdirSync(oldest);
+  mkdirSync(newest);
+  writeFileSync(path.join(oldest, "which.txt"), "opengrokbot");
+  writeFileSync(path.join(newest, "which.txt"), "openmausbot");
+
+  const lease = acquireDataDirLease(dataDir, { legacyDataDirs: [newest, oldest] });
+  try {
+    assert.equal(readFileSync(path.join(dataDir, "which.txt"), "utf8"), "openmausbot");
   } finally {
     lease.release();
   }
@@ -450,7 +469,7 @@ test("a delegated child from an earlier boot cannot block a new parent", (t) => 
   const { dataDir } = temporaryDirectory();
   const current = recordWrittenByThisProcess(dataDir);
   if (current.boot === null) return t.skip("no boot identity on this platform");
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".astra-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, JSON.stringify({ ...current, boot: randomUUID() }));
 

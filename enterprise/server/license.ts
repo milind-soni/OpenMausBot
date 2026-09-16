@@ -1,7 +1,7 @@
 // License keys: signed entitlement claims.
 //
 // A key is `omb1.<claims>.<signature>`: base64url JSON claims, Ed25519-signed
-// by an OpenMausBot signing key. The public keys are baked in below, so one
+// by an Astra signing key. The public keys are baked in below, so one
 // build serves every customer — the key, not the code, decides the feature
 // set. Verification is offline; nothing phones home.
 import { createPrivateKey, createPublicKey, sign, verify, type JsonWebKeyInput } from "node:crypto";
@@ -41,7 +41,7 @@ export function verifyLicenseKey(
 ): LicenseClaims {
   const parts = key.trim().split(".");
   if (parts.length !== 3 || parts[0] !== PREFIX || !parts[1] || !parts[2]) {
-    throw new Error(`OMB_LICENSE_KEY is not an OpenMausBot license key (expected "${PREFIX}.<claims>.<signature>")`);
+    throw new Error(`ASTRA_LICENSE_KEY is not an Astra license key (expected "${PREFIX}.<claims>.<signature>")`);
   }
   const [, claimsPart, signaturePart] = parts;
   const signature = Buffer.from(signaturePart, "base64url");
@@ -51,24 +51,24 @@ export function verifyLicenseKey(
   );
   if (!trusted) {
     throw new Error(
-      "OMB_LICENSE_KEY signature does not match any OpenMausBot signing key: the key was altered, or it was issued for a different build",
+      "ASTRA_LICENSE_KEY signature does not match any Astra signing key: the key was altered, or it was issued for a different build",
     );
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(claimsPart, "base64url").toString("utf8"));
   } catch {
-    throw new Error("OMB_LICENSE_KEY claims are not JSON; ask for the key to be reissued");
+    throw new Error("ASTRA_LICENSE_KEY claims are not JSON; ask for the key to be reissued");
   }
   const result = claimsSchema.safeParse(parsed);
   if (!result.success) {
-    throw new Error(`OMB_LICENSE_KEY claims are malformed (${result.error.issues[0]?.message ?? "invalid"}); ask for the key to be reissued`);
+    throw new Error(`ASTRA_LICENSE_KEY claims are malformed (${result.error.issues[0]?.message ?? "invalid"}); ask for the key to be reissued`);
   }
   const claims = result.data;
   if (claims.expires !== null) {
     const expires = new Date(claims.expires);
     if ((options.now ?? new Date()) >= expires) {
-      throw new Error(`OMB_LICENSE_KEY expired on ${claims.expires}; renew it to keep enterprise features`);
+      throw new Error(`ASTRA_LICENSE_KEY expired on ${claims.expires}; renew it to keep enterprise features`);
     }
   }
   return claims;

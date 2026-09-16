@@ -69,7 +69,7 @@ describe("browser capability proxy", () => {
     status = 200;
     payload = { result: { tools: [{ name: "agent_browser_snapshot" }] } };
     const child: ChildProcessWithoutNullStreams = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./browser-proxy.ts", import.meta.url))], {
-      env: { OMB_HARNESS_URL: url, OMB_BROWSER_TOKEN: "entrypoint-capability" }, stdio: ["pipe", "pipe", "pipe"],
+      env: { ASTRA_HARNESS_URL: url, ASTRA_BROWSER_TOKEN: "entrypoint-capability" }, stdio: ["pipe", "pipe", "pipe"],
     });
     let output = "";
     const result = new Promise<unknown>((resolve, reject) => {

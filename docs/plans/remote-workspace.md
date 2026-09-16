@@ -1,6 +1,6 @@
 # Plan: Remote Workspace
 
-Run the OpenMausBot server anywhere; connect from the desktop app, any
+Run the Astra server anywhere; connect from the desktop app, any
 browser, or the phone — with real authentication instead of the loopback
 trust model.
 
@@ -42,8 +42,8 @@ We studied a shipped design that solves this same problem for a
 desktop-first agent app and adopt these points as requirements:
 
 1. **Stable server identity.** The server generates `environmentId` once
-   (`OMB_DATA_DIR/environment-id`) and serves a descriptor at
-   `/.well-known/openmausbot/environment` — id, label, platform, version,
+   (`ASTRA_DATA_DIR/environment-id`) and serves a descriptor at
+   `/.well-known/astra/environment` — id, label, platform, version,
    capabilities. Clients verify the id on every connect and refuse a
    mismatch loudly (a re-used URL now pointing at a different server).
 2. **Two-stage credentials.** Pairing code: 12 characters from a 32-symbol
@@ -110,10 +110,10 @@ desktop-first agent app and adopt these points as requirements:
 2. **Private network helper**: detect a Tailscale MagicDNS name and offer
    `tailscale serve` for HTTPS with the server's actual port (TLS is
    Tailscale's; the server never terminates TLS). Shipped for the command
-   line as `openmausbot serve --tailscale`.
+   line as `astra serve --tailscale`.
 3. **Managed tunnel**: the cloudflared managed-tunnel channel the companion
    already uses — zero network configuration. Rides on the same sessions.
-   Shipped for the command line as `openmausbot login` + `serve --tunnel`
+   Shipped for the command line as `astra login` + `serve --tunnel`
    (`server/tunnel.ts`): the tunnel gateway forwards to a second, IPC
    listener on the harness, on which every request is "through a proxy" by
    construction.

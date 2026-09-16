@@ -100,7 +100,7 @@ function managerFixture() {
     owner,
     createView: (options) => new FakeView(options),
     notify: (state) => notifications.push(state),
-    partitionPrefix: "openmausbot-test",
+    partitionPrefix: "astra-test",
   });
   const open = (contextId, port, bounds = { x: 10, y: 20, width: 500, height: 400 }) =>
     manager.open({

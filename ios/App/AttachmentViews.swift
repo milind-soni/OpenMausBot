@@ -31,7 +31,7 @@ enum AttachmentImportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .unreadable(name):
-            return "OpenMausBot couldn't read \(name). Try exporting it to Files first."
+            return "Astra couldn't read \(name). Try exporting it to Files first."
         case let .unsupported(name):
             return "\(name) isn't a supported attachment. Try an image, PDF, text, Word, Excel, or PowerPoint file."
         case let .tooLarge(name, bytes):
@@ -441,7 +441,7 @@ struct FilePreviewItem: Identifiable {
 
     func cleanUp() {
         let directory = url.deletingLastPathComponent()
-        if directory.deletingLastPathComponent().lastPathComponent == "OpenMausBotFilePreviews" {
+        if directory.deletingLastPathComponent().lastPathComponent == "AstraFilePreviews" {
             try? FileManager.default.removeItem(at: directory)
         } else {
             try? FileManager.default.removeItem(at: url)

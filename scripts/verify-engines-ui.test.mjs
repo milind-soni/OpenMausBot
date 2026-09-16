@@ -4,7 +4,7 @@ const fixture = vi.hoisted(() => ({
   launch: vi.fn(), createServer: vi.fn(), close: vi.fn(),
   listen: vi.fn(), closeUi: vi.fn(), closeHttp: vi.fn(), closeConnections: vi.fn(), signals: new Map(),
 }));
-vi.mock("./control-omb.ts", () => ({ launchVerificationServer: fixture.launch }));
+vi.mock("./control-astra.ts", () => ({ launchVerificationServer: fixture.launch }));
 vi.mock("vite", () => ({ createServer: fixture.createServer }));
 vi.mock("node:http", () => ({ createServer: () => ({
   on: vi.fn(), once: vi.fn(), removeListener: vi.fn(), listen: fixture.listen,

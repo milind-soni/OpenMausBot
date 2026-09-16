@@ -121,7 +121,7 @@ describe("isProtectedPath", () => {
 
 describe("protectedContentHit", () => {
   it("flags content that disarms the guards", () => {
-    expect(protectedContentHit("process.env.OMB_SELF_MODIFY = '1'")).toMatch(/gate/);
+    expect(protectedContentHit("process.env.ASTRA_SELF_MODIFY = '1'")).toMatch(/gate/);
     expect(protectedContentHit("import { revertProposal } from './self-modify.ts'")).toMatch(/machinery/);
     expect(protectedContentHit("spawn('electron/self-modify-watchdog.mjs')")).toMatch(/watchdog/);
   });
@@ -172,7 +172,7 @@ describe("validateProposal", () => {
   it("refuses protected paths and protected content", () => {
     const parsed = parseProposal(proposalFor({}, [
       { path: "server/self-modify.ts", action: "edit", content: "// tweaked" },
-      { path: "server/props.ts", action: "edit", content: "const OMB_SELF_MODIFY = true;" },
+      { path: "server/props.ts", action: "edit", content: "const ASTRA_SELF_MODIFY = true;" },
     ]));
     const errors = validateProposal(parsed as never, root);
     expect(errors.some((e) => e.includes("protected path"))).toBe(true);

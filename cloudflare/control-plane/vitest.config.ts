@@ -16,7 +16,7 @@ export default defineConfig({
         bindings: {
           BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
           CLOUDFLARE_API_TOKEN: TEST_CLOUDFLARE_TOKEN,
-          ALLOWED_ORIGINS: "https://app.openmausbot.test",
+          ALLOWED_ORIGINS: "https://app.astra.test",
           TEST_MIGRATIONS: await readD1Migrations(`${root}migrations`),
         },
       },

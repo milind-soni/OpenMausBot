@@ -1,4 +1,4 @@
-// The bot folder: ~/.openmausbot/bots/<botId>/, owned by the server.
+// The bot folder: ~/.astra/bots/<botId>/, owned by the server.
 //
 // SOUL.md is a MIRROR of BotRecord.soul, never the source of truth. The
 // prompt is built from the record; the file exists so a person can read

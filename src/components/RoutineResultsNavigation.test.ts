@@ -42,13 +42,13 @@ const group: Group = {
 };
 const routine: Routine = {
   id: "routine", name: "Daily report", prompt: "Report progress", target: "bot", botId: bot.id,
-  runOn: "maus", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1] },
+  runOn: "astra", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1] },
   durationMinutes: 30, nextRunAt: 1_000, createdAt: 0, updatedAt: 2,
   resultsThreadId: "new-results", sourceThreadId: "original-source",
 };
 const run: RoutineRun = {
   id: "run", routineId: routine.id, routineName: routine.name, target: "bot", botId: bot.id,
-  runOn: "maus", threadId: "execution", sourceThreadId: "original-source", scheduledFor: 100,
+  runOn: "astra", threadId: "execution", sourceThreadId: "original-source", scheduledFor: 100,
   createdAt: 100, finishedAt: 200, status: "completed", manual: false,
 };
 

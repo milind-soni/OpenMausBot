@@ -22,7 +22,7 @@ path; they do not identify the exact cache responsible in an old live session.
 
 Build the generated `managedImageDockerfile()` under a dedicated fixture image
 tag, rather than replacing an image used by running user desktops. Set explicit
-`OMB_VERIFY_PODMAN`, `OMB_VERIFY_MACHINE`, and `OMB_VERIFY_IMAGE`, then run:
+`ASTRA_VERIFY_PODMAN`, `ASTRA_VERIFY_MACHINE`, and `ASTRA_VERIFY_IMAGE`, then run:
 
 ```sh
 node --experimental-strip-types scripts/verify-japanese-desktop.ts
@@ -30,7 +30,7 @@ node --experimental-strip-types scripts/verify-japanese-desktop.ts
 
 The script saves a minimal UTF-8 HTML file, launches Firefox in two independently
 created desktops, records actual screenshots and removes its containers and
-engine-host temporary workspaces. Use `OMB_VERIFY_OUTPUT` for a separate evidence
+engine-host temporary workspaces. Use `ASTRA_VERIFY_OUTPUT` for a separate evidence
 directory when comparing the old image. The receipt reports capture completion;
 glyph correctness requires inspecting the PNGs.
 

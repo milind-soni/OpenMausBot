@@ -1,6 +1,6 @@
 # Cua Driver redistribution records
 
-These files accompany the exact Cua Driver `0.19.3` Linux x64 runtime bundled by OpenMausBot. The upstream release archive omits its own license, the embedded Inter font license, a dependency notice, an SBOM, and artifact provenance, so they are preserved here and verified during packaging.
+These files accompany the exact Cua Driver `0.19.3` Linux x64 runtime bundled by Astra. The upstream release archive omits its own license, the embedded Inter font license, a dependency notice, an SBOM, and artifact provenance, so they are preserved here and verified during packaging.
 
 Trust anchor:
 
@@ -22,7 +22,7 @@ cargo-about generate \
   --target x86_64-unknown-linux-gnu \
   --manifest-path crates/cua-driver/Cargo.toml \
   --features portal-input \
-  --config /path/to/OpenMausBot/third_party/cua-driver/about.toml \
+  --config /path/to/Astra/third_party/cua-driver/about.toml \
   --format json \
   > cua-driver.cargo-about.json
 
@@ -30,18 +30,18 @@ cargo-about generate \
   --locked \
   --target x86_64-unknown-linux-gnu \
   --manifest-path crates/cursor-theme-cli/Cargo.toml \
-  --config /path/to/OpenMausBot/third_party/cua-driver/about.toml \
+  --config /path/to/Astra/third_party/cua-driver/about.toml \
   --format json \
   > cursor-theme.cargo-about.json
 
-node /path/to/OpenMausBot/scripts/generate-cua-sbom.mjs \
+node /path/to/Astra/scripts/generate-cua-sbom.mjs \
   cua-driver.cargo-about.json \
   cursor-theme.cargo-about.json \
   Cargo.lock \
-  /path/to/OpenMausBot/third_party/cua-driver
+  /path/to/Astra/third_party/cua-driver
 ```
 
 The generator fails unless the reports contain the reviewed root-scoped sets: 325 registry packages for the driver, 113 for the cursor-theme sidecar, and a 330-package union. The final CycloneDX inventory contains those 330 packages, eight Cua workspace packages, and the embedded Inter font. The MPL-2.0 set is exactly seven packages. Regeneration is expected to produce a reviewed diff; no release process accepts new native inputs automatically.
 
-OpenMausBot ships only the CLI and cursor-theme sidecar. The Linux SDK `.so`, Node `.node`, ABI header, and GNOME helper are not included in Phase 5 because the current runtime does not load them and must not silently install a Shell extension.
+Astra ships only the CLI and cursor-theme sidecar. The Linux SDK `.so`, Node `.node`, ABI header, and GNOME helper are not included in Phase 5 because the current runtime does not load them and must not silently install a Shell extension.
 The app's npm Cua SDK is used by the separate macOS integration and may have a different version; it is not loaded by this Linux CLI-spawn runtime.

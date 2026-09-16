@@ -165,7 +165,7 @@ export function PeopleSection() {
         api("/api/auth/sessions").catch(() => ({ sessions: [] })),
         api("/api/usage?groupBy=user").catch(() => ({ groups: [] })),
         api("/api/settings/custom-domain").catch(() => null),
-        fetch("/.well-known/openmausbot/environment").then((res) => (res.ok ? res.json() : null)).catch(() => null),
+        fetch("/.well-known/astra/environment").then((res) => (res.ok ? res.json() : null)).catch(() => null),
       ]);
       const current: SignInLists = {
         admins: Array.isArray(config?.signIn?.admins) ? config.signIn.admins : [],

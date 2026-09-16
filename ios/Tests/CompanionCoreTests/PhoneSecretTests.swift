@@ -69,7 +69,7 @@ final class PhoneSecretTests: XCTestCase {
                 context: context
             ), as: UTF8.self),
             [
-                "openmausbot-phone-credential-v1",
+                "astra-phone-credential-v1",
                 "taWSR_nZ7ojlH_0Z3tar6Q",
                 "paired-device-1",
                 "bot-1",

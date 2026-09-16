@@ -22,7 +22,7 @@ export interface BoxCreateRequest {
   idempotencyKey: string;
   createdAt: number;
   boxId?: string;
-  /** The provider Box has its deterministic OpenMaus name. Until this is
+  /** The provider Box has its deterministic Astra name. Until this is
    * true, deleting the bot would make an ambiguous or unnamed Box orphaned. */
   resolved?: true;
 }
@@ -82,7 +82,7 @@ function recoveryStateError(detail: string, cause?: unknown): Error & { status: 
   return Object.assign(
     new Error(
       `Cloud computer creation is paused because its recovery state is ${detail}. `
-      + "Check ascii.dev for an unnamed Box before repairing OpenMausBot's local state.",
+      + "Check ascii.dev for an unnamed Box before repairing Astra's local state.",
     ),
     { status: 503, cause },
   );
@@ -324,7 +324,7 @@ function acquireJournalLock(): JournalLockOwner {
       // lock can disappear between link(EEXIST) and read, or replace each
       // successfully reaped owner before the next link attempt.
       if (performance.now() >= deadline) {
-        throw recoveryStateError("locked by another OpenMausBot process");
+        throw recoveryStateError("locked by another Astra process");
       }
       if (reaped) continue;
       Atomics.wait(lockWait, 0, 0, LOCK_RETRY_MS);

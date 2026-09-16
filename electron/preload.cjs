@@ -4,7 +4,7 @@ const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 // Sandboxed preloads receive Electron's restricted `require`, which cannot
 // load sibling CommonJS files. Keep this tiny predicate inline here; main's
-const desktopRemoteClient = process.argv.includes("--openmausbot-remote-client");
+const desktopRemoteClient = process.argv.includes("--astra-remote-client");
 
 let pendingPackageInstallUrl = null;
 const packageInstallListeners = new Set();
@@ -31,7 +31,7 @@ const bridge = {
     ipcRenderer.on("desktop:capabilities-changed", handler);
     return () => ipcRenderer.removeListener("desktop:capabilities-changed", handler);
   },
-  /** Pair this desktop app to another OpenMausBot host. The bearer remains in
+  /** Pair this desktop app to another Astra host. The bearer remains in
    * the main process and is never returned over this bridge. */
   remoteClient: {
     active: desktopRemoteClient,
@@ -125,7 +125,7 @@ const bridge = {
   /** Tell the window which skin the page wears, so the native chrome the
    * renderer cannot paint (the Windows caption-button overlay) matches. */
   applySkin: (skin) => ipcRenderer.invoke("desktop:skin", skin),
-  /** A reviewed BotMRR package opened through openmausbot://install. */
+  /** A reviewed BotMRR package opened through astra://install. */
   onPackageInstall: (cb) => {
     packageInstallListeners.add(cb);
     if (pendingPackageInstallUrl) cb(pendingPackageInstallUrl);
@@ -161,7 +161,7 @@ const bridge = {
   /** Writes the redacted diagnostics report to a user-chosen file; resolves
    * the path, or null when the save dialog was cancelled. */
   exportDiagnostics: () => ipcRenderer.invoke("desktop:export-diagnostics"),
-  /** Ask where to save a bot-created file (inside ~/.openmausbot), copy it
+  /** Ask where to save a bot-created file (inside ~/.astra), copy it
    * there and reveal it. Returns the chosen path, or null if the user
    * cancelled the dialog. The chat bubble shows the
    * rejection text verbatim, so strip the "Error invoking remote method"
@@ -217,7 +217,7 @@ const bridge = {
   handyToggle: (handyPath) => ipcRenderer.invoke("handy:toggle", handyPath),
   handyTranscribeFile: (wavPath, handyPath) => ipcRenderer.invoke("handy:transcribe-file", wavPath, handyPath),
 
-  /** The Picovoice AccessKey for the "Luna" wake word, from the encrypted
+  /** The Picovoice AccessKey for the "Astra" wake word, from the encrypted
    * credential store. Null when none is saved. */
   picovoiceAccessKey: () => ipcRenderer.invoke("wake-word:access-key"),
 

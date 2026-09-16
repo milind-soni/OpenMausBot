@@ -31,7 +31,7 @@ struct PairingScannerSheet: View {
                     ContentUnavailableView {
                         Label("Camera access needed", systemImage: "camera.fill")
                     } description: {
-                        Text("Allow camera access to scan the pairing QR code shown by OpenMausBot.")
+                        Text("Allow camera access to scan the pairing QR code shown by Astra.")
                     } actions: {
                         Button("Open Settings") {
                             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }

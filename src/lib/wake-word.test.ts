@@ -55,7 +55,7 @@ describe("createWakeWordSession", () => {
     expect(h.factory).toHaveBeenCalledTimes(1);
     expect(h.start).toHaveBeenCalledTimes(1);
     expect(onActiveChange).toHaveBeenCalledWith(true);
-    // a second "Luna" while live must not double-open the mic
+    // a second "Astra" while live must not double-open the mic
     wake.start();
     expect(h.factory).toHaveBeenCalledTimes(1);
   });
@@ -117,8 +117,8 @@ describe("createWakeWordSession", () => {
     expect(h.dispose).toHaveBeenCalledTimes(1);
   });
 
-  it("always uses the Luna phrase", async () => {
+  it("always uses the Astra phrase", async () => {
     const { WAKE_PHRASE } = await load();
-    expect(WAKE_PHRASE).toBe("Luna");
+    expect(WAKE_PHRASE).toBe("Astra");
   });
 });

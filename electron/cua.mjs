@@ -2,8 +2,8 @@
 //
 // Two modes, per cua-driver's EMBEDDING.md:
 //  - "embedded" (packaged app): spawn our own private daemon via
-//    EmbeddedCuaDriverHost so TCC grants attribute to OpenMausBot and the
-//    driver inherits them. One prompt, named OpenMausBot, out of the box.
+//    EmbeddedCuaDriverHost so TCC grants attribute to Astra and the
+//    driver inherits them. One prompt, named Astra, out of the box.
 //  - "standalone" (dev): attach to an already-installed CuaDriver.app daemon
 //    (its own TCC identity, typically already granted on a dev machine).
 //
@@ -47,7 +47,7 @@ const STANDALONE_SOCKET = path.join(
   app.getPath("home"),
   "Library/Caches/cua-driver/cua-driver.sock",
 );
-const HOST_BUNDLE_ID = "com.openmausbot.app";
+const HOST_BUNDLE_ID = "com.astra.app";
 const CUA_ENV = { CUA_DRIVER_RS_TELEMETRY_ENABLED: "0" };
 const execFileAsync = promisify(execFile);
 process.env.CUA_DRIVER_RS_TELEMETRY_ENABLED ??= "0";
@@ -184,7 +184,7 @@ async function loadEmbeddedSdk() {
     return { ...embedded, ...permissions };
   }
   const isWindows = process.platform === "win32";
-  process.env.OPENMAUSBOT_CUA_SDK_LIBRARY = path.join(
+  process.env.ASTRA_CUA_SDK_LIBRARY = path.join(
     process.resourcesPath,
     "cua-sdk",
     "native",
@@ -232,7 +232,7 @@ async function attachStandalone(signal) {
     signal.throwIfAborted();
     // Launch CuaDriver.app through LaunchServices so Accessibility /
     // Screen Recording stay on com.trycua.driver — the identity this
-    // machine already granted — instead of the freshly signed OpenMausBot.
+    // machine already granted — instead of the freshly signed Astra.
     const launch = execFileAsync("/usr/bin/open", ["-a", "CuaDriver"], {
       timeout: 8_000, killSignal: "SIGKILL", maxBuffer: 8_192,
     });
@@ -290,14 +290,14 @@ async function startEmbedded(binary, signal) {
   }
   // CUA's embedding contract requires grants before the child daemon starts;
   // these SDK calls execute in Electron main so macOS attributes them to
-  // OpenMausBot rather than to a terminal or helper process.
+  // Astra rather than to a terminal or helper process.
   const permissionStatus = sdk.requestMacOSPermissions();
   if (!sdk.hasRequiredMacOSPermissions(permissionStatus)) {
     const missing = [
       !permissionStatus.accessibility && "Accessibility",
       !permissionStatus.screenRecording && "Screen Recording",
     ].filter(Boolean).join(" and ");
-    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
+    throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart Astra`);
   }
   const host = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);
   try {
@@ -340,7 +340,7 @@ export async function startCua() {
   // bundle runs the same host so local computer control works identically.
   const wantEmbedded =
     app.isPackaged ||
-    process.env.OPENMAUSBOT_CUA_EMBEDDED === "1" ||
+    process.env.ASTRA_CUA_EMBEDDED === "1" ||
     Boolean(devStagedWinBinary());
   let nextConnection;
 

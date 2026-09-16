@@ -46,10 +46,10 @@ export async function runPhoneSetup(
   const signIn = async (): Promise<boolean> => {
     try {
       if (await deps.accountReady?.(options)) {
-        io.log("Your saved OpenMausBot account can be reused. The connection will be checked when the server starts.");
+        io.log("Your saved Astra account can be reused. The connection will be checked when the server starts.");
         return true;
       }
-      io.log("Sign in to an OpenMausBot account using an emailed code. This is separate from your AI provider account.");
+      io.log("Sign in to an Astra account using an emailed code. This is separate from your AI provider account.");
       if (await deps.login(options, io) === 0) return true;
     } catch (error) {
       if (error instanceof SetupCancelled) throw error;
@@ -60,7 +60,7 @@ export async function runPhoneSetup(
     return false;
   };
   for (;;) {
-    const device = await io.choose("Use OpenMausBot on your phone?", [
+    const device = await io.choose("Use Astra on your phone?", [
       "Skip for now",
       "iPhone / iPad — native app or Safari",
       "Android — web browser",
@@ -91,14 +91,14 @@ export async function runPhoneSetup(
       if (route === 3) { back = true; continue; }
       if (route === 0) {
         io.log("This creates a public HTTPS endpoint through Cloudflare. Chat and settings require device pairing; the sign-in page and basic server identity are public.");
-        io.log("Starting it may download the Cloudflare connector. It stays active while OpenMausBot runs; stop OpenMausBot to close the connection.");
+        io.log("Starting it may download the Cloudflare connector. It stays active while Astra runs; stop Astra to close the connection.");
         if (!await io.confirm("Allow this managed public endpoint and connector download?", false)) continue;
         if (!await signIn()) return skip();
         return selected(phone, { tunnel: true, tailscale: false, publicUrl: undefined });
       }
       if (route === 1) {
         io.log("Tailscale must already be installed and signed in on this computer and phone, with HTTPS certificates enabled for the tailnet.");
-        if (!await io.confirm("Allow OpenMausBot to serve HTTPS to your tailnet while it runs?", false)) continue;
+        if (!await io.confirm("Allow Astra to serve HTTPS to your tailnet while it runs?", false)) continue;
         return selected(phone, { tailscale: true, tunnel: false, publicUrl: undefined });
       }
       io.log("Use an HTTPS reverse proxy you already configured for this server. Enter only its origin, without a password, pairing code, path, query or fragment.");
@@ -124,11 +124,11 @@ export function phonePairingInstructions(
   const origin = input.origin ? normalizePhoneOrigin(input.origin) : null;
   if (!input.ready || !origin) {
     return ["Phone access is not ready yet. No phone QR should be shown until the HTTPS connection is verified.",
-      "Your local OpenMausBot can still be used on this computer."];
+      "Your local Astra can still be used on this computer."];
   }
   return [
     phone === "ios"
-      ? "On iPhone or iPad, scan the QR with Camera to open Safari. If you already have the OpenMausBot iOS app, use its pairing scanner or paste the full pairing link there."
+      ? "On iPhone or iPad, scan the QR with Camera to open Safari. If you already have the Astra iOS app, use its pairing scanner or paste the full pairing link there."
       : "On Android, scan the QR with Camera and open it in your web browser. This link is for the web app, not the Android native pairing scanner.",
     `Or open ${origin}/pair on your phone and enter the code.`,
     "Choose Connect on the phone. Scanning a QR does not mean the phone is paired.",

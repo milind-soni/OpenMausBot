@@ -90,11 +90,11 @@ T3's provider sessions keyed by thread informed the ownership model. Hermes's
 [session turn leases](https://github.com/NousResearch/hermes-agent/blob/b2aa855b626ff8688eb34b95c60ee8b6a4af3679/gateway/turn_lease.py)
 and [entry-level memory updates](https://github.com/NousResearch/hermes-agent/blob/b2aa855b626ff8688eb34b95c60ee8b6a4af3679/tools/memory_tool_store.py)
 informed generation-checked cleanup and latest-state memory edits. We reuse
-OpenMausBot's store, provider adapters, MCP bridge and UI components; no new
+Astra's store, provider adapters, MCP bridge and UI components; no new
 orchestration framework or database is needed.
 
 Sidebar reference: [T3 Code at 5e6cc2b895](https://github.com/pingdotgg/t3code/tree/5e6cc2b89534a8e01772bf647b79a1f2da2f9664/apps/web/src/components).
-Adapt the interaction patterns to existing OpenMaus components. If copying
+Adapt the interaction patterns to existing Astra components. If copying
 source, retain its MIT copyright/license notice instead of changing its license.
 
 See [chat verification](../verification/chat-turns.md),

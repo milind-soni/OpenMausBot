@@ -60,7 +60,7 @@ interface CodexAppServerModel {
 
 /** Ask the installed Codex CLI for the ChatGPT model catalog it can actually
  * use. This is the authoritative subscription catalog and changes more often
- * than OpenMausBot releases, so consume every page instead of hard-coding the
+ * than Astra releases, so consume every page instead of hard-coding the
  * current set forever. */
 export function readCodexAppServerModelCatalog(
   cli: string,
@@ -167,7 +167,7 @@ export function readCodexAppServerModelCatalog(
     });
     child.on("error", () => finish(null));
     child.on("close", () => finish(null));
-    request("initialize", { clientInfo: { name: "openmausbot", version: "1" } }, "initialize");
+    request("initialize", { clientInfo: { name: "astra", version: "1" } }, "initialize");
   });
 }
 

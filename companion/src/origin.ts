@@ -14,7 +14,7 @@ export function companionOriginSocket(
 ): string | null {
   if (!value) return null;
   if (platform === "win32") {
-    return /^\\\\\.\\pipe\\openmausbot-companion-origin-[1-9][0-9]*-[0-9a-f-]{36}$/i.test(value)
+    return /^\\\\\.\\pipe\\astra-companion-origin-[1-9][0-9]*-[0-9a-f-]{36}$/i.test(value)
       ? value
       : null;
   }

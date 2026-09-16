@@ -9,7 +9,7 @@ const dirs: string[] = [];
 const week = 7 * 24 * 60 * 60_000;
 const input = {
   webhookId: "hook", webhookName: "Incoming", prompt: "Handle once", botId: "bot",
-  runOn: "maus" as const, deliveryId: "delivery", receivedAt: Date.now(),
+  runOn: "astra" as const, deliveryId: "delivery", receivedAt: Date.now(),
 };
 function harness() {
   const dir = mkdtempSync(join(tmpdir(), "omb-webhook-commit-"));

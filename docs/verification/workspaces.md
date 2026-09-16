@@ -23,11 +23,11 @@ and never a key, and checks refusals: bad names, unknown operations, a failed
 step reported without the tool's secrets, and a plain message when no agent
 exists.
 
-On a real server, after `openmausbot fleet init --domain <domain> --operator
-<user>` as root: `systemctl status openmausbot-fleet`, then `ls -l
-/run/openmausbot/fleet.sock` must show `root:<user>` and mode 660. Sign in to
+On a real server, after `astra fleet init --domain <domain> --operator
+<user>` as root: `systemctl status astra-fleet`, then `ls -l
+/run/astra/fleet.sock` must show `root:<user>` and mode 660. Sign in to
 the operator workspace and open Settings → Workspaces. Create one, add a
-member, suspend and resume it, and confirm `/var/log/openmausbot/fleet.jsonl`
+member, suspend and resume it, and confirm `/var/log/astra/fleet.jsonl`
 grew a line per action. A workspace other than the operator's must get 502
 from `/api/fleet`, because it cannot open the socket.
 

@@ -1,13 +1,13 @@
 # Claude coordination and turn-scoped tools
 
-“OpenMausBot: the turn ended” is an approval-broker denial, not evidence of
+“Astra: the turn ended” is an approval-broker denial, not evidence of
 an internet outage. Browser capabilities also expire when their owning turn
 ends; “unauthorized” after that boundary must not be repaired by giving a
 worker permanent browser credentials.
 
 The Claude driver keeps native background tasks disabled. Native subagents
 can still work within the active turn; asynchronous work across bots uses
-OpenMausBot's `delegate_bot` path, which owns each recipient's turn, approvals,
+Astra's `delegate_bot` path, which owns each recipient's turn, approvals,
 and completion receipt. Long-running native Bash commands can no longer
 auto-background past the owning turn. This does not change approval modes or
 disable sandbox protections.

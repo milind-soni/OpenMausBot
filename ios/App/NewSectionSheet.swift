@@ -263,7 +263,7 @@ struct NewSectionSheet: View {
         let selected = selection.contains(bot.id)
         let candidate = selection.candidate?.id == bot.id
         let order = selection.selectedIDs.firstIndex(of: bot.id).map { $0 + 1 }
-        let tint = MausPalette.color(bot.color)
+        let tint = AstraPalette.color(bot.color)
 
         return Button {
             if selection.toggle(bot.id) {

@@ -3,10 +3,10 @@
 // optional with a sensible default and Finish always works, even when the
 // save fails (the bot can be edited later from its settings).
 import { useEffect, useState } from "react";
-import { MausAvatar } from "@/components/Avatar";
+import { AstraAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { MAUS_COLOR_NAMES, MAUS_COLORS, type MausColor } from "@/lib/mascot";
+import { ASTRA_COLOR_NAMES, ASTRA_COLORS, type AstraColor } from "@/lib/mascot";
 import { api, type Bot } from "@/state/store";
 import { inputClass, PrimaryButton, QuietButton, staggerIndex, type BeatProps } from "./shared";
 
@@ -31,7 +31,7 @@ export function MeetYourBotBeat({
   onFinish: () => void;
 }) {
   const [name, setName] = useState(bot?.name ?? "");
-  const [color, setColor] = useState<MausColor>(bot?.color ?? "green");
+  const [color, setColor] = useState<AstraColor>(bot?.color ?? "green");
   const [line, setLine] = useState("");
   const [saving, setSaving] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -79,7 +79,7 @@ export function MeetYourBotBeat({
 
       <div className="animate-rise mt-5 flex items-center gap-4" style={staggerIndex(1)}>
         {/* the bot itself, in its chosen color, next to the guide */}
-        <MausAvatar color={color} state="happy" size={64} label={name || bot?.name} />
+        <AstraAvatar color={color} state="happy" size={64} label={name || bot?.name} />
         <div className="min-w-0 flex-1">
           <label className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary" htmlFor="welcome-bot-name">
             {t("onboarding.bot.name")}
@@ -101,7 +101,7 @@ export function MeetYourBotBeat({
       <div className="animate-rise mt-4" style={staggerIndex(2)}>
         <div className="text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("onboarding.bot.color")}</div>
         <div role="radiogroup" aria-label={t("onboarding.bot.color")} className="mt-2 flex flex-wrap gap-2">
-          {MAUS_COLOR_NAMES.map((c) => (
+          {ASTRA_COLOR_NAMES.map((c) => (
             <button
               key={c}
               type="button"
@@ -116,7 +116,7 @@ export function MeetYourBotBeat({
                 "size-7 rounded-full border-2 transition-transform duration-150 hover:scale-110 active:scale-95",
                 c === color ? "border-ink" : "border-transparent",
               )}
-              style={{ backgroundColor: MAUS_COLORS[c] }}
+              style={{ backgroundColor: ASTRA_COLORS[c] }}
             />
           ))}
         </div>

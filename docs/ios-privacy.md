@@ -1,7 +1,7 @@
-# OpenMausMobile privacy
+# AstraMobile privacy
 
-OpenMausMobile is a companion for an OpenMausBot service chosen and operated
-by the user. Local Wi-Fi and Tailscale connections work without an OpenMausBot
+AstraMobile is a companion for an Astra service chosen and operated
+by the user. Local Wi-Fi and Tailscale connections work without an Astra
 account. A user may separately sign in on the desktop to enable the optional
 **Use your phone anywhere** HTTPS connection.
 
@@ -13,7 +13,7 @@ account. A user may separately sign in on the desktop to enable the optional
   private App Group and its pairing token through a shared Keychain access
   group. No other app receives those values.
 - The computer remains the source of bots, transcripts, approvals, credentials,
-  SQLite data, and screen images. OpenMausBot's hosted control plane does not
+  SQLite data, and screen images. Astra's hosted control plane does not
   store a copy of that content.
 - When a user completes a supported credential request on the phone, the value
   exists only in the native secure field long enough to encrypt it with the
@@ -29,12 +29,12 @@ account. A user may separately sign in on the desktop to enable the optional
   passes the value over Electron's private process channel to commit through
   the same operating-system-encrypted store used by Settings. The value is not
   written to
-  iOS preferences or Keychain by OpenMausMobile, chat, SQLite, logs, or the
+  iOS preferences or Keychain by AstraMobile, chat, SQLite, logs, or the
   hosted control-plane database. The user's chosen Password AutoFill provider
   may separately store it under that provider's own settings and privacy terms.
 - On a local Wi-Fi or Tailscale connection, phone traffic goes directly to the
   user's computer. Tailscale is a separate service with its own privacy terms.
-- If the desktop user enables optional hosted access, OpenMausBot stores the
+- If the desktop user enables optional hosted access, Astra stores the
   account email address, an internal account ID, and computer installation
   metadata: an opaque installation ID, opaque client ID, computer display name,
   operating system, app version, status, and security timestamps. It also stores
@@ -44,13 +44,13 @@ account. A user may separately sign in on the desktop to enable the optional
 - The optional HTTPS route is proxied by Cloudflare to an outbound-only
   `cloudflared` connector on the user's computer. Messages, approvals,
   transcript responses, and screen frames pass through Cloudflare in transit,
-  but are not written to the OpenMausBot control-plane database. Cloudflare may
-  process IP addresses and connection/request metadata as OpenMausBot's service
+  but are not written to the Astra control-plane database. Cloudflare may
+  process IP addresses and connection/request metadata as Astra's service
   provider under Cloudflare's privacy terms.
 - Connector tokens stay in the desktop operating system's encrypted credential
   store. Pairing and device tokens are not stored in the hosted control-plane
   database.
-- When a user explicitly chooses OpenMausBot from another app's Share sheet, or
+- When a user explicitly chooses Astra from another app's Share sheet, or
   uses the attachment button in a chat, the selected text, link, image, or
   supported document is sent to the bot or room the user confirms. Images and
   documents are stored in the attachments directory on the user's computer with
@@ -61,7 +61,7 @@ account. A user may separately sign in on the desktop to enable the optional
   In-chat selections remain in memory until the message succeeds or the draft
   is discarded. Temporary Share-extension copies are removed after a completed
   send or cancellation. If iOS terminates the extension mid-transfer, the next
-  Share sheet session removes the abandoned copy immediately; an OpenMausMobile
+  Share sheet session removes the abandoned copy immediately; an AstraMobile
   foreground launch removes it once it is at least 60 minutes old.
 - Opening a file link sent by a bot requests that exact file from the paired
   computer over the selected authenticated companion connection. The app keeps
@@ -78,8 +78,8 @@ remote networks; neither makes a sleeping or powered-off computer reachable.
 ## Retention, control, and deletion
 
 Unpairing removes the computer address and pairing token from the phone.
-Revoking the phone in OpenMausBot's Companion settings invalidates that device
-credential. Transcript deletion is controlled by the OpenMausBot installation
+Revoking the phone in Astra's Companion settings invalidates that device
+credential. Transcript deletion is controlled by the Astra installation
 that stores the transcript.
 
 Signing out of optional hosted access stops advertising the hosted address,
@@ -91,7 +91,7 @@ holder asks for deletion. Some minimal records may be retained when required
 for security, fraud prevention, dispute resolution, or law.
 
 To request a copy or deletion of hosted account data, open an
-[OpenMausBot Support](https://github.com/milind-soni/OpenMausBot/issues) request
+[Astra Support](https://github.com/milind-soni/Astra/issues) request
 without posting an OTP, pairing code, device token, connector token, or other
 secret. The maintainer will provide a private way to verify control of the
 email address. Deleting hosted account data does not delete transcripts stored
@@ -100,4 +100,4 @@ on the user's own computer.
 ## Support
 
 Privacy questions can be opened at
-[OpenMausBot Support](https://github.com/milind-soni/OpenMausBot/issues).
+[Astra Support](https://github.com/milind-soni/Astra/issues).

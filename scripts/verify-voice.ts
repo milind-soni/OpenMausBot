@@ -8,7 +8,7 @@
 //      `provider: "piper"` and refuse with Piper-specific advice — never
 //      ElevenLabs' "add a key".
 // Launches its own fake-engine server; the user's app and data are untouched.
-import { launchVerificationServer } from "./control-omb.ts";
+import { launchVerificationServer } from "./control-astra.ts";
 
 const fixture = await launchVerificationServer();
 try {

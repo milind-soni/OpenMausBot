@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `openmausbot serve` — a daemon that runs the harness, the companion sidecar, the webhook receiver, and the managed tunnel with no Electron and no desktop session, so routines and webhooks keep running when the laptop is closed, and the desktop and phone become clients that can list more than one machine.
+**Goal:** `astra serve` — a daemon that runs the harness, the companion sidecar, the webhook receiver, and the managed tunnel with no Electron and no desktop session, so routines and webhooks keep running when the laptop is closed, and the desktop and phone become clients that can list more than one machine.
 
 **Architecture:** Almost nothing new. `server/index.ts` is already a standalone process (`pnpm dev:server`) and the companion is already a separate process. The always-on stack under `electron/` is already dependency-injected — `secure-credentials.mjs`, `control-plane-client.mjs`, `managed-companion-tunnel.mjs`, and `companion-origin-gateway.mjs` take their I/O as parameters and do not import `electron`. Only `electron/companion.mjs` does. So this plan extracts a shared supervisor those two shells both drive, adds a file-backed credential store for the headless case, and teaches the clients that a machine is a thing you pick.
 
@@ -14,7 +14,7 @@
 
 See [the roadmap](2026-08-31-00-control-plane-roadmap.md#global-constraints). Load-bearing here:
 
-- **Superseded (Sep 2026):** the harness now authenticates remote clients itself (`docs/plans/remote-workspace.md`: pairing codes, sessions, and a "through a proxy" rule for forwarded requests), and `openmausbot serve --tunnel` (`server/tunnel.ts`) opens a second, IPC listener for the tunnel gateway on which every request is remote by construction. The loopback bind and its owner trust are unchanged; the sidecar is no longer the only door.
+- **Superseded (Sep 2026):** the harness now authenticates remote clients itself (`docs/plans/remote-workspace.md`: pairing codes, sessions, and a "through a proxy" rule for forwarded requests), and `astra serve --tunnel` (`server/tunnel.ts`) opens a second, IPC listener for the tunnel gateway on which every request is remote by construction. The loopback bind and its owner trust are unchanged; the sidecar is no longer the only door.
 - **The loopback bind is not negotiable.** The harness listens on `127.0.0.1` and rejects any request whose `Host` is not loopback, defeating DNS rebinding. Headless must not add a second bind to the harness. Network exposure stays entirely in the companion sidecar, which is the design `companion/README.md` argues for at length — do not relitigate it.
 - **Fail closed on absent capability.** A headless host has no desktop session, no `safeStorage`, and on Linux may have no seat at all. Every capability that is unavailable must report unavailable, never "off" and never "on".
 - **The capability rule** applies to platform capabilities too: the client must not offer local computer control for a machine that cannot do it.
@@ -31,7 +31,7 @@ sidecar on `:8810`, `electron/companion-origin-gateway.mjs` opens the managed or
 `cloudflare/control-plane` maps one opaque hostname to that installation. Close the app
 and all four stop, taking routines (`server/routines.ts`) and the webhook receiver
 (`server/webhook-ingress.ts`, `:8800`) with them. The README says this plainly in its
-Status section, and it is the single biggest gap between OpenMausBot and an "AI employee".
+Status section, and it is the single biggest gap between Astra and an "AI employee".
 
 The good news, verified: of the five always-on modules, four already take their
 dependencies as injected parameters — `readSecureCredentials` in
@@ -47,13 +47,13 @@ imports `electron`.
 - Create `server/supervisor.test.ts`.
 - Create `server/host-adapter.ts`: the `HostAdapter` interface plus the headless implementation (file-backed credentials, no desktop capabilities).
 - Create `server/host-adapter.test.ts`.
-- Create `server/serve.ts`: the `openmausbot serve` entry point — flags, logging, signal handling.
+- Create `server/serve.ts`: the `astra serve` entry point — flags, logging, signal handling.
 - Create `server/serve.test.ts`.
 - Modify `electron/companion.mjs`: drive `server/supervisor.ts` through an Electron host adapter instead of owning the lifecycle.
 - Modify `server/index.ts`: `GET /api/machine` reporting this installation's identity and capabilities.
 - Modify `companion/src/routes.ts`: allowlist `/api/machine`.
 - Modify `src/components/Sidebar.tsx` or settings: the machine roster.
-- Create `docs/headless.md`, `build/openmausbot.service`, `build/com.openmausbot.serve.plist`.
+- Create `docs/headless.md`, `build/astra.service`, `build/com.astra.serve.plist`.
 - Modify `package.json`: a `serve` script and a `bin` entry.
 
 ---
@@ -121,7 +121,7 @@ imports `electron`.
 
 **Files:**
 - Create: `server/serve.ts`, `server/serve.test.ts`
-- Modify: `package.json` (`"serve"` script, `"bin": { "openmausbot": "..." }`)
+- Modify: `package.json` (`"serve"` script, `"bin": { "astra": "..." }`)
 
 - [ ] Write a failing test for the pure flag parser: `parseServeArgs([])` yields the documented defaults (port 8799, webhook 8800, companion 8810, tunnel off); `--port 9000` overrides; `--no-companion` disables it; `--tunnel` enables it; an unknown flag is a typed error naming the flag, not a silent ignore.
 - [ ] Write a failing test that `--tunnel` without a registered installation credential is a startup **error** with an actionable message, not a silent degrade to no tunnel.
@@ -129,7 +129,7 @@ imports `electron`.
 - [ ] Implement: parse flags, build the headless adapter and supervisor, install `SIGINT`/`SIGTERM` handlers that call `stop()` and wait for it, and log one line per lifecycle transition. Log to stdout in a form a journal will keep — no ANSI, no spinners, and never a credential.
 - [ ] Add the `serve` script and the `bin` entry. Keep the existing `dev:server` script working unchanged; `serve` is the supervised form, `dev:server` stays the bare one.
 - [ ] Run; expect PASS.
-- [ ] Commit `feat(headless): openmausbot serve`.
+- [ ] Commit `feat(headless): astra serve`.
 
 ---
 
@@ -146,7 +146,7 @@ imports `electron`.
 - [ ] Write a failing API test that `/api/machine` reports the adapter's capabilities verbatim and carries no credential, no tunnel hostname, and no installation secret.
 - [ ] Write a failing test in `companion/test/routes.test.ts` that `GET /api/machine` is allowlisted for paired devices and that `POST` to it is refused — the companion is default-deny per method and path, and a new route is closed until someone opens it deliberately.
 - [ ] Run; expect FAIL.
-- [ ] Implement. `name` defaults to the OS hostname and is overridable by `OMB_MACHINE_NAME`, because three VPS boxes all called `localhost` is not a roster.
+- [ ] Implement. `name` defaults to the OS hostname and is overridable by `ASTRA_MACHINE_NAME`, because three VPS boxes all called `localhost` is not a roster.
 - [ ] Run; expect PASS.
 - [ ] Commit `feat(headless): expose machine identity and capabilities`.
 
@@ -185,10 +185,10 @@ imports `electron`.
 ### Task 7: Ship it as a service
 
 **Files:**
-- Create: `docs/headless.md`, `build/openmausbot.service`, `build/com.openmausbot.serve.plist`
+- Create: `docs/headless.md`, `build/astra.service`, `build/com.astra.serve.plist`
 - Modify: `README.md` (the Status section's honest note about always-on)
 
-- [ ] Write the systemd unit: `Type=simple`, `Restart=on-failure`, `RestartSec=5`, a dedicated non-root user, `StateDirectory=openmausbot`, and `ProtectSystem=strict` with `~/.openmausbot` as the only writable path.
+- [ ] Write the systemd unit: `Type=simple`, `Restart=on-failure`, `RestartSec=5`, a dedicated non-root user, `StateDirectory=astra`, and `ProtectSystem=strict` with `~/.astra` as the only writable path.
 - [ ] Write the launchd plist for a Mac mini left running, with `KeepAlive` and `RunAtLoad`.
 - [ ] Write `docs/headless.md`: install, register the installation, the agent CLIs the box needs installed and logged in, the capability table for a headless host, the credential-at-rest tradeoff from Task 1 stated plainly, and the firewall guidance — the companion port must not be exposed directly; use the managed tunnel or a tailnet.
 - [ ] Update the README Status line that currently says webhook triggers use a local receiver rather than an always-on hosted relay. It is about to be less true; say exactly how much less.

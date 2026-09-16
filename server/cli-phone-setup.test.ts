@@ -76,7 +76,7 @@ describe("optional phone setup", () => {
     const result = await runPhoneSetup(options, ui.io, deps);
     expect(result).toEqual({ options });
     expect(result.options).toBe(options);
-    expect(ui.io.choose).toHaveBeenCalledWith("Use OpenMausBot on your phone?", expect.any(Array), 0);
+    expect(ui.io.choose).toHaveBeenCalledWith("Use Astra on your phone?", expect.any(Array), 0);
     expect(deps.accountReady).not.toHaveBeenCalled();
     expect(deps.login).not.toHaveBeenCalled();
     ui.consumed();
@@ -113,7 +113,7 @@ describe("optional phone setup", () => {
     const ui = prompts({ choices: [2, 0], confirms: [true] });
     expect((await runPhoneSetup(options, ui.io, deps)).phone).toBe("android");
     expect(deps.login).not.toHaveBeenCalled();
-    expect(ui.lines.join("\n")).toContain("saved OpenMausBot account");
+    expect(ui.lines.join("\n")).toContain("saved Astra account");
     ui.consumed();
   });
 

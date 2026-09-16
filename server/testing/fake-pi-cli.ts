@@ -32,13 +32,13 @@ if (argv.includes("--version") || argv.includes("-v")) {
 if (process.env.FAKE_PI_DUMP) {
   try {
     // When the driver mounts integrations it hands the MCP config through
-    // OMB_MCP_CONFIG; read it here so a test can assert the mount contract
+    // ASTRA_MCP_CONFIG; read it here so a test can assert the mount contract
     // (servers, proxy wrap, credential hygiene) without racing the temp file
     // cleanup the driver runs at turn settle.
     let mcpConfig: unknown = null;
-    if (process.env.OMB_MCP_CONFIG) {
+    if (process.env.ASTRA_MCP_CONFIG) {
       try {
-        mcpConfig = JSON.parse(readFileSync(process.env.OMB_MCP_CONFIG, "utf8"));
+        mcpConfig = JSON.parse(readFileSync(process.env.ASTRA_MCP_CONFIG, "utf8"));
       } catch {
         /* unreadable config dumps as null */
       }

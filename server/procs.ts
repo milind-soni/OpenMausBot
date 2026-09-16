@@ -218,6 +218,6 @@ export function brokerSocketPath(dataDir: string, tag: string): string {
   return process.platform === "win32"
     // Named pipes share a global namespace; DATA_DIR cannot isolate two
     // concurrent app instances the way a POSIX socket directory does.
-    ? `\\\\.\\pipe\\openmausbot-perm-${process.pid}-${tag}`
+    ? `\\\\.\\pipe\\astra-perm-${process.pid}-${tag}`
     : join(dataDir, `perm-${tag}.sock`);
 }

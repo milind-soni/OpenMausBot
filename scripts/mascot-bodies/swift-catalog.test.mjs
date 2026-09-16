@@ -6,12 +6,12 @@ import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 // P1 ruling: emitted to ios/Sources/CompanionCore (reachable by `swift test`),
 // not ios/App (the Xcode app target, which `swift test` never builds).
 const swift = readFileSync(
-  new URL("../../ios/Sources/CompanionCore/MausBodies.swift", import.meta.url),
+  new URL("../../ios/Sources/CompanionCore/AstraBodies.swift", import.meta.url),
   "utf8"
 );
 
 describe("the generated Swift catalog", () => {
-  it("warns against hand-editing, like MausFaceData does", () => {
+  it("warns against hand-editing, like AstraFaceData does", () => {
     expect(swift).toContain("do not hand-edit");
   });
 

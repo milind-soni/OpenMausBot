@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const fixture = await launchVerificationServer();
@@ -32,7 +32,7 @@ try {
   });
   const info = { ...fixture.info, launcherPid: process.pid, previewUrl: ui.previewUrl };
   console.log(JSON.stringify(info));
-  if (process.env.OMB_HELPER_EVIDENCE) writeFileSync(process.env.OMB_HELPER_EVIDENCE, JSON.stringify(info, null, 2));
+  if (process.env.ASTRA_HELPER_EVIDENCE) writeFileSync(process.env.ASTRA_HELPER_EVIDENCE, JSON.stringify(info, null, 2));
   await parkUntilSignal();
 } finally {
   await ui?.close();

@@ -27,9 +27,9 @@ describe("enterprise hook point", () => {
     expect(await loadEnterpriseLayer({ dir: absent, licenseKey: undefined })).toEqual({ edition: "oss", features: [] });
     const status = await loadEnterpriseLayer({ dir: absent, licenseKey: "omb1.x.y" });
     expect(status.edition).toBe("oss");
-    expect(status.notice).toContain("OMB_LICENSE_KEY is set but no enterprise layer exists");
+    expect(status.notice).toContain("ASTRA_LICENSE_KEY is set but no enterprise layer exists");
     expect(entitled("whitelabel")).toBe(false);
-    expect(describeEdition(status)).toContain("open-source edition (OMB_LICENSE_KEY is set");
+    expect(describeEdition(status)).toContain("open-source edition (ASTRA_LICENSE_KEY is set");
   });
 
   it("registers the layer's entitlements from the key", async () => {
@@ -42,14 +42,14 @@ describe("enterprise hook point", () => {
     expect(editionStatus()).toEqual(status);
     expect(entitled("whitelabel")).toBe(true);
     expect(entitled("budgets")).toBe(false);
-    expect(describeEdition(status)).toBe("openmausbot enterprise edition for Acme until 2027-01-01: sso, whitelabel");
+    expect(describeEdition(status)).toBe("astra enterprise edition for Acme until 2027-01-01: sso, whitelabel");
   });
 
   it("loads a compiled layer (server/index.js) the way an image ships it", async () => {
     const dir = fakeLayer(`export function register() { return { customer: "Built", features: ["admin"], expiresAt: null }; }`, "index.js");
     const status = await loadEnterpriseLayer({ dir, licenseKey: "k" });
     expect(status).toEqual({ edition: "enterprise", customer: "Built", features: ["admin"], expiresAt: null });
-    expect(describeEdition(status)).toBe("openmausbot enterprise edition for Built: admin");
+    expect(describeEdition(status)).toBe("astra enterprise edition for Built: admin");
   });
 
   it("stops granting features the moment the license expires, without a restart", async () => {
@@ -76,7 +76,7 @@ describe("enterprise hook point", () => {
   it("tells the operator when the layer is present but no key is configured", async () => {
     const dir = fakeLayer(`export function register() { return { customer: "x", features: [], expiresAt: null }; }`);
     const status = await loadEnterpriseLayer({ dir, licenseKey: undefined });
-    expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but OMB_LICENSE_KEY is not set" });
+    expect(status).toEqual({ edition: "oss", features: [], notice: "enterprise layer present but ASTRA_LICENSE_KEY is not set" });
   });
 
   it("refuses a layer that does not honour the contract", async () => {

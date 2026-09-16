@@ -73,12 +73,12 @@ async function pairingCode(scopes?: string[]): Promise<{ code: string; url: stri
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-remote-test-"));
   const staticDir = join(home, "static");
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".astra"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Served UI</title>");
   // Avoid probing whatever agent CLIs happen to be installed on the test
   // machine; remote-session behavior does not depend on an engine.
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+  writeFileSync(join(home, ".astra", "config.json"), JSON.stringify({
     instances: { fixture: { driver: "remote-session-test-shadow" } },
     profile: { name: "Security fixture", email: "private@example.invalid" },
     vps: { sshAlias: "fixture-private-host" },
@@ -91,16 +91,16 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
-      OMB_STATIC_DIR: staticDir,
-      OMB_PUBLIC_URL: `${PUBLIC_URL}/`,
-      OMB_APP_VERSION: "9.9.9-test",
-      OMB_ENVIRONMENT_LABEL: "cab mini",
-      OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
+      ASTRA_PORT: String(PORT),
+      ASTRA_WEBHOOK_PORT: String(WEBHOOK_PORT),
+      ASTRA_STATIC_DIR: staticDir,
+      ASTRA_PUBLIC_URL: `${PUBLIC_URL}/`,
+      ASTRA_APP_VERSION: "9.9.9-test",
+      ASTRA_ENVIRONMENT_LABEL: "cab mini",
+      ASTRA_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
       // Slow heartbeat on purpose: the revocation test must prove the stream is
       // ended by the revoke itself, not by the next heartbeat noticing.
-      OMB_SSE_HEARTBEAT_MS: "4000",
+      ASTRA_SSE_HEARTBEAT_MS: "4000",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -130,12 +130,12 @@ describe("before pairing", () => {
     expect(response.body).toEqual({ error: "invalid request URL" });
     const health = await call("/api/health");
     expect(health.status).toBe(200);
-    expect(health.body).toMatchObject({ app: "openmausbot", pid: child.pid });
+    expect(health.body).toMatchObject({ app: "astra", pid: child.pid });
     expect(child.exitCode).toBeNull();
   });
 
   it("describes itself to anyone, but serves nothing else off-machine", async () => {
-    const descriptor = await call("/.well-known/openmausbot/environment", { headers: remote("10.0.0.1") });
+    const descriptor = await call("/.well-known/astra/environment", { headers: remote("10.0.0.1") });
     expect(descriptor.status).toBe(200);
     expect(descriptor.body.environmentId).toMatch(/^[0-9a-f-]{36}$/);
     expect(descriptor.body.label).toBe("cab mini");

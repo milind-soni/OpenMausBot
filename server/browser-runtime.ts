@@ -58,7 +58,7 @@ class BrowserClient {
     this.child.on("close", () => { void this.stop(new TransportError("Browser connection closed.")); });
     this.ready = this.rpc("initialize", {
       protocolVersion: "2024-11-05", capabilities: {},
-      clientInfo: { name: "openmausbot-browser", version: "1" },
+      clientInfo: { name: "astra-browser", version: "1" },
     }).then((result) => {
       if (!result || typeof result !== "object" || !("protocolVersion" in result)) {
         throw new TransportError("Browser engine returned an invalid handshake.");

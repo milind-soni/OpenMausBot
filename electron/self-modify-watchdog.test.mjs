@@ -2,7 +2,7 @@
 // spawned as a child process against throwaway fixtures: a fake project root
 // holding an "edited" file, a fake data dir holding its journal entry and
 // byte-exact backup, and a boot marker. Timings are driven to milliseconds
-// through the OMB_WATCHDOG_* env overrides the script reads, so the
+// through the ASTRA_WATCHDOG_* env overrides the script reads, so the
 // nothing-to-watch, death, wedge (stale heartbeat), lifetime, and raced-by
 // another-watcher paths are all exercised in seconds.
 import { spawn } from "node:child_process";
@@ -16,10 +16,10 @@ const WATCHDOG = new URL("./self-modify-watchdog.mjs", import.meta.url).pathname
 
 const FAST = {
   ...process.env,
-  OMB_WATCHDOG_POLL_MS: "100",
-  OMB_WATCHDOG_BOOT_GRACE_MS: "200",
-  OMB_WATCHDOG_STALE_MS: "300",
-  OMB_WATCHDOG_MAX_LIFETIME_MS: "4000",
+  ASTRA_WATCHDOG_POLL_MS: "100",
+  ASTRA_WATCHDOG_BOOT_GRACE_MS: "200",
+  ASTRA_WATCHDOG_STALE_MS: "300",
+  ASTRA_WATCHDOG_MAX_LIFETIME_MS: "4000",
 };
 
 const EDITED = "export const props = { tick: 2 };\n";
@@ -165,7 +165,7 @@ describe("self-modify watchdog", () => {
     const settle = setTimeout(() => writeEntry("wd-test", backupPath(), "verified"), 250);
     const { code } = await runWatchdog([journalFile, dataDir, String(process.pid), root], {
       ...FAST,
-      OMB_WATCHDOG_MAX_LIFETIME_MS: "8000",
+      ASTRA_WATCHDOG_MAX_LIFETIME_MS: "8000",
     });
     clearTimeout(settle);
     expect(code).toBe(4);

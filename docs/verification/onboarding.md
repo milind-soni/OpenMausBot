@@ -3,13 +3,13 @@
 Launch the isolated full-app fixture following [Chat UI](chat-ui.md):
 
 ```sh
-node --experimental-strip-types scripts/control-omb.ts ui launch
+node --experimental-strip-types scripts/control-astra.ts ui launch
 ```
 
 In a second terminal, pass its exact printed handle:
 
 ```sh
-node --experimental-strip-types scripts/verify-onboarding-ui.ts /tmp/openmausbot-verify-data-XXXXXX/ui.json
+node --experimental-strip-types scripts/verify-onboarding-ui.ts /tmp/astra-verify-data-XXXXXX/ui.json
 ```
 
 Use a fresh fixture. The recipe clears only its browser storage, then enables

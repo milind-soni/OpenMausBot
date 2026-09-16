@@ -44,6 +44,6 @@ body:
       label: Logs
       description: >-
         Anything from the terminal running `pnpm dev:server`, or the per-thread
-        event logs in `~/.openmausbot/events/`. Redact anything that looks like
+        event logs in `~/.astra/events/`. Redact anything that looks like
         a key or token before pasting.
       render: text

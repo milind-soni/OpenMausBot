@@ -37,7 +37,7 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-browser-codex-path-"));
     bin = join(home, ".local", "bin");
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".astra");
     mkdirSync(bin, { recursive: true });
     mkdirSync(data);
     // The extensionless executable must exercise /usr/bin/env node, rather
@@ -66,8 +66,8 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: {
-        PATH: FINDER_PATH, HOME: home, OMB_DATA_DIR: data, OMB_PORT: String(port),
-        OMB_AGENT_BROWSER_PATH: browser, VITEST: "1",
+        PATH: FINDER_PATH, HOME: home, ASTRA_DATA_DIR: data, ASTRA_PORT: String(port),
+        ASTRA_AGENT_BROWSER_PATH: browser, VITEST: "1",
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -79,7 +79,7 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
       child.once("exit", () => { clearTimeout(timer); reject(new Error(`Fixture exited: ${stderr}`)); });
       child.stdout!.on("data", (chunk) => {
         output += chunk;
-        if (output.includes(`openmausbot server on ${base}`)) { clearTimeout(timer); resolve(); }
+        if (output.includes(`astra server on ${base}`)) { clearTimeout(timer); resolve(); }
       });
     });
     events = await openSse(`${base}/api/events`);
@@ -116,7 +116,7 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
     // process receives no shared profile key or direct browser command.
     expect(dump.argv).toContain(`mcp_servers.browser.command=${JSON.stringify(process.execPath)}`);
     expect(dump.argv.some((arg: string) => arg.startsWith("mcp_servers.browser.args=") && arg.includes("browser-proxy.ts"))).toBe(true);
-    expect(dump.env.OMB_BROWSER_TOKEN).toBeTruthy();
+    expect(dump.env.ASTRA_BROWSER_TOKEN).toBeTruthy();
     expect(dump.env.AGENT_BROWSER_SESSION).toBeUndefined();
     expect(dump.env.AGENT_BROWSER_ENCRYPTION_KEY).toBeUndefined();
     expect(dump.calls.some((call: any) => call.method === "turn/start")).toBe(true);

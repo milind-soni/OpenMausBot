@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { HELP } from "../control-omb.ts";
+import { HELP } from "../control-astra.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const DOCS = join(ROOT, "docs", "verification");
@@ -42,7 +42,7 @@ describe("docs/verification recipes cite things that exist", () => {
     expect(used.length).toBeGreaterThan(0);
     expect(used.filter((hit) => !helpVerbs.has(target(hit)))).toEqual([]);
     // the launcher form may also name `launch`, which pnpm cannot run
-    const direct = cited(/scripts\/control-omb\.ts ([a-z][\w-]*)/g);
+    const direct = cited(/scripts\/control-astra\.ts ([a-z][\w-]*)/g);
     expect(direct.filter((hit) => target(hit) !== "launch" && !helpVerbs.has(target(hit)))).toEqual([]);
   });
 

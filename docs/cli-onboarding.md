@@ -1,20 +1,20 @@
 # Terminal setup
 
-Install [Node.js](https://nodejs.org/) 24 or newer, then choose either way to run OpenMausBot:
+Install [Node.js](https://nodejs.org/) 24 or newer, then choose either way to run Astra:
 
 ```sh
 # Install once, then use the short command:
-npm install -g openmausbot
-openmausbot
+npm install -g astra
+astra
 ```
 
 Or, without a global install:
 
 ```sh
-npx openmausbot
+npx astra
 ```
 
-Use the same command next time. The first launch guides you through setup; later launches reuse your saved AI connection and phone-access choice. `openmausbot start` is the same as the bare command. If that workspace is already running, OpenMausBot opens it instead of starting a second server.
+Use the same command next time. The first launch guides you through setup; later launches reuse your saved AI connection and phone-access choice. `astra start` is the same as the bare command. If that workspace is already running, Astra opens it instead of starting a second server.
 
 ## First launch
 
@@ -37,18 +37,18 @@ A phone cannot connect to this computer's `localhost` address. The harness also 
 
 Choose one connection method:
 
-- **Managed HTTPS address:** setup asks explicit permission for a public endpoint through Cloudflare and a possible connector download. Device pairing protects chat and settings; the pairing page and basic server identity remain publicly reachable. Sign in to an **OpenMausBot account** using an emailed code, or reuse this machine's saved account. This account is separate from ChatGPT, Claude, or an API-provider account. The connection stays active while OpenMausBot runs.
+- **Managed HTTPS address:** setup asks explicit permission for a public endpoint through Cloudflare and a possible connector download. Device pairing protects chat and settings; the pairing page and basic server identity remain publicly reachable. Sign in to an **Astra account** using an emailed code, or reuse this machine's saved account. This account is separate from ChatGPT, Claude, or an API-provider account. The connection stays active while Astra runs.
 - **Existing Tailscale:** both computer and phone must already be signed in to the same tailnet, with HTTPS certificates enabled. Setup asks before enabling HTTPS serving to that tailnet; it does not install or sign in to Tailscale for you.
 - **Existing HTTPS address (advanced):** supply the origin of a reverse proxy you already configured, such as `https://maus.example.com`. Do not paste a password, path, query, or pairing code. Entering an address does not create the proxy or open a LAN listener.
 
 After the connection is ready:
 
-- **iPhone/iPad:** scan the QR with Camera to open Safari. If you already have the OpenMausBot iOS app, use its pairing scanner or paste the full link there.
+- **iPhone/iPad:** scan the QR with Camera to open Safari. If you already have the Astra iOS app, use its pairing scanner or paste the full link there.
 - **Android:** scan with Camera and open the link in your web browser. This CLI link does **not** work with the current Android native app's companion-pairing scanner.
 
 Choose **Connect** on the phone. Scanning alone is not a successful pairing. The code is private, single-use, and expires after five minutes. Guided phone pairing grants client access for chat and approvals, not settings or pairing administration.
 
-If the workspace starts but its HTTPS check fails, the local workspace remains usable and no phone code is created. Fix the connection and run `openmausbot pair` in another terminal to try again. A missing account, connector, or Tailscale prerequisite can prevent startup; follow the printed error, or use `openmausbot --local`. To add phone access after skipping it, stop the server, run `openmausbot setup`, then start it again.
+If the workspace starts but its HTTPS check fails, the local workspace remains usable and no phone code is created. Fix the connection and run `astra pair` in another terminal to try again. A missing account, connector, or Tailscale prerequisite can prevent startup; follow the printed error, or use `astra --local`. To add phone access after skipping it, stop the server, run `astra setup`, then start it again.
 
 ## Commands
 
@@ -56,21 +56,21 @@ The examples below assume a global install; prefix them with `npx` otherwise.
 
 | Command | Use |
 | --- | --- |
-| `openmausbot` | Set up once, then start with saved settings. |
-| `openmausbot setup` | Revisit AI and optional phone setup, save, and exit without starting. This is not a reset. |
-| `openmausbot --no-open` | Start without opening a browser. |
-| `openmausbot --local` | Ignore saved remote access for this launch; keep the saved choice for next time. |
-| `openmausbot --no-pair` | Suppress phone setup prompts and pairing invitations. This does **not** turn off saved remote access; use `--local` for that. |
-| `openmausbot pair` | Create another phone invitation while the configured workspace and HTTPS connection are running. |
-| `openmausbot sessions` | List paired devices; `openmausbot sessions revoke ID` signs one out. |
-| `openmausbot serve` | Start without onboarding prompts or automatic browser opening; specify remote-access flags explicitly for a service. |
-| `openmausbot login` | Sign in to an OpenMausBot account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
+| `astra` | Set up once, then start with saved settings. |
+| `astra setup` | Revisit AI and optional phone setup, save, and exit without starting. This is not a reset. |
+| `astra --no-open` | Start without opening a browser. |
+| `astra --local` | Ignore saved remote access for this launch; keep the saved choice for next time. |
+| `astra --no-pair` | Suppress phone setup prompts and pairing invitations. This does **not** turn off saved remote access; use `--local` for that. |
+| `astra pair` | Create another phone invitation while the configured workspace and HTTPS connection are running. |
+| `astra sessions` | List paired devices; `astra sessions revoke ID` signs one out. |
+| `astra serve` | Start without onboarding prompts or automatic browser opening; specify remote-access flags explicitly for a service. |
+| `astra login` | Sign in to an Astra account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
 
 `start` accepts the same server options as `serve`, including `--port`, `--data-dir`, `--tailscale`, `--tunnel`, and `--public-url`. Keep using your custom data directory and port when starting or pairing:
 
 ```sh
-openmausbot setup --data-dir /path/to/omb-data --port 8799
-openmausbot --data-dir /path/to/omb-data --port 8799
+astra setup --data-dir /path/to/omb-data --port 8799
+astra --data-dir /path/to/omb-data --port 8799
 ```
 
 Setup needs an interactive terminal. Later starts can run without one once setup is complete. Stop a running server before changing its setup or access mode: `--local` does not turn off a remote connection belonging to a server that is already running. You do not need to delete configuration, bots, or conversations to reconfigure it.
@@ -79,6 +79,6 @@ Setup needs an interactive terminal. Later starts can run without one once setup
 
 API keys are hidden while typed or pasted. New API connections save their key in the data directory's `config.json` as **plaintext, not encrypted**, with owner-only permissions (`0600`) on Unix. Managed-access account credentials in `tunnel-account.json` are also plaintext with `0600` permissions on Unix. Keep these files and backups private. Native provider sign-in credentials are managed by the provider's own CLI.
 
-Ctrl-C during AI setup leaves unsaved OMB changes unapplied. Installations and provider sign-ins already completed remain available. Ctrl-C during the later phone step keeps the AI setup you already saved, exits without starting a server, and does not undo an account sign-in already completed. Run `openmausbot setup` to continue; no destructive reset is needed.
+Ctrl-C during AI setup leaves unsaved OMB changes unapplied. Installations and provider sign-ins already completed remain available. Ctrl-C during the later phone step keeps the AI setup you already saved, exits without starting a server, and does not undo an account sign-in already completed. Run `astra setup` to continue; no destructive reset is needed.
 
 For remote access and background deployment options, see [self-hosting](self-hosting.md) and [the VPS guide](deploy-vps.md).

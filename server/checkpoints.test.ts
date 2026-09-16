@@ -13,10 +13,10 @@ import { afterAll, describe, expect, it } from "vitest";
 import { removeTempDir } from "./testing/cleanup.ts";
 
 // The module stores shadow repos under DATA_DIR, which config.ts reads from
-// OMB_DATA_DIR at import time — so the env var must be set before the import
+// ASTRA_DATA_DIR at import time — so the env var must be set before the import
 // is evaluated (same pattern as attachments.test.ts).
 const DATA_ROOT = mkdtempSync(join(tmpdir(), "omb-checkpoints-"));
-process.env.OMB_DATA_DIR = join(DATA_ROOT, "data");
+process.env.ASTRA_DATA_DIR = join(DATA_ROOT, "data");
 
 const { checkpointsEnabled, listCheckpoints, refusalReason, restore, snapshot } = await import(
   "./checkpoints.ts"
@@ -265,7 +265,7 @@ describe("refusals", () => {
   it("lists nothing (and creates nothing) for a folder never snapshotted", async () => {
     const { bot, cwd } = workspace();
     expect(await listCheckpoints(bot, cwd)).toEqual([]);
-    const shadow = join(process.env.OMB_DATA_DIR!, "checkpoints", bot);
+    const shadow = join(process.env.ASTRA_DATA_DIR!, "checkpoints", bot);
     expect(existsSync(shadow)).toBe(false);
   });
 });

@@ -203,7 +203,7 @@ function fixture({
       // only the pixel-carrying screenshot call fails; the status path's
       // plain get_desktop_state readiness probe keeps answering
       if (screenshotCaptureFails && args.includes("--screenshot-out-file")) throw new Error("capture failed");
-      if (args.includes("openmausbot-preview")) return { stdout: screenshotValid ? screenshot.toString("base64") : "not-an-image", stderr: "" };
+      if (args.includes("astra-preview")) return { stdout: screenshotValid ? screenshot.toString("base64") : "not-an-image", stderr: "" };
       if (args.includes("tail")) {
         return { stdout: "X display :1 did not become ready within 45 seconds\n", stderr: "" };
       }
@@ -255,7 +255,7 @@ describe("VPS computer", () => {
   it("uses a deterministic, bot-id-derived managed container name", () => {
     expect(vpsContainerName(BOT_ID)).toBe(vpsContainerName(BOT_ID));
     expect(vpsContainerName(BOT_ID)).not.toBe(vpsContainerName("another-bot"));
-    expect(vpsContainerName(BOT_ID)).toMatch(/^openmausbot-vps-[a-z0-9-]+$/);
+    expect(vpsContainerName(BOT_ID)).toMatch(/^astra-vps-[a-z0-9-]+$/);
   });
 
   it("passes the SSH target as one validated Docker argv value", () => {
@@ -308,7 +308,7 @@ describe("VPS computer", () => {
     // The status poll must never transfer pixels: readiness is the driver
     // answering get_desktop_state, and pixel validation belongs to the
     // screenshot path alone.
-    expect(fake.calls.some(({ args }) => args.includes("openmausbot-preview"))).toBe(false);
+    expect(fake.calls.some(({ args }) => args.includes("astra-preview"))).toBe(false);
     expect(fake.calls.some(({ args }) => args.includes("--screenshot-out-file"))).toBe(false);
   });
 
@@ -406,7 +406,7 @@ describe("VPS computer", () => {
     expect(run.at(-1)).toBe(IMAGE_ID);
     expect(run.join(" ")).toContain(`--label ${VPS_MANAGED_LABEL}=1`);
     expect(run.find((arg) => arg.startsWith(`${VPS_ENVIRONMENT_LABEL}=`)))
-      .toMatch(/^com\.openmausbot\.environment=[0-9a-f-]{36}$/i);
+      .toMatch(/^com\.astra\.environment=[0-9a-f-]{36}$/i);
     expect(run.join(" ")).toContain(`--label ${IMAGE_LAYER_LABEL}=${IMAGE_LAYER_VERSION}`);
     expect(run.join(" ")).toContain(`--label ${VPS_VIEWER_LABEL}=1`);
     expect(run.join(" ")).toContain("--restart unless-stopped");
@@ -494,10 +494,10 @@ describe("VPS computer", () => {
       "-e",
       "CUA_DRIVER_RS_TELEMETRY_ENABLED=0",
       vpsContainerName(BOT_ID),
-      "/usr/local/libexec/openmausbot/cua-driver",
+      "/usr/local/libexec/astra/cua-driver",
       "mcp",
       "--socket",
-      "/run/user/1000/openmausbot-cua.sock",
+      "/run/user/1000/astra-cua.sock",
     ]);
   });
 
@@ -506,10 +506,10 @@ describe("VPS computer", () => {
     const frame = await vpsComputerScreenshot(CONFIG, BOT_ID, fake.runner);
     expect(frame).toEqual({ png: screenshot.toString("base64"), format: "png" });
     expect(fake.calls.some(({ args }) => args.includes("get_desktop_state"))).toBe(true);
-    const transfer = fake.calls.find(({ args }) => args.includes("openmausbot-preview"))!.args;
+    const transfer = fake.calls.find(({ args }) => args.includes("astra-preview"))!.args;
     expect(transfer.slice(2)).toEqual([
       "exec", "-u", "cua", "-e", "HOME=/home/cua", CONTAINER_ID,
-      "sh", "-c", expect.stringContaining('quality=70'), "openmausbot-preview", "/tmp/openmausbot-vps-preview.png",
+      "sh", "-c", expect.stringContaining('quality=70'), "astra-preview", "/tmp/astra-vps-preview.png",
     ]);
     expect(transfer[transfer.indexOf("-c") + 1]).toContain("image.thumbnail((1280, 1280))");
     expect(fake.calls.some(({ args }) => args.includes("rm") && args.includes("-f"))).toBe(true);
@@ -524,7 +524,7 @@ describe("VPS computer", () => {
   it.skipIf(!hasPillow)("transfers real JPEG previews at quality 70, within 1280px without upscaling", async () => {
     const fake = fixture();
     await vpsComputerScreenshot(CONFIG, BOT_ID, fake.runner);
-    const transfer = fake.calls.find(({ args }) => args.includes("openmausbot-preview"))!.args;
+    const transfer = fake.calls.find(({ args }) => args.includes("astra-preview"))!.args;
     // Execute the exact in-container script, substituting only the local
     // Pillow interpreter and a disposable input image. No Docker or SSH.
     const script = transfer[transfer.indexOf("-c") + 1].replace("/opt/venv/bin/python", "python3");
@@ -534,7 +534,7 @@ describe("VPS computer", () => {
         const original = execFileSync("python3", ["-I", "-c", `from PIL import Image; import sys; Image.effect_noise((${width}, ${height}), 64).convert("RGBA").save(sys.stdout.buffer, format="PNG")`], { maxBuffer: 32 * 1024 * 1024 });
         const path = join(scratch, "preview.png");
         writeFileSync(path, original);
-        const encoded = execFileSync("sh", ["-c", script, "openmausbot-preview", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
+        const encoded = execFileSync("sh", ["-c", script, "astra-preview", path], { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
         const jpeg = Buffer.from(encoded, "base64");
         const decoded = execFileSync("python3", ["-I", "-c", [
           "from PIL import Image",
@@ -548,7 +548,7 @@ describe("VPS computer", () => {
         expect(JSON.parse(decoded)).toEqual({ format: "JPEG", size: expected, mode: "RGB", quality70: true });
         expect(jpeg.length).toBeLessThan(original.length / 2);
         expect(readFileSync(path).equals(original)).toBe(true);
-        const frame = await vpsComputerScreenshot(CONFIG, BOT_ID, async (args, options) => args.includes("openmausbot-preview")
+        const frame = await vpsComputerScreenshot(CONFIG, BOT_ID, async (args, options) => args.includes("astra-preview")
           ? { stdout: encoded, stderr: "" }
           : fake.runner(args, options));
         expect(frame).toEqual({ png: encoded, format: "jpeg" });
@@ -559,7 +559,7 @@ describe("VPS computer", () => {
   it.skipIf(process.platform === "win32")("falls back to the original PNG when conversion is unavailable or fails", async () => {
     const fake = fixture();
     await vpsComputerScreenshot(CONFIG, BOT_ID, fake.runner);
-    const transfer = fake.calls.find(({ args }) => args.includes("openmausbot-preview"))!.args;
+    const transfer = fake.calls.find(({ args }) => args.includes("astra-preview"))!.args;
     const originalScript = transfer[transfer.indexOf("-c") + 1];
     const scratch = mkdtempSync(join(tmpdir(), "omb-vps-preview-fallback-"));
     try {
@@ -569,7 +569,7 @@ describe("VPS computer", () => {
       // the previous PNG behavior, never return a partial JPEG plus a PNG.
       for (const interpreter of [join(scratch, "missing-python"), "false"]) {
         const script = originalScript.replace("/opt/venv/bin/python", interpreter);
-        const encoded = execFileSync("sh", ["-c", script, "openmausbot-preview", path], { encoding: "utf8" });
+        const encoded = execFileSync("sh", ["-c", script, "astra-preview", path], { encoding: "utf8" });
         expect(encoded).toBe(screenshot.toString("base64"));
       }
     } finally { rmSync(scratch, { recursive: true, force: true }); }
@@ -593,7 +593,7 @@ describe("VPS computer", () => {
     const frames = await Promise.all([first, second]);
     expect(frames[0]).toEqual(frames[1]);
     expect(fake.calls.filter(({ args }) => args.includes("--screenshot-out-file"))).toHaveLength(1);
-    expect(fake.calls.filter(({ args }) => args.includes("openmausbot-preview"))).toHaveLength(1);
+    expect(fake.calls.filter(({ args }) => args.includes("astra-preview"))).toHaveLength(1);
     expect(fake.calls.filter(({ args }) => args.includes("rm"))).toHaveLength(1);
     expect(vpsLifecycleBusy()).toBe(false);
   });
@@ -617,7 +617,7 @@ describe("VPS computer", () => {
     await first;
     for (const alias of ["first-preview-vps", "second-preview-vps"]) {
       expect(fake.calls.filter(({ args }) => args[1] === `ssh://${alias}` && args.includes("--screenshot-out-file"))).toHaveLength(1);
-      expect(fake.calls.filter(({ args }) => args[1] === `ssh://${alias}` && args.includes("openmausbot-preview"))).toHaveLength(1);
+      expect(fake.calls.filter(({ args }) => args[1] === `ssh://${alias}` && args.includes("astra-preview"))).toHaveLength(1);
     }
   });
 
@@ -629,7 +629,7 @@ describe("VPS computer", () => {
       const runner: VpsCommandRunner = async (args, options) => {
         const timeoutMs = options?.timeoutMs ?? 120_000;
         calls.push({ args, timeoutMs });
-        if (args.includes("openmausbot-preview") || args.includes("rm")) {
+        if (args.includes("astra-preview") || args.includes("rm")) {
           // Match defaultRunner: time out, terminate, then wait its 5s kill
           // grace before settling. Nothing races ahead of this outstanding work.
           await new Promise((resolve) => setTimeout(resolve, timeoutMs + 5_000));
@@ -643,7 +643,7 @@ describe("VPS computer", () => {
       const first = vpsComputerScreenshot(CONFIG, BOT_ID, runner).finally(() => { settled = true; });
       const rejected = expect(first).rejects.toMatchObject({ status: 504 });
       await vi.advanceTimersByTimeAsync(35_000);
-      expect(calls.find(({ args }) => args.includes("openmausbot-preview"))?.timeoutMs).toBe(14_000);
+      expect(calls.find(({ args }) => args.includes("astra-preview"))?.timeoutMs).toBe(14_000);
       expect(calls.find(({ args }) => args.includes("rm"))?.timeoutMs).toBe(5_000);
       expect(vpsLifecycleBusy()).toBe(true);
       expect(settled).toBe(false);
@@ -758,7 +758,7 @@ describe("VPS computer", () => {
     expect(rebuilt.ready).toBe(true);
   });
 
-  it("never removes a container OpenMausBot did not create", async () => {
+  it("never removes a container Astra did not create", async () => {
     const unowned = fixture({ managed: false });
     await expect(vpsComputerAction("remove", CONFIG, BOT_ID, unowned.runner)).rejects.toThrow(/did not create/);
     expect(unowned.calls.some(({ args }) => args[2] === "rm")).toBe(false);

@@ -290,7 +290,7 @@ function canonicalImageName(originalName: string, path: string, mime: string): s
 }
 
 /** Persist a pasted image server-side and return the attachment chip data.
- * The server writes ~/.openmausbot/attachments/<uuid>.<ext> and answers
+ * The server writes ~/.astra/attachments/<uuid>.<ext> and answers
  * with the path; the prompt references that path so every CLI can open it. */
 export function optimisticImageAttachment(file: File): ImageAttachment | null {
   if (!isImageFile(file)) return null;

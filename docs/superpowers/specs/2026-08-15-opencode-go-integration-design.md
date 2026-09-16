@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add OpenCode Go as an optional first-class OpenMausBot engine by launching the maintained OpenCode CLI through its ACP stdio interface. The integration must preserve the existing session, streaming, tool, permission, cancellation, MCP, credential, and model-selection contracts.
+Add OpenCode Go as an optional first-class Astra engine by launching the maintained OpenCode CLI through its ACP stdio interface. The integration must preserve the existing session, streaming, tool, permission, cancellation, MCP, credential, and model-selection contracts.
 
 ## Scope
 
@@ -34,7 +34,7 @@ Credential handling will follow existing write-only secret conventions. The key 
 1. Registry discovers the OpenCode executable and checks configuration/credential presence.
 2. Setup or onboarding can configure the engine without installing a CLI or restarting the app.
 3. A session starts through ACP, authenticates, creates or loads a session, and sets the full `opencode-go/<model-id>` value with `session/set_config_option` before the first prompt.
-4. ACP events stream text and tool activity through existing OpenMausBot event handling.
+4. ACP events stream text and tool activity through existing Astra event handling.
 5. Permission requests are brokered through the existing permission proxy; allow, deny, timeout, and missing-option paths remain explicit.
 6. Cancellation terminates the session/process cleanly, including early exit and malformed JSON-RPC cases.
 

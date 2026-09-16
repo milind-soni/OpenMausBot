@@ -85,6 +85,6 @@ export async function updateClaudeCli(
     if (!version) throw new Error("Claude returned an empty version");
     return { version };
   } catch {
-    throw new Error("Claude finished updating, but OpenMausBot could not verify the installed version. Refresh Engines to check it.");
+    throw new Error("Claude finished updating, but Astra could not verify the installed version. Refresh Engines to check it.");
   }
 }

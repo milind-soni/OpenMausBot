@@ -1,25 +1,25 @@
 # Chat UI, driven headlessly
 
-The `ui` group of `control-omb` drives the real React renderer — the same
+The `ui` group of `control-astra` drives the real React renderer — the same
 `<App/>` the desktop shell loads, mounted by `scripts/testing/threads-preview.tsx`
 — in a headless Chrome through the agent-browser binary the harness pins
 (`server/browser-engine-release.ts`, implementation in
-`scripts/testing/control-omb-ui.ts`). Everything it touches is disposable: the
+`scripts/testing/control-astra-ui.ts`). Everything it touches is disposable: the
 fake-engine fixture from `launch`, a Vite preview of the app, and one browser
 session whose `HOME` is the fixture's data directory. The user's app on port
-8799 and `~/.openmausbot` are never involved.
+8799 and `~/.astra` are never involved.
 
 ## Launch
 
 ```sh
-node --experimental-strip-types scripts/control-omb.ts ui launch \
+node --experimental-strip-types scripts/control-astra.ts ui launch \
   --tool-calls '[{"name":"Bash","input":{"command":"echo hi"},"ok":true}]'
 ```
 
 Run it in the foreground so Ctrl-C reaches it. On first use it downloads the
 pinned agent-browser release (size and SHA-256 verified) and its Chrome for
 Testing into `.omb-scratch/verify-tools` (gitignored); later launches reuse
-them. `OMB_AGENT_BROWSER_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` take
+them. `ASTRA_AGENT_BROWSER_PATH` and `AGENT_BROWSER_EXECUTABLE_PATH` take
 precedence when set. The launcher then starts the fixture, pins its language
 to English (`PATCH /api/config`), creates Pepper through the same `new-bot`
 path as [Chat turns](chat-turns.md), mounts the preview, opens it in a headless
@@ -28,7 +28,7 @@ session named `omb-ui-<port>`, and prints a handle:
 ```json
 {
   "ok": true,
-  "ui": "/tmp/openmausbot-verify-data-XXXXXX/ui.json",
+  "ui": "/tmp/astra-verify-data-XXXXXX/ui.json",
   "url": "http://127.0.0.1:PORT",
   "previewUrl": "http://127.0.0.1:5178/__threads.html",
   "botId": "…", "dataDir": "…", "logPath": "…"
@@ -43,7 +43,7 @@ a browser it did not launch.
 ## Drive
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/astra-verify-data-XXXXXX/ui.json
 pnpm control:omb ui flag --ui $H --set features.showToolCalls=true --dry-run
 pnpm control:omb ui flag --ui $H --set features.showToolCalls=true
 pnpm control:omb ui snapshot --ui $H --interactive
@@ -87,10 +87,10 @@ What the screenshot looks like when the recipe passes (`evidence/chat-ui/chat-ui
 
 ![The isolated app after the recipe: Pepper's greeting, the sent "hello", a passed Bash chip and the fake reply](evidence/chat-ui/chat-ui.png)
 
-The permanent form of this recipe is `scripts/testing/control-omb-ui.e2e.test.ts`:
+The permanent form of this recipe is `scripts/testing/control-astra-ui.e2e.test.ts`:
 
 ```sh
-OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
+ASTRA_UI_E2E=1 pnpm exec vitest run scripts/testing/control-astra-ui.e2e.test.ts
 ```
 
 The asserted recipe now also covers the floating **This run** card with a
@@ -128,7 +128,7 @@ redaction is best effort. Neither this log nor a successful command proves an
 unasserted user outcome.
 
 It runs when an agent-browser binary resolves and is skipped with a printed
-reason otherwise; `OMB_UI_E2E=1` forces the verified download. The `ui-smoke`
+reason otherwise; `ASTRA_UI_E2E=1` forces the verified download. The `ui-smoke`
 job in `.github/workflows/ci.yml` runs it on Ubuntu 24.04 and uploads the
 screenshot; it is not one of the required checks.
 
@@ -144,7 +144,7 @@ the fallback timer could fire. This probes state; the current app's active-turn
 tail displays presence rather than partial text/reasoning.
 
 ```sh
-OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/stream-buffer.e2e.test.ts
+ASTRA_UI_E2E=1 pnpm exec vitest run scripts/testing/stream-buffer.e2e.test.ts
 pnpm exec vitest run src/state/store.test.ts
 ```
 
@@ -159,7 +159,7 @@ browser and server and removing its temporary data.
 ## Bot setup and MCP access recipe
 
 `scripts/testing/bot-tools-ui.e2e.test.ts` uses the same full-app launcher and
-optional `OMB_UI_E2E=1` gate. It verifies profile-only role creation, closing
+optional `ASTRA_UI_E2E=1` gate. It verifies profile-only role creation, closing
 and reopening the dialog during a slow creation without duplicate submissions, recovery
 when the preset PATCH fails after creation, the composer’s Tools shortcut,
 optional setup ideas, Paste config importing disabled servers, refreshed

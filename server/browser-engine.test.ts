@@ -265,7 +265,7 @@ describe("finding the browser engine", () => {
     expect(asset).toEqual({
       target: "win32-x64", version: "0.36.0-omb.1",
       asset: "agent-browser-win32-x64-0.36.0-omb.1.exe",
-      url: "https://github.com/milind-soni/OpenMausBot/releases/download/browser-engine-v0.36.0-omb.1/agent-browser-win32-x64-0.36.0-omb.1.exe",
+      url: "https://github.com/milind-soni/Astra/releases/download/browser-engine-v0.36.0-omb.1/agent-browser-win32-x64-0.36.0-omb.1.exe",
       bytes: 13806080, sha256: "33bee834f6a6072ec8688b0914726e0262874d758f69f27e8baf7eaac6b5ed15",
     });
     expect(agentBrowserReleaseVersion(asset)).toBe("0.36.0-omb.1");
@@ -288,7 +288,7 @@ describe("finding the browser engine", () => {
     expect(resolveAgentBrowserBinary(options)).toBeNull();
     files.add(revised);
     expect(browserEngineStatus(options)).toMatchObject({ kind: "ready", binaryPath: revised, version: "0.36.0-omb.1" });
-    expect(resolveAgentBrowserBinary({ ...options, env: { PATH: "", OMB_AGENT_BROWSER_PATH: old } })).toBe(old);
+    expect(resolveAgentBrowserBinary({ ...options, env: { PATH: "", ASTRA_AGENT_BROWSER_PATH: old } })).toBe(old);
   });
 
   it("retains default upstream versions and permits a pinned platform-specific asset URL", () => {
@@ -301,8 +301,8 @@ describe("finding the browser engine", () => {
 
   it.each(SUPPORTED_BROWSER_TARGETS)("uses the complete %s desktop bundle before old downloaded engines", (target) => {
     const [platform, arch] = target.split("-");
-    const env = { OMB_RESOURCES_PATH: join(tmpdir(), "OMB resources"), PATH: "" };
-    const bundle = browserBundlePaths(join(env.OMB_RESOURCES_PATH, "browser-engine"), target);
+    const env = { ASTRA_RESOURCES_PATH: join(tmpdir(), "OMB resources"), PATH: "" };
+    const bundle = browserBundlePaths(join(env.ASTRA_RESOURCES_PATH, "browser-engine"), target);
     const files = new Set([bundle.directory, bundle.engine, bundle.chrome, bundle.manifest, bundle.licenses]);
     const options = { env, platform: platform as NodeJS.Platform, arch, exists: (p: string) => files.has(p) };
     expect(resolveAgentBrowserBinary(options)).toBe(bundle.engine);
@@ -319,13 +319,13 @@ describe("finding the browser engine", () => {
     // A deliberately configured external runtime remains an explicit override.
     const external = join(tmpdir(), "external-engine");
     files.add(external);
-    expect(resolveAgentBrowserBinary({ ...options, env: { ...env, OMB_AGENT_BROWSER_PATH: external } })).toBe(external);
+    expect(resolveAgentBrowserBinary({ ...options, env: { ...env, ASTRA_AGENT_BROWSER_PATH: external } })).toBe(external);
   });
 
   it("mounts the bundled browser with no download and keeps explicit Chrome overrides", async () => {
     const resources = mkdtempSync(join(tmpdir(), "omb-browser-resources-"));
     scratch.push(resources);
-    const env = { OMB_RESOURCES_PATH: resources, PATH: "" };
+    const env = { ASTRA_RESOURCES_PATH: resources, PATH: "" };
     const bundle = browserBundlePaths(join(resources, "browser-engine"), `${process.platform}-${process.arch}`);
     mkdirSync(bundle.licenses, { recursive: true });
     for (const file of [bundle.engine, bundle.chrome, bundle.manifest]) {
@@ -337,7 +337,7 @@ describe("finding the browser engine", () => {
     expect(spec.env.AGENT_BROWSER_EXECUTABLE_PATH).toBe(bundle.chrome);
     expect(spec.env.AGENT_BROWSER_SESSION).toBe("isolated");
     expect(spec.env.AGENT_BROWSER_NO_WEBMCP).toBe("1");
-    expect(spec.env).not.toHaveProperty("OMB_RESOURCES_PATH");
+    expect(spec.env).not.toHaveProperty("ASTRA_RESOURCES_PATH");
     const override = agentBrowserIntegration({ binaryPath: bundle.engine, session: "isolated", encryptionKey: "key", env: { ...env, AGENT_BROWSER_EXECUTABLE_PATH: "/explicit/chrome" } });
     expect(override.env.AGENT_BROWSER_EXECUTABLE_PATH).toBe("/explicit/chrome");
     // A spawn would fail because the fixture engine is not executable.
@@ -364,9 +364,9 @@ describe("finding the browser engine", () => {
     files.add(pinned);
     expect(resolveAgentBrowserBinary({ dataDir, env, exists })).toBe(pinned);
     files.add(override);
-    expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: override }, exists })).toBe(override);
+    expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, ASTRA_AGENT_BROWSER_PATH: override }, exists })).toBe(override);
     // an override that does not exist is an error, not a silent fallback
-    expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: join(dataDir, "missing", name) }, exists })).toBeNull();
+    expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, ASTRA_AGENT_BROWSER_PATH: join(dataDir, "missing", name) }, exists })).toBeNull();
     expect(browserEngineStatus({ dataDir, env, exists })).toMatchObject({ kind: "ready", binaryPath: pinned, version: agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset()) });
   });
 

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 
-import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-astra.ts";
 
 // Obstruct only the attachments directory in the launcher's disposable home.
 // The real child still boots normally and handles real HTTP requests.
@@ -12,7 +12,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...childProcess,
     spawn(command: string, args: readonly string[], options: SpawnOptions) {
-      const dataDir = options.env?.OMB_DATA_DIR;
+      const dataDir = options.env?.ASTRA_DATA_DIR;
       if (!dataDir || !args.includes(join(process.cwd(), "server", "index.ts"))) {
         throw new Error("Expected the isolated verification server");
       }

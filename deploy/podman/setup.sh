@@ -10,19 +10,19 @@ if [ "$(podman info --format '{{.Host.Security.Rootless}}')" != true ]; then
 fi
 systemctl --user enable --now podman.socket >/dev/null
 if [ ! -f .env ]; then
-    data_root="$HOME/openmausbot/data"
+    data_root="$HOME/astra/data"
     mkdir -p "$data_root"
     chmod 700 "$data_root"
     umask 077
     cat > .env <<EOF
-COMPOSE_PROJECT_NAME=openmausbot-podman
-OMB_DATA_ROOT=$data_root
+COMPOSE_PROJECT_NAME=astra-podman
+ASTRA_DATA_ROOT=$data_root
 PODMAN_SOCKET=/run/user/$(id -u)/podman/podman.sock
-OMB_PORT=8799
-OMB_WEBHOOK_PORT=8800
-OMB_HTTP_PORT=8080
-OMB_PUBLIC_URL=http://localhost:8080
-OMB_HTTPS_HOST=https-disabled.invalid
+ASTRA_PORT=8799
+ASTRA_WEBHOOK_PORT=8800
+ASTRA_HTTP_PORT=8080
+ASTRA_PUBLIC_URL=http://localhost:8080
+ASTRA_HTTPS_HOST=https-disabled.invalid
 ENGINES=
 EOF
 fi

@@ -577,7 +577,7 @@ async function requestAlias(request: Request) {
 
 async function route(request: Request, env: Env, ctx: ExecutionContext) {
   const url = new URL(request.url);
-  if (request.method === "GET" && url.pathname === "/health") return json({ service: "openmausbot-composio", ready: Boolean(env.COMPOSIO_API_KEY) });
+  if (request.method === "GET" && url.pathname === "/health") return json({ service: "astra-composio", ready: Boolean(env.COMPOSIO_API_KEY) });
   if (request.method === "POST" && url.pathname === "/v1/installations") return register(request, env);
   if (!url.pathname.startsWith("/v1/")) return json({ error: "not found" }, 404);
   const installation = await authenticate(request, env);

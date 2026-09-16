@@ -4,7 +4,7 @@
 # partial release. That keeps release credentials and publication authority
 # in the unified release workflow while making every release candidate
 # reproducible from an exact ref. Attach the resulting files to the matching
-# canonical OpenMausBot release after the smoke test passes.
+# canonical Astra release after the smoke test passes.
 name: Package Ubuntu
 
 on:
@@ -83,37 +83,37 @@ jobs:
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
       - name: Verify the installed browser with Ubuntu sandbox restrictions
-        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenMausBot/resources
+        run: node scripts/smoke-browser-bundle.mjs --resources /opt/Astra/resources
       - name: Launch packaged app and verify lifecycle
         env:
-          OMB_KEEP_SMOKE_DIR: "1"
-          OMB_SMOKE_INSTALLED_DEB: "1"
+          ASTRA_KEEP_SMOKE_DIR: "1"
+          ASTRA_SMOKE_INSTALLED_DEB: "1"
         run: pnpm smoke:linux-package
       - name: Remove the installed upgrade fixture
         if: always()
-        run: sudo dpkg --purge openmausbot || true
+        run: sudo dpkg --purge astra || true
       - name: Prepare release assets
         id: release
         shell: bash
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
-          appimage="release/OpenMausBot-${version}-x86_64.AppImage"
-          deb="release/OpenMausBot-${version}-amd64.deb"
+          appimage="release/Astra-${version}-x86_64.AppImage"
+          deb="release/Astra-${version}-amd64.deb"
           test -f "$appimage"
           test -f "$deb"
-          cp "$appimage" release/OpenMausBot.AppImage
-          cp "$deb" release/OpenMausBot-amd64.deb
-          chmod 0755 release/OpenMausBot.AppImage
+          cp "$appimage" release/Astra.AppImage
+          cp "$deb" release/Astra-amd64.deb
+          chmod 0755 release/Astra.AppImage
           (
             cd release
             sha256sum \
               "$(basename "$appimage")" \
               "$(basename "$deb")" \
-              OpenMausBot.AppImage \
-              OpenMausBot-amd64.deb > SHA256SUMS-ubuntu-x64.txt
+              Astra.AppImage \
+              Astra-amd64.deb > SHA256SUMS-ubuntu-x64.txt
           )
-          echo "artifact-name=openmausbot-ubuntu-${version}-x64" >> "$GITHUB_OUTPUT"
+          echo "artifact-name=astra-ubuntu-${version}-x64" >> "$GITHUB_OUTPUT"
           echo "version: $version"
           echo "commit:  $(git rev-parse HEAD)"
           cat release/SHA256SUMS-ubuntu-x64.txt
@@ -121,7 +121,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
-          name: openmausbot-ubuntu-smoke-diagnostics
+          name: astra-ubuntu-smoke-diagnostics
           path: |
             /tmp/omb-linux-smoke-*
             /tmp/omb-linux-smoke-runtime-*
@@ -132,10 +132,10 @@ jobs:
         with:
           name: ${{ steps.release.outputs.artifact-name }}
           path: |
-            release/OpenMausBot-*-amd64.deb
-            release/OpenMausBot-*-x86_64.AppImage
-            release/OpenMausBot-amd64.deb
-            release/OpenMausBot.AppImage
+            release/Astra-*-amd64.deb
+            release/Astra-*-x86_64.AppImage
+            release/Astra-amd64.deb
+            release/Astra.AppImage
             release/SHA256SUMS-ubuntu-x64.txt
           if-no-files-found: error
           retention-days: 14

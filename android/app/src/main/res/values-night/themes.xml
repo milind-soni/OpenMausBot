@@ -4,5 +4,5 @@
       The window background behind Compose. Without a dark variant the first
       frame of a dark-mode launch flashes white before the composition draws.
     -->
-    <style name="Theme.OpenMausMobile" parent="android:Theme.Material.NoActionBar" />
+    <style name="Theme.AstraMobile" parent="android:Theme.Material.NoActionBar" />
 </resources>

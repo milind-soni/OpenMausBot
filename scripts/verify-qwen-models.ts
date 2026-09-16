@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { readQwenModelCatalog } from "../server/drivers/acp/qwen.ts";
 
 const fixture = await launchVerificationServer();

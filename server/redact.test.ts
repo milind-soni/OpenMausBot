@@ -22,8 +22,8 @@ describe("redactSecrets", () => {
             command: "/usr/bin/node",
             args: ["/app/agents-proxy.js"],
             env: [
-              { name: "OMB_BOT_ID", value: "bot-123" },
-              { name: "OMB_COMMS_TOKEN", value: "s3cret-comms-token-value" },
+              { name: "ASTRA_BOT_ID", value: "bot-123" },
+              { name: "ASTRA_COMMS_TOKEN", value: "s3cret-comms-token-value" },
             ],
           },
           {
@@ -45,7 +45,7 @@ describe("redactSecrets", () => {
     expect(out).not.toContain("box_live_abcdefghijklmnop");
     // shape survives: still the same method, servers, names and non-secret env
     expect(out).toContain("session/new");
-    expect(out).toContain("OMB_COMMS_TOKEN");
+    expect(out).toContain("ASTRA_COMMS_TOKEN");
     expect(out).toContain("OGB_BOX_TOKEN");
     expect(out).toContain("bot-123");
     expect(out).toContain("box-9");
@@ -261,7 +261,7 @@ describe("redactSecretsInText", () => {
   it("is idempotent for structurally identified credentials", () => {
     const input = {
       apiKey: "abcdefgh12345678",
-      env: [{ name: "OMB_COMMS_TOKEN", value: "abcdefghijklmnop" }],
+      env: [{ name: "ASTRA_COMMS_TOKEN", value: "abcdefghijklmnop" }],
     };
     const once = redactSecrets(input);
 

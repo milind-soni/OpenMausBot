@@ -8,7 +8,7 @@ import { showRun, type RunStep } from "@/lib/verify-steps";
 
 const steps: RunStep[] = [
   { id: "s1", label: "doctor", command: "pnpm control:omb doctor --url http://127.0.0.1:8799", status: "passed", dryRun: false, verified: true },
-  { id: "s2", label: "send", command: "node --experimental-strip-types scripts/control-omb.ts send --bot x --text y", status: "failed", dryRun: false, verified: true },
+  { id: "s2", label: "send", command: "node --experimental-strip-types scripts/control-astra.ts send --bot x --text y", status: "failed", dryRun: false, verified: true },
   { id: "s3", label: "git push", command: "git push origin main", status: "running", dryRun: false, verified: false },
 ];
 const TAG = `>${t("chat.verify.verifiedTag")}<`;

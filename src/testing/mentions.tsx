@@ -15,7 +15,7 @@ function Fixture() {
   const group = state.groups[0];
   return <div className="flex h-dvh flex-col bg-app text-ink">
     <nav className="flex shrink-0 flex-wrap gap-4 border-b border-hairline px-6 py-3 text-sm">
-      <span className="font-semibold">OpenMausBot · Isolated mention verification</span>
+      <span className="font-semibold">Astra · Isolated mention verification</span>
       <button onClick={() => { setRoom(true); setDmPreview(false); }}>Channel</button>
       <button onClick={() => setRoom(false)}>Direct chat</button>
       <button onClick={() => { setRoom(true); setDmPreview(true); }}>DM renderer preview</button>

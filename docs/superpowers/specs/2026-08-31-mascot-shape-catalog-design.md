@@ -2,7 +2,7 @@
 
 > **Naming note (2026-09-01):** the code vocabulary for this feature is `body`, not
 > `shape` — `mascotBody`, `MASCOT_BODIES`, `MascotBodyId`, `shared/mascot-bodies.ts`,
-> `scripts/mascot-bodies/`, `MausBodies.swift`. The repo enforces
+> `scripts/mascot-bodies/`, `AstraBodies.swift`. The repo enforces
 > `anti-slop/no-shape-in-symbol-names` as an error, and `body` is the word this document
 > already uses in prose. Identifiers written as `mascotShape` etc. below are the original
 > design text and are stale; the ids themselves (`cursor`, `blob`, …) are unchanged.
@@ -25,14 +25,14 @@ phone.
 
 The mascot has one body. `CursorAvatar` already accepts a `silhouette` prop —
 `{ name, fit, body, clip, anchor }` — but exactly one silhouette is ever passed,
-built inline in `Avatar.tsx`. On the phone, `MausSilhouette` hardcodes the same
-outline as a 4KB string with hand-tuned transforms, and `MausFaceData.anchor` is
+built inline in `Avatar.tsx`. On the phone, `AstraSilhouette` hardcodes the same
+outline as a 4KB string with hand-tuned transforms, and `AstraFaceData.anchor` is
 a single tuple. So a bot's identity is carried entirely by its colour.
 
 The two platforms have already drifted. Desktop places the face at
 `{ x: 93, y: 101, scale: 0.74 }`; iOS at `(87.04, 98.65, 0.84)`. The phone's
 face is about 14% larger and sits higher on the same body. This is the failure
-`MausAvatar.swift`'s own header predicts: "starts close and drifts every time
+`AstraAvatar.swift`'s own header predicts: "starts close and drifts every time
 either side is touched."
 
 ## What we are building
@@ -126,12 +126,12 @@ Outputs, both checked in:
 
 - `shared/mascot-shapes.ts` — the TypeScript catalog, the id union, and the zod
   schema.
-- `ios/Sources/CompanionCore/MausBodies.swift` — the Swift catalog, keyed by the same ids.
+- `ios/Sources/CompanionCore/AstraBodies.swift` — the Swift catalog, keyed by the same ids.
 
 Both carry a "generated, do not hand-edit" header, matching the existing
-convention in `MausFaceData.swift`.
+convention in `AstraFaceData.swift`.
 
-Why absolute cubics: the iOS path parser in `MausSilhouette.parse()` understands
+Why absolute cubics: the iOS path parser in `AstraSilhouette.parse()` understands
 only `M`, `C` and `Z`. Emitting cubics keeps that twenty-line parser untouched.
 Quadratics convert to cubics exactly; arcs use the standard four-segment cubic
 approximation.
@@ -146,7 +146,7 @@ This removes the `GRADIENT_SILHOUETTE` workaround: the exported pack baked
 placeholder, so `Avatar.tsx` patched it back with a regex. The generator emits
 the placeholder directly, so the patch is deleted rather than generalised.
 
-Of the 29 `MausAvatar` call sites, only those rendering a specific bot change.
+Of the 29 `AstraAvatar` call sites, only those rendering a specific bot change.
 They already pass `color={bot.color}`; `shape={bot.mascotShape}` rides alongside.
 Sites rendering a generic mascot keep the default and are untouched.
 
@@ -156,16 +156,16 @@ that bot's own colour, so the choice is previewed rather than described.
 
 ### iOS
 
-`MausShapes.swift` holds the ten outlines and their anchors. `MausSilhouette`
+`MausShapes.swift` holds the ten outlines and their anchors. `AstraSilhouette`
 becomes a lookup over that catalog rather than a single static path;
-`MausFaceData.anchor` likewise.
+`AstraFaceData.anchor` likewise.
 
 The existing parse-once caching is preserved **per shape** — a dictionary of
 lazily parsed `Path` values, one per id. This matters: the current code caches
 because a chat list redraws hundreds of avatars per frame, and a per-draw parse
 would reintroduce that cost.
 
-`MausAvatar` gains `shape: String = "cursor"`. `BotAvatarView` passes
+`AstraAvatar` gains `shape: String = "cursor"`. `BotAvatarView` passes
 `bot.mascotShape`. An unrecognised id falls back to `cursor`.
 
 ### Schema and sync

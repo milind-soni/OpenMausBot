@@ -39,7 +39,7 @@ export function resolveAdbBinary({
 } = {}) {
   const executable = executableName(platform);
   const candidates = [
-    env.OMB_ADB_PATH,
+    env.ASTRA_ADB_PATH,
     resourcesPath && path.join(resourcesPath, "android-platform-tools", platform, executable),
     ...String(env.PATH ?? "")
       .split(path.delimiter)

@@ -5,7 +5,7 @@ description: "Create one reviewed skill that teaches a bot how to launch, drive,
 
 # Create a verification skill
 
-Create one compact, project-specific `SKILL.md` through OpenMausBot's normal
+Create one compact, project-specific `SKILL.md` through Astra's normal
 skill review flow. Do not install files directly, enable a skill yourself, or
 silently add scripts to the user's project.
 

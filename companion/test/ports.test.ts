@@ -28,7 +28,7 @@ const ENTRY = join(HERE, "..", "src", "index.ts");
  * back to the account running the suite, so this would quietly read whatever
  * real paired fleet the developer has. The suite's own throwaway home is
  * already on `process.env` — see server/testing/setup.ts — along with the
- * OMB_COMPANION_DIR that pins the sidecar's own data directory inside it,
+ * ASTRA_COMPANION_DIR that pins the sidecar's own data directory inside it,
  * which is carried for the same reason and is the one that actually decides
  * where the child writes. */
 const start = (env: Record<string, string>): Promise<{ code: number | null; err: string }> =>
@@ -39,7 +39,7 @@ const start = (env: Record<string, string>): Promise<{ code: number | null; err:
         ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
         ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
         ...(process.env.USERPROFILE ? { USERPROFILE: process.env.USERPROFILE } : {}),
-        ...(process.env.OMB_COMPANION_DIR ? { OMB_COMPANION_DIR: process.env.OMB_COMPANION_DIR } : {}),
+        ...(process.env.ASTRA_COMPANION_DIR ? { ASTRA_COMPANION_DIR: process.env.ASTRA_COMPANION_DIR } : {}),
         ...env,
       },
       stdio: ["ignore", "ignore", "pipe"],
@@ -52,16 +52,16 @@ const start = (env: Record<string, string>): Promise<{ code: number | null; err:
 
 describe("port conflicts with the harness", () => {
   it("refuses the harness's own port, and says so", async () => {
-    const { code, err } = await start({ OMB_PORT: "9100", OMB_COMPANION_PORT: "9100" });
+    const { code, err } = await start({ ASTRA_PORT: "9100", ASTRA_COMPANION_PORT: "9100" });
     expect(code).toBe(1);
-    expect(err).toContain("OMB_COMPANION_PORT");
+    expect(err).toContain("ASTRA_COMPANION_PORT");
     expect(err).toContain("the harness itself");
   }, 20_000);
 
   // The one that actually bit. The webhook port is implicit — one above the
   // harness — so someone reading only their own config sees no overlap.
   it("refuses the webhook receiver's port, and names it", async () => {
-    const { code, err } = await start({ OMB_PORT: "9100", OMB_COMPANION_PORT: "9101" });
+    const { code, err } = await start({ ASTRA_PORT: "9100", ASTRA_COMPANION_PORT: "9101" });
     expect(code).toBe(1);
     expect(err).toContain("9101");
     expect(err).toContain("webhook receiver");
@@ -69,12 +69,12 @@ describe("port conflicts with the harness", () => {
 
   it("refuses it for the control port too", async () => {
     const { code, err } = await start({
-      OMB_PORT: "9100",
-      OMB_COMPANION_PORT: "9200",
-      OMB_CONTROL_PORT: "9101",
+      ASTRA_PORT: "9100",
+      ASTRA_COMPANION_PORT: "9200",
+      ASTRA_CONTROL_PORT: "9101",
     });
     expect(code).toBe(1);
-    expect(err).toContain("OMB_CONTROL_PORT");
+    expect(err).toContain("ASTRA_CONTROL_PORT");
     expect(err).toContain("webhook receiver");
   }, 20_000);
 
@@ -85,26 +85,26 @@ describe("port conflicts with the harness", () => {
   // that is not running.
   it("refuses to put the device port and the control port on one socket", async () => {
     const { code, err } = await start({
-      OMB_PORT: "9100",
-      OMB_COMPANION_PORT: "9300",
-      OMB_CONTROL_PORT: "9300",
+      ASTRA_PORT: "9100",
+      ASTRA_COMPANION_PORT: "9300",
+      ASTRA_CONTROL_PORT: "9300",
     });
     expect(code).toBe(1);
-    expect(err).toContain("OMB_COMPANION_PORT");
-    expect(err).toContain("OMB_CONTROL_PORT");
+    expect(err).toContain("ASTRA_COMPANION_PORT");
+    expect(err).toContain("ASTRA_CONTROL_PORT");
     expect(err).toContain("9300");
     // named by the check, not discovered by the second bind
     expect(err).not.toContain("already in use");
   }, 20_000);
 
-  // An explicit OMB_WEBHOOK_PORT moves the receiver, which frees the port
+  // An explicit ASTRA_WEBHOOK_PORT moves the receiver, which frees the port
   // above the harness. Refusing it anyway would be refusing a port nothing
   // is on.
-  it("follows OMB_WEBHOOK_PORT rather than assuming the port above", async () => {
+  it("follows ASTRA_WEBHOOK_PORT rather than assuming the port above", async () => {
     const { code, err } = await start({
-      OMB_PORT: "9100",
-      OMB_WEBHOOK_PORT: "9500",
-      OMB_COMPANION_PORT: "9500",
+      ASTRA_PORT: "9100",
+      ASTRA_WEBHOOK_PORT: "9500",
+      ASTRA_COMPANION_PORT: "9500",
     });
     expect(code).toBe(1);
     expect(err).toContain("webhook receiver");
@@ -114,13 +114,13 @@ describe("port conflicts with the harness", () => {
     // vacated 9101 on the companion and the conflict on the control means a
     // message naming the *control* port proves 9101 got through.
     const moved = await start({
-      OMB_PORT: "9100",
-      OMB_WEBHOOK_PORT: "9500",
-      OMB_COMPANION_PORT: "9101",
-      OMB_CONTROL_PORT: "9500",
+      ASTRA_PORT: "9100",
+      ASTRA_WEBHOOK_PORT: "9500",
+      ASTRA_COMPANION_PORT: "9101",
+      ASTRA_CONTROL_PORT: "9500",
     });
     expect(moved.code).toBe(1);
-    expect(moved.err).toContain("OMB_CONTROL_PORT");
-    expect(moved.err).not.toContain("OMB_COMPANION_PORT");
+    expect(moved.err).toContain("ASTRA_CONTROL_PORT");
+    expect(moved.err).not.toContain("ASTRA_COMPANION_PORT");
   }, 40_000);
 });

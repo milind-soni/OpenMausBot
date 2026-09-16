@@ -1,7 +1,7 @@
 // electron-updater installs an AppImage update by writing the new file under
 // the *release asset's* name and unlinking the old one. Our feed names assets
 // after the version, so a user whose AppImage is called
-// OpenMausBot-0.1.43-x86_64.AppImage ends up with a 0.1.44 file and nothing at
+// Astra-0.1.43-x86_64.AppImage ends up with a 0.1.44 file and nothing at
 // the old path — every .desktop entry, symlink, dock pin and AppImageLauncher
 // registration pointing at it breaks, and the app vanishes from the launcher.
 //

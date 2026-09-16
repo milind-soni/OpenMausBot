@@ -1,4 +1,4 @@
-// OpenMausBot server — the harness host. Clients hold no transports
+// Astra server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { spawn } from "node:child_process";
@@ -85,7 +85,7 @@ import {
 import * as composio from "./composio.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { peerAllowed, peerName, peerRosterSystemPrompt, reachablePeers, roomPeerRosterSystemPrompt, roomRosterLine } from "./peer-roster.ts";
-import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
+import { astraStatusSystemPrompt } from "./astra-status-capsule.ts";
 import {
   containerComputerAction,
   containerComputerExists,
@@ -415,11 +415,11 @@ import {
   type PhoneSecretContext,
 } from "./phone-secret.ts";
 
-const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
-const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+const PORT = Number(process.env.ASTRA_PORT || process.env.OGB_PORT || 8799);
+const WEBHOOK_PORT = Number(process.env.ASTRA_WEBHOOK_PORT || PORT + 1);
 // Behind a proxy or tunnel, the base URL senders should use (docs/self-hosting.md).
-const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
-const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
+const WEBHOOK_PUBLIC_URL = process.env.ASTRA_WEBHOOK_PUBLIC_URL || undefined;
+const STATIC_DIR = process.env.ASTRA_STATIC_DIR || null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
   ".js": "text/javascript",
@@ -460,19 +460,19 @@ if (existsSync(join(DATA_DIR, ".backups"))) {
 }
 const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // Only after ensureDirs(): it performs the one-time rename of the legacy data
-// dir, which must not find a freshly created ~/.openmausbot already there.
+// dir, which must not find a freshly created ~/.astra already there.
 // Remote clients (server/request-auth.ts, server/sessions.ts): a stable identity
 // for this server, the paired sessions, and the cookie the served UI uses.
 const ENVIRONMENT_ID = loadEnvironmentId(DATA_DIR);
 const sessions = new SessionRegistry({ file: join(DATA_DIR, "sessions.json") });
 const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
-const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
+const DESKTOP_MANAGED = process.env.ASTRA_DESKTOP_PARENT === "1";
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
-const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
+const FALLBACK_PUBLIC_URL = process.env.ASTRA_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
 
 // ── self-modify trial boot ───────────────────────────────────────
@@ -608,11 +608,11 @@ type UtilityParentPort = {
 // supplies parentPort; plain Node intentionally leaves it absent.
 const utilityParentPort = (process as NodeJS.Process & { parentPort?: UtilityParentPort }).parentPort;
 type DesktopPrivateMessage = BrowserCleanupWireRequest | {
-  type: "openmausbot:browser-control";
+  type: "astra:browser-control";
   botId: string;
   held: true;
 } | {
-  type: "openmausbot:phone-secret-save";
+  type: "astra:phone-secret-save";
   requestId: string;
   target: string;
   value: string;
@@ -646,7 +646,7 @@ function postDesktopPrivateMessage(message: DesktopPrivateMessage): boolean {
 function applyDesktopMutationTokenMessage(raw: unknown): boolean {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
   const message = raw as Record<string, unknown>;
-  if (message.type !== "openmausbot:desktop-mutation-token") return false;
+  if (message.type !== "astra:desktop-mutation-token") return false;
   if (typeof message.token !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(message.token)) {
     throw new Error("invalid desktop mutation capability");
   }
@@ -665,7 +665,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
     const status = browserEngineStatus();
     // Guest sessions are throwaway and never saved, so only the bot's own
     // session and shared profile sessions have state to clear.
-    const sessions = request.type === "openmausbot:browser-bot-deleted" && request.botId
+    const sessions = request.type === "astra:browser-bot-deleted" && request.botId
       ? [browserSessionId(request.botId, "")]
       : request.partitionId
         ? [browserSessionId("", request.partitionId)]
@@ -675,7 +675,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
     const work = status.kind === "ready" && sessions.length
       ? Promise.all(sessions.map(async (session) => {
           const ok = await clearBrowserSessionState(status.binaryPath, session, { encryptionKey: browserEngineEncryptionKey() });
-          if (!ok) console.warn(`browser cleanup: could not clear saved state for session ${session}; restart OpenMausBot to retry this profile's cleanup. Do not use state clear --all: it erases other profiles too.`);
+          if (!ok) console.warn(`browser cleanup: could not clear saved state for session ${session}; restart Astra to retry this profile's cleanup. Do not use state clear --all: it erases other profiles too.`);
           return ok;
         }))
       : Promise.resolve([true]);
@@ -683,7 +683,7 @@ const browserCleanup: BrowserCleanupCoordinator = new BrowserCleanupCoordinator(
       console.warn("browser cleanup: could not clear saved session state", error);
       return false;
     }).then((ok) => {
-      browserCleanup.receive({ type: "openmausbot:browser-lifecycle-result", requestId: request.requestId, ok });
+      browserCleanup.receive({ type: "astra:browser-lifecycle-result", requestId: request.requestId, ok });
     }).catch((error) => {
       console.warn("browser cleanup: could not acknowledge cleanup", error);
     });
@@ -876,12 +876,12 @@ function agentsIntegration(
     args: [agentsProxyPath],
     env: {
       ...AGENTS_NODE_FLAG,
-      OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
-      OMB_BOT_ID: botId,
-      OMB_THREAD_ID: threadId,
-      OMB_COMMS_TOKEN: token,
-      OMB_TURN_DEPTH: String(depth),
-      OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      ASTRA_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      ASTRA_BOT_ID: botId,
+      ASTRA_THREAD_ID: threadId,
+      ASTRA_COMMS_TOKEN: token,
+      ASTRA_TURN_DEPTH: String(depth),
+      ASTRA_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
     },
   };
 }
@@ -1143,7 +1143,7 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
     kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
   return { profile: partitionId, session, spec, integration: {
     command: process.execPath, args: [SPAWNED_PROXIES.browser], env: {
-      ...AGENTS_NODE_FLAG, OMB_BROWSER_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      ...AGENTS_NODE_FLAG, ASTRA_BROWSER_TOKEN: token, ASTRA_HARNESS_URL: `http://127.0.0.1:${PORT}`,
     },
   } };
 }
@@ -1161,8 +1161,8 @@ export function browserEngineSummary(): { kind: "engine" | "unavailable"; reason
 
 function phoneIntegration() {
   const env: Record<string, string> = { ...AGENTS_NODE_FLAG };
-  if (process.env.OMB_ADB_PATH) env.OMB_ADB_PATH = process.env.OMB_ADB_PATH;
-  if (process.env.OMB_RESOURCES_PATH) env.OMB_RESOURCES_PATH = process.env.OMB_RESOURCES_PATH;
+  if (process.env.ASTRA_ADB_PATH) env.ASTRA_ADB_PATH = process.env.ASTRA_ADB_PATH;
+  if (process.env.ASTRA_RESOURCES_PATH) env.ASTRA_RESOURCES_PATH = process.env.ASTRA_RESOURCES_PATH;
   if (process.env.PH_ANDROID_SERIAL) env.PH_ANDROID_SERIAL = process.env.PH_ANDROID_SERIAL;
   return { command: process.execPath, args: [phoneProxyPath], env };
 }
@@ -1198,7 +1198,7 @@ const computerControl = new ComputerControl((botId, snapshot) => {
   // server record, while only the trusted Browser panel may clear Electron's
   // local gate after its server-first release succeeds.
   if (snapshot.held && /^[A-Za-z0-9_-]{1,120}$/.test(botId)) {
-    postDesktopPrivateMessage({ type: "openmausbot:browser-control", botId, held: true });
+    postDesktopPrivateMessage({ type: "astra:browser-control", botId, held: true });
   }
   broadcast({ kind: "computer-control", botId, held: snapshot.held, helpReason: snapshot.helpReason });
 });
@@ -1516,7 +1516,7 @@ function previewSystemPrompt(bot: BotRecord) {
   // `cfg` is the module-level config (`const cfg = loadConfig()` near the
   // top of index.ts), the same object the turn code reads.
   const persona = [
-    `You are ${bot.name}, a personal bot in OpenMausBot.`,
+    `You are ${bot.name}, a personal bot in Astra.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
   ]
@@ -1534,7 +1534,7 @@ function previewSystemPrompt(bot: BotRecord) {
           : null;
   const peers = reachablePeers(store.bots, bot);
   const coordination = bot.chiefOfStaff
-    ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, openMausStatusSystemPrompt())
+    ? chiefOfStaffSystemPrompt(bot.id, store.bots, true, astraStatusSystemPrompt())
     : peers.length > 0
       ? peerRosterSystemPrompt(peers)
       : "";
@@ -2657,7 +2657,7 @@ sessions.onSessionRevoked((sessionId) => {
  * correctly through its own Last-Event-ID with no client code at all. */
 const STREAM_ID = randomUUID().slice(0, 8);
 const REPLAY_MAX = 500;
-const configuredSseHeartbeatMs = Number(process.env.OMB_SSE_HEARTBEAT_MS);
+const configuredSseHeartbeatMs = Number(process.env.ASTRA_SSE_HEARTBEAT_MS);
 const SSE_HEARTBEAT_MS =
   Number.isFinite(configuredSseHeartbeatMs) && configuredSseHeartbeatMs > 0
     ? configuredSseHeartbeatMs
@@ -2850,16 +2850,16 @@ const repeats = new RepeatDetector({ thresholds: [5, 10, 20], maxKeysPerThread: 
 // left its bot busy forever. The watchdog stops a turn whose thread has emitted NOTHING for stallMs —
 // activity-based, so an hour-long turn that keeps streaming is never
 // touched, and turns parked on a human approval are exempt.
-const TURN_STALL_MS = Math.max(60_000, Number(process.env.OMB_TURN_STALL_MS) || 20 * 60_000);
+const TURN_STALL_MS = Math.max(60_000, Number(process.env.ASTRA_TURN_STALL_MS) || 20 * 60_000);
 /** How long ask_bot waits synchronously before the ask is converted into a
  * delegation claim ticket (the peer's turn keeps running either way). */
-const ASK_BOT_TIMEOUT_MS = Math.max(5_000, Number(process.env.OMB_ASK_BOT_TIMEOUT_MS) || 4 * 60_000);
+const ASK_BOT_TIMEOUT_MS = Math.max(5_000, Number(process.env.ASTRA_ASK_BOT_TIMEOUT_MS) || 4 * 60_000);
 // A room waits for a busy teammate instead of dropping them, but never
 // forever: a bot parked on a permission card in another chat is "busy" until
 // a human returns. Past this cap a goal's lead is told the teammate could not
 // free up and reassigns, and a chat round moves on with a chip that says so —
 // the wait ends as data, not as a dead room. Tests shrink it.
-const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOAL_WAIT_MAX_MS) || 30 * 60_000);
+const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.ASTRA_GOAL_WAIT_MAX_MS) || 30 * 60_000);
 // Reassigning around a busy teammate is bounded too: after this many
 // exhausted waits in one run the team is blocked on availability, not stuck.
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
@@ -3446,7 +3446,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const permission = event.requestType === "permission";
       // A permission request here is one the provider left for a person: its
       // own mode already ran (Ask, Edits, Auto's reviewer, Custom's config).
-      // OpenMausBot decides nothing about the action itself. Only Full access
+      // Astra decides nothing about the action itself. Only Full access
       // answers, because that is exactly what the person granted. A QUESTION
       // always reaches the human — even Full access never invents an answer.
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
@@ -4732,7 +4732,7 @@ async function startTurn(
   const recoveryText = resumeCursor !== undefined ? buildRecoveryText({ text: turnText, transcript }) : undefined;
 
   const persona = [
-    `You are ${bot.name}, a personal bot in OpenMausBot.`,
+    `You are ${bot.name}, a personal bot in Astra.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
   ]
@@ -4828,7 +4828,7 @@ async function startTurn(
         throw Object.assign(new Error("another thread is working in this project folder — wait for it to finish or choose a separate folder"), { status: 409, code: "workspace_busy" });
       }
       // Checkpoint explicit project folders, where a bot can overwrite the
-      // user's work. Its private OpenMaus workspace is app-owned and changes
+      // user's work. Its private Astra workspace is app-owned and changes
       // on nearly every ordinary chat; snapshotting it would add hidden disk
       // and process overhead without a user project to restore.
       const checkpointCwd = cwd && cwd !== privateWorkspace ? cwd : undefined;
@@ -4925,7 +4925,7 @@ async function startTurn(
           throw new Error("this model engine cannot control this computer — choose Claude, an ACP engine, or an API engine with the tool loop, or select another destination");
         }
         const cua = readCuaConnection();
-        if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
+        if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart Astra");
         bindTurnComputer(resourceOwner, "computer:host");
         integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
         computerKind = "local";
@@ -4952,7 +4952,7 @@ async function startTurn(
             const vpsControl = controlIntegration(bot.id, threadId, dispatchClaimId);
             integrations.localComputer = {
               ...vpsMcp,
-              env: { ...vpsMcp.env, OMB_CONTROL_URL: vpsControl.url, OMB_CONTROL_TOKEN: vpsControl.token },
+              env: { ...vpsMcp.env, ASTRA_CONTROL_URL: vpsControl.url, ASTRA_CONTROL_TOKEN: vpsControl.token },
             };
             computerKind = "vps";
             previewCapture = () => vps.vpsComputerScreenshot(targetCfg, bot.id);
@@ -5084,7 +5084,7 @@ async function startTurn(
             bot.id,
             store.bots,
             Boolean(integrations.agents),
-            openMausStatusSystemPrompt(),
+            astraStatusSystemPrompt(),
           )
         : integrations.agents && sectionPeers.length > 0
           // Ordinary bots could always CALL the peer tools; until now the
@@ -5668,10 +5668,10 @@ store.reconcileInterruptedGroupGoals((runId, threadId) => {
   );
   const detail = run.output ?? run.error ?? (
     status === "completed"
-      ? "The scheduled team goal completed before OpenMausBot restarted."
+      ? "The scheduled team goal completed before Astra restarted."
       : status === "stopped"
         ? "The scheduled team goal was stopped."
-        : "OpenMausBot restarted before this scheduled team goal finished."
+        : "Astra restarted before this scheduled team goal finished."
   );
   return { status, detail, finishedAt: run.finishedAt ?? groupGoalRecoveryAt };
 });
@@ -5709,7 +5709,7 @@ async function cloudRoutineReadiness(): Promise<{ ready: boolean; reason?: strin
   }
   const instance = registry.instances().find((candidate) => candidate.driverKind === "boxAgent");
   if (!instance) {
-    return { ready: false, reason: "The Cloud VM runner is unavailable. Restart OpenMausBot and try again." };
+    return { ready: false, reason: "The Cloud VM runner is unavailable. Restart Astra and try again." };
   }
   try {
     const snapshot = await instance.snapshot();
@@ -5925,10 +5925,10 @@ try {
     claimRequest: () => workspaceMaintenance.request(),
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
-  console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
+  console.log(`astra webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
 } catch (error) {
   webhookIngressError = error instanceof Error ? error.message : String(error);
-  console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
+  console.error(`astra webhook receiver unavailable: ${webhookIngressError}`);
 }
 
 const webhookIngressStatus = () => ({
@@ -6371,7 +6371,7 @@ async function runGroupMemberTurn(
     ? reachablePeers(store.bots, bot).filter((peer) => !readyGroup.memberIds.includes(peer.id))
     : [];
   const system = [
-    `You are ${bot.name}, a bot in the room "${readyGroup.name}" in OpenMausBot.`,
+    `You are ${bot.name}, a bot in the room "${readyGroup.name}" in Astra.`,
     bot.title && `Role: ${bot.title}.`,
     bot.description && `About: ${bot.description}`,
     `Room members: ${roster}, and ${userName} (the human).`,
@@ -7765,7 +7765,7 @@ function dispatchConnectorResume(entry: { botId: string; threadId: string; resum
   const owner = connectorThread(entry.botId, entry.threadId);
   if (!owner) return;
   const names = entry.labels.join(", ");
-  const prompt = `OpenMausBot connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
+  const prompt = `Astra connection update: the user securely connected ${names}. Continue the task that paused for this connection. Do not ask them to connect it again.`;
   if (owner.group ? owner.bot.busy : threadBusy(entry.botId, entry.threadId) || activeGroupTurnForBot(entry.botId)) {
     pendingConnectorResumes.set(`${entry.threadId}:${entry.resumeKey}`, entry);
     return;
@@ -7872,7 +7872,7 @@ function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKe
 }
 
 function credentialDesktopHandoff(label: string): string {
-  return `Securely provide the ${label} from OpenMausBot on your phone or computer. It is never added to chat.`;
+  return `Securely provide the ${label} from Astra on your phone or computer. It is never added to chat.`;
 }
 
 function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
@@ -7909,8 +7909,8 @@ function dispatchSecretResume(entry: SecretResumeEntry) {
   if (!owner) return;
   const prompt =
     entry.outcome === "provided"
-      ? `OpenMausBot credential update: the user securely provided ${entry.label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
-      : `OpenMausBot credential update: the user declined to provide ${entry.label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
+      ? `Astra credential update: the user securely provided ${entry.label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
+      : `Astra credential update: the user declined to provide ${entry.label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
   if (owner.group ? owner.bot.busy : threadBusy(entry.botId, entry.threadId) || activeGroupTurnForBot(entry.botId)) {
     pendingSecretResumes.set(`${entry.threadId}:${entry.messageId}`, entry);
     return;
@@ -8153,10 +8153,10 @@ function cliProbeEnvironment(): NodeJS.ProcessEnv {
     "BOX_TOKEN",
     "OPENCODE_API_KEY",
     "COMPOSIO_API_KEY",
-    "OMB_COMPOSIO_BROKER_TOKEN",
-    "OMB_TTS_KEY",
-    "OMB_OPENAI_IMAGE_KEY",
-    "OMB_CUSTOM_IMAGE_KEY",
+    "ASTRA_COMPOSIO_BROKER_TOKEN",
+    "ASTRA_TTS_KEY",
+    "ASTRA_OPENAI_IMAGE_KEY",
+    "ASTRA_CUSTOM_IMAGE_KEY",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
   ]) {
@@ -8463,7 +8463,7 @@ let mcpProbesInFlight = 0;
 const claudeUpdatesInFlight = new Set<string>();
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
-/** The built UI, when this process serves it (OMB_STATIC_DIR: set by the
+/** The built UI, when this process serves it (ASTRA_STATIC_DIR: set by the
  * desktop app and by the container image). Public by design: it is the same
  * bundle anyone can download, holds no secrets, and a remote browser must be
  * able to load /pair before it has a session. Returns false when there is
@@ -8611,10 +8611,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // code into a session. Everything else needs the loopback owner or a
     // paired session with the right scope.
     if (method === "GET" && !path.startsWith("/api/") && !path.startsWith("/.well-known/") && serveStatic(res, path)) return;
-    if (method === "GET" && path === "/.well-known/openmausbot/environment") {
+    if (method === "GET" && path === "/.well-known/astra/environment") {
       return json(res, 200, environmentDescriptor({ environmentId: ENVIRONMENT_ID, desktopManaged: DESKTOP_MANAGED, emailSignIn: emailSignIn.enabled() }));
     }
-    const domainCheck = /^\/\.well-known\/openmausbot\/domain-check\/([a-f0-9]{64})$/.exec(path);
+    const domainCheck = /^\/\.well-known\/astra\/domain-check\/([a-f0-9]{64})$/.exec(path);
     if (method === "GET" && domainCheck) {
       res.setHeader("cache-control", "no-store");
       const challenge = customDomainVerifier.challenge(domainCheck[1]);
@@ -8707,7 +8707,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // A stranger learns only the app name; pid (the desktop boot probe keys
     // on it) and the static flag stay behind the gate below.
     if (method === "GET" && path === "/api/health" && !gate.auth) {
-      return json(res, 200, { app: "openmausbot" });
+      return json(res, 200, { app: "astra" });
     }
     // The brand is public too: the sign-in page must carry the deployment's
     // name and icon before anyone has a session, and it holds nothing secret.
@@ -8768,7 +8768,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         url: base ? `${base}/pair#code=${code}` : null,
         hint: base
           ? null
-          : "this server has no public address to put in a link: set OMB_PUBLIC_URL, or open /pair on the address you use and type the code",
+          : "this server has no public address to put in a link: set ASTRA_PUBLIC_URL, or open /pair on the address you use and type the code",
       });
     }
     if (method === "GET" && path === "/api/auth/pairing") return json(res, 200, { pairings: sessions.openPairings(), publicUrl: publicUrl() });
@@ -8779,7 +8779,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       res.setHeader("cache-control", "no-store");
       if (method === "GET") return json(res, 200, customDomainStatus());
       if (method === "POST" || method === "DELETE") {
-        if (DESKTOP_MANAGED) return json(res, 409, { error: "Custom domains are configured on a self-hosted OpenMausBot server, not the desktop companion." });
+        if (DESKTOP_MANAGED) return json(res, 409, { error: "Custom domains are configured on a self-hosted Astra server, not the desktop companion." });
         if (!/^application\/json\b/i.test(String(req.headers["content-type"] ?? ""))) {
           return json(res, 415, { error: "content-type must be application/json" });
         }
@@ -8823,10 +8823,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // unless the launcher explicitly sets that key; production builds never
     // set it.
     if (method === "POST" && path === "/api/testing/internal-capability") {
-      const expected = process.env.OMB_TEST_INTERNAL_CAPABILITY_KEY ?? "";
-      const actual = Array.isArray(req.headers["x-openmausbot-test-capability"])
+      const expected = process.env.ASTRA_TEST_INTERNAL_CAPABILITY_KEY ?? "";
+      const actual = Array.isArray(req.headers["x-astra-test-capability"])
         ? ""
-        : String(req.headers["x-openmausbot-test-capability"] ?? "");
+        : String(req.headers["x-astra-test-capability"] ?? "");
       const expectedBytes = Buffer.from(expected);
       const actualBytes = Buffer.from(actual);
       if (
@@ -10301,7 +10301,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // ── independent webhook triggers ────────────────────────────────────
     // Management stays on the app-only server. Actual deliveries land on a
     // second, webhook-only loopback listener so Funnel or a future hosted
-    // relay never has to expose the rest of OpenMausBot's control surface.
+    // relay never has to expose the rest of Astra's control surface.
     if (path === "/api/webhooks" && method === "GET") {
       return json(res, 200, { webhooks: webhooks.list(), attempts: webhooks.listAttempts(), ingress: webhookIngressStatus() });
     }
@@ -10457,7 +10457,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // it never grants authority or replaces the existing request gate.
     const requirePinnedClientThread = (botId: string, threadId: unknown): void => {
       if (threadId === undefined &&
-        (auth.kind === "session" || req.headers["x-openmausbot-companion"] === "1") &&
+        (auth.kind === "session" || req.headers["x-astra-companion"] === "1") &&
         store.tasks(botId).length > 1) {
         throw Object.assign(new Error("This bot has multiple threads. Update this client and choose a thread before sending this action."), { status: 409 });
       }
@@ -10530,7 +10530,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // a bot must render a Markdown link to it, while a user message must carry
     // the exact standalone attachment tag written by the composer. The bot
     // branch derives conversation/workspace roots; the user branch is limited
-    // to OpenMausBot's private attachment directory. This is deliberately not
+    // to Astra's private attachment directory. This is deliberately not
     // a general path reader.
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/file$/);
     const streamsMessageImage = Boolean(
@@ -10857,7 +10857,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           ? body.name.trim()
           : profileName
             ? `${profileName}'s Team`
-            : "My OpenMaus Team";
+            : "My Astra Team";
       const memberIds = store.bots.filter((bot) => !bot.hidden).map((bot) => bot.id);
       if ((body.format === "backup" ? store.bots.length : memberIds.length) === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
@@ -12260,7 +12260,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           });
         }
         // LIST is eventually consistent, and a remembered Box may also have
-        // been renamed outside OpenMausBot. The create journal is stronger
+        // been renamed outside Astra. The create journal is stronger
         // ownership evidence: inspect every durable id directly before the bot
         // record that makes it discoverable can be removed. Missing credentials
         // or an unavailable provider must fail closed.
@@ -12710,7 +12710,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // to open by hand instead.
       const workspacePath = memoryOverview(m[1]).workspacePath;
       if (auth.kind !== "loopback") {
-        return json(res, 403, { error: `This only works on the computer running OpenMausBot. The memory folder there is ${workspacePath}`, workspacePath });
+        return json(res, 403, { error: `This only works on the computer running Astra. The memory folder there is ${workspacePath}`, workspacePath });
       }
       const opened = await openMemoryLocation(m[1], parsed.data.target);
       if (!opened.ok) return json(res, 500, { error: opened.error, workspacePath: opened.workspacePath });
@@ -13560,7 +13560,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // child proves it is OURS by echoing its pid (a stray dev server has
     // the same API shape but a different pid)
     if (method === "GET" && path === "/api/health") {
-      return json(res, 200, { app: "openmausbot", pid: process.pid, static: Boolean(STATIC_DIR) });
+      return json(res, 200, { app: "astra", pid: process.pid, static: Boolean(STATIC_DIR) });
     }
     // The bots' browser engine: install it on this machine (agent-browser +
     // a Chrome for Testing, a one-time download), or ask how that is going.
@@ -13591,7 +13591,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (fleetRoute) {
       if (!entitled("admin")) return json(res, 403, { error: "Workspaces need an enterprise licence with the admin feature." });
       const socket = fleetSocketPath();
-      if (!fleetAvailable(socket)) return json(res, 404, { error: "No fleet agent on this server. Run `openmausbot fleet init --domain … --operator <this user>` as root." });
+      if (!fleetAvailable(socket)) return json(res, 404, { error: "No fleet agent on this server. Run `astra fleet init --domain … --operator <this user>` as root." });
       const [, resource, slug, sub] = fleetRoute;
       let forward: { method: string; path: string; body?: unknown } | null = null;
       if (method === "GET" && !resource) forward = { method: "GET", path: "/workspaces" };
@@ -13751,7 +13751,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "install") {
-          if (!(await registry.installRuntime(instanceId))) return json(res, 404, { error: "Installing this engine from Settings is not available on this server. Use the install command on the machine running OpenMausBot." });
+          if (!(await registry.installRuntime(instanceId))) return json(res, 404, { error: "Installing this engine from Settings is not available on this server. Use the install command on the machine running Astra." });
           return json(res, 200, { instances: await describeInstances() });
         }
         if (action === "auth/start") {
@@ -14072,7 +14072,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // without a restart. Every mutation requires admin; applying runs the
     // journal-first + preflight + trial-boot pipeline from self-modify.ts.
     if (path === "/api/self-modify" || path.startsWith("/api/self-modify/")) {
-      if (!selfModifyEnabled(cfg)) return json(res, 403, { error: "self-modify is disabled — set features.selfModify or OMB_SELF_MODIFY=1" });
+      if (!selfModifyEnabled(cfg)) return json(res, 403, { error: "self-modify is disabled — set features.selfModify or ASTRA_SELF_MODIFY=1" });
       if (!auth.scopes.includes("admin")) return json(res, 403, { error: "admin scope required" });
 
       if (method === "GET" && path === "/api/self-modify") {
@@ -14639,10 +14639,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Electron server has the private key needed to open the envelope.
     m = path.match(/^\/api\/bots\/([\w-]+)\/secret-cards\/([\w-]+)\/provide$/);
     if (m && method === "POST") {
-      if (req.headers["x-openmausbot-companion"] !== "1") {
+      if (req.headers["x-astra-companion"] !== "1") {
         return json(res, 403, { error: "Secure phone entry must come from a paired phone" });
       }
-      const rawDeviceId = req.headers["x-openmausbot-companion-device"];
+      const rawDeviceId = req.headers["x-astra-companion-device"];
       const authenticatedDeviceId = Array.isArray(rawDeviceId) ? "" : String(rawDeviceId ?? "");
       if (!/^[\w-]{1,128}$/.test(authenticatedDeviceId)) {
         return json(res, 401, { error: "This paired phone could not be verified" });
@@ -14999,7 +14999,7 @@ restoreSteeredMessages();
 restoreChannelMessages();
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
+  console.log(`astra server on http://127.0.0.1:${PORT}`);
   // The trial boot survived parse, module init, and listener bind: the
   // riskiest window is behind us, so the live proposal is promoted and the
   // boot-crash guard comes off.
@@ -15033,18 +15033,18 @@ server.listen(PORT, "127.0.0.1", () => {
   }
 });
 
-// A second listener for `openmausbot serve --tunnel` (server/tunnel.ts): the
+// A second listener for `astra serve --tunnel` (server/tunnel.ts): the
 // connector gateway on this machine forwards public traffic to this IPC path.
 // Nothing changes about the loopback bind above. Requests arriving here have
 // no peer address, which request-auth treats as "through a proxy": a session
 // is required, never loopback trust, whatever headers the request carries.
-const TUNNEL_SOCKET = process.env.OMB_TUNNEL_SOCKET?.trim() || null;
+const TUNNEL_SOCKET = process.env.ASTRA_TUNNEL_SOCKET?.trim() || null;
 let tunnelListener: ReturnType<typeof createServer> | null = null;
 if (TUNNEL_SOCKET) {
   if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
   tunnelListener = createServer(handleRequest);
   tunnelListener.listen(TUNNEL_SOCKET, () => {
-    console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
+    console.log(`astra tunnel listener on ${TUNNEL_SOCKET}`);
   });
 }
 

@@ -46,7 +46,7 @@ final class LiveActivityCoordinator {
         for update in wanted {
             guard case let .bot(bot) = update.chat else { continue }
             wantedIds.insert(bot.id)
-            let face = MausState.forBot(bot, last: state.visibleTranscript(forThread: bot.threadId).last)
+            let face = AstraState.forBot(bot, last: state.visibleTranscript(forThread: bot.threadId).last)
             let kind = update.kind == .needsYou ? "needsYou" : "working"
             if since[bot.id]?.kind != kind { since[bot.id] = (kind, Date()) }
             let content = BotActivityAttributes.ContentState(

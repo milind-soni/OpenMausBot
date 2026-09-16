@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OpenMausMobile</string>
+    <string name="app_name">AstraMobile</string>
     <string name="notification_channel_blocking">Approvals and questions</string>
     <string name="notification_channel_blocking_desc">Time-sensitive prompts that need an answer</string>
     <string name="notification_channel_done">Bot messages</string>
@@ -8,7 +8,7 @@
     <string name="notification_channel_routine">Routine failures</string>
     <string name="notification_channel_routine_desc">When a scheduled routine fails</string>
     <string name="notification_channel_always_on">Background connection</string>
-    <string name="notification_channel_always_on_desc">Shown while OpenMausBot stays connected in the background</string>
-    <string name="always_on_notification_title">MausBot is staying connected</string>
+    <string name="notification_channel_always_on_desc">Shown while Astra stays connected in the background</string>
+    <string name="always_on_notification_title">AstraBot is staying connected</string>
     <string name="always_on_notification_text">Notifications will reach you even with the app closed</string>
 </resources>

@@ -39,7 +39,7 @@ export function setupModeActive(input: { soul?: string; description?: string; te
 }
 
 // skill_manage is only ever mounted alongside the other agent tools when
-// skill authoring is turned on for this turn (OMB_SKILL_AUTHORING_ENABLED);
+// skill authoring is turned on for this turn (ASTRA_SKILL_AUTHORING_ENABLED);
 // the block must never name a tool the model cannot actually call.
 const SKILL_MANAGE_ASIDE = "(keep SOUL.md short; put step-by-step procedure into a skill with skill_manage)";
 const NO_SKILL_MANAGE_ASIDE = "(keep SOUL.md short; describe procedures plainly in your standing instructions for now)";

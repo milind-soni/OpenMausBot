@@ -1,4 +1,4 @@
-OpenMausBot Windows vendor revision 0.36.0-omb.1.
+Astra Windows vendor revision 0.36.0-omb.1.
 Base: vercel-labs/agent-browser eb05921bad874cd2a1b4fa5d1149f1ed26576cae.
 Carries only the Windows handle-inheritance fix from upstream PR1781,
 commit 81a98c349d04195396ffae6898bd375ad64280de, plus modification notices
@@ -8,7 +8,7 @@ diff --git a/cli/src/connection.rs b/cli/src/connection.rs
 --- a/cli/src/connection.rs
 +++ b/cli/src/connection.rs
 @@ -1,3 +1,4 @@
-+// Modified by OpenMausBot: Windows stdio inheritance fix from upstream PR1781.
++// Modified by Astra: Windows stdio inheritance fix from upstream PR1781.
  use crate::validation::sanitize_session_component;
  use serde::{Deserialize, Serialize};
  use serde_json::{json, Value};
@@ -55,7 +55,7 @@ diff --git a/cli/src/main.rs b/cli/src/main.rs
 --- a/cli/src/main.rs
 +++ b/cli/src/main.rs
 @@ -1,3 +1,4 @@
-+// Modified by OpenMausBot: Windows stdio inheritance fix from upstream PR1781.
++// Modified by Astra: Windows stdio inheritance fix from upstream PR1781.
  mod ca_bundle;
  mod chat;
  mod color;
@@ -71,7 +71,7 @@ diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 --- a/cli/Cargo.toml
 +++ b/cli/Cargo.toml
 @@ -1,6 +1,7 @@
-+# Modified by OpenMausBot: distinguish the patched Windows vendor build.
++# Modified by Astra: distinguish the patched Windows vendor build.
  [package]
  name = "agent-browser"
 -version = "0.36.0"

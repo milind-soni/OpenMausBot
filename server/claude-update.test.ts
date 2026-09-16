@@ -42,7 +42,7 @@ describe("updateClaudeCli", () => {
     };
 
     await expect(updateClaudeCli("claude", {}, execute)).rejects.toThrow(
-      "Claude finished updating, but OpenMausBot could not verify",
+      "Claude finished updating, but Astra could not verify",
     );
   });
 });

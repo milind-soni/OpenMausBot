@@ -1,4 +1,4 @@
-// Config + data dirs. One file, ~/.openmausbot/config.json, env fallbacks:
+// Config + data dirs. One file, ~/.astra/config.json, env fallbacks:
 //   { "xai": {"key":"xai-…"}, "composio": {"apiKey":"ak_…"}, "box": {"token":"…"},
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
@@ -230,9 +230,9 @@ const featureConfigSchema = z.object({
   browser: z.boolean().optional(),
   /** Bots may propose edits to this server's own code, applied only through
    * the journal + watchdog rollback path. Off until explicitly enabled —
-   * also settable with OMB_SELF_MODIFY=1. */
+   * also settable with ASTRA_SELF_MODIFY=1. */
   selfModify: z.boolean().optional(),
-  /** "Luna" wake word: keep an on-device Porcupine detector armed while
+  /** "Astra" wake word: keep an on-device Porcupine detector armed while
    * the app runs. Off until explicitly enabled; the mic is not opened
    * before that. */
   wakeWord: z.boolean().optional(),
@@ -330,7 +330,7 @@ const appConfigSchema = z.object({
   /** Composer dictation (hold Ctrl+Space): the Deepgram streaming key. The
    * desktop shell, not a provider driver, consumes it. */
   dictation: z.object({ key: optionalText }).optional(),
-  /** The "Luna" wake word: the Picovoice AccessKey for the renderer's
+  /** The "Astra" wake word: the Picovoice AccessKey for the renderer's
    * on-device Porcupine detector. Stored and reported configured-or-not
    * only; the key never leaves the server except to the user's own
    * desktop shell. */
@@ -562,7 +562,7 @@ export function builtInBrowserEnabled(cfg: AppConfig): boolean {
  * on. Default is off — the ability of a running server to rewrite its own
  * source must never arrive silently with an update. */
 export function selfModifyEnabled(cfg: AppConfig): boolean {
-  if (process.env.OMB_SELF_MODIFY === "1") return true;
+  if (process.env.ASTRA_SELF_MODIFY === "1") return true;
   return cfg.features?.selfModify === true;
 }
 
@@ -592,20 +592,29 @@ export function providerReloadKeys(patch: object): string[] {
   return Object.keys(patch).filter((key) => !FLEET_NEUTRAL_KEYS.has(key));
 }
 
-// OMB_DATA_DIR isolates test/soak rigs from the user's real fleet.
-export const DATA_DIR = process.env.OMB_DATA_DIR ?? join(homedir(), ".openmausbot");
-const LEGACY_DATA_DIR = join(homedir(), ".opengrokbot");
+// ASTRA_DATA_DIR isolates test/soak rigs from the user's real fleet.
+// OMB_DATA_DIR is still read as a fallback so existing rigs keep working.
+const legacyDataDirOverride = process.env.OMB_DATA_DIR;
+export const DATA_DIR = process.env.ASTRA_DATA_DIR ?? legacyDataDirOverride ?? join(homedir(), ".astra");
+// Predecessors in order: OpenGrokBot (first release) and OpenMausBot (the
+// name this app shipped under until the Astra rename). A fresh machine has
+// neither.
+const LEGACY_DATA_DIRS = [join(homedir(), ".opengrokbot"), join(homedir(), ".openmausbot")];
 export const EVENTS_DIR = join(DATA_DIR, "events");
 export const NATIVE_DIR = join(DATA_DIR, "native");
 
 export function ensureDirs() {
   // one-time migration from the pre-rename data dir — bots, transcripts,
-  // config and keys all carry over
-  if (!existsSync(DATA_DIR) && existsSync(LEGACY_DATA_DIR)) {
-    try {
-      renameSync(LEGACY_DATA_DIR, DATA_DIR);
-    } catch {
-      /* cross-device or busy — fall through to a fresh dir */
+  // config and keys all carry over. Newest predecessor wins: a machine that
+  // ran both legacy versions renames the one it actually used last.
+  if (!existsSync(DATA_DIR)) {
+    const legacy = LEGACY_DATA_DIRS.find((dir) => existsSync(dir));
+    if (legacy) {
+      try {
+        renameSync(legacy, DATA_DIR);
+      } catch {
+        /* cross-device or busy — fall through to a fresh dir */
+      }
     }
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
@@ -659,8 +668,8 @@ export function loadConfig(): AppConfig {
   // never the workspace key, so an operator's stray variable cannot flip
   // every Claude bot onto pay-as-you-go billing.
   cfg.anthropic = { ...cfg.anthropic };
-  if (process.env.OMB_ANTHROPIC_API_KEY !== undefined) cfg.anthropic.key = process.env.OMB_ANTHROPIC_API_KEY;
-  if (process.env.OMB_ANTHROPIC_API_URL !== undefined) cfg.anthropic.url = process.env.OMB_ANTHROPIC_API_URL;
+  if (process.env.ASTRA_ANTHROPIC_API_KEY !== undefined) cfg.anthropic.key = process.env.ASTRA_ANTHROPIC_API_KEY;
+  if (process.env.ASTRA_ANTHROPIC_API_URL !== undefined) cfg.anthropic.url = process.env.ASTRA_ANTHROPIC_API_URL;
   cfg.openaiCompat = { ...cfg.openaiCompat };
   if (process.env.OPENAI_COMPAT_API_KEY !== undefined) cfg.openaiCompat.key = process.env.OPENAI_COMPAT_API_KEY;
   if (process.env.OPENAI_COMPAT_URL !== undefined) cfg.openaiCompat.url = process.env.OPENAI_COMPAT_URL;
@@ -677,21 +686,21 @@ export function loadConfig(): AppConfig {
   cfg.opencodeGo = { ...cfg.opencodeGo };
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
-  if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
+  if (process.env.ASTRA_TTS_KEY !== undefined) cfg.tts.key = process.env.ASTRA_TTS_KEY;
   cfg.dictation = { ...cfg.dictation };
-  if (process.env.OMB_DICTATION_KEY !== undefined) cfg.dictation.key = process.env.OMB_DICTATION_KEY;
+  if (process.env.ASTRA_DICTATION_KEY !== undefined) cfg.dictation.key = process.env.ASTRA_DICTATION_KEY;
   cfg.wakeWord = { ...cfg.wakeWord };
-  if (process.env.OMB_PICOVOICE_KEY !== undefined) cfg.wakeWord.accessKey = process.env.OMB_PICOVOICE_KEY;
+  if (process.env.ASTRA_PICOVOICE_KEY !== undefined) cfg.wakeWord.accessKey = process.env.ASTRA_PICOVOICE_KEY;
   cfg.imageGen = { ...cfg.imageGen };
-  if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
-  if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
+  if (process.env.ASTRA_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.ASTRA_OPENAI_IMAGE_KEY;
+  if (process.env.ASTRA_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.ASTRA_CUSTOM_IMAGE_KEY;
   // The sign-in allow-list: env is how a headless box or a container is
   // bootstrapped before anyone can reach Settings.
   const splitEmails = (value: string) => value.split(/[,\s]+/).map((entry) => entry.trim().toLowerCase()).filter(Boolean);
-  if (process.env.OMB_SIGNIN_EMAILS !== undefined || process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) {
+  if (process.env.ASTRA_SIGNIN_EMAILS !== undefined || process.env.ASTRA_SIGNIN_MEMBER_EMAILS !== undefined) {
     cfg.signIn = { ...cfg.signIn };
-    if (process.env.OMB_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.OMB_SIGNIN_EMAILS);
-    if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
+    if (process.env.ASTRA_SIGNIN_EMAILS !== undefined) cfg.signIn.admins = splitEmails(process.env.ASTRA_SIGNIN_EMAILS);
+    if (process.env.ASTRA_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.ASTRA_SIGNIN_MEMBER_EMAILS);
   }
   return cfg;
 }
@@ -706,17 +715,17 @@ export function loadConfig(): AppConfig {
 export function syncCredentialEnv(patch: Partial<AppConfig>): void {
   const secrets: Array<[value: string | undefined, name: string]> = [
     [patch.xai?.key, "XAI_API_KEY"],
-    [patch.anthropic?.key, "OMB_ANTHROPIC_API_KEY"],
+    [patch.anthropic?.key, "ASTRA_ANTHROPIC_API_KEY"],
     [patch.openaiCompat?.key, "OPENAI_COMPAT_API_KEY"],
     [patch.vision?.key, "FREELLMAPI_API_KEY"],
     [patch.composio?.apiKey, "COMPOSIO_API_KEY"],
     [patch.box?.token, "BOX_TOKEN"],
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
-    [patch.tts?.key, "OMB_TTS_KEY"],
-    [patch.dictation?.key, "OMB_DICTATION_KEY"],
-    [patch.wakeWord?.accessKey, "OMB_PICOVOICE_KEY"],
-    [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
-    [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
+    [patch.tts?.key, "ASTRA_TTS_KEY"],
+    [patch.dictation?.key, "ASTRA_DICTATION_KEY"],
+    [patch.wakeWord?.accessKey, "ASTRA_PICOVOICE_KEY"],
+    [patch.imageGen?.key, "ASTRA_OPENAI_IMAGE_KEY"],
+    [patch.imageGen?.customApiKey, "ASTRA_CUSTOM_IMAGE_KEY"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -727,7 +736,7 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
   // must follow the same set-when-truthy / delete-when-cleared rule as keys.
   const settings: Array<[value: string | undefined, name: string]> = [
     [patch.openaiCompat?.url, "OPENAI_COMPAT_URL"],
-    [patch.anthropic?.url, "OMB_ANTHROPIC_API_URL"],
+    [patch.anthropic?.url, "ASTRA_ANTHROPIC_API_URL"],
     [patch.openaiCompat?.model, "OPENAI_COMPAT_MODEL"],
     [patch.openaiCompat?.provider, "OPENAI_COMPAT_PROVIDER"],
     [patch.vision?.url, "VISION_URL"],
@@ -747,26 +756,26 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
  * child these are someone else's keys riding along in `...process.env`. */
 export const WORKSPACE_CREDENTIAL_ENV = [
   "XAI_API_KEY",
-  "OMB_ANTHROPIC_API_KEY",
-  "OMB_ANTHROPIC_API_URL",
+  "ASTRA_ANTHROPIC_API_KEY",
+  "ASTRA_ANTHROPIC_API_URL",
   "OPENAI_COMPAT_API_KEY",
   "OPENAI_COMPAT_URL",
   "FREELLMAPI_API_KEY",
   "VISION_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
-  "OMB_TTS_KEY",
-  "OMB_DICTATION_KEY",
-  "OMB_PICOVOICE_KEY",
-  "OMB_OPENAI_IMAGE_KEY",
-  "OMB_CUSTOM_IMAGE_KEY",
+  "ASTRA_TTS_KEY",
+  "ASTRA_DICTATION_KEY",
+  "ASTRA_PICOVOICE_KEY",
+  "ASTRA_OPENAI_IMAGE_KEY",
+  "ASTRA_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
-  "OMB_COMPOSIO_BROKER_TOKEN",
+  "ASTRA_COMPOSIO_BROKER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but
   // exposing them to a shell-capable agent points straight at app-owned
   // state. The built-in browser master is delivered privately in memory.
-  "OMB_BROWSER_CONNECTION",
-  "OMB_USER_DATA",
+  "ASTRA_BROWSER_CONNECTION",
+  "ASTRA_USER_DATA",
 ] as const;
 
 /** Drop every workspace credential from a child-process env (in place). */
@@ -793,7 +802,7 @@ export const PROVIDER_CREDENTIAL_ENV = [
   "CURSOR_AUTH_TOKEN",
 ] as const;
 
-/** Merge a partial config into ~/.openmausbot/config.json (secrets never
+/** Merge a partial config into ~/.astra/config.json (secrets never
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstances?: boolean } = {}): void {
   const p = join(DATA_DIR, "config.json");

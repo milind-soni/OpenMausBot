@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { launchVerificationServer, runControlOmb, type VerificationServer } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb, type VerificationServer } from "./control-astra.ts";
 import { waitForExit } from "../server/testing/cleanup.ts";
 import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 
@@ -32,8 +32,8 @@ async function restartFixture(fixture: VerificationServer): Promise<ChildProcess
     LOCALAPPDATA: join(home, "AppData", "Local"), XDG_CONFIG_HOME: join(home, ".config"),
     XDG_CACHE_HOME: join(home, ".cache"), XDG_DATA_HOME: join(home, ".local", "share"),
     TEMP: temp, TMP: temp, TMPDIR: temp, HERMES_HOME: join(home, ".hermes"),
-    OMB_DATA_DIR: dataDir, OMB_PORT: new URL(fixture.info.url).port,
-    OMB_WEBHOOK_PORT: String(Number(new URL(fixture.info.url).port) + 1),
+    ASTRA_DATA_DIR: dataDir, ASTRA_PORT: new URL(fixture.info.url).port,
+    ASTRA_WEBHOOK_PORT: String(Number(new URL(fixture.info.url).port) + 1),
     FAKE_CLAUDE_MODE: "happy", FAKE_CLAUDE_DUMP: fixture.fixtureDumpPath,
     PATH: dirname(process.execPath),
   });
@@ -49,7 +49,7 @@ async function restartFixture(fixture: VerificationServer): Promise<ChildProcess
       try {
         const response = await fetch(`${fixture.info.url}/api/health`, { signal: AbortSignal.timeout(1_000) });
         const health = await response.json() as { app?: string; pid?: number };
-        if (response.ok && health.app === "openmausbot" && health.pid === child.pid) return child;
+        if (response.ok && health.app === "astra" && health.pid === child.pid) return child;
       } catch { /* Only this owned child can satisfy the PID handshake. */ }
       if (Date.now() >= deadline) throw new Error(`Restored fixture did not start; see ${fixture.info.logPath}`);
       await new Promise((done) => setTimeout(done, 100));

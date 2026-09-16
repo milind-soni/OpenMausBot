@@ -43,8 +43,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @openmausbot/docs types:check
-      - run: pnpm --filter @openmausbot/docs lint
+      - run: pnpm --filter @astra/docs types:check
+      - run: pnpm --filter @astra/docs lint
       - run: pnpm docs:build
         env:
           GITHUB_TOKEN: ${{ github.token }}

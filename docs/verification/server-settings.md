@@ -23,7 +23,7 @@ not prove a customer's real DNS, certificate, or reverse proxy is configured.
 1. Follow the [fixture launcher](README.md#launch), retaining its printed URL,
    temporary data directory and persistent log path. Run Doctor against that
    explicit URL.
-2. Start Vite on a separate free port with `OMB_PORT` set to the printed harness
+2. Start Vite on a separate free port with `ASTRA_PORT` set to the printed harness
    port. Do not let it proxy to the default port or the user's live app.
 3. For domain UI, open Settings → Remote access → Connect your domain. Enter
    `bots.example.com`: confirm the Type/Name/Value rows and that copy buttons do
@@ -33,7 +33,7 @@ not prove a customer's real DNS, certificate, or reverse proxy is configured.
    intercept only the fixture's GET `/api/settings/custom-domain` response and
    supply `serverIpv4: "8.8.8.8"`, preserving its other fields. Never point DNS
    at this synthetic address or intercept verification POSTs. Public-interface
-   detection and the `OMB_PUBLIC_IPV4` override are covered by the helper tests.
+   detection and the `ASTRA_PUBLIC_IPV4` override are covered by the helper tests.
    Without a public interface or override, confirm the UI asks the administrator
    for the IP and does not offer a fake value to copy. Expand the advanced guide
    and confirm its app and webhook ports match the fixture. Submit
@@ -47,7 +47,7 @@ not prove a customer's real DNS, certificate, or reverse proxy is configured.
 4. To exercise Codex, add an instance to **only the fixture's config.json**:
    driver `codex`, CLI set to the absolute path of
    `server/testing/fake-codex-login-cli.ts`, environment
-   `OMB_DEVICE_AUTH_FIXTURE=1`, `HOME` set to the fixture's temporary directory,
+   `ASTRA_DEVICE_AUTH_FIXTURE=1`, `HOME` set to the fixture's temporary directory,
    and `CODEX_HOME` set to its `.codex` subdirectory. Reload that isolated
    provider registry and refresh the preview. Never substitute the real Codex
    executable. The fixture requires an explicit opt-in and makes no network

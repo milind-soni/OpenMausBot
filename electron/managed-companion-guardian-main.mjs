@@ -1,7 +1,7 @@
 // The connector guardian as a process: `node managed-companion-guardian-main.mjs
 // <cloudflared> <tokenFile> <socketPath> <pid> <originPort>`. Spawned by
 // managed-companion-tunnel.mjs (desktop) and, bundled as
-// dist-server/tunnel-guardian.js, by `openmausbot serve --tunnel`. Runs
+// dist-server/tunnel-guardian.js, by `astra serve --tunnel`. Runs
 // unconditionally: nothing imports this file, and the library it wraps has
 // no side effects, so a bundle that inlines the library stays inert.
 import { guardianArguments, runManagedCompanionGuardian } from "./managed-companion-guardian.mjs";

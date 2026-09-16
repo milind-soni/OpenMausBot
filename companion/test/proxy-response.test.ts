@@ -56,8 +56,8 @@ const device = async (
 
 beforeAll(async () => {
   harness = createServer((req, res) => {
-    companionMarker = String(req.headers["x-openmausbot-companion"] ?? "");
-    companionDevice = String(req.headers["x-openmausbot-companion-device"] ?? "");
+    companionMarker = String(req.headers["x-astra-companion"] ?? "");
+    companionDevice = String(req.headers["x-astra-companion-device"] ?? "");
     respond(res);
   });
   const harnessPort = await listen(harness);
@@ -105,7 +105,7 @@ describe("preparing a harness response for a device", () => {
       for (const action of ["join", "screenshot"]) {
         const { status, text } = await device(`/api/bots/b1/computer/${action}`, "POST");
         expect(status).toBe(403);
-        expect(text).toContain("enable it in OpenMausBot");
+        expect(text).toContain("enable it in Astra");
         expect(text).toContain("Settings → Remote access");
       }
     } finally {
@@ -133,7 +133,7 @@ describe("preparing a harness response for a device", () => {
     const response = await fetch(`http://127.0.0.1:${sidecarPort}/api/bots`, {
       headers: {
         authorization: `Bearer ${TOKEN}`,
-        "x-openmausbot-companion-device": "another-phone",
+        "x-astra-companion-device": "another-phone",
       },
     });
     expect(response.status).toBe(200);

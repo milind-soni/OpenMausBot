@@ -154,7 +154,7 @@ describe("an upstream that fails mid-stream", () => {
       const res = await fetch(`${base}/api/health`, { headers: { authorization: "Bearer omb_x" } });
       expect(res.status).toBe(502);
       expect((await res.json()) as { error: string }).toEqual({
-        error: "OpenMausBot is not running on this computer",
+        error: "Astra is not running on this computer",
       });
     });
     expect(escaped).toEqual([]);

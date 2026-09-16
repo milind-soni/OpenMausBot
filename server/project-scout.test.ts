@@ -27,11 +27,11 @@ afterEach(() => {
 describe("scoutProject", () => {
   it("names the project from the README and summarizes its first paragraph", () => {
     const dir = project({
-      "README.md": "[![ci](x)](y)\n# Maus Tracker\n\nTracks every maus in the house.\n\nMore prose.",
+      "README.md": "[![ci](x)](y)\n# Astra Tracker\n\nTracks every maus in the house.\n\nMore prose.",
       "package.json": JSON.stringify({ name: "not-this", description: "not this either" }),
     });
     const profile = scoutProject(dir);
-    expect(profile.name).toBe("Maus Tracker");
+    expect(profile.name).toBe("Astra Tracker");
     expect(profile.summary).toBe("Tracks every maus in the house.");
   });
 
@@ -86,7 +86,7 @@ describe("scoutProject", () => {
 
 describe("suggestTeam", () => {
   const profile: ProjectProfile = {
-    name: "Maus Tracker",
+    name: "Astra Tracker",
     summary: "Tracks every maus in the house.",
     stacks: ["TypeScript", "React"],
     signals: [
@@ -97,12 +97,12 @@ describe("suggestTeam", () => {
 
   it("always leads with a lead, then one member per signal, each with a reason", () => {
     const suggestion = suggestTeam(profile);
-    expect(suggestion.roomName).toBe("Maus Tracker");
+    expect(suggestion.roomName).toBe("Astra Tracker");
     expect(suggestion.manifest.team.members.map((member) => member.key)).toEqual(["lead", "frontend", "testing"]);
     expect(suggestion.reasons.frontend).toContain("react");
     expect(suggestion.manifest.team.description).toBe(profile.summary);
     const frontend = suggestion.manifest.team.members[1]!;
-    expect(frontend.description).toContain("Maus Tracker");
+    expect(frontend.description).toContain("Astra Tracker");
     expect(frontend.description).toContain("react, vite");
   });
 

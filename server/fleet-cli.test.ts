@@ -33,33 +33,33 @@ const io = () => {
 
 const base: FleetInput = {
   action: "list", admins: [], members: [], dryRun: false, yes: false, keepData: false,
-  node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", root: "/",
+  node: "/usr/bin/node", script: "/usr/lib/node_modules/astra/cli.js", root: "/",
 };
-const registryFile = "/etc/openmausbot/fleet.json";
+const registryFile = "/etc/astra/fleet.json";
 const withRegistry = (workspaces = {}) => ({ [registryFile]: JSON.stringify({ ...emptyRegistry("agentada.cc"), workspaces }) });
 
-describe("openmausbot fleet", () => {
+describe("astra fleet", () => {
   it("prints the plan instead of acting when not root, and on --dry-run even as root", async () => {
     const { deps, calls } = machine();
     const { io: log, out } = io();
     expect(await runFleetCommand({ ...base, action: "init", domain: "agentada.cc" }, log, deps)).toBe(0);
     expect(out[0]).toBe("not running as root; run these as root:");
-    expect(out.join("\n")).toContain("cat > /etc/systemd/system/openmausbot@.service <<'OMB_EOF'");
-    expect(out.join("\n")).toContain("systemctl enable --now openmausbot-fence.service");
+    expect(out.join("\n")).toContain("cat > /etc/systemd/system/astra@.service <<'ASTRA_EOF'");
+    expect(out.join("\n")).toContain("systemctl enable --now astra-fence.service");
     expect(calls).toEqual([]);
 
     const rooted = machine({ root: true, files: withRegistry() });
     const dry = io();
     expect(await runFleetCommand({ ...base, action: "create", slug: "acme", admins: ["ada@example.test"], dryRun: true }, dry.io, rooted.deps)).toBe(0);
     expect(dry.out[0]).toBe("dry run; run these as root:");
-    expect(dry.out.join("\n")).toContain("useradd --system --create-home --home-dir /var/lib/openmausbot/acme");
+    expect(dry.out.join("\n")).toContain("useradd --system --create-home --home-dir /var/lib/astra/acme");
     expect(rooted.calls).toEqual([]);
   });
 
   it("refuses an npx cache as the unit's script and asks for the domain", async () => {
     const { deps } = machine({ root: true });
     const bad = io();
-    expect(await runFleetCommand({ ...base, action: "init", domain: "agentada.cc", script: "/root/.npm/_npx/abc/node_modules/openmausbot/cli.js" }, bad.io, deps)).toBe(2);
+    expect(await runFleetCommand({ ...base, action: "init", domain: "agentada.cc", script: "/root/.npm/_npx/abc/node_modules/astra/cli.js" }, bad.io, deps)).toBe(2);
     expect(bad.err[0]).toMatch(/npx|permanently/);
     const missing = io();
     expect(await runFleetCommand({ ...base, action: "init" }, missing.io, deps)).toBe(2);
@@ -72,16 +72,16 @@ describe("openmausbot fleet", () => {
     const code = await runFleetCommand({ ...base, action: "create", slug: "acme", admins: ["ada@example.test"], members: ["@acme.test"], brandFile: "/srv/brand.json", anthropicKeyFile: "/srv/key.txt", cap: 40, licenseKey: "omb1.k" }, log, deps);
     expect(code).toBe(0);
     expect(calls.slice(0, 4)).toEqual([
-      "run useradd --system --create-home --home-dir /var/lib/openmausbot/acme --shell /usr/sbin/nologin --user-group omb-acme",
-      "mkdir /var/lib/openmausbot/acme/.openmausbot 700",
-      "run chown omb-acme:omb-acme /var/lib/openmausbot/acme/.openmausbot",
-      "write /var/lib/openmausbot/acme/.openmausbot/config.json 600",
+      "run useradd --system --create-home --home-dir /var/lib/astra/acme --shell /usr/sbin/nologin --user-group omb-acme",
+      "mkdir /var/lib/astra/acme/.astra 700",
+      "run chown omb-acme:omb-acme /var/lib/astra/acme/.astra",
+      "write /var/lib/astra/acme/.astra/config.json 600",
     ]);
-    expect(JSON.parse(files.get("/var/lib/openmausbot/acme/.openmausbot/config.json")!)).toEqual({
+    expect(JSON.parse(files.get("/var/lib/astra/acme/.astra/config.json")!)).toEqual({
       signIn: { admins: ["ada@example.test"], members: ["@acme.test"] }, anthropic: { key: "sk-ant-fixture" }, budgets: { monthlyUsd: 40 },
     });
-    expect(files.get("/var/lib/openmausbot/acme/.openmausbot/brand.json")).toBe('{"name":"Acme"}');
-    expect(files.get("/etc/openmausbot/instances/acme.env")).toContain("OMB_LICENSE_KEY=omb1.k");
+    expect(files.get("/var/lib/astra/acme/.astra/brand.json")).toBe('{"name":"Acme"}');
+    expect(files.get("/etc/astra/instances/acme.env")).toContain("ASTRA_LICENSE_KEY=omb1.k");
     expect(calls).toContain("health http://127.0.0.1:8810/api/health");
     expect(calls.at(-1)).toBe(`write ${registryFile} 600`);
     expect(JSON.parse(files.get(registryFile)!).workspaces.acme).toMatchObject({ port: 8810, host: "acme.agentada.cc" });
@@ -116,7 +116,7 @@ describe("openmausbot fleet", () => {
   });
 
   it("edits a workspace's sign-in list in place, owned by the workspace, and lists what runs", async () => {
-    const dataFile = "/var/lib/openmausbot/acme/.openmausbot/config.json";
+    const dataFile = "/var/lib/astra/acme/.astra/config.json";
     const ready = machine({ root: true, files: { ...withRegistry({ acme: { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" } }), [dataFile]: '{"signIn":{"admins":["ada@example.test"]}}' } });
     const added = io();
     expect(await runFleetCommand({ ...base, action: "users", slug: "acme", userAction: "add", email: "Bob@Acme.test", chatOnly: true }, added.io, ready.deps)).toBe(0);

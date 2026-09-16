@@ -224,7 +224,7 @@ struct AgentProfileView: View {
                     } footer: {
                         Text(imageGenerationReady
                              ? "Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this device."
-                             : "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.")
+                             : "To generate images, configure the shared image provider in Astra on your computer. Provider keys cannot be added from this device.")
                     }
                 }
 

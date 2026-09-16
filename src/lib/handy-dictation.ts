@@ -1,8 +1,8 @@
-// The "Luna" wake word driving Handy (https://handy.computer) — the user's
+// The "Astra" wake word driving Handy (https://handy.computer) — the user's
 // own OFFLINE speech-to-text app.
 //
 // The user's flow, automated end to end:
-//   "Luna" → Handy toggles into recording → the user talks → silence stops
+//   "Astra" → Handy toggles into recording → the user talks → silence stops
 //   it (watchdog below) → the pill animates while Handy transcribes → the
 //   transcript lands on the CLIPBOARD (the user's Handy is in clipboard
 //   mode) → it feeds into the composer.

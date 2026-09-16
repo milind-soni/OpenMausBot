@@ -23,7 +23,7 @@ function runBridge(bin: string, input: string) {
         vpsContainerName("bridge-test"),
       ],
       {
-        env: { ...process.env, OMB_EXTRA_PATH: bin, NODE_NO_WARNINGS: "1" },
+        env: { ...process.env, ASTRA_EXTRA_PATH: bin, NODE_NO_WARNINGS: "1" },
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -40,7 +40,7 @@ function runBridge(bin: string, input: string) {
 
 describe.skipIf(process.platform === "win32")("VPS Cua MCP bridge", () => {
   it("passes MCP bytes unchanged to docker exec over the validated SSH target", async () => {
-    const bin = await mkdtemp(join(tmpdir(), "openmausbot-vps-mcp-"));
+    const bin = await mkdtemp(join(tmpdir(), "astra-vps-mcp-"));
     temporary.push(bin);
     const fakeDocker = join(bin, "docker");
     await writeFile(fakeDocker, "#!/bin/sh\nprintf 'ARGS:%s\\n' \"$*\" >&2\ncat\n", { mode: 0o700 });
@@ -54,12 +54,12 @@ describe.skipIf(process.platform === "win32")("VPS Cua MCP bridge", () => {
     expect(result.stderr).toContain(
       `ARGS:-H ssh://production-vps exec -i -u cua -e HOME=/home/cua -e DISPLAY=:1 ` +
         `-e CUA_DRIVER_INSTALL_CHANNEL=python_package -e CUA_DRIVER_RS_TELEMETRY_ENABLED=0 ${vpsContainerName("bridge-test")} ` +
-        "/usr/local/libexec/openmausbot/cua-driver mcp --socket /run/user/1000/openmausbot-cua.sock",
+        "/usr/local/libexec/astra/cua-driver mcp --socket /run/user/1000/astra-cua.sock",
     );
   });
 
   it("survives docker closing stdin before consuming the request", async () => {
-    const bin = await mkdtemp(join(tmpdir(), "openmausbot-vps-mcp-"));
+    const bin = await mkdtemp(join(tmpdir(), "astra-vps-mcp-"));
     temporary.push(bin);
     const fakeDocker = join(bin, "docker");
     await writeFile(fakeDocker, "#!/bin/sh\nexit 0\n", { mode: 0o700 });

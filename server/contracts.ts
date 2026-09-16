@@ -51,7 +51,7 @@ export interface ModelSelection {
   effort?: EffortLevel;
 }
 
-/** An image already admitted to OpenMausBot's private attachment store.
+/** An image already admitted to Astra's private attachment store.
  * Drivers receive this structured value instead of learning a host path from
  * prompt text. The harness validates the path and size before constructing it. */
 export interface TurnImageInput {
@@ -245,7 +245,7 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Cloud computer, reached through OpenMausBot's REST-to-MCP adapter.
+    /** Cloud computer, reached through Astra's REST-to-MCP adapter.
      * `control` is the harness's loopback who-is-driving endpoint: the
      * adapter consults it so a person who takes the wheel in the panel
      * pauses the bot's hands mid-turn instead of typing over them. */

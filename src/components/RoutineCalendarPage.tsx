@@ -55,7 +55,7 @@ import {
   intakeFiles,
   type Attachment,
 } from "@/lib/composer-attachments";
-import { MAUS_COLORS, type MausState } from "@/lib/mascot";
+import { ASTRA_COLORS, type AstraState } from "@/lib/mascot";
 import {
   addDays,
   atLocalTime,
@@ -234,7 +234,7 @@ function projectCalls(calls: CalendarCall[], from: number, to: number): CallOccu
   return items.sort((left, right) => left.at - right.at);
 }
 
-function statusState(status: RoutineRunStatus): MausState {
+function statusState(status: RoutineRunStatus): AstraState {
   if (status === "running") return "working";
   if (status === "waiting") return "curious";
   if (status === "completed") return "proud";
@@ -384,7 +384,7 @@ function EventEditor({
   };
   const [routineTarget, setRoutineTarget] = useState<RoutineTarget>(existingRoutine?.target ?? "bot");
   const [groupId, setGroupId] = useState(existingRoutine?.groupId ?? "");
-  const [runOn, setRunOn] = useState<RoutineRunOn>(existingRoutine?.runOn ?? defaultRunOn ?? "maus");
+  const [runOn, setRunOn] = useState<RoutineRunOn>(existingRoutine?.runOn ?? defaultRunOn ?? "astra");
   const [attachments, setAttachments] = useState<Array<RoutineContextAttachment | CalendarCallAttachment>>(
     existingRoutine?.target === "room-goal" ? [] : existingRoutine?.attachments ?? existingCall?.attachments ?? [],
   );
@@ -459,7 +459,7 @@ function EventEditor({
       setGroupId("");
       return;
     }
-    setRunOn("maus");
+    setRunOn("astra");
     setAttachments([]);
     setAttachmentNotice("");
     const room = selectedRoom ?? rooms[0];
@@ -487,7 +487,7 @@ function EventEditor({
       const added = toContextAttachments(result.attachments);
       if (added.length) {
         setAttachments((current) => [...current, ...added].slice(0, 20));
-        if (runOn === "cloud") setRunOn("maus");
+        if (runOn === "cloud") setRunOn("astra");
       }
       if (result.notice) setAttachmentNotice(result.notice);
     } finally {
@@ -518,7 +518,7 @@ function EventEditor({
           target: routineTarget,
           botId: lockedBotId ?? botIds[0] ?? "",
           groupId: routineTarget === "room-goal" ? groupId : null,
-          runOn: routineTarget === "room-goal" ? "maus" : runOn,
+          runOn: routineTarget === "room-goal" ? "astra" : runOn,
           enabled: existingRoutine ? undefined : true,
           schedule: nextSchedule,
           durationMinutes,
@@ -928,11 +928,11 @@ function EventEditor({
                 {isRoomGoal ? (
                   <div className="rounded-xl border border-accent/35 bg-accent/[0.07] p-3">
                     <div className="text-[12.5px] font-medium text-ink">Runs on this computer</div>
-                    <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">OpenMausBot keeps the group and its member hand-offs together for the full goal.</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">Astra keeps the group and its member hand-offs together for the full goal.</div>
                   </div>
                 ) : <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">This computer</div><div className="mt-1 text-[11px] text-ink-secondary">Uses the bot’s current model and tools.</div></button>
-                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Cloud VM</div><div className="mt-1 text-[11px] text-ink-secondary">Uses your connected cloud VM; OpenMausBot must stay running to launch it.</div></button>
+                  <button type="button" onClick={() => setRunOn("astra")} className={cn("rounded-xl border p-3 text-left", runOn === "astra" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">This computer</div><div className="mt-1 text-[11px] text-ink-secondary">Uses the bot’s current model and tools.</div></button>
+                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[12.5px] font-medium text-ink">Cloud VM</div><div className="mt-1 text-[11px] text-ink-secondary">Uses your connected cloud VM; Astra must stay running to launch it.</div></button>
                 </div>}
               </div>
             </div>
@@ -1018,7 +1018,7 @@ function QuickComposer({
             name,
             prompt: description,
             botId: botIds[0],
-            runOn: "maus",
+            runOn: "astra",
             enabled: true,
             schedule: { type: "once", at: seed.at },
             durationMinutes,
@@ -1126,7 +1126,7 @@ function CalendarEventCard({
   const ownerBots = ownerIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = ownerBots[0];
   const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? "Routine";
-  const color = isCall ? "#6d7cff" : primary ? MAUS_COLORS[primary.color] : "#666";
+  const color = isCall ? "#6d7cff" : primary ? ASTRA_COLORS[primary.color] : "#666";
   const [previewDuration, setPreviewDuration] = useState(item.durationMinutes);
   useEffect(() => setPreviewDuration(item.durationMinutes), [item.durationMinutes]);
   const status = run?.status;

@@ -87,7 +87,7 @@ export function isProxied(req: IncomingMessage): boolean {
 
 /** A request over an IPC listener (a unix socket or a named pipe) has no peer
  * address. Only a gateway on this machine can reach such a listener, and it
- * is there to forward traffic from elsewhere (`openmausbot serve --tunnel`),
+ * is there to forward traffic from elsewhere (`astra serve --tunnel`),
  * so the request is remote by construction: whatever headers it carries or
  * lacks, it never gets loopback trust. */
 export function ipcPeer(req: IncomingMessage): boolean {
@@ -288,7 +288,7 @@ export interface ResolveOptions {
   companionMutationToken?: string;
 }
 
-const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
+const DESKTOP_OWNER_HEADER = "x-astra-desktop-owner";
 
 function mutatingPublicRoute(method: string, path: string): boolean {
   const upper = method.toUpperCase();
@@ -356,12 +356,12 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
   const proxied = isProxied(req);
   const loopback = !proxied && isLoopbackHost(headerValue(req.headers.host)) && isAllowedOrigin(headerValue(req.headers.origin));
   if (loopback) {
-    const companionToken = headerValue(req.headers["x-openmausbot-companion-auth"]);
+    const companionToken = headerValue(req.headers["x-astra-companion-auth"]);
     if (companionToken && options.loopbackMutationToken !== undefined) {
       if (
         !secureTokenMatch(companionToken, options.companionMutationToken ?? "") ||
-        req.headers["x-openmausbot-companion"] !== "1" ||
-        !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-openmausbot-companion-device"]) ?? "") ||
+        req.headers["x-astra-companion"] !== "1" ||
+        !/^[\w-]{1,128}$/.test(headerValue(req.headers["x-astra-companion-device"]) ?? "") ||
         companionDenial({ path, method, authenticated: true })
       ) return deny(403, "forbidden: invalid companion request");
       return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };

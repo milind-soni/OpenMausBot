@@ -11,9 +11,9 @@ dist-server
 .DS_Store
 *.tsbuildinfo
 electron/resources/speech-helper
-electron/resources/OpenMausBot Speech.app
+electron/resources/Astra Speech.app
 # stale helper from the removed Teach a skill recorder
-electron/resources/OpenMausBot Recorder.app
+electron/resources/Astra Recorder.app
 release
 .omb-scratch
 .wrangler/

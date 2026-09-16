@@ -51,7 +51,7 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
 
   async function boot(m: ReturnType<typeof machine>) {
     const logs: string[] = [];
-    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", root: m.root, deps: m.deps, auditFile: join(m.root, "audit.jsonl"), licenseKey: "omb1.k", now: () => new Date("2026-09-10T12:00:00Z") }, { log: (line) => logs.push(line) });
+    const server = await startFleetAgent({ socketPath, node: "/usr/bin/node", script: "/usr/lib/node_modules/astra/cli.js", root: m.root, deps: m.deps, auditFile: join(m.root, "audit.jsonl"), licenseKey: "omb1.k", now: () => new Date("2026-09-10T12:00:00Z") }, { log: (line) => logs.push(line) });
     stop = () => new Promise((resolve) => server.close(() => resolve()));
     return logs;
   }
@@ -68,12 +68,12 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
 
     const created = await fleetRequest(socketPath, "POST", "/workspaces", { slug: "acme", admins: ["ada@example.test"], members: ["@acme.test"], cap: 40, anthropicKey: "sk-ant-fixture", brandJson: '{"name":"Acme"}' });
     expect(created).toMatchObject({ status: 200, body: { ok: true, log: [expect.stringContaining("https://acme.agentada.cc is ready")] } });
-    expect(m.calls).toContain("useradd --system --create-home --home-dir " + join(root, "var/lib/openmausbot/acme") + " --shell /usr/sbin/nologin --user-group omb-acme");
-    expect(JSON.parse(m.files.get(join(root, "var/lib/openmausbot/acme/.openmausbot/config.json"))!)).toMatchObject({ anthropic: { key: "sk-ant-fixture" }, budgets: { monthlyUsd: 40 } });
-    expect(m.files.get(join(root, "etc/openmausbot/instances/acme.env"))).toContain("OMB_LICENSE_KEY=omb1.k");
+    expect(m.calls).toContain("useradd --system --create-home --home-dir " + join(root, "var/lib/astra/acme") + " --shell /usr/sbin/nologin --user-group omb-acme");
+    expect(JSON.parse(m.files.get(join(root, "var/lib/astra/acme/.astra/config.json"))!)).toMatchObject({ anthropic: { key: "sk-ant-fixture" }, budgets: { monthlyUsd: 40 } });
+    expect(m.files.get(join(root, "etc/astra/instances/acme.env"))).toContain("ASTRA_LICENSE_KEY=omb1.k");
 
     // The workspace's own ledger, as its server would write it; the agent reads it as root.
-    const dataDir = join(root, "var/lib/openmausbot/acme/.openmausbot");
+    const dataDir = join(root, "var/lib/astra/acme/.astra");
     mkdirSync(dataDir, { recursive: true });
     appendUsage(dataDir, { at: "2026-09-03T10:00:00.000Z", botId: "b", botName: "B", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 10, output: 5, costUsd: 0.25, trigger: { kind: "owner" } });
     appendUsage(dataDir, { at: "2026-08-03T10:00:00.000Z", botId: "b", botName: "B", threadId: "t", instanceId: "claude", driverKind: "claudeAgent", model: "m", input: 10, output: 5, costUsd: 9, trigger: { kind: "owner" } });
@@ -87,7 +87,7 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     expect(await fleetRequest(socketPath, "POST", "/workspaces/acme/users", { action: "remove", email: "nobody@acme.test" })).toMatchObject({ status: 400, body: { error: expect.stringContaining("not on the list") } });
 
     expect((await fleetRequest(socketPath, "POST", "/workspaces/acme/suspend")).status).toBe(200);
-    expect(m.calls).toContain("systemctl disable --now openmausbot@acme.service");
+    expect(m.calls).toContain("systemctl disable --now astra@acme.service");
     expect((await fleetRequest(socketPath, "DELETE", "/workspaces/acme", { keepData: true })).status).toBe(200);
     expect(m.calls).toContain("userdel omb-acme");
     expect(await fleetRequest(socketPath, "GET", "/workspaces")).toMatchObject({ status: 200, body: { workspaces: [] } });

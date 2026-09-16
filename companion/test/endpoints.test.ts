@@ -8,7 +8,7 @@ import {
 
 describe("hostedCompanionUrl", () => {
   it("normalizes one explicit HTTPS origin", () => {
-    expect(hostedCompanionUrl("  https://Maus.Example/  ")).toBe("https://maus.example");
+    expect(hostedCompanionUrl("  https://Astra.Example/  ")).toBe("https://maus.example");
     expect(hostedCompanionUrl(undefined)).toBeNull();
     expect(hostedCompanionUrl("  ")).toBeNull();
   });
@@ -22,7 +22,7 @@ describe("hostedCompanionUrl", () => {
       "https://maus.example#pair",
       "not a URL",
     ]) {
-      expect(() => hostedCompanionUrl(value)).toThrow(/OMB_COMPANION_HOSTED_URL/);
+      expect(() => hostedCompanionUrl(value)).toThrow(/ASTRA_COMPANION_HOSTED_URL/);
     }
   });
 });
@@ -35,23 +35,23 @@ describe("companionEndpointCandidates", () => {
         ["100.121.5.6", "192.168.1.42", "10.0.0.7"],
         "macbook.tail1234.ts.net",
         "https://device-123.companion.example",
-        "openmausbot-abcd1234.local",
+        "astra-abcd1234.local",
       ),
     ).toEqual([
       { url: "https://device-123.companion.example", kind: "hosted", priority: 0 },
       { url: "http://macbook.tail1234.ts.net:8810", kind: "tailnet", priority: 100 },
       { url: "http://192.168.1.42:8810", kind: "lan", priority: 201 },
       { url: "http://10.0.0.7:8810", kind: "lan", priority: 202 },
-      { url: "http://openmausbot-abcd1234.local:8810", kind: "bonjour", priority: 300 },
+      { url: "http://astra-abcd1234.local:8810", kind: "bonjour", priority: 300 },
     ]);
   });
 
   it("keeps direct routes when no hosted route exists", () => {
     expect(
-      companionEndpointCandidates(8810, ["192.168.1.42"], null, null, "openmausbot-abcd1234.local"),
+      companionEndpointCandidates(8810, ["192.168.1.42"], null, null, "astra-abcd1234.local"),
     ).toEqual([
       { url: "http://192.168.1.42:8810", kind: "lan", priority: 200 },
-      { url: "http://openmausbot-abcd1234.local:8810", kind: "bonjour", priority: 300 },
+      { url: "http://astra-abcd1234.local:8810", kind: "bonjour", priority: 300 },
     ]);
   });
 
@@ -62,12 +62,12 @@ describe("companionEndpointCandidates", () => {
       addresses,
       null,
       "https://device-123.companion.example",
-      "openmausbot-abcd1234.local",
+      "astra-abcd1234.local",
     );
     expect(endpoints).toHaveLength(MAX_COMPANION_ENDPOINTS);
     expect(endpoints[0]).toMatchObject({ kind: "hosted", priority: 0 });
     expect(endpoints.at(-1)).toEqual({
-      url: "http://openmausbot-abcd1234.local:8810",
+      url: "http://astra-abcd1234.local:8810",
       kind: "bonjour",
       priority: 300,
     });

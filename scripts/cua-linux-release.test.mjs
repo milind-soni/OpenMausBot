@@ -206,7 +206,7 @@ describe("Linux CUA release staging", () => {
       root,
       "node_modules",
       ".cache",
-      "openmausbot",
+      "astra",
       "cua-driver-rs-0.19.3-linux-x86_64-binary.tar.gz",
     );
     fs.mkdirSync(path.dirname(cache), { recursive: true });

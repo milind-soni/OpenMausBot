@@ -1,4 +1,4 @@
-OpenMausMobile is the private iPhone companion for OpenMausBot on your computer.
+AstraMobile is the private iPhone companion for Astra on your computer.
 
 Keep your AI team moving when you step away from your desk:
 
@@ -14,16 +14,16 @@ Keep your AI team moving when you step away from your desk:
 
 YOUR COMPUTER STAYS IN CHARGE
 
-OpenMausMobile connects to the companion service on your own computer. Your bot transcripts remain in OpenMausBot’s local storage; the optional hosted connection transports them to your computer without creating a developer-hosted transcript copy.
+AstraMobile connects to the companion service on your own computer. Your bot transcripts remain in Astra’s local storage; the optional hosted connection transports them to your computer without creating a developer-hosted transcript copy.
 
-When a bot requests a supported API key, the phone can send it over Secure phone access or Tailscale, encrypted for the paired computer. Apple Passwords is built in, and other enabled Password AutoFill providers work too. The value is never added to chat or retained by OpenMausMobile.
+When a bot requests a supported API key, the phone can send it over Secure phone access or Tailscale, encrypted for the paired computer. Apple Passwords is built in, and other enabled Password AutoFill providers work too. The value is never added to chat or retained by AstraMobile.
 
 PAIR ONCE, REVOKE ANY TIME
 
-Pair with a short-lived code from OpenMausBot’s Companion panel. The computer stores only a hash of the phone credential and lets you revoke the device at any time.
+Pair with a short-lived code from Astra’s Companion panel. The computer stores only a hash of the phone credential and lets you revoke the device at any time.
 
 USE IT AT HOME OR AWAY
 
-Bonjour finds your computer on a trusted local network. For remote access, use Tailscale on both devices or enable the optional email-verified HTTPS connection in OpenMausBot’s desktop Companion settings.
+Bonjour finds your computer on a trusted local network. For remote access, use Tailscale on both devices or enable the optional email-verified HTTPS connection in Astra’s desktop Companion settings.
 
-Requires OpenMausBot running on a Mac, Windows, or Linux computer. Tailscale is optional and is not affiliated with OpenMausBot.
+Requires Astra running on a Mac, Windows, or Linux computer. Tailscale is optional and is not affiliated with Astra.

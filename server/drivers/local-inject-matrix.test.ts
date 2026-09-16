@@ -233,7 +233,7 @@ describe("Grok / Kimi / Droid / OpenCode writers × live ids", () => {
       UNSLOTH_STUDIO_AUTH_TOKEN: "unsloth-secret",
     });
     expect(id).toBe(droidInjectId(host.id, "gemma-4-31b-it-bf16"));
-    expect(id.startsWith("custom:openmausbot-")).toBe(true);
+    expect(id.startsWith("custom:astra-")).toBe(true);
     const settings = JSON.parse(readFileSync(join(home, ".factory", "settings.json"), "utf8")) as {
       customModels: Array<{ provider: string; baseUrl: string; apiKey: string; model: string }>;
     };
@@ -331,7 +331,7 @@ describe("probe payload dialects", () => {
   const probe = (payload: unknown) =>
     mergeLocalInject(
       { default: "keep", options: [{ id: "keep", label: "Keep" }] },
-      { VITEST: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "1" },
+      { VITEST: "true", ASTRA_PROBE_LOCAL_INJECT: "1" },
       async (url) => {
         if (String(url).includes(":8080")) return new Response(JSON.stringify(payload), { status: 200 });
         return new Response("nope", { status: 500 });
@@ -366,7 +366,7 @@ describe("loaded host probes", () => {
   it("pins every host's actually-loaded models in one Custom list", async () => {
     const catalog = await mergeLocalInject(
       { default: "keep", options: [{ id: "keep", label: "Keep" }] },
-      { VITEST: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "1" },
+      { VITEST: "true", ASTRA_PROBE_LOCAL_INJECT: "1" },
       async (url) => {
         const href = String(url);
         if (href.includes("/v1/models/status")) {

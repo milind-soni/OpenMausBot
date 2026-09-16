@@ -5,18 +5,18 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const podman = process.env.OMB_VERIFY_PODMAN;
-const machine = process.env.OMB_VERIFY_MACHINE;
-const image = process.env.OMB_VERIFY_IMAGE;
-if (!podman || !machine || !image) throw new Error("Set explicit OMB_VERIFY_PODMAN, OMB_VERIFY_MACHINE and OMB_VERIFY_IMAGE");
-const output = resolve(process.env.OMB_VERIFY_OUTPUT || ".omb-scratch/japanese");
+const podman = process.env.ASTRA_VERIFY_PODMAN;
+const machine = process.env.ASTRA_VERIFY_MACHINE;
+const image = process.env.ASTRA_VERIFY_IMAGE;
+if (!podman || !machine || !image) throw new Error("Set explicit ASTRA_VERIFY_PODMAN, ASTRA_VERIFY_MACHINE and ASTRA_VERIFY_IMAGE");
+const output = resolve(process.env.ASTRA_VERIFY_OUTPUT || ".omb-scratch/japanese");
 mkdirSync(output, { recursive: true });
 writeFileSync(resolve(output, "receipt.json"), JSON.stringify({ capturesComplete: false, visualReview: "pending" }, null, 2));
 // Keep Podman's existing connection/SSH configuration, but isolate app imports.
 const podmanEnv = { ...process.env };
 const runtime = mkdtempSync(resolve(output, "runtime-"));
 process.env.HOME = process.env.USERPROFILE = resolve(runtime, "home");
-process.env.OMB_DATA_DIR = resolve(runtime, "app-data");
+process.env.ASTRA_DATA_DIR = resolve(runtime, "app-data");
 mkdirSync(process.env.HOME, { recursive: true });
 try {
   await capture();

@@ -18,11 +18,11 @@ Make PR #230's four new permission-broker collision tests pass on Windows by eli
 
 ### Summary
 
-The Windows CI job fails on PR #230 at exactly one test in the vitest run: `denies a colliding ask id from a second connection on the same broker`, with `Error: connect ENOENT \\.\pipe\openmausbot-perm-1892-t-perm-d`. The same job log shows the real cause: `permission broker unavailable on \\.\pipe\openmausbot-perm-1892-t-perm-d: listen EADDRINUSE: address already in use`. The broker for that test never started because the pipe name was already held by the previous collision test. All four collision tests produce the same pipe name. (The full `pnpm test` job also runs broker:test, updater, and packaged-server; those never executed in the failing run because `vitest run` exited non-zero first, so their Windows status is not evidenced by this run.)
+The Windows CI job fails on PR #230 at exactly one test in the vitest run: `denies a colliding ask id from a second connection on the same broker`, with `Error: connect ENOENT \\.\pipe\astra-perm-1892-t-perm-d`. The same job log shows the real cause: `permission broker unavailable on \\.\pipe\astra-perm-1892-t-perm-d: listen EADDRINUSE: address already in use`. The broker for that test never started because the pipe name was already held by the previous collision test. All four collision tests produce the same pipe name. (The full `pnpm test` job also runs broker:test, updater, and packaged-server; those never executed in the failing run because `vitest run` exited non-zero first, so their Windows status is not evidenced by this run.)
 
 ### Problem Frame
 
-`permissionSocketPath(threadId)` truncates the thread id to an 8-char tag (`server/drivers/claude.ts:192-195`). The four collision tests use thread ids `t-perm-dup-1`, `t-perm-dup-2`, `t-perm-dup-3`, `t-perm-dup-4`, which all truncate to `t-perm-d`. On Windows, `brokerSocketPath` builds `\\.\pipe\openmausbot-perm-<pid>-t-perm-d` (`server/procs.ts:114-119`).
+`permissionSocketPath(threadId)` truncates the thread id to an 8-char tag (`server/drivers/claude.ts:192-195`). The four collision tests use thread ids `t-perm-dup-1`, `t-perm-dup-2`, `t-perm-dup-3`, `t-perm-dup-4`, which all truncate to `t-perm-d`. On Windows, `brokerSocketPath` builds `\\.\pipe\astra-perm-<pid>-t-perm-d` (`server/procs.ts:114-119`).
 
 On POSIX, `createPermissionBroker` calls `unlinkSync(opts.socketPath)` before `listen()` (`server/drivers/claude.ts:208-210`), which removes the previous test's socket file, so re-listening the same name succeeds. On Windows, `unlinkSync` on a `\\.\pipe\...` path is a no-op — a named pipe is not a filesystem entry. The OS holds the pipe name briefly after the prior broker's `server.close()`, so the next test's `listen()` fails with `EADDRINUSE` and the broker never starts. The test's `connectSocket` then fails with `ENOENT` because no pipe is listening. The observed run failed only 1 of the 4 same-name tests, confirming the release window is short and the failure is timing-dependent.
 
@@ -61,7 +61,7 @@ The pre-existing broker tests never hit this because they use distinct thread id
 
 ### Sources
 
-- Windows job log (admin-gated, obtained via authenticated `gh`): `permission broker unavailable on \\.\pipe\openmausbot-perm-1892-t-perm-d: listen EADDRINUSE: address already in use` followed by `Error: connect ENOENT \\.\pipe\openmausbot-perm-1892-t-perm-d` on the `denies a colliding ask id from a second connection on the same broker` test.
+- Windows job log (admin-gated, obtained via authenticated `gh`): `permission broker unavailable on \\.\pipe\astra-perm-1892-t-perm-d: listen EADDRINUSE: address already in use` followed by `Error: connect ENOENT \\.\pipe\astra-perm-1892-t-perm-d` on the `denies a colliding ask id from a second connection on the same broker` test.
 - `server/drivers/claude.ts:192-195` — `permissionSocketPath` 8-char tag truncation.
 - `server/procs.ts:114-119` — Windows named-pipe name construction with `process.pid`.
 - `server/drivers/claude.ts:208-210` — `unlinkSync` before `listen()` (POSIX-only effective).
@@ -97,7 +97,7 @@ The pre-existing broker tests never hit this because they use distinct thread id
 - `pnpm exec vitest run server/drivers/claude.test.ts` — 33 tests declared; on Windows, 33 pass; on macOS and Ubuntu, 32 pass and 1 is skipped (the Windows-only pipe-naming test at line 66).
 - `pnpm typecheck` — clean.
 - Full `pnpm test` on macOS (vitest + broker:test + updater + packaged-server).
-- The Windows `typecheck + test (windows-latest)` job is green on two consecutive runs. If it is not, obtain the job log (authenticated `gh api repos/milind-soni/OpenMausBot/actions/jobs/<id>/logs`) and name the failing test before any further change; do not guess a second fix.
+- The Windows `typecheck + test (windows-latest)` job is green on two consecutive runs. If it is not, obtain the job log (authenticated `gh api repos/milind-soni/Astra/actions/jobs/<id>/logs`) and name the failing test before any further change; do not guess a second fix.
 
 ## Definition of Done
 

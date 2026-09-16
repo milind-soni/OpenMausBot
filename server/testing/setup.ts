@@ -1,5 +1,5 @@
 // Vitest setup — every test file gets a throwaway home directory so
-// DATA_DIR (~/.openmausbot) never touches the real one. os.homedir()
+// DATA_DIR (~/.astra) never touches the real one. os.homedir()
 // reads HOME (POSIX) / USERPROFILE (Windows) at call time, and this file
 // runs before any test module imports server/config.ts.
 import { mkdtempSync } from "node:fs";
@@ -12,9 +12,9 @@ import { removeTempDir } from "./cleanup.ts";
 const home = mkdtempSync(join(tmpdir(), "omb-test-home-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
-// OMB_DATA_DIR is an intentional production override, but tests must never
+// ASTRA_DATA_DIR is an intentional production override, but tests must never
 // let it escape the throwaway home they are about to delete.
-delete process.env.OMB_DATA_DIR;
+delete process.env.ASTRA_DATA_DIR;
 // Do not let a developer's Hermes global config path leak into per-test homes.
 delete process.env.HERMES_HOME;
 // The companion keeps its paired devices in its own directory, and resolves
@@ -22,7 +22,7 @@ delete process.env.HERMES_HOME;
 // Named explicitly all the same: the device tests delete this directory
 // wholesale, and "it is safe because of a line in another file" is not the
 // footing that delete should stand on.
-process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
+process.env.ASTRA_COMPANION_DIR = join(home, ".astra-companion");
 
 // Product code follows navigator.language, which makes English assertions
 // depend on the developer or CI host locale. Keep the shared default stable;

@@ -1,5 +1,5 @@
 // Many client workspaces on one Linux server: each is its own OS user, its
-// own `openmausbot@<slug>` service on its own loopback ports, its own data
+// own `astra@<slug>` service on its own loopback ports, its own data
 // folder, brand, sign-in list and keys, reached at <slug>.<domain> through
 // the system Caddy. This module only PLANS: it renders files and fixed
 // argument lists as steps, so what the CLI does as root is inspectable and
@@ -33,18 +33,18 @@ export interface FleetLayout {
 export function fleetLayout(root = "/"): FleetLayout {
   const at = (...parts: string[]) => join(root, ...parts);
   return {
-    etcDir: at("etc", "openmausbot"),
-    registryFile: at("etc", "openmausbot", "fleet.json"),
-    instancesDir: at("etc", "openmausbot", "instances"),
-    unitFile: at("etc", "systemd", "system", "openmausbot@.service"),
-    fenceFile: at("etc", "openmausbot", "fence.nft"),
-    fenceUnitFile: at("etc", "systemd", "system", "openmausbot-fence.service"),
+    etcDir: at("etc", "astra"),
+    registryFile: at("etc", "astra", "fleet.json"),
+    instancesDir: at("etc", "astra", "instances"),
+    unitFile: at("etc", "systemd", "system", "astra@.service"),
+    fenceFile: at("etc", "astra", "fence.nft"),
+    fenceUnitFile: at("etc", "systemd", "system", "astra-fence.service"),
     caddyDir: at("etc", "caddy", "omb.d"),
     caddyfile: at("etc", "caddy", "Caddyfile"),
-    homesDir: at("var", "lib", "openmausbot"),
-    agentUnitFile: at("etc", "systemd", "system", "openmausbot-fleet.service"),
-    socketPath: at("run", "openmausbot", "fleet.sock"),
-    auditFile: at("var", "log", "openmausbot", "fleet.jsonl"),
+    homesDir: at("var", "lib", "astra"),
+    agentUnitFile: at("etc", "systemd", "system", "astra-fleet.service"),
+    socketPath: at("run", "astra", "fleet.sock"),
+    auditFile: at("var", "log", "astra", "fleet.jsonl"),
   };
 }
 
@@ -53,16 +53,16 @@ export function agentUnit(spec: { node: string; script: string; operator: string
   const layout = spec.layout ?? fleetLayout();
   const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
   return [
-    "# Written by `openmausbot fleet init`. The operator workspace creates and manages workspaces through this.",
+    "# Written by `astra fleet init`. The operator workspace creates and manages workspaces through this.",
     "[Unit]",
-    "Description=OpenMausBot fleet agent",
+    "Description=Astra fleet agent",
     "After=network-online.target",
     "Wants=network-online.target",
     "",
     "[Service]",
     "Type=simple",
     `ExecStart=${spec.node}${strip} ${spec.script} fleet agent --socket ${layout.socketPath} --group ${spec.operator}`,
-    "RuntimeDirectory=openmausbot",
+    "RuntimeDirectory=astra",
     "RuntimeDirectoryMode=0755",
     "Restart=always",
     "RestartSec=3",
@@ -119,7 +119,7 @@ export function workspaceHome(layout: FleetLayout, slug: string): string {
 }
 
 export function workspaceDataDir(layout: FleetLayout, slug: string): string {
-  return join(workspaceHome(layout, slug), ".openmausbot");
+  return join(workspaceHome(layout, slug), ".astra");
 }
 
 export function assertSlug(slug: string): void {
@@ -149,9 +149,9 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
   const layout = spec.layout ?? fleetLayout();
   const strip = spec.script.endsWith(".ts") ? " --experimental-strip-types" : "";
   return [
-    "# Written by `openmausbot fleet init`. One unit for every workspace: %i is the slug.",
+    "# Written by `astra fleet init`. One unit for every workspace: %i is the slug.",
     "[Unit]",
-    "Description=OpenMausBot workspace %i",
+    "Description=Astra workspace %i",
     "After=network-online.target",
     "Wants=network-online.target",
     "",
@@ -163,7 +163,7 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
     `EnvironmentFile=${layout.instancesDir}/%i.env`,
     `Environment=HOME=${layout.homesDir}/%i`,
     "Environment=PATH=/usr/local/bin:/usr/bin:/bin",
-    `ExecStart=${spec.node}${strip} ${spec.script} serve --port \${OMB_PORT} --data-dir \${OMB_DATA_DIR} --public-url \${OMB_PUBLIC_URL} --label %i --no-pair`,
+    `ExecStart=${spec.node}${strip} ${spec.script} serve --port \${ASTRA_PORT} --data-dir \${ASTRA_DATA_DIR} --public-url \${ASTRA_PUBLIC_URL} --label %i --no-pair`,
     "Restart=always",
     "RestartSec=3",
     "KillMode=mixed",
@@ -183,10 +183,10 @@ export function templateUnit(spec: { node: string; script: string; layout?: Flee
 
 export function fenceUnit(layout = fleetLayout()): string {
   return [
-    "# Written by `openmausbot fleet init`: keeps each workspace's loopback ports to its own user.",
+    "# Written by `astra fleet init`: keeps each workspace's loopback ports to its own user.",
     "[Unit]",
-    "Description=OpenMausBot per-workspace loopback fence",
-    "Before=openmausbot@.service",
+    "Description=Astra per-workspace loopback fence",
+    "Before=astra@.service",
     "",
     "[Service]",
     "Type=oneshot",
@@ -203,7 +203,7 @@ export function fenceUnit(layout = fleetLayout()): string {
  * loopback ports, so a shell-capable bot cannot reach a sibling's API.
  * Written whole each time, so `nft -f` is idempotent. */
 export function fenceRules(workspaces: FleetWorkspace[]): string {
-  const lines = ["#!/usr/sbin/nft -f", "# Written by `openmausbot fleet`; regenerated on every create, suspend, resume and delete.", "add table inet openmausbot", "flush table inet openmausbot", "table inet openmausbot {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
+  const lines = ["#!/usr/sbin/nft -f", "# Written by `astra fleet`; regenerated on every create, suspend, resume and delete.", "add table inet astra", "flush table inet astra", "table inet astra {", "\tchain output {", "\t\ttype filter hook output priority 0; policy accept;"];
   for (const workspace of [...workspaces].sort((a, b) => a.slug.localeCompare(b.slug))) {
     lines.push(`\t\toif lo tcp dport { ${workspace.port}, ${workspace.webhookPort} } meta skuid != { ${fleetUser(workspace.slug)}, caddy, root } reject`);
   }
@@ -237,12 +237,12 @@ export function caddyImportLine(layout = fleetLayout()): string {
 
 export function instanceEnv(input: { workspace: FleetWorkspace; dataDir: string; licenseKey?: string }): string {
   const lines = [
-    `OMB_DATA_DIR=${input.dataDir}`,
-    `OMB_PORT=${input.workspace.port}`,
-    `OMB_WEBHOOK_PORT=${input.workspace.webhookPort}`,
-    `OMB_PUBLIC_URL=https://${input.workspace.host}`,
+    `ASTRA_DATA_DIR=${input.dataDir}`,
+    `ASTRA_PORT=${input.workspace.port}`,
+    `ASTRA_WEBHOOK_PORT=${input.workspace.webhookPort}`,
+    `ASTRA_PUBLIC_URL=https://${input.workspace.host}`,
   ];
-  if (input.licenseKey) lines.push(`OMB_LICENSE_KEY=${input.licenseKey}`);
+  if (input.licenseKey) lines.push(`ASTRA_LICENSE_KEY=${input.licenseKey}`);
   return lines.join("\n") + "\n";
 }
 
@@ -294,8 +294,8 @@ export function initPlan(input: { domain: string; node: string; script: string; 
     ...(input.operator ? [{ kind: "write" as const, path: layout.agentUnitFile, content: agentUnit({ node: input.node, script: input.script, operator: input.operator, layout }), mode: 0o644 }] : []),
     { kind: "append-once", path: layout.caddyfile, line: caddyImportLine(layout) },
     { kind: "run", argv: ["systemctl", "daemon-reload"], why: "load the workspace template and the fence unit" },
-    { kind: "run", argv: ["systemctl", "enable", "--now", "openmausbot-fence.service"], why: "apply the loopback fence now and at boot" },
-    ...(input.operator ? [{ kind: "run" as const, argv: ["systemctl", "enable", "--now", "openmausbot-fleet.service"], why: `start the fleet agent for ${input.operator}` }] : []),
+    { kind: "run", argv: ["systemctl", "enable", "--now", "astra-fence.service"], why: "apply the loopback fence now and at boot" },
+    ...(input.operator ? [{ kind: "run" as const, argv: ["systemctl", "enable", "--now", "astra-fleet.service"], why: `start the fleet agent for ${input.operator}` }] : []),
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "start serving the workspaces folder" },
     { kind: "note", text: `point *.${registry.domain} at this server (a wildcard A/AAAA record); each workspace gets its own certificate when created` },
     ...(input.operator ? [{ kind: "note" as const, text: `the workspace running as ${input.operator} can now manage workspaces from Settings → Workspaces` }] : []),
@@ -339,14 +339,14 @@ export function createPlan(input: {
     { kind: "write", path: join(layout.instancesDir, `${workspace.slug}.env`), content: instanceEnv({ workspace, dataDir, licenseKey: input.licenseKey }), mode: 0o600 },
     ...(input.memoryMax
       ? [
-          { kind: "mkdir" as const, path: join(layout.unitFile.replace(/openmausbot@\.service$/, ""), `openmausbot@${workspace.slug}.service.d`), mode: 0o755 },
-          { kind: "write" as const, path: join(layout.unitFile.replace(/openmausbot@\.service$/, ""), `openmausbot@${workspace.slug}.service.d`, "limits.conf"), content: `[Service]\nMemoryMax=${input.memoryMax}\n`, mode: 0o644 },
+          { kind: "mkdir" as const, path: join(layout.unitFile.replace(/astra@\.service$/, ""), `astra@${workspace.slug}.service.d`), mode: 0o755 },
+          { kind: "write" as const, path: join(layout.unitFile.replace(/astra@\.service$/, ""), `astra@${workspace.slug}.service.d`, "limits.conf"), content: `[Service]\nMemoryMax=${input.memoryMax}\n`, mode: 0o644 },
         ]
       : []),
     { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
     { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: "fence the new ports to their user" },
     { kind: "run", argv: ["systemctl", "daemon-reload"], why: "pick up the workspace's environment and limits" },
-    { kind: "run", argv: ["systemctl", "enable", "--now", `openmausbot@${workspace.slug}.service`], why: "start the workspace now and at boot" },
+    { kind: "run", argv: ["systemctl", "enable", "--now", `astra@${workspace.slug}.service`], why: "start the workspace now and at boot" },
     { kind: "health", url: `http://127.0.0.1:${workspace.port}/api/health`, why: "wait for the workspace to answer" },
     { kind: "write", path: join(layout.caddyDir, `${workspace.slug}.caddy`), content: caddySite(workspace), mode: 0o644 },
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: `serve https://${workspace.host} and fetch its certificate` },
@@ -370,7 +370,7 @@ export function suspendPlan(input: { registry: FleetRegistry; slug: string; layo
   return {
     registry,
     steps: [
-      { kind: "run", argv: ["systemctl", "disable", "--now", `openmausbot@${workspace.slug}.service`], why: "stop the workspace and keep it stopped at boot" },
+      { kind: "run", argv: ["systemctl", "disable", "--now", `astra@${workspace.slug}.service`], why: "stop the workspace and keep it stopped at boot" },
       { kind: "write", path: join(layout.caddyDir, `${workspace.slug}.caddy`), content: caddySite(workspace), mode: 0o644 },
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "show the suspended page instead" },
       { kind: "write", path: layout.registryFile, content: `${JSON.stringify(registry, null, 2)}\n`, mode: 0o600 },
@@ -384,7 +384,7 @@ export function resumePlan(input: { registry: FleetRegistry; slug: string; layou
   return {
     registry,
     steps: [
-      { kind: "run", argv: ["systemctl", "enable", "--now", `openmausbot@${workspace.slug}.service`], why: "start the workspace again" },
+      { kind: "run", argv: ["systemctl", "enable", "--now", `astra@${workspace.slug}.service`], why: "start the workspace again" },
       { kind: "health", url: `http://127.0.0.1:${workspace.port}/api/health`, why: "wait for the workspace to answer" },
       { kind: "write", path: join(layout.caddyDir, `${workspace.slug}.caddy`), content: caddySite(workspace), mode: 0o644 },
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "serve it again" },
@@ -400,15 +400,15 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
   if (!workspace) throw new Error(`no workspace "${input.slug}"`);
   const { [input.slug]: _gone, ...rest } = input.registry.workspaces;
   const registry: FleetRegistry = { ...input.registry, workspaces: rest };
-  const unitsDir = layout.unitFile.replace(/openmausbot@\.service$/, "");
+  const unitsDir = layout.unitFile.replace(/astra@\.service$/, "");
   return {
     registry,
     steps: [
-      { kind: "run", argv: ["systemctl", "disable", "--now", `openmausbot@${workspace.slug}.service`], why: "stop the workspace" },
+      { kind: "run", argv: ["systemctl", "disable", "--now", `astra@${workspace.slug}.service`], why: "stop the workspace" },
       { kind: "remove", path: join(layout.caddyDir, `${workspace.slug}.caddy`) },
       { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "stop serving its address" },
       { kind: "remove", path: join(layout.instancesDir, `${workspace.slug}.env`) },
-      { kind: "remove", path: join(unitsDir, `openmausbot@${workspace.slug}.service.d`, "limits.conf") },
+      { kind: "remove", path: join(unitsDir, `astra@${workspace.slug}.service.d`, "limits.conf") },
       { kind: "write", path: layout.fenceFile, content: fenceRules(Object.values(registry.workspaces)), mode: 0o600 },
       { kind: "run", argv: ["nft", "-f", layout.fenceFile], why: "drop its fence rule" },
       { kind: "run", argv: input.keepData ? ["userdel", fleetUser(workspace.slug)] : ["userdel", "--remove", fleetUser(workspace.slug)], why: input.keepData ? "remove the account, keep its home and data" : "remove the account and everything it owned" },
@@ -420,14 +420,14 @@ export function deletePlan(input: { registry: FleetRegistry; slug: string; keepD
 export function upgradePlan(input: { registry: FleetRegistry }): FleetStep[] {
   const running = Object.values(input.registry.workspaces).filter((workspace) => workspace.status === "running").sort((a, b) => a.slug.localeCompare(b.slug));
   return [
-    { kind: "run", argv: ["npm", "install", "-g", "openmausbot@latest"], why: "install the release every workspace runs from" },
-    ...running.map((workspace) => ({ kind: "run" as const, argv: ["systemctl", "restart", `openmausbot@${workspace.slug}.service`], why: `restart ${workspace.slug} on the new release` })),
+    { kind: "run", argv: ["npm", "install", "-g", "astra@latest"], why: "install the release every workspace runs from" },
+    ...running.map((workspace) => ({ kind: "run" as const, argv: ["systemctl", "restart", `astra@${workspace.slug}.service`], why: `restart ${workspace.slug} on the new release` })),
     ...running.map((workspace) => ({ kind: "health" as const, url: `http://127.0.0.1:${workspace.port}/api/health`, why: `wait for ${workspace.slug}` })),
   ];
 }
 
 /** A workspace's sign-in list edited from outside, the same shape
- * `openmausbot access` writes; the server reads it live. */
+ * `astra access` writes; the server reads it live. */
 export function applySignIn(configText: string, action: "add" | "remove", email: string, chatOnly: boolean): { config: string; summary: string } {
   const entry = email.trim().toLowerCase();
   assertEmailOrDomain(entry);
@@ -460,7 +460,7 @@ export function describeSteps(steps: FleetStep[]): string[] {
         lines.push(`install -d -m ${step.mode.toString(8)}${step.owner ? ` -o ${step.owner} -g ${step.owner}` : ""} ${shellQuote(step.path)}`);
         break;
       case "write":
-        lines.push(`cat > ${shellQuote(step.path)} <<'OMB_EOF'`, step.content.replace(/\n$/, ""), "OMB_EOF", `chmod ${step.mode.toString(8)} ${shellQuote(step.path)}`);
+        lines.push(`cat > ${shellQuote(step.path)} <<'ASTRA_EOF'`, step.content.replace(/\n$/, ""), "ASTRA_EOF", `chmod ${step.mode.toString(8)} ${shellQuote(step.path)}`);
         if (step.owner) lines.push(`chown ${step.owner}:${step.owner} ${shellQuote(step.path)}`);
         break;
       case "append-once":

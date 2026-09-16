@@ -4,7 +4,7 @@
 > Each numbered plan below is its own file and its own working, testable deliverable.
 > Execute them with superpowers:subagent-driven-development, one plan at a time.
 
-**Goal:** Close the gap between what OpenMausBot already is (an engine-neutral harness
+**Goal:** Close the gap between what Astra already is (an engine-neutral harness
 that owns memory, skills, permissions, and computers) and what it is not yet packaged
 as (a portable Bot Profile, a real connections surface, and a machine that stays on).
 

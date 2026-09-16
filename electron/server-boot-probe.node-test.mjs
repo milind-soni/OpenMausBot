@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 
-const OUR_BODY = () => ({ app: "openmausbot", pid: 4242, static: true });
+const OUR_BODY = () => ({ app: "astra", pid: 4242, static: true });
 
 function okFetch({ body = OUR_BODY(), status = 200 } = {}) {
   return async () => ({
@@ -93,7 +93,7 @@ test("an identity mismatch (same payload shape, wrong pid) stays foreign", async
     port: 8799,
     pid: () => 4242,
     bootTimeoutMs: 5_000,
-    fetchImpl: okFetch({ body: { app: "openmausbot", pid: 999, static: true } }),
+    fetchImpl: okFetch({ body: { app: "astra", pid: 999, static: true } }),
   });
   assert.equal(outcome.outcome, "foreign-owner");
 });
@@ -159,7 +159,7 @@ test("regression: a pid read before the spawn event must not doom our own child"
   const fetchImpl = async () => {
     calls += 1;
     if (calls === 1) throw new Error("ECONNREFUSED");
-    return { ok: true, status: 200, json: async () => ({ app: "openmausbot", pid: 4242, static: true }) };
+    return { ok: true, status: 200, json: async () => ({ app: "astra", pid: 4242, static: true }) };
   };
   const outcome = await pollServerIdentity({
     port: 8799,

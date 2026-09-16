@@ -10,8 +10,8 @@
 
 export type WakeDictationEngine = "cloud" | "handy";
 
-const STORAGE_KEY = "openmausbot.wake-engine.v1";
-const HANDY_PATH_KEY = "openmausbot.handy-path.v1";
+const STORAGE_KEY = "astra.wake-engine.v1";
+const HANDY_PATH_KEY = "astra.handy-path.v1";
 
 function storage(): Storage | null {
   try {

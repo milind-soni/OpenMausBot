@@ -7,7 +7,7 @@ real interface.
 
 ## Goal
 
-A new install should leave the first session knowing what OpenMausBot is
+A new install should leave the first session knowing what Astra is
 (agents with hands, connected apps, channels, automations, the terminal)
 and where each of those lives in the app, without reading a manual. Every
 part is skippable, replayable from Settings, and never shown on a paired
@@ -96,7 +96,7 @@ sweep, and beats swap without the view transition.
   `guided-tour.test.ts`, `first-conversation.test.ts`, and the config merge
   in `server/config.test.ts`.
 - The tour was walked end to end in headless Chrome against the isolated
-  fixture (`node --experimental-strip-types scripts/control-omb.ts launch`)
+  fixture (`node --experimental-strip-types scripts/control-astra.ts launch`)
   with a screenshot per step. Note that the record is per workspace, so a
   second client on the same server runs the same tour and skips steps it
   cannot see; test from one window.

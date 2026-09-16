@@ -10,16 +10,16 @@
 // marketplace will, and still renders offline.
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { Check } from "lucide-react";
-import { MausAvatar } from "@/components/Avatar";
+import { AstraAvatar } from "@/components/Avatar";
 import { ServiceIcon, type ToolkitCard } from "@/components/PluginsPanel";
 import { cn } from "@/lib/cn";
-import type { MausState } from "@/lib/mascot";
+import type { AstraState } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
 import { api } from "@/state/store";
 
 export interface SceneProps {
   playing: boolean;
-  onCue?: (state: MausState) => void;
+  onCue?: (state: AstraState) => void;
   onEnded?: () => void;
   label: string;
 }
@@ -164,7 +164,7 @@ export function OrbitingApps({ playing, onCue, onEnded, label }: SceneProps) {
       <div className="absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2">
         <div className="absolute inset-0 -m-6 rounded-full bg-accent/15 blur-2xl" aria-hidden="true" />
         <div className="relative drop-shadow-[0_10px_24px_rgba(0,0,0,0.4)]">
-          <MausAvatar color="green" state={connected ? "proud" : "curious"} size={76} animated={!still} trackPointer={false} />
+          <AstraAvatar color="green" state={connected ? "proud" : "curious"} size={76} animated={!still} trackPointer={false} />
         </div>
       </div>
 

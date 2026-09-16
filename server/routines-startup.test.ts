@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 
-import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-astra.ts";
 import { RoutineManager, type RoutineRun } from "./routines.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
@@ -59,13 +59,13 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
     disk.routines.find((routine: { id: string }) => routine.id === scheduled.id).nextRunAt = dueAt;
     disk.runs.push({
       id: "interrupted-run", routineId: interrupted.id, routineName: interrupted.name,
-      prompt: interrupted.prompt, target: "bot", botId: interruptedBot.id, runOn: "maus",
+      prompt: interrupted.prompt, target: "bot", botId: interruptedBot.id, runOn: "astra",
       scheduledFor: dueAt, createdAt: dueAt, startedAt: dueAt, manual: true,
       status: "waiting", threadId: interruptedBot.threadId,
     });
     disk.runs.push({
       id: "historical-run", routineId: "historical-routine", routineName: "Previously completed work",
-      prompt: "Already finished", target: "bot", botId: reusedBot.id, runOn: "maus",
+      prompt: "Already finished", target: "bot", botId: reusedBot.id, runOn: "astra",
       scheduledFor: dueAt - 60_000, createdAt: dueAt - 60_000, startedAt: dueAt - 60_000,
       finishedAt: dueAt - 60_000, manual: true, status: "completed", threadId: reusedBot.threadId,
     });
@@ -87,12 +87,12 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
       if (process.env[key]) env[key] = process.env[key];
     }
     Object.assign(env, {
-      HOME: dataDir, USERPROFILE: dataDir, OMB_DATA_DIR: dataDir,
+      HOME: dataDir, USERPROFILE: dataDir, ASTRA_DATA_DIR: dataDir,
       APPDATA: join(dataDir, "AppData", "Roaming"), LOCALAPPDATA: join(dataDir, "AppData", "Local"),
       XDG_CONFIG_HOME: join(dataDir, ".config"), XDG_CACHE_HOME: join(dataDir, ".cache"),
       XDG_DATA_HOME: join(dataDir, ".local", "share"), HERMES_HOME: join(dataDir, ".hermes"),
       TEMP: join(dataDir, "tmp"), TMP: join(dataDir, "tmp"), TMPDIR: join(dataDir, "tmp"),
-      OMB_PORT: new URL(url).port, OMB_WEBHOOK_PORT: String(Number(new URL(url).port) + 1),
+      ASTRA_PORT: new URL(url).port, ASTRA_WEBHOOK_PORT: String(Number(new URL(url).port) + 1),
       PATH: dirname(process.execPath), FAKE_CLAUDE_MODE: "happy",
     });
     const log = openSync(logPath, "a", 0o600);

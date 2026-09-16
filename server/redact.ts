@@ -4,7 +4,7 @@
 // protocol drift diagnosable — but the messages that set a session up carry
 // the credentials the agent is handed: the box token and the comms token
 // travel inside `session/new`'s mcpServers env, and a Composio consumer key
-// travels in an MCP header. Those logs sit in ~/.openmausbot/native as
+// travels in an MCP header. Those logs sit in ~/.astra/native as
 // ordinary files, are read by anyone debugging, and get pasted into issues.
 //
 // So the log keeps the SHAPE and loses the VALUES: a redacted entry still
@@ -90,7 +90,7 @@ export function redactSecrets(input: unknown, depth = 0): unknown {
 
   if (Array.isArray(input)) {
     return input.map((item) => {
-      // ACP env entries: {name: "OMB_COMMS_TOKEN", value: "…"}
+      // ACP env entries: {name: "ASTRA_COMMS_TOKEN", value: "…"}
       if (
         item !== null &&
         typeof item === "object" &&

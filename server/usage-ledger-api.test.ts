@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-astra.ts";
 
 describe("usage ledger through real turns", () => {
   let session: VerificationServer;

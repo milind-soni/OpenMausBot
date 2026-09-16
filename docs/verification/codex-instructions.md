@@ -13,7 +13,7 @@ Codex 0.147.0 and 0.153.4 retain the original developer message on resume, even
 when configuration changes. Therefore a changed instruction block also needs a
 `thread/inject_items` developer update before the next user turn.
 
-The driver stores a SHA-256 receipt per OpenMausBot/native-thread pair under
+The driver stores a SHA-256 receipt per Astra/native-thread pair under
 `codex-instructions/` in the data directory. It contains no prompt text. Native
 injection flushes history before acknowledging; the receipt is written only
 after that acknowledgement. Unchanged rules need no injected update. Missing

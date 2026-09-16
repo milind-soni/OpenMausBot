@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 // The command a Linux user pastes to finish an update.
 //
-// OpenMausBot is installed from the releases repository by hand, not from a
+// Astra is installed from the releases repository by hand, not from a
 // store, so there is no package handler worth delegating to — a stock Ubuntu
 // 24.04 registers App Center for .deb and may not install a local one at all.
 // The app therefore never installs the package itself; it downloads it,

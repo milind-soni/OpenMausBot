@@ -1,5 +1,5 @@
 // Voice-note dictation — the button next to the send arrow, and the engine
-// the "Luna" wake word drives.
+// the "Astra" wake word drives.
 //
 // Difference from hold-to-dictate (clipboard-dictation.ts): there is no
 // gesture to finalize, so END OF SPEECH has to be detected. Three signals

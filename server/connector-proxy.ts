@@ -2,7 +2,7 @@
 //
 // Provider CLIs only see this stdio server. Ordinary MCP traffic is relayed
 // to the configured Composio Session, but connection requests are converted
-// into first-class OpenMausBot chat cards. The agent never authors an auth
+// into first-class Astra chat cards. The agent never authors an auth
 // URL and credentials never pass through its transcript.
 //
 // stdout is the MCP transport. Never log there.
@@ -11,18 +11,18 @@ import { randomUUID } from "node:crypto";
 
 type Json = Record<string, unknown>;
 
-const UPSTREAM = process.env.OMB_CONNECTOR_UPSTREAM_URL ?? "";
-const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
-const BOT_ID = process.env.OMB_BOT_ID ?? "";
-const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
-const TOKEN = process.env.OMB_CONNECTOR_TOKEN ?? process.env.OMB_COMMS_TOKEN ?? "";
+const UPSTREAM = process.env.ASTRA_CONNECTOR_UPSTREAM_URL ?? "";
+const HARNESS = process.env.ASTRA_HARNESS_URL ?? "http://127.0.0.1:8799";
+const BOT_ID = process.env.ASTRA_BOT_ID ?? "";
+const THREAD_ID = process.env.ASTRA_THREAD_ID ?? "";
+const TOKEN = process.env.ASTRA_CONNECTOR_TOKEN ?? process.env.ASTRA_COMMS_TOKEN ?? "";
 const MAX_RESPONSE_BYTES = 20 * 1024 * 1024;
 const INITIALIZE_RELAY_TIMEOUT_MS = 1_000;
 const RELAY_TIMEOUT_MS = 10 * 60_000;
 
 function parsedHeaders(): Record<string, string> {
   try {
-    const value: unknown = JSON.parse(process.env.OMB_CONNECTOR_UPSTREAM_HEADERS ?? "{}");
+    const value: unknown = JSON.parse(process.env.ASTRA_CONNECTOR_UPSTREAM_HEADERS ?? "{}");
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(
       Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
@@ -51,7 +51,7 @@ function initializeResult(id: unknown, protocolVersion: unknown): Json {
     result: {
       protocolVersion: typeof protocolVersion === "string" && protocolVersion ? protocolVersion : "2024-11-05",
       capabilities: { tools: {} },
-      serverInfo: { name: "openmausbot-connectors", version: "1" },
+      serverInfo: { name: "astra-connectors", version: "1" },
     },
   };
 }
@@ -204,12 +204,12 @@ async function handle(message: Json): Promise<void> {
       const labels = requests.map((r) => (r.alias ? `${r.slug} (${r.alias})` : r.slug)).join(", ");
       send(textResult(
         id,
-        `OpenMausBot showed the user a secure connection card for ${labels}. End this turn now. The app will continue the task automatically after the connection finishes.`,
+        `Astra showed the user a secure connection card for ${labels}. End this turn now. The app will continue the task automatically after the connection finishes.`,
       ));
       return;
     }
     if (/WAIT_FOR_CONNECTIONS$/i.test(name)) {
-      send(textResult(id, "OpenMausBot is handling connection completion and will continue the task automatically."));
+      send(textResult(id, "Astra is handling connection completion and will continue the task automatically."));
       return;
     }
   }

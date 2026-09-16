@@ -1,7 +1,7 @@
 // Real ComputerPanel + isolated fake-engine server, with only its cloud
 // transport simulated. No Box account or user's app data is contacted.
 // Run: node --experimental-strip-types scripts/verify-cloud-preview.ts
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const fixture = await launchVerificationServer();

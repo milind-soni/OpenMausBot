@@ -2,7 +2,7 @@
 // one surface: the same input, the same primary button.
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/cn";
-import type { MausMotion, MausState } from "@/lib/mascot";
+import type { AstraMotion, AstraState } from "@/lib/mascot";
 
 /** What a beat can do to the flow around it. Every beat can move on or be
  * skipped; the guide mascot is shared, so a beat borrows it rather than
@@ -11,9 +11,9 @@ export interface BeatProps {
   onNext: () => void;
   /** Same destination as onNext; separate so analytics can tell them apart. */
   onSkip: () => void;
-  setMascot: (state: MausState) => void;
+  setMascot: (state: AstraState) => void;
   /** Fire a one-shot motion on the guide (`success`, `celebrate`, …). */
-  bump: (motion: Exclude<MausMotion, "none">) => void;
+  bump: (motion: Exclude<AstraMotion, "none">) => void;
 }
 
 export const inputClass =

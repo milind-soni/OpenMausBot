@@ -341,7 +341,7 @@ function ToolCallsRow() {
   );
 }
 
-/** The "Luna" wake word: a Picovoice AccessKey row plus the on/off switch.
+/** The "Astra" wake word: a Picovoice AccessKey row plus the on/off switch.
  * The detector runs in the renderer (see wake-word.ts); the server only
  * stores the key and the feature flag. The transcription ENGINE is a
  * renderer choice: the built-in Deepgram bridge (cloud) or the user's own
@@ -349,7 +349,7 @@ function ToolCallsRow() {
 function WakeWordSection() {
   const { state, dispatch } = useStore();
   const enabled = state.config?.features?.wakeWord === true;
-  // The words after "Luna" are transcribed by Deepgram, so the cloud engine
+  // The words after "Astra" are transcribed by Deepgram, so the cloud engine
   // is half-useless without that key — say so instead of failing live.
   const deepgramReady = state.config?.dictation?.configured === true;
   const [engine, setEngine] = useState(wakeDictationEngine());

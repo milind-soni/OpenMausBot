@@ -24,14 +24,14 @@ final class AttachedMessageContentTests: XCTestCase {
 
     func testFallsBackToBasenameForOlderFileTags() {
         let parsed = AttachedMessageContent.parse(
-            #"<attached-file path="C:\Users\Maus\brief.docx" />"#
+            #"<attached-file path="C:\Users\Astra\brief.docx" />"#
         )
 
         XCTAssertEqual(parsed.text, "")
         XCTAssertEqual(parsed.attachments, [
             DisplayedMessageAttachment(
                 kind: .file,
-                path: #"C:\Users\Maus\brief.docx"#,
+                path: #"C:\Users\Astra\brief.docx"#,
                 name: "brief.docx"
             ),
         ])

@@ -45,23 +45,23 @@ jobs:
           # npm attaches its lowercase tarball independently after publishing.
           # The legacy updater bridge mirrors only the desktop/feed assets.
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
-            --pattern '*.yml' --pattern 'OpenMausBot*' --pattern 'SHA256SUMS-ubuntu-x64.txt'
+            --pattern '*.yml' --pattern 'Astra*' --pattern 'SHA256SUMS-ubuntu-x64.txt'
           required=(
             latest-linux.yml latest-mac.yml latest.yml
-            "OpenMausBot-$version-amd64.deb"
-            "OpenMausBot-$version-arm64.dmg"
-            "OpenMausBot-$version-arm64.dmg.blockmap"
-            "OpenMausBot-$version-arm64.zip"
-            "OpenMausBot-$version-arm64.zip.blockmap"
-            "OpenMausBot-$version-setup.exe"
-            "OpenMausBot-$version-setup.exe.blockmap"
-            "OpenMausBot-$version-x64.dmg"
-            "OpenMausBot-$version-x64.dmg.blockmap"
-            "OpenMausBot-$version-x64.zip"
-            "OpenMausBot-$version-x64.zip.blockmap"
-            "OpenMausBot-$version-x86_64.AppImage"
-            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe
-            OpenMausBot.AppImage OpenMausBot.dmg SHA256SUMS-ubuntu-x64.txt
+            "Astra-$version-amd64.deb"
+            "Astra-$version-arm64.dmg"
+            "Astra-$version-arm64.dmg.blockmap"
+            "Astra-$version-arm64.zip"
+            "Astra-$version-arm64.zip.blockmap"
+            "Astra-$version-setup.exe"
+            "Astra-$version-setup.exe.blockmap"
+            "Astra-$version-x64.dmg"
+            "Astra-$version-x64.dmg.blockmap"
+            "Astra-$version-x64.zip"
+            "Astra-$version-x64.zip.blockmap"
+            "Astra-$version-x86_64.AppImage"
+            Astra-amd64.deb Astra-intel.dmg Astra-setup.exe
+            Astra.AppImage Astra.dmg SHA256SUMS-ubuntu-x64.txt
           )
           for file in "${required[@]}"; do
             test -s "assets/$file" || { echo "::error::$TAG is missing $file"; exit 1; }
@@ -80,15 +80,15 @@ jobs:
           const sha512 = (file) => createHash("sha512").update(readFileSync(file)).digest("base64");
           const expected = new Map([
             ["latest-mac.yml", [
-              `OpenMausBot-${version}-x64.zip`,
-              `OpenMausBot-${version}-arm64.zip`,
-              `OpenMausBot-${version}-x64.dmg`,
-              `OpenMausBot-${version}-arm64.dmg`,
+              `Astra-${version}-x64.zip`,
+              `Astra-${version}-arm64.zip`,
+              `Astra-${version}-x64.dmg`,
+              `Astra-${version}-arm64.dmg`,
             ]],
-            ["latest.yml", [`OpenMausBot-${version}-setup.exe`]],
+            ["latest.yml", [`Astra-${version}-setup.exe`]],
             ["latest-linux.yml", [
-              `OpenMausBot-${version}-x86_64.AppImage`,
-              `OpenMausBot-${version}-amd64.deb`,
+              `Astra-${version}-x86_64.AppImage`,
+              `Astra-${version}-amd64.deb`,
             ]],
           ]);
           let bad = 0;
@@ -127,7 +127,7 @@ jobs:
             `sha256:${createHash("sha256").update(readFileSync(join("assets", name))).digest("hex")}`,
           ]));
           const inventory = JSON.parse(execFileSync("gh", ["release", "view", tag, "--repo", process.env.GITHUB_REPOSITORY, "--json", "assets"], { encoding: "utf8" })).assets;
-          const npmTarball = `openmausbot-${tag.slice(1)}.tgz`;
+          const npmTarball = `astra-${tag.slice(1)}.tgz`;
           const remote = inventory.filter((asset) => asset.name !== npmTarball);
           if (inventory.length - remote.length > 1) throw new Error(`duplicate canonical npm asset: ${npmTarball}`);
           if (remote.length !== expected.size) throw new Error(`canonical release has ${remote.length} assets but ${expected.size} downloaded`);
@@ -147,16 +147,16 @@ jobs:
           test -n "$GH_TOKEN" || { echo "::error::RELEASES_PAT is required for the updater bridge"; exit 1; }
           title=$(cat "$RUNNER_TEMP/release-title.txt")
           state=missing
-          if gh release view "$TAG" --repo milind-soni/openmausbot-releases > /dev/null 2>&1; then
-            state=$(gh release view "$TAG" --repo milind-soni/openmausbot-releases --json isDraft --jq .isDraft)
+          if gh release view "$TAG" --repo milind-soni/astra-releases > /dev/null 2>&1; then
+            state=$(gh release view "$TAG" --repo milind-soni/astra-releases --json isDraft --jq .isDraft)
           else
-            gh release create "$TAG" --repo milind-soni/openmausbot-releases \
+            gh release create "$TAG" --repo milind-soni/astra-releases \
               --draft --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md"
             state=true
           fi
           if [ "$state" != false ]; then
             for file in assets/*; do
-              gh release upload "$TAG" "$file" --repo milind-soni/openmausbot-releases --clobber
+              gh release upload "$TAG" "$file" --repo milind-soni/astra-releases --clobber
             done
           fi
           # Published bytes are immutable. Draft uploads and already-published
@@ -172,8 +172,8 @@ jobs:
           const canonical = assets(process.env.GITHUB_REPOSITORY, process.env.CANONICAL_TOKEN);
           // The npm job may attach this optional asset between our download
           // and comparison. It is canonical-only, never an updater artifact.
-          canonical.delete(`openmausbot-${tag.slice(1)}.tgz`);
-          const legacy = assets("milind-soni/openmausbot-releases", process.env.LEGACY_TOKEN);
+          canonical.delete(`astra-${tag.slice(1)}.tgz`);
+          const legacy = assets("milind-soni/astra-releases", process.env.LEGACY_TOKEN);
           if (canonical.size !== legacy.size) throw new Error(`legacy mirror has ${legacy.size} assets; canonical has ${canonical.size}`);
           for (const [name, digest] of canonical) {
             if (legacy.get(name) !== digest) throw new Error(`legacy mirror differs for ${name}`);
@@ -182,12 +182,12 @@ jobs:
           EOF
           # Keep recovery reruns idempotent: published bytes stay immutable,
           # while the legacy title and notes follow the canonical release.
-          gh release edit "$TAG" --repo milind-soni/openmausbot-releases \
+          gh release edit "$TAG" --repo milind-soni/astra-releases \
             --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md"
           if [ "$state" != false ]; then
-            gh release edit "$TAG" --repo milind-soni/openmausbot-releases --draft=false --latest
+            gh release edit "$TAG" --repo milind-soni/astra-releases --draft=false --latest
           fi
-          gh release view "$TAG" --repo milind-soni/openmausbot-releases \
+          gh release view "$TAG" --repo milind-soni/astra-releases \
             --json isDraft --jq .isDraft | grep -q false
 
       - name: Refresh the Vercel docs

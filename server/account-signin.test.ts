@@ -30,7 +30,7 @@ describe("the exchange with the control plane", () => {
     try {
       const signIn = createEmailSignIn({
         allow: { admins: ["her@example.test"], members: ["@team.test"] },
-        env: { ...process.env, OMB_CONTROL_PLANE_URL: stub.url },
+        env: { ...process.env, ASTRA_CONTROL_PLANE_URL: stub.url },
       });
       expect(signIn.enabled()).toBe(true);
       expect(await signIn.start("nobody@example.test")).toMatchObject({ ok: false, status: 403 });
@@ -59,7 +59,7 @@ describe("the exchange with the control plane", () => {
   it("is off with an empty allow-list and says so when the sign-in service is down", async () => {
     const off = createEmailSignIn({ allow: () => ({ admins: [], members: [] }) });
     expect(off.enabled()).toBe(false);
-    const down = createEmailSignIn({ allow: { admins: ["a@b.test"], members: [] }, env: { ...process.env, OMB_CONTROL_PLANE_URL: "http://127.0.0.1:9" } });
+    const down = createEmailSignIn({ allow: { admins: ["a@b.test"], members: [] }, env: { ...process.env, ASTRA_CONTROL_PLANE_URL: "http://127.0.0.1:9" } });
     expect(await down.start("a@b.test")).toMatchObject({ ok: false, status: 502 });
   });
 });

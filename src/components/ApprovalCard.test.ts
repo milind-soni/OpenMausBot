@@ -21,7 +21,7 @@ const createRoutineOperation = {
     name: "Backlog review",
     instructions: "Review every item in the backlog.",
     schedule: { type: "daily" as const, time: "09:00", weekdays: [1, 2, 3, 4, 5] },
-    runOn: "maus" as const,
+    runOn: "astra" as const,
     durationMinutes: 30,
   },
 };

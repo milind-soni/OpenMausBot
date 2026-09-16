@@ -24,7 +24,7 @@ test("a pairing link keeps its code in the hash; a code anywhere else is refused
 });
 
 test("self-hosted pairing supports custom HTTPS and Cloudflare names without Tailscale", () => {
-  for (const origin of ["https://bots.example.com", "https://example.trycloudflare.com", "https://c-example.openmausbot.com"]) {
+  for (const origin of ["https://bots.example.com", "https://example.trycloudflare.com", "https://c-example.astra.com"]) {
     const link = `${origin}/pair#code=ABCD-EFGH-JKLM`;
     assert.deepEqual(env.parsePairingLink(link), {
       origin, code: "ABCD-EFGH-JKLM", url: link,

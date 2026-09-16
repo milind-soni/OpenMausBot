@@ -122,7 +122,7 @@ describe("comms e2e (fake ACP fleet)", () => {
     }
     const antigravityProfile = join(
       home,
-      ".openmausbot",
+      ".astra",
       "providers",
       "antigravity",
       createHash("sha256").update("geminiAsker").digest("hex"),
@@ -130,9 +130,9 @@ describe("comms e2e (fake ACP fleet)", () => {
     );
     mkdirSync(antigravityProfile, { recursive: true });
     writeFileSync(join(antigravityProfile, "acp_token.json"), "{}\n");
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".astra"), { recursive: true });
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".astra", "config.json"),
       JSON.stringify({
         instances: {
           // the ask-peer fleet: both bots run "ask-peer" so A can ask B
@@ -216,10 +216,10 @@ describe("comms e2e (fake ACP fleet)", () => {
     const env: NodeJS.ProcessEnv = {
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
+      ASTRA_PORT: String(PORT),
       // e2e-friendly ask ceiling: the timeout-conversion test needs the
       // synchronous wait to end while the gated peer turn is still open
-      OMB_ASK_BOT_TIMEOUT_MS: "8000",
+      ASTRA_ASK_BOT_TIMEOUT_MS: "8000",
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     // Without SystemRoot, winsock fails to initialize in the child.

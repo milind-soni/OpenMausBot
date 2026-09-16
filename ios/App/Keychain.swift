@@ -3,7 +3,7 @@
 /// keychain item.
 enum Keychain {
     static func save(_ token: String, for connectionId: String) throws {
-        try OpenMausSharedKeychain.save(token, for: connectionId)
+        try AstraSharedKeychain.save(token, for: connectionId)
     }
 
     /// The stored token: nil only when there genuinely is not one.
@@ -21,13 +21,13 @@ enum Keychain {
     /// So: `errSecItemNotFound` is the only nil. Everything else throws, and
     /// the caller decides whether to wait or to give up.
     static func token(for connectionId: String) throws -> String? {
-        try OpenMausSharedKeychain.tokenMigratingLegacyItem(for: connectionId)
+        try AstraSharedKeychain.tokenMigratingLegacyItem(for: connectionId)
     }
 
     @discardableResult
     static func remove(_ connectionId: String) -> Bool {
-        OpenMausSharedKeychain.removeIncludingLegacyItem(connectionId)
+        AstraSharedKeychain.removeIncludingLegacyItem(connectionId)
     }
 }
 
-typealias KeychainError = OpenMausSharedKeychainError
+typealias KeychainError = AstraSharedKeychainError

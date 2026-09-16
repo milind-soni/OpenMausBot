@@ -65,7 +65,7 @@ function desktopCommandEnvironment(source = process.env, additions = {}) {
     if (SESSION_ENV_KEYS.has(key) || key.startsWith("LC_")) env[key] = String(value);
   }
   env.PATH = sanitizePath(source.PATH);
-  // Keep every Cua child owned by OpenMausBot deterministic and local-only.
+  // Keep every Cua child owned by Astra deterministic and local-only.
   // Bundled native code must not independently update itself or opt users into
   // upstream telemetry. This does not change the user's persisted preferences.
   env.CUA_DRIVER_RS_UPDATE_CHECK = "false";

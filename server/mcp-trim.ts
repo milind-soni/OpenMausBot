@@ -113,7 +113,7 @@ function marker(input: {
   const where = input.spillHint && input.spillPath
     ? ` The whole result is at ${JSON.stringify(input.spillPath)}; reading it costs as much as not trimming, so narrow the call first.`
     : " If you need more, call the tool again with a narrower query, a filter, or the next page.";
-  return `\n\n[OpenMausBot trimmed this tool result to fit the conversation: ${fmt(input.originalChars)} → ${fmt(input.keptChars)} characters.${what}${where}]`;
+  return `\n\n[Astra trimmed this tool result to fit the conversation: ${fmt(input.originalChars)} → ${fmt(input.keptChars)} characters.${what}${where}]`;
 }
 
 /** The structural cut on its own, for a payload that is already parsed and

@@ -100,7 +100,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     const url = `http://127.0.0.1:${port}`;
     const token = randomBytes(32).toString("base64url");
     lease = acquireDataDirLease(dataDir);
-    const leaseFile = join(dataDir, "openmausbot-server.lease");
+    const leaseFile = join(dataDir, "astra-server.lease");
     const parentLease = readFileSync(leaseFile, "utf8");
     const start = async () => {
       const proc = utilityProcess.fork(join(output, "server/index.js"), [], {
@@ -109,8 +109,8 @@ if (process.versions.electron && process.argv.includes(flag)) {
           PATH: dirname(runtime), HOME: home, USERPROFILE: home,
           XDG_CONFIG_HOME: home, XDG_CACHE_HOME: home, XDG_DATA_HOME: home,
           APPDATA: home, LOCALAPPDATA: home, TMPDIR: home, TEMP: home, TMP: home,
-          OMB_DATA_DIR: dataDir, OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(webhookPort),
-          OMB_STATIC_DIR: join(output, "ui"), OMB_DESKTOP_PARENT: "1",
+          ASTRA_DATA_DIR: dataDir, ASTRA_PORT: String(port), ASTRA_WEBHOOK_PORT: String(webhookPort),
+          ASTRA_STATIC_DIR: join(output, "ui"), ASTRA_DESKTOP_PARENT: "1",
           ...lease.utilityServerLeaseEnvironment(),
           FAKE_CLAUDE_MODE: "hang", FAKE_CLAUDE_PROMPTS: join(home, "prompts.jsonl"),
           FAKE_CLAUDE_DUMP: join(home, "fake.json"),
@@ -127,7 +127,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       supervisor.watch(proc);
       proc.once("spawn", () => {
         record("spawn", { pid: proc.pid, generation: children.length });
-        proc.postMessage({ type: "openmausbot:desktop-mutation-token", token, companionToken: token });
+        proc.postMessage({ type: "astra:desktop-mutation-token", token, companionToken: token });
       });
       proc.on("message", (message) => {
         if (supervisor.isCurrent(proc)) approval.receive(proc, message);
@@ -189,7 +189,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       fakePid = null;
       await until(() => active && active.pid !== initialPid, "replacement PID verified");
       const replacementPid = active.pid;
-      assert.equal(JSON.parse(readFileSync(join(dataDir, ".openmausbot-server-child/openmausbot-server.lease"), "utf8")).pid, replacementPid);
+      assert.equal(JSON.parse(readFileSync(join(dataDir, ".astra-server-child/astra-server.lease"), "utf8")).pid, replacementPid);
       const wait = await control("wait_for_conversation", { target_type: "bot", target_id: bot.id, task_id: bot.activeTaskId, timeout_seconds: 2 });
       assert.equal(wait.target.busy, false);
       const messages = await control("get_bot_messages", { bot_id: bot.id, task_id: bot.activeTaskId, limit: 10 });

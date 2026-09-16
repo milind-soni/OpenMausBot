@@ -116,9 +116,9 @@ describe("vision rlm e2e (fake freellmapi)", () => {
     await upstream.listen();
 
     home = mkdtempSync(join(tmpdir(), "omb-vision-rlm-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".astra"), { recursive: true });
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".astra", "config.json"),
       JSON.stringify({
         instances: {
           vision: {
@@ -133,7 +133,7 @@ describe("vision rlm e2e (fake freellmapi)", () => {
     const env: NodeJS.ProcessEnv = {
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
+      ASTRA_PORT: String(PORT),
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {

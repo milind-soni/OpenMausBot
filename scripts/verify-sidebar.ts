@@ -1,5 +1,5 @@
 // Actual Sidebar against a disposable fake-engine server; never the live app.
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const fixture = await launchVerificationServer();

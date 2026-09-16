@@ -1,9 +1,9 @@
 // The handful of outward links the app offers from the profile menu and the
 // About dialog. They are collected here so "where does Help go?" has one
 // answer rather than one per call site.
-export const APP_NAME = "OpenMausBot";
-export const APP_REPOSITORY = "https://github.com/milind-soni/OpenMausBot";
-/** The docs tree is the help centre, and it is where openmausbot.com sends
+export const APP_NAME = "Astra";
+export const APP_REPOSITORY = "https://github.com/milind-soni/Astra";
+/** The docs tree is the help centre, and it is where astra.com sends
  * people too — one destination, not two competing ones. */
 export const DOCS_URL = `${APP_REPOSITORY}/tree/main/docs`;
 export const HELP_CENTER_URL = DOCS_URL;

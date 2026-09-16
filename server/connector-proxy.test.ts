@@ -55,13 +55,13 @@ describe("connector MCP bridge", () => {
       });
     });
     const lines = start({
-      OMB_HARNESS_URL: harness,
-      OMB_CONNECTOR_TOKEN: "bridge-secret",
+      ASTRA_HARNESS_URL: harness,
+      ASTRA_CONNECTOR_TOKEN: "bridge-secret",
       // A simultaneously mounted agents proxy may define this different
       // value in Codex's flattened child environment.
-      OMB_COMMS_TOKEN: "agents-secret",
-      OMB_BOT_ID: "bot-1",
-      OMB_THREAD_ID: "thread-1",
+      ASTRA_COMMS_TOKEN: "agents-secret",
+      ASTRA_BOT_ID: "bot-1",
+      ASTRA_THREAD_ID: "thread-1",
     });
     child!.stdin.write(`${JSON.stringify({
       jsonrpc: "2.0",
@@ -89,10 +89,10 @@ describe("connector MCP bridge", () => {
       });
     });
     const lines = start({
-      OMB_HARNESS_URL: harness,
-      OMB_CONNECTOR_TOKEN: "bridge-secret",
-      OMB_BOT_ID: "bot-1",
-      OMB_THREAD_ID: "thread-1",
+      ASTRA_HARNESS_URL: harness,
+      ASTRA_CONNECTOR_TOKEN: "bridge-secret",
+      ASTRA_BOT_ID: "bot-1",
+      ASTRA_THREAD_ID: "thread-1",
     });
     child!.stdin.write(`${JSON.stringify({
       jsonrpc: "2.0",
@@ -140,7 +140,7 @@ describe("connector MCP bridge", () => {
       result: {
         protocolVersion: "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "openmausbot-connectors", version: "1" },
+        serverInfo: { name: "astra-connectors", version: "1" },
       },
     });
     expect(reply.result).not.toHaveProperty("isError");
@@ -156,7 +156,7 @@ describe("connector MCP bridge", () => {
       // Deliberately never respond. The proxy must abort this request and
       // return its local capability result instead of hanging OpenCode.
     });
-    const lines = start({ OMB_CONNECTOR_UPSTREAM_URL: upstream });
+    const lines = start({ ASTRA_CONNECTOR_UPSTREAM_URL: upstream });
     child!.stdin.write(`${JSON.stringify({
       jsonrpc: "2.0",
       id: 11,
@@ -198,13 +198,13 @@ describe("connector MCP bridge", () => {
       });
     });
     const lines = start({
-      OMB_CONNECTOR_UPSTREAM_URL: upstream,
-      OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer upstream-secret" }),
+      ASTRA_CONNECTOR_UPSTREAM_URL: upstream,
+      ASTRA_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer upstream-secret" }),
     });
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method: "initialize", params: { protocolVersion: "2024-11-05" } })}\n`);
     const reply = await nextJson(lines);
     expect(reply.result.protocolVersion).toBe("2024-11-05");
-    expect(reply.result.serverInfo).toEqual({ name: "openmausbot-connectors", version: "1" });
+    expect(reply.result.serverInfo).toEqual({ name: "astra-connectors", version: "1" });
     expect(upstreamAuthorization).toBe("Bearer upstream-secret");
     expect(upstreamBody).toMatchObject({ method: "initialize" });
     expect(JSON.stringify(reply)).not.toContain("upstream-secret");
@@ -227,8 +227,8 @@ describe("connector MCP bridge", () => {
       }));
     });
     const lines = start({
-      OMB_CONNECTOR_UPSTREAM_URL: upstream,
-      OMB_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer upstream-secret" }),
+      ASTRA_CONNECTOR_UPSTREAM_URL: upstream,
+      ASTRA_CONNECTOR_UPSTREAM_HEADERS: JSON.stringify({ authorization: "Bearer upstream-secret" }),
     });
     child!.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 4, method: "tools/list", params: {} })}\n`);
     const reply = await nextJson(lines);

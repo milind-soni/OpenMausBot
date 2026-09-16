@@ -39,7 +39,7 @@ struct NewGroupSheet: View {
                                 Spacer()
                                 Image(systemName: members.contains(bot.id) ? "checkmark.circle.fill" : "circle")
                                     .font(.system(size: 22))
-                                    .foregroundStyle(members.contains(bot.id) ? MausPalette.color(bot.color) : Color.secondary.opacity(0.4))
+                                    .foregroundStyle(members.contains(bot.id) ? AstraPalette.color(bot.color) : Color.secondary.opacity(0.4))
                             }
                         }
                         .buttonStyle(.plain)

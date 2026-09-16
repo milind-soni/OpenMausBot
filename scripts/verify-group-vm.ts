@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 
-const podman = process.env.OMB_VERIFY_PODMAN;
-const machine = process.env.OMB_VERIFY_MACHINE;
+const podman = process.env.ASTRA_VERIFY_PODMAN;
+const machine = process.env.ASTRA_VERIFY_MACHINE;
 if (!podman || !isAbsolute(podman) || !machine) {
-  throw new Error("Set OMB_VERIFY_PODMAN to an absolute executable path and OMB_VERIFY_MACHINE explicitly");
+  throw new Error("Set ASTRA_VERIFY_PODMAN to an absolute executable path and ASTRA_VERIFY_MACHINE explicitly");
 }
 type Connection = { Name: string; URI: string; Identity: string };
 const connections = JSON.parse(execFileSync(podman, ["system", "connection", "list", "--format", "json"], {
@@ -73,8 +73,8 @@ try {
     assert(computer.args.includes(target), "MCP must target exactly the speaking bot GUI container");
     assert(String(dump.systemPrompt).includes("computer"), "Goal must include computer instructions");
     // Settled capabilities must already be revoked, including the final speaker.
-    const gate = await fetch(computer.env.OMB_CONTROL_URL, {
-      headers: { authorization: `Bearer ${computer.env.OMB_CONTROL_TOKEN}` }, signal: AbortSignal.timeout(5_000),
+    const gate = await fetch(computer.env.ASTRA_CONTROL_URL, {
+      headers: { authorization: `Bearer ${computer.env.ASTRA_CONTROL_TOKEN}` }, signal: AbortSignal.timeout(5_000),
     });
     assert.equal(gate.status, 401, "A settled speaker must lose computer authority");
     evidence.push({ id, computerArgs: computer.args, target, status: wait.status });

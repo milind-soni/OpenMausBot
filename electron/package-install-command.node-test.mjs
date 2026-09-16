@@ -17,11 +17,11 @@ import {
 } from "./package-install-command.mjs";
 
 test("the Ubuntu command resolves dependencies", () => {
-  const command = packageInstallCommand("deb", "/home/u/.cache/openmausbot-updater/pending/x.deb");
+  const command = packageInstallCommand("deb", "/home/u/.cache/astra-updater/pending/x.deb");
 
   assert.equal(
     command,
-    "sudo apt-get install -y '/home/u/.cache/openmausbot-updater/pending/x.deb'",
+    "sudo apt-get install -y '/home/u/.cache/astra-updater/pending/x.deb'",
   );
   // `dpkg -i` is what electron-updater ran, and it installs nothing when a
   // release adds a dependency. Ubuntu also satisfies ours through virtual
@@ -45,7 +45,7 @@ test("inherited Object names are not install commands", () => {
 test("a staged path that is gone is not used", () => {
   const workspace = mkdtempSync(join(tmpdir(), "omb-staged-"));
   try {
-    const present = join(workspace, "OpenMausBot.deb");
+    const present = join(workspace, "Astra.deb");
     writeFileSync(present, "x");
     const missing = join(workspace, "gone.deb");
 
@@ -94,7 +94,7 @@ test("the quoted path survives a shell round-trip", { skip: posixShell }, () => 
 });
 
 test("the whole command parses into the arguments apt-get would receive", { skip: posixShell }, () => {
-  const file = "/home/o'brien/.cache/openmausbot-updater/pending/OpenMausBot-0.1.44-amd64.deb";
+  const file = "/home/o'brien/.cache/astra-updater/pending/Astra-0.1.44-amd64.deb";
   const command = packageInstallCommand("deb", file);
 
   // Replace the privileged verb with a printer, then confirm the shell hands
@@ -123,7 +123,7 @@ test("the package marker decides the install path", () => {
     linuxPackageType({
       platform: "linux",
       resourcesPath: "/tmp/squashfs-root/resources",
-      appImage: "/home/u/OpenMausBot.AppImage",
+      appImage: "/home/u/Astra.AppImage",
       readMarker: marker(null),
     }),
     "AppImage",
@@ -135,7 +135,7 @@ test("the package marker decides the install path", () => {
     linuxPackageType({
       platform: "linux",
       resourcesPath: "/opt/app/resources",
-      appImage: "/home/u/OpenMausBot.AppImage",
+      appImage: "/home/u/Astra.AppImage",
       readMarker: marker("deb"),
     }),
     "deb",

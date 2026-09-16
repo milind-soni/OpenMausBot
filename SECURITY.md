@@ -13,7 +13,7 @@ response as soon as possible, normally within a few days.
   built-in agent integrations use narrower per-turn capabilities. Anything that makes it reachable
   from off-machine without a paired session, lets one bot reuse another turn's capability, or lets
   a local *unprivileged other user* drive it is a vulnerability.
-- API keys live in `~/.openmausbot/config.json` and are write-only through the API (`configured`
+- API keys live in `~/.astra/config.json` and are write-only through the API (`configured`
   booleans out, never values). Any path that echoes a stored secret back — API response, SSE event,
   log line, argv visible in `ps` — is a vulnerability.
 - Agents run real CLIs (`claude`, `codex`) with the user's own privileges, and the permission broker

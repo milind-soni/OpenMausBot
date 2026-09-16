@@ -4,24 +4,24 @@ description: Recover from a stuck download or restart and understand supported u
 icon: RefreshCw
 ---
 
-OpenMausBot checks for updates in the background and offers the download in a card at the bottom of the window. How the download is applied depends on what you installed.
+Astra checks for updates in the background and offers the download in a card at the bottom of the window. How the download is applied depends on what you installed.
 
 | Build | What the button does |
 |---|---|
 | macOS, Windows, Linux AppImage | **Restart to update** — the app replaces itself and reopens. An AppImage is always rewritten at the path you launch, so your launcher, symlink or dock pin keeps working. |
-| Ubuntu `.deb` (and rpm/pacman) | **Install** — OpenMausBot downloads and verifies the package, copies the install command, and opens a terminal for you to paste it into. The app never installs a system package itself, so it never asks for your administrator password. |
+| Ubuntu `.deb` (and rpm/pacman) | **Install** — Astra downloads and verifies the package, copies the install command, and opens a terminal for you to paste it into. The app never installs a system package itself, so it never asks for your administrator password. |
 
 Ubuntu packages are installed from the releases repository by hand, so the app hands you the exact line rather than guessing at a package handler:
 
 ```bash
-sudo apt-get install -y '/home/you/.cache/openmausbot-updater/pending/OpenMausBot-<version>-amd64.deb'
+sudo apt-get install -y '/home/you/.cache/astra-updater/pending/Astra-<version>-amd64.deb'
 ```
 
-Reopen OpenMausBot once it finishes to be running the new version.
+Reopen Astra once it finishes to be running the new version.
 
 ## The download keeps spinning
 
-Leave the app open long enough for one complete attempt, then quit and reopen it. A failed differential update should fall back to the full package. If the same release remains stuck, download the current installer from the [official releases page](https://github.com/milind-soni/OpenMausBot/releases/latest) and install it over the existing copy.
+Leave the app open long enough for one complete attempt, then quit and reopen it. A failed differential update should fall back to the full package. If the same release remains stuck, download the current installer from the [official releases page](https://github.com/milind-soni/Astra/releases/latest) and install it over the existing copy.
 
 On macOS, **Preparing update** is a separate step after the download finishes. macOS must stage the update before **Restart to update** becomes available. A completed download does not mean this preparation is finished.
 
@@ -29,9 +29,9 @@ If an update fails, its error stays visible instead of being replaced by a backg
 
 ## Restart to update does nothing
 
-Quit OpenMausBot completely and launch it again. If the version did not change, install the latest release manually. Your conversations and settings live outside the application bundle and are not removed by replacing the app.
+Quit Astra completely and launch it again. If the version did not change, install the latest release manually. Your conversations and settings live outside the application bundle and are not removed by replacing the app.
 
-The installed version runs the updater, not the version being downloaded. If you are upgrading from an older build with a stuck updater, you may need to install the new version manually once to receive the fix. Do not delete your OpenMausBot data directory.
+The installed version runs the updater, not the version being downloaded. If you are upgrading from an older build with a stuck updater, you may need to install the new version manually once to receive the fix. Do not delete your Astra data directory.
 
 ## Report an update failure
 
@@ -42,7 +42,7 @@ Open **App settings → General → Diagnostics → Export Diagnostics…**. Inc
 The install command is on your clipboard either way. Open a terminal yourself and paste it. If the clipboard was overwritten, the package is already downloaded and you can run:
 
 ```bash
-sudo apt-get install -y ~/.cache/openmausbot-updater/pending/OpenMausBot-*-amd64.deb
+sudo apt-get install -y ~/.cache/astra-updater/pending/Astra-*-amd64.deb
 ```
 
 Use `apt-get`, not `dpkg -i` — only `apt-get` resolves dependencies, and on Ubuntu 24.04 ours are satisfied through virtual packages that `dpkg` alone will not follow.
@@ -52,5 +52,5 @@ Use `apt-get`, not `dpkg -i` — only `apt-get` resolves dependencies, and on Ub
 Open **App settings** and check the displayed version. A commit merged to `main` is not in the desktop app until a release workflow publishes a new version.
 
 <Callout type="warn" title="Use official artifacts">
-  Do not install update files forwarded through chat or uploaded to an unrelated repository. Use the OpenMausBot releases repository and its checksums.
+  Do not install update files forwarded through chat or uploaded to an unrelated repository. Use the Astra releases repository and its checksums.
 </Callout>

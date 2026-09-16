@@ -13,7 +13,7 @@
 //
 // Everything is disposable. A harness is started against a temporary HOME
 // with a fabricated profile and the repository's fake engine, so nothing here
-// reads or writes your real ~/.openmausbot. No real name, key or token can end up in a fixture. The
+// reads or writes your real ~/.astra. No real name, key or token can end up in a fixture. The
 // pairing token is redacted on the way out regardless.
 //
 // One fixture is not captured: options-card.json needs a bot to actually ask
@@ -142,8 +142,8 @@ async function captureFrames(wanted, during) {
 async function main() {
   mkdirSync(OUT, { recursive: true });
   home = mkdtempSync(join(tmpdir(), "companion-fixtures-"));
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({
+  mkdirSync(join(home, ".astra"), { recursive: true });
+  writeFileSync(join(home, ".astra", "config.json"), JSON.stringify({
     profile: PROFILE,
     instances: {
       claude: {
@@ -158,11 +158,11 @@ async function main() {
   const harness = start("harness", [join(ROOT, "server", "index.ts")], {
     HOME: home,
     USERPROFILE: home,
-    OMB_PORT: String(HARNESS_PORT),
+    ASTRA_PORT: String(HARNESS_PORT),
     FAKE_CLAUDE_MODE: "happy",
     // the receiver would otherwise take the port above, which is nothing
     // to do with this but makes the log noisy
-    OMB_WEBHOOK_PORT: String(base + 1),
+    ASTRA_WEBHOOK_PORT: String(base + 1),
   });
   await waitFor(`${HARNESS}/api/health`, "harness", harness);
 
@@ -178,11 +178,11 @@ async function main() {
   const sidecar = start("companion", [join(ROOT, "companion", "src", "index.ts")], {
     HOME: home,
     USERPROFILE: home,
-    OMB_PORT: String(HARNESS_PORT),
-    OMB_WEBHOOK_PORT: String(base + 1),
-    OMB_COMPANION_PORT: String(COMPANION_PORT),
-    OMB_CONTROL_PORT: String(CONTROL_PORT),
-    OMB_COMPANION_DIR: join(home, "companion"),
+    ASTRA_PORT: String(HARNESS_PORT),
+    ASTRA_WEBHOOK_PORT: String(base + 1),
+    ASTRA_COMPANION_PORT: String(COMPANION_PORT),
+    ASTRA_CONTROL_PORT: String(CONTROL_PORT),
+    ASTRA_COMPANION_DIR: join(home, "companion"),
   });
   await waitFor(`${CONTROL}/state`, "companion", sidecar);
 
@@ -377,7 +377,7 @@ async function main() {
       prompt: "Check Discord for new bug reports and file them.",
       target: "bot",
       botId: kiwi.id,
-      runOn: "maus",
+      runOn: "astra",
       enabled: true,
       schedule: { type: "interval", everyMinutes: 5, anchorAt: Date.now() },
     }),

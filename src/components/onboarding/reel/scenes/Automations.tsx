@@ -10,7 +10,7 @@
 // so a user recognises both when they meet them for real.
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, MousePointer2, Zap } from "lucide-react";
-import { MausAvatar } from "@/components/Avatar";
+import { AstraAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { reducedMotion } from "@/lib/onboarding";
 import type { SceneProps } from "./OrbitingApps";
@@ -153,7 +153,7 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
                     )}
                     style={{ top: ROW + 2, height: ROW - 8 }}
                   >
-                    <MausAvatar color="green" state={busy ? "working" : "idle"} size={16} animated={!still} trackPointer={false} />
+                    <AstraAvatar color="green" state={busy ? "working" : "idle"} size={16} animated={!still} trackPointer={false} />
                     <div className="min-w-0">
                       <div className="truncate text-[9.5px] font-semibold leading-tight text-ink">Weekly report</div>
                       <div className="text-[8px] leading-tight tabular-nums text-ink-secondary">9:00 · weekly</div>
@@ -209,7 +209,7 @@ export function Automations({ playing, onCue, onEnded, label }: SceneProps) {
       <div className="absolute bottom-3 left-1/2 z-20 -translate-x-1/2">
         <div className={cn("absolute inset-0 -m-4 rounded-full bg-accent/20 blur-xl transition-opacity duration-500", busy ? "opacity-100" : "opacity-0")} aria-hidden="true" />
         <div className="relative drop-shadow-[0_8px_18px_rgba(0,0,0,0.45)]">
-          <MausAvatar
+          <AstraAvatar
             color="green"
             state={hookDone ? "happy" : hook ? "alerting" : done ? "proud" : firing ? "working" : "drowsy"}
             size={40}

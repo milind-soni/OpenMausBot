@@ -22,11 +22,11 @@ folders and capacity. They do not drive the native iOS UI.
 ## Native UI
 
 Generate the Xcode project with `cd ios && xcodegen generate`. Create a fresh
-iPhone or iPad simulator, then run the `OpenMausCompanion` scheme's UI tests
+iPhone or iPad simulator, then run the `AstraCompanion` scheme's UI tests
 against that explicit simulator ID. For example, from `ios/`:
 
 ```sh
-xcodebuild -project OpenMausCompanion.xcodeproj -scheme OpenMausCompanion \
+xcodebuild -project AstraCompanion.xcodeproj -scheme AstraCompanion \
   -configuration Debug -destination 'platform=iOS Simulator,id=SIMULATOR_ID' \
   -derivedDataPath /tmp/omb-ios-threads-build CODE_SIGNING_ALLOWED=NO test
 ```

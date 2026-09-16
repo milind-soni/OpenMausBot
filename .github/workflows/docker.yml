@@ -34,17 +34,17 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
-        run: docker build -t openmausbot:ci .
+        run: docker build -t astra:ci .
       - name: Boot the container and prove the server + UI answer
         run: |
           set -euo pipefail
-          docker run -d --name omb openmausbot:ci
+          docker run -d --name omb astra:ci
           for i in $(seq 1 40); do
-            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q astra; then break; fi
             sleep 2
             if [ "$i" = "40" ]; then docker logs omb; echo "server never became healthy"; exit 1; fi
           done
-          # the renderer is served by the server itself (OMB_STATIC_DIR)
+          # the renderer is served by the server itself (ASTRA_STATIC_DIR)
           docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
           docker logs omb | tail -5
       - name: Prove the non-root user can browse with the baked-in Chrome
@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           probe() { docker run --rm --network bridge curlimages/curl:8.14.1 -s --max-time 3 "http://$1:$2/" >/dev/null; }
-          docker run -d --name leaky --entrypoint node openmausbot:ci -e "require('http').createServer((q,s)=>s.end('leak')).listen(8799,'0.0.0.0')"
+          docker run -d --name leaky --entrypoint node astra:ci -e "require('http').createServer((q,s)=>s.end('leak')).listen(8799,'0.0.0.0')"
           sleep 2
           leaky_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' leaky)
           test -n "$leaky_ip"
@@ -83,19 +83,19 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f omb >/dev/null
-          docker tag openmausbot:ci ghcr.io/milind-soni/openmausbot:latest
+          docker tag astra:ci ghcr.io/milind-soni/astra:latest
           printf 'DOMAIN=localhost\nENGINES=\n' > deploy/.env
           docker compose -f deploy/docker-compose.yml up -d --no-build
           for i in $(seq 1 45); do
-            curl -sk -o /dev/null --max-time 2 https://localhost/.well-known/openmausbot/environment && break
+            curl -sk -o /dev/null --max-time 2 https://localhost/.well-known/astra/environment && break
             sleep 2
             if [ "$i" = "45" ]; then docker compose -f deploy/docker-compose.yml logs; echo "caddy never answered"; exit 1; fi
           done
           code() { curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
           body() { curl -sk --max-time 10 "$@"; }
           H=https://localhost
-          grep -q '"environmentId"' <<<"$(body $H/.well-known/openmausbot/environment)"   # descriptor is public
-          grep -q '^{"app":"openmausbot"}$' <<<"$(body $H/api/health)"             # the probe is public, and says only the app name
+          grep -q '"environmentId"' <<<"$(body $H/.well-known/astra/environment)"   # descriptor is public
+          grep -q '^{"app":"astra"}$' <<<"$(body $H/api/health)"             # the probe is public, and says only the app name
           test "$(code $H/api/bots)" = 403                                        # nothing else before pairing
           grep -q 'pair this device' <<<"$(body $H/api/bots)"
           grep -qi '<html' <<<"$(body $H/pair)"                                    # the UI shell is served so /pair can load
@@ -110,7 +110,7 @@ jobs:
           grep -qi 'Secure' <<<"$paired"                                          # over TLS the cookie is Secure
           grep -qi 'HttpOnly' <<<"$paired"
           test "$(code -b "$jar" $H/api/health)" = 200                              # paired: the API answers
-          grep -q openmausbot <<<"$(body -b "$jar" $H/api/health)"
+          grep -q astra <<<"$(body -b "$jar" $H/api/health)"
           test "$(code -b "$jar" -H 'Origin: https://evil.example' -X POST -d '{}' $H/api/bots)" = 403   # cookie is same-origin only
           test "$(code -b "$jar" -H 'Origin: https://localhost' $H/api/auth/session)" = 200
           grep -q '"via":"cookie"' <<<"$(body -b "$jar" $H/api/auth/session)"
@@ -120,7 +120,7 @@ jobs:
           # the proof is that bytes arrived within the window (a buffering proxy sends none).
           sse=$( (curl -sk -b "$jar" -N --max-time 4 $H/api/events || true) | head -c 64 )
           test -n "$sse"                                                           # SSE streams, not buffered
-          grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # OMB_WEBHOOK_PUBLIC_URL is advertised
+          grep -q '"baseUrl":"https://localhost"' <<<"$(body -b "$jar" $H/api/webhooks)"   # ASTRA_WEBHOOK_PUBLIC_URL is advertised
           test "$(code $H/api/bots)" = 403                                        # and without the cookie it is still closed
           docker compose -f deploy/docker-compose.yml down -v
 

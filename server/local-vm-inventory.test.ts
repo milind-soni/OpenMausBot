@@ -37,7 +37,7 @@ describe("Local VM inventory", () => {
       ready: true,
       problem: null,
       viewer_url: "http://127.0.0.1:5000/vnc.html#password=secret",
-      workspace_path: "/Users/person/.openmausbot/vm-homes/private",
+      workspace_path: "/Users/person/.astra/vm-homes/private",
       commands: { remove: "docker rm private-container" },
     } as unknown as ContainerComputerStatus;
 

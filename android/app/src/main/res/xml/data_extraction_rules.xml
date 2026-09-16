@@ -18,10 +18,10 @@
             path="companion_device_token.xml" />
         <exclude
             domain="sharedpref"
-            path="openmaus.permissions.xml" />
+            path="astra.permissions.xml" />
         <exclude
             domain="sharedpref"
-            path="openmaus.onboarding.xml" />
+            path="astra.onboarding.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude
@@ -29,9 +29,9 @@
             path="companion_device_token.xml" />
         <exclude
             domain="sharedpref"
-            path="openmaus.permissions.xml" />
+            path="astra.permissions.xml" />
         <exclude
             domain="sharedpref"
-            path="openmaus.onboarding.xml" />
+            path="astra.onboarding.xml" />
     </device-transfer>
 </data-extraction-rules>

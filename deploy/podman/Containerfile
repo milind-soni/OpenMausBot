@@ -30,10 +30,10 @@ COPY --from=build --chown=maus:maus /src/dist ./dist
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 ENV HOME=/data \
-    OMB_DATA_DIR=/data/.openmausbot \
-    OMB_STATIC_DIR=/app/dist \
-    OMB_PORT=8799 \
-    OMB_WEBHOOK_PORT=8800 \
+    ASTRA_DATA_DIR=/data/.astra \
+    ASTRA_STATIC_DIR=/app/dist \
+    ASTRA_PORT=8799 \
+    ASTRA_WEBHOOK_PORT=8800 \
     NODE_ENV=production
 USER maus
 CMD ["node", "dist-server/index.js"]

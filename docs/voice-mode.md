@@ -1,4 +1,4 @@
-# Voice in OpenMausBot
+# Voice in Astra
 
 Decision doc, 2026-08-14. How bots speak, and how you hold a conversation with
 one.

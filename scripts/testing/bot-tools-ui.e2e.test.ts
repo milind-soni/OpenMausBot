@@ -8,14 +8,14 @@ import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { BOT_ROLES, roleProfilePatch } from "../../src/lib/bot-roles.ts";
-import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { runControlOmb } from "../control-astra.ts";
+import { UI_TOOLS_DIR } from "./control-astra-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
-const forced = process.env.OMB_UI_E2E === "1";
+const forced = process.env.ASTRA_UI_E2E === "1";
 const enabled = forced || Boolean(binary);
-if (!enabled) console.log("skipping bot tools UI e2e: no agent-browser; set OMB_UI_E2E=1 to install the pinned release");
+if (!enabled) console.log("skipping bot tools UI e2e: no agent-browser; set ASTRA_UI_E2E=1 to install the pinned release");
 const LAUNCH_TIMEOUT_MS = forced && !binary ? 600_000 : 180_000;
 
 interface FixtureInfo { ui: string; url: string; dataDir: string; logPath: string }
@@ -31,7 +31,7 @@ describe("bot setup and tools in the real renderer", () => {
   (enabled ? it : it.skip)("creates roles, configures per-bot MCP access, and recovers a rejected preset", async () => {
     let stdout = "";
     let stderr = "";
-    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
+    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-astra.ts"), "ui", "launch"], {
       cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });

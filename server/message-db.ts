@@ -107,7 +107,7 @@ function ensureMemoryIndex(db: DatabaseSync): void {
 // is no more of a dependency than the table it indexes. The sidebar's LIKE
 // search below stays as it is — substring find over a single thread wants
 // every occurrence, not a relevance ranking.
-/** FTS5 is in every runtime OpenMausBot supports — node:sqlite on Node ≥ 24
+/** FTS5 is in every runtime Astra supports — node:sqlite on Node ≥ 24
  * (package.json engines) and the Node inside Electron 43 — so a SQLite
  * without it is a mis-installed runtime, not a mode to run in. Say that,
  * instead of surfacing SQLite's own "no such module: fts5" from deep inside
@@ -116,7 +116,7 @@ export function describeMissingFts5(error: unknown): Error | null {
   const message = error instanceof Error ? error.message : String(error);
   if (!/no such module:\s*fts5/i.test(message)) return null;
   return new Error(
-    `OpenMausBot needs SQLite with FTS5, which is built into Node 24 and newer (and into the app). ` +
+    `Astra needs SQLite with FTS5, which is built into Node 24 and newer (and into the app). ` +
     `This Node (${process.version}) has none: install Node 24 or newer. (${message})`,
   );
 }

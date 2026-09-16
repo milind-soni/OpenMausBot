@@ -44,8 +44,8 @@ export function createControlClient(options?: {
   cacheMs?: number;
   fetchImpl?: typeof fetch;
 }): ControlClient {
-  const url = options?.url ?? process.env.OMB_CONTROL_URL ?? "";
-  const token = options?.token ?? process.env.OMB_CONTROL_TOKEN ?? "";
+  const url = options?.url ?? process.env.ASTRA_CONTROL_URL ?? "";
+  const token = options?.token ?? process.env.ASTRA_CONTROL_TOKEN ?? "";
   const cacheMs = options?.cacheMs ?? 750;
   const fetchImpl = options?.fetchImpl ?? fetch;
   const configured = Boolean(url && token);

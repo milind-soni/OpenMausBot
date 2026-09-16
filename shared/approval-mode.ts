@@ -1,5 +1,5 @@
 /** The approval levels exposed by the app. Each one is a provider's own
- * permission mode, passed through: OpenMausBot never decides a permission
+ * permission mode, passed through: Astra never decides a permission
  * itself (Full access aside, which answers residual prompts because that is
  * what the person granted). The order is the order the selector shows. */
 export const APPROVAL_MODES = ["ask", "edits", "auto", "full", "custom"] as const;

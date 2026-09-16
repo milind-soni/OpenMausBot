@@ -11,7 +11,7 @@ import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
-import type { MausMotion } from "@/lib/mascot";
+import type { AstraMotion } from "@/lib/mascot";
 import { type BeatId, beatsFor } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
 import { StoreProvider, type Bot } from "@/state/store";
@@ -19,7 +19,7 @@ import "./styles.css";
 
 const PREVIEW_BOT = {
   id: "preview-bot",
-  name: "Maus",
+  name: "Astra",
   color: "green",
   soul: "",
 } as unknown as Bot;
@@ -37,12 +37,12 @@ function fromUrl() {
     skin: skin && SKINS.some((s) => s.id === skin) ? skin : ("midnight" as SkinId),
     reduced: params.get("reduced") === "1",
     all: params.get("all") === "1",
-    entrance: (params.get("entrance") ?? "arrive") as Exclude<MausMotion, "none">,
+    entrance: (params.get("entrance") ?? "arrive") as Exclude<AstraMotion, "none">,
   };
 }
 
 /** One window-sized stage in one skin. The flow fills it via `embedded`. */
-function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none"> }) {
+function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<AstraMotion, "none"> }) {
   const width = 1100;
   const height = 720;
   return (

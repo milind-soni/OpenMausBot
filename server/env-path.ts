@@ -105,7 +105,7 @@ export function augmentedPath(): string {
   if (cached === null) {
     cached = mergePaths([
       ...registeredDirs.filter((d) => existsSync(d)),
-      ...(process.env.OMB_EXTRA_PATH ? process.env.OMB_EXTRA_PATH.split(delimiter) : []),
+      ...(process.env.ASTRA_EXTRA_PATH ? process.env.ASTRA_EXTRA_PATH.split(delimiter) : []),
       ...(process.env.PATH ? process.env.PATH.split(delimiter) : []),
       // Keep the last successful login-shell result while a rescan starts a
       // fresh asynchronous probe. Otherwise resetPathCache() would make

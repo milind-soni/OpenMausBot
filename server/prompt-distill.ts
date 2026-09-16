@@ -43,8 +43,8 @@ export interface DistillOutcome {
 }
 
 // Env override exists so tests can point the cache at a temp dir without
-// touching the user's real ~/.openmausbot.
-const cacheDir = () => process.env.OMB_PROMPT_CACHE_DIR ?? join(DATA_DIR, "prompt-cache");
+// touching the user's real ~/.astra.
+const cacheDir = () => process.env.ASTRA_PROMPT_CACHE_DIR ?? join(DATA_DIR, "prompt-cache");
 
 export async function clearDistillCache(): Promise<void> {
   await mkdir(cacheDir(), { recursive: true });

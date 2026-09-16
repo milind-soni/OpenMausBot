@@ -204,12 +204,12 @@
         }
       }
     },
-    "Alerts arrive while OpenMausBot is open or was recently in the background. Closed-app delivery is not available yet.": {
+    "Alerts arrive while Astra is open or was recently in the background. Closed-app delivery is not available yet.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Os alertas chegam enquanto o OpenMausBot está aberto ou esteve em segundo plano há pouco. A entrega com o app fechado ainda não está disponível."
+            "value": "Os alertas chegam enquanto o Astra está aberto ou esteve em segundo plano há pouco. A entrega com o app fechado ainda não está disponível."
           }
         }
       }
@@ -224,12 +224,12 @@
         }
       }
     },
-    "Allow camera access to scan the pairing QR code shown by OpenMausBot.": {
+    "Allow camera access to scan the pairing QR code shown by Astra.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Permita o acesso à câmera para escanear o QR code de pareamento mostrado pelo OpenMausBot."
+            "value": "Permita o acesso à câmera para escanear o QR code de pareamento mostrado pelo Astra."
           }
         }
       }
@@ -424,12 +424,12 @@
         }
       }
     },
-    "Changes the language inside OpenMausMobile. Buttons drawn by iOS itself follow the phone's language, which you can set for this app in iOS Settings.": {
+    "Changes the language inside AstraMobile. Buttons drawn by iOS itself follow the phone's language, which you can set for this app in iOS Settings.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Muda o idioma dentro do OpenMausMobile. Os botões desenhados pelo próprio iOS seguem o idioma do telefone, que você pode definir para este app nos Ajustes do iOS."
+            "value": "Muda o idioma dentro do AstraMobile. Os botões desenhados pelo próprio iOS seguem o idioma do telefone, que você pode definir para este app nos Ajustes do iOS."
           }
         }
       }
@@ -1216,22 +1216,22 @@
         }
       }
     },
-    "Dictation needs Microphone access. Enable it in Settings → OpenMausMobile.": {
+    "Dictation needs Microphone access. Enable it in Settings → AstraMobile.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O ditado precisa de acesso ao Microfone. Ative em Ajustes → OpenMausMobile."
+            "value": "O ditado precisa de acesso ao Microfone. Ative em Ajustes → AstraMobile."
           }
         }
       }
     },
-    "Dictation needs Speech Recognition access. Enable it in Settings → OpenMausMobile.": {
+    "Dictation needs Speech Recognition access. Enable it in Settings → AstraMobile.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O ditado precisa de acesso ao Reconhecimento de Fala. Ative em Ajustes → OpenMausMobile."
+            "value": "O ditado precisa de acesso ao Reconhecimento de Fala. Ative em Ajustes → AstraMobile."
           }
         }
       }
@@ -1579,12 +1579,12 @@
         }
       }
     },
-    "Get alerts while OpenMausBot is open or was recently in the background. Alerts stop after iOS fully suspends or closes the app.": {
+    "Get alerts while Astra is open or was recently in the background. Alerts stop after iOS fully suspends or closes the app.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Receba alertas enquanto o OpenMausBot está aberto ou esteve em segundo plano há pouco. Os alertas param depois que o iOS suspende ou fecha o app por completo."
+            "value": "Receba alertas enquanto o Astra está aberto ou esteve em segundo plano há pouco. Os alertas param depois que o iOS suspende ou fecha o app por completo."
           }
         }
       }
@@ -2289,12 +2289,12 @@
         }
       }
     },
-    "On your computer, open OpenMausBot → Settings → Phone.": {
+    "On your computer, open Astra → Settings → Phone.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "No seu computador, abra OpenMausBot → Ajustes → Telefone."
+            "value": "No seu computador, abra Astra → Ajustes → Telefone."
           }
         }
       }
@@ -2319,12 +2319,12 @@
         }
       }
     },
-    "Only continue on a network you trust. Local connections are authenticated but are not encrypted by OpenMausBot.": {
+    "Only continue on a network you trust. Local connections are authenticated but are not encrypted by Astra.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Só continue em uma rede em que você confia. As conexões locais são autenticadas, mas não são criptografadas pelo OpenMausBot."
+            "value": "Só continue em uma rede em que você confia. As conexões locais são autenticadas, mas não são criptografadas pelo Astra."
           }
         }
       }
@@ -2429,15 +2429,15 @@
         }
       }
     },
-    "OpenMausBot": {
+    "Astra": {
       "shouldTranslate": false
     },
-    "OpenMausBot is trying the saved connection automatically.": {
+    "Astra is trying the saved connection automatically.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O OpenMausBot está tentando a conexão salva automaticamente."
+            "value": "O Astra está tentando a conexão salva automaticamente."
           }
         }
       }
@@ -2552,12 +2552,12 @@
         }
       }
     },
-    "Pair this device with OpenMausBot to see your chats and respond to your bots.": {
+    "Pair this device with Astra to see your chats and respond to your bots.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pareie este dispositivo com o OpenMausBot para ver suas conversas e responder aos seus bots."
+            "value": "Pareie este dispositivo com o Astra para ver suas conversas e responder aos seus bots."
           }
         }
       }
@@ -3105,12 +3105,12 @@
         }
       }
     },
-    "Runs the agent and its tools inside its Box virtual machine. The VM wakes automatically for each run; keep OpenMausBot running so its scheduler can launch the job.": {
+    "Runs the agent and its tools inside its Box virtual machine. The VM wakes automatically for each run; keep Astra running so its scheduler can launch the job.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Roda o agente e as ferramentas dele dentro da máquina virtual Box. A VM acorda automaticamente a cada execução; mantenha o OpenMausBot rodando para que o agendador consiga iniciar o trabalho."
+            "value": "Roda o agente e as ferramentas dele dentro da máquina virtual Box. A VM acorda automaticamente a cada execução; mantenha o Astra rodando para que o agendador consiga iniciar o trabalho."
           }
         }
       }
@@ -3185,12 +3185,12 @@
         }
       }
     },
-    "Scan the QR code in OpenMausBot. We'll securely choose the best way to connect.": {
+    "Scan the QR code in Astra. We'll securely choose the best way to connect.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Escaneie o QR code no OpenMausBot. Vamos escolher com segurança a melhor forma de conectar."
+            "value": "Escaneie o QR code no Astra. Vamos escolher com segurança a melhor forma de conectar."
           }
         }
       }
@@ -3395,12 +3395,12 @@
         }
       }
     },
-    "Showing what was connected last time. Your computer could not open its credential store just now, so these could not be re-checked. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.": {
+    "Showing what was connected last time. Your computer could not open its credential store just now, so these could not be re-checked. Nothing has been disconnected — restarting Astra on your computer usually clears this.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Mostrando o que estava conectado da última vez. O seu computador não conseguiu abrir o cofre de credenciais agora, então não foi possível verificá-las de novo. Nada foi desconectado — reiniciar o OpenMausBot no seu computador costuma resolver."
+            "value": "Mostrando o que estava conectado da última vez. O seu computador não conseguiu abrir o cofre de credenciais agora, então não foi possível verificá-las de novo. Nada foi desconectado — reiniciar o Astra no seu computador costuma resolver."
           }
         }
       }
@@ -3605,12 +3605,12 @@
         }
       }
     },
-    "Switches OpenMausMobile to this computer": {
+    "Switches AstraMobile to this computer": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Muda o OpenMausMobile para este computador"
+            "value": "Muda o AstraMobile para este computador"
           }
         }
       }
@@ -3735,12 +3735,12 @@
         }
       }
     },
-    "That isn't an OpenMausBot pairing QR code.": {
+    "That isn't an Astra pairing QR code.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esse não é um QR code de pareamento do OpenMausBot."
+            "value": "Esse não é um QR code de pareamento do Astra."
           }
         }
       }
@@ -3955,12 +3955,12 @@
         }
       }
     },
-    "This pairing predates secure phone entry. Scan a fresh QR from OpenMausBot, or finish this request on your computer.": {
+    "This pairing predates secure phone entry. Scan a fresh QR from Astra, or finish this request on your computer.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Este pareamento é anterior à digitação segura pelo telefone. Escaneie um novo QR do OpenMausBot ou conclua esta solicitação no seu computador."
+            "value": "Este pareamento é anterior à digitação segura pelo telefone. Escaneie um novo QR do Astra ou conclua esta solicitação no seu computador."
           }
         }
       }
@@ -3975,12 +3975,12 @@
         }
       }
     },
-    "This removes the connection from this device only. It does not revoke this device on your Mac. To remove Mac-side access, open OpenMausBot → Settings → Phone and remove it there.": {
+    "This removes the connection from this device only. It does not revoke this device on your Mac. To remove Mac-side access, open Astra → Settings → Phone and remove it there.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Isto remove a conexão apenas deste dispositivo. Não revoga este dispositivo no seu Mac. Para remover o acesso do lado do Mac, abra OpenMausBot → Ajustes → Telefone e remova por lá."
+            "value": "Isto remove a conexão apenas deste dispositivo. Não revoga este dispositivo no seu Mac. Para remover o acesso do lado do Mac, abra Astra → Ajustes → Telefone e remova por lá."
           }
         }
       }
@@ -4005,12 +4005,12 @@
         }
       }
     },
-    "This routine uses a schedule added by a newer OpenMausBot. Choose One time, Selected days, or Every X minutes before saving.": {
+    "This routine uses a schedule added by a newer Astra. Choose One time, Selected days, or Every X minutes before saving.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Esta rotina usa um agendamento adicionado por um OpenMausBot mais novo. Escolha Uma vez, Dias selecionados ou A cada X minutos antes de salvar."
+            "value": "Esta rotina usa um agendamento adicionado por um Astra mais novo. Escolha Uma vez, Dias selecionados ou A cada X minutos antes de salvar."
           }
         }
       }
@@ -4055,12 +4055,12 @@
         }
       }
     },
-    "To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from this device.": {
+    "To generate images, configure the shared image provider in Astra on your computer. Provider keys cannot be added from this device.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "Para gerar imagens, configure o provedor de imagens compartilhado no OpenMausBot no seu computador. Não é possível adicionar chaves de provedor por este dispositivo."
+            "value": "Para gerar imagens, configure o provedor de imagens compartilhado no Astra no seu computador. Não é possível adicionar chaves de provedor por este dispositivo."
           }
         }
       }
@@ -4545,12 +4545,12 @@
         }
       }
     },
-    "Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.": {
+    "Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting Astra on your computer usually clears this.": {
       "localizations": {
         "pt-BR": {
           "stringUnit": {
             "state": "translated",
-            "value": "O seu computador não conseguiu abrir o cofre de credenciais, então não sabe dizer quais contas estão conectadas. Nada foi desconectado — reiniciar o OpenMausBot no seu computador costuma resolver."
+            "value": "O seu computador não conseguiu abrir o cofre de credenciais, então não sabe dizer quais contas estão conectadas. Nada foi desconectado — reiniciar o Astra no seu computador costuma resolver."
           }
         }
       }

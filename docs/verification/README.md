@@ -1,6 +1,6 @@
-# Verifying OpenMausBot
+# Verifying Astra
 
-OpenMausBot has one development control surface: `pnpm control:omb`. It is a
+Astra has one development control surface: `pnpm control:omb`. It is a
 thin command-line adapter over `scripts/mcp-server.ts`, so verification uses
 the same URL validation, task pinning, bounded transcripts, wait states, and
 redaction as external MCP clients.
@@ -10,7 +10,7 @@ redaction as external MCP clients.
 Start a fixture in one terminal:
 
 ```sh
-node --experimental-strip-types scripts/control-omb.ts launch
+node --experimental-strip-types scripts/control-astra.ts launch
 ```
 
 Run the foreground launcher directly rather than through `pnpm`; this ensures
@@ -19,7 +19,7 @@ it receives Ctrl-C and can stop its child before removing the temporary data.
 It gives the child a temporary data directory and home, chooses a free
 harness/webhook port pair, installs only the repository's fake engine, prints
 the URL, PID, data directory, and persistent log path, then stays attached to
-that exact child. The parent shell and the user's OpenMausBot data are
+that exact child. The parent shell and the user's Astra data are
 untouched. Only `FAKE_CLAUDE_*` variables cross from the launcher's
 environment into that child, so a recipe can script the fake engine's mode,
 replies and tool calls without writing a wrapper CLI.
@@ -53,7 +53,7 @@ Use only mapped, tested commands:
 - [Usage ledger](usage-ledger.md)
 - [Spend cap and sell prices](spend-cap.md)
 
-`control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
+`control-astra ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
 renderer in a headless Chrome by accessible name, so composer sends, transcript
 rows, tool chips and server feature flags are provable from the command line.
 Other renderer-only behavior—Settings, sidebar drag-and-drop, the VM modal, the

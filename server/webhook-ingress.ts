@@ -92,7 +92,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { app: "openmausbot-webhooks", ready: true });
+      return json(res, 200, { app: "astra-webhooks", ready: true });
     }
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });

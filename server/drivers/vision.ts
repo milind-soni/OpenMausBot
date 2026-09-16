@@ -65,7 +65,7 @@ export const VisionDriver: ProviderDriver<VisionConfig> = {
   install: {
     docsUrl: "https://github.com/freellmapi/freellmapi",
     signInCommand:
-      'add {"vision":{"key":"sk-..."}} to ~/.openmausbot/config.json (or set FREELLMAPI_API_KEY)',
+      'add {"vision":{"key":"sk-..."}} to ~/.astra/config.json (or set FREELLMAPI_API_KEY)',
     command: {
       darwin: "Get a free key from freellmapi or set up local proxy at http://localhost:3001/v1",
       linux: "Get a free key from freellmapi or set up local proxy at http://localhost:3001/v1",

@@ -721,7 +721,7 @@ describe("applyPiLocalCatalog", () => {
           { id: "omlx/MiniMax-M3-4bit", label: "MiniMax-M3-4bit", custom: true },
         ],
       },
-      { VITEST: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "1" },
+      { VITEST: "true", ASTRA_PROBE_LOCAL_INJECT: "1" },
       async (url) => {
         if (String(url).includes(":8080")) {
           return new Response(JSON.stringify({ data: [{ id: "MiniMax-M3-4bit" }] }), { status: 200 });

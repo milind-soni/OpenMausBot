@@ -3,7 +3,7 @@
 `scripts/verify-voice.ts` proves the voice surfaces end to end against the
 standard isolated fixture (disposable home, fake engine, no user data):
 
-1. The "Luna" wake-word credential round-trip: the Picovoice AccessKey saves
+1. The "Astra" wake-word credential round-trip: the Picovoice AccessKey saves
    through `PUT /api/config`, the status reports `wakeWord.configured: true`,
    and no response ever echoes the secret back.
 2. The built-in (zero-key, offline) voice engine really synthesizes: the

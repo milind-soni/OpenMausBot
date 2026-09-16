@@ -12,7 +12,7 @@ vi.mock("@/state/store", async (original) => ({
 }));
 
 const bot: Bot = {
-  id: "maus", threadId: "current", name: "Maus", title: "", description: "", notifications: true,
+  id: "maus", threadId: "current", name: "Astra", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   projects: [{ id: "mail", name: "Email", emoji: "📬" }],
   tasks: [{ threadId: "current", title: "Inbox", projectId: "mail", createdAt: 1 }],

@@ -43,11 +43,11 @@ struct ConnectedAppsView: View {
                     Label("Accounts could not be re-checked", systemImage: "exclamationmark.triangle")
                         .foregroundStyle(.orange)
                     if statuses == nil {
-                        Text("Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.")
+                        Text("Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting Astra on your computer usually clears this.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("Showing what was connected last time. Your computer could not open its credential store just now, so these could not be re-checked. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.")
+                        Text("Showing what was connected last time. Your computer could not open its credential store just now, so these could not be re-checked. Nothing has been disconnected — restarting Astra on your computer usually clears this.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

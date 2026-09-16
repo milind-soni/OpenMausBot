@@ -1,8 +1,8 @@
-// The "Luna" wake word.
+// The "Astra" wake word.
 //
 // Porcupine runs ON-DEVICE in a worker: raw mic frames go in, and the only
 // thing that comes out is "the phrase was heard". No audio leaves the
-// machine, nothing is transcribed here. Hearing "Luna" starts one
+// machine, nothing is transcribed here. Hearing "Astra" starts one
 // voice-dictation session (voice-dictation.ts); when the speaker finishes
 // (Deepgram's endpointer + the silence watchdog), the transcript lands in
 // the composer via appendComposerDraft, the same path the Verify card's
@@ -10,13 +10,13 @@
 // composer being unmounted.
 //
 // Suspension rules (mirroring the call view's half-duplex rule):
-//   - while the bot SPEAKS (TTS), detection pauses — Luna must never wake
+//   - while the bot SPEAKS (TTS), detection pauses — Astra must never wake
 //     on her own voice;
 //   - while a CALL is up, detection pauses — the call owns the mic;
 //   - while dictation itself is live, the controller stands down until the
 //     transcript lands.
 //
-// The keyword model is trained at runtime from the phrase "Luna" via
+// The keyword model is trained at runtime from the phrase "Astra" via
 // Porcupine's Console API (trainWakeWordFromPhrase) and cached in
 // IndexedDB, so the only credential needed is a free Picovoice AccessKey,
 // entered once in Settings → Connections. If that key is absent or training
@@ -30,8 +30,8 @@ import { wakeDictationEngine } from "./handy";
 import { createHandyDictationSession } from "./handy-dictation";
 import { createVoiceDictationSession } from "./voice-dictation";
 
-export const WAKE_PHRASE = "Luna";
-const KEYWORD_CACHE_PATH = "luna_keyword";
+export const WAKE_PHRASE = "Astra";
+const KEYWORD_CACHE_PATH = "astra_keyword";
 
 export interface WakeWordCallbacks {
   onDetected: () => void;
@@ -64,7 +64,7 @@ export class WakeWordController {
     return this.detectorActive;
   }
 
-  /** Build the engine (training "Luna" on first use; cached in IndexedDB
+  /** Build the engine (training "Astra" on first use; cached in IndexedDB
    * afterwards). Throws with a user-readable message on failure. */
   async prepare(accessKey: string): Promise<void> {
     if (this.worker) return;
@@ -146,7 +146,7 @@ export class WakeWordController {
 
 /** One wake→dictate cycle. The controller never touches the composer or the
  * transcription engines themselves; this object owns the session while a
- * transcript is being captured, so a second "Luna" cannot double-open it.
+ * transcript is being captured, so a second "Astra" cannot double-open it.
  * The engine is chosen per start(): the built-in Deepgram bridge (cloud,
  * needs a key) or the user's own Handy app (offline, transcript arrives via
  * the clipboard). */

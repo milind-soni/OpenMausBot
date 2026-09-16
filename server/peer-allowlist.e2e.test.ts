@@ -56,7 +56,7 @@ const fixture = (displayName: string, dump?: string) => ({
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-peer-allowlist-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".astra");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
   mkdirSync(staticDir, { recursive: true });
@@ -89,10 +89,10 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1),
-      OMB_STATIC_DIR: staticDir,
-      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
+      ASTRA_PORT: String(port),
+      ASTRA_WEBHOOK_PORT: String(port + 1),
+      ASTRA_STATIC_DIR: staticDir,
+      ASTRA_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -159,7 +159,7 @@ const mintCapability = async (botId: string, threadId: string): Promise<string> 
     "POST",
     "/api/testing/internal-capability",
     { botId, threadId, kind: "agents" },
-    { "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+    { "x-astra-test-capability": TEST_CAPABILITY_KEY },
   );
   expect(minted.status).toBe(201);
   return String(minted.body.token);
@@ -212,7 +212,7 @@ describe("peer allow-list", () => {
       // exactly that.
       expect(systemPrompt).toContain("[/TEAM ROSTER] If a supported API key is missing");
 
-      const providerToken = String(dump.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      const providerToken = String(dump.mcpConfig?.mcpServers?.agents?.env?.ASTRA_COMMS_TOKEN ?? "");
       expect(providerToken).toMatch(/^[a-f0-9]{48}$/);
       await expect.poll(() => botBusy(asker.id)).toBe(false);
       const token = await mintCapability(asker.id, asker.threadId);
@@ -318,7 +318,7 @@ describe("peer allow-list", () => {
       rmSync(askerDump, { force: true });
       await warmUp(asker.id);
       await expect.poll(() => readDump(askerDump)()?.mcpConfig, { timeout: 10_000 }).toBeTruthy();
-      const providerToken = String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN ?? "");
+      const providerToken = String(readDump(askerDump)()!.mcpConfig?.mcpServers?.agents?.env?.ASTRA_COMMS_TOKEN ?? "");
       expect(providerToken).toMatch(/^[a-f0-9]{48}$/);
       const token = await mintCapability(asker.id, asker.threadId);
       expect((await api("PATCH", `/api/bots/${asker.id}`, { approvePeerComms: true })).status).toBe(200);

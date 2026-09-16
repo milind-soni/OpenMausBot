@@ -51,7 +51,7 @@ const threadMessages = async (threadId: string): Promise<Array<{ kind: string; c
  * duplicated rather than imported because DATA_DIR there is fixed at import
  * time from this process's HOME, not the fixture's. */
 function brokerCandidates(threadId: string): string[] {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".astra");
   const prefix = threadId.replace(/[^\w-]/g, "").slice(0, 4);
   const digest = createHash("sha256").update(threadId).digest("hex").slice(0, 4);
   const scope = createHash("sha256").update(`${dataDir}\0${child.pid}\0${threadId}`).digest("hex").slice(0, 16);
@@ -94,7 +94,7 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
   beforeAll(async () => {
     chmodSync(FAKE_CLAUDE, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-steer-unattended-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".astra");
     mkdirSync(data, { recursive: true });
     finishGate = join(home, "finish.gate");
     writeFileSync(join(data, "config.json"), JSON.stringify({
@@ -116,8 +116,8 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
         ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
         HOME: home,
         USERPROFILE: home,
-        OMB_PORT: String(port),
-        OMB_WEBHOOK_PORT: String(port + 1),
+        ASTRA_PORT: String(port),
+        ASTRA_WEBHOOK_PORT: String(port + 1),
         // the broker falls back to os.tmpdir() under a deep HOME; the child
         // has to agree with this process about where that is
         TMPDIR: tmpdir(),
@@ -155,7 +155,7 @@ posixOnly("a steered message does not lift the unattended mark on its own", () =
       name: "Nightly build",
       prompt: "Handle the incoming build event",
       botId: bot.id,
-      runOn: "maus",
+      runOn: "astra",
     });
     expect(hook.status).toBe(201);
     const delivered = await fetch(hook.body.credential.url, {

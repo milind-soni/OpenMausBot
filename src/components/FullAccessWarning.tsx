@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { ShieldAlert } from "lucide-react";
 
 export const FULL_ACCESS_WARNING =
-  "This bot can read, edit, delete files, use the internet, and control its selected computer without asking—even for potentially destructive or sensitive actions. This also applies to scheduled work and tasks delegated by your Chief or other bots. It does not enable Full access on other bots. Some providers may still require approval. Questions and separate OpenMausBot confirmations still wait for you. This does not grant operating-system permissions or access to accounts you have not connected.";
+  "This bot can read, edit, delete files, use the internet, and control its selected computer without asking—even for potentially destructive or sensitive actions. This also applies to scheduled work and tasks delegated by your Chief or other bots. It does not enable Full access on other bots. Some providers may still require approval. Questions and separate Astra confirmations still wait for you. This does not grant operating-system permissions or access to accounts you have not connected.";
 
 export function FullAccessWarning({
   open,

@@ -41,7 +41,7 @@ export const brandSchema = z
 
 export type Brand = z.infer<typeof brandSchema>;
 
-export const DEFAULT_BRAND: Brand = { name: "OpenMausBot" };
+export const DEFAULT_BRAND: Brand = { name: "Astra" };
 
 export interface BrandStatus {
   brand: Brand;
@@ -54,7 +54,7 @@ export interface BrandStatus {
 }
 
 export function brandFile(): string {
-  return process.env.OMB_BRAND_FILE || join(DATA_DIR, "brand.json");
+  return process.env.ASTRA_BRAND_FILE || join(DATA_DIR, "brand.json");
 }
 
 /** Resolve the brand for this server right now. Never throws. */

@@ -171,11 +171,11 @@ const __APP_VERSION__: string;
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
       applySkin?(skin: string): Promise<boolean>;
-      /** Receives a GitHub package URL opened through openmausbot://install. */
+      /** Receives a GitHub package URL opened through astra://install. */
       onPackageInstall?(cb: (url: string) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
-      /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
+      /** Opens a live desktop as a sandboxed window owned by Astra. */
       desktopViewer?: {
         open(url: string, title: string, contextId: string): Promise<boolean>;
         /** Closes the live-desktop window, but only when it belongs to this bot. */
@@ -207,7 +207,7 @@ const __APP_VERSION__: string;
       /** Writes the redacted diagnostics report to a user-chosen file;
        * resolves the path, or null when cancelled. */
       exportDiagnostics?(): Promise<string | null>;
-      /** Asks where to save a bot-created file (inside ~/.openmausbot), copies
+      /** Asks where to save a bot-created file (inside ~/.astra), copies
        * it there and reveals it. Resolves the chosen path, or null if the
        * user cancelled the dialog. */
       saveFile?(filePath: string): Promise<string | null>;
@@ -241,8 +241,8 @@ const __APP_VERSION__: string;
       /** Headless transcription of WAV bytes through the user's Handy
        * install (offline model). Returns the transcript text. */
       handyTranscribeFile?(wav: ArrayBuffer, handyPath: string): Promise<{ ok: boolean; text?: string; error?: string }>;
-      /** The Picovoice AccessKey for the "Luna" wake word, from the OS-backed
-       * encrypted store (or OMB_PICOVOICE_KEY in dev). Null when none is
+      /** The Picovoice AccessKey for the "Astra" wake word, from the OS-backed
+       * encrypted store (or ASTRA_PICOVOICE_KEY in dev). Null when none is
        * saved — the wake word then stays off and Settings explains why. */
       picovoiceAccessKey?(): Promise<string | null>;
       /** In-app auto-update (packaged app only; dormant in dev). onState

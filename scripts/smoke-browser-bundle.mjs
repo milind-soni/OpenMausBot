@@ -95,8 +95,8 @@ const env = {
   XDG_CONFIG_HOME: join(fixture, "config"), XDG_CACHE_HOME: join(fixture, "cache"),
   XDG_DATA_HOME: join(fixture, "data"), XDG_RUNTIME_DIR: join(fixture, "run"),
   TMPDIR: join(fixture, "tmp"), TMP: join(fixture, "tmp"), TEMP: join(fixture, "tmp"),
-  OMB_DATA_DIR: join(fixture, "omb"), OMB_RESOURCES_PATH: resolve(values.resources),
-  ...(values["engine-candidate"] ? { OMB_AGENT_BROWSER_PATH: enginePath, AGENT_BROWSER_EXECUTABLE_PATH: paths.chrome } : {}),
+  ASTRA_DATA_DIR: join(fixture, "omb"), ASTRA_RESOURCES_PATH: resolve(values.resources),
+  ...(values["engine-candidate"] ? { ASTRA_AGENT_BROWSER_PATH: enginePath, AGENT_BROWSER_EXECUTABLE_PATH: paths.chrome } : {}),
   // macOS's per-user temp directory is long; keep Unix socket paths <104 bytes.
   AGENT_BROWSER_SOCKET_DIR: join(fixture, "s"),
   AGENT_BROWSER_DEFAULT_TIMEOUT: "15000", LANG: "en_US.UTF-8", NO_COLOR: "1",
@@ -105,7 +105,7 @@ for (const key of ["SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT"])
   if (process.platform === "win32" && process.env[key]) env[key] = process.env[key];
 }
 for (const directory of new Set([fixtureHome, env.APPDATA, env.LOCALAPPDATA, env.XDG_CONFIG_HOME,
-  env.XDG_CACHE_HOME, env.XDG_DATA_HOME, env.XDG_RUNTIME_DIR, env.TMPDIR, env.OMB_DATA_DIR, env.AGENT_BROWSER_SOCKET_DIR])) {
+  env.XDG_CACHE_HOME, env.XDG_DATA_HOME, env.XDG_RUNTIME_DIR, env.TMPDIR, env.ASTRA_DATA_DIR, env.AGENT_BROWSER_SOCKET_DIR])) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
 }
 // Isolate even source-module initialization. No inherited account credentials,
@@ -267,7 +267,7 @@ process.once("SIGTERM", interrupt);
 try {
   const { browserEngineStatus, agentBrowserIntegration, prepareBrowserSessionState, closeBrowserSession: closeSession } = await import("../server/browser-engine.ts");
   closeBrowserSession = closeSession;
-  const status = browserEngineStatus({ dataDir: env.OMB_DATA_DIR, env });
+  const status = browserEngineStatus({ dataDir: env.ASTRA_DATA_DIR, env });
   assert.equal(status.kind, "ready", `Fresh-home runtime did not discover the bundle: ${JSON.stringify(status)}`);
   assert.equal(resolve(status.binaryPath), resolve(enginePath), "Runtime did not select the engine under test");
   const engineVersion = await run(enginePath, ["--version"], env);
@@ -275,7 +275,7 @@ try {
   assert.equal(engineVersion, `agent-browser ${engineVersionExpected}`, `Unexpected engine version: ${engineVersion}`);
   assert(chromeVersion.includes(spec.chrome.version), `Unexpected Chromium version: ${chromeVersion}`);
 
-  const title = `OpenMausBot bundled browser ${randomBytes(6).toString("hex")}`;
+  const title = `Astra bundled browser ${randomBytes(6).toString("hex")}`;
   server = createServer((_request, response) => {
     fixtureRequests += 1;
     response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });

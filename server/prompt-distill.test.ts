@@ -19,11 +19,11 @@ let cacheRoot: string;
 
 beforeEach(() => {
   cacheRoot = mkdtempSync(join(tmpdir(), "omb-distill-"));
-  process.env.OMB_PROMPT_CACHE_DIR = cacheRoot;
+  process.env.ASTRA_PROMPT_CACHE_DIR = cacheRoot;
 });
 
 afterEach(() => {
-  delete process.env.OMB_PROMPT_CACHE_DIR;
+  delete process.env.ASTRA_PROMPT_CACHE_DIR;
 });
 
 describe("distillPrompt", () => {

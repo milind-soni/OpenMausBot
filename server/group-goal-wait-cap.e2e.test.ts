@@ -54,7 +54,7 @@ const fixture = (displayName: string, environment: Record<string, string>) => ({
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-goal-wait-cap-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".astra");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
@@ -85,11 +85,11 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1),
-      OMB_STATIC_DIR: staticDir,
+      ASTRA_PORT: String(port),
+      ASTRA_WEBHOOK_PORT: String(port + 1),
+      ASTRA_STATIC_DIR: staticDir,
       // seconds, not minutes: the point of this file is the cap firing
-      OMB_GOAL_WAIT_MAX_MS: "1500",
+      ASTRA_GOAL_WAIT_MAX_MS: "1500",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

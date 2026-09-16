@@ -2,7 +2,7 @@
 // --permission-prompt-tool (ported from agentcal's runPermissionProxy;
 // dedicated entry file, so there is no argv-dispatch fork-bomb hazard).
 // Forwards each ask over a unix socket to the broker living in the
-// OpenMausBot server and waits for the human's answer.
+// Astra server and waits for the human's answer.
 //
 //   approve   — the CLI calls this for any tool use its permission mode
 //               would deny; the answer is the --permission-prompt-tool
@@ -26,7 +26,7 @@ interface AllowPermissionResult {
 }
 const dead = () => {
   for (const resolve of waiting.values()) {
-    resolve({ behavior: "deny", message: "OpenMausBot: permission broker unavailable — skip this action" });
+    resolve({ behavior: "deny", message: "Astra: permission broker unavailable — skip this action" });
   }
   waiting.clear();
 };
@@ -58,7 +58,7 @@ const send = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 const TOOLS = [
   {
     name: "approve",
-    description: "Ask the OpenMausBot user whether a tool use is allowed",
+    description: "Ask the Astra user whether a tool use is allowed",
     inputSchema: {
       type: "object",
       properties: {
@@ -96,7 +96,7 @@ async function handle(msg: any) {
       result: {
         protocolVersion: msg.params?.protocolVersion ?? "2024-11-05",
         capabilities: { tools: {} },
-        serverInfo: { name: "openmausbot-permissions", version: "1" },
+        serverInfo: { name: "astra-permissions", version: "1" },
       },
     });
   }
@@ -133,7 +133,7 @@ async function handle(msg: any) {
         if (answer.always && suggestions) result.updatedPermissions = suggestions;
         text = JSON.stringify(result);
       } else {
-        text = JSON.stringify({ behavior: "deny", message: answer.message || "Denied from OpenMausBot" });
+        text = JSON.stringify({ behavior: "deny", message: answer.message || "Denied from Astra" });
       }
     }
     return send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text }] } });

@@ -59,8 +59,8 @@ const dumpOf = (threadId: string): { systemPrompt?: string; mcpConfig?: any } | 
 /** The live per-turn token of a held turn — the only credential the
  * internal endpoints accept, and the one a real tool call would carry. */
 const liveToken = async (threadId: string): Promise<Record<string, string>> => {
-  await expect.poll(() => dumpOf(threadId)?.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN, { timeout: 15_000 }).toBeTruthy();
-  return { authorization: `Bearer ${dumpOf(threadId)!.mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN}` };
+  await expect.poll(() => dumpOf(threadId)?.mcpConfig?.mcpServers?.agents?.env?.ASTRA_COMMS_TOKEN, { timeout: 15_000 }).toBeTruthy();
+  return { authorization: `Bearer ${dumpOf(threadId)!.mcpConfig.mcpServers.agents.env.ASTRA_COMMS_TOKEN}` };
 };
 /** Hold a fresh turn open on a bot's own thread and hand back its live
  * token. A wake that lands on that thread cannot start while this turn
@@ -94,7 +94,7 @@ const mintedToken = async (botId: string, threadId: string, depth = 0): Promise<
     "POST",
     "/api/testing/internal-capability",
     { botId, threadId, kind: "agents", depth },
-    { "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+    { "x-astra-test-capability": TEST_CAPABILITY_KEY },
   );
   expect(minted.status).toBe(201);
   return { authorization: `Bearer ${minted.body.token}` };
@@ -122,7 +122,7 @@ beforeAll(async () => {
   chmodSync(FAKE_ACP, 0o755);
   home = mkdtempSync(join(tmpdir(), "omb-thread-aware-"));
   gates = join(home, "gates");
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".astra");
   mkdirSync(data, { recursive: true });
   mkdirSync(gates, { recursive: true });
   // Every turn holds until its gate exists, and dumps its argv/env/prompt
@@ -143,7 +143,7 @@ beforeAll(async () => {
     "if (at >= 0) {",
     "  try {",
     '    const servers = JSON.parse(readFileSync(process.argv[at + 1], "utf8")).mcpServers ?? {};',
-    "    for (const server of Object.values(servers)) thread ??= server?.env?.OMB_THREAD_ID ?? null;",
+    "    for (const server of Object.values(servers)) thread ??= server?.env?.ASTRA_THREAD_ID ?? null;",
     "  } catch {}",
     "}",
     "const relay = new PassThrough();",
@@ -195,9 +195,9 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1),
-      OMB_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
+      ASTRA_PORT: String(port),
+      ASTRA_WEBHOOK_PORT: String(port + 1),
+      ASTRA_TEST_INTERNAL_CAPABILITY_KEY: TEST_CAPABILITY_KEY,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -350,7 +350,7 @@ describe("start_thread on a teammate", () => {
       expect((await messages(pm.threadId)).some((message) => message.tool?.name === "Thread #QA: PR #3 on @Quinn waiting for a free slot")).toBe(true);
       // the first line of an opened thread is the opener's words, marked as such
       const firstLine = (await messages(opened[0].threadId)).find((message) => message.role === "user");
-      expect(firstLine.text).toContain("[Thread opened by @Pam, another bot in this OpenMausBot workspace");
+      expect(firstLine.text).toContain("[Thread opened by @Pam, another bot in this Astra workspace");
       expect(firstLine.text).toContain("Test pull request 1.");
       expect(firstLine.peerAsk).toMatchObject({ botId: pm.id, name: "Pam" });
       // a peer-opened thread runs one hop down: no agents tools were mounted

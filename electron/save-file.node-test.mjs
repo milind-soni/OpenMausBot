@@ -26,7 +26,7 @@ let botHome;
 
 before(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "omb-save-file-"));
-  botHome = path.join(home, ".openmausbot");
+  botHome = path.join(home, ".astra");
   fs.mkdirSync(path.join(botHome, "workspaces", "bot"), { recursive: true });
   fs.writeFileSync(path.join(botHome, "workspaces", "bot", "report.docx"), "docx");
   fs.writeFileSync(path.join(home, "secret.txt"), "private");
@@ -53,9 +53,9 @@ describe("save-file path validation", () => {
     const realBotHome = path.join(realHome, "bot-data");
     fs.mkdirSync(realBotHome, { recursive: true });
     fs.writeFileSync(path.join(realBotHome, "report.docx"), "docx");
-    fs.symlinkSync(realBotHome, path.join(linkedHome, ".openmausbot"));
+    fs.symlinkSync(realBotHome, path.join(linkedHome, ".astra"));
 
-    const viaLink = path.join(linkedHome, ".openmausbot", "report.docx");
+    const viaLink = path.join(linkedHome, ".astra", "report.docx");
     assert.equal(await resolveSavablePath(viaLink, { home: linkedHome }), await fs.promises.realpath(viaLink));
 
     fs.rmSync(realHome, { recursive: true, force: true });

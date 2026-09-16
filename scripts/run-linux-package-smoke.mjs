@@ -29,11 +29,11 @@ if (appImages.length !== 1) {
 const [appImage] = appImages;
 
 const executables = [
-  path.join(root, "release", "linux-unpacked", "openmausbot"),
+  path.join(root, "release", "linux-unpacked", "astra"),
   path.join(root, "release", appImage),
 ];
-if (process.env.OMB_SMOKE_INSTALLED_DEB === "1") {
-  executables.push("/opt/OpenMausBot/openmausbot");
+if (process.env.ASTRA_SMOKE_INSTALLED_DEB === "1") {
+  executables.push("/opt/Astra/astra");
 }
 
 for (const executable of executables) {
@@ -47,8 +47,8 @@ for (const executable of executables) {
       env: {
         ...process.env,
         XDG_RUNTIME_DIR: runtimeDirectory,
-        OMB_SMOKE_BUNDLED_CUA: "1",
-        OMB_SMOKE_EXECUTABLE: executable,
+        ASTRA_SMOKE_BUNDLED_CUA: "1",
+        ASTRA_SMOKE_EXECUTABLE: executable,
       },
       stdio: "inherit",
     },
@@ -76,9 +76,9 @@ if (process.exitCode === undefined) {
       env: {
         ...process.env,
         XDG_RUNTIME_DIR: runtimeDirectory,
-        OMB_SMOKE_BUNDLED_CUA: "1",
-        OMB_SMOKE_SIGNAL_SHUTDOWN: "1",
-        OMB_SMOKE_EXECUTABLE: path.join(root, "release", appImage),
+        ASTRA_SMOKE_BUNDLED_CUA: "1",
+        ASTRA_SMOKE_SIGNAL_SHUTDOWN: "1",
+        ASTRA_SMOKE_EXECUTABLE: path.join(root, "release", appImage),
       },
       stdio: "inherit",
     },
@@ -105,8 +105,8 @@ if (process.exitCode === undefined) {
       env: {
         ...process.env,
         XDG_RUNTIME_DIR: runtimeDirectory,
-        OMB_SMOKE_HARD_DEATH: "1",
-        OMB_SMOKE_EXECUTABLE: path.join(root, "release", "linux-unpacked", "openmausbot"),
+        ASTRA_SMOKE_HARD_DEATH: "1",
+        ASTRA_SMOKE_EXECUTABLE: path.join(root, "release", "linux-unpacked", "astra"),
       },
       stdio: "inherit",
     },
@@ -141,8 +141,8 @@ if (process.exitCode === undefined) for (const lane of [
       env: {
         ...process.env,
         XDG_RUNTIME_DIR: runtimeDirectory,
-        OMB_SMOKE_WAYLAND: lane.wayland ? "1" : "0",
-        OMB_SMOKE_LINUX_CUA_BLOCKED: lane.blocked ? "1" : "0",
+        ASTRA_SMOKE_WAYLAND: lane.wayland ? "1" : "0",
+        ASTRA_SMOKE_LINUX_CUA_BLOCKED: lane.blocked ? "1" : "0",
       },
       stdio: "inherit",
     },

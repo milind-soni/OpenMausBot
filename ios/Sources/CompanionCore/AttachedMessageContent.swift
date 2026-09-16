@@ -32,7 +32,7 @@ public struct AttachedMessageContent: Hashable, Sendable {
         self.attachments = attachments
     }
 
-    /// Splits only the exact, standalone tags OpenMausBot writes. An inline
+    /// Splits only the exact, standalone tags Astra writes. An inline
     /// example in somebody's prose stays prose instead of disappearing.
     public static func parse(_ source: String) -> AttachedMessageContent {
         var attachments: [DisplayedMessageAttachment] = []

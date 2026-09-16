@@ -6,7 +6,7 @@ import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies.ts";
 // Emitted into the Android app module, whose JVM unit tests (Robolectric) parse
 // the catalog the way `swift test` does for CompanionCore — see swift-catalog.test.mjs.
 const kotlin = readFileSync(
-  new URL("../../android/app/src/main/kotlin/com/openmausbot/companion/ui/MausBodies.kt", import.meta.url),
+  new URL("../../android/app/src/main/kotlin/com/astra/companion/ui/AstraBodies.kt", import.meta.url),
   "utf8"
 );
 

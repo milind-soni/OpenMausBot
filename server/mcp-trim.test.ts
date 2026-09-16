@@ -28,7 +28,7 @@ describe("trimResultText", () => {
     expect(out.text.length).toBeLessThan(DEFAULT_RESULT_BUDGET);
     expect(out.originalChars).toBe(text.length);
 
-    const kept = JSON.parse(out.text.slice(0, out.text.indexOf("\n\n[OpenMausBot")));
+    const kept = JSON.parse(out.text.slice(0, out.text.indexOf("\n\n[Astra")));
     // whole records, not a severed one
     expect(kept.products.length).toBeGreaterThan(0);
     expect(kept.products.length).toBeLessThan(200);
@@ -49,7 +49,7 @@ describe("trimResultText", () => {
       dishes: Array.from({ length: 60 }, (_, i) => product(i)),
     });
     const out = trimResultText({ text });
-    const kept = JSON.parse(out.text.slice(0, out.text.indexOf("\n\n[OpenMausBot")));
+    const kept = JSON.parse(out.text.slice(0, out.text.indexOf("\n\n[Astra")));
     expect(kept.restaurants.length).toBeGreaterThan(0);
     expect(kept.dishes.length).toBeGreaterThan(0);
   });
@@ -57,7 +57,7 @@ describe("trimResultText", () => {
   it("trims a bare array root", () => {
     const text = JSON.stringify(Array.from({ length: 200 }, (_, i) => product(i)));
     const out = trimResultText({ text });
-    const kept = JSON.parse(out.text.slice(0, out.text.indexOf("\n\n[OpenMausBot")));
+    const kept = JSON.parse(out.text.slice(0, out.text.indexOf("\n\n[Astra")));
     expect(Array.isArray(kept)).toBe(true);
     expect(kept.length).toBeLessThan(200);
     expect(kept[0]).toEqual(product(0));
@@ -92,7 +92,7 @@ describe("trimResultText", () => {
   it("never cuts a surrogate pair in half", () => {
     const text = `${"🍵".repeat(20_000)}`;
     const out = trimResultText({ text, budget: 4_000 });
-    const body = out.text.slice(0, out.text.indexOf("\n\n[OpenMausBot"));
+    const body = out.text.slice(0, out.text.indexOf("\n\n[Astra"));
     expect([...body].every((ch) => ch === "🍵")).toBe(true);
   });
 

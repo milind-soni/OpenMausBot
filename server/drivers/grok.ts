@@ -46,7 +46,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "xAI",
       missingKeyError: `no xAI key — set ${config.apiKeyEnv} or config.json xai.key`,
-      unavailableReason: `no xAI API key — add {"xai":{"key":"xai-…"}} to ~/.openmausbot/config.json or set ${config.apiKeyEnv}`,
+      unavailableReason: `no xAI API key — add {"xai":{"key":"xai-…"}} to ~/.astra/config.json or set ${config.apiKeyEnv}`,
       timeoutMs: 120_000,
       retryScale: Number(process.env.FAKE_GROK_RETRY_SCALE ?? "1"),
       generateModel: () => "grok-3-mini",

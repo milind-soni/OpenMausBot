@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
-import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { runControlOmb } from "../control-astra.ts";
+import { UI_TOOLS_DIR } from "./control-astra-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
-const forced = process.env.OMB_UI_E2E === "1";
+const forced = process.env.ASTRA_UI_E2E === "1";
 const enabled = forced || Boolean(binary);
-if (!enabled) console.log("skipping workspace backup UI e2e: no agent-browser; set OMB_UI_E2E=1 to install the pinned release");
+if (!enabled) console.log("skipping workspace backup UI e2e: no agent-browser; set ASTRA_UI_E2E=1 to install the pinned release");
 const LAUNCH_TIMEOUT_MS = forced && !binary ? 600_000 : 180_000;
 interface FixtureInfo { ui: string; url: string; dataDir: string; logPath: string }
 
@@ -26,7 +26,7 @@ describe("full backup Settings in the real renderer", () => {
   (enabled ? it : it.skip)("uses passwords, a file preview and explicit replacement without leaking secrets", async () => {
     let stdout = "";
     let stderr = "";
-    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
+    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-astra.ts"), "ui", "launch"], {
       cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
@@ -124,7 +124,7 @@ describe("full backup Settings in the real renderer", () => {
     const evidence = join(ROOT, ".omb-scratch", "verify-evidence", "workspace-backup-preview.png");
     await ui("screenshot", "--out", evidence);
     await click("Replace workspace");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Fully quit OpenMausBot");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Fully quit Astra");
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/restore')).body")).toEqual({ id: "validated-stage", confirmation: "REPLACE" });
     expect(await evaluate("window.backupFixture.calls.find(call => call.path.endsWith('/upload')).rawFile")).toBe(true);
     expect(await evaluate("localStorage.getItem('omb-pending-workspace-restore')")).toBe("validated-stage");

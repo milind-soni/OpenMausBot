@@ -1,6 +1,6 @@
 ---
 name: self-modify
-description: Propose safe, reversible edits to OpenMausBot's own code through the journal + watchdog rollback pipeline. Use when a task requires changing the bot server itself rather than working within it.
+description: Propose safe, reversible edits to Astra's own code through the journal + watchdog rollback pipeline. Use when a task requires changing the bot server itself rather than working within it.
 ---
 
 # Self-modify: changing this server's own code
@@ -33,7 +33,7 @@ state as: *file, change, why it is safe, how it was or will be proven*.
    <DATA_DIR>/self-modify/pending/<your-id>.json
    ```
 
-   (On desktop installs `<DATA_DIR>` is `%USERPROFILE%\.openmausbot`.)
+   (On desktop installs `<DATA_DIR>` is `%USERPROFILE%\.astra`.)
 
    Shape:
 
@@ -62,7 +62,7 @@ state as: *file, change, why it is safe, how it was or will be proven*.
 
 - **Validation** — source-tree paths only; protected paths (this skill, the
   journal, the watchdog, config) and protected content (anything touching
-  the gate, the revert machinery, or `OMB_SELF_MODIFY`) are refused.
+  the gate, the revert machinery, or `ASTRA_SELF_MODIFY`) are refused.
 - **Journal** — originals are snapshotted byte-for-byte before the first write.
 - **Preflight** — changed server files must pass `node --check`; dependency
   changes install with scripts disabled. Failure auto-reverts.
@@ -78,7 +78,7 @@ state as: *file, change, why it is safe, how it was or will be proven*.
   skill itself, `package.json` (except dependency sections via the
   `packageJson` field), lockfiles, CI.
 - You cannot write content that touches the gate, revert machinery, or
-  `OMB_SELF_MODIFY` anywhere — even in an unrelated file.
+  `ASTRA_SELF_MODIFY` anywhere — even in an unrelated file.
 - One server-touching proposal may be in flight at a time.
 - Proposals are auditable forever: every apply is recorded in the journal
   with who, why, what, and how it resolved.

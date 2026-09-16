@@ -32,7 +32,7 @@ describe("durable browser lifecycle cleanup", () => {
       send(message) {
         const { requestId } = message;
         queueMicrotask(() => coordinator.receive({
-          type: "openmausbot:browser-lifecycle-result",
+          type: "astra:browser-lifecycle-result",
           requestId,
           ok: true,
         }));
@@ -85,7 +85,7 @@ describe("durable browser lifecycle cleanup", () => {
       send(message) {
         sentProfileId = message.partitionId ?? "";
         queueMicrotask(() => coordinator.receive({
-          type: "openmausbot:browser-lifecycle-result",
+          type: "astra:browser-lifecycle-result",
           requestId: message.requestId,
           ok: true,
         }));
@@ -140,7 +140,7 @@ describe("durable browser lifecycle cleanup", () => {
       retryMs: [10],
       send(message) {
         queueMicrotask(() => afterRestart.receive({
-          type: "openmausbot:browser-lifecycle-result",
+          type: "astra:browser-lifecycle-result",
           requestId: message.requestId,
           ok: true,
         }));

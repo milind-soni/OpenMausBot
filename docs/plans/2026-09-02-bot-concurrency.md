@@ -25,7 +25,7 @@ the conservative per-bot lane described here.
 - Memory is per bot, files per user; no concurrent-write semantics are published — the product
   pushes conflicts to "a single owner at each stage".
 
-## Decision for OpenMausBot
+## Decision for Astra
 
 1. **Default stays serial per bot; membership fans out; a busy bot is *woken later*, never
    skipped.** Ordinary room turns join the same bounded wait that goals use (`waitForGroupGoalBot`

@@ -12,7 +12,7 @@
 // detached watchdog (electron/self-modify-watchdog.mjs) reverts this process
 // if it dies before verifying itself, and boot reconciliation
 // (verifyBootedProposal/failStartupCheck) covers a watchdog that died too.
-// The whole subsystem is opt-in (OMB_SELF_MODIFY or feature config) and the
+// The whole subsystem is opt-in (ASTRA_SELF_MODIFY or feature config) and the
 // safety machinery is on the protected list — the system can propose, it
 // cannot touch its own leash.
 import { spawnSync } from "node:child_process";
@@ -55,7 +55,7 @@ const PROTECTED_PREFIXES = ["server/self-modify", "electron/self-modify", ".gith
 /** Content that must not appear in any applied file, even outside the
  * protected paths — these lines are how the other guards get disabled. */
 const PROTECTED_CONTENT: Array<{ pattern: RegExp; why: string }> = [
-  { pattern: /OMB_SELF_MODIFY/, why: "toggles the self-modify gate itself" },
+  { pattern: /ASTRA_SELF_MODIFY/, why: "toggles the self-modify gate itself" },
   { pattern: /selfModifyConfig|selfModifyEnabled|SELF_MODIFY_DIR|PENDING_DIR|JOURNAL_DIR/, why: "touches self-modify internals" },
   { pattern: /verifyBootedProposal|failStartupCheck|beginBootingProposal|revertProposal|preflightCheck/, why: "touches the revert/verify machinery" },
   { pattern: /self-modify-watchdog/, why: "touches the watchdog" },

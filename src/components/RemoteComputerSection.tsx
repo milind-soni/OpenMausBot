@@ -139,7 +139,7 @@ export function RemoteComputerSection() {
                 {t("remote.client.server.hint")}
               </p>
               <code className="select-all rounded-lg bg-inset px-3 py-2 text-[12px] text-ink">
-                npx openmausbot pair --client
+                npx astra pair --client
               </code>
               <label className="flex flex-col gap-1.5 text-[12px] text-ink-secondary">
                 {t("remote.client.server.pairingLink")}
@@ -169,7 +169,7 @@ export function RemoteComputerSection() {
                 <input
                   value={endpoint}
                   onChange={(event) => setEndpoint(event.target.value)}
-                  placeholder="https://…openmausbot.com or computer.tailnet.ts.net"
+                  placeholder="https://…astra.com or computer.tailnet.ts.net"
                   disabled={busy}
                   autoCapitalize="none"
                   autoCorrect="off"

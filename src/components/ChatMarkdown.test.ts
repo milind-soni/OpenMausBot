@@ -191,7 +191,7 @@ describe("message-scoped file targets", () => {
     expect(localFilePath("file://server/share/report.pdf")).toBe("//server/share/report.pdf");
     expect(localFilePath("//cdn.example.test/report.pdf")).toBeNull();
     expect(localFilePath("/C:/posix/report.pdf")).toBe("/C:/posix/report.pdf");
-    expect(localFilePath("file:///C:/Users/Maus/report.pdf")).toBe("C:/Users/Maus/report.pdf");
+    expect(localFilePath("file:///C:/Users/Astra/report.pdf")).toBe("C:/Users/Astra/report.pdf");
     expect(localFilePath("https://example.test/report.pdf")).toBeNull();
     expect(localFilePath("#section")).toBeNull();
     expect(localFilePath("javascript:alert(1)")).toBeNull();
@@ -199,7 +199,7 @@ describe("message-scoped file targets", () => {
 
   it("preserves supported local file spellings without widening unsafe protocols", () => {
     expect(chatUrlTransform("file:///Users/milind/report.md")).toBe("file:///Users/milind/report.md");
-    expect(chatUrlTransform("C:/Users/Maus/report.md")).toBe("C:/Users/Maus/report.md");
+    expect(chatUrlTransform("C:/Users/Astra/report.md")).toBe("C:/Users/Astra/report.md");
     expect(chatUrlTransform("\\\\server\\share\\report.md")).toBe("\\\\server\\share\\report.md");
     expect(chatUrlTransform("javascript:alert(1)")).toBe("");
     expect(chatUrlTransform("https://example.test/report.md")).toBe("https://example.test/report.md");
@@ -229,12 +229,12 @@ describe("ChatMarkdown attachments", () => {
 
   it("keeps host paths private while routing them through the scoped file handler", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-      text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Maus/report.md)",
+      text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Astra/report.md)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
     expect(html).toContain('title="Save a copy"');
     expect(html).not.toContain("/Users/milind/report.md");
-    expect(html).not.toContain("C:/Users/Maus/report.md");
+    expect(html).not.toContain("C:/Users/Astra/report.md");
   });
 
   it("keeps an unscoped legacy file link inert", () => {

@@ -9,7 +9,7 @@ import { workingFolderLabel } from "./ComposerTray";
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 const bot: Bot = {
-  id: "maus", threadId: "idle", name: "Maus", title: "", description: "", notifications: true,
+  id: "maus", threadId: "idle", name: "Astra", title: "", description: "", notifications: true,
   color: "green", unread: true, busy: true, activity: "working", messages: [],
   modelSelection: { instanceId: "fake", model: "test" },
   tasks: [
@@ -28,7 +28,7 @@ describe("sidebar bot threads", () => {
   });
   it("shows indented named threads with separate presence and a usable New thread action", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot, selected: true })));
-    expect(markup).toContain('aria-label="Maus threads"');
+    expect(markup).toContain('aria-label="Astra threads"');
     expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
     expect(markup).toContain("Long research · Working");
     expect(markup).toContain("Needs approval · Waiting · Unread");

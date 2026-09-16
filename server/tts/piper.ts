@@ -4,7 +4,7 @@
 // the built-in SAPI/`say` engines, which work everywhere but sound robotic —
 // Piper is the offline engine you pick when the voice should sound human.
 //
-// The engine and voice models live in ~/.openmausbot/piper (engine binary at
+// The engine and voice models live in ~/.astra/piper (engine binary at
 // the root, voices/ beside it). Nothing here downloads or updates anything at
 // runtime; provisioning is a documented manual step and the provider simply
 // never appears as an option when the engine is absent.
@@ -19,7 +19,7 @@ import type { Audio, Voice } from "./elevenlabs.ts";
 
 const execFileAsync = promisify(execFile);
 
-const PIPER_ROOT = join(homedir(), ".openmausbot", "piper");
+const PIPER_ROOT = join(homedir(), ".astra", "piper");
 const VOICES_DIR = join(PIPER_ROOT, "voices");
 const ENGINE_TIMEOUT_MS = 60_000;
 

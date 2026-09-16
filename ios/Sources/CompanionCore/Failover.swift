@@ -153,7 +153,7 @@ public enum ConnectionAdvice {
         case .cannotFindHost:
             advice = "\u{201C}\(host)\u{201D} didn't resolve. If that's a Tailscale name, this phone may not be on the tailnet."
         case .cannotConnectToHost:
-            advice = "Reached your computer, but Phone access isn't answering on port \(port) — open OpenMausBot → Settings → Phone."
+            advice = "Reached your computer, but Phone access isn't answering on port \(port) — open Astra → Settings → Phone."
         case .timedOut:
             advice = "No route to your computer at \(host) — different network, or a firewall."
         case .notConnectedToInternet:

@@ -768,7 +768,7 @@ body {
   transition: none !important;
 }
 
-/* SupaMaus vector motion. The fast horizontal compression is the edge-on
+/* SupaAstra vector motion. The fast horizontal compression is the edge-on
    moment of a turn; face parallax, surface lighting, and orbiting vector marks
    sell the 3D rotation without duplicate silhouettes, raster frames, or WebGL. */
 .maus-character,

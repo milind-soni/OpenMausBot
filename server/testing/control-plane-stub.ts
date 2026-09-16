@@ -1,4 +1,4 @@
-// A stand-in for cloudflare/control-plane for tests of `openmausbot login`
+// A stand-in for cloudflare/control-plane for tests of `astra login`
 // and `serve --tunnel`: the routes the desktop's control-plane client uses,
 // answering in the shapes its validators accept. Authorization is only "is
 // this a credential this stub issued". Records every call so a test can
@@ -42,7 +42,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
 
 export async function startControlPlaneStub(options: { otp?: string; endpointUrl?: string } = {}): Promise<ControlPlaneStub> {
   const otp = options.otp ?? "24681357";
-  const endpointUrl = options.endpointUrl ?? "https://c-stub.openmausbot.invalid";
+  const endpointUrl = options.endpointUrl ?? "https://c-stub.astra.invalid";
   const connectorToken = `stub-connector-${randomBytes(48).toString("base64url")}`;
   const accountTokens = new Set<string>();
   const installations = new Map<string, StubInstallation>();
@@ -80,7 +80,7 @@ export async function startControlPlaneStub(options: { otp?: string; endpointUrl
     const byCredential = () => [...installations.values()].find((inst) => inst.credential === bearer) ?? null;
     const account = accountTokens.has(bearer);
 
-    if (method === "GET" && path === "/healthz") return send(200, { ok: true, service: "openmausbot-control-plane" });
+    if (method === "GET" && path === "/healthz") return send(200, { ok: true, service: "astra-control-plane" });
     if (method === "POST" && path === "/api/auth/email-otp/send-verification-otp") {
       await readJson(req);
       return send(200, { success: true });

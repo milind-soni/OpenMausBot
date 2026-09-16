@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { schemaIssue, type JsonValue } from "./schema.ts";
-import type { MausColor } from "./store.ts";
+import type { AstraColor } from "./store.ts";
 import { botMascotBody, type MascotBodyId } from "../shared/mascot-bodies.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
@@ -22,7 +22,7 @@ const COLORS = [
   "yellow",
   "teal",
   "coral",
-] as const satisfies readonly MausColor[];
+] as const satisfies readonly AstraColor[];
 
 const requiredText = (max: number) =>
   z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
@@ -64,7 +64,7 @@ const membersSchema = z
 
 const manifestSchema = z.discriminatedUnion("version", [
   z.object({
-    format: z.literal(TEAM_MANIFEST_FORMAT, { error: "This is not an OpenMaus team file" }),
+    format: z.literal(TEAM_MANIFEST_FORMAT, { error: "This is not an Astra team file" }),
     version: z.literal(LEGACY_TEAM_MANIFEST_VERSION),
     team: z.object({
       name: requiredText(100),
@@ -78,7 +78,7 @@ const manifestSchema = z.discriminatedUnion("version", [
     }),
   }),
   z.object({
-    format: z.literal(TEAM_MANIFEST_FORMAT, { error: "This is not an OpenMaus team file" }),
+    format: z.literal(TEAM_MANIFEST_FORMAT, { error: "This is not an Astra team file" }),
     version: z.literal(TEAM_MANIFEST_VERSION),
     team: z.object({
       name: requiredText(100),
@@ -95,7 +95,7 @@ export interface TeamManifestMember {
   description: string;
   soul?: string;
   appearance: {
-    color: MausColor;
+    color: AstraColor;
     mascotExpression?: string;
     mascotBody?: string;
   };
@@ -142,7 +142,7 @@ interface ExportableBot {
   title: string;
   description: string;
   soul?: string;
-  color: MausColor;
+  color: AstraColor;
   mascotExpression?: string | null;
   mascotBody?: string | null;
 }
@@ -213,7 +213,7 @@ export interface ImportedMemberProfile {
   title: string;
   description: string;
   soul?: string;
-  color: MausColor;
+  color: AstraColor;
   mascotExpression?: string;
   mascotBody?: MascotBodyId;
 }

@@ -1,11 +1,11 @@
 {
-  "name": "@openmausbot/companion",
+  "name": "@astra/companion",
   "version": "0.1.0",
   "private": true,
-  "description": "A sidecar that lets a paired phone reach an unmodified OpenMausBot harness",
+  "description": "A sidecar that lets a paired phone reach an unmodified Astra harness",
   "type": "module",
   "bin": {
-    "openmausbot-companion": "./src/index.ts"
+    "astra-companion": "./src/index.ts"
   },
   "engines": {
     "node": ">=24"

@@ -9,7 +9,7 @@ import {
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
 
-export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.openmausbot.com";
+export const DEFAULT_COMPANION_CONTROL_PLANE_URL = "https://accounts.astra.com";
 
 export const COMPANION_CLIENT_INSTANCE_FIELD = "companionClientInstanceId";
 export const COMPANION_ACCOUNT_TOKEN_FIELD = "companionAccountToken";
@@ -36,8 +36,8 @@ export function resolveCompanionControlPlaneURL({
   isPackaged,
   environment = process.env,
 } = {}) {
-  if (Object.hasOwn(environment, "OMB_CONTROL_PLANE_URL")) {
-    return normalizeControlPlaneURL(environment.OMB_CONTROL_PLANE_URL);
+  if (Object.hasOwn(environment, "ASTRA_CONTROL_PLANE_URL")) {
+    return normalizeControlPlaneURL(environment.ASTRA_CONTROL_PLANE_URL);
   }
   return isPackaged ? DEFAULT_COMPANION_CONTROL_PLANE_URL : "";
 }
@@ -132,7 +132,7 @@ const FRIENDLY_MESSAGES = Object.freeze({
   unauthorized: "Your sign-in expired. Email yourself a new code to reconnect.",
   forbidden: "The secure connection request was not allowed. Try signing in again.",
   signed_out: "Your sign-in expired. Email yourself a new code to reconnect.",
-  network_unavailable: "OpenMausBot could not reach its secure connection service. Check your internet and try again.",
+  network_unavailable: "Astra could not reach its secure connection service. Check your internet and try again.",
   rate_limited: "Too many attempts were made. Wait a little, then try again.",
   credential_rotation_rate_limited: "This computer was reconnected too often. Wait a little, then try again.",
   installation_limit_reached: "This account has reached its computer limit. Remove an old computer and try again.",

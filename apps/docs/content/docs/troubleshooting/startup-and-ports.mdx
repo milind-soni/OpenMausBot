@@ -8,17 +8,17 @@ The Electron app starts a local harness and serves the interface from the same m
 
 ## App opens but never becomes ready
 
-1. Quit every OpenMausBot window.
-2. Confirm no old OpenMausBot process remains.
+1. Quit every Astra window.
+2. Confirm no old Astra process remains.
 3. Start the app once and wait for the local harness.
 4. If it still fails, inspect the desktop log.
 
-On macOS, packaged logs are under `~/Library/Logs/OpenMausBot`. On Windows they are under the OpenMausBot log directory in `%APPDATA%`.
+On macOS, packaged logs are under `~/Library/Logs/Astra`. On Windows they are under the Astra log directory in `%APPDATA%`.
 
 ## Development port overrides
 
-Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
+Use `ASTRA_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
 
 ## Isolate a test profile
 
-Developers can set `OMB_DATA_DIR` to run against a clean OpenMausBot data directory. This is useful for reproduction and screenshots without touching a real workspace.
+Developers can set `ASTRA_DATA_DIR` to run against a clean Astra data directory. This is useful for reproduction and screenshots without touching a real workspace.

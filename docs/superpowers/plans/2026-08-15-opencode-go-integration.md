@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add OpenCode Go as an optional ACP-backed OpenMausBot engine with dynamic models, write-only credentials, setup UX, and comprehensive tests.
+**Goal:** Add OpenCode Go as an optional ACP-backed Astra engine with dynamic models, write-only credentials, setup UX, and comprehensive tests.
 
 **Architecture:** Extend the generic ACP support SPI with an optional asynchronous model resolver and keep OpenCode-specific behavior in `server/drivers/acp/opencode-go.ts`. Load the API key from config/environment into the child process only, register the driver in the normal fleet, and reuse the existing registry, `/api/instances`, setup UI, and ACP event machinery.
 
@@ -43,7 +43,7 @@
 - [ ] Run the focused tests and verify they fail for missing exports/driver.
 - [ ] Implement `fetchOpenCodeGoModels(fetcher)` with a module cache, 8-second timeout via `AbortController`, validation of `data`/array payloads, and a static fallback containing the documented Go model ids. Do not log response bodies or credentials.
 - [ ] Implement `OpenCodeGoDriver = createAcpDriver({ driverKind: "opencodeGo", displayName: "OpenCode Go", defaultCli: "opencode", nativeSource: "opencode-go.acp", spawnArgs: () => ["acp"], transformEnv: stripForeignProviderKeys, pickAuthMethod: () => null, authFailure: "continue", isAuthenticated: env => Boolean(env.OPENCODE_API_KEY), resolveModels: () => fetchOpenCodeGoModels() })`; the environment transform must remove known unrelated provider keys and leave the intentionally injected OpenCode key.
-- [ ] Add cross-platform setup commands, docs URL, and a login note that never asks OpenMausBot to edit OpenCode auth files.
+- [ ] Add cross-platform setup commands, docs URL, and a login note that never asks Astra to edit OpenCode auth files.
 - [ ] Run the focused tests and commit `feat(acp): add OpenCode Go driver`.
 
 ### Task 3: Wire credential storage and registration

@@ -167,7 +167,7 @@ describe("message-db", () => {
     // the user's own words, which carry no note and get no author
     insertMessage("dm", msg("m-user", "please get the pricing audit emailed to me"));
     // a bot's own reply that merely quotes the wording mid-text is its own
-    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this OpenMausBot workspace] earlier about the pricing audit", { role: "bot" }));
+    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this Astra workspace] earlier about the pricing audit", { role: "bot" }));
     // a line stored since — the exact row shape the store writes for an
     // ask_bot delivery (Message.peerAsk)
     closeMessageDb();

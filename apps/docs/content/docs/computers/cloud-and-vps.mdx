@@ -8,11 +8,11 @@ icon: Cloud
 
 Add a Box API key in App Settings to provision an isolated hosted Linux desktop. The computer can sleep and wake, and supported sessions provide a live viewer for temporary human control. Trial accounts automatically retry creation with the provider's shorter auto-stop ceiling when required.
 
-Box is a third-party paid service after its trial. OpenMausBot stores the configured credential locally and does not expose it to the renderer.
+Box is a third-party paid service after its trial. Astra stores the configured credential locally and does not expose it to the renderer.
 
 ## Bring your own VPS
 
-OpenMausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.
+Astra can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.
 
 Your SSH alias should include connection multiplexing, keepalives, and a connect timeout. Connect manually once to approve the host key, then verify:
 
@@ -25,6 +25,6 @@ The SSH user needs Docker access, which is root-equivalent on that server. Use a
 
 The managed container publishes no ports, has no host mounts, and is checked before every attach. Its filesystem should be treated as disposable; move important results out before deleting or upgrading the container.
 
-**Take control** opens the VPS desktop inside OpenMausBot through a temporary SSH tunnel. noVNC remains on the container's private bridge network; only a random loopback port is opened on your computer, and the tunnel closes with the viewer.
+**Take control** opens the VPS desktop inside Astra through a temporary SSH tunnel. noVNC remains on the container's private bridge network; only a random loopback port is opened on your computer, and the tunnel closes with the viewer.
 
-Auto reuses an already-ready VPS without changing its lifecycle. To let Auto create or wake this bot's managed container, enable **Start VPS automatically** for that bot. This permission is off by default. When neither the VPS nor a local fallback is available, OpenMausBot shows the exact VPS failure instead of silently omitting computer tools.
+Auto reuses an already-ready VPS without changing its lifecycle. To let Auto create or wake this bot's managed container, enable **Start VPS automatically** for that bot. This permission is off by default. When neither the VPS nor a local fallback is available, Astra shows the exact VPS failure instead of silently omitting computer tools.

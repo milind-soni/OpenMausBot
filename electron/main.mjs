@@ -90,7 +90,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
 // resolve to ::1 and paint a black window
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
-const DEFAULT_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
+const DEFAULT_COMPOSIO_BROKER_URL = "https://astra-composio.milindsoni201.workers.dev";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
@@ -176,14 +176,14 @@ function applyUnreadBadge(win = mainWindow) {
 // intercepting input. This app is not graphics-heavy, so reliability wins.
 if (process.platform === "linux") {
   app.disableHardwareAcceleration();
-  app.setDesktopName("com.openmausbot.app.desktop");
+  app.setDesktopName("com.astra.app.desktop");
 }
 
 // One instance per user: without this lock a second launch forks a second
 // harness server on a fallback port and splits data dirs in two. The loser
 // exits before any child or window exists; the winner surfaces itself.
 if (!app.requestSingleInstanceLock()) {
-  console.log("[desktop] OpenMausBot is already running — focusing that window");
+  console.log("[desktop] Astra is already running — focusing that window");
   process.exit(0);
 }
 
@@ -284,7 +284,7 @@ const serverSupervisor = createServerSupervisor({
     slog("server recovery paused after repeated failures; quit and reopen to retry");
     dialog.showErrorBox(
       "The bot server stopped",
-      "Automatic recovery could not restart the background server. Quit and reopen OpenMausBot to try again. Interrupted chat turns were not resent.\n\n" +
+      "Automatic recovery could not restart the background server. Quit and reopen Astra to try again. Interrupted chat turns were not resent.\n\n" +
         `Server log: ${path.join(LOG_DIR, "server.log")}`,
     );
   },
@@ -294,9 +294,9 @@ const serverSupervisor = createServerSupervisor({
 function desktopDataDir() {
   // Match the historical desktop fallback for an unset or empty override,
   // then pass this exact resolved path to the utility child. server/config.ts
-  // intentionally treats an empty OMB_DATA_DIR differently, so inheriting it
+  // intentionally treats an empty ASTRA_DATA_DIR differently, so inheriting it
   // without normalization would lease one directory and write another.
-  return process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
+  return process.env.ASTRA_DATA_DIR || path.join(app.getPath("home"), ".astra");
 }
 
 async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_MS) {
@@ -321,6 +321,24 @@ async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_M
 let phoneSecretIdentity = null;
 let desktopRemoteAccess = null;
 let desktopCompanionRelay = null;
+
+// One-time adoption of the pre-rename Electron userData folder. Renaming the
+// app moved %APPDATA%/OpenMausBot to %APPDATA%/Astra; without this the
+// updater, logs and the safeStorage credential file would start from zero on
+// every existing install. Copy (never move) and only when the new folder does
+// not exist yet: safeStorage ciphertext is machine-bound, so a copied file
+// decrypts the same as the original, and keeping the source lets a user
+// roll back to the previous version without losing their credentials.
+try {
+  const newUserdata = app.getPath("userData");
+  if (!fs.existsSync(newUserdata)) {
+    const legacyUserdata = path.join(app.getPath("appData"), "OpenMausBot");
+    if (fs.existsSync(legacyUserdata)) fs.cpSync(legacyUserdata, newUserdata, { recursive: true, errorOnExist: false, force: false });
+  }
+} catch {
+  // Unreadable/partial legacy folder must not block startup; worst case is
+  // re-signing in and re-pairing, not data loss.
+}
 
 const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
 
@@ -427,15 +445,15 @@ async function secureWorkspaceConfig() {
 }
 
 function composioBrokerUrl() {
-  const configured = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
+  const configured = process.env.ASTRA_COMPOSIO_BROKER_URL?.trim();
   return normalizeManagedComposioBrokerUrl(
     configured || (app.isPackaged ? DEFAULT_COMPOSIO_BROKER_URL : ""),
   );
 }
 
 // The packaged app has no terminal: everything about the server child's life
-// goes to server.log in the OS log dir (~/Library/Logs/OpenMausBot on macOS,
-// Console.app-visible; %APPDATA%\OpenMausBot\logs on Windows), which is also
+// goes to server.log in the OS log dir (~/Library/Logs/Astra on macOS,
+// Console.app-visible; %APPDATA%\Astra\logs on Windows), which is also
 // why stdio is piped, not inherited — under a Finder/Explorer launch the
 // parent's stdio leads nowhere and a failed boot is otherwise undiagnosable.
 const LOG_DIR = app.getPath("logs");
@@ -907,7 +925,7 @@ function syncPhoneSecretKey(proc) {
 function syncDesktopMutationToken(proc) {
   try {
     proc.postMessage({
-      type: "openmausbot:desktop-mutation-token",
+      type: "astra:desktop-mutation-token",
       token: desktopMutationToken,
       companionToken: companionMutationToken,
     });
@@ -964,29 +982,29 @@ async function startServerOn(port) {
     // server gets only a private capability that validates that same live
     // owner; fallback-port children must not race to replace the parent lease.
     ...desktopDataDirLease.utilityServerLeaseEnvironment(),
-    OMB_DATA_DIR: desktopDataDir(),
+    ASTRA_DATA_DIR: desktopDataDir(),
     // A packaged utility child must never fall back to a descriptor inherited
     // from the launching shell. It starts fail-closed until this exact main
     // process sends the private in-memory connection after spawn.
-    OMB_DESKTOP_PARENT: "1",
-    OMB_STATIC_DIR: path.join(process.resourcesPath, "ui"),
-    OMB_RESOURCES_PATH: process.resourcesPath,
-    OMB_SKILLS_DIR: path.join(process.resourcesPath, "skills"),
-    OMB_PORT: String(port),
+    ASTRA_DESKTOP_PARENT: "1",
+    ASTRA_STATIC_DIR: path.join(process.resourcesPath, "ui"),
+    ASTRA_RESOURCES_PATH: process.resourcesPath,
+    ASTRA_SKILLS_DIR: path.join(process.resourcesPath, "skills"),
+    ASTRA_PORT: String(port),
     // the server advertises this to remote clients so version skew is visible
-    OMB_APP_VERSION: app.getVersion(),
-    OMB_USER_DATA: app.getPath("userData"),
+    ASTRA_APP_VERSION: app.getVersion(),
+    ASTRA_USER_DATA: app.getPath("userData"),
     ...(secureCredentials.composioApiKey
       ? { COMPOSIO_API_KEY: secureCredentials.composioApiKey }
       : {}),
     // "we could not read your keys" must not reach the UI as "you have none"
-    OMB_CREDENTIAL_STORE: credentialStoreUnavailable ? "unavailable" : "ok",
+    ASTRA_CREDENTIAL_STORE: credentialStoreUnavailable ? "unavailable" : "ok",
     // one env var per stored workspace secret (xai/box/voice/OpenCode Go);
     // the server prefers these over config.json, whose plaintext fields
     // the boot migration has deleted
     ...workspaceCredentialEnv(secureCredentials),
   });
-  delete childEnv.OMB_BROWSER_CONNECTION;
+  delete childEnv.ASTRA_BROWSER_CONNECTION;
   slog(`fork ${entry} port=${port}`);
   const proc = utilityProcess.fork(entry, [], {
     env: childEnv,
@@ -1085,7 +1103,7 @@ function syncManagedComposioCredentials() {
   if (!serverProc) return;
   try {
     serverProc.postMessage({
-      type: "openmausbot:managed-composio",
+      type: "astra:managed-composio",
       access: managedComposioAccess(composioBrokerUrl(), secureCredentials),
     });
   } catch (error) {
@@ -1106,8 +1124,8 @@ function buildErrorPage({ allPortsOccupied }) {
   const serverLogPath = path.join(LOG_DIR, "server.log");
   const serverLogHref = pathToFileURL(serverLogPath).href;
   const reason = allPortsOccupied
-    ? "Every OpenMausBot port answered health checks from another process — likely a second copy of the app, or another program on ports 8799–28799. Quit that program, then quit and reopen OpenMausBot."
-    : "The background server didn't come up in time — this is usually slow startup, not a port conflict. Quit and reopen OpenMausBot.";
+    ? "Every Astra port answered health checks from another process — likely a second copy of the app, or another program on ports 8799–28799. Quit that program, then quit and reopen Astra."
+    : "The background server didn't come up in time — this is usually slow startup, not a port conflict. Quit and reopen Astra.";
   return (
     "data:text/html;charset=utf-8," +
     encodeURIComponent(
@@ -1170,7 +1188,7 @@ function desktopViewerErrorPage(message, retryUrl) {
 }
 
 function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed()) throw new Error("The Astra window is unavailable");
   const url = desktopViewerUrl(rawUrl);
   const titleCandidate = Object.prototype.toString.call(rawTitle) === "[object String]" ? rawTitle.trim() : "";
   const title = titleCandidate ? titleCandidate.slice(0, 80) : "Live desktop";
@@ -1215,7 +1233,7 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
       sandbox: true,
       // Keep provider cookies away from the app renderer and discard them on
       // app exit. The secret-bearing URL is sufficient to authenticate.
-      partition: "openmausbot-desktop-viewer",
+      partition: "astra-desktop-viewer",
     },
   });
   desktopViewerWindow = viewer;
@@ -1288,7 +1306,7 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
 }
 
 function ensureDesktopWorkspace(owner) {
-  if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
+  if (!owner || owner.isDestroyed()) throw new Error("The Astra window is unavailable");
   if (desktopWorkspaceManager) {
     if (desktopWorkspaceOwner !== owner) {
       throw new Error("The desktop workspace belongs to another app window");
@@ -1300,7 +1318,7 @@ function ensureDesktopWorkspace(owner) {
   const manager = createDesktopWorkspaceManager({
     owner,
     createView: (options) => new WebContentsView(options),
-    partitionPrefix: `openmausbot-desktop-workspace-${randomUUID()}`,
+    partitionPrefix: `astra-desktop-workspace-${randomUUID()}`,
     notify: (state) => {
       if (!owner.isDestroyed() && !owner.webContents.isDestroyed()) {
         owner.webContents.send("desktop-workspace:state", state);
@@ -1639,14 +1657,14 @@ function createWindow() {
   // Packaged CI smoke hook. It validates the real renderer/preload bridge and
   // same-origin embedded server, then follows the normal window-close path.
   // No debugging port or sandbox override is needed.
-  if (process.env.OMB_SMOKE_TEST === "1") {
+  if (process.env.ASTRA_SMOKE_TEST === "1") {
     win.webContents.once("did-finish-load", async () => {
       try {
         const result = await win.webContents.executeJavaScript(`
           (async () => {
             if (!window.ogb?.getCapabilities) throw new Error("desktop preload bridge is unavailable");
             let crashPromise = null;
-            if (${JSON.stringify(process.env.OMB_SMOKE_CUA === "1")}) {
+            if (${JSON.stringify(process.env.ASTRA_SMOKE_CUA === "1")}) {
               crashPromise = new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                   unsubscribe?.();
@@ -1702,7 +1720,7 @@ function createWindow() {
             `unexpected packaged renderer URL: ${result.location} (expected ${expectedLocation})`,
           );
         }
-        if (process.env.OMB_SMOKE_BUNDLED_CUA === "1") {
+        if (process.env.ASTRA_SMOKE_BUNDLED_CUA === "1") {
           const connection = await cuaReady;
           const expectedDriver = path.join(
             process.resourcesPath,
@@ -1740,7 +1758,7 @@ function createWindow() {
       } catch (error) {
         console.error(`[smoke] renderer-failed ${error?.stack ?? error}`);
       } finally {
-        if (process.env.OMB_SMOKE_KEEP_OPEN !== "1") win.close();
+        if (process.env.ASTRA_SMOKE_KEEP_OPEN !== "1") win.close();
       }
     });
   }
@@ -1836,14 +1854,14 @@ ipcMain.handle("desktop:export-diagnostics", localOnly("desktop:export-diagnosti
   return result.filePath;
 }));
 
-// Bots hand users files as markdown links to paths inside the OpenMausBot
+// Bots hand users files as markdown links to paths inside the Astra
 // home (workspaces, attachments). As plain anchors those resolved against the
 // page origin, so the click opened http://127.0.0.1:8799<path> in the default
 // browser and the server's SPA fallback answered with index.html — a second
 // copy of the chat UI instead of the file. Ask where to put it and copy it
 // there instead: a save dialog tells the user the file landed somewhere and
 // where, which a silent copy into ~/Downloads does not. The path is
-// renderer-controlled, so it must resolve inside ~/.openmausbot and be a
+// renderer-controlled, so it must resolve inside ~/.astra and be a
 // regular file — never a symlink escape or directory.
 ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event, rawPath) => {
   return withSavableFile(rawPath, { home: os.homedir() }, async ({ defaultName, copyTo }) => {
@@ -1879,7 +1897,7 @@ ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async
 
 // The Box VNC viewer must be a top-level page for its token exchange. A
 // sandboxed modal BrowserWindow satisfies that requirement while keeping the
-// live desktop inside OpenMausBot instead of sending the person to a browser.
+// live desktop inside Astra instead of sending the person to a browser.
 ipcMain.handle("desktop-viewer:open", localOnly("desktop-viewer:open", (event, rawUrl, title, contextId) => {
   const owner = BrowserWindow.fromWebContents(event.sender);
   return openDesktopViewer(owner, rawUrl, title, contextId);
@@ -2147,10 +2165,10 @@ ipcMain.handle(
   localOnly("dictation:start", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) throw new Error("No window attached to the dictation request");
-    const apiKey = secureCredentials?.dictationApiKey ?? process.env.OMB_DICTATION_KEY ?? "";
+    const apiKey = secureCredentials?.dictationApiKey ?? process.env.ASTRA_DICTATION_KEY ?? "";
     if (!apiKey) {
       throw new Error(
-        "No Deepgram key. Save one in Settings → Connections (or set OMB_DICTATION_KEY and relaunch).",
+        "No Deepgram key. Save one in Settings → Connections (or set ASTRA_DICTATION_KEY and relaunch).",
       );
     }
     const id = ++dictationSessionSeq;
@@ -2215,10 +2233,10 @@ ipcMain.handle(
   localOnly("call-stt:start", (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win) throw new Error("No window attached to the call stream");
-    const apiKey = secureCredentials?.dictationApiKey ?? process.env.OMB_DICTATION_KEY ?? "";
+    const apiKey = secureCredentials?.dictationApiKey ?? process.env.ASTRA_DICTATION_KEY ?? "";
     if (!apiKey) {
       throw new Error(
-        "No Deepgram key. Save one in Settings → Connections (or set OMB_DICTATION_KEY and relaunch) to talk on calls.",
+        "No Deepgram key. Save one in Settings → Connections (or set ASTRA_DICTATION_KEY and relaunch) to talk on calls.",
       );
     }
     const id = ++callSttSessionSeq;
@@ -2350,7 +2368,7 @@ ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => 
 // but only on an explicit, local-only request while the user has the
 // feature enabled, and it never lands in config the server echoes back.
 ipcMain.handle("wake-word:access-key", localOnly("wake-word:access-key", () => {
-  return secureCredentials?.picovoiceAccessKey ?? process.env.OMB_PICOVOICE_KEY ?? null;
+  return secureCredentials?.picovoiceAccessKey ?? process.env.ASTRA_PICOVOICE_KEY ?? null;
 }));
 
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {
@@ -2393,19 +2411,27 @@ app.whenReady().then(async () => {
       // config.json. The parent retains ownership across utility-child port
       // fallbacks and restarts for the entire desktop process lifetime.
       desktopDataDirLease = acquireDataDirLease(desktopDataDir(), {
-        legacyDataDir: path.join(app.getPath("home"), ".opengrokbot"),
+        // Both pre-rename data dirs, newest first — the lease migrates the
+        // one that actually exists (OpenMausBot for every shipping build).
+        legacyDataDirs: [
+          path.join(app.getPath("home"), ".openmausbot"),
+          path.join(app.getPath("home"), ".opengrokbot"),
+        ],
       });
     } catch (error) {
       dialog.showErrorBox(
-        "OpenMausBot could not start safely",
-        error?.message ?? "Another process is using this OpenMausBot data folder.",
+        "Astra could not start safely",
+        error?.message ?? "Another process is using this Astra data folder.",
       );
       app.quit();
       return;
     }
   }
   if (app.isPackaged) {
-    app.setAsDefaultProtocolClient("openmausbot");
+    // astra:// deep links. The openmausbot:// registration from pre-rename
+    // installs is left in place; install-package links move to astra:// and
+    // old desktop builds keep consuming the scheme they registered.
+    app.setAsDefaultProtocolClient("astra");
     // Chromium adds this capability below JavaScript, so renderer requests
     // can mutate the local harness while a Full-access shell using curl
     // cannot impersonate the person operating the desktop app.

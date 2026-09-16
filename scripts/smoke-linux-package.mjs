@@ -14,11 +14,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const wayland = process.env.OMB_SMOKE_WAYLAND === "1";
-const hardDeath = process.env.OMB_SMOKE_HARD_DEATH === "1";
-const bundled = process.env.OMB_SMOKE_BUNDLED_CUA === "1";
-const sessionBlocked = process.env.OMB_SMOKE_LINUX_CUA_BLOCKED === "1";
-const signalShutdown = process.env.OMB_SMOKE_SIGNAL_SHUTDOWN === "1";
+const wayland = process.env.ASTRA_SMOKE_WAYLAND === "1";
+const hardDeath = process.env.ASTRA_SMOKE_HARD_DEATH === "1";
+const bundled = process.env.ASTRA_SMOKE_BUNDLED_CUA === "1";
+const sessionBlocked = process.env.ASTRA_SMOKE_LINUX_CUA_BLOCKED === "1";
+const signalShutdown = process.env.ASTRA_SMOKE_SIGNAL_SHUTDOWN === "1";
 if ([hardDeath, bundled, sessionBlocked].filter(Boolean).length > 1) {
   throw new Error("hard-death, bundled, and release-safety smoke modes are mutually exclusive");
 }
@@ -26,7 +26,7 @@ if (signalShutdown && !bundled) {
   throw new Error("signal-shutdown smoke requires the bundled runtime mode");
 }
 const executable = path.resolve(
-  process.env.OMB_SMOKE_EXECUTABLE ?? path.join(root, "release", "linux-unpacked", "openmausbot"),
+  process.env.ASTRA_SMOKE_EXECUTABLE ?? path.join(root, "release", "linux-unpacked", "astra"),
 );
 if (!existsSync(executable)) throw new Error(`[smoke-linux-package] missing executable: ${executable}`);
 
@@ -37,15 +37,15 @@ const xdgRuntime = path.join(sandbox, "runtime");
 const marker = path.join(sandbox, "cua-invocations.ndjson");
 const fakeState = path.join(sandbox, "cua-serve-count");
 const sentinel = path.join(sandbox, "cua-driver");
-mkdirSync(path.join(home, ".openmausbot"), { recursive: true });
+mkdirSync(path.join(home, ".astra"), { recursive: true });
 mkdirSync(xdgConfig, { recursive: true });
 mkdirSync(xdgRuntime, { recursive: true, mode: 0o700 });
 chmodSync(xdgRuntime, 0o700);
 writeFileSync(
-  path.join(home, ".openmausbot", "config.json"),
+  path.join(home, ".astra", "config.json"),
   JSON.stringify({ instances: { ghost: { driver: "not-a-real-driver", displayName: "Ghost" } } }),
 );
-for (const appName of ["openmausbot", "OpenMausBot"]) {
+for (const appName of ["astra", "Astra"]) {
   const userData = path.join(xdgConfig, appName);
   mkdirSync(userData, { recursive: true, mode: 0o700 });
   chmodSync(userData, 0o700);
@@ -117,7 +117,7 @@ const metadata = {
   mcp_protocol_version: "2025-06-18",
   pid: process.pid,
   embedded: true,
-  host_bundle_id: "com.openmausbot.app",
+  host_bundle_id: "com.astra.app",
 };
 const tools = ["click", "get_window_state", "list_apps", "type_text"].map((name) => ({ name }));
 const toolManifest = { schema_version: "1", capability_version: "1", tools };
@@ -193,12 +193,12 @@ const desktopEnv = {
   XDG_SESSION_TYPE: wayland ? "wayland" : "x11",
   XDG_CURRENT_DESKTOP: "GNOME",
   CUA_DRIVER_PATH: sentinel,
-  OMB_COMPOSIO_BROKER_URL: `http://127.0.0.1:${brokerAddress.port}`,
-  OMB_SMOKE_TEST: "1",
-  OMB_SMOKE_CUA: hardDeath || bundled || sessionBlocked ? "0" : "1",
-  OMB_SMOKE_BUNDLED_CUA: bundled ? "1" : "0",
+  ASTRA_COMPOSIO_BROKER_URL: `http://127.0.0.1:${brokerAddress.port}`,
+  ASTRA_SMOKE_TEST: "1",
+  ASTRA_SMOKE_CUA: hardDeath || bundled || sessionBlocked ? "0" : "1",
+  ASTRA_SMOKE_BUNDLED_CUA: bundled ? "1" : "0",
 };
-if (hardDeath || signalShutdown) desktopEnv.OMB_SMOKE_KEEP_OPEN = "1";
+if (hardDeath || signalShutdown) desktopEnv.ASTRA_SMOKE_KEEP_OPEN = "1";
 if (bundled) delete desktopEnv.CUA_DRIVER_PATH;
 if (wayland) desktopEnv.WAYLAND_DISPLAY = "wayland-smoke";
 else delete desktopEnv.WAYLAND_DISPLAY;
@@ -282,10 +282,10 @@ try {
     location,
     title,
   } = result;
-  if (health?.app !== "openmausbot" || health.static !== true) {
+  if (health?.app !== "astra" || health.static !== true) {
     throw new Error(`unexpected embedded health response: ${JSON.stringify(health)}`);
   }
-  if (!String(title).includes("OpenMausBot")) throw new Error(`unexpected renderer title: ${title}`);
+  if (!String(title).includes("Astra")) throw new Error(`unexpected renderer title: ${title}`);
   if (capabilities.host.platform !== "linux") throw new Error("renderer did not report Linux");
   if (capabilities.host.session !== (wayland ? "wayland" : "x11")) {
     throw new Error(`renderer did not report the ${wayland ? "Wayland" : "X11"} contract`);
@@ -335,7 +335,7 @@ try {
   if (sessionBlocked) {
     await waitForExit();
     if (existsSync(marker)) throw new Error("release safety block still invoked a CUA executable");
-    const activeUserData = ["openmausbot", "OpenMausBot"]
+    const activeUserData = ["astra", "Astra"]
       .map((name) => path.join(xdgConfig, name))
       .find((directory) => existsSync(path.join(directory, "cua-connection.json")));
     if (!activeUserData) throw new Error("release safety smoke could not locate the CUA descriptor");
@@ -382,7 +382,7 @@ try {
     if (existsSync(marker)) {
       throw new Error(`packaged app invoked the ambient driver:\n${readFileSync(marker, "utf8")}`);
     }
-    const userData = ["openmausbot", "OpenMausBot"]
+    const userData = ["astra", "Astra"]
       .map((name) => path.join(xdgConfig, name))
       .find((directory) => existsSync(path.join(directory, "cua-connection.json")));
     if (!userData) throw new Error("bundled smoke could not locate the CUA descriptor");
@@ -478,7 +478,7 @@ try {
       await delay(50);
     }
     if (staleHealth?.ok) throw new Error("embedded harness survived hard Electron death");
-    const userData = ["openmausbot", "OpenMausBot"]
+    const userData = ["astra", "Astra"]
       .map((name) => path.join(xdgConfig, name))
       .find((directory) => existsSync(path.join(directory, "cua-connection.json")));
     if (!userData) throw new Error("hard-death smoke could not locate the CUA descriptor");
@@ -494,7 +494,7 @@ try {
     const restart = spawn(executable, wayland ? ["--ozone-platform=x11"] : [], {
       cwd: root,
       detached: true,
-      env: { ...desktopEnv, OMB_SMOKE_KEEP_OPEN: "0" },
+      env: { ...desktopEnv, ASTRA_SMOKE_KEEP_OPEN: "0" },
       stdio: ["ignore", "pipe", "pipe"],
     });
     try {
@@ -591,6 +591,6 @@ try {
   await stopProcess();
   for (const socket of brokerSockets) socket.destroy();
   await new Promise((resolve) => slowBroker.close(resolve));
-  if (process.env.OMB_KEEP_SMOKE_DIR !== "1") rmSync(sandbox, { recursive: true, force: true });
+  if (process.env.ASTRA_KEEP_SMOKE_DIR !== "1") rmSync(sandbox, { recursive: true, force: true });
   else console.log(`[smoke-linux-package] kept ${sandbox}`);
 }

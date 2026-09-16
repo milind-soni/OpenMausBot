@@ -1,4 +1,4 @@
-// `openmausbot serve --domain maus.example.com`: HTTPS on your own domain
+// `astra serve --domain maus.example.com`: HTTPS on your own domain
 // with nothing to configure. The server downloads a pinned Caddy once into
 // the data dir (the same way it fetches cloudflared and the browser engine),
 // writes the Caddyfile the Docker stack ships, and runs Caddy as its child:
@@ -36,12 +36,12 @@ export function pinnedCaddyPath(dataDir: string, platform: NodeJS.Platform = pro
   return join(dataDir, "caddy", `${CADDY_VERSION}-${caddyTarget(platform, arch)}`, platform === "win32" ? "caddy.exe" : "caddy");
 }
 
-/** OMB_CADDY_PATH, then the pinned download, then a `caddy` on PATH. */
+/** ASTRA_CADDY_PATH, then the pinned download, then a `caddy` on PATH. */
 export function resolveCaddyBinary(options: { dataDir: string; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; arch?: string; exists?: (p: string) => boolean } ): string | null {
   const env = options.env ?? process.env;
   const exists = options.exists ?? existsSync;
   const platform = options.platform ?? process.platform;
-  const override = env.OMB_CADDY_PATH?.trim();
+  const override = env.ASTRA_CADDY_PATH?.trim();
   if (override) return resolve(override) === override && exists(override) ? override : null;
   const pinned = pinnedCaddyPath(options.dataDir, platform, options.arch);
   if (exists(pinned)) return pinned;
@@ -111,7 +111,7 @@ export async function ensureCaddy(options: {
  * state live under the data dir so they survive restarts and upgrades. */
 export function caddyfileFor(input: { domain: string; appPort: number; webhookPort: number }): string {
   return [
-    "# Written by openmausbot serve --domain. Edit the command, not this file.",
+    "# Written by astra serve --domain. Edit the command, not this file.",
     "{",
     "\tadmin off",
     "\tlog {",

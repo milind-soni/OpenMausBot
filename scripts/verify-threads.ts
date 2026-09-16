@@ -2,7 +2,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { launchVerificationServer, runControlOmb } from "./control-omb.ts";
+import { launchVerificationServer, runControlOmb } from "./control-astra.ts";
 import { fixtureApi, mountPreview, parkUntilSignal, type MountedPreview } from "./testing/preview-fixture.ts";
 
 const fixture = await launchVerificationServer();
@@ -50,7 +50,7 @@ try {
   ].join("\n"), { mode: 0o700 });
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
   ui = await mountPreview(fixture, {
-    entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Threads",
+    entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated Astra Threads",
   });
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, finishGate }));
   await parkUntilSignal();

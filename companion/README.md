@@ -2,7 +2,7 @@
 
 The sidecar a phone talks to.
 
-OpenMausBot's harness listens on `127.0.0.1` and nothing else, which is the
+Astra's harness listens on `127.0.0.1` and nothing else, which is the
 right default and one it has recently gone out of its way to enforce: it now
 rejects any request whose `Host` is not loopback, defeating DNS rebinding.
 
@@ -111,21 +111,21 @@ it is switched on, so the opt-in is never implicit.
 
 | Environment | Default | |
 |---|---|---|
-| `OMB_PORT` | `8799` | where the harness is |
-| `OMB_WEBHOOK_PORT` | `OMB_PORT` + 1 | the harness's webhook receiver — refused, not used |
-| `OMB_COMPANION_PORT` | `8810` | where devices connect |
-| `OMB_CONTROL_PORT` | `8811` | the pairing page, loopback only |
-| `OMB_COMPANION_DIR` | `~/.openmausbot-companion` | paired devices live here |
-| `OMB_COMPANION_NAME` | your name, from the harness | what the phone calls this computer |
+| `ASTRA_PORT` | `8799` | where the harness is |
+| `ASTRA_WEBHOOK_PORT` | `ASTRA_PORT` + 1 | the harness's webhook receiver — refused, not used |
+| `ASTRA_COMPANION_PORT` | `8810` | where devices connect |
+| `ASTRA_CONTROL_PORT` | `8811` | the pairing page, loopback only |
+| `ASTRA_COMPANION_DIR` | `~/.astra-companion` | paired devices live here |
+| `ASTRA_COMPANION_NAME` | your name, from the harness | what the phone calls this computer |
 
-`OMB_COMPANION_NAME` overrides a name the sidecar otherwise asks the harness
+`ASTRA_COMPANION_NAME` overrides a name the sidecar otherwise asks the harness
 for at startup — the profile from onboarding, as *"Ada's computer"*. It falls
-back to `OpenMausBot` when the harness is not up or has no profile. Read once
+back to `Astra` when the harness is not up or has no profile. Read once
 and cached: the name goes into the Bonjour record, and re-advertising under a
 new one later would show the phone two computers.
 
 The harness owns two ports, not one: itself, and a webhook receiver one above
-it (`OMB_WEBHOOK_PORT`). The companion refuses to start on either and says
+it (`ASTRA_WEBHOOK_PORT`). The companion refuses to start on either and says
 which — the alternative is a race for the socket, where starting second means
 the companion will not come up and starting first means webhooks quietly stop
 working with the explanation logged somewhere else entirely.

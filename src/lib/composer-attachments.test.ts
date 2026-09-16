@@ -59,9 +59,9 @@ function image(path: string): ImageAttachment {
 
 describe("composeMessage with images", () => {
   it("emits an attached-image tag carrying the server path and display name", () => {
-    const prompt = composeMessage("what is this?", [image("/home/u/.openmausbot/attachments/abc.png")]);
+    const prompt = composeMessage("what is this?", [image("/home/u/.astra/attachments/abc.png")]);
     expect(prompt).toBe(
-      'what is this?\n\n<attached-image path="/home/u/.openmausbot/attachments/abc.png" name="shot.png" />',
+      'what is this?\n\n<attached-image path="/home/u/.astra/attachments/abc.png" name="shot.png" />',
     );
   });
 
@@ -126,16 +126,16 @@ describe("splitTranscriptAttachments", () => {
 
   it("uses the saved basename for old file tags without a name", () => {
     const { display, files } = splitTranscriptAttachments(
-      '<attached-file path="/home/me/.openmausbot/attachments/report.pdf" />',
+      '<attached-file path="/home/me/.astra/attachments/report.pdf" />',
     );
     expect(display).toBe("");
     expect(files).toEqual([
-      { path: "/home/me/.openmausbot/attachments/report.pdf", name: "report.pdf" },
+      { path: "/home/me/.astra/attachments/report.pdf", name: "report.pdf" },
     ]);
   });
 
   it("marks only private-store UUID attachment names as actionable", () => {
-    const privatePath = "/home/me/.openmausbot/attachments/123e4567-e89b-42d3-a456-426614174000.pdf";
+    const privatePath = "/home/me/.astra/attachments/123e4567-e89b-42d3-a456-426614174000.pdf";
     expect(splitTranscriptAttachments(`<attached-file path="${privatePath}" name="Report.pdf" />`).files[0])
       .toMatchObject({ path: privatePath, name: "Report.pdf", private: true });
     expect(splitTranscriptAttachments('<attached-file path="/Users/me/Desktop/report.pdf" />').files[0]?.private)

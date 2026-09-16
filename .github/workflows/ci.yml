@@ -80,12 +80,12 @@ jobs:
           node-version: 24
       - name: Install and reuse the pinned connector in an isolated fixture
         env:
-          OMB_ARM64_FIXTURE: ${{ runner.temp }}/omb-cloudflared-arm64
+          ASTRA_ARM64_FIXTURE: ${{ runner.temp }}/omb-cloudflared-arm64
         run: |
           node --input-type=module -e 'import assert from "node:assert/strict"; assert.equal(process.platform, "linux"); assert.equal(process.arch, "arm64");'
-          node scripts/prepare-cloudflared.mjs --current --root "$OMB_ARM64_FIXTURE"
-          node scripts/prepare-cloudflared.mjs --current --root "$OMB_ARM64_FIXTURE"
-          "$OMB_ARM64_FIXTURE/dist-native/cloudflared/linux-arm64/cloudflared" version
+          node scripts/prepare-cloudflared.mjs --current --root "$ASTRA_ARM64_FIXTURE"
+          node scripts/prepare-cloudflared.mjs --current --root "$ASTRA_ARM64_FIXTURE"
+          "$ASTRA_ARM64_FIXTURE/dist-native/cloudflared/linux-arm64/cloudflared" version
 
   foss:
     # LICENSING.md promises that deleting enterprise/ leaves a working
@@ -109,8 +109,8 @@ jobs:
       - name: The server boots and reports the open-source edition
         run: |
           mkdir -p /tmp/omb-foss/home
-          HOME=/tmp/omb-foss/home OMB_DATA_DIR=/tmp/omb-foss/data OMB_PORT=18797 OMB_WEBHOOK_PORT=18796 \
-            OMB_BROWSER_CONNECTION=/tmp/omb-foss/browser-connection.json OMB_LICENSE_KEY=omb1.not.real \
+          HOME=/tmp/omb-foss/home ASTRA_DATA_DIR=/tmp/omb-foss/data ASTRA_PORT=18797 ASTRA_WEBHOOK_PORT=18796 \
+            ASTRA_BROWSER_CONNECTION=/tmp/omb-foss/browser-connection.json ASTRA_LICENSE_KEY=omb1.not.real \
             node --experimental-strip-types server/index.ts > /tmp/omb-foss/server.log 2>&1 &
           for i in $(seq 1 60); do curl -sf http://127.0.0.1:18797/api/health >/dev/null && break; sleep 1; done
           curl -sf http://127.0.0.1:18797/api/edition | tee /tmp/omb-foss/edition.json; echo
@@ -141,7 +141,7 @@ jobs:
     # docs/verification/chat-ui.md run by a machine. It downloads the pinned
     # agent-browser release (digest verified) and its Chrome, drives the real
     # <App/> against the isolated fake-engine fixture, and keeps the screenshot.
-    name: renderer smoke (control-omb ui, Ubuntu 24.04)
+    name: renderer smoke (control-astra ui, Ubuntu 24.04)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -160,16 +160,16 @@ jobs:
         # This is Chrome's own documented fix for 23.10+; a developer machine
         # needs nothing, and the sandbox itself stays on.
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-      - name: Drive the real renderer through control-omb ui
+      - name: Drive the real renderer through control-astra ui
         env:
-          OMB_UI_E2E: "1"
-          OMB_UI_EVIDENCE_DIR: .omb-scratch/verify-evidence
-        run: pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts
+          ASTRA_UI_E2E: "1"
+          ASTRA_UI_EVIDENCE_DIR: .omb-scratch/verify-evidence
+        run: pnpm exec vitest run scripts/testing/control-astra-ui.e2e.test.ts scripts/testing/bot-tools-ui.e2e.test.ts
       - name: Upload the renderer screenshot
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: control-omb-ui-chat-screenshot
+          name: control-astra-ui-chat-screenshot
           path: .omb-scratch/verify-evidence/chat-ui.png
           if-no-files-found: warn
           retention-days: 7
@@ -220,20 +220,20 @@ jobs:
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
       - name: Verify the installed browser with Ubuntu sandbox restrictions
-        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenMausBot/resources
+        run: node scripts/smoke-browser-bundle.mjs --resources /opt/Astra/resources
       - name: Launch packaged app and verify lifecycle
         env:
-          OMB_KEEP_SMOKE_DIR: "1"
-          OMB_SMOKE_INSTALLED_DEB: "1"
+          ASTRA_KEEP_SMOKE_DIR: "1"
+          ASTRA_SMOKE_INSTALLED_DEB: "1"
         run: pnpm smoke:linux-package
       - name: Remove the installed upgrade fixture
         if: always()
-        run: sudo dpkg --purge openmausbot || true
+        run: sudo dpkg --purge astra || true
       - name: Upload smoke diagnostics on failure
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
-          name: openmausbot-ubuntu-smoke-diagnostics
+          name: astra-ubuntu-smoke-diagnostics
           path: |
             /tmp/omb-linux-smoke-*
             /tmp/omb-linux-smoke-runtime-*
@@ -258,8 +258,8 @@ jobs:
         run: |
           cd ios
           xcodebuild \
-            -project OpenMausCompanion.xcodeproj \
-            -scheme OpenMausCompanion \
+            -project AstraCompanion.xcodeproj \
+            -scheme AstraCompanion \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \

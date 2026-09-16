@@ -40,7 +40,7 @@ enum ShareItemLoadingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .appGroupUnavailable:
-            return "OpenMausBot couldn't open its secure sharing folder. Open the app once, then try again."
+            return "Astra couldn't open its secure sharing folder. Open the app once, then try again."
         case .nothingSupported:
             return "There isn't any text, link, image, or supported document to send."
         case .tooManyItems:
@@ -52,7 +52,7 @@ enum ShareItemLoadingError: LocalizedError {
         case let .unsupportedDocument(name):
             return "\(name) isn't a supported document. Try PDF, text, Word, Excel, or PowerPoint."
         case let .unreadable(name):
-            return "OpenMausBot couldn't read \(name). Try exporting it to Files first."
+            return "Astra couldn't read \(name). Try exporting it to Files first."
         }
     }
 }
@@ -74,13 +74,13 @@ enum ShareItemLoader {
         guard providers.count <= AttachmentPolicy.maximumItems else {
             throw ShareItemLoadingError.tooManyItems
         }
-        OpenMausSharedInbox.removeDirectories(olderThan: 0)
+        AstraSharedInbox.removeDirectories(olderThan: 0)
         guard let container = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: OpenMausSharedConfiguration.appGroupIdentifier
+            forSecurityApplicationGroupIdentifier: AstraSharedConfiguration.appGroupIdentifier
         ) else { throw ShareItemLoadingError.appGroupUnavailable }
 
         let inboxRoot = container.appendingPathComponent(
-            OpenMausSharedInbox.directoryName,
+            AstraSharedInbox.directoryName,
             isDirectory: true
         )
         let inbox = inboxRoot

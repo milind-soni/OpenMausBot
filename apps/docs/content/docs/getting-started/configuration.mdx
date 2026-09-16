@@ -4,18 +4,18 @@ description: Understand engine paths, credentials, and the local configuration b
 icon: Settings
 ---
 
-Most users configure OpenMausBot from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
+Most users configure Astra from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
 
 ## Engine discovery
 
-OpenMausBot checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.
+Astra checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.
 
 Explicit paths are useful when you:
 
 - keep multiple CLI versions;
 - use a wrapper script;
 - installed an engine in a directory desktop apps cannot discover; or
-- launch OpenMausBot from a Windows shortcut or Linux application menu with a different environment from your terminal.
+- launch Astra from a Windows shortcut or Linux application menu with a different environment from your terminal.
 
 ## Optional credentials
 
@@ -34,7 +34,7 @@ Source and headless runs can set supported environment variables before starting
 
 ### Per-instance Claude tool scope
 
-Source and headless installations can give separate Claude instances different built-in tool sets in `~/.openmausbot/config.json`:
+Source and headless installations can give separate Claude instances different built-in tool sets in `~/.astra/config.json`:
 
 ```json
 {
@@ -50,7 +50,7 @@ Source and headless installations can give separate Claude instances different b
 }
 ```
 
-`tools` selects Claude's available built-ins; an explicit empty array disables every built-in, while omitting it keeps Claude's default set. `disallowedTools` applies Claude tool-name patterns as an additional deny list. These settings do not grant or pre-approve MCP integrations, which remain controlled by the instance's mounted integrations and OpenMausBot permission flow.
+`tools` selects Claude's available built-ins; an explicit empty array disables every built-in, while omitting it keeps Claude's default set. `disallowedTools` applies Claude tool-name patterns as an additional deny list. These settings do not grant or pre-approve MCP integrations, which remain controlled by the instance's mounted integrations and Astra permission flow.
 
 <Callout type="warn" title="Do not put secrets in prompts">
   A prompt becomes conversation history and may be sent to an agent provider. Use App Settings or environment configuration for credentials.

@@ -1,5 +1,5 @@
 /**
- * The Discord wordless mark, matching the one on openmausbot.com.
+ * The Discord wordless mark, matching the one on astra.com.
  *
  * `currentColor` rather than Discord's blurple: it sits in a menu whose other
  * icons are all muted lucide strokes, and a single brand-colored mark in that

@@ -5,9 +5,9 @@ The app is native Swift and uses XcodeGen; EAS commands do not apply.
 ## One-time Apple setup
 
 1. Enrol in the Apple Developer Program.
-2. Register the bundle IDs `com.openmausbot.app`, `com.openmausbot.app.widgets`, and `com.openmausbot.app.share` (or change them in `project.yml` before the first upload).
-3. Register the App Group `group.com.openmausbot.shared`. Enable App Groups and Keychain Sharing for the app and Share extension identifiers, then add the group to both. Keep the app's legacy `$(AppIdentifierPrefix)com.openmausbot.app` Keychain group during upgrades so existing pairings can migrate safely.
-4. Create the matching app in App Store Connect with the name **OpenMaus Mobile**, primary category **Productivity**, and a unique SKU.
+2. Register the bundle IDs `com.astra.app`, `com.astra.app.widgets`, and `com.astra.app.share` (or change them in `project.yml` before the first upload).
+3. Register the App Group `group.com.astra.shared`. Enable App Groups and Keychain Sharing for the app and Share extension identifiers, then add the group to both. Keep the app's legacy `$(AppIdentifierPrefix)com.astra.app` Keychain group during upgrades so existing pairings can migrate safely.
+4. Create the matching app in App Store Connect with the name **Astra Mobile**, primary category **Productivity**, and a unique SKU.
 5. Create or select Apple Distribution certificates and App Store provisioning profiles for the containing app and both extensions.
 6. Add the review contact details in App Store Connect; do not commit private contact data or App Store Connect keys.
 
@@ -27,8 +27,8 @@ The app is native Swift and uses XcodeGen; EAS commands do not apply.
 - Copy the localized text from `en-US/`.
 - Use `privacy-answers.md` and verify it still matches the binary.
 - Use `review-notes.md`, adding a real review contact in App Store Connect.
-- Support URL: `https://github.com/milind-soni/OpenMausBot/issues`
-- Privacy policy URL: `https://github.com/milind-soni/OpenMausBot/blob/main/docs/ios-privacy.md`
+- Support URL: `https://github.com/milind-soni/Astra/issues`
+- Privacy policy URL: `https://github.com/milind-soni/Astra/blob/main/docs/ios-privacy.md`
 - Choose manual release for 1.0; enable a phased release after the first production build is stable.
 
 The unsigned simulator CI proves compilation, not distribution signing. A TestFlight upload cannot be automated until the Apple team, App Store Connect record, and protected signing/API-key secrets exist.

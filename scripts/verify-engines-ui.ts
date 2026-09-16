@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "vite";
 import type { InstanceInfo } from "../src/state/store.tsx";
-import { launchVerificationServer } from "./control-omb.ts";
+import { launchVerificationServer } from "./control-astra.ts";
 
 const instances: InstanceInfo[] = [
   ["claude", "claudeAgent", "Claude", true, "2.1.8"],
@@ -63,7 +63,7 @@ try {
           return json({ error: "Preview only: no real account or installation is changed." }, 400);
         }
         if (path !== "/__engines.html") return next();
-        void server.transformIndexHtml(req.url!, '<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>OpenMaus · Engine preview</title></head><body><div id="root"></div><script type="module" src="/scripts/testing/engines-preview.tsx"></script></body></html>')
+        void server.transformIndexHtml(req.url!, '<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Astra · Engine preview</title></head><body><div id="root"></div><script type="module" src="/scripts/testing/engines-preview.tsx"></script></body></html>')
           .then((html) => { res.setHeader("content-type", "text/html"); res.end(html); }).catch(next);
       });
     } }],

@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 const root = mkdtempSync(join(tmpdir(), 'omb-native-instructions-'));
-process.env.OMB_DATA_DIR = join(root, 'omb');
+process.env.ASTRA_DATA_DIR = join(root, 'omb');
 const { codexDeveloperInstructions, syncCodexInstructions } = await import('../server/drivers/codex-instructions.ts');
 const captures = [];
 const server = createServer(async (req, res) => {
@@ -111,7 +111,7 @@ try {
         assert(text(5, 'developer').includes('BOT_RULE_B'));
         assert(text(5, 'developer').indexOf('BOT_RULE_B') > text(5, 'developer').indexOf('BOT_RULE_A'));
         assert(!text(7, 'developer').includes('BOT_RULE_A') && text(7, 'developer').includes('BOT_RULE_B'));
-        assert(text(8, 'developer').includes('No OpenMausBot bot-specific instructions remain.'));
+        assert(text(8, 'developer').includes('No Astra bot-specific instructions remain.'));
         assert(!text(10, 'developer').includes('BOT_RULE_'));
     }
     else {

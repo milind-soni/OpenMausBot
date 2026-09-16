@@ -145,7 +145,7 @@ describe("QwenAgentDriver catalog", () => {
     const instance = await QwenAgentDriver.create({
       instanceId: "qwen-local-catalog",
       displayName: "Qwen",
-      environment: { ...homeEnv(home), OPENMAUSBOT_PROBE_LOCAL_INJECT: "1" },
+      environment: { ...homeEnv(home), ASTRA_PROBE_LOCAL_INJECT: "1" },
       enabled: true,
       config: QwenAgentDriver.defaultConfig(),
     });
@@ -212,7 +212,7 @@ describe("Qwen route selection", () => {
       { id: "local-qwen", baseUrl: "https://cloud.example/v1" },
     ] } });
     const instance = await QwenAgentDriver.create({ instanceId: "qwen-default", displayName: "Qwen", enabled: true,
-      environment: { ...homeEnv(home), OPENMAUSBOT_PROBE_LOCAL_INJECT: "1" }, config: { cli: FAKE_CLI, fullAuto: false } });
+      environment: { ...homeEnv(home), ASTRA_PROBE_LOCAL_INJECT: "1" }, config: { cli: FAKE_CLI, fullAuto: false } });
     try {
       expect(instance.models.default).toBe("omlx::local-qwen");
       expect(instance.models.options).toHaveLength(2);

@@ -2,7 +2,7 @@
 
 Approval levels belong to a bot and apply to its next provider turn, including
 when that provider resumes an existing native thread. Each level is one of the
-provider's own permission modes, passed through. OpenMausBot does not judge an
+provider's own permission modes, passed through. Astra does not judge an
 action itself: there is no app-side allowlist, classifier, or pattern rule. A
 request that reaches you is one the provider left for you.
 
@@ -11,15 +11,15 @@ request that reaches you is one the provider left for you.
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
 | **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
 | **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
-| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native prompts are answered for you. Applies to this bot's direct, scheduled, and delegated work (ask_bot, delegate_bot); delegation uses the receiving bot's setting, never the sender's. Questions and separate OpenMausBot confirmations still wait for you. |
-| **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
+| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native prompts are answered for you. Applies to this bot's direct, scheduled, and delegated work (ask_bot, delegate_bot); delegation uses the receiving bot's setting, never the sender's. Questions and separate Astra confirmations still wait for you. |
+| **Custom (`config.toml`)** | Codex only. Astra reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
 Full access is an elevated-risk standing approval. Full and Custom can only be
 enabled from a packaged local desktop app, where the choice crosses a private
 process channel rather than the bot-accessible HTTP API. They are hidden in
 development, standalone web, and remote pages. Full access does not bypass operating
 system privacy controls, authentication, CAPTCHA or MFA, service permissions,
-or OpenMausBot's separate confirmations for credentials, routines, skills, and
+or Astra's separate confirmations for credentials, routines, skills, and
 peer communication.
 
 A turn a webhook, a routine, or another bot started runs in the bot's level
@@ -33,7 +33,7 @@ once** answers this request only. **Always allow this session** hands the
 provider its own remembered approval: Claude receives its suggested permission
 rules, and ACP agents such as Grok receive their `allow_always` option, or the
 driver repeats your answer for that exact operation until the native session
-ends. OpenMausBot keeps no standing grant for a provider's tool. It is not
+ends. Astra keeps no standing grant for a provider's tool. It is not
 offered for computer control or for a sandbox change.
 
 Auto-accept edits and Ask card whatever the provider asks about. Approve for
@@ -86,12 +86,12 @@ teammate can delegate work to this bot without downgrading its explicit Auto
 These settings apply on each turn, including resumed conversations. Switching
 to a different provider while elevated requires leaving Full/Custom first;
 choose Ask. Switching models within Antigravity keeps the selected level.
-Native modes require a CLI version that supports them; OpenMausBot does not
+Native modes require a CLI version that supports them; Astra does not
 silently substitute unrestricted access when a mode is rejected.
 
 ### Read-only integration tools
 
-OpenMausBot's built-in agents MCP server describes nine scoped reads with
+Astra's built-in agents MCP server describes nine scoped reads with
 explicit read-only, non-destructive, idempotent, closed-world metadata:
 `list_bots`, `list_rooms`, `list_threads`, `check_delegation`, `wait_delegation`,
 `session_search`, `session_read`, `list_routines`, and `skills_list`.
@@ -107,7 +107,7 @@ The level set follows the provider-boundary approach in
 [T3 Code's permission modes](https://github.com/pingdotgg/t3code/blob/e16b8b059c9f5ff6dfed1addecffb831c6aee043/docs/user/permission-modes.md):
 Supervised, Auto-accept edits, Auto, and Full access, each a provider mode
 rather than an app rule, with a remembered approval that belongs to the
-provider's session. Its quieter default is Full access; OpenMausBot keeps its
+provider's session. Its quieter default is Full access; Astra keeps its
 own opt-in desktop confirmation and Ask as the default.
 
 ## Verification for contributors

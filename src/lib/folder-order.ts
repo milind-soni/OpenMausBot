@@ -1,5 +1,5 @@
 /** A separate payload prevents folder drags from reordering sidebar sections. */
-export const FOLDER_DRAG_TYPE = "application/x-openmausbot-folder";
+export const FOLDER_DRAG_TYPE = "application/x-astra-folder";
 
 export function draggedFolder(raw: string, botId: string, projectIds: readonly string[]): string | null {
   try {

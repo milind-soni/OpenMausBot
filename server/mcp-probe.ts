@@ -45,7 +45,7 @@ function redactConfiguredValues(value: string, env: Record<string, string>): str
 }
 
 /** Start one stdio server long enough to prove the MCP handshake and list its
- * tools. It is always reaped, never inherits OpenMaus credentials, and never
+ * tools. It is always reaped, never inherits Astra credentials, and never
  * returns child stderr or environment values to the renderer. */
 export function probeMcpServer(
   server: StoredMcpServer,
@@ -157,7 +157,7 @@ export function probeMcpServer(
       params: {
         protocolVersion: "2025-06-18",
         capabilities: {},
-        clientInfo: { name: "OpenMausBot", version: "probe" },
+        clientInfo: { name: "Astra", version: "probe" },
       },
     });
   });

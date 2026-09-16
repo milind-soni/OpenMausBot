@@ -80,7 +80,7 @@ export function parseVoiceList(stdout: string): Voice[] {
 export async function synthesizeWindows(text: string, voiceId: string | undefined, run: Runner = defaultRun): Promise<Audio> {
   const trimmed = text.trim();
   if (!trimmed) return { bytes: new Uint8Array(), mime: "audio/wav" };
-  const dir = await mkdtemp(join(tmpdir(), "openmausbot-sapi-"));
+  const dir = await mkdtemp(join(tmpdir(), "astra-sapi-"));
   const out = join(dir, "utterance.wav");
   try {
     const encoded = Buffer.from(trimmed, "utf8").toString("base64");

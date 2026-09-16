@@ -1,12 +1,12 @@
 // Shared provisioning and shell contract for the cloud computer's Cua Driver.
 // The box command API is the transport boundary: the daemon stays loopback-only
-// inside the VM and OpenMausBot never exposes another inbound port.
+// inside the VM and Astra never exposes another inbound port.
 
 export const REMOTE_CUA_VERSION = "0.20.0";
 export const REMOTE_CUA_EXECUTABLE = "/opt/ogb/cua-driver";
 export const REMOTE_CUA_SOCKET = "/opt/ogb/run/cua.sock";
-export const REMOTE_CUA_SESSION = "openmausbot";
-export const REMOTE_CDP_HELPER = "/opt/ogb/openmausbot-cdp.mjs";
+export const REMOTE_CUA_SESSION = "astra";
+export const REMOTE_CDP_HELPER = "/opt/ogb/astra-cdp.mjs";
 
 const REMOTE_CUA_WHEELS = {
   x86_64: {
@@ -153,7 +153,7 @@ export function remoteComputerBootstrapCommand(botName: string): string {
   ].join("\n");
   // The display name is untrusted. Encode the banner before composing the
   // nested tmux shell so substitutions/backticks can never become syntax.
-  const banner = Buffer.from(`  ▦ ${botName}'s computer — OpenMausBot`).toString("base64");
+  const banner = Buffer.from(`  ▦ ${botName}'s computer — Astra`).toString("base64");
   const tmuxSessionCommand = [
     "echo",
     `printf %s ${shellQuote(banner)} | base64 -d`,

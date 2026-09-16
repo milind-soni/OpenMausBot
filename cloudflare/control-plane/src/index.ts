@@ -52,7 +52,7 @@ async function canonicalAuthResponse(response: Response): Promise<Response> {
 
   // Better Auth error bodies are dependency-owned and may contain prose or
   // change shape between releases (its rate limiter currently returns only a
-  // `message`). Publish only OpenMausBot's stable, lowercase error contract.
+  // `message`). Publish only Astra's stable, lowercase error contract.
   const payload: unknown = await response.json().catch(() => null);
   const parsed = betterAuthErrorSchema.safeParse(payload);
   const dependencyCode = parsed.success ? parsed.data.code : "";
@@ -146,7 +146,7 @@ export function createWorker(cloudflareFetch: CloudflareFetch = fetch) {
         } catch {
           return secureResponse(errorResponse(503, "misconfigured"), request, null, requestId);
         }
-        return secureResponse(json({ ok: true, service: "openmausbot-control-plane" }), request, null, requestId);
+        return secureResponse(json({ ok: true, service: "astra-control-plane" }), request, null, requestId);
       }
 
       let config: ControlPlaneConfig | null = null;

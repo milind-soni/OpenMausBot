@@ -57,7 +57,7 @@ beforeAll(async () => {
   queueFinishGate = join(home, "queue-finish");
   stopScopedLeadFinishGate = join(home, "stop-scoped-lead-finish");
   writeFileSync(stopScopedLeadFinishGate, "allow initial goal delegation");
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".astra");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
@@ -204,9 +204,9 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(port),
-      OMB_WEBHOOK_PORT: String(port + 1),
-      OMB_STATIC_DIR: staticDir,
+      ASTRA_PORT: String(port),
+      ASTRA_WEBHOOK_PORT: String(port + 1),
+      ASTRA_STATIC_DIR: staticDir,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -577,7 +577,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "astra",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });
@@ -672,7 +672,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "astra",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });
@@ -775,7 +775,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "astra",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });
@@ -912,7 +912,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "astra",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });

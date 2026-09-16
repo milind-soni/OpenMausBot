@@ -6,7 +6,7 @@ import { PromptPreview, type PromptPreviewData } from "./PromptPreview";
 
 const data: PromptPreviewData = {
   sections: [
-    { id: "persona", label: "Identity", text: "You are Scout, a personal bot in OpenMausBot.", bytes: 120 },
+    { id: "persona", label: "Identity", text: "You are Scout, a personal bot in Astra.", bytes: 120 },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: "Always cite primary sources.", bytes: 340 },
   ],
   totalBytes: 460,

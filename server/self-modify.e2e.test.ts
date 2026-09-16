@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { launchVerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer } from "../scripts/control-astra.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -64,7 +64,7 @@ function readEntry(dataDir: string, id: string): E2eEntry {
 }
 
 /** Restart a server against an existing fixture data dir, the way
- * chat-followups-restart.test.ts does. OMB_SELF_MODIFY opts the trial-boot
+ * chat-followups-restart.test.ts does. ASTRA_SELF_MODIFY opts the trial-boot
  * machinery in without touching the fixture's config file. */
 function startServer(opts: { dataDir: string; port: string; logPath: string }): ChildProcess {
   const env: NodeJS.ProcessEnv = {};
@@ -74,7 +74,7 @@ function startServer(opts: { dataDir: string; port: string; logPath: string }): 
   Object.assign(env, {
     HOME: opts.dataDir,
     USERPROFILE: opts.dataDir,
-    OMB_DATA_DIR: opts.dataDir,
+    ASTRA_DATA_DIR: opts.dataDir,
     APPDATA: join(opts.dataDir, "AppData", "Roaming"),
     LOCALAPPDATA: join(opts.dataDir, "AppData", "Local"),
     XDG_CONFIG_HOME: join(opts.dataDir, ".config"),
@@ -84,10 +84,10 @@ function startServer(opts: { dataDir: string; port: string; logPath: string }): 
     TEMP: join(opts.dataDir, "tmp"),
     TMP: join(opts.dataDir, "tmp"),
     TMPDIR: join(opts.dataDir, "tmp"),
-    OMB_PORT: opts.port,
-    OMB_WEBHOOK_PORT: String(Number(opts.port) + 1),
+    ASTRA_PORT: opts.port,
+    ASTRA_WEBHOOK_PORT: String(Number(opts.port) + 1),
     PATH: dirname(process.execPath),
-    OMB_SELF_MODIFY: "1",
+    ASTRA_SELF_MODIFY: "1",
   });
   const log = openSync(opts.logPath, "a", 0o600);
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
@@ -104,7 +104,7 @@ async function waitHealthy(url: string, child: ChildProcess, logPath: string): P
     if (child.exitCode !== null) return false;
     try {
       const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1_000) });
-      return (await response.json() as { app?: string }).app === "openmausbot";
+      return (await response.json() as { app?: string }).app === "astra";
     } catch {
       return false;
     }

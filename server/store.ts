@@ -25,7 +25,7 @@ import type { RoutineRunCardData } from "../shared/routine-run.ts";
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
 
-export type MausColor =
+export type AstraColor =
   | "green"
   | "blue"
   | "red"
@@ -42,7 +42,7 @@ export type MausColor =
  * string rather than a union: bots saved under the app's earlier ten-face
  * vocabulary still carry those names, and the client resolves both on read.
  */
-export type MausExpression = string;
+export type AstraExpression = string;
 
 export interface OptionCardData {
   title: string;
@@ -121,7 +121,7 @@ export interface Message {
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
   text?: string;
   /** Durable provider output stored by the harness. Paths always point into
-   * OpenMausBot's private attachment directory; renderers receive only the
+   * Astra's private attachment directory; renderers receive only the
    * existing allowlisted /api/attachments URL. */
   attachments?: Array<{ kind: "image"; path: string; mime: string }>;
   card?: OptionCardData;
@@ -556,8 +556,8 @@ export interface BotRecord {
   /** Receipt committed with a confirmed profile, for retrying card settlement. */
   lastProfileRequestId?: string;
   notifications: boolean;
-  color: MausColor;
-  mascotExpression?: MausExpression | null;
+  color: AstraColor;
+  mascotExpression?: AstraExpression | null;
   mascotBody?: MascotBodyId | null;
   /** App-owned attachment served as this bot's custom profile image. */
   avatarUrl?: string;
@@ -685,7 +685,7 @@ const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
-const COLORS: MausColor[] = [
+const COLORS: AstraColor[] = [
   "green",
   "blue",
   "red",
@@ -1163,7 +1163,7 @@ export class Store {
       detail: string;
       finishedAt: number;
     } | null,
-    fallbackDetail = "OpenMausBot restarted before this goal finished.",
+    fallbackDetail = "Astra restarted before this goal finished.",
     fallbackFinishedAt = Date.now(),
   ): number {
     const ownedThreadIds = new Set<string>();

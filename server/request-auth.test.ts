@@ -144,9 +144,9 @@ describe("resolveRequestAuth", () => {
   it("accepts authenticated relay mutations without exposing the desktop owner capability", () => {
     const headers = {
       host: "127.0.0.1:8799",
-      "x-openmausbot-companion": "1",
-      "x-openmausbot-companion-device": "phone-1",
-      "x-openmausbot-companion-auth": "relay-secret",
+      "x-astra-companion": "1",
+      "x-astra-companion-device": "phone-1",
+      "x-astra-companion-auth": "relay-secret",
     };
     const check = (method: string, path: string, overrides: Record<string, string> = {}, relay = "relay-secret") =>
       resolveRequestAuth(request({ ...headers, ...overrides }, method), {
@@ -160,10 +160,10 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
     const forged: Record<string, string>[] = [
-      { "x-openmausbot-companion-auth": "" },
-      { "x-openmausbot-companion-auth": "desktop-secret" },
-      { "x-openmausbot-companion-device": "" },
-      { "x-openmausbot-companion": "0" },
+      { "x-astra-companion-auth": "" },
+      { "x-astra-companion-auth": "desktop-secret" },
+      { "x-astra-companion-device": "" },
+      { "x-astra-companion": "0" },
       { origin: "https://evil.example" },
       { "x-forwarded-for": "203.0.113.1" },
       { host: "remote.example" },
@@ -242,7 +242,7 @@ describe("resolveRequestAuth", () => {
     const desktop = resolveRequestAuth(
       request({
         host: "127.0.0.1:8799",
-        "x-openmausbot-desktop-owner": "owner-token-123",
+        "x-astra-desktop-owner": "owner-token-123",
       }, "POST"),
       options("/api/routines"),
     );
@@ -370,7 +370,7 @@ describe("resolveRequestAuth", () => {
   });
 });
 
-describe("an IPC listener (openmausbot serve --tunnel) is remote by construction", () => {
+describe("an IPC listener (astra serve --tunnel) is remote by construction", () => {
   // SAFETY: only headers, method and the socket peer are read; a unix-socket peer has no address
   const overSocket = (headers: Record<string, string>) => ({ headers, method: "GET", socket: {} }) as unknown as IncomingMessage;
 
@@ -398,7 +398,7 @@ describe("an IPC listener (openmausbot serve --tunnel) is remote by construction
       const { code } = sessions.openPairing({ scopes: ["admin", "client"] });
       const paired = sessions.exchange({ code, label: "phone", source: "203.0.113.9" });
       if (!paired.ok) throw new Error(paired.error);
-      const admitted = resolveRequestAuth(overSocket({ host: "c-1.openmausbot.com", authorization: `Bearer ${paired.token}` }), gate);
+      const admitted = resolveRequestAuth(overSocket({ host: "c-1.astra.com", authorization: `Bearer ${paired.token}` }), gate);
       expect(admitted.auth?.kind).toBe("session");
     } finally {
       rmSync(dir, { recursive: true, force: true });

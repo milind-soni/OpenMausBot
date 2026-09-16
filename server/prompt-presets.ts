@@ -19,7 +19,7 @@ export interface PromptPreset {
   source: "built-in" | { url: string };
 }
 
-// ── built-ins: original, short, OpenMausBot-style standing instructions ──
+// ── built-ins: original, short, Astra-style standing instructions ──
 export const BUILT_IN_PRESETS: PromptPreset[] = [
   {
     id: "concise-coder",
@@ -251,13 +251,13 @@ function boundedImportFetch(fetcher: typeof fetch): typeof fetch {
 async function listDir(target: Target, path: string, fetcher: typeof fetch): Promise<z.infer<typeof CONTENT_ENTRY>[]> {
   const ref = target.ref ? `?ref=${encodeURIComponent(target.ref)}` : "";
   const url = `${API}/repos/${target.owner}/${target.repo}/contents/${path}${ref}`;
-  const response = await fetcher(url, { headers: { accept: "application/vnd.github+json", "user-agent": "OpenMausBot-prompt-library" } });
+  const response = await fetcher(url, { headers: { accept: "application/vnd.github+json", "user-agent": "Astra-prompt-library" } });
   if (!response.ok) throw new Error(`GitHub API ${response.status} for ${url}`);
   return asEntries(CONTENT_LISTING.parse(await response.json()));
 }
 
 async function fetchText(url: string, fetcher: typeof fetch): Promise<string> {
-  const response = await fetcher(url, { headers: { "user-agent": "OpenMausBot-prompt-library" } });
+  const response = await fetcher(url, { headers: { "user-agent": "Astra-prompt-library" } });
   if (!response.ok) throw new Error(`download failed (${response.status})`);
   const text = await response.text();
   if (Buffer.byteLength(text, "utf8") > MAX_FILE_BYTES) throw new ImportLimitError("file is larger than the 256KB import cap");

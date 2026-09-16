@@ -76,10 +76,10 @@ beforeAll(async () => {
   stub = await startControlPlaneStub();
   home = mkdtempSync(join(tmpdir(), "omb-email-signin-"));
   const staticDir = join(home, "static");
-  mkdirSync(join(home, ".openmausbot"), { recursive: true });
+  mkdirSync(join(home, ".astra"), { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Served UI</title>");
-  writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ instances: { fixture: { driver: "email-signin-test-shadow" } } }));
+  writeFileSync(join(home, ".astra", "config.json"), JSON.stringify({ instances: { fixture: { driver: "email-signin-test-shadow" } } }));
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
@@ -87,15 +87,15 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(PORT + 1),
-      OMB_STATIC_DIR: staticDir,
-      OMB_PUBLIC_URL: `https://${HOST}`,
-      OMB_ENVIRONMENT_LABEL: "agentada",
-      OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
-      OMB_CONTROL_PLANE_URL: stub.url,
-      OMB_SIGNIN_EMAILS: "Her@Example.test, @agentada.test",
-      OMB_SIGNIN_MEMBER_EMAILS: "staff@example.test",
+      ASTRA_PORT: String(PORT),
+      ASTRA_WEBHOOK_PORT: String(PORT + 1),
+      ASTRA_STATIC_DIR: staticDir,
+      ASTRA_PUBLIC_URL: `https://${HOST}`,
+      ASTRA_ENVIRONMENT_LABEL: "agentada",
+      ASTRA_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
+      ASTRA_CONTROL_PLANE_URL: stub.url,
+      ASTRA_SIGNIN_EMAILS: "Her@Example.test, @agentada.test",
+      ASTRA_SIGNIN_MEMBER_EMAILS: "staff@example.test",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -121,7 +121,7 @@ afterAll(async () => {
 
 describe("sign in with your email on a hosted server", () => {
   it("advertises the option in the public descriptor", async () => {
-    const descriptor = await call("/.well-known/openmausbot/environment");
+    const descriptor = await call("/.well-known/astra/environment");
     expect(descriptor.status).toBe(200);
     expect(descriptor.body.capabilities.emailSignIn).toBe(true);
   });

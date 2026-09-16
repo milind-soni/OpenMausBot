@@ -55,7 +55,7 @@ final class MessageAttachmentsTests: XCTestCase {
     func testRejectsMalformedEmptyAndCustomSchemeLinks() {
         XCTAssertNil(LocalMessageLink.resolve("#section"))
         XCTAssertNil(LocalMessageLink.resolve("?download=1"))
-        XCTAssertNil(LocalMessageLink.resolve("openmausbot://pair?token=secret"))
+        XCTAssertNil(LocalMessageLink.resolve("astra://pair?token=secret"))
         XCTAssertNil(LocalMessageLink.resolve("javascript:alert(1)"))
         XCTAssertNil(LocalMessageLink.resolve("https:///missing-host.md"))
         XCTAssertNil(LocalMessageLink.resolve("file:///tmp/report.md?replace=1"))

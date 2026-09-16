@@ -73,7 +73,7 @@ describe("computer proxy (fake box)", () => {
             ? JSON.stringify([
                 { id: "page-1", type: "page", title: " Example ", url: browserUrl },
               ])
-            : command.includes("openmausbot-cdp.mjs snapshot")
+            : command.includes("astra-cdp.mjs snapshot")
               ? JSON.stringify({
                   title: "Account",
                   url: "https://user:password@example.com/form?token=secret#private",
@@ -82,7 +82,7 @@ describe("computer proxy (fake box)", () => {
                     { ref: "b42", role: "button", name: "Continue" },
                   ],
                 })
-              : command.includes("openmausbot-cdp.mjs click") || command.includes("openmausbot-cdp.mjs fill")
+              : command.includes("astra-cdp.mjs click") || command.includes("astra-cdp.mjs fill")
                 ? `GEOM 1920 1080\nHASH ${hash}\nSIZE ${size}\nB64 ${JPEG}\nSEM ok\n`
             : cropFails && /convert "\$f" -crop/.test(command)
               ? `GEOM 1920 1080\nHASH ${hash}\nCROP_FAILED\n`
@@ -423,7 +423,7 @@ describe("computer proxy (fake box)", () => {
     });
     const filled = await waitFor(82);
     expect(commands.length - before).toBe(1);
-    expect(commands.at(-1)).toContain("openmausbot-cdp.mjs fill");
+    expect(commands.at(-1)).toContain("astra-cdp.mjs fill");
     expect(commands.at(-1)).not.toContain("person@example.com");
     expect(filled.result.content[0].text).toMatch(/trusted Chrome DevTools input/);
 
@@ -546,14 +546,14 @@ describe("computer proxy (fake box)", () => {
     const result = await waitFor(130);
     const issued = commands.slice(before);
     expect(issued).toHaveLength(2);
-    expect(issued[0]).toContain('profile="$HOME/.openmausbot/chrome-profile"');
+    expect(issued[0]).toContain('profile="$HOME/.astra/chrome-profile"');
     expect(issued[0]).toContain('chmod 700 "$profile"');
     expect(issued[0]).toContain('! cp -a -n "$browser_dir"/. "$profile"/');
     expect(issued[0]).toContain('echo "failed to copy browser profile: $browser_dir" >&2');
     expect(issued[0]).toContain('ln -s "$profile" "$browser_dir"');
     expect(issued[0]).not.toContain("do;");
     expect(issued[0]).not.toContain("then;");
-    expect(issued[0]).toContain('--user-data-dir="$HOME/.openmausbot/chrome-profile"');
+    expect(issued[0]).toContain('--user-data-dir="$HOME/.astra/chrome-profile"');
     expect(issued[0]).toContain("--password-store=basic");
     expect(issued[0]).toContain("--disable-session-crashed-bubble");
     expect(issued[0]).not.toContain("user:password@");
@@ -693,11 +693,11 @@ describe("computer proxy control gate (fake box + fake control)", () => {
         OGB_BOX_API: `http://127.0.0.1:${boxPort}`,
         OGB_BOX_ID: "box-1",
         OGB_BOX_TOKEN: "t",
-        OMB_CONTROL_URL: `http://127.0.0.1:${controlPort}/api/internal/computer-control?botId=b1`,
-        OMB_CONTROL_TOKEN: "control-secret",
+        ASTRA_CONTROL_URL: `http://127.0.0.1:${controlPort}/api/internal/computer-control?botId=b1`,
+        ASTRA_CONTROL_TOKEN: "control-secret",
         // fast cadence so the wait tests measure logic, not wall-clock
-        OMB_CONTROL_POLL_MS: "25",
-        OMB_CONTROL_WAIT_MS: "1500",
+        ASTRA_CONTROL_POLL_MS: "25",
+        ASTRA_CONTROL_WAIT_MS: "1500",
       },
       stdio: ["pipe", "pipe", "pipe"],
     });

@@ -6,7 +6,7 @@
  * from plain Node: the renderer is JSX and `--experimental-strip-types` cannot
  * load it, but the generator needs exactly these numbers to solve where a face
  * fits inside a new silhouette. The phone already draws this line in the same
- * place (MausFaceData.swift vs MausAvatar.swift).
+ * place (AstraFaceData.swift vs AstraAvatar.swift).
  */
 
 /** The face box every coordinate in this file is expressed in. */

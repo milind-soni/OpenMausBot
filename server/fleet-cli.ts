@@ -1,4 +1,4 @@
-// `openmausbot fleet`: many client workspaces on one Linux server. The plans
+// `astra fleet`: many client workspaces on one Linux server. The plans
 // come from fleet.ts; this runs them as root with fixed argument lists, or
 // prints them for an operator to paste into a root shell, and never builds
 // a shell command from user input. The fleet agent (fleet-agent.ts) reuses
@@ -147,7 +147,7 @@ export async function executePlan(steps: FleetStep[], deps: FleetDeps, io: Fleet
         break;
       }
       case "health":
-        if (!(await deps.health(step.url, HEALTH_TIMEOUT_MS))) return failed(io, step.why, `${step.url} did not answer within ${HEALTH_TIMEOUT_MS / 1000}s; check journalctl -u openmausbot@<slug>`);
+        if (!(await deps.health(step.url, HEALTH_TIMEOUT_MS))) return failed(io, step.why, `${step.url} did not answer within ${HEALTH_TIMEOUT_MS / 1000}s; check journalctl -u astra@<slug>`);
         break;
       case "note":
         io.log(step.text);
@@ -166,7 +166,7 @@ function failed(io: FleetIo, what: string, output: string): number {
 
 export function loadRegistry(layout: FleetLayout, deps: FleetDeps): FleetRegistry {
   const text = deps.readText(layout.registryFile);
-  if (text === null) throw new Error(`no fleet on this server yet: run \`openmausbot fleet init --domain your.domain\` first`);
+  if (text === null) throw new Error(`no fleet on this server yet: run \`astra fleet init --domain your.domain\` first`);
   return parseRegistry(text);
 }
 
@@ -254,11 +254,11 @@ export async function runFleetCommand(input: FleetInput, io: FleetIo, deps: Flee
       const registry = loadRegistry(layout, deps);
       const rows = Object.values(registry.workspaces).sort((a, b) => a.slug.localeCompare(b.slug));
       if (!rows.length) {
-        io.log(`no workspaces yet on ${registry.domain}; create one with: openmausbot fleet create NAME --admin you@example.com`);
+        io.log(`no workspaces yet on ${registry.domain}; create one with: astra fleet create NAME --admin you@example.com`);
         return 0;
       }
       for (const workspace of rows) {
-        const live = asRoot ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() : workspace.status;
+        const live = asRoot ? (await deps.run(["systemctl", "is-active", `astra@${workspace.slug}.service`])).output.trim() : workspace.status;
         io.log(`${workspace.slug.padEnd(24)} https://${workspace.host.padEnd(40)} :${String(workspace.port).padEnd(6)} ${live}`);
       }
       return 0;

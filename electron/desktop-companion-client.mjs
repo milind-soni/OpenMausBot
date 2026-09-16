@@ -24,7 +24,7 @@ const MAX_ERROR_BYTES = 64 * 1024;
 export function desktopCompanionRendererArguments(localOrigin, remoteAccess) {
   return [
     `--omb-local-origin=${localOrigin}`,
-    ...(remoteAccess ? ["--openmausbot-remote-client"] : []),
+    ...(remoteAccess ? ["--astra-remote-client"] : []),
   ];
 }
 
@@ -48,7 +48,7 @@ const cleanLabel = (value, fallback) => {
   return label || fallback;
 };
 
-/** Pairing tokens may travel through a verified OpenMausBot HTTPS endpoint or
+/** Pairing tokens may travel through a verified Astra HTTPS endpoint or
  * an explicit Tailscale MagicDNS name. WireGuard protects cleartext HTTP on
  * the latter; accepting LAN IPs there would silently turn the long-lived
  * bearer into plaintext Wi-Fi traffic. */
@@ -67,7 +67,7 @@ export function normalizeDesktopCompanionEndpoint(value) {
   const hostname = parsed.hostname.toLowerCase();
   const tailscaleHttp = parsed.protocol === "http:" && hostname.endsWith(".ts.net");
   const managedHttps =
-    parsed.protocol === "https:" && hostname.endsWith(".openmausbot.com");
+    parsed.protocol === "https:" && hostname.endsWith(".astra.com");
   if (
     (!tailscaleHttp && !managedHttps) ||
     parsed.username ||
@@ -131,7 +131,7 @@ export async function pairDesktopCompanion({
 }) {
   const endpoint = normalizeDesktopCompanionEndpoint(rawEndpoint);
   if (!endpoint) {
-    throw new Error("Enter the OpenMausBot HTTPS companion address or full Tailscale name ending in .ts.net");
+    throw new Error("Enter the Astra HTTPS companion address or full Tailscale name ending in .ts.net");
   }
   const code = String(rawCode ?? "").trim();
   if (!PAIRING_CODE.test(code)) throw new Error("Enter the six-digit code shown on the other computer");

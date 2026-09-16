@@ -66,7 +66,7 @@ describe("peerProvenanceNote", () => {
     expect(peerProvenanceAuthor(withPeerProvenance("ship it", { botName: "Scout", delivery: "post_to_room" }))).toBeNull();
     // the user's words, and a bot quoting the note mid-sentence, stay theirs
     expect(peerProvenanceAuthor("ship it")).toBeNull();
-    expect(peerProvenanceAuthor("as in a [Message from @Scout, another bot in this OpenMausBot workspace] line")).toBeNull();
+    expect(peerProvenanceAuthor("as in a [Message from @Scout, another bot in this Astra workspace] line")).toBeNull();
   });
 
   it("puts the note in front of the message without altering it", () => {

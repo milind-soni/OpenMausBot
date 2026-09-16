@@ -53,7 +53,7 @@ describe("remote connection Settings", () => {
     expect(html).toContain('<option value="server" selected="">Self-hosted server</option>');
     expect(html).toContain('<option value="companion">Desktop companion</option>');
     expect(html).toContain("Server pairing link");
-    expect(html).toContain("npx openmausbot pair --client");
+    expect(html).toContain("npx astra pair --client");
     expect(html).toContain("12-character code");
     expect(html).toContain("custom domains and Cloudflare Tunnel");
     expect(html).toContain("Connect to server");
@@ -73,7 +73,7 @@ describe("remote connection Settings", () => {
     expect(html).toContain("Companion address");
     expect(html).toContain("Six-digit companion code");
     expect(html).toContain('placeholder="000000"');
-    expect(html).toContain("managed OpenMausBot HTTPS address");
+    expect(html).toContain("managed Astra HTTPS address");
     expect(html).toContain("Tailscale name ending in .ts.net");
     expect(html).not.toContain("<select");
     expect(html).not.toContain("Server pairing link");

@@ -219,7 +219,7 @@ struct ChatView: View {
                             StreamingBubble(text: nil, reasoning: thinking, color: current.color)
                                 .id(Self.liveBubbleId)
                         } else if current.busy {
-                            TypingIndicatorView(tintColor: MausPalette.color(current.color))
+                            TypingIndicatorView(tintColor: AstraPalette.color(current.color))
                                 .id(Self.liveBubbleId)
                                 .accessibilityLabel("\(current.name) is working")
                         }
@@ -257,7 +257,7 @@ struct ChatView: View {
                                 Color.clear
                             }
                         }
-                        ChatAvatarView(chat: current, size: faceSize, state: MausState.forChat(current, in: session.state), animated: MausState.forChat(current, in: session.state).showsActivity || islandExpanded, comets: islandExpanded)
+                        ChatAvatarView(chat: current, size: faceSize, state: AstraState.forChat(current, in: session.state), animated: AstraState.forChat(current, in: session.state).showsActivity || islandExpanded, comets: islandExpanded)
                             .offset(y: faceCentre - faceSize / 2)
                             .allowsHitTesting(false)
                     }
@@ -1129,7 +1129,7 @@ struct ChatView: View {
                         : CommandSkillHUDView.defaultCommands.filter {
                             $0.id != "computer" && (current.supportsTasks || $0.id != "tasks")
                         },
-                    accentColor: MausPalette.color(current.color)
+                    accentColor: AstraPalette.color(current.color)
                 ) { command in
                     switch command.id {
                     case "computer":
@@ -1144,7 +1144,7 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if draft.isEmpty && attachments.isEmpty && !current.busy
                         && !hasPendingApproval && !storedChips.isEmpty {
-                PredictiveActionChipsView(chips: storedChips, accentColor: MausPalette.color(current.color)) { chip in
+                PredictiveActionChipsView(chips: storedChips, accentColor: AstraPalette.color(current.color)) { chip in
                     submit(chip.prompt)
                 }
                 .transition(.opacity)
@@ -1564,7 +1564,7 @@ struct TextBubble: View {
                 if let speaker, !mine {
                     Text(speaker.name)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(MausPalette.color(speaker.color))
+                        .foregroundStyle(AstraPalette.color(speaker.color))
                 }
                 // Bots get markdown, you do not — the same split the desktop
                 // makes. Markdown you did not intend is worse than markdown
@@ -1679,7 +1679,7 @@ struct CredentialRequestCardView: View {
         let requestKey: String?
     }
 
-    private var tint: Color { MausPalette.color(message.from?.color ?? chat.color) }
+    private var tint: Color { AstraPalette.color(message.from?.color ?? chat.color) }
     private var requester: String { message.from?.name ?? chat.name }
     private var label: String { visible(secret.label) ?? "API credential" }
     private var accessibilityStatus: Text {
@@ -1877,7 +1877,7 @@ struct CredentialRequestCardView: View {
                     Label("Pair again to enter here", systemImage: "qrcode")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(tint)
-                    Text("This pairing predates secure phone entry. Scan a fresh QR from OpenMausBot, or finish this request on your computer.")
+                    Text("This pairing predates secure phone entry. Scan a fresh QR from Astra, or finish this request on your computer.")
                         .font(.system(size: 13))
                         .foregroundStyle(Color.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -2089,7 +2089,7 @@ struct CardView: View {
     /// choice above so the two cannot drift apart.
     private static func isRefusal(_ option: String) -> Bool { OptionCard.isRefusal(option) }
 
-    private var tint: Color { MausPalette.color(chat.color) }
+    private var tint: Color { AstraPalette.color(chat.color) }
 
     var body: some View {
         if let card = message.card {
@@ -2291,7 +2291,7 @@ struct StreamingBubble: View {
                     AgentThoughtChamberView(
                         reasoning: String(reasoning.suffix(2_000)),
                         botName: "Bot",
-                        mascotColor: MausPalette.color(color),
+                        mascotColor: AstraPalette.color(color),
                         isStreaming: true
                     )
                 }

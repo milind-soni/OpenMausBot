@@ -1,19 +1,19 @@
 {
-  "name": "openmausbot",
+  "name": "astra",
   "private": true,
   "version": "0.1.74",
   "description": "A local-first chat app for running a team of AI agents.",
-  "homepage": "https://github.com/milind-soni/OpenMausBot",
+  "homepage": "https://github.com/milind-soni/Astra",
   "repository": {
     "type": "git",
-    "url": "https://github.com/milind-soni/OpenMausBot.git"
+    "url": "https://github.com/milind-soni/Astra.git"
   },
   "author": {
     "name": "Milind Soni",
     "email": "46266943+milind-soni@users.noreply.github.com"
   },
   "license": "Apache-2.0",
-  "desktopName": "com.openmausbot.app.desktop",
+  "desktopName": "com.astra.app.desktop",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
@@ -26,15 +26,15 @@
     "check:contrast": "node scripts/check-skin-contrast.mjs",
     "i18n:check": "node scripts/generate-locale.mjs --check",
     "dev": "vite",
-    "docs:dev": "pnpm --filter @openmausbot/docs dev",
-    "docs:build": "pnpm --filter @openmausbot/docs build",
-    "docs:preview": "pnpm --filter @openmausbot/docs preview",
+    "docs:dev": "pnpm --filter @astra/docs dev",
+    "docs:build": "pnpm --filter @astra/docs build",
+    "docs:preview": "pnpm --filter @astra/docs preview",
     "companion": "node --experimental-strip-types companion/src/index.ts",
-    "omb": "node --experimental-strip-types server/openmausbot.ts",
-    "pair": "node --experimental-strip-types server/openmausbot.ts pair",
+    "omb": "node --experimental-strip-types server/astra.ts",
+    "pair": "node --experimental-strip-types server/astra.ts pair",
     "dev:server": "node --experimental-strip-types server/index.ts",
     "mcp": "node --experimental-strip-types scripts/mcp-server.ts",
-    "control:omb": "node --experimental-strip-types scripts/control-omb.ts",
+    "control:omb": "node --experimental-strip-types scripts/control-astra.ts",
     "dev:desktop": "node scripts/prepare-cloudflared.mjs --current && electron .",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
@@ -76,10 +76,10 @@
     "broker:check": "pnpm broker:types && tsc -p cloudflare/composio-broker/tsconfig.json",
     "broker:test": "vitest run --config cloudflare/composio-broker/vitest.config.ts",
     "broker:deploy": "wrangler deploy --config cloudflare/composio-broker/wrangler.jsonc",
-    "control-plane:types": "pnpm --filter @openmausbot/control-plane types",
-    "control-plane:check": "pnpm --filter @openmausbot/control-plane check",
-    "control-plane:test": "pnpm --filter @openmausbot/control-plane test",
-    "control-plane:dry-run": "pnpm --filter @openmausbot/control-plane dry-run"
+    "control-plane:types": "pnpm --filter @astra/control-plane types",
+    "control-plane:check": "pnpm --filter @astra/control-plane check",
+    "control-plane:test": "pnpm --filter @astra/control-plane test",
+    "control-plane:dry-run": "pnpm --filter @astra/control-plane dry-run"
   },
   "dependencies": {
     "@clack/prompts": "1.7.0",

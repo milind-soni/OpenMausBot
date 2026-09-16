@@ -11,7 +11,7 @@ The desktop application ships two separate components:
   is no root-level NOTICE in that tag. All six official macOS/Linux binaries
   were downloaded and their SHA-256 digests checked against GitHub's release
   metadata on 2026-09-08.
-- **Windows exception: agent-browser 0.36.0-omb.1** is an OpenMausBot vendor
+- **Windows exception: agent-browser 0.36.0-omb.1** is an Astra vendor
   build, not an official or unmodified Vercel executable. It starts from exact
   v0.36.0 commit `eb05921bad874cd2a1b4fa5d1149f1ed26576cae` and carries only
   the Windows handle-inheritance fix contributed by `holny` in upstream
@@ -53,15 +53,15 @@ downloads, then records a complete file/symlink inventory. Missing, modified,
 or incomplete staged resources fail the pre-signing package check.
 
 Archives and extracted binaries are generated build output, not git content.
-Set `OMB_BROWSER_ARCHIVE_DIR` to a directory of reviewed vendor assets for an
+Set `ASTRA_BROWSER_ARCHIVE_DIR` to a directory of reviewed vendor assets for an
 offline build; cached bytes are still verified. Browser dependencies are
-updated through reviewed OpenMausBot releases, not a silent browser updater.
+updated through reviewed Astra releases, not a silent browser updater.
 
-On macOS, release signing applies OpenMausBot's Developer ID to native
+On macOS, release signing applies Astra's Developer ID to native
 executables and libraries after validating the upstream bytes. The original
 notices remain intact. Packaged browser profiles, cookies and downloads are
 never included here; those belong in the user's isolated bot data directory.
 
 Google, Chromium and Vercel are their owners' names; their inclusion does not
-imply endorsement of OpenMausBot. This provenance record is not legal advice
+imply endorsement of Astra. This provenance record is not legal advice
 or a replacement for the included upstream licenses.

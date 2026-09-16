@@ -11,9 +11,9 @@ struct CompanionWelcomeView: View {
 
                 ZStack {
                     RoundedRectangle(cornerRadius: 32, style: .continuous)
-                        .fill(MausPalette.color("blue").opacity(0.12))
+                        .fill(AstraPalette.color("blue").opacity(0.12))
                         .frame(width: 148, height: 148)
-                    MausAvatar(color: "blue", size: 108, state: .happy, animated: false)
+                    AstraAvatar(color: "blue", size: 108, state: .happy, animated: false)
                         .accessibilityHidden(true)
                 }
 
@@ -54,7 +54,7 @@ struct CompanionWelcomeView: View {
         }
         .background {
             LinearGradient(
-                colors: [MausPalette.color("blue").opacity(0.10), Color.clear],
+                colors: [AstraPalette.color("blue").opacity(0.10), Color.clear],
                 startPoint: .top,
                 endPoint: .center
             )
@@ -90,7 +90,7 @@ private struct WelcomeBenefit: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: icon)
                 .font(.title3)
-                .foregroundStyle(MausPalette.color("blue"))
+                .foregroundStyle(AstraPalette.color("blue"))
                 .frame(width: 30, height: 30)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
@@ -117,24 +117,24 @@ struct UnpairedHomeView: View {
 
                     ZStack {
                         Circle()
-                            .fill(MausPalette.color("blue").opacity(0.12))
+                            .fill(AstraPalette.color("blue").opacity(0.12))
                             .frame(width: 112, height: 112)
                         Image(systemName: "laptopcomputer.and.iphone")
                             .font(.system(size: 42, weight: .medium))
-                            .foregroundStyle(MausPalette.color("blue"))
+                            .foregroundStyle(AstraPalette.color("blue"))
                     }
                     .accessibilityHidden(true)
 
                     VStack(spacing: 8) {
                         Text("Connect when you're ready")
                             .font(.title2.bold())
-                        Text("Pair this device with OpenMausBot to see your chats and respond to your bots.")
+                        Text("Pair this device with Astra to see your chats and respond to your bots.")
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
                     }
 
-                    Text("On your computer, open OpenMausBot → Settings → Phone.")
+                    Text("On your computer, open Astra → Settings → Phone.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -156,7 +156,7 @@ struct UnpairedHomeView: View {
                 .padding(.vertical, 14)
                 .background(.ultraThinMaterial)
             }
-            .navigationTitle("OpenMausBot")
+            .navigationTitle("Astra")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink {
@@ -183,18 +183,18 @@ struct NotificationOnboardingView: View {
 
                 ZStack {
                     RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .fill(MausPalette.color("green").opacity(0.12))
+                        .fill(AstraPalette.color("green").opacity(0.12))
                         .frame(width: 132, height: 132)
                     Image(systemName: "bell.badge.fill")
                         .font(.system(size: 48, weight: .medium))
-                        .foregroundStyle(MausPalette.color("green"))
+                        .foregroundStyle(AstraPalette.color("green"))
                 }
                 .accessibilityHidden(true)
 
                 VStack(spacing: 10) {
                     Text("Stay in the loop")
                         .font(.largeTitle.bold())
-                    Text("Get alerts while OpenMausBot is open or was recently in the background. Alerts stop after iOS fully suspends or closes the app.")
+                    Text("Get alerts while Astra is open or was recently in the background. Alerts stop after iOS fully suspends or closes the app.")
                         .font(.title3)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)

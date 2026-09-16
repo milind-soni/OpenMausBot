@@ -46,7 +46,7 @@ jobs:
         run: node scripts/smoke-browser-bundle.mjs --resources "${{ github.workspace }}/release/win-unpacked/resources"
       - name: Verify the packaged server discovers its browser
         env:
-          OMB_SMOKE_DIST: ${{ github.workspace }}/release/win-unpacked/resources/server
+          ASTRA_SMOKE_DIST: ${{ github.workspace }}/release/win-unpacked/resources/server
         run: node scripts/smoke-packaged-server.mjs --browser-bundle "${{ github.workspace }}/release/win-unpacked/resources/browser-engine"
       - name: report what was built
         shell: bash
@@ -85,8 +85,8 @@ jobs:
           fi
           [ -f "$res/app-update.yml" ] || { echo "::error::missing $res/app-update.yml"; fail=1; }
           if [ -f "$res/app-update.yml" ]; then
-            grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || {
-              echo "::error::app-update.yml does not point at milind-soni/OpenMausBot"; fail=1; }
+            grep -Eq '^repo: Astra$' "$res/app-update.yml" || {
+              echo "::error::app-update.yml does not point at milind-soni/Astra"; fail=1; }
             # while the build is unsigned, a publisherName makes
             # electron-updater reject every update as untrusted
             if grep -q "publisherName" "$res/app-update.yml"; then
@@ -106,7 +106,7 @@ jobs:
         run: |
           res=release/win-unpacked/resources
           HOME="$RUNNER_TEMP/omb-smoke" USERPROFILE="$RUNNER_TEMP/omb-smoke" \
-            OMB_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
+            ASTRA_PORT=21987 node "$res/server/index.js" > "$RUNNER_TEMP/server.log" 2>&1 &
           pid=$!
           for _ in $(seq 1 90); do
             if curl -fsS --max-time 2 http://127.0.0.1:21987/api/health >/dev/null 2>&1; then

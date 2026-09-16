@@ -81,7 +81,7 @@ describe("computerPrompt", () => {
   it("distinguishes background window control from foreground desktop input", () => {
     const prompt = computerPrompt("local");
     expect(prompt).toContain("background delivery");
-    expect(prompt).toContain("do not bring OpenMausBot");
+    expect(prompt).toContain("do not bring Astra");
     expect(prompt).toContain("dedicated browser tools");
     expect(prompt).toContain("keeping the user's intended browser profile/account");
     expect(prompt).toContain("Do not silently retry a background refusal");

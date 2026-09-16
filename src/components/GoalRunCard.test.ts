@@ -29,12 +29,12 @@ function message(status: GroupGoalRunCardData["status"], detail?: string): Messa
 describe("GoalRunCard", () => {
   it("shows live goal progress without expanding into a run log", () => {
     const markup = renderToStaticMarkup(createElement(GoalRunCard, {
-      message: message("working", "Luna is reviewing the second draft."),
+      message: message("working", "Astra is reviewing the second draft."),
     }));
 
     expect(markup).toContain("Write and polish the launch announcement");
     expect(markup).toContain("Working");
-    expect(markup).toContain("Luna is reviewing the second draft.");
+    expect(markup).toContain("Astra is reviewing the second draft.");
     expect(markup).toContain("Sprout coordinating · Turn 3 of 12");
     expect(markup).toContain('aria-label="Goal run: Working"');
   });

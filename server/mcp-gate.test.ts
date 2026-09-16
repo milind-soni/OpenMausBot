@@ -46,9 +46,9 @@ describe("mcp-gate", () => {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        OMB_GATE_NAME: "shop",
-        OMB_GATE_SPILL_DIR: join(scratch, "spill"),
-        OMB_GATE_UPSTREAM: JSON.stringify({
+        ASTRA_GATE_NAME: "shop",
+        ASTRA_GATE_SPILL_DIR: join(scratch, "spill"),
+        ASTRA_GATE_UPSTREAM: JSON.stringify({
           command: process.execPath,
           args: [upstreamJs],
           env: { SCRIPT: script, UPSTREAM_ONLY: "yes" },
@@ -114,7 +114,7 @@ describe("mcp-gate", () => {
     const answer = await call("search_products");
     const text = answer.result.content[0].text;
     expect(text.length).toBeLessThan(full.length / 10);
-    expect(text).toContain("OpenMausBot trimmed this tool result");
+    expect(text).toContain("Astra trimmed this tool result");
 
     const spillDir = join(scratch, "spill");
     const [file] = readdirSync(spillDir);
@@ -124,7 +124,7 @@ describe("mcp-gate", () => {
     // never trimming. It is there for the person and the harness.
     expect(text).not.toContain(join(spillDir, file));
 
-    const kept = JSON.parse(text.slice(0, text.indexOf("\n\n[OpenMausBot")));
+    const kept = JSON.parse(text.slice(0, text.indexOf("\n\n[Astra")));
     expect(kept.products[0]).toEqual(products[0]);
     expect(kept.nextOffset).toBe("1");
   });
@@ -143,7 +143,7 @@ describe("mcp-gate", () => {
 
   it("honours a budget the harness sets", async () => {
     const products = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, blurb: "x".repeat(300) }));
-    start({ content: [{ type: "text", text: JSON.stringify({ products }) }], structuredContent: undefined }, { OMB_GATE_BUDGET: "2000" });
+    start({ content: [{ type: "text", text: JSON.stringify({ products }) }], structuredContent: undefined }, { ASTRA_GATE_BUDGET: "2000" });
     const text = (await call("search_products")).result.content[0].text;
     expect(text.length).toBeLessThan(2_400);
   });
@@ -154,7 +154,7 @@ describe("mcp-gate", () => {
     await nextLine();
     // proven by the upstream having started at all: it reads SCRIPT from the
     // env the gate passed through. Gate-only keys must not reach it.
-    expect(JSON.parse(JSON.stringify(process.env.OMB_GATE_UPSTREAM ?? null))).toBe(null);
+    expect(JSON.parse(JSON.stringify(process.env.ASTRA_GATE_UPSTREAM ?? null))).toBe(null);
   });
 
   it("spawns an upstream named as a bare command on PATH", async () => {
@@ -170,8 +170,8 @@ describe("mcp-gate", () => {
       stdio: ["pipe", "pipe", "pipe"],
       env: {
         ...process.env,
-        OMB_GATE_NAME: "shop",
-        OMB_GATE_UPSTREAM: JSON.stringify({ command: "node", args: [upstreamJs], env: { SCRIPT: script } }),
+        ASTRA_GATE_NAME: "shop",
+        ASTRA_GATE_UPSTREAM: JSON.stringify({ command: "node", args: [upstreamJs], env: { SCRIPT: script } }),
       },
     }) as ChildProcessWithoutNullStreams;
     createInterface({ input: gate.stdout }).on("line", (line) => {

@@ -89,7 +89,7 @@ describe("managed Companion origin endpoint", () => {
     const allocated = endpoint();
     const target = createHttpServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify({ app: "openmausbot" }));
+      response.end(JSON.stringify({ app: "astra" }));
     });
     servers.push(target);
     await listen(target, allocated.socketPath);

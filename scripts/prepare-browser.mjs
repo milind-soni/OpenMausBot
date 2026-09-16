@@ -144,7 +144,7 @@ function extract(archive, directory) {
   if (result.error || result.status !== 0) throw new Error(`Browser archive extraction failed: ${result.error?.message ?? result.stderr ?? result.status}`);
 }
 
-export async function stageBrowserTarget(root, target, { cacheDirectory = process.env.OMB_BROWSER_ARCHIVE_DIR ?? join(root, "dist-native", "browser-archives") } = {}) {
+export async function stageBrowserTarget(root, target, { cacheDirectory = process.env.ASTRA_BROWSER_ARCHIVE_DIR ?? join(root, "dist-native", "browser-archives") } = {}) {
   const spec = browserBundleSpec(target);
   const parent = join(root, "dist-native", "browser");
   mkdirSync(parent, { recursive: true });

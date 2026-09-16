@@ -1,6 +1,6 @@
 # Desktop-to-desktop companion mode
 
-Every OpenMausBot desktop build can play either role:
+Every Astra desktop build can play either role:
 
 - **Host mode** is the normal app. It owns the agents, conversations, credentials, routines, and computers.
 - **Client mode** controls a paired host through the same authenticated, default-deny companion API used by the phone app.
@@ -23,10 +23,10 @@ below. The two connection types intentionally do not share credentials.
 2. Open a pairing window so the host displays a six-digit code.
 3. On the client, open **Settings → Remote access → Connect to another computer**
    and choose **Desktop companion**.
-4. Enter the host's managed `https://…openmausbot.com` companion address and the six-digit code.
+4. Enter the host's managed `https://…astra.com` companion address and the six-digit code.
 5. Choose **Pair and switch to client mode**. The client restarts and opens the host's bot UI.
 
-The HTTPS address uses the host's managed outbound tunnel. TLS is verified by the operating system, and the client does not need Tailscale. HTTPS is intentionally restricted to OpenMausBot-managed companion names so a typo cannot redirect a paired-device token to an unrelated site.
+The HTTPS address uses the host's managed outbound tunnel. TLS is verified by the operating system, and the client does not need Tailscale. HTTPS is intentionally restricted to Astra-managed companion names so a typo cannot redirect a paired-device token to an unrelated site.
 
 ## Pair over Tailscale
 

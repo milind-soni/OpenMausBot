@@ -35,7 +35,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
   const [sent, setSent] = useState(false);
 
   useEffect(() => {
-    void fetch("/.well-known/openmausbot/environment")
+    void fetch("/.well-known/astra/environment")
       .then((r) => (r.ok ? r.json() : null))
       .then((d: EnvironmentDescriptor | null) => {
         setEnvironment(d);
@@ -89,7 +89,7 @@ export function PairPage({ initialCode, initialEmail = null, reason }: { initial
   return (
     <main className="flex min-h-screen items-center justify-center bg-app px-6 text-ink">
       <div className="w-full max-w-[420px]">
-        <h1 className="text-[20px] font-semibold">{mode === "email" ? "Sign in to" : "Connect to"} {environment?.label ?? "this OpenMausBot"}</h1>
+        <h1 className="text-[20px] font-semibold">{mode === "email" ? "Sign in to" : "Connect to"} {environment?.label ?? "this Astra"}</h1>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-secondary">
           {environment ? `Version ${environment.version} on ${environment.platform}. ` : ""}
           {mode === "email"

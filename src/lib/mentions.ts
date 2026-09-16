@@ -1,6 +1,6 @@
-import { MAUS_COLORS, type MausColor } from "./mascot";
+import { ASTRA_COLORS, type AstraColor } from "./mascot";
 
-export type MentionPeer = { name: string; hidden?: boolean; color?: MausColor };
+export type MentionPeer = { name: string; hidden?: boolean; color?: AstraColor };
 export type MentionRange = { start: number; end: number; color?: string };
 
 /** Filter the composer's mention roster without silently truncating it.
@@ -29,7 +29,7 @@ export function mentionRanges(text: string, peers: readonly MentionPeer[], every
     const length = all ? 8 : peer?.name.length;
     if (length === undefined) continue;
     // Only palette values enter CSS. @everyone has no individual bot identity.
-    const color = !all && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
+    const color = !all && peer?.color && Object.hasOwn(ASTRA_COLORS, peer.color) ? ASTRA_COLORS[peer.color] : undefined;
     ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}) });
     at += length;
   }

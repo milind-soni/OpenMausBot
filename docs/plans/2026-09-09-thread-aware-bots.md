@@ -11,7 +11,7 @@ a teammate, and it does not know that it cannot.
 A user asked a bot to "create a new thread for each open PowerPM that is
 waiting for your review". The bot opened three ticket comments instead, then,
 when asked, explained correctly that it has no callable action to create
-OpenMausBot threads and that those come from separate user prompts. It was
+Astra threads and that those come from separate user prompts. It was
 right about the code and wrong to guess; the gap is that nothing told it
 either thing up front.
 

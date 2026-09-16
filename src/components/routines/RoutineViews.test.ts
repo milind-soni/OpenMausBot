@@ -7,10 +7,10 @@ import { RoutineLogs } from "./RoutineLogs";
 import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
 
 const routine: Routine = {
-  id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "maus", enabled: true,
+  id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "astra", enabled: true,
   schedule: { type: "interval", everyMinutes: 60, anchorAt: 1 }, durationMinutes: 30, nextRunAt: 3_600_000, createdAt: 1, updatedAt: 1,
 };
-const run: RoutineRun = { id: "run", routineId: routine.id, routineName: routine.name, target: "bot", botId: routine.botId, runOn: "maus", scheduledFor: 100, createdAt: 100, status: "completed", manual: false, output: "Brief prepared." };
+const run: RoutineRun = { id: "run", routineId: routine.id, routineName: routine.name, target: "bot", botId: routine.botId, runOn: "astra", scheduledFor: 100, createdAt: 100, status: "completed", manual: false, output: "Brief prepared." };
 
 function list(props: Partial<Parameters<typeof RoutineList>[0]> = {}) {
   return renderToStaticMarkup(createElement(RoutineList, { routines: [routine], runs: [run], onOpen: vi.fn(), onLogs: vi.fn(), ...props }));

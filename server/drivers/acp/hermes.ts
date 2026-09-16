@@ -399,7 +399,7 @@ const support: AcpSupport = {
   resolveModels: (env: Record<string, string | undefined>, config: any) => resolveModels(env, config),
   resolveTurnModel: (model, env) => {
     // Never inherit a broad or stale compatibility grant from the parent.
-    // Only this OpenMaus driver binds one concrete local model; Hermes still
+    // Only this Astra driver binds one concrete local model; Hermes still
     // requires the exact read-only screenshot MCP tool before activation.
     bindHermesScreenshotCompat(env, model);
     if (!model) return model;

@@ -17,7 +17,7 @@ describe("MinimaxDriver", () => {
   let home: string;
 
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), "openmausbot-minimax-"));
+    home = mkdtempSync(join(tmpdir(), "astra-minimax-"));
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     delete process.env.MINIMAX_API_KEY;

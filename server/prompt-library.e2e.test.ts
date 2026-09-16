@@ -3,7 +3,7 @@
 // is a typed error, not a crash. Import from real GitHub is covered by the
 // unit tests' fake fetch; this file proves the HTTP surface itself.
 import { expect, it } from "vitest";
-import { launchVerificationServer } from "../scripts/control-omb.ts";
+import { launchVerificationServer } from "../scripts/control-astra.ts";
 import { request } from "../scripts/mcp-server.ts";
 
 it("serves the built-in prompt catalog and rejects bad import sources", async () => {

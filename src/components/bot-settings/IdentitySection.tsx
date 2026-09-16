@@ -7,7 +7,7 @@ import { useState } from "react";
 import { BookOpen } from "lucide-react";
 
 import type { Bot } from "@/state/store";
-import type { MausMotion, MausState } from "@/lib/mascot";
+import type { AstraMotion, AstraState } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
 import { BotProfileAvatarCard } from "../BotProfileAvatarCard";
@@ -23,8 +23,8 @@ export function IdentitySection({
 }: {
   bot: Bot;
   patch: (patch: BotPatch) => void;
-  activeState: MausState;
-  mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
+  activeState: AstraState;
+  mascotMotion: { kind: Exclude<AstraMotion, "none">; nonce: number } | null;
 }) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
 

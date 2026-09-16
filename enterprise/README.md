@@ -1,4 +1,4 @@
-# OpenMausBot Enterprise
+# Astra Enterprise
 
 Source-available features for hosted and white-labelled deployments. This
 folder has its own [LICENSE](./LICENSE); everything outside it is Apache 2.0.
@@ -10,7 +10,7 @@ open-source edition. No core file imports anything from here.
 
 ## How a deployment turns enterprise
 
-Set `OMB_LICENSE_KEY` on the server. The key is `omb1.<claims>.<signature>`:
+Set `ASTRA_LICENSE_KEY` on the server. The key is `omb1.<claims>.<signature>`:
 the claims are visible JSON (who it is for, which entitlements, when it
 expires), signed with an Ed25519 key whose public half is baked into
 `server/license.ts`. Verification is offline, and one build serves every
@@ -20,7 +20,7 @@ customer, because the key decides the feature set rather than the code.
 
 ```json
 { "edition": "enterprise", "customer": "Acme", "features": ["sso", "whitelabel"], "expiresAt": "2027-09-02" }
-{ "edition": "oss", "features": [], "notice": "OMB_LICENSE_KEY expired on 2027-09-02; renew it to keep enterprise features" }
+{ "edition": "oss", "features": [], "notice": "ASTRA_LICENSE_KEY expired on 2027-09-02; renew it to keep enterprise features" }
 ```
 
 A missing, altered, or expired key never stops the server: it runs the
@@ -47,7 +47,7 @@ node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features whi
 ```
 
 The signing key lives outside the repo (default
-`~/.config/openmausbot-enterprise/signing-key.json`). Rotate by generating a
+`~/.config/astra-enterprise/signing-key.json`). Rotate by generating a
 new pair and appending its public key: keys signed by older pairs keep
 working until they expire.
 
@@ -61,8 +61,8 @@ working until they expire.
 
 ## White-label (`whitelabel`)
 
-Put a `brand.json` in the server's data dir (`OMB_DATA_DIR`, the `/data`
-volume in Docker) or point `OMB_BRAND_FILE` at one:
+Put a `brand.json` in the server's data dir (`ASTRA_DATA_DIR`, the `/data`
+volume in Docker) or point `ASTRA_BRAND_FILE` at one:
 
 ```json
 {

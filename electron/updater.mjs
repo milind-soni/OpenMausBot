@@ -48,7 +48,7 @@ function updaterLogger() {
 // A system package is the distro's to install, not ours. Left to
 // electron-updater, a .deb update raises a polkit root prompt out of a chat
 // app, runs `dpkg -i` (which resolves no dependencies) and replaces
-// /opt/OpenMausBot while this very process is still running.
+// /opt/Astra while this very process is still running.
 const HAND_OFF_TYPES = new Set(HAND_OFF_PACKAGE_TYPES);
 
 // Do what this app already does for engine installs: put the exact command on

@@ -75,8 +75,8 @@ function requireUpdaterTarget(resources, label) {
   const updateFile = path.join(resources, "app-update.yml");
   requireFile(updateFile);
   const update = readFileSync(updateFile, "utf8");
-  if (!/^owner: milind-soni$/m.test(update) || !/^repo: OpenMausBot$/m.test(update)) {
-    fail(`${label} app-update.yml does not point at milind-soni/OpenMausBot`);
+  if (!/^owner: milind-soni$/m.test(update) || !/^repo: Astra$/m.test(update)) {
+    fail(`${label} app-update.yml does not point at milind-soni/Astra`);
   }
 }
 
@@ -165,7 +165,7 @@ function verifyCompliance(licenses, label) {
   const registryIds = new Set();
   for (const component of registry) {
     const packageId = component.properties?.find(
-      (property) => property.name === "openmausbot:cargo:package-id",
+      (property) => property.name === "astra:cargo:package-id",
     )?.value;
     if (typeof packageId !== "string" || !packageId.startsWith("registry+")) {
       fail(`${label} SBOM registry component has no exact Cargo package ID`);
@@ -399,7 +399,7 @@ function verifyCloudflaredResources(resources, label, { directoryMode = 0o755 } 
 const appImage = exactlyOne(".AppImage");
 const deb = exactlyOne(".deb");
 const unpacked = path.join(releaseDir, "linux-unpacked");
-const executable = path.join(unpacked, "openmausbot");
+const executable = path.join(unpacked, "astra");
 const resources = path.join(unpacked, "resources");
 
 requireExecutable(appImage);
@@ -423,7 +423,7 @@ const fields = execFileSync(
   { encoding: "utf8" },
 );
 for (const expected of [
-  "Package: openmausbot",
+  "Package: astra",
   "Architecture: amd64",
   "Maintainer: Milind Soni",
   "Section: utils",
@@ -435,7 +435,7 @@ for (const expected of [
 const extracted = mkdtempSync(path.join(tmpdir(), "omb-deb-verify-"));
 try {
   execFileSync("dpkg-deb", ["--extract", deb, extracted]);
-  const debAppRoot = path.join(extracted, "opt", "OpenMausBot");
+  const debAppRoot = path.join(extracted, "opt", "Astra");
   requireDirectoryMode(debAppRoot, 0o755);
   const debResources = path.join(debAppRoot, "resources");
   // Routes the in-app updater to the package-manager hand-off.
@@ -455,7 +455,7 @@ try {
     "usr",
     "share",
     "applications",
-    "com.openmausbot.app.desktop",
+    "com.astra.app.desktop",
   );
   const scalableIcon = path.join(
     extracted,
@@ -465,16 +465,16 @@ try {
     "hicolor",
     "scalable",
     "apps",
-    "openmausbot.svg",
+    "astra.svg",
   );
   requireFile(desktopFile);
   requireFile(scalableIcon);
   const desktop = readFileSync(desktopFile, "utf8");
   for (const expected of [
-    "Name=OpenMausBot",
-    "Exec=/opt/OpenMausBot/openmausbot %U",
-    "Icon=openmausbot",
-    "StartupWMClass=com.openmausbot.app",
+    "Name=Astra",
+    "Exec=/opt/Astra/astra %U",
+    "Icon=astra",
+    "StartupWMClass=com.astra.app",
     "Categories=Utility;",
   ]) {
     if (!desktop.includes(expected)) fail(`desktop entry is missing ${JSON.stringify(expected)}`);

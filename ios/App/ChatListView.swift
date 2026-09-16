@@ -325,7 +325,7 @@ struct ChatListView: View {
                         chat: summary.chat,
                         preview: summary.preview,
                         at: summary.lastActivity,
-                        state: MausState.forChat(summary.chat, in: session.state),
+                        state: AstraState.forChat(summary.chat, in: session.state),
                         waiting: waitingChats.contains(summary.chat.id),
                         last: index == rows.count - 1
                     )
@@ -572,7 +572,7 @@ struct GroupTile: View {
                     }
                     if room.unread {
                         Circle()
-                            .fill(MausPalette.color("blue"))
+                            .fill(AstraPalette.color("blue"))
                             .frame(width: 10, height: 10)
                             .overlay(Circle().stroke(Color(uiColor: .systemBackground), lineWidth: 2))
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -607,7 +607,7 @@ struct ChatRow: View {
     let chat: Chat
     let preview: String
     let at: Double
-    var state: MausState = .idle
+    var state: AstraState = .idle
     var waiting = false
     var last = false
 
@@ -617,7 +617,7 @@ struct ChatRow: View {
             ZStack {
                 if chat.unread && !chat.busy {
                     Circle()
-                        .fill(MausPalette.color(chat.color))
+                        .fill(AstraPalette.color(chat.color))
                         .frame(width: 10, height: 10)
                 }
             }
@@ -678,7 +678,7 @@ struct ChatRow: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 9)
                             .padding(.vertical, 4)
-                            .background(Capsule().fill(MausPalette.color(chat.color)))
+                            .background(Capsule().fill(AstraPalette.color(chat.color)))
                             .padding(.top, 4)
                     }
                 }
@@ -713,7 +713,7 @@ struct UpdatesPill: View {
                             case .needsYou:
                                 Image(systemName: "hand.raised.fill")
                                     .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(MausPalette.color(first.chat.color))
+                                    .foregroundStyle(AstraPalette.color(first.chat.color))
                                 Text("\(first.chat.name) needs you")
                             case .working:
                                 Text("\(first.chat.name) is working")
@@ -766,7 +766,7 @@ struct MascotStack: View {
     var body: some View {
         HStack(spacing: -overlap) {
             ForEach(Array(colors.enumerated()), id: \.offset) { _, color in
-                MausAvatar(color: color, size: size, state: .idle, animated: false)
+                AstraAvatar(color: color, size: size, state: .idle, animated: false)
                     .padding(2)
                     .background(Circle().fill(Color(uiColor: .systemBackground)))
             }

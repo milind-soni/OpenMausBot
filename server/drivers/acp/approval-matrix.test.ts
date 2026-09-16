@@ -47,7 +47,7 @@ describe("remaining ACP approval mappings", () => {
         USERPROFILE: scratch,
         HERMES_HOME: join(scratch, ".hermes"),
         KIMI_CODE_HOME: join(scratch, ".kimi"),
-        OPENMAUSBOT_PROBE_LOCAL_INJECT: "0",
+        ASTRA_PROBE_LOCAL_INJECT: "0",
         FAKE_ACP_MODE: "permission",
         FAKE_ACP_DUMP: dump,
         FAKE_ACP_RPC_DUMP: rpcDump,

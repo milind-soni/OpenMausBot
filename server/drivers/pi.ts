@@ -539,7 +539,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             env: piEnvironment({
               ...process.env,
               ...input.environment,
-              ...(mcpServers && mcpTempDir ? { OMB_MCP_CONFIG: join(mcpTempDir, "mcp.json") } : {}),
+              ...(mcpServers && mcpTempDir ? { ASTRA_MCP_CONFIG: join(mcpTempDir, "mcp.json") } : {}),
             }),
           });
         } catch (err) {

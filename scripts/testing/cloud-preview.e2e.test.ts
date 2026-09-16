@@ -7,12 +7,12 @@ import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
-import { runControlOmb } from "../control-omb.ts";
-import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { runControlOmb } from "../control-astra.ts";
+import { UI_TOOLS_DIR } from "./control-astra-ui.ts";
 import { mountPreview, type MountedPreview } from "./preview-fixture.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
+const enabled = process.env.ASTRA_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
 interface FixtureInfo { ui: string; url: string; dataDir: string; logPath: string }
 
 describe("cloud preview recovery in the real renderer", () => {
@@ -27,7 +27,7 @@ describe("cloud preview recovery in the real renderer", () => {
     let stdout = "";
     let stderr = "";
     let info: FixtureInfo;
-    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
+    child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-astra.ts"), "ui", "launch"], {
       cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });

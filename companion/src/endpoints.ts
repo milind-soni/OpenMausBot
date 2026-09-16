@@ -29,7 +29,7 @@ export function hostedCompanionUrl(value: string | undefined): string | null {
   try {
     parsed = new URL(configured);
   } catch {
-    throw new Error("OMB_COMPANION_HOSTED_URL must be an absolute HTTPS origin");
+    throw new Error("ASTRA_COMPANION_HOSTED_URL must be an absolute HTTPS origin");
   }
 
   if (
@@ -40,7 +40,7 @@ export function hostedCompanionUrl(value: string | undefined): string | null {
     parsed.search ||
     parsed.hash
   ) {
-    throw new Error("OMB_COMPANION_HOSTED_URL must be an HTTPS origin without a path, credentials, query, or fragment");
+    throw new Error("ASTRA_COMPANION_HOSTED_URL must be an HTTPS origin without a path, credentials, query, or fragment");
   }
 
   return parsed.origin;

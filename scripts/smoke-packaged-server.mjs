@@ -40,10 +40,10 @@ const staging = mkdtempSync(join(tmpdir(), "omb-smoke-"));
 const home = mkdtempSync(join(tmpdir(), "omb-smoke-home-"));
 const port = 21000 + Math.floor(Math.random() * 9000);
 
-// OMB_SMOKE_DIST lets the release workflow aim this at a packaged app's
+// ASTRA_SMOKE_DIST lets the release workflow aim this at a packaged app's
 // Resources/server tree instead of the repo build.
 try {
-  cpSync(process.env.OMB_SMOKE_DIST ?? join(root, "dist-server"), join(staging, "server"), { recursive: true });
+  cpSync(process.env.ASTRA_SMOKE_DIST ?? join(root, "dist-server"), join(staging, "server"), { recursive: true });
   if (browserBundle) cpSync(resolve(browserBundle), join(staging, "browser-engine"), { recursive: true });
 } catch (error) {
   for (const directory of [staging, home]) rmSync(directory, { recursive: true, force: true });
@@ -60,10 +60,10 @@ const fixtureEnv = {
   XDG_CONFIG_HOME: join(home, ".config"),
   XDG_CACHE_HOME: join(home, ".cache"),
   XDG_DATA_HOME: join(home, ".local", "share"),
-  OMB_DATA_DIR: join(home, ".openmausbot"),
-  OMB_PORT: String(port),
+  ASTRA_DATA_DIR: join(home, ".astra"),
+  ASTRA_PORT: String(port),
   ...(browserBundle ? {
-    OMB_RESOURCES_PATH: staging,
+    ASTRA_RESOURCES_PATH: staging,
     // A global engine on the developer's PATH must not make this test pass.
     PATH: process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32") : "/usr/bin:/bin",
   } : {}),
@@ -232,7 +232,7 @@ if (
   mcpReport.error ||
   mcpReport.exit?.timeout ||
   mcpReport.exit?.code !== 0 ||
-  mcpReport.responses?.find((response) => response.id === 1)?.result?.serverInfo?.name !== "openmausbot-mcp" ||
+  mcpReport.responses?.find((response) => response.id === 1)?.result?.serverInfo?.name !== "astra-mcp" ||
   mcpReport.responses?.find((response) => response.id === 2)?.result?.structuredContent?.status !== "connected" ||
   JSON.stringify(mcpReport.responses?.find((response) => response.id === 3)?.result) !== "{}"
 ) {

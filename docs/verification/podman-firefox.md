@@ -23,7 +23,7 @@ Restarting the old container does not add the new capability.
 
 ## Isolated before/after acceptance
 
-Set `OMB_VERIFY_PODMAN` and `OMB_VERIFY_MACHINE` explicitly, with the managed
+Set `ASTRA_VERIFY_PODMAN` and `ASTRA_VERIFY_MACHINE` explicitly, with the managed
 image already prepared on that test engine, then run:
 
 ```sh
@@ -41,7 +41,7 @@ fresh-profile control sets `MOZ_DISABLE_CONTENT_SANDBOX=1`, requires level zero,
 and must fail the same enabled-sandbox assertion. Both levels are recorded in
 `receipt.json`. The script cleans up only
 the containers and workspaces it created. Logs and receipt remain under
-`.omb-scratch/firefox` (override with `OMB_VERIFY_OUTPUT`).
+`.omb-scratch/firefox` (override with `ASTRA_VERIFY_OUTPUT`).
 
 2026-09-06: Windows/WSL2 Linux x86_64, rootless Podman 5.8.3, managed driver
 0.20.0-v4 image. Baseline: `chroot: EPERM`, timeout exit 124, no PNG. Patched:

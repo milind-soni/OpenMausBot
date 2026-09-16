@@ -29,21 +29,21 @@
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // computer-proxy / permission-proxy). All state comes from env, injected by
 // the harness when it builds the integration:
-//   OMB_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
-//   OMB_BOT_ID       the calling bot's id (excluded from list_bots; sender)
-//   OMB_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
-//   OMB_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
+//   ASTRA_HARNESS_URL  base URL of the harness (http://127.0.0.1:8799)
+//   ASTRA_BOT_ID       the calling bot's id (excluded from list_bots; sender)
+//   ASTRA_COMMS_TOKEN  shared secret for the localhost-only internal endpoints
+//   ASTRA_TURN_DEPTH   this turn's comms depth (the harness refuses recursion)
 import readline from "node:readline";
 
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
-const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
-const BOT_ID = process.env.OMB_BOT_ID ?? "";
-const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
-const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
-const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
-const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
+const HARNESS = process.env.ASTRA_HARNESS_URL ?? "http://127.0.0.1:8799";
+const BOT_ID = process.env.ASTRA_BOT_ID ?? "";
+const THREAD_ID = process.env.ASTRA_THREAD_ID ?? "";
+const TOKEN = process.env.ASTRA_COMMS_TOKEN ?? "";
+const DEPTH = Number(process.env.ASTRA_TURN_DEPTH ?? "0") || 0;
+const SKILL_AUTHORING_ENABLED = process.env.ASTRA_SKILL_AUTHORING_ENABLED === "1";
 const MAX_CREATED_PER_TURN = 4;
 let createdThisTurn = 0;
 // Same spirit as MAX_CREATED_PER_TURN above and MAX_QUEUED_PER_THREAD in
@@ -335,8 +335,8 @@ const ROUTINE_FIELDS_SCHEMA = {
   schedule: ROUTINE_SCHEDULE_SCHEMA,
   run_on: {
     type: "string",
-    enum: ["maus", "cloud"],
-    description: "Where the routine runs. Defaults to maus (this OpenMausBot setup).",
+    enum: ["astra", "cloud"],
+    description: "Where the routine runs. Defaults to maus (this Astra setup).",
   },
   timeout_minutes: {
     type: "integer",
@@ -359,7 +359,7 @@ const TOOLS = [
   {
     name: "list_bots",
     description:
-      "List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
+      "List the other bots (agents) in your Astra section, with their model and whether they're busy. Call this before delegate_bot or ask_bot to discover who's available. Use delegate_bot for assignments; use ask_bot only for a short consultation needed inline.",
     inputSchema: { type: "object", properties: {} },
   },
   {
@@ -534,7 +534,7 @@ const TOOLS = [
   {
     name: "request_credential",
     description:
-      "Ask the user for a supported API key through OpenMausBot's secure credential flow. The desktop app and a freshly QR-paired mobile app show a secure entry card; older mobile pairings show how to pair again or finish on the computer. Never claim a secure field opened unless this request succeeds, and never ask the user to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; OpenMausBot resumes the task after the user saves or declines.",
+      "Ask the user for a supported API key through Astra's secure credential flow. The desktop app and a freshly QR-paired mobile app show a secure entry card; older mobile pairings show how to pair again or finish on the computer. Never claim a secure field opened unless this request succeeds, and never ask the user to paste a secret into chat. The secret is saved by the desktop app and is never returned to you. After calling this tool, end the turn; Astra resumes the task after the user saves or declines.",
     inputSchema: {
       type: "object",
       properties: {
@@ -795,8 +795,8 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   }
   const runOn = args.run_on ?? args.runOn;
   const timeoutMinutes = args.timeout_minutes ?? args.timeoutMinutes;
-  if (runOn != null && runOn !== "maus" && runOn !== "cloud") {
-    return { fields, error: 'run_on must be "maus" or "cloud".' };
+  if (runOn != null && runOn !== "astra" && runOn !== "cloud") {
+    return { fields, error: 'run_on must be "astra" or "cloud".' };
   }
   if (timeoutMinutes != null && (
     typeof timeoutMinutes !== "number" || !Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 240
@@ -1170,7 +1170,7 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       return { text: `${r.label ?? CREDENTIAL_TARGETS[credentialId].label} is already configured. Continue the task.` };
     }
     return {
-      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
+      text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; Astra will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
     };
   }
   if (name === "list_routines") {

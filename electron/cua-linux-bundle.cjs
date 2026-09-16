@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const STAGE_PREFIX = "openmausbot-cua-linux-x64-";
+const STAGE_PREFIX = "astra-cua-linux-x64-";
 const LEGACY_STAGE_GRACE_MS = 10 * 60 * 1000;
 const FILES = Object.freeze({
   "cua-driver": "ed5844fadf07b9b72c4a3b3802e1c47233c166d66d6198608d5991f807aab4ac",

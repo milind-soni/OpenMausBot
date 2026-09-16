@@ -23,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const WATCHDOG_DIR = dirname(fileURLToPath(import.meta.url));
 // electron/ -> project root. The data dir is passed explicitly so a moved
-// OMB_DATA_DIR cannot strand the watchdog.
+// ASTRA_DATA_DIR cannot strand the watchdog.
 
 const args = process.argv.slice(2);
 const journalFile = args[0];
@@ -115,10 +115,10 @@ const envMs = (name, fallback) => {
   const raw = Number(process.env[name]);
   return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 };
-const BOOT_GRACE_MS = envMs("OMB_WATCHDOG_BOOT_GRACE_MS", 20_000);
-const STALE_AFTER_MS = envMs("OMB_WATCHDOG_STALE_MS", 60_000);
-const POLL_MS = envMs("OMB_WATCHDOG_POLL_MS", 2_000);
-const MAX_LIFETIME_MS = envMs("OMB_WATCHDOG_MAX_LIFETIME_MS", 10 * 60_000);
+const BOOT_GRACE_MS = envMs("ASTRA_WATCHDOG_BOOT_GRACE_MS", 20_000);
+const STALE_AFTER_MS = envMs("ASTRA_WATCHDOG_STALE_MS", 60_000);
+const POLL_MS = envMs("ASTRA_WATCHDOG_POLL_MS", 2_000);
+const MAX_LIFETIME_MS = envMs("ASTRA_WATCHDOG_MAX_LIFETIME_MS", 10 * 60_000);
 
 const start = Date.now();
 const readMarkerMtime = () => {

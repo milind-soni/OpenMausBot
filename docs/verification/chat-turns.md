@@ -67,7 +67,7 @@ This does not prove resumption or cleanup of real provider sessions after a cras
 pnpm exec vitest run server/independent-threads-api.test.ts
 ```
 
-This test launches a fresh `control-omb` fixture for each case, wraps only its
+This test launches a fresh `control-astra` fixture for each case, wraps only its
 fake engine with per-model completion gates, and uses the shared MCP/CLI surface
 for pinned sends, waits, model changes, reads, and interrupts. It verifies two
 tasks running under one bot, switching and creating while busy, separate model

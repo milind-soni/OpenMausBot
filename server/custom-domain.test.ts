@@ -107,7 +107,7 @@ describe("domain verification", () => {
     expect(Number.isNaN(Date.parse(result.verifiedAt))).toBe(false);
     expect(lookup).toHaveBeenCalledExactlyOnceWith("bots.company.com");
     expect(request).toHaveBeenCalledTimes(2);
-    expect(request.mock.calls[0]![0].pathname).toBe("/.well-known/openmausbot/environment");
+    expect(request.mock.calls[0]![0].pathname).toBe("/.well-known/astra/environment");
     const token = request.mock.calls[1]![0].pathname.slice(CUSTOM_DOMAIN_CHALLENGE_PATH.length);
     expect(token).toMatch(/^[a-f0-9]{64}$/);
     expect(verifier.challenge(token)).toBeNull();
@@ -244,7 +244,7 @@ describe("HTTPS transport", () => {
     for (const [url, options] of httpsRequestMock.mock.calls as [URL, RequestOptions][]) {
       expect(url.hostname).toBe("bots.company.com");
       expect(options).toMatchObject({ method: "GET", agent: false, rejectUnauthorized: true });
-      expect(options.headers).toEqual({ Accept: "application/json", "User-Agent": "OpenMausBot-domain-check" });
+      expect(options.headers).toEqual({ Accept: "application/json", "User-Agent": "Astra-domain-check" });
       const callback = vi.fn();
       options.lookup!("bots.company.com", { all: false }, callback);
       expect(callback).toHaveBeenCalledWith(null, "8.8.8.8", 4);
@@ -272,6 +272,6 @@ describe("HTTPS transport", () => {
   it("rejects HTML and malformed JSON without returning their contents", async () => {
     const verifier = createCustomDomainVerifier({ environmentId, lookup: async () => [publicAddress] });
     responder = () => ({ status: 200, body: "<html>private error page</html>" });
-    await expect(verifier.verify("bots.company.com")).rejects.toThrow("did not return OpenMausBot data");
+    await expect(verifier.verify("bots.company.com")).rejects.toThrow("did not return Astra data");
   });
 });

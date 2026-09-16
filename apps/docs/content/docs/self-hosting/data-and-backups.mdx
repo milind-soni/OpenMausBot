@@ -1,10 +1,10 @@
 ---
 title: Data and backups
-description: Know what OpenMausBot stores locally and what to preserve.
+description: Know what Astra stores locally and what to preserve.
 icon: DatabaseBackup
 ---
 
-OpenMausBot keeps its application state under `~/.openmausbot`, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store.
+Astra keeps its application state under `~/.astra`, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store.
 
 ## Export and import in Settings
 
@@ -47,7 +47,7 @@ replaced. Type **REPLACE** to confirm, then fully quit and reopen the desktop ap
 or restart the hosted server process. Closing a desktop window is not enough.
 
 Restore **replaces**, rather than combines, workspace data. The previous data is
-kept under `.openmausbot/.backups/safety-<restore-id>/`. A failed or interrupted
+kept under `.astra/.backups/safety-<restore-id>/`. A failed or interrupted
 replacement recovers the previous files before the server loads them. Keep that
 safety directory until you have checked the restored workspace. It contains
 private data; do not share it.
@@ -86,7 +86,7 @@ paths are not copied or rewritten; check them when moving between computers.
 
 ## Filesystem-level backups
 
-Close OpenMausBot before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.openmausbot` directory rather than selecting individual database files.
+Close Astra before taking a filesystem-level backup so SQLite and configuration files are captured consistently. Preserve the entire `.astra` directory rather than selecting individual database files.
 
 Raw filesystem snapshots differ from Settings exports: they may include saved
 credentials, CLI homes and browser sessions. A Docker snapshot of the whole

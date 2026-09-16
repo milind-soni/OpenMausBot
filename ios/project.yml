@@ -1,15 +1,15 @@
 # XcodeGen spec. The .xcodeproj is generated, not committed — a project
 # file is a merge-conflict machine and nothing in it is worth reviewing.
 #
-#   brew install xcodegen && cd ios && xcodegen generate && open OpenMausCompanion.xcodeproj
+#   brew install xcodegen && cd ios && xcodegen generate && open AstraCompanion.xcodeproj
 #
 # XcodeGen is a development tool, not a dependency of the app: the app
 # itself has none. If you'd rather not install it, make an iOS App target
 # in Xcode by hand, add the App/ folder, and add the local CompanionCore
 # package — the Info.plist keys below are the part that is easy to miss.
-name: OpenMausCompanion
+name: AstraCompanion
 options:
-  bundleIdPrefix: com.openmausbot
+  bundleIdPrefix: com.astra
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -19,18 +19,18 @@ packages:
     path: .
 
 schemes:
-  OpenMausCompanion:
+  AstraCompanion:
     build:
       targets:
-        OpenMausCompanion: all
-        OpenMausCompanionUITests: [test]
+        AstraCompanion: all
+        AstraCompanionUITests: [test]
     test:
       config: Debug
       targets:
-        - OpenMausCompanionUITests
+        - AstraCompanionUITests
 
 targets:
-  OpenMausCompanion:
+  AstraCompanion:
     type: application
     platform: iOS
     sources:
@@ -40,11 +40,11 @@ targets:
     dependencies:
       - package: CompanionCore
         product: CompanionCore
-      - target: OpenMausCompanionWidgets
-      - target: OpenMausShareExtension
+      - target: AstraCompanionWidgets
+      - target: AstraShareExtension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.astra.app
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "6"
         SWIFT_VERSION: "5.9"
@@ -52,32 +52,32 @@ targets:
         # The catalog lives in App/, which is already a source path.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     entitlements:
-      path: App/OpenMausCompanion.entitlements
+      path: App/AstraCompanion.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.openmausbot.shared
+          - group.com.astra.shared
         keychain-access-groups:
-          - $(AppIdentifierPrefix)com.openmausbot.app
-          - $(AppIdentifierPrefix)group.com.openmausbot.shared
+          - $(AppIdentifierPrefix)com.astra.app
+          - $(AppIdentifierPrefix)group.com.astra.shared
     info:
       path: App/Info.plist
       properties:
         # What appears under the icon. Distinct from the desktop app on
         # purpose: someone may well have both, and two identical labels on
         # one person's devices is a small cruelty.
-        CFBundleDisplayName: OpenMausMobile
+        CFBundleDisplayName: AstraMobile
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
         ITSAppUsesNonExemptEncryption: false
-        OpenMausKeychainAccessGroup: $(AppIdentifierPrefix)group.com.openmausbot.shared
+        AstraKeychainAccessGroup: $(AppIdentifierPrefix)group.com.astra.shared
         # The bot's Live Activity — its face and ask in the Dynamic Island
         # and on the lock screen.
         NSSupportsLiveActivities: true
         CFBundleURLTypes:
-          - CFBundleURLName: com.openmausbot.companion.pairing
+          - CFBundleURLName: com.astra.companion.pairing
             CFBundleURLSchemes:
-              - openmausbot
+              - astra
         # REQUIRED, and easy to lose. Without a launch screen iOS runs the
         # app in compatibility scaling: letterboxed inside black bars, with
         # everything drawn oversized, on every modern iPhone. An empty
@@ -100,18 +100,18 @@ targets:
         # It looks exactly like "no computers on this network", which is a
         # confusing hour if you don't know to look here.
         NSLocalNetworkUsageDescription: >-
-          OpenMausBot finds your computer on this network so your bots can
+          Astra finds your computer on this network so your bots can
           reach you here.
         NSCameraUsageDescription: >-
-          OpenMausBot uses the camera only to scan a pairing QR code shown on
+          Astra uses the camera only to scan a pairing QR code shown on
           your computer.
         NSMicrophoneUsageDescription: >-
-          OpenMausMobile listens while you dictate a message to a bot.
+          AstraMobile listens while you dictate a message to a bot.
         NSSpeechRecognitionUsageDescription: >-
-          OpenMausMobile converts your speech into text so you can send it
+          AstraMobile converts your speech into text so you can send it
           to a bot. Recognition runs on this phone when it can.
         NSBonjourServices:
-          - _openmausbot._tcp
+          - _astra._tcp
         # The companion listener is plain HTTP on a local address. ATS has
         # to be told, and this is the narrowest way to say it: local
         # networking only, not a blanket exception.
@@ -132,26 +132,26 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
 
   # Native navigation coverage uses bundled synthetic data and no pairing.
-  OpenMausCompanionUITests:
+  AstraCompanionUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
       - path: UITests
     dependencies:
-      - target: OpenMausCompanion
+      - target: AstraCompanion
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: com.astra.app.uitests
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
-        TEST_TARGET_NAME: OpenMausCompanion
+        TEST_TARGET_NAME: AstraCompanion
 
   # The system share sheet can send a link, text, image, or document straight
   # to a paired bot without first opening the containing app. Connection
   # metadata lives in the App Group; the bearer remains in the shared
   # Keychain access group.
-  OpenMausShareExtension:
+  AstraShareExtension:
     type: app-extension
     platform: iOS
     sources:
@@ -162,7 +162,7 @@ targets:
         product: CompanionCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app.share
+        PRODUCT_BUNDLE_IDENTIFIER: com.astra.app.share
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "6"
         SWIFT_VERSION: "5.9"
@@ -170,19 +170,19 @@ targets:
         APPLICATION_EXTENSION_API_ONLY: YES
         SKIP_INSTALL: true
     entitlements:
-      path: ShareExtension/OpenMausShareExtension.entitlements
+      path: ShareExtension/AstraShareExtension.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.com.openmausbot.shared
+          - group.com.astra.shared
         keychain-access-groups:
-          - $(AppIdentifierPrefix)group.com.openmausbot.shared
+          - $(AppIdentifierPrefix)group.com.astra.shared
     info:
       path: ShareExtension/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausBot
+        CFBundleDisplayName: Astra
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        OpenMausKeychainAccessGroup: $(AppIdentifierPrefix)group.com.openmausbot.shared
+        AstraKeychainAccessGroup: $(AppIdentifierPrefix)group.com.astra.shared
         # ATS is evaluated for URLSession work performed by the extension too.
         # Mirror the containing app's narrow local/Tailscale exceptions so a
         # share can reach the same already-paired routes. Local-network privacy
@@ -206,23 +206,23 @@ targets:
 
   # The Live Activity lives in a widget extension. It shares the mascot's
   # drawing and data with the app, and the activity contract in Shared/.
-  OpenMausCompanionWidgets:
+  AstraCompanionWidgets:
     type: app-extension
     platform: iOS
     sources:
       - path: Widgets
       - path: Shared
-      - path: App/MausAvatar.swift
-      - path: App/MausFaceData.swift
+      - path: App/AstraAvatar.swift
+      - path: App/AstraFaceData.swift
     dependencies:
-      # MausAvatar draws whichever body a bot wears, and the body catalog and
+      # AstraAvatar draws whichever body a bot wears, and the body catalog and
       # its path parser live in CompanionCore. The extension shares the
       # drawing with the app, so it has to share the catalog too.
       - package: CompanionCore
         product: CompanionCore
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.openmausbot.app.widgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.astra.app.widgets
         MARKETING_VERSION: "1.0.0"
         CURRENT_PROJECT_VERSION: "6"
         SWIFT_VERSION: "5.9"
@@ -231,7 +231,7 @@ targets:
     info:
       path: Widgets/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausMobile
+        CFBundleDisplayName: AstraMobile
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

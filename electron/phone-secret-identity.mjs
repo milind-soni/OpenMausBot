@@ -127,7 +127,7 @@ export function phoneSecretPrivateKeyMessage(identity) {
   const verified = readPhoneSecretIdentity({ [PHONE_SECRET_CREDENTIAL_KEY]: identity });
   if (!verified) return null;
   return {
-    type: "openmausbot:phone-secret-key",
+    type: "astra:phone-secret-key",
     version: verified.version,
     keyId: verified.keyId,
     privateKey: verified.privateKey,
@@ -137,7 +137,7 @@ export function phoneSecretPrivateKeyMessage(identity) {
 export function decodePhoneSecretSaveRequest(rawMessage) {
   const message = rawMessage?.data ?? rawMessage;
   if (!message || typeof message !== "object" || Array.isArray(message)) return null;
-  if (message.type !== "openmausbot:phone-secret-save") return null;
+  if (message.type !== "astra:phone-secret-save") return null;
   if (typeof message.requestId !== "string" || !/^[A-Za-z0-9_-]{1,80}$/.test(message.requestId)) return null;
   if (typeof message.target !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(message.target)) return null;
   if (typeof message.value !== "string") return null;
@@ -148,7 +148,7 @@ export function decodePhoneSecretSaveRequest(rawMessage) {
 
 export function phoneSecretSaveResult(requestId, ok, error) {
   const result = {
-    type: "openmausbot:phone-secret-save-result",
+    type: "astra:phone-secret-save-result",
     requestId,
     ok: ok === true,
   };

@@ -7,7 +7,7 @@ dependencies:
   tools:
     - type: "mcp"
       value: "phone"
-      description: "OpenMausBot's bundled physical Android phone tools"
+      description: "Astra's bundled physical Android phone tools"
 
 policy:
   allow_implicit_invocation: true

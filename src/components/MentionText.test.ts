@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
 import { MentionText } from "./MentionText";
-import { MAUS_COLORS } from "@/lib/mascot";
+import { ASTRA_COLORS } from "@/lib/mascot";
 
 it("uses each bot's avatar palette and updates when its color changes", () => {
   for (const color of ["red", "blue"] as const) {
@@ -10,8 +10,8 @@ it("uses each bot's avatar palette and updates when its color changes", () => {
       text: "@Atlas @Juniper @everyone", everyone: true,
       peers: [{ name: "Atlas", color }, { name: "Juniper", color: "purple" }],
     }));
-    expect(html).toContain(`style="--mention-color:${MAUS_COLORS[color]}">@Atlas`);
-    expect(html).toContain(`style="--mention-color:${MAUS_COLORS.purple}">@Juniper`);
+    expect(html).toContain(`style="--mention-color:${ASTRA_COLORS[color]}">@Atlas`);
+    expect(html).toContain(`style="--mention-color:${ASTRA_COLORS.purple}">@Juniper`);
     expect(html).toContain('<span class="mention-highlight">@everyone</span>');
   }
 });

@@ -100,7 +100,7 @@ export class McpStdioClient {
     await client.rpc("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "openmausbot-harness", version: "1.0.0" },
+      clientInfo: { name: "astra-harness", version: "1.0.0" },
     }, INITIALIZE_TIMEOUT_MS).then(() => client.rpc("notifications/initialized", {}, 5_000, true));
     return client;
   }
