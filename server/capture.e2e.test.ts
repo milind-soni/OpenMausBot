@@ -68,7 +68,8 @@ posixOnly("fact capture after attended turns", () => {
     await turn(on.id, on.threadId, "hello again, how are you");
     await turn(on.id, on.threadId, "maybe the office is moving, not sure");
     await until(async () => /Biscuit/.test(memoryOf(on.id)), "the capture to land", 30_000);
-    const bodies = (text: string) => text.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.split(" · ").at(-1) ?? "");
+    // the body is the last segment once trailing marks (confirmed/updated) are stripped
+    const bodies = (text: string) => text.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.replace(/ · (?:confirmed|updated|superseded|archived) \d{4}-\d{2}-\d{2}$/, "").split(" · ").at(-1) ?? "");
     const notebook = memoryOf(on.id);
     const line = notebook.split("\n").find((l) => l.includes("Biscuit"))!;
     // the default importance (3) is omitted by the grammar

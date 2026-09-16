@@ -395,7 +395,13 @@ const appConfigSchema = z.object({
   verify: z.object({ auto: z.boolean().optional(), retries: z.number().int().min(0).max(5).optional(), routines: z.boolean().optional() }).strict().optional(),
   /** Phase 4 part 1: how long a thread must be quiet before its buffered
    * turns go out for fact capture (bots that opted in). */
-  memory: z.object({ captureQuietMs: z.number().int().positive().optional() }).strict().optional(),
+  memory: z.object({
+    captureQuietMs: z.number().int().positive().optional(),
+    /** Phase 4 part 2: days without a restatement before a low-importance
+     * line is archived, and the local hour of the nightly pass. */
+    staleDays: z.number().int().positive().optional(),
+    consolidateHour: z.number().int().min(0).max(23).optional(),
+  }).strict().optional(),
   /** Harness recall before a turn (Phase 1 part 2): on by default; captures
    * from SupaMaus included where it runs; the block's size cap. */
   recall: z.object({
@@ -463,7 +469,7 @@ export interface AppConfig {
   tools?: { deferred?: boolean };
   gates?: { auto?: boolean; timeoutSeconds?: number };
   verify?: { auto?: boolean; retries?: number; routines?: boolean };
-  memory?: { captureQuietMs?: number };
+  memory?: { captureQuietMs?: number; staleDays?: number; consolidateHour?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -634,6 +640,16 @@ export function verifyRoutines(cfg: AppConfig): boolean {
 export function memoryCaptureQuietMs(cfg: AppConfig): number {
   const value = cfg.memory?.captureQuietMs;
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 90_000;
+}
+/** Phase 4 part 2: how long a low-importance line may go without a restatement. */
+export function memoryStaleDays(cfg: AppConfig): number {
+  const value = cfg.memory?.staleDays;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 90;
+}
+/** The local hour of the nightly consolidation pass for bots with capture on. */
+export function memoryConsolidateHour(cfg: AppConfig): number {
+  const value = cfg.memory?.consolidateHour;
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 23 ? value : 3;
 }
 export function gatesTimeoutMs(cfg: AppConfig): number {
   const seconds = cfg.gates?.timeoutSeconds;

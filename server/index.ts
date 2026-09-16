@@ -149,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines, memoryCaptureQuietMs } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines, memoryCaptureQuietMs, memoryStaleDays, memoryConsolidateHour } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -274,7 +274,7 @@ import {
   memorySourceLabel,
   searchMemoryFiles,
   SESSION_SEARCH_SYSTEM_PROMPT,
-  workspaceDir, currentFolderPrompt, readMemoryFile, syncMemoryIndex } from "./workspace.ts";
+  workspaceDir, currentFolderPrompt, readMemoryFile, syncMemoryIndex, memoryDate } from "./workspace.ts";
 import { readMemoryTopic } from "./workspace.ts";
 import {
   MEMORY_INDEX,
@@ -282,8 +282,7 @@ import {
   memoryCapacity,
   memoryOverview,
   openMemoryLocation,
-  readMemoryDoc,
-} from "./memory-store.ts";
+  readMemoryDoc, writeMemoryDoc } from "./memory-store.ts";
 import {
   beginMemoryTurn,
   endMemoryTurn,
@@ -293,8 +292,7 @@ import {
   journalMemoryWrite,
   readMemoryJournal,
   revertMemoryChange,
-  type MemoryJournalEntry,
-} from "./memory-journal.ts";
+  type MemoryJournalEntry, recordMemoryChange } from "./memory-journal.ts";
 import {
   readSectionContext,
   readSections,
@@ -347,7 +345,8 @@ import {
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { discoverGates, runGates, scopeLine } from "./gates.ts";
-import { CaptureBuffer, capturePrompt, dedupeCandidates, MAX_PER_FLUSH, parseCandidates, type CaptureBatch, type Candidate } from "./capture.ts";
+import { CaptureBuffer, capturePrompt, dedupeCandidates, MAX_PER_FLUSH, normaliseFact, parseCandidates, type CaptureBatch, type Candidate } from "./capture.ts";
+import { applyPlan, consolidatorPrompt, DEFAULT_FLOOR_SHARE, duplicateIndexes, parseContradictions, parseNotebook, planConsolidation, stampConfirmed, type Contradiction } from "./consolidate.ts";
 import { parseVerdict, verdictLine, verifierPrompt, type Verdict } from "./verifier.ts";
 import { beginNode, bySubject, finishNode, nextPending, nodeOutput, resetRunningNodes, skipNode, startGraphRun } from "./graph-runner.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
@@ -7104,7 +7103,8 @@ async function runCapture(batch: CaptureBatch): Promise<void> {
       console.error(`[omb-capture] ${speaker} call failed for ${batch.threadId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  const fresh = dedupeCandidates(all, readMemoryFile(bot.id)?.text ?? notebook).slice(0, MAX_PER_FLUSH);
+  const before = readMemoryDoc(bot.id, MEMORY_INDEX).text;
+  const fresh = dedupeCandidates(all, before).slice(0, MAX_PER_FLUSH);
   for (const candidate of fresh) {
     const result = updateMemory(bot.id, { action: "append", text: candidate.text }, { source, importance: candidate.importance });
     if (!result.ok) {
@@ -7112,11 +7112,112 @@ async function runCapture(batch: CaptureBatch): Promise<void> {
       break;
     }
   }
-  if (fresh.length) {
+  // Phase 4 part 2: a fact said again is a restatement — stamp the line
+  // it already has as confirmed, so freshness sees it
+  const restated = all.filter((candidate) => !fresh.includes(candidate));
+  if (restated.length) {
+    const keys = new Set(restated.map((c) => normaliseFact(c.text)));
+    const today = memoryDate();
+    const current = readMemoryDoc(bot.id, MEMORY_INDEX).text;
+    const stamped = current.split("\n").map((line) => {
+      const entry = parseNotebook(line)[0];
+      return entry && !entry.struck && keys.has(normaliseFact(entry.body)) ? stampConfirmed(line, today) : line;
+    }).join("\n");
+    if (stamped !== current) writeMemoryDoc(bot.id, MEMORY_INDEX, stamped);
+  }
+  const after = readMemoryDoc(bot.id, MEMORY_INDEX).text;
+  if (after !== before) {
+    recordMemoryChange(bot.id, { path: MEMORY_INDEX, actor: "bot", via: "capture", threadId: batch.threadId, before, after });
     try { syncMemoryIndex(bot.id); } catch { /* the index catches up on the next write */ }
-    console.error(`[omb-capture] ${bot.name}: kept ${fresh.length} of ${all.length} candidate(s) from ${batch.turns.length} turn(s)`);
+    console.error(`[omb-capture] ${bot.name}: kept ${fresh.length} of ${all.length} candidate(s) from ${batch.turns.length} turn(s)${restated.length ? `, ${restated.length} restated` : ""}`);
   }
 }
+
+// ── Phase 4 part 2: freshness and consolidation ─────────────────────────
+// One bounded pass over a bot's notebook: exact duplicates merge onto the
+// newest, contradictions found by one strict-JSON call are struck with a
+// trace, stale low-importance lines move to memory/archive.md, never more
+// than a fifth of the entries in one pass, the journal keeps the before and
+// after. Nightly for bots with capture on; on demand for any bot.
+export interface ConsolidationSummary {
+  ok: true;
+  entries: number;
+  removedDuplicates: number;
+  superseded: number;
+  archived: number;
+  overFloor: boolean;
+  judged: boolean;
+}
+
+async function consolidateMemory(botId: string): Promise<ConsolidationSummary | { ok: false; error: string }> {
+  const bot = store.bot(botId);
+  if (!bot) return { ok: false, error: "no such bot" };
+  const doc = readMemoryDoc(botId, MEMORY_INDEX);
+  const entries = parseNotebook(doc.text);
+  if (!entries.length) return { ok: true, entries: 0, removedDuplicates: 0, superseded: 0, archived: 0, overFloor: false, judged: false };
+  let contradictions: Contradiction[] = [];
+  let judged = false;
+  const instance = registry.get(bot.modelSelection.instanceId);
+  const generate = instance ? harnessGenerateFor(instance) : undefined;
+  if (generate && entries.filter((e) => !e.struck).length >= 2) {
+    try {
+      const outcome = await runHarnessCall(DATA_DIR, {
+        kind: "consolidate",
+        botId: bot.id,
+        botName: bot.name,
+        threadId: bot.threadId,
+        turnKey: doc.hash,
+        prompt: consolidatorPrompt(entries, duplicateIndexes(entries)),
+        instanceId: bot.modelSelection.instanceId,
+        driverKind: instance?.driverKind ?? "unknown",
+        model: bot.modelSelection.model,
+        call: (text) => generate(text, {}),
+      }, { budgetExhausted: () => Boolean(spendState(cfg, DATA_DIR)?.exceeded) });
+      if (outcome && "text" in outcome) {
+        contradictions = parseContradictions(outcome.text, entries.length);
+        judged = true;
+      }
+    } catch (error) {
+      console.error(`[omb-consolidate] ${bot.name}: the contradiction call failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const today = memoryDate();
+  const plan = planConsolidation(entries, { today, staleDays: memoryStaleDays(cfg), floorShare: DEFAULT_FLOOR_SHARE, contradictions });
+  const applied = applyPlan(doc.text, entries, plan, today);
+  if (applied.text !== doc.text) {
+    // the file may have moved under us (a turn's memory_update): the hash
+    // check refuses, and the next pass starts from the new text
+    try {
+      writeMemoryDoc(botId, MEMORY_INDEX, applied.text, { expectedHash: doc.hash });
+    } catch (error) {
+      return { ok: false, error: `the notebook changed during the pass; nothing was applied (${error instanceof Error ? error.message : String(error)})` };
+    }
+    if (applied.archived.length) {
+      const archive = readMemoryDoc(botId, MEMORY_ARCHIVE);
+      const base = archive.exists ? archive.text : "# Archived notebook lines\n\nMoved here by consolidation: old, low-importance, never restated. Nothing is deleted.\n";
+      writeMemoryDoc(botId, MEMORY_ARCHIVE, `${base.replace(/\n*$/, "\n")}${applied.archived.join("\n")}\n`);
+    }
+    recordMemoryChange(botId, { path: MEMORY_INDEX, actor: "bot", via: "consolidate", before: doc.text, after: applied.text });
+    try { syncMemoryIndex(botId); } catch { /* the index catches up on the next write */ }
+  }
+  const summary: ConsolidationSummary = { ok: true, entries: entries.length, removedDuplicates: plan.removeDuplicate.length, superseded: plan.supersede.length, archived: plan.archive.length, overFloor: plan.overFloor, judged };
+  console.error(`[omb-consolidate] ${bot.name}: ${summary.removedDuplicates} duplicate(s) removed, ${summary.superseded} superseded, ${summary.archived} archived${summary.overFloor ? " (floor reached)" : ""}`);
+  return summary;
+}
+const MEMORY_ARCHIVE = "memory/archive.md";
+
+/** Nightly, at the configured local hour, every bot with capture on. */
+let lastConsolidationDay = "";
+setInterval(() => {
+  const now = new Date();
+  const day = memoryDate(now);
+  if (now.getHours() !== memoryConsolidateHour(cfg) || lastConsolidationDay === day) return;
+  lastConsolidationDay = day;
+  for (const bot of store.bots) {
+    if (!bot.memoryCapture) continue;
+    void consolidateMemory(bot.id).catch((error) => console.error(`[omb-consolidate] ${bot.name}: ${error instanceof Error ? error.message : String(error)}`));
+  }
+}, 5 * 60_000).unref?.();
 
 /** Phase 3 part 1: when a board task's turn ends in a project folder with
  * gates, run them off the turn path, keep the results on the task, prefix
@@ -15427,6 +15528,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (error instanceof MemoryStoreError && error.code === "too-large") return json(res, 400, { error: error.message });
         return replyMemoryError(res, error);
       }
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/consolidate$/);
+    if (m && method === "POST") {
+      // Phase 4 part 2: one bounded pass, now; the journal has the undo
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const result = await consolidateMemory(m[1]);
+      return json(res, result.ok ? 200 : 409, result);
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/file$/);
     if (m && method === "GET") {

@@ -191,3 +191,4 @@ printed path. Never kill processes by name and never delete a broad temp root.
 - [verifier.md](verifier.md) — the tool-less verifier on finished board tasks and the loop breaker on brokered tool calls (Phase 3 part 3)
 - [graph-runner.md](graph-runner.md) — routine runs as checkpointed graphs: check, judge, ship after the turn; resume on restart (Phase 3 part 4)
 - [capture.md](capture.md) — facts said in passing captured into the bot's notebook after attended turns (Phase 4 part 1)
+- [consolidate.md](consolidate.md) — confirmed stamps, duplicate merge, contradictions struck, stale lines archived, one bounded journaled pass (Phase 4 part 2)

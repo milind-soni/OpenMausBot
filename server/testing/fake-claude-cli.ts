@@ -214,7 +214,21 @@ if (argAfter("--output-format") === "text" || argAfter("--output-format") === "j
       .filter((line) => line.startsWith("- ") && / (is|are) /.test(line) && !/^- (hi|hello|hey)\b/i.test(line))
       .map((line) => ({ text: line.slice(2).replace(/^(by the way|as i said|also),?\s*/i, "").replace(/[.!]+$/, ""), kind: "fact", confidence: /maybe/i.test(line) ? 0.3 : 0.9, importance: 3 })))
     : null;
-  const generated = captured !== null ? captured : prompt.includes("You are the VERIFIER")
+  // Phase 4 part 2: the consolidator finds pairs that differ only by "not"
+  const consolidated = prompt.includes("You are the CONSOLIDATOR")
+    ? (() => {
+      const items = prompt.split("\n").map((line) => /^\[(\d+)\] (.*)$/.exec(line)).filter((m): m is RegExpExecArray => Boolean(m))
+        .map((m) => ({ index: Number(m[1]), key: m[2].toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim() }));
+      const pairs: Array<{ a: number; b: number; keep: "a" | "b" }> = [];
+      for (const x of items) for (const y of items) {
+        if (x.index >= y.index) continue;
+        const bare = (k: string) => k.replace(/\b(?:do|does|did) not\b ?|\bnot\b ?/, "");
+        if (bare(x.key) === bare(y.key) && x.key !== y.key) pairs.push({ a: x.index, b: y.index, keep: "b" });
+      }
+      return JSON.stringify({ pairs });
+    })()
+    : null;
+  const generated = captured !== null ? captured : consolidated !== null ? consolidated : prompt.includes("You are the VERIFIER")
     ? (prompt.includes("[[fake:incomplete]]")
       ? JSON.stringify({ is_complete: false, confidence: 0.35, evidence_for: [], evidence_against: ["the fake verifier was told this is incomplete"], next_action: "do the missing part" })
       : JSON.stringify({ is_complete: true, confidence: 0.9, evidence_for: ["the fake verifier accepts it"], evidence_against: [], next_action: "" }))
