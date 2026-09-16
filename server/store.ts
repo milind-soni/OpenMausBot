@@ -698,6 +698,10 @@ export interface BotRecord {
    * when this one fails on a provider error, silently and recorded on the
    * task. Absent = no silent fallback; the quota card still offers a choice. */
   fallback?: { alternate?: ModelSelection };
+  /** Phase 4 part 1 (decision 16): the harness captures facts said in
+   * passing into this bot's notebook after attended direct turns. Off by
+   * default; a person switches it on per bot. */
+  memoryCapture?: boolean;
   /** provider-native continuation per instance (e.g. claude session id) */
   resumeCursors: Record<string, unknown>;
   /** where the bot works ("Works on"): its cloud box, the Local VM, this

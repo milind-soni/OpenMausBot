@@ -206,7 +206,15 @@ if (argAfter("--output-format") === "text" || argAfter("--output-format") === "j
   // Phase 3 part 3: a verifier call is answered with a verdict. The task
   // body decides it, so one server can hold both outcomes: a body carrying
   // "[[fake:incomplete]]" is judged not complete, everything else complete.
-  const generated = prompt.includes("You are the VERIFIER")
+  // Phase 4 part 1: a capture prompt is answered from the spoken lines —
+  // every line that states something with " is " or " are " becomes a fact,
+  // a line with "maybe" is low confidence, greetings yield nothing.
+  const captured = prompt.includes("You are the CAPTURE")
+    ? JSON.stringify((prompt.split(/\n\n/).find((block) => /^What the (person|assistant) said/.test(block)) ?? "").split("\n")
+      .filter((line) => line.startsWith("- ") && / (is|are) /.test(line) && !/^- (hi|hello|hey)\b/i.test(line))
+      .map((line) => ({ text: line.slice(2).replace(/^(by the way|as i said|also),?\s*/i, "").replace(/[.!]+$/, ""), kind: "fact", confidence: /maybe/i.test(line) ? 0.3 : 0.9, importance: 3 })))
+    : null;
+  const generated = captured !== null ? captured : prompt.includes("You are the VERIFIER")
     ? (prompt.includes("[[fake:incomplete]]")
       ? JSON.stringify({ is_complete: false, confidence: 0.35, evidence_for: [], evidence_against: ["the fake verifier was told this is incomplete"], next_action: "do the missing part" })
       : JSON.stringify({ is_complete: true, confidence: 0.9, evidence_for: ["the fake verifier accepts it"], evidence_against: [], next_action: "" }))

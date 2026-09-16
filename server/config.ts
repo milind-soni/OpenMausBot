@@ -393,6 +393,9 @@ const appConfigSchema = z.object({
   /** Phase 3 part 3: the tool-less verifier on finished unattended work;
    * retries is how many "not complete" verdicts send the task back to ready. */
   verify: z.object({ auto: z.boolean().optional(), retries: z.number().int().min(0).max(5).optional(), routines: z.boolean().optional() }).strict().optional(),
+  /** Phase 4 part 1: how long a thread must be quiet before its buffered
+   * turns go out for fact capture (bots that opted in). */
+  memory: z.object({ captureQuietMs: z.number().int().positive().optional() }).strict().optional(),
   /** Harness recall before a turn (Phase 1 part 2): on by default; captures
    * from SupaMaus included where it runs; the block's size cap. */
   recall: z.object({
@@ -460,6 +463,7 @@ export interface AppConfig {
   tools?: { deferred?: boolean };
   gates?: { auto?: boolean; timeoutSeconds?: number };
   verify?: { auto?: boolean; retries?: number; routines?: boolean };
+  memory?: { captureQuietMs?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -626,6 +630,11 @@ export function verifyRetries(cfg: AppConfig): number {
 export function verifyRoutines(cfg: AppConfig): boolean {
   return cfg.verify?.routines !== false && cfg.verify?.auto !== false;
 }
+/** Phase 4 part 1: quiet spell before buffered turns are read for facts. */
+export function memoryCaptureQuietMs(cfg: AppConfig): number {
+  const value = cfg.memory?.captureQuietMs;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 90_000;
+}
 export function gatesTimeoutMs(cfg: AppConfig): number {
   const seconds = cfg.gates?.timeoutSeconds;
   return typeof seconds === "number" && Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 600_000;
@@ -733,6 +742,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "features",
   "gates",
   "verify",
+  "memory",
   "board",
   "browserProfiles",
   "onboarding",

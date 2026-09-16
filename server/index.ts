@@ -149,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines, memoryCaptureQuietMs } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -274,7 +274,7 @@ import {
   memorySourceLabel,
   searchMemoryFiles,
   SESSION_SEARCH_SYSTEM_PROMPT,
-  workspaceDir, currentFolderPrompt } from "./workspace.ts";
+  workspaceDir, currentFolderPrompt, readMemoryFile, syncMemoryIndex } from "./workspace.ts";
 import { readMemoryTopic } from "./workspace.ts";
 import {
   MEMORY_INDEX,
@@ -347,6 +347,7 @@ import {
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { discoverGates, runGates, scopeLine } from "./gates.ts";
+import { CaptureBuffer, capturePrompt, dedupeCandidates, MAX_PER_FLUSH, parseCandidates, type CaptureBatch, type Candidate } from "./capture.ts";
 import { parseVerdict, verdictLine, verifierPrompt, type Verdict } from "./verifier.ts";
 import { beginNode, bySubject, finishNode, nextPending, nodeOutput, resetRunningNodes, skipNode, startGraphRun } from "./graph-runner.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
@@ -3865,6 +3866,7 @@ function scheduleTurnDigest(input: {
         return message.id;
       });
       recordBoardResult(input.threadId, input.botId, renderDigest(digest));
+      bufferCapture(input.botId, input.threadId, input.reply);
     } catch (error) {
       console.error(`digest: could not record turn ${input.turnId} on ${input.threadId}:`, error instanceof Error ? error.message : error);
     }
@@ -7029,6 +7031,90 @@ function recordBoardResult(threadId: string, botId: string, digestLine: string):
     void runBoardGates(task.id, botId, threadId, digestLine);
   } catch (error) {
     console.error(`[omb-board] could not record the result for ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// ── Phase 4 part 1: fact capture ───────────────────────────────────────
+// After an attended direct turn on a bot with capture on, the turn's words
+// wait in a buffer and go out after a quiet spell (or ten turns) as two
+// one-shot calls — the person's words, the bot's words — whose candidates
+// are appended to the notebook, marked captured. Never on the turn path.
+const captureBuffer = new CaptureBuffer({
+  quietMs: memoryCaptureQuietMs(cfg),
+  maxTurns: 10,
+  onFlush: (batch) => { void runCapture(batch); },
+});
+const captureUnsupportedLogged = new Set<string>();
+
+function bufferCapture(botId: string, threadId: string, reply: string): void {
+  try {
+    const bot = store.bot(botId);
+    if (!bot?.memoryCapture) return;
+    if (isUnattended(botId, threadId)) return; // routines, board runs, webhooks
+    if (!store.taskByThread(botId, threadId)) return; // rooms and peer threads are not the person's own chat
+    const messages = store.activePath(threadId);
+    const lastUser = [...messages].reverse().find((m) => m.role === "user" && m.kind === "text");
+    if (!lastUser?.text || lastUser.peerAsk) return; // a peer's ask, not a person
+    captureBuffer.add(botId, threadId, { person: lastUser.text, bot: reply });
+  } catch (error) {
+    console.error(`[omb-capture] could not buffer ${threadId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function runCapture(batch: CaptureBatch): Promise<void> {
+  const bot = store.bot(batch.botId);
+  if (!bot?.memoryCapture) return;
+  const instance = registry.get(bot.modelSelection.instanceId);
+  const generate = instance ? harnessGenerateFor(instance) : undefined;
+  if (!generate) {
+    if (!captureUnsupportedLogged.has(bot.id)) {
+      captureUnsupportedLogged.add(bot.id);
+      console.error(`[omb-capture] ${bot.name}'s engine has no one-shot call; nothing is captured for it`);
+    }
+    return;
+  }
+  const notebook = readMemoryFile(bot.id)?.text ?? "";
+  const task = store.taskByThread(bot.id, batch.threadId);
+  const source = `${memorySourceLabel({ task: task ? { title: task.title } : undefined, threadId: batch.threadId })}, captured`;
+  const lastKey = store.activePath(batch.threadId).at(-1)?.id ?? String(Date.now());
+  const all: Candidate[] = [];
+  for (const speaker of ["person", "bot"] as const) {
+    const lines = batch.turns.map((turn) => (speaker === "person" ? turn.person : turn.bot)).filter((line) => line.trim());
+    if (!lines.length) continue;
+    const prompt = capturePrompt({ speaker, lines, notebook });
+    try {
+      const outcome = await runHarnessCall(DATA_DIR, {
+        kind: `capture-${speaker}`,
+        botId: bot.id,
+        botName: bot.name,
+        threadId: batch.threadId,
+        turnKey: lastKey,
+        prompt,
+        instanceId: bot.modelSelection.instanceId,
+        driverKind: instance?.driverKind ?? "unknown",
+        model: bot.modelSelection.model,
+        call: (text) => generate(text, {}),
+      }, { budgetExhausted: () => Boolean(spendState(cfg, DATA_DIR)?.exceeded) });
+      if (!outcome || !("text" in outcome)) continue;
+      for (const candidate of parseCandidates(outcome.text)) {
+        // the bot's own words are the weaker source: say so on the line
+        all.push(speaker === "bot" ? { ...candidate, text: `${candidate.text} (the bot's own account)` } : candidate);
+      }
+    } catch (error) {
+      console.error(`[omb-capture] ${speaker} call failed for ${batch.threadId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const fresh = dedupeCandidates(all, readMemoryFile(bot.id)?.text ?? notebook).slice(0, MAX_PER_FLUSH);
+  for (const candidate of fresh) {
+    const result = updateMemory(bot.id, { action: "append", text: candidate.text }, { source, importance: candidate.importance });
+    if (!result.ok) {
+      console.error(`[omb-capture] ${bot.name}: append refused (${result.code}); stopping this flush`);
+      break;
+    }
+  }
+  if (fresh.length) {
+    try { syncMemoryIndex(bot.id); } catch { /* the index catches up on the next write */ }
+    console.error(`[omb-capture] ${bot.name}: kept ${fresh.length} of ${all.length} candidate(s) from ${batch.turns.length} turn(s)`);
   }
 }
 
@@ -14749,6 +14835,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Phase 2 part 2 (decision 12): the engine a failed direct turn
       // continues on. null clears it; the alternate is checked like any
       // model selection but need not be available right now.
+      if (body.memoryCapture !== undefined) {
+        if (typeof body.memoryCapture !== "boolean") return json(res, 400, { error: "memoryCapture must be true or false" });
+        patch.memoryCapture = body.memoryCapture;
+      }
       if (body.fallback !== undefined) {
         if (body.fallback === null) {
           patch.fallback = undefined;

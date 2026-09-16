@@ -190,3 +190,4 @@ printed path. Never kill processes by name and never delete a broad temp root.
 - [gates.md](gates.md) — the project's checks run by the harness when a board task ends, and the scope line on its result (Phase 3 part 1)
 - [verifier.md](verifier.md) — the tool-less verifier on finished board tasks and the loop breaker on brokered tool calls (Phase 3 part 3)
 - [graph-runner.md](graph-runner.md) — routine runs as checkpointed graphs: check, judge, ship after the turn; resume on restart (Phase 3 part 4)
+- [capture.md](capture.md) — facts said in passing captured into the bot's notebook after attended turns (Phase 4 part 1)
