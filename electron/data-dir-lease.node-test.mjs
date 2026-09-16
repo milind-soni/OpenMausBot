@@ -560,3 +560,35 @@ test("boot identity does not weaken exclusion: only one of many live racers wins
   const after = acquireDataDirLease(dataDir);
   assert.equal(after.release(), true);
 });
+
+test("a live but unrelated Windows pid reused within the same boot is treated as stale", async (t) => {
+  if (process.platform !== "win32") return t.skip("Windows-only: wmic process-identity check");
+  const { dataDir } = temporaryDirectory();
+  const sibling = spawn(process.execPath, ["--eval", "setInterval(()=>{}, 1_000);"], { stdio: "ignore" });
+  const siblingPid = sibling.pid;
+  assert.ok(siblingPid);
+  t.after(() => sibling.kill());
+  // Give the sibling enough time to start so its CreationDate is unambiguously
+  // later than the synthetic lease's createdAt, reproducing the same-boot
+  // PID-reuse case from the issue.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const leasePath = path.join(dataDir, LEASE_NAME);
+  const stale = {
+    version: 1,
+    pid: siblingPid,
+    host: hostname(),
+    token: randomUUID(),
+    createdAt: Date.now() - 60_000,
+    boot: null,
+    uptime: 0,
+  };
+  writeFileSync(leasePath, `${JSON.stringify(stale)}\n`, { mode: 0o600 });
+
+  const lease = acquireDataDirLease(dataDir);
+  try {
+    assert.equal(lease.ownerPid, process.pid);
+  } finally {
+    lease.release();
+  }
+});
