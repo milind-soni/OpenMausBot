@@ -392,7 +392,7 @@ const appConfigSchema = z.object({
   gates: z.object({ auto: z.boolean().optional(), timeoutSeconds: z.number().int().positive().optional() }).strict().optional(),
   /** Phase 3 part 3: the tool-less verifier on finished unattended work;
    * retries is how many "not complete" verdicts send the task back to ready. */
-  verify: z.object({ auto: z.boolean().optional(), retries: z.number().int().min(0).max(5).optional() }).strict().optional(),
+  verify: z.object({ auto: z.boolean().optional(), retries: z.number().int().min(0).max(5).optional(), routines: z.boolean().optional() }).strict().optional(),
   /** Harness recall before a turn (Phase 1 part 2): on by default; captures
    * from SupaMaus included where it runs; the block's size cap. */
   recall: z.object({
@@ -459,7 +459,7 @@ export interface AppConfig {
   recall?: { auto?: boolean; captures?: boolean; maxChars?: number };
   tools?: { deferred?: boolean };
   gates?: { auto?: boolean; timeoutSeconds?: number };
-  verify?: { auto?: boolean; retries?: number };
+  verify?: { auto?: boolean; retries?: number; routines?: boolean };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -621,6 +621,10 @@ export function verifyAuto(cfg: AppConfig): boolean {
 export function verifyRetries(cfg: AppConfig): number {
   const value = cfg.verify?.retries;
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? Math.min(value, 5) : 1;
+}
+/** Phase 3 part 4: routine runs get check → judge → ship after their turn. */
+export function verifyRoutines(cfg: AppConfig): boolean {
+  return cfg.verify?.routines !== false && cfg.verify?.auto !== false;
 }
 export function gatesTimeoutMs(cfg: AppConfig): number {
   const seconds = cfg.gates?.timeoutSeconds;

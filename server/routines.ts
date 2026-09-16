@@ -155,6 +155,9 @@ export interface RoutineRun {
   startedAt?: number;
   finishedAt?: number;
   output?: string;
+  /** Phase 3 part 4: what the graph's check and judge nodes said about this
+   * run, kept apart from the bot's own report. */
+  verdict?: string;
   /** Human-readable reason the detached execution is waiting. */
   attention?: string;
   error?: string;
@@ -291,6 +294,14 @@ export interface RoutineManagerOptions {
   /** A successful provider turn is intermediate while its peer work or
    * queued continuation still belongs to this detached execution. */
   hasPendingDelegations?: (threadId: string) => boolean;
+  /** Phase 3 part 4: the graph's later nodes (check → judge → ship) after
+   * a successful turn. The run stays `running` until this resolves; ok
+   * completes it with the note appended to its output, not ok fails it
+   * with the error. Absent: a run completes on its turn, as before. */
+  afterTurn?: (run: RoutineRun) => Promise<{ ok: boolean; note?: string; error?: string }>;
+  /** Phase 3 part 4: true when a run found `running` after a restart has a
+   * checkpointed turn, so its later nodes can resume without a new turn. */
+  resumeAfterRestart?: (run: RoutineRun) => boolean;
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -828,6 +839,12 @@ export class RoutineManager {
     const recovered: RoutineRun[] = [];
     for (const run of this.runs) {
       if (run.status === "running" || run.status === "waiting") {
+        // Phase 3 part 4: a run whose turn already finished resumes its
+        // later nodes from the checkpoint instead of dying here.
+        if (run.status === "running" && run.target !== "room-goal" && this.options.resumeAfterRestart?.(run)) {
+          this.interrupted.push(run.id);
+          continue;
+        }
         run.status = "failed";
         if (run.target === "room-goal") run.goalStatus = "failed";
         run.error = "OpenMausBot restarted while this routine was running";
@@ -1562,6 +1579,15 @@ export class RoutineManager {
         return cloneRun(run);
       }
       const pending = this.options.hasPendingDelegations?.(event.threadId) === true;
+      if (!pending && this.options.afterTurn && run.target !== "room-goal") {
+        // Phase 3 part 4: the turn is one node; check, judge and ship follow
+        run.attention = "Checking and judging the run";
+        run.error = undefined;
+        this.save();
+        this.emitRun(run);
+        void this.settleAfterTurn(run);
+        return cloneRun(run);
+      }
       run.status = pending ? "waiting" : "completed";
       if (!pending) this.clearFailureStreak(run.routineId);
       run.attention = pending ? "Waiting for delegated work to finish" : undefined;
@@ -1574,6 +1600,44 @@ export class RoutineManager {
     this.emitRun(run);
     if (event.type === "turn.completed") queueMicrotask(() => void this.tick());
     return cloneRun(run);
+  }
+
+  /** Phase 3 part 4: runs kept alive by resumeAfterRestart, waiting for
+   * resumeInterruptedRuns once the caller has its after-turn wiring up. */
+  private interrupted: string[] = [];
+
+  resumeInterruptedRuns(): number {
+    const ids = this.interrupted.splice(0);
+    for (const id of ids) {
+      const run = this.runs.find((candidate) => candidate.id === id && candidate.status === "running");
+      if (run) void this.settleAfterTurn(run);
+    }
+    return ids.length;
+  }
+
+  private async settleAfterTurn(run: RoutineRun): Promise<void> {
+    const afterTurn = this.options.afterTurn;
+    if (!afterTurn) return;
+    let outcome: { ok: boolean; note?: string; error?: string };
+    try {
+      outcome = await afterTurn(run);
+    } catch (error) {
+      outcome = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+    if (run.status !== "running") return; // stopped or reassigned meanwhile
+    if (outcome.ok) {
+      run.status = "completed";
+      this.clearFailureStreak(run.routineId);
+      run.attention = undefined;
+      run.finishedAt = this.now();
+      run.error = undefined;
+      if (outcome.note) run.verdict = outcome.note.slice(0, 2_000);
+      this.save();
+      this.emitRun(run);
+    } else {
+      this.failRun(run, outcome.error ?? "the run's checks did not pass");
+    }
+    queueMicrotask(() => void this.tick());
   }
 
   failThread(threadId: string, message: string) {

@@ -149,7 +149,7 @@ import {
   DATA_DIR,
   EVENTS_DIR,
   NATIVE_DIR,
-  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries } from "./config.ts";
+  customMcpServers, recallAuto, recallCaptures, recallMaxChars, contextRecite, boardDefaultBudgetUsd, toolsDeferred, gatesAuto, gatesTimeoutMs, verifyAuto, verifyRetries, verifyRoutines } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts";
@@ -347,7 +347,8 @@ import {
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { discoverGates, runGates, scopeLine } from "./gates.ts";
-import { parseVerdict, verdictLine, verifierPrompt } from "./verifier.ts";
+import { parseVerdict, verdictLine, verifierPrompt, type Verdict } from "./verifier.ts";
+import { beginNode, bySubject, finishNode, nextPending, nodeOutput, resetRunningNodes, skipNode, startGraphRun } from "./graph-runner.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
 import { redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
@@ -370,6 +371,7 @@ import {
   visibleTo as visibleBoardTasks,
   type BoardStatus,
   type BoardTask,
+  type TaskGates,
   type TaskPatch as BoardTaskPatch, bookSpend, taskByThread, setResult, BUDGET_PAUSED_REASON, suggestedBudgetUsd, setGates, setVerdict } from "./task-board.ts";
 import { createBotDispatch, parkedOnCard } from "./task-dispatch-bot.ts";
 import { DEFAULT_STALE_AFTER_MS, createDispatcher as createBoardDispatcher } from "./task-dispatcher.ts";
@@ -6854,6 +6856,13 @@ const resolveMentionText = (text: string): string => resolveMentions(text, menti
 
 routines = new RoutineManager({
   resolveMentions: resolveMentionText,
+  // Phase 3 part 4: check → judge → ship after the turn, from checkpoints
+  afterTurn: (run) => routineAfterTurn(run),
+  resumeAfterRestart: (run) => {
+    if (!verifyRoutines(cfg)) return false;
+    const graph = bySubject("routine", run.id);
+    return Boolean(graph && graph.status === "running" && graph.nodes.find((n) => n.name === "work")?.status === "done");
+  },
   emit: broadcast,
   hasPendingDelegations: (threadId) => pendingThreads().includes(threadId) ||
     [...delegationWatch.values()].some((watch) => watch.sourceThreadId === threadId) ||
@@ -6941,6 +6950,9 @@ routines = new RoutineManager({
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
   },
 });
+// Phase 3 part 4: runs whose turn finished before a restart pick up at
+// their next node instead of failing as "restarted while running".
+routines.resumeInterruptedRuns();
 // The scheduler receipt and room transcript live in separate durable stores.
 // If the process exited between those two writes, prefer the correlated
 // RoutineRun's terminal truth; an uncorrelated manual goal is simply failed
@@ -7100,6 +7112,88 @@ function boardHold(task: BoardTask): string | null {
   if (task.status !== "running" || !task.threadId) return null;
   const last = store.activePath(task.threadId).at(-1);
   return parkedOnCard(last as Parameters<typeof parkedOnCard>[0]);
+}
+
+// ── Phase 3 part 4: a routine run as a graph ───────────────────────────
+// intake → work → check → judge → ship, with a checkpoint per node in
+// graphs.db. The turn is the `work` node and runs exactly as before; this
+// runs the nodes after it, reusing any node already checkpointed, so a
+// resume after a restart never repeats a gate run or a model call.
+const ROUTINE_GRAPH_NODES = [
+  { name: "intake", kind: "decision" },
+  { name: "work", kind: "bot_turn" },
+  { name: "check", kind: "check" },
+  { name: "judge", kind: "verify" },
+  { name: "ship", kind: "code" },
+] as const;
+
+async function routineAfterTurn(run: RoutineRun): Promise<{ ok: boolean; note?: string; error?: string }> {
+  if (!verifyRoutines(cfg)) return { ok: true };
+  const threadId = run.threadId;
+  const bot = store.bot(run.botId);
+  if (!threadId || !bot) return { ok: true };
+  let graph = bySubject("routine", run.id);
+  if (!graph || graph.status !== "running") {
+    graph = startGraphRun({ kind: "routine", subjectId: run.id, nodes: ROUTINE_GRAPH_NODES });
+    finishNode(graph.id, "intake", { acceptance: run.prompt ?? "", routineId: run.routineId });
+    finishNode(graph.id, "work", { threadId, output: run.output ?? "" });
+  }
+  resetRunningNodes(graph.id);
+  const graphId = graph.id;
+  // check: the folder's gates, once
+  let gates = nodeOutput(graphId, "check") as TaskGates | null;
+  if (gates === null && nextPending(graphId)?.name === "check") {
+    beginNode(graphId, "check");
+    const cwd = store.taskByThread(run.botId, threadId)?.cwd ?? bot.cwd ?? undefined;
+    const specs = discoverGates(cwd);
+    if (cwd && specs.length) {
+      const results = await runGates(cwd, specs, { timeoutMs: gatesTimeoutMs(cfg) });
+      gates = { results, scope: scopeLine(results, specs.map((g) => g.name)) };
+      finishNode(graphId, "check", gates);
+    } else {
+      skipNode(graphId, "check", "no gates declared for the folder");
+    }
+  }
+  // judge: the verifier, once
+  let verdict = nodeOutput(graphId, "judge") as (Verdict & { line: string }) | null;
+  if (verdict === null && nextPending(graphId)?.name === "judge") {
+    beginNode(graphId, "judge");
+    const instance = registry.get(bot.modelSelection.instanceId);
+    const generate = instance ? harnessGenerateFor(instance) : undefined;
+    if (!generate) {
+      skipNode(graphId, "judge", "the engine has no one-shot call");
+    } else {
+      const botSaid = store.activePath(threadId).filter((m) => m.role === "bot" && m.kind === "text" && m.text).slice(-5).map((m) => m.text ?? "");
+      const acceptance = run.prompt ?? "";
+      const prompt = verifierPrompt({ title: run.routineName, body: acceptance, result: run.output ?? null, gates, botSaid });
+      const outcome = await runHarnessCall(DATA_DIR, {
+        kind: "verify",
+        botId: bot.id,
+        botName: bot.name,
+        threadId,
+        turnKey: `routine-${run.id}`,
+        prompt,
+        instanceId: bot.modelSelection.instanceId,
+        driverKind: instance?.driverKind ?? "unknown",
+        model: bot.modelSelection.model,
+        call: (text) => generate(text, {}),
+      }, { budgetExhausted: () => Boolean(spendState(cfg, DATA_DIR)?.exceeded) }).catch(() => null);
+      if (!outcome || !("text" in outcome)) {
+        skipNode(graphId, "judge", outcome && "skipped" in outcome ? "the monthly cap is reached" : "the verifier call failed");
+      } else {
+        const parsed = parseVerdict(outcome.text, { gatesFailed: Boolean(gates?.results.some((r) => r.status !== "pass")) });
+        verdict = { ...parsed, line: verdictLine(parsed) };
+        finishNode(graphId, "judge", verdict);
+      }
+    }
+  }
+  // ship: the outcome, recorded
+  const ok = verdict ? verdict.isComplete : true;
+  const note = [gates?.scope, verdict?.line].filter(Boolean).join("\n");
+  if (nextPending(graphId)?.name === "ship") finishNode(graphId, "ship", { ok, note });
+  return ok ? { ok: true, ...(note ? { note } : {}) } : { ok: false, error: verdict?.line ?? "not complete" };
+  // a failed run keeps the gate line too, through failRun's error: the
+  // verdict line already names the failing gate
 }
 
 function boardReady(): boolean {

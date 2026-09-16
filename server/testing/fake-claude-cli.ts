@@ -194,9 +194,12 @@ if (argAfter("--output-format") === "text" || argAfter("--output-format") === "j
     process.stdin.on("data", (chunk) => { input += chunk; });
     process.stdin.on("end", () => resolve(input));
   });
-  if (process.env.FAKE_CLAUDE_DUMP) {
+  // A verifier call (Phase 3) dumps beside the turn's dump, never over it:
+  // fixtures read FAKE_CLAUDE_DUMP for the turn's prompt after the run.
+  const oneShotDump = process.env.FAKE_CLAUDE_DUMP && prompt.includes("You are the VERIFIER") ? `${process.env.FAKE_CLAUDE_DUMP}.verify` : process.env.FAKE_CLAUDE_DUMP;
+  if (oneShotDump) {
     writeFileSync(
-      process.env.FAKE_CLAUDE_DUMP,
+      oneShotDump,
       JSON.stringify({ pid: process.pid, argv, env: process.env, prompt, mcpConfig: null }, null, 2),
     );
   }
