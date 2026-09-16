@@ -395,7 +395,7 @@ import {
 } from "./browser-engine.ts";
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
-import { RoutineRequestService } from "./routine-requests.ts";
+import { RoutineRequestService, proposalToRoutineInput } from "./routine-requests.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
@@ -11866,6 +11866,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const persistence = proposalPersistence(from.id, fromThreadId);
         if (!persistence.ok) {
           return json(res, persistence.status, { error: persistence.error });
+        }
+        // Phase 4 part 4: an enabled twin is named now, before any card,
+        // so the bot can tell the person instead of asking them to confirm
+        if (body.action === "create") {
+          const draft = proposalToRoutineInput(body.routine as Parameters<typeof proposalToRoutineInput>[0], forBot?.botId ?? from.id, Date.now());
+          const twin = draft ? routines.proposalTwin(draft) : null;
+          if (twin) return json(res, 409, { error: routines.alreadyScheduledMessage(twin) });
         }
         const proposedInput = body.action === "create"
           ? { action: body.action, routine: body.routine, forBot }

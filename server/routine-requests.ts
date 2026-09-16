@@ -879,6 +879,18 @@ function cardCopy(
   };
 }
 
+/** Phase 4 part 4: the routine a proposal would create, sanitised the way
+ * the confirmed card will sanitise it — so the twin check before the card
+ * compares like with like. Null when the proposal itself is invalid (the
+ * proposal path reports that on its own). */
+export function proposalToRoutineInput(routine: RoutineToolDefinitionInput, botId: string, now: number): RoutineInput | null {
+  try {
+    return inputFromDefinition(normalizeDefinition(routine, now), botId, now);
+  } catch {
+    return null;
+  }
+}
+
 function inputFromDefinition(definition: RoutineRequestDefinition, botId: string, now: number): RoutineInput {
   return {
     name: definition.name,

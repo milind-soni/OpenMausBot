@@ -100,7 +100,9 @@ export const UNATTENDED_PROMPT =
 export const ROUTINE_EXECUTION_PROMPT =
   " Execute this routine now: use available peer tools for required handoffs rather than merely announcing that you will wait; after an accepted delegation, end this turn for automatic resumption, and report a concrete blocker if no handoff is possible." +
   UNATTENDED_PROMPT +
-  SCOPED_CLAIM_PROMPT;
+  SCOPED_CLAIM_PROMPT +
+  // Phase 4 part 4: a note the next run will read
+  " If the next run of this routine should know something, end your report with one line starting \"Note for next run:\".";
 /** Phase 2: the board exists and is the place for work filed for later,
  * so a bot does not wander off to a connected app when asked to "file a task". */
 export const BOARD_PROMPT =

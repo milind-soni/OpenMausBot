@@ -193,3 +193,4 @@ printed path. Never kill processes by name and never delete a broad temp root.
 - [capture.md](capture.md) — facts said in passing captured into the bot's notebook after attended turns (Phase 4 part 1)
 - [consolidate.md](consolidate.md) — confirmed stamps, duplicate merge, contradictions struck, stale lines archived, one bounded journaled pass (Phase 4 part 2)
 - [reflection.md](reflection.md) — a judged-complete board task with tool work drafts one candidate skill for review (Phase 4 part 3)
+- [routine-notes.md](routine-notes.md) — a run's note for the next run, and the already-scheduled refusal for a bot's duplicate proposal (Phase 4 part 4)

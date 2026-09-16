@@ -98,7 +98,9 @@ posixOnly("harness-owned compaction (every fake engine, window forced to 100k)",
     // the model summary is a harness call: booked once, under a fingerprint
     // (only the Claude fake offers a one-shot; the others draft none)
     const harnessRows = ledger.filter((r) => r.trigger?.kind === "harness");
-    expect(harnessRows).toHaveLength(engine.id === "claude" ? 1 : 0);
+    // Claude and, since Phase 3 part 5 gave it a one-shot through `codex
+    // exec`, Codex draft the summary with a model call; the rest do not
+    expect(harnessRows).toHaveLength(engine.id === "claude" || engine.id === "codex" ? 1 : 0);
     if (engine.id === "claude") expect(harnessRows[0]).toMatchObject({ trigger: { call: "compaction-summary" }, costUsd: 0.0012, input: 120 });
     if (engine.id === "claude") expect(harnessRows[0].fingerprint).toMatch(/^[a-f0-9]{64}$/);
     // Claude keeps one process per thread; a reset must not land on the one

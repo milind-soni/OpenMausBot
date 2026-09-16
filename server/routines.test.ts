@@ -10,8 +10,7 @@ import {
   RoutineScheduleError,
   type RoutineManagerOptions,
   type RoutineRun,
-  type RoutineSchedule,
-} from "./routines.ts";
+  type RoutineSchedule, extractNextRunNote } from "./routines.ts";
 
 const dirs: string[] = [];
 
@@ -2622,5 +2621,27 @@ describe("run records for recurring routines (Phase 2 part 4)", () => {
     await h.manager.tick();
     settle(h.started[2]!.threadId, true);
     expect(h.manager.listRoutines()[0]?.failureStreak).toBeUndefined();
+  });
+  it("reads a 'Note for next run' line out of a report (Phase 4 part 4)", () => {
+    expect(extractNextRunNote("All done.\nNote for next run: check the sprint board first.")).toBe("check the sprint board first.");
+    expect(extractNextRunNote("**Note for the next run:** skip the archive")).toBe("skip the archive");
+    expect(extractNextRunNote("nothing to note")).toBeNull();
+    expect(extractNextRunNote(undefined)).toBeNull();
+  });
+  it("tells a bot's proposal that the same routine is already scheduled, while a person may still duplicate on purpose (Phase 4 part 4)", () => {
+    const h = harness();
+    const input = () => ({ name: "Queue check", prompt: "Check the queue and report", botId: "maus-1", enabled: true, schedule: { type: "daily" as const, time: "09:00", weekdays: [1] } });
+    const request = (n: number) => ({ requestId: `req-${n}`, messageId: `msg-${n}`, botId: "maus-1", threadId: "thread-1", action: "create" as const, fingerprintVersion: 1 as const, fingerprint: `fp-${n}` });
+    const first = h.manager.create(input(), request(1));
+    expect(h.manager.proposalTwin({ ...input(), name: "Proposed twin" })?.name).toBe("Queue check"); // checked before the card
+    expect(() => h.manager.create({ ...input(), name: "Another name" }, request(2))).toThrow(/already scheduled: "Queue check"/);
+    // a different schedule is not a twin; a person's own create never is
+    expect(h.manager.create({ ...input(), name: "Evening", schedule: { type: "daily" as const, time: "18:00", weekdays: [1] } }, request(3)).id).not.toBe(first.id);
+    const byHand = h.manager.create({ ...input(), name: "By hand" });
+    expect(byHand.id).not.toBe(first.id);
+    // once every enabled twin is off, the proposal goes through
+    h.manager.update(first.id, { enabled: false });
+    h.manager.update(byHand.id, { enabled: false });
+    expect(h.manager.create({ ...input(), name: "Again" }, request(4)).id).not.toBe(first.id);
   });
 });
