@@ -2558,3 +2558,69 @@ describe("routine continuity", () => {
     })).toThrow(/continuity/i);
   });
 });
+
+describe("mention tokens in routine instructions (Phase 2 part 4)", () => {
+  it("resolves tokens at run time, so the turn sees ids and one line per entity", async () => {
+    const h = harness();
+    const manager = new RoutineManager({ ...h.options, file: h.options.file!.replace(/\.json$/, "-mentions.json"), resolveMentions: (text) => text.replace("@Scout [[omb:bot:b1]]", "Scout (bot b1)") + "\n\n[References: bot b1: Scout — idle]" });
+    const routine = manager.create({ name: "Nudge", prompt: "Ask @Scout [[omb:bot:b1]] for the numbers", botId: "maus-1", schedule: { type: "once", at: 10 } } as any);
+    manager.runNow(routine.id);
+    await manager.tick();
+    expect(h.started.at(-1)?.prompt).toContain("Ask Scout (bot b1) for the numbers");
+    expect(h.started.at(-1)?.prompt).toContain("[References: bot b1: Scout — idle]");
+    // the definition keeps the token, so a rename never breaks it
+    expect(manager.listRoutines()[0]?.prompt).toContain("[[omb:bot:b1]]");
+  });
+});
+
+describe("run records for recurring routines (Phase 2 part 4)", () => {
+  const anchorAt = Date.parse("2026-08-17T08:00:00Z");
+  const every5 = { type: "interval" as const, everyMinutes: 5, anchorAt };
+  const due = (n: number) => anchorAt + n * 5 * 60_000 + 1_000;
+
+  it("counts a skipped occurrence on the routine when it comes due while the previous run is still going", async () => {
+    const h = harness(anchorAt);
+    const routine = h.manager.create({ name: "Poll", prompt: "poll it", botId: "maus-1", schedule: every5 });
+    h.setNow(due(1));
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    h.setNow(due(2));
+    await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns().filter((run) => run.routineId === routine.id)).toHaveLength(1);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ skippedRuns: 1, lastSkippedAt: due(2) });
+    const restored = new RoutineManager(h.options);
+    expect(restored.listRoutines()[0]?.skippedRuns).toBe(1);
+  });
+
+  it("queues the next run instead when the routine's overlap policy says so", async () => {
+    const h = harness(anchorAt);
+    const routine = h.manager.create({ name: "Poll", prompt: "poll it", botId: "maus-1", schedule: every5, overlap: "queue" });
+    expect(routine.overlap).toBe("queue");
+    h.setNow(due(1));
+    await h.manager.tick();
+    h.setNow(due(2));
+    await h.manager.tick();
+    expect(h.manager.listRuns().filter((run) => run.routineId === routine.id)).toHaveLength(2);
+    expect(h.manager.listRoutines()[0]?.skippedRuns).toBeUndefined();
+    expect(h.manager.update(routine.id, { overlap: "skip" })?.overlap).toBeUndefined();
+  });
+
+  it("counts consecutive failures on the routine and clears them on a completed run", async () => {
+    const h = harness(anchorAt);
+    h.manager.create({ name: "Flaky", prompt: "try", botId: "maus-1", schedule: every5 });
+    const settle = (threadId: string, ok: boolean) => h.manager.handleRuntimeEvent({ eventId: `e-${threadId}-${ok}`, provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok });
+    h.setNow(due(1));
+    await h.manager.tick();
+    settle(h.started[0]!.threadId, false);
+    expect(h.manager.listRoutines()[0]?.failureStreak).toBe(1);
+    h.setNow(due(2));
+    await h.manager.tick();
+    settle(h.started[1]!.threadId, false);
+    expect(h.manager.listRoutines()[0]?.failureStreak).toBe(2);
+    h.setNow(due(3));
+    await h.manager.tick();
+    settle(h.started[2]!.threadId, true);
+    expect(h.manager.listRoutines()[0]?.failureStreak).toBeUndefined();
+  });
+});

@@ -384,6 +384,9 @@ const appConfigSchema = z.object({
     /** Phase 1 part 4: restate the first request after a compaction and every tenth turn. */
     recite: z.boolean().optional(),
   }).strict().optional(),
+  /** Phase 2 part 3: deferred tool loading on the agents proxy — a small
+   * core plus search_tools / use_tool instead of every schema on every call. */
+  tools: z.object({ deferred: z.boolean().optional() }).strict().optional(),
   /** Harness recall before a turn (Phase 1 part 2): on by default; captures
    * from SupaMaus included where it runs; the block's size cap. */
   recall: z.object({
@@ -448,6 +451,7 @@ export interface AppConfig {
   launches?: { maxConcurrent?: number; maxPerHour?: number; maxPerDay?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; recite?: boolean };
   recall?: { auto?: boolean; captures?: boolean; maxChars?: number };
+  tools?: { deferred?: boolean };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -590,6 +594,11 @@ export function contextAutoCompact(cfg: AppConfig): boolean {
 
 export function contextRecite(cfg: AppConfig): boolean {
   return cfg.context?.recite !== false;
+}
+
+/** Phase 2 part 3: deferred tool loading; off by default. */
+export function toolsDeferred(cfg: AppConfig): boolean {
+  return cfg.tools?.deferred === true;
 }
 
 /** Phase 1 part 2: the harness recalls before every direct turn unless told not to. */

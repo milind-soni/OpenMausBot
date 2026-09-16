@@ -96,6 +96,18 @@ export interface Routine {
    * work builds on itself instead of restarting cold. Optional so existing
    * files migrate in place. */
   continuity?: boolean;
+  /** Phase 2 part 4: what a recurring routine does when it comes due while
+   * its previous run is still going. Absent = "skip" (record a skipped run);
+   * "queue" lets the new run wait its turn. */
+  overlap?: "skip" | "queue";
+  /** Phase 2 part 4: consecutive failed runs; cleared by a completed one. */
+  failureStreak?: number;
+  /** Phase 2 part 4: how many times the routine came due while its previous
+   * run was still going and was skipped (default overlap policy), and when
+   * that last happened — a count on the routine, not a row per skip, so a
+   * five-minute routine with long runs cannot flood the run log. */
+  skippedRuns?: number;
+  lastSkippedAt?: number;
   /** Conversation that created this routine in chat. Calendar/import-created
    * routines intentionally have no source, and older files migrate in place. */
   sourceThreadId?: string;
@@ -200,6 +212,7 @@ export interface RoutineInput {
   timeoutMinutes?: number | null;
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
+  overlap?: "skip" | "queue";
   /** Omission preserves routing; null creates a new dedicated results task. */
   resultsThreadId?: string | null;
 }
@@ -255,6 +268,9 @@ export interface RoutineManagerOptions {
     triggerSource: RoutineRunTrigger,
     onDispatchError: (message: string) => void,
   ) => Promise<void>;
+  /** Phase 2 part 4: expand `@name [[omb:type:id]]` tokens in the routine's
+   * instructions into one resolved line each, at run time. */
+  resolveMentions?: (text: string) => string;
   startGoal?: (
     groupId: string,
     threadId: string,
@@ -715,6 +731,7 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
     ...(timeoutMinutes === undefined ? {} : { timeoutMinutes }),
     attachments,
     ...(continuity ? { continuity: true } : {}),
+    ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
   };
 }
 
@@ -985,6 +1002,7 @@ export class RoutineManager {
       timeoutMinutes: Object.hasOwn(patch, "timeoutMinutes") ? patch.timeoutMinutes : routine.timeoutMinutes,
       attachments: patch.attachments ?? routine.attachments,
       continuity: patch.continuity ?? routine.continuity,
+      overlap: patch.overlap ?? routine.overlap,
     }, now);
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
     const scheduleChanged = JSON.stringify(clean.schedule) !== JSON.stringify(routine.schedule);
@@ -1011,6 +1029,7 @@ export class RoutineManager {
       // `Object.assign` cannot remove a key, and a cleared flag is absent
       // rather than false, so switching continuity off has to delete it.
       if (!clean.continuity) delete routine.continuity;
+      if (clean.overlap !== "queue") delete routine.overlap;
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
       }
@@ -1350,7 +1369,7 @@ export class RoutineManager {
             const overlapping = (routine.schedule.type === "interval" || routine.schedule.type === "cron") && this.runs.some(
               (run) => run.routineId === routine.id && ["queued", "running", "waiting"].includes(run.status),
             );
-            if (!overlapping) {
+            if (!overlapping || routine.overlap === "queue") {
               const run = this.newRun(routine, scheduledFor, false, allocations);
               if (late > CATCH_UP_MS) {
                 run.status = "missed";
@@ -1358,6 +1377,11 @@ export class RoutineManager {
                 run.error = "This computer was offline for more than 12 hours after the scheduled time";
               }
               scheduledRuns.push(run);
+            } else {
+              // Phase 2 part 4: the skip is recorded on the routine, so a
+              // person can see that it came due and why it did not run
+              routine.skippedRuns = (routine.skippedRuns ?? 0) + 1;
+              routine.lastSkippedAt = now;
             }
             routine.nextRunAt =
               routine.schedule.type === "once" ? null : nextOccurrence(routine.schedule, Math.max(now, scheduledFor));
@@ -1469,7 +1493,7 @@ export class RoutineManager {
             await this.options.startTurn(
               run.botId,
               task.threadId,
-              composeExecutionPrompt(prompt, run.attachments, this.continuityCarry(run)),
+              composeExecutionPrompt(this.options.resolveMentions?.(prompt) ?? prompt, run.attachments, this.continuityCarry(run)),
               run.runOn ?? "maus",
               triggerSource,
               (message) => this.failThread(task.threadId, message),
@@ -1539,6 +1563,7 @@ export class RoutineManager {
       }
       const pending = this.options.hasPendingDelegations?.(event.threadId) === true;
       run.status = pending ? "waiting" : "completed";
+      if (!pending) this.clearFailureStreak(run.routineId);
       run.attention = pending ? "Waiting for delegated work to finish" : undefined;
       if (!pending) run.finishedAt = this.now();
       run.error = undefined;
@@ -1585,6 +1610,7 @@ export class RoutineManager {
       this.emitRun(run);
     } else {
       run.status = status === "stopped" ? "cancelled" : "completed";
+      if (run.status === "completed") this.clearFailureStreak(run.routineId);
       run.attention = undefined;
       run.finishedAt = this.now();
       run.error = undefined;
@@ -1596,8 +1622,16 @@ export class RoutineManager {
     return cloneRun(run);
   }
 
+  private clearFailureStreak(routineId: string): void {
+    const routine = this.routines.find((candidate) => candidate.id === routineId);
+    if (routine?.failureStreak) delete routine.failureStreak;
+  }
+
   private failRun(run: RoutineRun, message: string) {
     run.status = "failed";
+    // Phase 2 part 4: the streak a person and the dead-letter rule can read
+    const failing = this.routines.find((routine) => routine.id === run.routineId);
+    if (failing) failing.failureStreak = (failing.failureStreak ?? 0) + 1;
     run.attention = undefined;
     run.error = redactSecretsInText(message).slice(0, 500);
     run.finishedAt = this.now();
