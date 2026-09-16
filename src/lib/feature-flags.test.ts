@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
+import { boardEnabled, builtInBrowserEnabled, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -37,5 +37,10 @@ describe("experimental feature flags", () => {
     expect(sharedComputersEnabled({ features: {} })).toBe(false);
     expect(sharedComputersEnabled({ features: { sharedComputers: false } })).toBe(false);
     expect(sharedComputersEnabled({ features: { sharedComputers: true } })).toBe(true);
+  });
+  it("shows the task board only when the server says the board is on", () => {
+    expect(boardEnabled(null)).toBe(false);
+    expect(boardEnabled({ features: { skillAuthoring: true } })).toBe(false);
+    expect(boardEnabled({ features: { board: true } })).toBe(true);
   });
 });

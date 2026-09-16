@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ClipboardCopy,
   Copy,
+  ClipboardList,
   Crown,
   FolderMinus,
   FolderPlus,
@@ -37,6 +38,7 @@ import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { lastNonReceipt } from "@/lib/receipts";
+import { boardEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -2142,6 +2144,22 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <span className="size-2 rounded-full bg-danger" />
             )}
           </button>
+          {boardEnabled(state.config) && (
+            <button
+              data-tour="nav-board"
+              onClick={() => dispatch({ type: "showBoard" })}
+              aria-label={density === "icons" ? t("sidebar.nav.board") : undefined}
+              title={density === "icons" ? t("sidebar.nav.board") : undefined}
+              className={cn(
+                "flex min-h-10 w-full items-center rounded-xl py-2 text-left transition-colors",
+                density === "icons" ? "justify-center px-2" : "gap-3 px-3",
+                state.activeView === "board" ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
+              )}
+            >
+              <ClipboardList size={20} className={state.activeView === "board" ? "text-accent" : "text-ink-secondary"} />
+              <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>{t("sidebar.nav.board")}</span>
+            </button>
+          )}
           <button
             onClick={() => dispatch({ type: "togglePlugins", open: true })}
             className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
@@ -2181,6 +2199,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 ),
                 onSelect: () => dispatch({ type: "showRoutines" }),
               },
+              ...(boardEnabled(state.config)
+                ? [{
+                    key: "board",
+                    label: t("sidebar.nav.board"),
+                    icon: <ClipboardList size={18} />,
+                    active: state.activeView === "board",
+                    onSelect: () => dispatch({ type: "showBoard" }),
+                  }]
+                : []),
               {
                 key: "plugins",
                 tourId: "nav-apps",

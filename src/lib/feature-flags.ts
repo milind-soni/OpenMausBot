@@ -1,7 +1,7 @@
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; board?: boolean };
   browserEngine?: { kind: "engine" | "unavailable"; reason?: string; installable?: boolean; installing?: boolean; installError?: string };
 }
 
@@ -44,4 +44,10 @@ export function showToolCallsEnabled(config: FeatureFlagConfig | null | undefine
  * the controls simply are not offered. */
 export function sharedComputersEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.sharedComputers === true;
+}
+
+/** The task board (Phase 2) is off unless this server was switched on in its
+ * config.json; the sidebar offers the board screen only then. */
+export function boardEnabled(config: FeatureFlagConfig | null | undefined): boolean {
+  return config?.features?.board === true;
 }

@@ -146,6 +146,30 @@ tool work unless pulled forward.
 - **Benchmark track:** multi-bot runs on the same boards to prove the team beats one bot on cost
   or accuracy, or is turned off where it does not.
 
+## Main moved (checked Sep 16, 2026, 25 commits since the chain's base `4005d09f`)
+
+What main built that changes the plan; reconciled when the chain re-stacks, before any merge.
+
+- **#1297 MCP servers by URL** (Streamable HTTP and SSE, write-only headers, a switch to use
+  Claude Code's own servers). Closes Phase 2 part 3's deferred "remote HTTP MCP" item on the
+  transport side. Still open from that item: Test-then-enable with the rug-pull hash check
+  (#1009's shape) for URL servers — moved to Phase 3's tail as a small follow-up.
+- **#1302 recent-work brief, daily log line, recall by time.** A per-turn brief of the bot's
+  newest words in its other conversations in the SYSTEM prompt, a model-free daily log line per
+  turn under `memory/log/`, and `session_search since/until`. It overlaps Phase 1 part 2
+  (recall block in the TURN text, importance grammar on `memory/log/`). Decision at re-stack:
+  keep both, brief for recency and recall for the question at hand, measure the pair on the
+  recall set (24 cases) and T1–T5; if the brief alone reaches the recall block's numbers on
+  the "told-*" cases, the recall block drops conversation passages and keeps memory/captures.
+- **#1309 / #1304 routine run fields** (`deferredAt`, `deferredNoticeAt`; keep the computer
+  awake for due routines). Overlaps Phase 2 part 4's `skippedRuns` / `overlap` / `failureStreak`.
+  Reconcile at re-stack: main's fields stay, ours add to them; Phase 3 part 4 (graph runner) is
+  built after that.
+- **#1290 active threads panel** touches `Sidebar.tsx` where the Phase 3 board entry sits —
+  a mechanical conflict.
+- **Phase 3 gained a part** on Omkar's request: the board screen (part 2), desktop first,
+  phones as follow-ups.
+
 ## Later (L, only on evidence)
 
 - Engine routing by kind of job: a graph `decision` node over a per-bot table seeded from

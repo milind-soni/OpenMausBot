@@ -10335,6 +10335,8 @@ function configStatus() {
       // shell and the Settings UI read it so they offer nothing this server
       // would refuse.
       sharedComputers: sharedComputersEnabled(cfg),
+      // Phase 3 part 2: the sidebar offers the board only where it exists.
+      board: boardEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -12760,7 +12762,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // Comments are NOT folded in here. One list response used to carry
       // every comment on every task, growing without limit as bots commented;
       // they are loaded per task through the route just below instead.
-      const tasks = listBoardTasks({ status: requestedStatus, assigneeBotId });
+      // Phase 3 part 2: the board screen shows why an assigned task waits.
+      const tasks = listBoardTasks({ status: requestedStatus, assigneeBotId }).map((task) => ({ ...task, hold: boardDispatch.hold(task) }));
       return json(res, 200, { tasks });
     }
     const taskCommentsListMatch = path.match(/^\/api\/tasks\/([\w-]+)\/comments$/);
