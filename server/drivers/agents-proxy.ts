@@ -405,9 +405,10 @@ const TOOLS = [
   },
   {
     name: "coordinate_bots",
-    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Name 1-4 bot_ids: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
+    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use direct=true (without group_id) for your standing bot-to-bot conversation even from a room, or group_id from list_room_targets for a specific room. Name 1-4 bot_ids: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
-      group_id: { type: "string", description: "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly." },
+      group_id: { type: "string", description: "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly. Cannot be combined with direct=true." },
+      direct: { type: "boolean", description: "Set true to contact teammates in your standing bot-to-bot conversations even from a room. Omit group_id. Results return to this conversation; this does not write to the user's private DM. Omit or false keeps the default room routing." },
       bot_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, uniqueItems: true },
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Self-contained question or task for these teammates. Send separate requests when responsibilities differ." },
       request_key: { type: "string", description: "A short unique assignment key. Reuse for an identical retry." },
@@ -1021,12 +1022,12 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       && typeof canonical.request_key === "string" && canonical.request_key.trim().length > 0;
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids), message and request_key are required; group_id, rework and label are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids), message and request_key are required; group_id, direct, rework and label are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
     const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
-      groupId: canonical.group_id, botIds: ids, message: canonical.message,
+      groupId: canonical.group_id, direct: canonical.direct, botIds: ids, message: canonical.message,
       requestKey: canonical.request_key, rework: canonical.rework, label: canonical.label,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };

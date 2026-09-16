@@ -11,6 +11,12 @@ reachable bots as well as rooms. The latter addresses 1–4 existing bots in thi
 room (default), or — in ordinary direct chat without a room — the sender's one
 standing conversation with each recipient. A Chief can reach additional teams only
 after the owner grants that access in [team settings](team-access.md).
+From a room, `coordinate_bots` also accepts `direct: true` to explicitly use
+those standing bot-to-bot conversations. Omit `group_id` in that case; combining
+the two is rejected. Leaving `direct` out (or setting it to false) keeps the
+existing room default. This never posts into the user's private DM with the
+recipient. Peer, team and approval checks still apply, and results return to
+the originating room. `list_room_targets` describes both destination choices.
 Recipients run sequentially per room, with their own models, permissions and
 working environments. Busy recipients queue. Once all requested results arrive,
 the sender resumes in the original conversation. A lead can consult its own
@@ -78,6 +84,32 @@ pnpm exec vitest run server/turn-dispatch-guard.test.ts
 pnpm exec vitest run server/comms.test.ts server/thread-aware-bots.e2e.test.ts server/routine-delegation.e2e.test.ts server/independent-threads-api.test.ts server/peer-allowlist.e2e.test.ts server/steer-queue.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
 ```
+
+### Explicit room-to-direct routing (MOCA-135)
+
+```sh
+pnpm exec vitest run server/room-coordination.e2e.test.ts -t 'direct'
+```
+
+The disposable fixture drives the real injected agents MCP proxy from a room
+turn to a same-team bot outside that room. It checks a completed reply in a
+separate bot-to-bot thread, a result receipt and resumed sender in the source
+room, repeated work reusing the standing conversation, and an unchanged private
+DM and active task. Negative cases cover conflicting destinations, disallowed
+peers, team boundaries and denied approval; the omitted flag still routes in
+the room. The provider's tool calls/replies are scripted, so this establishes
+routing and authorization behavior, not real-model tool-choice quality.
+
+Recorded locally on 2026-09-16 against base `0101f1c2`: the two new routing
+regressions failed before the fix, then all nine direct-routing cases passed.
+A separate disposable control fixture also sent a synthetic review from
+Planning to an outside teammate's pair conversation and returned it to
+Planning. The reply was present in the resumed sender's actual prompt; the
+recipient's private DM and active task were unchanged. The retained local
+wait/transcript evidence is `.omb-scratch/workflow.log` in the MOCA-135 worktree;
+the fixture log is `server-1789531369023-7146.log` in the platform temporary
+`openmausbot-verification-evidence` directory. The owned server and temporary
+fixture data were cleaned up. No live account or provider was used.
 
 The integration suite launches the disposable control fixture and drives the
 actual injected agents MCP proxy with a scripted provider. It checks same-room

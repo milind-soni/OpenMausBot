@@ -33,6 +33,105 @@ async function withRooms(test: (f: any) => Promise<void>) {
   } finally { await session.close(); }
 }
 
+it("routes an explicit direct assignment from a room to the standing peer conversation and returns here", () => withRooms(async f => {
+  const before = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.target.id);
+  const privateThread = before.threadId;
+  const privateMessages = await f.messages(privateThread);
+  f.plan[f.sender.id].steps[0].arguments = {
+    direct: true, bot_ids: [f.target.id], request_key: "direct-work", message: "Please build CSV",
+  };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const node = f.nodes().find((n: any) => n.parentId && n.botId === f.target.id);
+  expect(node).toMatchObject({ status: "completed", reported: true });
+  expect(node.groupId).toBeUndefined();
+  expect(node.threadId).not.toBe(privateThread);
+  expect((await f.messages(node.threadId)).some((m: any) => m.text === "Built CSV")).toBe(true);
+  expect(await f.messages(privateThread)).toEqual(privateMessages);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const returned = await f.messages(f.source.activeTaskId);
+  expect(returned.some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+  expect(returned.some((m: any) => m.threadRef?.threadId === node.threadId)).toBe(true);
+  const resumed = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);
+  expect(resumed.threadId).toBe(f.source.activeTaskId);
+  expect(JSON.stringify(resumed.prompt)).toContain("Built CSV");
+  const after = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.target.id);
+  expect(after.threadId).toBe(privateThread);
+  // A second independent assignment must reuse the pair, not create a new task.
+  f.plan[f.sender.id].steps[0].arguments.request_key = "direct-again";
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const assignments = f.nodes().filter((n: any) => n.parentId && n.botId === f.target.id);
+  expect(assignments).toHaveLength(2);
+  expect(assignments.map((n: any) => n.threadId)).toEqual([node.threadId, node.threadId]);
+}), 45_000);
+
+it("rejects conflicting direct and room destinations without starting work", () => withRooms(async f => {
+  f.plan[f.sender.id].steps[0].arguments.direct = true;
+  f.plan[f.sender.id].steps[0].expectError = true;
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const response = f.provider()[0].evidence.find((entry: any) => entry.step)?.response;
+  expect(response.result.isError).toBe(true);
+  expect(response.result.content[0].text).toContain("direct");
+}), 45_000);
+
+it.each(["peer", "team"])("direct routing does not bypass %s restrictions", restriction => withRooms(async f => {
+  f.plan[f.sender.id].steps[0] = { arguments: {
+    direct: true, bot_ids: [f.target.id], request_key: "restricted", message: "Do not deliver",
+  }, expectError: true };
+  if (restriction === "peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  else await f.api(`/api/bots/${f.target.id}`, { section: "Other team" }, "PATCH");
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const result = f.provider()[0].evidence.find((entry: any) => entry.step)?.response;
+  expect(result.result.isError).toBe(true);
+  expect(result.result.content[0].text).toContain(restriction === "peer" ? "allowed peer" : "section boundary");
+}), 45_000);
+
+it.each(["allow", "deny"])("direct routing honors %s on a room's peer-approval card", behavior => withRooms(async f => {
+  await f.api(`/api/bots/${f.sender.id}`, { approvePeerComms: true }, "PATCH");
+  f.plan[f.sender.id].steps[0] = { arguments: {
+    direct: true, bot_ids: [f.target.id], request_key: "approved-direct", message: "Please build CSV",
+  }, expectError: behavior === "deny" };
+  await f.start();
+  let card: any;
+  await expect.poll(async () => {
+    card = (await f.messages(f.source.activeTaskId)).find((m: any) => m.card?.tool === "delegate_bot");
+    return Boolean(card);
+  }, { timeout: 10_000 }).toBe(true);
+  expect(f.nodes()).toEqual([]);
+  await f.api(`/api/threads/${f.source.activeTaskId}/respond`, { requestId: card.card.requestId, behavior });
+  expect((await f.wait()).status).toBe("settled");
+  if (behavior === "deny") expect(f.nodes()).toEqual([]);
+  else expect(f.nodes().find((n: any) => n.parentId)).toMatchObject({ status: "completed", approvalGranted: true });
+}), 45_000);
+
+it.each([undefined, false])("keeps default direct=%s routing in the source room", direct => withRooms(async f => {
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id] });
+  delete f.plan[f.sender.id].steps[0].arguments.group_id;
+  f.plan[f.sender.id].steps[0].arguments.direct = direct;
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().find((n: any) => n.parentId && n.botId === f.target.id)).toMatchObject({
+    groupId: f.source.id, threadId: f.source.activeTaskId, status: "completed",
+  });
+}), 45_000);
+
+it("withholds a direct result from a room after peer access is revoked", () => withRooms(async f => {
+  f.plan[f.sender.id].steps[0].arguments = {
+    direct: true, bot_ids: [f.target.id], request_key: "revoke-direct", message: "Please build CSV",
+  };
+  f.plan[f.target.id] = { delayMs: 2000, reply: "PRIVATE_DIRECT_RESULT" };
+  await f.start();
+  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 10_000 }).toBe("running");
+  await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  expect((await f.wait()).status).toBe("settled");
+  const messages = await f.messages(f.source.activeTaskId);
+  expect(messages.some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
+  expect(JSON.stringify(messages)).not.toContain("PRIVATE_DIRECT_RESULT");
+  const resumed = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);
+  expect(JSON.stringify(resumed.prompt)).not.toContain("PRIVATE_DIRECT_RESULT");
+}), 45_000);
+
 it("refuses a disallowed peer without starting the recipient", () => withRooms(async f => {
   await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
   f.plan[f.sender.id].steps[0].expectError = true;
