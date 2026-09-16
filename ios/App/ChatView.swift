@@ -464,8 +464,8 @@ struct ChatView: View {
 
     // MARK: - Header
 
-    /// Back on the left with the rest-of-app unread count, the bot's
-    /// computer on the right — a blurred strip to the top edge.
+    /// Back on the left with the rest-of-app unread count, threads and the
+    /// bot's computer on the right — a blurred strip to the top edge.
     private var headerBar: some View {
         HStack(alignment: .top) {
             Button { dismiss() } label: {
@@ -494,10 +494,18 @@ struct ChatView: View {
 
             HStack(spacing: 8) {
                 if current.supportsTasks {
-                    GlassButton(systemImage: "square.stack.3d.up", size: 44, weight: .medium) {
+                    Button {
                         showingTasks = true
+                    } label: {
+                        Label("Threads", systemImage: "square.stack")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.primary)
+                            .padding(.horizontal, 12)
+                            .frame(height: 44)
+                            .contentShape(Capsule())
                     }
-                    .accessibilityLabel("Threads")
+                    .buttonStyle(.plain)
+                    .glassCapsule()
                     .accessibilityIdentifier("header-threads")
                 }
                 if case .bot = current {
