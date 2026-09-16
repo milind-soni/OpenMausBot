@@ -223,7 +223,7 @@ export function PendingApprovalActions({
   const reviewedSha256 = pending.message.card?.skillRequest
     ? reviewedSkillSha256(pending.message.card.skillRequest)
     : undefined;
-  const decide = (behavior: "allow" | "deny", always = false) =>
+  const decide = (behavior: "allow" | "deny", grant?: "persistent" | "session") =>
     dispatch({
       type: "decideRequest",
       threadId,
@@ -231,10 +231,10 @@ export function PendingApprovalActions({
       behavior,
       message: behavior === "deny" ? "Denied by the user." : undefined,
       reviewedSha256: behavior === "allow" ? reviewedSha256 : undefined,
-      // a harness-native card (peer comms) remembers a grant on the bot; a
-      // provider's card hands the allow to the provider for its session
-      alwaysAllow: always && bot && pending.allowKey ? { botId: bot.id, key: pending.allowKey } : undefined,
-      always: always && !pending.allowKey && pending.allowSession ? true : undefined,
+      alwaysAllow: grant === "persistent" && bot && pending.allowKey
+        ? { botId: bot.id, key: pending.allowKey }
+        : undefined,
+      always: grant === "session" && pending.allowSession ? true : undefined,
     });
 
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
@@ -254,16 +254,16 @@ export function PendingApprovalActions({
       </button>
       {!durableRequest && bot && pending.allowKey && (
         <button
-          onClick={() => decide("allow", true)}
+          onClick={() => decide("allow", "persistent")}
           title={t("approval.action.stopAsking", { name: bot.name, key: pending.allowKey })}
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >
           {t("approval.action.alwaysAllow")}
         </button>
       )}
-      {!durableRequest && !pending.allowKey && pending.allowSession && (
+      {!durableRequest && pending.allowSession && (
         <button
-          onClick={() => decide("allow", true)}
+          onClick={() => decide("allow", "session")}
           title={t("approval.action.alwaysAllowSessionHint")}
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >

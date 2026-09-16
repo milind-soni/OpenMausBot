@@ -4,9 +4,9 @@
 // provider's own permission mode passed straight through (Claude `auto`,
 // Grok `--permission-mode`, Codex `approvalsReviewer`, …), and a request that
 // reaches this process is one the provider left for a person. The only
-// verdict the app synthesizes is Full access, because that level is the
-// person's explicit, separately confirmed grant to answer every prompt.
-// Questions never come through here: a bot's question always reaches a human.
+// automatic verdicts the app synthesizes are Full access and an exact
+// invocation the person explicitly saved with "Always allow". Questions never
+// come through here: a bot's question always reaches a human.
 
 import { type ApprovalMode } from "../shared/approval-mode.ts";
 import type { ProviderAdapter, RequestOutcome } from "./contracts.ts";
@@ -52,12 +52,13 @@ export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiate
 const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
 
 /** Why a permission request landed where it did — the decision log's "which
- * rule". `full-access` is the one auto-approval; `native-approval` is a card
- * the provider's own reviewer (Auto, or Custom's config) left for the person;
- * `explicit-approval-block` is a sandbox widening only Full may answer;
- * `no-grant` is an Ask or Edits card, where asking is the whole point. */
+ * rule". `full-access` and `always-allow` are automatic approvals;
+ * `native-approval` is a card the provider's own reviewer (Auto, or Custom's
+ * config) left for the person; `explicit-approval-block` is a sandbox widening
+ * only Full may answer; `no-grant` is an Ask or Edits card. */
 export type AutoVerdictSource =
   | "full-access"
+  | "always-allow"
   | "native-approval"
   | "explicit-approval-block"
   | "no-grant";
@@ -68,16 +69,36 @@ export interface AutoVerdict {
    * auto-approved action is never invisible. */
   approve: string | null;
   source: AutoVerdictSource;
+  /** The exact saved invocation that produced an automatic approval. */
+  rule?: string;
+}
+
+interface ProviderGrantContext {
+  summary?: string;
+  alwaysAllow?: readonly string[];
+  approvalScope?: "local-computer";
+  requiresExplicitApproval?: boolean;
+}
+
+/** A standing provider grant is deliberately narrower than a tool name: it
+ * includes the exact displayed arguments. Whitespace is preserved because it
+ * can be meaningful inside shell strings. Host control and sandbox widening
+ * never receive one. */
+export function rememberableProviderApprovalKey(
+  tool: string,
+  summary: string | undefined,
+  context?: Pick<ProviderGrantContext, "approvalScope" | "requiresExplicitApproval">,
+): string | undefined {
+  if (context?.approvalScope || context?.requiresExplicitApproval) return undefined;
+  if (ASKS_A_PERSON.has(tool.replace(/^mcp__[^_]+__/, "").toLowerCase())) return undefined;
+  if (!summary || summary === tool) return undefined;
+  return `${tool}:${summary}`;
 }
 
 export function autoVerdict(
   mode: ApprovalMode,
   tool: string,
-  context?: {
-    /** The provider is asking to widen its configured sandbox rather than
-     * perform one ordinary action. Only explicit Full may synthesize this. */
-    requiresExplicitApproval?: boolean;
-  },
+  context?: ProviderGrantContext,
 ): AutoVerdict {
   // A question is for a person, whatever channel it arrived on — and
   // whatever the mode: even Full has no answer to give, only an approval
@@ -90,6 +111,10 @@ export function autoVerdict(
   // request.opened caller invokes this for permissions only, never questions.
   if (mode === "full") return { approve: `approved ${tool} (full access)`, source: "full-access" };
   if (context?.requiresExplicitApproval) return { approve: null, source: "explicit-approval-block" };
+  const allowKey = rememberableProviderApprovalKey(tool, context?.summary, context);
+  if (allowKey && context?.alwaysAllow?.includes(allowKey)) {
+    return { approve: `approved ${tool} (always allowed)`, source: "always-allow", rule: allowKey };
+  }
   if (mode === "auto" || mode === "custom") return { approve: null, source: "native-approval" };
   return { approve: null, source: "no-grant" };
 }
