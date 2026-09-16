@@ -254,11 +254,18 @@ describe("Fish Audio", () => {
       { id: "fish-1", label: "Narrator", description: "Warm and measured" },
       { id: "fish-2", label: "Studio Voice", description: undefined },
     ]);
-    expect(seen.slice(-3).map((call) => call.url)).toEqual([
-      "/model?page_size=100&sort_by=task_count",
+    // The public page and the owned-page walk run concurrently (fish.ts:102,
+    // Promise.all), so how they interleave is not deterministic — asserting a
+    // fixed order made this fail on loaded runners. What IS ordered is the
+    // owned walk itself: page 2 is only fetched after page 1 reports hasMore.
+    const urls = seen.slice(-3).map((call) => call.url);
+    expect([...urls].sort()).toEqual([
       "/model?page_size=100&self=true&sort_by=created_at&page_number=1",
       "/model?page_size=100&self=true&sort_by=created_at&page_number=2",
+      "/model?page_size=100&sort_by=task_count",
     ]);
+    expect(urls.indexOf("/model?page_size=100&self=true&sort_by=created_at&page_number=1"))
+      .toBeLessThan(urls.indexOf("/model?page_size=100&self=true&sort_by=created_at&page_number=2"));
   });
 
   it("requests s2.1-pro mp3 speech and returns its raw audio", async () => {

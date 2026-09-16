@@ -114,4 +114,19 @@ describe("parseSince", () => {
     expect(parseSince("soon", now)).toBeNull();
     expect(parseSince("", now)).toBeNull();
   });
+
+  it("reads a bare date as the start of that local day, like yesterday and other typed dates", () => {
+    const previousTimezone = process.env.TZ;
+    process.env.TZ = "America/Los_Angeles";
+    try {
+      const localNow = new Date(2026, 8, 16, 10, 30).getTime();
+      expect(parseSince("2026-09-15", localNow)).toBe(new Date(2026, 8, 15).getTime());
+      expect(parseSince("2026-09-15", localNow)).toBe(parseSince("yesterday", localNow));
+      expect(parseSince("2026-09-15", localNow)).toBe(parseSince("2026-09-15 00:00", localNow));
+      expect(parseSince("2026-09-01T00:00:00Z", localNow)).toBe(Date.UTC(2026, 8, 1));
+    } finally {
+      if (previousTimezone === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTimezone;
+    }
+  });
 });

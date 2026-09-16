@@ -85,7 +85,8 @@ describe("Box deletion journal", () => {
     const stored = readFileSync(path, "utf8");
     expect(JSON.parse(stored)).toEqual({ version: 1, records: [prepared] });
     expect(stored).not.toMatch(/token|authorization|secret/i);
-    expect(statSync(path).mode & 0o777).toBe(0o600);
+    // Windows reports 0666 for a 0600 file: the mode is a POSIX guarantee.
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it("advances a target-bound operation monotonically and retires idempotently", async () => {

@@ -13,8 +13,11 @@ describe("thread resource ownership", () => {
     expect(leases.claim("computer:host", a)).toBe(true);
     expect(leases.claim("computer:host", a)).toBe(true);
     expect(leases.claim("computer:host", b)).toBe(false);
+    expect(leases.blocker("computer:host", b)).toEqual(a);
+    expect(leases.blocker("computer:host", a)).toBeUndefined();
     expect(leases.claim("browser:other", b)).toBe(true);
     leases.release(a);
+    expect(leases.blocker("computer:host", b)).toBeUndefined();
     expect(leases.claim("computer:host", b)).toBe(true);
     leases.release(a);
     expect(leases.owns("computer:host", b)).toBe(true);

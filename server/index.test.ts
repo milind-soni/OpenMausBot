@@ -2500,24 +2500,34 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "hold the shared desktop" })).status).toBe(202);
       await promptedOnBox(1, botIds[0]);
       expect(existsSync(fakeClaudeDump)).toBe(false);
+      // A sibling thread can wait, and Stop must cancel that pending claim
+      // without interrupting the thread which already owns the desktop.
+      const firstThread = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === botIds[0]).threadId;
+      const sibling = (await api("POST", `/api/bots/${botIds[0]}/tasks`, { title: "Waiting sibling" })).body.task;
+      expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "wait then cancel", threadId: sibling.threadId })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/Waiting for computer/);
+      expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
+      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/Computer wait ended/);
+      expect(promptsOnBox()).toBe(1);
+      expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
         expect((await api("POST", `/api/team-computers/${requestId}/${action}`, { acknowledgeCost: true })).status).toBe(409);
       }
       expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true })).status).toBe(409);
       expect((await api("PATCH", `/api/bots/${botIds[0]}`, { computer: "off" })).status).toBe(409);
 
-      // The room's different bot cannot concurrently claim the physical Box.
+      // The room waits rather than failing or concurrently driving the Box.
       expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the occupied shared desktop" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
-      )), { timeout: 5_000 }).toMatch(/another thread is using this computer/);
-      await idle(botIds[1]);
+      )), { timeout: 5_000 }).toMatch(/Waiting for computer/);
       expect(promptsOnBox()).toBe(1);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, {})).status).toBe(200);
       await idle(botIds[0]);
 
-      rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the released shared desktop" })).status).toBe(202);
+      // No Retry or second user message: releasing the owner wakes the turn.
       await promptedOnBox(2, botIds[1]);
       expect(existsSync(fakeClaudeDump)).toBe(false);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
@@ -2898,8 +2908,23 @@ describe("harness HTTP API", () => {
       const removed = await api("DELETE", `/api/bots/${target.id}`).catch(() => undefined);
       targetDeleted = removed?.status === 200 || removed?.status === 404;
       if (!targetDeleted) await api("DELETE", `/api/bots/${target.id}`).catch(() => undefined);
-      await api("DELETE", `/api/bots/${chief.id}`).catch(() => undefined);
+      // Clear the Box token BEFORE deleting the Chief. interruptTurn is
+      // asynchronous, so the Chief can still be busy here, and while a token
+      // is configured a busy bot's delete is refused with 409 (index.ts:6673).
+      // That refusal was swallowed by the catch below, leaving this Chief in
+      // the store for the rest of the file — and because setChiefOfStaff is
+      // per-section (store.ts:2020), electing a Chief in the default section
+      // never cleared it, so the team-import test's store-wide count saw two.
       await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      // interruptTurn is asynchronous, so wait for the Chief to actually
+      // settle before deleting it: several delete guards refuse a busy bot
+      // (index.ts:6650-6674), and swallowing that 409 is what leaked.
+      await expect.poll(async () =>
+        (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === chief.id)?.busy !== true,
+      { timeout: 15_000 }).toBe(true);
+      await api("DELETE", `/api/bots/${chief.id}`).catch(() => undefined);
+      // Assert the cleanup actually happened rather than trusting the catch.
+      expect((await api("GET", "/api/bots")).body.bots.some((bot: { id: string }) => bot.id === chief.id)).toBe(false);
       boxRouteCalls.length = 0;
     }
   });

@@ -32,7 +32,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegationInheritsFullAccess } from "./auto-approve.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import {
@@ -957,9 +957,34 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   }
 }
 
-function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): void {
-  if (exclusive && !claimTurnResource(owner, resource)) {
-    throw Object.assign(new Error("another thread is using this computer — wait for it to finish"), { status: 409, code: "computer_busy" });
+async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): Promise<void> {
+  const active = () => activeInternalGenerationByThread.get(owner.threadId) === owner.generation &&
+    turnResourceOwners.get(owner.threadId)?.generation === owner.generation;
+  let waitingMessage: Message | undefined;
+  const deadline = Date.now() + GROUP_GOAL_WAIT_MAX_MS;
+  try {
+    while (true) {
+      if (!active()) throw new DirectTurnSetupCancelled("Computer wait cancelled");
+      if (!exclusive || claimTurnResource(owner, resource)) break;
+      if (!waitingMessage) {
+        const blocker = turnResources.blocker(resource, owner);
+        const holderBot = blocker && store.botByThread(blocker.threadId);
+        const holderTask = holderBot && blocker && store.taskByThread(holderBot.id, blocker.threadId);
+        const holder = holderBot ? `${holderBot.name}${holderTask?.title ? ` / ${holderTask.title}` : ""}`
+          : blocker && store.groupByThread(blocker.threadId)?.name;
+        waitingMessage = store.appendMessage(owner.threadId, {
+          role: "bot", kind: "activity",
+          tool: { name: `Waiting for computer${holder ? ` — ${holder} is using it` : ""}; will continue automatically` },
+          ...(holderBot && holderTask ? { threadRef: { botId: holderBot.id, threadId: holderTask.threadId, title: holderTask.title } } : {}),
+        });
+      }
+      if (Date.now() >= deadline) throw new Error("Computer is still busy. Stop the turn using it, then retry.");
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+    }
+  } finally {
+    if (waitingMessage) store.patchMessage(owner.threadId, waitingMessage.id, {
+      tool: { name: active() && turnResources.owns(resource, owner) ? "Computer available — continuing" : "Computer wait ended", ok: true },
+    });
   }
   turnResourceOwners.set(owner.threadId, owner);
   turnComputerResources.set(owner.threadId, { owner, resource });
@@ -1785,7 +1810,10 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * approval semantics require an implemented provider mapping. The trusted transition enforces
  * this too, but no provider dispatch or later permission callback relies on
  * persistence having been produced exclusively by that route. Delegation
- * uses the receiving bot's grant, never the sender's — see approvalModeForOrigin. */
+ * uses the receiving bot's grant, never the sender's (approvalModeForOrigin) —
+ * with one deliberate exception: a Chief of Staff with Full access makes the
+ * threads it delegates Full too (delegatedFullAccess), so the grant the
+ * person gave the Chief covers the work the Chief hands out. */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
@@ -1806,6 +1834,49 @@ function fullAccessForSource(botId: string, threadId: string): boolean {
 
 function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
   return Boolean(bot.approvePeerComms && !fullAccessForSource(bot.id, threadId));
+}
+
+/** Full access flows down a Chief of Staff's delegation. The person gave the
+ * Chief Full access so its work runs without prompts; a teammate stopping
+ * that same work to ask defeats the grant — and in practice the person was
+ * answering every one of those cards, all day, for the whole team. So a
+ * teammate a Full-access Chief delegates to runs Full for that work: the
+ * recipient switches, whatever its own level says. The recipient's engine
+ * has to implement Full (supportsApprovalMode); otherwise the work keeps the
+ * recipient's own level, as before. Only a Chief passes access on — an
+ * ordinary bot's delegation still uses the recipient's setting. */
+function delegatedFullAccess(from: BotRecord, fromThreadId: string, target: BotRecord): boolean {
+  return delegationInheritsFullAccess({
+    senderIsChief: Boolean(from.chiefOfStaff),
+    senderHasFullAccess: fullAccessForSource(from.id, fromThreadId),
+    sameBot: from.id === target.id,
+    recipientDriverKind: registry.cliTarget(target.modelSelection.instanceId)?.driverKind,
+  });
+}
+
+/** Make a delegated thread Full and say so in it once, so the level the
+ * chip shows and the level the turns run at agree, and the person can see
+ * where the access came from. Idempotent: a pair conversation is reused
+ * across delegations and must not collect a chip per request. */
+function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: string): void {
+  if (store.taskByThread(target.id, threadId)?.approvalMode === "full") return;
+  store.patchTask(target.id, threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+  store.appendMessage(threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Full access — delegated by ${from.name}, a Chief of Staff with Full access`, ok: true },
+  });
+}
+
+/** A room member's level for one turn. Work a Full-access Chief hands out
+ * in a room runs Full for that turn: the room thread is shared, so the
+ * level is not stored on it — it rides the handoff. */
+function roomTurnApprovalMode(bot: BotRecord, orchestration?: GroupTurnOrchestration): ApprovalMode {
+  const handoff = orchestration?.roomHandoffId ? roomHandoffs.nodes.get(orchestration.roomHandoffId) : undefined;
+  const source = handoff?.parentId ? roomHandoffs.nodes.get(handoff.parentId) : undefined;
+  const from = source ? store.bot(source.botId) : undefined;
+  if (from && source && delegatedFullAccess(from, source.threadId, bot)) return "full";
+  return approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId));
 }
 
 /** Privileged approval-mode transitions are deliberately absent from the
@@ -3395,10 +3466,12 @@ const watchdog = new TurnWatchdog({
         groupSpeakers.delete(turn.threadId);
         store.patchGroup(group.id, { busyBotId: null, unread: true });
       }
+      // A cleared UI busy flag must not strand this finished generation's
+      // computer claim. The generation checks above protect replacements.
+      releaseTurnResources(stalledResourceOwner);
       const currentBot = store.bot(turn.botId);
       if (currentBot?.busy) {
         stopScreenPoller(currentBot.id, turn.threadId);
-        releaseTurnResources(stalledResourceOwner);
         if (activeVpsThreads.get(currentBot.id) === turn.threadId) activeVpsThreads.delete(currentBot.id);
         if (store.taskByThread(currentBot.id, turn.threadId)) store.setTaskActivity(currentBot.id, turn.threadId, "idle");
         else store.setActivity(currentBot.id, "idle");
@@ -3671,11 +3744,11 @@ async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner:
   const ownerId = teamComputerOwner(computer.id);
   if (boxLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
   if (computerControl.snapshot(ownerId).held) throw new Error("Release human control of the team computer before starting another turn");
-  bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
+  await bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
   teamComputerTurns.set(owner.threadId, { owner, computerId: computer.id, botId, remoteAgent });
   let machine = await box.findBox(cfg, ownerId);
   if (!machine) throw new Error("The team's Box computer is missing; explicitly create or retry it from the Team map");
-  bindTurnComputer(owner, `computer:box:${machine.id}`, true);
+  await bindTurnComputer(owner, `computer:box:${machine.id}`, true);
   const action = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null });
   if (action === "wake") machine = await box.readyBox(cfg, ownerId);
   if (!machine || box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null }) !== "attach") {
@@ -5720,7 +5793,7 @@ async function startTurn(
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
         }
         try {
-          bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
+          await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
             throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
           }
@@ -5774,11 +5847,15 @@ async function startTurn(
           hostPlatform: process.platform,
           providerSupportsLocal: mountsLocalComputer,
         })) {
-          throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+          // Name the condition that actually failed: a person told "choose an
+          // ACP engine" while already on one has nowhere to go.
+          throw new Error(mountsLocalComputer
+            ? `local computer control is not available on ${process.platform} — select another destination`
+            : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
         }
         const cua = readCuaConnection();
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
-        bindTurnComputer(resourceOwner, "computer:host");
+        await bindTurnComputer(resourceOwner, "computer:host");
         integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
         computerKind = "local";
       }
@@ -5793,7 +5870,7 @@ async function startTurn(
         if (!unsupported) {
           // The remote lifecycle and container are shared by this bot. Keep
           // its explicit computer turns serialized; ordinary threads still run.
-          bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
+          await bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
           activeVpsThreads.set(bot.id, threadId);
           let remote;
           remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
@@ -5830,7 +5907,7 @@ async function startTurn(
       if (!teamComputer && mountsCloudComputer && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
         // Explicit cloud turns can provision/wake the same bot's Box. Claim
         // before any network await so setup itself cannot race another turn.
-        if (wants === "cloud") bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
+        if (wants === "cloud") await bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
         if (!mountsCloudComputer && wants === "cloud") {
           throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
         }
@@ -5872,7 +5949,7 @@ async function startTurn(
           });
         }
         if (b && lifecycle === "attach") {
-          bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
+          await bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
           previewCapture = () => box.screenshotBox(cfg, bot.id, b!.id);
           if (mountsCloudComputer) {
             integrations.computer = {
@@ -5915,7 +5992,7 @@ async function startTurn(
       ) {
         const cua = readCuaConnection();
         if (cua) {
-          bindTurnComputer(resourceOwner, "computer:host");
+          await bindTurnComputer(resourceOwner, "computer:host");
           integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
           computerKind = "local";
         }
@@ -7462,7 +7539,7 @@ async function runGroupMemberTurn(
   if (!readyGroup || !stillOwnsThread || !readyGroup.memberIds.includes(readyBot.id)) return false;
   const setupChanged =
     turnInstance(readyBot) !== instance ||
-    approvalModeForTurn(readyBot, Boolean(orchestration?.roomHandoffId)) !== preparedApprovalMode ||
+    roomTurnApprovalMode(readyBot, orchestration) !== preparedApprovalMode ||
     readyBot.modelSelection.instanceId !== preparedSelection.instanceId ||
     readyBot.modelSelection.model !== preparedSelection.model ||
     readyBot.modelSelection.effort !== preparedSelection.effort ||
@@ -7614,7 +7691,7 @@ async function runGroupMemberTurn(
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
     const target = { ...localVmTargetForBot(readyBot.id) };
-    bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
+    await bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
     if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
       throw new Error("this Local VM is being started, stopped, or replaced");
     }
@@ -7849,7 +7926,7 @@ async function runGroupMemberTurn(
         text,
         refreshSystemPrompt: true,
         images: turnImages,
-        approvalMode: approvalModeForTurn(readyBot, Boolean(orchestration?.roomHandoffId)),
+        approvalMode: roomTurnApprovalMode(readyBot, orchestration),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
@@ -8059,6 +8136,7 @@ async function runGroupMemberTurn(
   return true;
   } catch (error) {
     if (providerDispatched) throw error;
+    if (error instanceof DirectTurnSetupCancelled) return false;
     const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
     if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
@@ -11403,7 +11481,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             threadId: destination ? destination.id === source?.id ? address.threadId : destination.threadId : store.bot(botId)?.threadId ?? "", botId,
           }));
           for (const target of targets) {
-            const eligibility = target.botId === internalSender.id ? "Choose a teammate, not yourself" : roomHandoffProblem(target, address);
+            // roomHandoffProblem's "no longer exists" is written for a route
+            // that was valid and went away. Here the id is the model's own
+            // argument — usually a display name dropped into a bot_ids slot —
+            // so say which id failed and where the real ones are, instead of
+            // telling the model a teammate it can still reach is gone. Only
+            // the id the caller sent is echoed back, never a bot's name.
+            const addressed = store.bot(target.botId);
+            const eligibility =
+              target.botId === internalSender.id ? "Choose a teammate, not yourself"
+              : !addressed ? `No bot with id "${target.botId}" — call list_bots and copy the exact id from the result`
+              : addressed.hidden ? `The bot with id "${target.botId}" is no longer available — call list_bots for the ones you can reach`
+              : roomHandoffProblem(target, address);
             if (eligibility) return json(res, 403, { error: eligibility });
           }
           let approvalGranted = false;
@@ -11436,6 +11525,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 if (!resolved) throw new Error("The recipient no longer exists");
                 target.threadId = resolved.task.threadId;
                 if (resolved.created) createdThread = resolved.task.threadId;
+                if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
+                  grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
+                }
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
                 target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "");
@@ -11696,6 +11788,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const task = store.createTask(target.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
+        if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
         const queued = queueDelegation(
           commsBus,
           from,

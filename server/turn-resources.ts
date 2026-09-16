@@ -10,10 +10,15 @@ export type TurnOwner = { threadId: string; generation: string };
 export class TurnResources {
   private readonly owners = new Map<string, TurnOwner>();
 
-  claim(resource: string, owner: TurnOwner): boolean {
+  blocker(resource: string, owner: TurnOwner): TurnOwner | undefined {
     for (const [key, current] of this.owners) {
-      if (overlaps(key, resource) && !sameOwner(current, owner)) return false;
+      if (overlaps(key, resource) && !sameOwner(current, owner)) return current;
     }
+    return undefined;
+  }
+
+  claim(resource: string, owner: TurnOwner): boolean {
+    if (this.blocker(resource, owner)) return false;
     this.owners.set(resource, owner);
     return true;
   }
