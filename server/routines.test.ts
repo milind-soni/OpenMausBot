@@ -2071,6 +2071,28 @@ describe("RoutineManager", () => {
     expect(h.taskActivations).toEqual([true]);
   });
 
+  it("defers webhook deliveries behind the same busy admission as scheduled runs", async () => {
+    const h = harness();
+    h.setBot("busy");
+    const queued = h.manager.enqueueWebhook({
+      webhookId: "hook-busy",
+      webhookName: "Busy gate",
+      prompt: "Handle after the turn",
+      botId: "maus-1",
+      runOn: "maus",
+      deliveryId: "delivery-busy",
+      receivedAt: new Date(2026, 7, 17, 8, 2).getTime(),
+    });
+    await h.manager.tick();
+    const held = h.manager.listRuns().find((run) => run.id === queued.id)!;
+    expect(held).toMatchObject({ status: "queued", deferredAt: expect.any(Number) });
+    expect(h.started).toHaveLength(0);
+    h.setBot("ready");
+    await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === queued.id)).toMatchObject({ status: "running" });
+    expect(h.started).toEqual([{ botId: "maus-1", threadId: "thread-1", prompt: "Handle after the turn" }]);
+  });
+
   it("folds provider lifecycle events into the calendar receipt", async () => {
     const h = harness();
     const routine = h.manager.create({

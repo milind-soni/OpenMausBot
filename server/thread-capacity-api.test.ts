@@ -180,6 +180,113 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
     expect(existsSync(threadFile(threads[11], "json"))).toBe(false);
   }, 60_000);
 
+  it("dispatches routines into a free slot without waiting for whole-bot idle", async () => {
+    await limit(2);
+    const { botId, threads } = await botWithThreads(2);
+    expect((await send(botId, threads[0], "HOLD_ONE_SLOT")).body.queued).toBeUndefined();
+    await dump(threads[0]);
+    expect(await busyThreads(botId)).toEqual([threads[0]]);
+    const created = await api("POST", "/api/routines", {
+      name: "Slot dispatch probe",
+      prompt: "Write the scheduled digest.",
+      target: "bot",
+      botId,
+      runOn: "maus",
+      enabled: true,
+      schedule: { type: "daily", time: "23:00" },
+    });
+    expect(created.status).toBe(201);
+    const routineId = created.body.routine.id;
+    const runState = async (id: string) =>
+      (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === id);
+    try {
+      // One busy thread, one free slot: the run must start now instead of
+      // waiting for the bot to become fully idle.
+      const first = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
+      await expect.poll(async () => (await runState(first.id))?.status, { timeout: 15_000 }).toBe("running");
+      const firstRun = await runState(first.id);
+      expect(firstRun.threadId).toBeTruthy();
+      expect(firstRun.threadId).not.toBe(threads[0]);
+      await dump(firstRun.threadId);
+      expect(await busyThreads(botId)).toHaveLength(2);
+      // Whole-bot idleness is no longer the gate: the bot flag stays busy
+      // while the scheduled run occupies the second slot.
+      expect((await botState(botId)).busy).toBe(true);
+      // At capacity the next run defers until a slot frees.
+      const second = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      expect((await runState(second.id))?.status).toBe("queued");
+      finish(threads[0]);
+      await expect.poll(async () => (await runState(second.id))?.status, { timeout: 15_000 }).toBe("running");
+      const secondRun = await runState(second.id);
+      expect(secondRun.threadId).not.toBe(firstRun.threadId);
+      await dump(secondRun.threadId);
+    } finally {
+      for (const threadId of await busyThreads(botId)) finish(threadId);
+      await expect.poll(async () => (await busyThreads(botId)).length, { timeout: 15_000 }).toBe(0);
+      await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  }, 90_000);
+
+  it("holds routine runs behind an active group turn and starts them once it ends", async () => {
+    const { botId } = await botWithThreads(1);
+    const createdRoom = await api("POST", "/api/groups", {
+      name: "Routine gate room",
+      memberIds: [botId],
+      setup: { bulletin: "Answer briefly.", defaultResponder: { kind: "member", botId } },
+    });
+    expect(createdRoom.status).toBe(201);
+    const room = createdRoom.body.group;
+    const created = await api("POST", "/api/routines", {
+      name: "Group gate probe",
+      prompt: "Write the deferred digest.",
+      target: "bot",
+      botId,
+      runOn: "maus",
+      enabled: true,
+      schedule: { type: "daily", time: "23:00" },
+    });
+    expect(created.status).toBe(201);
+    const routineId = created.body.routine.id;
+    const runState = async (id: string) =>
+      (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === id);
+    const roomWorking = async () =>
+      (await api("GET", "/api/bots?messages=0")).body.groups.find((group: any) => group.id === room.id)?.working;
+    try {
+      const sent = await api("POST", `/api/groups/${room.id}/messages`, { text: "Hold the room turn open." });
+      expect(sent.status).toBe(202);
+      expect(sent.body.queued).toBeUndefined();
+      // Room turns run in the member's shared workspace, so the gated fake
+      // provider dumps and holds under the bot id, not the room thread id.
+      await dump(botId);
+      await expect.poll(roomWorking, { timeout: 15_000 }).toBe(true);
+      const run = (await api("POST", `/api/routines/${routineId}/run`)).body.run;
+      // An active group turn blocks scheduled starts the same way it blocks
+      // every other turn kind, even with every capacity slot free: across
+      // scheduler ticks the run stays queued — deferred, not failed.
+      await new Promise((resolve) => setTimeout(resolve, 12_000));
+      const held = await runState(run.id);
+      expect(held?.status).toBe("queued");
+      expect(held?.deferredAt).toEqual(expect.any(Number));
+      // Ending the room turn releases the run into a thread of its own.
+      finish(botId);
+      await expect.poll(roomWorking, { timeout: 15_000 }).toBe(false);
+      await expect.poll(async () => (await runState(run.id))?.status, { timeout: 20_000 }).toBe("running");
+      const started = await runState(run.id);
+      expect(started.threadId).toBeTruthy();
+      expect(started.threadId).not.toBe(room.threadId);
+      await dump(started.threadId);
+    } finally {
+      finish(room.threadId);
+      for (const threadId of await busyThreads(botId)) finish(threadId);
+      await expect.poll(async () => (await busyThreads(botId)).length, { timeout: 15_000 }).toBe(0);
+      await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
+      await api("DELETE", `/api/routines/${routineId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+    }
+  }, 120_000);
+
   it("restores cancellable queued receipts from a fresh snapshot and broadcasts complete queue changes", async () => {
     await limit(1);
     const { botId, threads: [active, waiting, cancelled, deleted] } = await botWithThreads(4);

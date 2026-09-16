@@ -992,6 +992,15 @@ function hasDirectDispatch(botId: string): boolean {
   return [...directTurnDispatchClaims.values()].some((claim) => claim.botId === botId);
 }
 
+/** Routine and webhook dispatch shares startTurn's admission preconditions
+ * instead of waiting for whole-bot idleness: a free thread slot and no
+ * active group turn. A group turn blocks scheduled starts the same way it
+ * blocks every other turn kind; it does not consume a capacity slot. */
+function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
+  const bot = store.bot(botId);
+  return !bot ? "missing" : botAtThreadCapacity(botId) || activeGroupTurnForBot(botId) ? "busy" : "ready";
+}
+
 function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
   const profile = store.bot(botId);
   if (!profile) throw Object.assign(new Error("no such bot"), { status: 404 });
@@ -6455,10 +6464,7 @@ routines = new RoutineManager({
   hasPendingDelegations: (threadId) => pendingThreads().includes(threadId) ||
     [...delegationWatch.values()].some((watch) => watch.sourceThreadId === threadId) ||
     pendingDelegationWakes.has(threadId),
-  botState: (botId) => {
-    const bot = store.bot(botId);
-    return !bot ? "missing" : bot.busy ? "busy" : "ready";
-  },
+  botState: unattendedDispatchState,
   goalState: (groupId, coordinatorBotId) => {
     const group = store.group(groupId);
     const coordinator = store.bot(coordinatorBotId);
@@ -7147,10 +7153,7 @@ function resolveAndSendProfile(
 // ordered behind a busy MAUS and gives webhook runs the same durable receipts.
 const webhooks = new WebhookManager({
   emit: broadcast,
-  botState: (botId) => {
-    const bot = store.bot(botId);
-    return !bot ? "missing" : bot.busy ? "busy" : "ready";
-  },
+  botState: unattendedDispatchState,
   enqueue: (input) => routines!.enqueueWebhook(input),
   findRun: (webhookId, deliveryId) => routines!.webhookRunReceipt(webhookId, deliveryId),
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
