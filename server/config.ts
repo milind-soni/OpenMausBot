@@ -21,6 +21,9 @@ const BROWSER_PROFILE_ID = /^[a-z0-9_-]{1,40}$/;
 export const DEFAULT_ROOM_TURN_TIMEOUT_MINUTES = 5;
 export const MIN_ROOM_TURN_TIMEOUT_MINUTES = 1;
 export const MAX_ROOM_TURN_TIMEOUT_MINUTES = 1_440;
+export const DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES = 30;
+export const DEFAULT_ROOM_HANDOFF_MIN_RUNWAY_MINUTES = 10;
+export const DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES = 240;
 export const DEFAULT_MAX_CONCURRENT_BOT_THREADS = 3;
 export const MAX_CONCURRENT_BOT_THREADS = 10;
 /** Bounds for threads.eventLogMaxBytes: the floor keeps the kept tail large
@@ -62,7 +65,19 @@ const roomConfigSchema = z.object({
     .int()
     .min(MIN_ROOM_TURN_TIMEOUT_MINUTES)
     .max(MAX_ROOM_TURN_TIMEOUT_MINUTES),
-});
+  /** Room handoff tree lifetime. Active execution pauses this clock; the
+   * hard cap is wall-clock and bounds trees that never stop executing. */
+  handoffLifetimeMinutes: z.number().int().min(1).max(MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
+  handoffMinRunwayMinutes: z.number().int().min(1).max(MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
+  handoffHardCapMinutes: z.number().int().min(1).max(7 * MAX_ROOM_TURN_TIMEOUT_MINUTES).optional(),
+}).refine(
+  (rooms) =>
+    (rooms.handoffMinRunwayMinutes ?? DEFAULT_ROOM_HANDOFF_MIN_RUNWAY_MINUTES) <=
+      (rooms.handoffLifetimeMinutes ?? DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES) &&
+    (rooms.handoffLifetimeMinutes ?? DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES) <=
+      (rooms.handoffHardCapMinutes ?? DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES),
+  { message: "rooms handoff bounds must satisfy handoffMinRunwayMinutes <= handoffLifetimeMinutes <= handoffHardCapMinutes" },
+);
 const localVmConfigSchema = z.object({
   mode: z.enum(["shared", "per-bot"]).optional(),
   maxInstances: z
@@ -416,7 +431,7 @@ export interface AppConfig {
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox"; baseUrl?: string; model?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
-  rooms?: { turnTimeoutMinutes: number };
+  rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
@@ -540,6 +555,23 @@ export function vpsSshAlias(cfg: AppConfig): string | null {
 
 export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
   return cfg.rooms?.turnTimeoutMinutes ?? DEFAULT_ROOM_TURN_TIMEOUT_MINUTES;
+}
+
+export interface RoomHandoffLimitsMs {
+  lifetimeMs: number;
+  minRunwayMs: number;
+  hardCapMs: number;
+}
+
+/** Room handoff tree budgets in milliseconds. The tree lifetime pauses
+ * while a node is actively executing; the hard cap is wall-clock and bounds
+ * trees that never stop. Read when the server starts. */
+export function roomHandoffLimits(cfg: AppConfig): RoomHandoffLimitsMs {
+  return {
+    lifetimeMs: (cfg.rooms?.handoffLifetimeMinutes ?? DEFAULT_ROOM_HANDOFF_LIFETIME_MINUTES) * 60_000,
+    minRunwayMs: (cfg.rooms?.handoffMinRunwayMinutes ?? DEFAULT_ROOM_HANDOFF_MIN_RUNWAY_MINUTES) * 60_000,
+    hardCapMs: (cfg.rooms?.handoffHardCapMinutes ?? DEFAULT_ROOM_HANDOFF_HARD_CAP_MINUTES) * 60_000,
+  };
 }
 
 export function maxConcurrentBotThreads(cfg: AppConfig): number {

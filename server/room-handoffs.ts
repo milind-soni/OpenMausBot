@@ -15,7 +15,7 @@ const nodeSchema = z.object({
 });
 export type RoomHandoff = z.infer<typeof nodeSchema>;
 export type RoomAddress = Pick<RoomHandoff, "groupId" | "threadId" | "botId">;
-export const ROOM_HANDOFF_LIMITS = { depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000, queueMs: 60 * 60_000 };
+export const ROOM_HANDOFF_LIMITS = { depth: 4, requests: 24, executions: 48, lifetimeMs: 30 * 60_000, minRunwayMs: 10 * 60_000, queueMs: 60 * 60_000, hardCapMs: 4 * 60 * 60_000 };
 /** Renders elapsed milliseconds as whole minutes, or seconds under one minute. */
 const duration = (ms: number) => ms >= 60_000 ? `${Math.floor(ms / 60_000)}m` : `${Math.floor(ms / 1000)}s`;
 const terminal = (n: RoomHandoff) => ["completed", "failed", "cancelled"].includes(n.status);
@@ -40,9 +40,14 @@ export class RoomHandoffs {
   private readonly file: string;
   private readonly hooks: RoomHandoffHooks;
   private readonly now: () => number;
+  private readonly limits: typeof ROOM_HANDOFF_LIMITS;
+  /** Per-root pause accounting for the tree lifetime clock. */
+  private readonly pauses = new Map<string, { accumulatedMs: number; since?: number }>();
 
-  constructor(file: string, hooks: RoomHandoffHooks, now: () => number = Date.now) {
+  constructor(file: string, hooks: RoomHandoffHooks, now: () => number = Date.now,
+    limits: Partial<typeof ROOM_HANDOFF_LIMITS> = {}) {
     this.file = file; this.hooks = hooks; this.now = now;
+    this.limits = { ...ROOM_HANDOFF_LIMITS, ...limits };
     try {
       const saved = z.array(nodeSchema).max(10_000).parse(JSON.parse(readFileSync(file, "utf8")));
       const ids = new Map(saved.map(n => [n.id, n]));
@@ -75,15 +80,51 @@ export class RoomHandoffs {
     return path;
   }
 
+  /** The tree lifetime clock pauses while any node in the tree is actively
+   * executing: the budget bounds coordination sprawl, not the runtime of
+   * dispatched work. Accounting is in-memory; a restart fails every
+   * interrupted node anyway, so no pause span survives one. */
+  private trackExecutionPauses(): void {
+    const now = this.now();
+    const executing = new Set<string>();
+    for (const n of this.nodes.values()) {
+      if (!terminal(n) && n.status === "running") executing.add(n.rootId);
+    }
+    for (const rootId of executing) {
+      const pause = this.pauses.get(rootId) ?? { accumulatedMs: 0 };
+      pause.since ??= now;
+      this.pauses.set(rootId, pause);
+    }
+    for (const [rootId, pause] of this.pauses) {
+      if (pause.since != null && !executing.has(rootId)) {
+        pause.accumulatedMs += now - pause.since;
+        pause.since = undefined;
+      }
+      const root = this.nodes.get(rootId);
+      if (!root || terminal(root)) this.pauses.delete(rootId);
+    }
+  }
+  private pausedMs(root: RoomHandoff): number {
+    const pause = this.pauses.get(root.id);
+    if (!pause) return 0;
+    return pause.accumulatedMs + (pause.since != null ? this.now() - pause.since : 0);
+  }
+  /** The lifetime budget consumed so far: wall clock minus paused time. */
+  private effectiveAgeMs(root: RoomHandoff): number {
+    return Math.max(0, this.now() - root.createdAt - this.pausedMs(root));
+  }
   /** The earliest moment this node may be failed for lifetime: the tree
    * ceiling, a running node's own start plus a minimum runway, or, for work
-   * parked in a busy teammate's queue, its own queue window (#1238). */
+   * parked in a busy teammate's queue, its own queue window (#1238). The
+   * wall-clock hard cap clamps every extension: a tree that never stops
+   * executing still dies, so runway extensions cannot compound forever. */
   private deadline(n: RoomHandoff): number {
     const anchor = n.status === "running" ? n.startedAt ?? n.createdAt : n.createdAt;
+    const root = this.root(n);
     const ceiling = n.status === "queued" && n.executions === 0
-      ? anchor + ROOM_HANDOFF_LIMITS.queueMs
-      : this.root(n).createdAt + ROOM_HANDOFF_LIMITS.lifetimeMs;
-    return Math.max(ceiling, anchor + ROOM_HANDOFF_LIMITS.minRunwayMs);
+      ? anchor + this.limits.queueMs
+      : root.createdAt + this.limits.lifetimeMs + this.pausedMs(root);
+    return Math.min(Math.max(ceiling, anchor + this.limits.minRunwayMs), root.createdAt + this.limits.hardCapMs);
   }
   /** An ancestor past its ceiling is not failed while a descendant is still
    * running inside its own runway; cancelling would cascade into that work. */
@@ -104,9 +145,16 @@ export class RoomHandoffs {
    * never started reports the queue window it waited out, not the tree's. */
   private lifetimeError(n: RoomHandoff): string {
     if (n.status === "queued" && n.executions === 0) {
-      return `Room handoff queue budget exhausted: never started while waiting for a busy teammate after ${duration(this.now() - n.createdAt)} of the ${duration(ROOM_HANDOFF_LIMITS.queueMs)} queue window`;
+      return `Room handoff queue budget exhausted: never started while waiting for a busy teammate after ${duration(this.now() - n.createdAt)} of the ${duration(this.limits.queueMs)} queue window`;
     }
-    return `Room handoff lifetime budget exhausted: node was ${n.status} after ${duration(this.now() - this.root(n).createdAt)} of the ${duration(ROOM_HANDOFF_LIMITS.lifetimeMs)} tree lifetime`;
+    const root = this.root(n);
+    return `Room handoff lifetime budget exhausted: node was ${n.status} after ${duration(this.effectiveAgeMs(root))} of the ${duration(this.limits.lifetimeMs)} tree lifetime`;
+  }
+  /** The wall-clock ceiling ignores pauses: it is what stops a tree whose
+   * execution never pauses long enough to age its lifetime budget. */
+  private hardCapError(n: RoomHandoff): string {
+    const root = this.root(n);
+    return `Room handoff hard cap exhausted: node was ${n.status} after ${duration(this.now() - root.createdAt)} of the ${duration(this.limits.hardCapMs)} wall-clock cap`;
   }
 
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
@@ -138,15 +186,19 @@ export class RoomHandoffs {
     if (kind === "work" && target.groupId && path.some(n => n.groupId === target.groupId)) throw new Error("A room request cannot return to an ancestor room; results are returned automatically");
     // The path includes the source root, so its work-node count is the
     // proposed edge depth: four edges are allowed; the fifth is refused.
-    if (kind === "work" && path.filter(n => n.kind === "work").length > ROOM_HANDOFF_LIMITS.depth) throw new Error("Room handoff depth limit reached");
+    if (kind === "work" && path.filter(n => n.kind === "work").length > this.limits.depth) throw new Error("Room handoff depth limit reached");
     const root = fresh ? parent : this.root(parent);
     const count = [...this.nodes.values()].filter(n => n.rootId === parent!.rootId && n.parentId).length;
-    if (count >= ROOM_HANDOFF_LIMITS.requests) throw new Error("Room handoff budget exhausted");
+    if (count >= this.limits.requests) throw new Error("Room handoff budget exhausted");
     // Refuse work the tree's lifetime budget cannot honestly serve: a node
     // accepted in the root's last minutes would be doomed at enqueue time.
-    const remaining = ROOM_HANDOFF_LIMITS.lifetimeMs - (this.now() - root.createdAt);
-    if (remaining < ROOM_HANDOFF_LIMITS.minRunwayMs) {
-      throw new Error(`Room handoff budget exhausted: only ${duration(Math.max(remaining, 0))} of the ${duration(ROOM_HANDOFF_LIMITS.lifetimeMs)} tree lifetime remains`);
+    // The wall-clock hard cap ignores pauses, so the runway actually
+    // available is the shorter of the two remainders.
+    const lifetimeRemaining = this.limits.lifetimeMs - this.effectiveAgeMs(root);
+    const hardCapRemaining = root.createdAt + this.limits.hardCapMs - this.now();
+    const remaining = Math.min(lifetimeRemaining, hardCapRemaining);
+    if (remaining < this.limits.minRunwayMs) {
+      throw new Error(`Room handoff budget exhausted: only ${duration(Math.max(remaining, 0))} of the ${duration(this.limits.lifetimeMs)} tree lifetime remains`);
     }
     // Retain a bounded audit history without evicting active requests.
     if (this.nodes.size >= 1000) {
@@ -228,13 +280,17 @@ export class RoomHandoffs {
 
   tick() {
     if (this.loadError) return;
+    this.trackExecutionPauses();
     // Validate and expire deepest nodes first so each one is failed with its
     // own status; an ancestor's cancellation then only sweeps what is left.
+    // The hard cap overrides the runner and follow-up protections: it is the
+    // bound that stops a tree whose execution never pauses.
     for (const n of [...this.nodes.values()].reverse()) {
       if (terminal(n)) continue;
       const error = this.hooks.validate(n, n.parentId ? this.nodes.get(n.parentId) : undefined);
-      if (error || (this.now() > this.deadline(n) && !this.protectsRunner(n) && !this.owesFollowUp(n))) {
-        this.cancelTree(n, error ?? this.lifetimeError(n), "failed");
+      const hardCapped = this.now() >= this.root(n).createdAt + this.limits.hardCapMs;
+      if (error || hardCapped || (this.now() > this.deadline(n) && !this.protectsRunner(n) && !this.owesFollowUp(n))) {
+        this.cancelTree(n, error ?? (hardCapped ? this.hardCapError(n) : this.lifetimeError(n)), "failed");
       }
     }
     for (const n of this.nodes.values()) {
@@ -255,10 +311,15 @@ export class RoomHandoffs {
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);
       const executionCost = 1;
-      if (root.executions + executionCost > ROOM_HANDOFF_LIMITS.executions) { this.cancelTree(n, "Room execution budget exhausted", "failed"); continue; }
+      if (root.executions + executionCost > this.limits.executions) { this.cancelTree(n, "Room execution budget exhausted", "failed"); continue; }
       const resumed = n.status === "resume";
       const childCount = this.children(n.id).length;
       root.executions += executionCost; n.status = "running"; n.startedAt = this.now();
+      // Open the pause at the moment execution starts, not at the next tick:
+      // the lifetime clock must not charge the gap before observation.
+      const pause = this.pauses.get(root.id) ?? { accumulatedMs: 0 };
+      pause.since ??= this.now();
+      this.pauses.set(root.id, pause);
       this.publish(n, root);
       const controller = new AbortController();
       this.controllers.set(n.id, controller);
