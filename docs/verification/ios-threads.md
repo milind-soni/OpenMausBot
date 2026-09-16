@@ -36,20 +36,35 @@ xcodebuild -project OpenMausCompanion.xcodeproj -scheme OpenMausCompanion \
 threads in Email, one unfiled thread, and one hidden routine run. No companion
 client, tokens or provider process are started. This fixture is separate from
 the captured server contract fixtures under `Tests/CompanionCoreTests/Fixtures`.
+`App/ThreadPreviewPages.json` supplies offline sibling transcripts, so the
+switching check can assert that the body as well as the title changes. The
+bulk-delete UI checks add `-threads-preview-deletion` to update that synthetic
+fleet in memory; `-threads-preview-deletion-fails-weekend` refuses the second
+delete to check partial results. These flags are compiled only in Debug.
 
 Check on iPhone and iPad:
 
 1. Expand Pepper's Threads row and Email folder. Each visible thread opens
    directly; the routine run is absent. Check working, queued and unread labels.
 2. Search by folder and thread name, then clear the search.
-3. Enter an unsent draft in Gmail, switch to iCloud through the header, and
-   return. iCloud must not inherit Gmail's draft; Gmail must retain it.
+3. Enter an unsent draft in Gmail, switch to iCloud through the thread-name
+   pill, and return. iCloud must not inherit Gmail's draft; Gmail must retain
+   it. With the opening island animation enabled, use the separate Threads
+   button in the top bar to open the same picker and switch again.
 4. Open Updates. Active sibling threads must have distinct entries and titles.
 5. In the thread picker, attempt creation while offline. The sheet must stay
    open and show an error. Failed renames must retain the entered title.
+6. Select two idle threads for deletion, confirm the count, and check that the
+   current working thread and its transcript remain. Repeat with the synthetic
+   second-delete failure: only the first thread disappears and the remaining
+   one stays selected with a visible partial-result error.
 
 Keep the `.xcresult` bundle and screenshots as evidence. Shut down and remove
 only the disposable simulators you created.
+The PR's macOS CI runs `scripts/verify-ios-thread-navigation-ci.sh` after the
+simulator build. It creates fresh iPhone and iPad simulators, runs only this
+offline UI fixture, deletes those exact simulators, and uploads both `.xcresult`
+bundles with screenshots as a short-lived artifact.
 
 The offline UI checks do **not** prove real-device pairing, HTTPS/Tailscale,
 live network reconnects, dictation or attachment uploads. Validate those with

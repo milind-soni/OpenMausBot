@@ -4,10 +4,34 @@ import XCTest
 /// paired computer, message sends, or server mutations are involved.
 final class ThreadNavigationUITests: XCTestCase {
     @MainActor
+    func testTopBarOpensThreadsWithIslandIntroEnabledAndSwitches() {
+        let app = launchPreview(islandIntro: "always")
+        openGmail(in: app)
+
+        let topBarThreads = app.buttons["header-threads"]
+        XCTAssertTrue(topBarThreads.waitForExistence(timeout: 5))
+        topBarThreads.tap()
+        let iCloud = app.buttons["thread-preview-icloud"]
+        XCTAssertTrue(iCloud.waitForExistence(timeout: 5))
+        recordScreenshot("Top bar opens the thread picker", in: app)
+        iCloud.tap()
+        assertThread("Triage iCloud", in: app)
+        XCTAssertTrue(transcriptContains("I am reviewing iCloud here", in: app))
+
+        app.buttons["thread-switcher"].tap()
+        let weekend = app.buttons["thread-preview-weekend"]
+        XCTAssertTrue(weekend.waitForExistence(timeout: 5))
+        weekend.tap()
+        assertThread("Plan weekend", in: app)
+        XCTAssertFalse(transcriptContains("I am reviewing iCloud here", in: app))
+    }
+
+    @MainActor
     func testRosterShowsFolderThreadsAndSwitchesLocally() {
         let app = launchPreview()
         openGmail(in: app)
         assertThread("Triage Gmail", in: app)
+        XCTAssertTrue(transcriptContains("I’m reviewing Gmail here", in: app))
 
         app.buttons["thread-switcher"].tap()
         let iCloud = app.buttons["thread-preview-icloud"]
@@ -18,11 +42,15 @@ final class ThreadNavigationUITests: XCTestCase {
         recordScreenshot("Thread picker with folder and runtime states", in: app)
         iCloud.tap()
         assertThread("Triage iCloud", in: app)
+        XCTAssertTrue(transcriptContains("I am reviewing iCloud here", in: app))
+        XCTAssertFalse(transcriptContains("I’m reviewing Gmail here", in: app))
 
         app.buttons["Back"].tap()
         XCTAssertTrue(app.buttons["threads-toggle.preview-pepper"].waitForExistence(timeout: 5))
         app.buttons["thread.preview-gmail"].tap()
         assertThread("Triage Gmail", in: app)
+        XCTAssertTrue(transcriptContains("I’m reviewing Gmail here", in: app))
+        XCTAssertFalse(transcriptContains("I am reviewing iCloud here", in: app))
     }
 
     @MainActor
@@ -124,7 +152,60 @@ final class ThreadNavigationUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchPreview() -> XCUIApplication {
+    func testBulkDeletionKeepsCurrentAndWorkingThread() {
+        let app = launchPreview(extraArguments: ["-threads-preview-deletion"])
+        openGmail(in: app)
+        app.buttons["thread-switcher"].tap()
+        app.buttons["select-threads"].tap()
+
+        XCTAssertFalse(app.buttons["select-thread-preview-gmail"].isEnabled)
+        XCTAssertFalse(app.buttons["select-thread-preview-routine"].exists)
+        app.buttons["select-all-threads"].tap()
+        XCTAssertTrue(app.buttons["delete-selected-threads"].label.contains("2"))
+        app.buttons["delete-selected-threads"].tap()
+        let confirmation = app.buttons["Delete 2 threads"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        recordScreenshot("Bulk delete confirmation with count", in: app)
+        confirmation.tap()
+
+        assertMissing(app.buttons["select-thread-preview-icloud"])
+        assertMissing(app.buttons["select-thread-preview-weekend"])
+        XCTAssertTrue(app.buttons["thread-preview-gmail"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        assertThread("Triage Gmail", in: app)
+        XCTAssertTrue(transcriptContains("I’m reviewing Gmail here", in: app))
+        app.buttons["Back"].tap()
+        XCTAssertEqual(app.buttons["threads-toggle.preview-pepper"].value as? String, "Expanded, 1 threads")
+    }
+
+    @MainActor
+    func testBulkDeletionStopsOnFailureAndKeepsRemainingSelection() {
+        let app = launchPreview(extraArguments: [
+            "-threads-preview-deletion", "-threads-preview-deletion-fails-weekend"
+        ])
+        openGmail(in: app)
+        app.buttons["thread-switcher"].tap()
+        app.buttons["select-threads"].tap()
+        app.buttons["select-all-threads"].tap()
+        app.buttons["delete-selected-threads"].tap()
+        let confirmation = app.buttons["Delete 2 threads"]
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 5))
+        confirmation.tap()
+
+        let error = app.descendants(matching: .any).matching(identifier: "thread-action-error").firstMatch
+        XCTAssertTrue(error.waitForExistence(timeout: 5))
+        XCTAssertTrue(error.label.contains("Deleted 1 of 2 threads"))
+        XCTAssertTrue(error.label.contains("Synthetic deletion failure"))
+        assertMissing(app.buttons["select-thread-preview-icloud"])
+        let remaining = app.buttons["select-thread-preview-weekend"]
+        XCTAssertTrue(remaining.exists)
+        XCTAssertTrue(remaining.label.contains("Deselect"))
+        XCTAssertTrue(app.buttons["delete-selected-threads"].label.contains("1"))
+        recordScreenshot("Partial bulk deletion keeps the remaining thread selected", in: app)
+    }
+
+    @MainActor
+    private func launchPreview(extraArguments: [String] = [], islandIntro: String = "never") -> XCUIApplication {
         continueAfterFailure = false
         let app = XCUIApplication()
         // Xcode may prelaunch the app after installing an updated build.
@@ -133,10 +214,10 @@ final class ThreadNavigationUITests: XCTestCase {
         app.launchArguments = [
             "-store-preview", "-threads-preview",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
-            "-companion.prefs.islandIntro", "never",
+            "-companion.prefs.islandIntro", islandIntro,
             "-companion.onboarding.welcomeSeen", "YES",
             "-companion.onboarding.notificationsSeen", "YES"
-        ]
+        ] + extraArguments
         app.launch()
         // Simulator installation can restore an unpaired, prewarmed scene
         // without the preview arguments once. Restart only that wrong route;
@@ -179,6 +260,19 @@ final class ThreadNavigationUITests: XCTestCase {
         let expected = NSPredicate(format: "label == %@", "Switch thread: \(title)")
         let appeared = XCTNSPredicateExpectation(predicate: expected, object: header)
         XCTAssertEqual(XCTWaiter.wait(for: [appeared], timeout: 5), .completed)
+    }
+
+    @MainActor
+    private func transcriptContains(_ text: String, in app: XCUIApplication) -> Bool {
+        app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.exists
+    }
+
+    @MainActor
+    private func assertMissing(_ element: XCUIElement) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"), object: element
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 5), .completed)
     }
 
     @MainActor
