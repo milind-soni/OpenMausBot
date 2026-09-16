@@ -18,6 +18,8 @@ describe("buildNotification", () => {
     expect(buildNotification("question", bot, "thread-1", "which branch?")?.title).toBe("Scout has a question");
     expect(buildNotification("done", bot, "thread-1", "pushed the branch")?.title).toBe("Scout finished");
     expect(buildNotification("routine-failed", bot, "thread-1", "boom")?.title).toBe("Scout's routine failed");
+    expect(buildNotification("routine-deferred", bot, "thread-1", "target busy for 30 minutes")?.title)
+      .toBe("Scout's routine is waiting");
     expect(buildNotification("turn-failed", bot, "thread-1", "the Local VM is not ready")?.title)
       .toBe("Scout couldn't start");
   });

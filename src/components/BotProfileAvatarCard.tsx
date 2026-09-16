@@ -19,6 +19,7 @@ import {
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
 import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
+import { useOrganizationBranding } from "@/lib/use-organization-branding";
 
 type AvatarPatch = Partial<
   Pick<Bot, "avatarCrop" | "avatarUrl" | "color" | "mascotExpression" | "mascotBody">
@@ -43,6 +44,7 @@ export function BotProfileAvatarCard({
   onPatch: (patch: AvatarPatch) => void;
 }) {
   const { flushBotPatches } = useStore();
+  const organization = useOrganizationBranding();
   const fileRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [savingConnection, setSavingConnection] = useState(false);
@@ -124,6 +126,15 @@ export function BotProfileAvatarCard({
       </div>
 
       <div className="p-3">
+        {Boolean(organization?.icons.length) && <div className="mb-3 border-b border-hairline/40 pb-3">
+          <div className="mb-2 text-[13px] font-medium text-ink-secondary">{organization!.name} icons</div>
+          <div className="flex flex-wrap gap-2">{organization!.icons.map(icon => <button key={icon.id} type="button" disabled={busy} title={icon.name} aria-label={`Use ${icon.name} icon`} className="flex size-12 items-center justify-center rounded-lg border border-hairline/40 hover:bg-control disabled:opacity-50" onClick={() => {
+            // Use the normal attachment path, so chosen icons survive removal
+            // from Admin and travel with the user's own workspace backups.
+            const bytes = Uint8Array.from(atob(icon.image.slice(22)), byte => byte.charCodeAt(0));
+            void upload(new File([bytes], `${icon.id}.png`, { type: "image/png" }));
+          }}><img src={icon.image} alt="" className="size-10 rounded-md object-contain" /></button>)}</div>
+        </div>}
         <div className="flex justify-center py-3">
           <BotAvatar
             bot={bot}

@@ -3,6 +3,7 @@
 // folds one SSE event stream; every provider process runs here.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 
@@ -31,7 +32,7 @@ import {
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
 
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegationInheritsFullAccess } from "./auto-approve.ts";
 import { updateClaudeCli } from "./claude-update.ts";
 import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import {
@@ -82,6 +83,7 @@ import * as box from "./box.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
 import { boxCreateRecoverySnapshot, retireDeletedBoxCreate } from "./box-create-idempotency.ts";
+import { boxDeletionSnapshot } from "./box-delete-journal.ts";
 import {
   boxAccountResourceChangeError,
   cloudBackendChangeError,
@@ -955,9 +957,34 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   }
 }
 
-function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): void {
-  if (exclusive && !claimTurnResource(owner, resource)) {
-    throw Object.assign(new Error("another thread is using this computer — wait for it to finish"), { status: 409, code: "computer_busy" });
+async function bindTurnComputer(owner: TurnOwner, resource: string, exclusive = false): Promise<void> {
+  const active = () => activeInternalGenerationByThread.get(owner.threadId) === owner.generation &&
+    turnResourceOwners.get(owner.threadId)?.generation === owner.generation;
+  let waitingMessage: Message | undefined;
+  const deadline = Date.now() + GROUP_GOAL_WAIT_MAX_MS;
+  try {
+    while (true) {
+      if (!active()) throw new DirectTurnSetupCancelled("Computer wait cancelled");
+      if (!exclusive || claimTurnResource(owner, resource)) break;
+      if (!waitingMessage) {
+        const blocker = turnResources.blocker(resource, owner);
+        const holderBot = blocker && store.botByThread(blocker.threadId);
+        const holderTask = holderBot && blocker && store.taskByThread(holderBot.id, blocker.threadId);
+        const holder = holderBot ? `${holderBot.name}${holderTask?.title ? ` / ${holderTask.title}` : ""}`
+          : blocker && store.groupByThread(blocker.threadId)?.name;
+        waitingMessage = store.appendMessage(owner.threadId, {
+          role: "bot", kind: "activity",
+          tool: { name: `Waiting for computer${holder ? ` — ${holder} is using it` : ""}; will continue automatically` },
+          ...(holderBot && holderTask ? { threadRef: { botId: holderBot.id, threadId: holderTask.threadId, title: holderTask.title } } : {}),
+        });
+      }
+      if (Date.now() >= deadline) throw new Error("Computer is still busy. Stop the turn using it, then retry.");
+      await new Promise<void>(resolve => setTimeout(resolve, 100));
+    }
+  } finally {
+    if (waitingMessage) store.patchMessage(owner.threadId, waitingMessage.id, {
+      tool: { name: active() && turnResources.owns(resource, owner) ? "Computer available — continuing" : "Computer wait ended", ok: true },
+    });
   }
   turnResourceOwners.set(owner.threadId, owner);
   turnComputerResources.set(owner.threadId, { owner, resource });
@@ -1783,7 +1810,10 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
  * approval semantics require an implemented provider mapping. The trusted transition enforces
  * this too, but no provider dispatch or later permission callback relies on
  * persistence having been produced exclusively by that route. Delegation
- * uses the receiving bot's grant, never the sender's — see approvalModeForOrigin. */
+ * uses the receiving bot's grant, never the sender's (approvalModeForOrigin) —
+ * with one deliberate exception: a Chief of Staff with Full access makes the
+ * threads it delegates Full too (delegatedFullAccess), so the grant the
+ * person gave the Chief covers the work the Chief hands out. */
 const approvalModeForTurn = (bot: BotRecord, peerInitiated = false): ApprovalMode => {
   const mode = approvalModeForOrigin(approvalModeFor(bot), { peerInitiated });
   if (!supportsApprovalMode(registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, mode)) {
@@ -1804,6 +1834,49 @@ function fullAccessForSource(botId: string, threadId: string): boolean {
 
 function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
   return Boolean(bot.approvePeerComms && !fullAccessForSource(bot.id, threadId));
+}
+
+/** Full access flows down a Chief of Staff's delegation. The person gave the
+ * Chief Full access so its work runs without prompts; a teammate stopping
+ * that same work to ask defeats the grant — and in practice the person was
+ * answering every one of those cards, all day, for the whole team. So a
+ * teammate a Full-access Chief delegates to runs Full for that work: the
+ * recipient switches, whatever its own level says. The recipient's engine
+ * has to implement Full (supportsApprovalMode); otherwise the work keeps the
+ * recipient's own level, as before. Only a Chief passes access on — an
+ * ordinary bot's delegation still uses the recipient's setting. */
+function delegatedFullAccess(from: BotRecord, fromThreadId: string, target: BotRecord): boolean {
+  return delegationInheritsFullAccess({
+    senderIsChief: Boolean(from.chiefOfStaff),
+    senderHasFullAccess: fullAccessForSource(from.id, fromThreadId),
+    sameBot: from.id === target.id,
+    recipientDriverKind: registry.cliTarget(target.modelSelection.instanceId)?.driverKind,
+  });
+}
+
+/** Make a delegated thread Full and say so in it once, so the level the
+ * chip shows and the level the turns run at agree, and the person can see
+ * where the access came from. Idempotent: a pair conversation is reused
+ * across delegations and must not collect a chip per request. */
+function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: string): void {
+  if (store.taskByThread(target.id, threadId)?.approvalMode === "full") return;
+  store.patchTask(target.id, threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+  store.appendMessage(threadId, {
+    role: "bot",
+    kind: "activity",
+    tool: { name: `Full access — delegated by ${from.name}, a Chief of Staff with Full access`, ok: true },
+  });
+}
+
+/** A room member's level for one turn. Work a Full-access Chief hands out
+ * in a room runs Full for that turn: the room thread is shared, so the
+ * level is not stored on it — it rides the handoff. */
+function roomTurnApprovalMode(bot: BotRecord, orchestration?: GroupTurnOrchestration): ApprovalMode {
+  const handoff = orchestration?.roomHandoffId ? roomHandoffs.nodes.get(orchestration.roomHandoffId) : undefined;
+  const source = handoff?.parentId ? roomHandoffs.nodes.get(handoff.parentId) : undefined;
+  const from = source ? store.bot(source.botId) : undefined;
+  if (from && source && delegatedFullAccess(from, source.threadId, bot)) return "full";
+  return approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId));
 }
 
 /** Privileged approval-mode transitions are deliberately absent from the
@@ -3393,10 +3466,12 @@ const watchdog = new TurnWatchdog({
         groupSpeakers.delete(turn.threadId);
         store.patchGroup(group.id, { busyBotId: null, unread: true });
       }
+      // A cleared UI busy flag must not strand this finished generation's
+      // computer claim. The generation checks above protect replacements.
+      releaseTurnResources(stalledResourceOwner);
       const currentBot = store.bot(turn.botId);
       if (currentBot?.busy) {
         stopScreenPoller(currentBot.id, turn.threadId);
-        releaseTurnResources(stalledResourceOwner);
         if (activeVpsThreads.get(currentBot.id) === turn.threadId) activeVpsThreads.delete(currentBot.id);
         if (store.taskByThread(currentBot.id, turn.threadId)) store.setTaskActivity(currentBot.id, turn.threadId, "idle");
         else store.setActivity(currentBot.id, "idle");
@@ -3669,11 +3744,11 @@ async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner:
   const ownerId = teamComputerOwner(computer.id);
   if (boxLifecycleBusyBots.has(ownerId)) throw new Error("The team computer is being changed; wait for it to finish");
   if (computerControl.snapshot(ownerId).held) throw new Error("Release human control of the team computer before starting another turn");
-  bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
+  await bindTurnComputer(owner, `computer:box-bot:${ownerId}`, true);
   teamComputerTurns.set(owner.threadId, { owner, computerId: computer.id, botId, remoteAgent });
   let machine = await box.findBox(cfg, ownerId);
   if (!machine) throw new Error("The team's Box computer is missing; explicitly create or retry it from the Team map");
-  bindTurnComputer(owner, `computer:box:${machine.id}`, true);
+  await bindTurnComputer(owner, `computer:box:${machine.id}`, true);
   const action = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null });
   if (action === "wake") machine = await box.readyBox(cfg, ownerId);
   if (!machine || box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: typeof machine.state === "string" ? machine.state : null }) !== "attach") {
@@ -3736,7 +3811,10 @@ function providerOperationConflict(provider: RemoteComputerProvider): string | n
     if (boxInventoryRequestsBusyIds.size > 0 || orphanBoxLifecycleBusyIds.size > 0) {
       return "wait for cloud computer actions to finish before changing the Box account";
     }
-    if (boxCreateRecoverySnapshot().some((entry) => !entry.resolved)) {
+    const deletingBoxIds = new Set(boxDeletionSnapshot().map((entry) => entry.boxId));
+    if (boxCreateRecoverySnapshot().some(
+      (entry) => !entry.resolved && (!entry.boxId || !deletingBoxIds.has(entry.boxId)),
+    )) {
       return "finish reconciling pending cloud computer creation before changing the Box account";
     }
   } else if (vps.vpsLifecycleBusy()) {
@@ -5715,7 +5793,7 @@ async function startTurn(
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) return false;
         }
         try {
-          bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
+          await bindTurnComputer(resourceOwner, `computer:vm:${localVmTarget.key}`, true);
           if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(localVmTarget.key)) {
             throw new Error("this Local VM is being started, stopped, or replaced — wait for setup to finish");
           }
@@ -5769,11 +5847,15 @@ async function startTurn(
           hostPlatform: process.platform,
           providerSupportsLocal: mountsLocalComputer,
         })) {
-          throw new Error("this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+          // Name the condition that actually failed: a person told "choose an
+          // ACP engine" while already on one has nowhere to go.
+          throw new Error(mountsLocalComputer
+            ? `local computer control is not available on ${process.platform} — select another destination`
+            : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
         }
         const cua = readCuaConnection();
         if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
-        bindTurnComputer(resourceOwner, "computer:host");
+        await bindTurnComputer(resourceOwner, "computer:host");
         integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
         computerKind = "local";
       }
@@ -5788,7 +5870,7 @@ async function startTurn(
         if (!unsupported) {
           // The remote lifecycle and container are shared by this bot. Keep
           // its explicit computer turns serialized; ordinary threads still run.
-          bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
+          await bindTurnComputer(resourceOwner, `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`, true);
           activeVpsThreads.set(bot.id, threadId);
           let remote;
           remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
@@ -5825,11 +5907,19 @@ async function startTurn(
       if (!teamComputer && mountsCloudComputer && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
         // Explicit cloud turns can provision/wake the same bot's Box. Claim
         // before any network await so setup itself cannot race another turn.
-        if (wants === "cloud") bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
+        if (wants === "cloud") await bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
         if (!mountsCloudComputer && wants === "cloud") {
           throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
         }
-        let b = await box.findBox(cfg, bot.id).catch(() => null);
+        let b;
+        try {
+          b = await box.findBox(cfg, bot.id);
+        } catch (error) {
+          // Auto may fall through when an optional provider is offline, but a
+          // durable deletion fence must never be mistaken for "no computer".
+          if (wants === "cloud" || (error as { status?: number })?.status === 409) throw error;
+          b = null;
+        }
         let lifecycle = box.boxTurnLifecycleAction({
           explicitCloud: wants === "cloud",
           canMount: mountsCloudComputer,
@@ -5838,7 +5928,7 @@ async function startTurn(
         if (lifecycle === "provision") {
           broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
           await box.provisionBox(cfg, bot.id, bot.name);
-          b = await box.findBox(cfg, bot.id).catch(() => null);
+          b = await box.findBox(cfg, bot.id);
           lifecycle = box.boxTurnLifecycleAction({
             explicitCloud: true,
             canMount: mountsCloudComputer,
@@ -5851,7 +5941,7 @@ async function startTurn(
         // consent boundary for the resume (~8s, and it un-pauses billing).
         if (lifecycle === "wake") {
           broadcast({ kind: "computer", botId: bot.id, state: "waking" });
-          b = (await box.readyBox(cfg, bot.id).catch(() => null)) ?? b;
+          b = (await box.readyBox(cfg, bot.id)) ?? b;
           lifecycle = box.boxTurnLifecycleAction({
             explicitCloud: true,
             canMount: mountsCloudComputer,
@@ -5859,7 +5949,7 @@ async function startTurn(
           });
         }
         if (b && lifecycle === "attach") {
-          bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
+          await bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
           previewCapture = () => box.screenshotBox(cfg, bot.id, b!.id);
           if (mountsCloudComputer) {
             integrations.computer = {
@@ -5902,7 +5992,7 @@ async function startTurn(
       ) {
         const cua = readCuaConnection();
         if (cua) {
-          bindTurnComputer(resourceOwner, "computer:host");
+          await bindTurnComputer(resourceOwner, "computer:host");
           integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
           computerKind = "local";
         }
@@ -6279,6 +6369,7 @@ function routineRunCard(run: RoutineRun): NonNullable<Message["routineRun"]> {
     status: run.status,
   };
   if (run.goalStatus) card.goalStatus = run.goalStatus;
+  if (run.deferredAt != null && run.status === "queued") card.deferredAt = run.deferredAt;
   if (run.threadId) card.executionThreadId = run.threadId;
   if (summary) card.summary = summary;
   if (error) card.error = error;
@@ -6308,6 +6399,8 @@ function routineRunFallbackText(card: NonNullable<Message["routineRun"]>): strin
             ? "was cancelled"
             : card.status === "missed"
               ? "was missed"
+              : card.status === "queued" && card.deferredAt != null
+                ? "deferred: target busy"
               : card.status
   );
   return `Routine “${card.routineName}” ${state}`;
@@ -6521,6 +6614,16 @@ routines = new RoutineManager({
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
   },
+  onRunDeferred: (run) => {
+    const bot = store.bot(run.botId);
+    if (!bot) return;
+    const minutes = run.deferredAt != null && run.deferredNoticeAt != null
+      ? Math.max(1, Math.round((run.deferredNoticeAt - run.deferredAt) / 60_000))
+      : null;
+    const detail = `${redactSecretsInText(run.routineName)}: target busy${minutes != null ? ` for ${minutes} minutes` : ""}`;
+    const notificationBot = routineSourceOwner(run)?.bot ?? bot;
+    notify(buildNotification("routine-deferred", notificationBot, routineSourceThread(run) ?? bot.threadId, detail));
+  },
 });
 // The scheduler receipt and room transcript live in separate durable stores.
 // If the process exited between those two writes, prefer the correlated
@@ -6623,6 +6726,9 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
       if (computerProviderConfigTransitions.size > 0) {
         return deletionResponse( 409, { error: "computer provider settings are being updated — wait before deleting this bot" });
       }
+      if (localVmModeChangeBusy) {
+        return deletionResponse(409, { error: "Local VM settings are being updated — wait before deleting this bot" });
+      }
       if (boxLifecycleBusyBots.has(bot.id)) {
         return deletionResponse( 409, { error: "wait for this bot's cloud computer action to finish before deleting the bot" });
       }
@@ -6645,6 +6751,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         return deletionResponse( 409, { error: "stop this bot's work before checking and deleting its cloud computer" });
       }
       const botBoxRecovery = boxCreateRecoverySnapshot().filter((entry) => entry.botId === bot.id);
+      const botBoxDeletions = boxDeletionSnapshot().filter((entry) => entry.ownerBotId === bot.id);
       if (botBoxRecovery.some((entry) => !entry.resolved)) {
         return deletionResponse( 409, {
           error: "finish reconciling this bot's pending cloud computer creation before deleting it — check ascii.dev, then retry Box setup",
@@ -6661,84 +6768,100 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         releaseComputerLifecycle();
         return deletionResponse( 409, { error: "this bot or one of its channels is securely saving a credential" });
       }
+      let claimedLocalVmTarget: LocalVmTarget | null = null;
       try {
+        let localVmCleanup: { target: LocalVmTarget; removeContainer: boolean } | null = null;
         if (localVmMode(cfg) === "per-bot") {
           const target = perBotLocalVmTarget(bot.id);
           if (localVmActiveThreads.has(target.key) || localVmLifecycleBusy.has(target.key)) {
             return deletionResponse( 409, { error: "stop this bot's Local VM turn or setup action before deleting the bot" });
           }
+          if (localVmLeaseFor(target).current(localVmOwnerBusy)) {
+            return deletionResponse(409, { error: "stop this bot's Local VM turn before deleting the bot" });
+          }
+          // Hold the target from preflight through deletion. A simultaneous
+          // mode change or lifecycle route must not recreate the container
+          // after we checked it and before its bot owner disappears.
+          localVmLifecycleBusy.add(target.key);
+          claimedLocalVmTarget = target;
           const vm = await containerComputerStatus(undefined, undefined, target);
           if (!vm.daemonUp && existsSync(target.workspaceDir)) {
             return deletionResponse( 409, {
-              error: "start the container runtime and delete this bot's Local VM before deleting the bot",
+              error: "start the container runtime so OpenMausBot can remove this bot's Local VM while deleting it",
             });
           }
-          if (vm.container !== "missing") {
-            return deletionResponse( 409, { error: "delete this bot's Local VM from its Computer panel before deleting the bot" });
+          if (vm.container !== "missing" && !vm.managed) {
+            return deletionResponse(409, {
+              error: `The container named ${vm.container_name} was not created by OpenMausBot. Remove it manually before deleting this bot`,
+            });
           }
+          localVmCleanup = {
+            target,
+            removeContainer: vm.container !== "missing",
+          };
         }
-        // VPS containers are also durable and may outlive a destination or
-        // backend switch. Keep the bot as the discoverable owner until the
-        // person explicitly removes that container from Settings.
+
+        // Preflight every provider before deleting any resource. Cleanup can
+        // still fail mid-flight across independent providers, but a missing
+        // credential or offline daemon should not cause avoidable partial work.
         const vpsInventory = await vps.listManagedVpsComputers(cfg, managedBoxOwners());
         if (vpsInventory.configured && !vpsInventory.available) {
           return deletionResponse( 503, {
-            error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. Refresh Settings → Computers before deleting this bot`,
+            error: `${vpsInventory.problem ?? "VPS computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
           });
         }
-        if (vpsInventory.instances.some((instance) => instance.ownerBotId === bot.id)) {
-          return deletionResponse( 409, {
-            error: "remove this bot's VPS computer from Settings → Computers before deleting the bot",
+        const ownedVpsComputers = vpsInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
+
+        if ((botBoxRecovery.length > 0 || botBoxDeletions.length > 0) && !box.boxConfigured(cfg)) {
+          return deletionResponse(409, {
+            error: "Reconnect the Box account that owns this bot's remembered cloud computer, then retry deletion",
           });
         }
-        // LIST is eventually consistent, and a remembered Box may also have
-        // been renamed outside OpenMausBot. The create journal is stronger
-        // ownership evidence: inspect every durable id directly before the bot
-        // record that makes it discoverable can be removed. Missing credentials
-        // or an unavailable provider must fail closed.
-        for (const recovery of botBoxRecovery) {
-          if (!recovery.boxId) {
-            return deletionResponse( 409, {
-              error: "finish reconciling this bot's pending cloud computer creation before deleting it",
-            });
-          }
-          const inspected = await box.inspectBoxIdentity(cfg, recovery.boxId);
-          if (!inspected.available) {
-            return deletionResponse( 503, {
-              error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Restore its Box account before deleting this bot`,
-            });
-          }
-          if (inspected.identity) {
-            return deletionResponse( 409, {
-              error: "delete this bot's remembered cloud computer from Settings → Computers before deleting the bot",
-            });
-          }
-          // A direct 404/410 is authoritative even while account LIST catches
-          // up. Retire only this exact provider identity, then continue looking
-          // for any older name-based resource the journal never recorded.
-          retireDeletedBoxCreate(recovery.boxId);
-        }
-        // A Box survives destination/backend changes and contains browser
-        // sessions and files. Resolve ownership from a fresh provider listing;
-        // deleting the bot first would make that durable machine look orphaned.
         const cloudInventory = await box.listManagedBoxes(cfg, managedBoxOwners());
         if (cloudInventory.configured && !cloudInventory.available) {
           return deletionResponse( 503, {
-            error: `${cloudInventory.problem ?? "cloud computer inventory is unavailable"}. Refresh Settings → Computers before deleting this bot`,
+            error: `${cloudInventory.problem ?? "cloud computer inventory is unavailable"}. The bot was kept so its computer can be retried safely`,
           });
         }
-        if (cloudInventory.instances.some((instance) => instance.ownerBotId === bot.id)) {
-          return deletionResponse( 409, {
-            error: "delete this bot's cloud computer from Settings → Computers before deleting the bot",
-          });
-        }
-        // Establish a durable cleanup intent before any teardown. A malformed
-        // or unreadable journal therefore rejects the delete with the bot and
-        // all of its live work untouched. The intent is aborted if a later
-        // pre-delete side effect fails, and committed only after Store deletion.
+        const ownedBoxComputers = cloudInventory.instances.filter((instance) => instance.ownerBotId === bot.id);
+
+        // Revalidate a reviewed Chief-of-Staff request and establish the
+        // browser cleanup intent before the first irreversible provider
+        // mutation. A stale review or damaged journal therefore leaves every
+        // computer intact. Cross-provider rollback is impossible, so every
+        // subsequent operation is exact and retry-safe.
         revalidate();
         const browserCleanupRequest = browserCleanup.prepare("bot", bot.id);
         try {
+          // Provider-owned computers are durable, billable resources. Remove
+          // each exact, freshly revalidated identity before making its bot
+          // owner disappear. Shared team computers use a different owner id
+          // and are intentionally absent from these lists.
+          for (const instance of ownedBoxComputers) {
+            const removed = await box.deleteManagedBox(cfg, managedBoxOwners(), instance.boxId, instance.name);
+            if (removed.pending) {
+              throw Object.assign(
+                new Error("The cloud computer deletion has started but is still finishing. The bot was kept; retry in a moment"),
+                { status: 409 },
+              );
+            }
+          }
+          for (const instance of ownedVpsComputers) {
+            await vps.removeManagedVpsComputer(cfg, managedBoxOwners(), instance.name, instance.name);
+          }
+          if (localVmCleanup) {
+            if (localVmCleanup.removeContainer) {
+              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target);
+            }
+            // Unlike the standalone "Delete VM" action, deleting the bot is
+            // a complete erasure: its now-ownerless desktop files and browser
+            // session must not remain hidden on disk or block the event loop.
+            await removeDirectory(localVmCleanup.target.workspaceDir, { recursive: true, force: true });
+            localVmSeen.delete(localVmCleanup.target.key);
+            localVmIdles.get(localVmCleanup.target.key)?.cancel();
+            localVmIdles.delete(localVmCleanup.target.key);
+            localVmLeases.forget(localVmCleanup.target.key);
+          }
           // a running turn dies with its bot
           // Invalidate every bot-callable bearer before the first asynchronous
           // teardown step. A request that already passed its initial header
@@ -6751,7 +6874,6 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
             revokeInternalCapabilitiesForThread(task.threadId);
           }
           await interruptAllDirectThreads(bot.id);
-          revalidate();
           // Deletion removes the thread before a late turn.completed can fold
           // staged provider images into a message, so dispose them here.
           for (const task of store.tasks(bot.id)) {
@@ -6772,6 +6894,12 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           const target = perBotLocalVmTarget(bot.id);
           localVmIdles.get(target.key)?.cancel();
           localVmIdles.delete(target.key);
+          // Provider and local-computer teardown above can await for an
+          // arbitrary amount of time. A reviewed Chief deletion is bound to
+          // the exact target profile it presented; re-check that receipt at
+          // the final durable mutation boundary so a concurrent profile edit
+          // cannot be erased under a stale approval.
+          revalidate();
           store.deleteBot(bot.id, setupRequest);
           // Removing schedules is not a security revocation. Keep them intact
           // if the bot/receipt write fails, so a failed deletion is retryable.
@@ -6802,6 +6930,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
         }
         return deletionResponse( 200, { ok: true });
       } finally {
+        if (claimedLocalVmTarget) localVmLifecycleBusy.delete(claimedLocalVmTarget.key);
         releaseComputerLifecycle();
         releasePhoneSecretMutation();
       }
@@ -7410,7 +7539,7 @@ async function runGroupMemberTurn(
   if (!readyGroup || !stillOwnsThread || !readyGroup.memberIds.includes(readyBot.id)) return false;
   const setupChanged =
     turnInstance(readyBot) !== instance ||
-    approvalModeForTurn(readyBot, Boolean(orchestration?.roomHandoffId)) !== preparedApprovalMode ||
+    roomTurnApprovalMode(readyBot, orchestration) !== preparedApprovalMode ||
     readyBot.modelSelection.instanceId !== preparedSelection.instanceId ||
     readyBot.modelSelection.model !== preparedSelection.model ||
     readyBot.modelSelection.effort !== preparedSelection.effort ||
@@ -7562,7 +7691,7 @@ async function runGroupMemberTurn(
     }
     // A distinct identity fences cleanup even in shared mode on the same room thread.
     const target = { ...localVmTargetForBot(readyBot.id) };
-    bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
+    await bindTurnComputer(resourceOwner, `computer:vm:${target.key}`, true);
     if (localVmImageBusy || localVmModeChangeBusy || localVmLifecycleBusy.has(target.key)) {
       throw new Error("this Local VM is being started, stopped, or replaced");
     }
@@ -7797,7 +7926,7 @@ async function runGroupMemberTurn(
         text,
         refreshSystemPrompt: true,
         images: turnImages,
-        approvalMode: approvalModeForTurn(readyBot, Boolean(orchestration?.roomHandoffId)),
+        approvalMode: roomTurnApprovalMode(readyBot, orchestration),
         system: roomSystem.text,
         systemStable: roomSystem.stable,
         systemVolatile: roomSystem.volatile,
@@ -8007,6 +8136,7 @@ async function runGroupMemberTurn(
   return true;
   } catch (error) {
     if (providerDispatched) throw error;
+    if (error instanceof DirectTurnSetupCancelled) return false;
     const isSpendCap = typeof error === "object" && error !== null && (error as { code?: string }).code === "spend_cap";
     const isVariantError = typeof error === "object" && error !== null && (error as { code?: string }).code === "unsupported_model_variant";
     if (!roomSpeaker && !isSpendCap && !isVariantError) throw error;
@@ -11351,7 +11481,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             threadId: destination ? destination.id === source?.id ? address.threadId : destination.threadId : store.bot(botId)?.threadId ?? "", botId,
           }));
           for (const target of targets) {
-            const eligibility = target.botId === internalSender.id ? "Choose a teammate, not yourself" : roomHandoffProblem(target, address);
+            // roomHandoffProblem's "no longer exists" is written for a route
+            // that was valid and went away. Here the id is the model's own
+            // argument — usually a display name dropped into a bot_ids slot —
+            // so say which id failed and where the real ones are, instead of
+            // telling the model a teammate it can still reach is gone. Only
+            // the id the caller sent is echoed back, never a bot's name.
+            const addressed = store.bot(target.botId);
+            const eligibility =
+              target.botId === internalSender.id ? "Choose a teammate, not yourself"
+              : !addressed ? `No bot with id "${target.botId}" — call list_bots and copy the exact id from the result`
+              : addressed.hidden ? `The bot with id "${target.botId}" is no longer available — call list_bots for the ones you can reach`
+              : roomHandoffProblem(target, address);
             if (eligibility) return json(res, 403, { error: eligibility });
           }
           let approvalGranted = false;
@@ -11384,6 +11525,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 if (!resolved) throw new Error("The recipient no longer exists");
                 target.threadId = resolved.task.threadId;
                 if (resolved.created) createdThread = resolved.task.threadId;
+                if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
+                  grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
+                }
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
                 target, parsed.data.requestKey + ":" + target.botId, parsed.data.message, approvalGranted, parsed.data.rework, [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "");
@@ -11644,6 +11788,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const task = store.createTask(target.id, title, false, projectId, { botId: from.id, name: from.name, at: Date.now() });
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
+        if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
         const queued = queueDelegation(
           commsBus,
           from,
@@ -16000,46 +16145,85 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resourceError) return json(res, 409, { error: resourceError });
         }
 
-        const boxRecovery = changingBoxToken ? boxCreateRecoverySnapshot() : [];
+        let boxRecovery = changingBoxToken ? boxCreateRecoverySnapshot() : [];
+        let boxDeletions = changingBoxToken ? boxDeletionSnapshot() : [];
+        if (changingBoxToken && boxDeletions.length > 0 && !nextBoxToken) {
+          return json(res, 409, {
+            error: "finish or retry pending cloud computer deletion before removing the Box account",
+          });
+        }
+        let replacementProvedByDeletion = false;
+        if (changingBoxToken && boxDeletions.length > 0 && nextBoxToken) {
+          try {
+            await box.verifyBoxDeletionCredential({ box: { token: nextBoxToken } });
+            replacementProvedByDeletion = true;
+            // Verification can observe a completed operation and retire both
+            // its deletion fence and matching create receipt. Never continue
+            // with the pre-verification snapshots: they would demand access
+            // to a Box whose exact operation just proved it was deleted.
+            boxRecovery = boxCreateRecoverySnapshot();
+            boxDeletions = boxDeletionSnapshot();
+          } catch (error) {
+            return json(res, (error as { status?: number })?.status ?? 503, {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
         let currentBoxInventory: box.ManagedBoxInventory | null = null;
         let currentBoxResources: Array<{ boxId: string; name: string }> | null = null;
         const journalBoxResources: Array<{ boxId: string; name: string }> = [];
+        const deletingBoxIds = new Set(boxDeletions.map((entry) => entry.boxId));
         if (changingBoxToken && currentBoxToken) {
           currentBoxInventory = await box.listManagedBoxes(
             { box: { token: currentBoxToken } },
             managedBoxOwners(),
           );
           if (!currentBoxInventory.available) {
-            return json(res, 503, {
-              error: `${currentBoxInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
-            });
-          }
-          const currentById = new Map(
-            currentBoxInventory.instances.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
-          );
-          for (const recovery of boxRecovery) {
-            if (!recovery.boxId) continue;
-            const inspected = await box.inspectBoxIdentity({ box: { token: currentBoxToken } }, recovery.boxId);
-            if (!inspected.available) {
+            if (!replacementProvedByDeletion) {
               return json(res, 503, {
-                error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Box account and retry`,
+                error: `${currentBoxInventory.problem ?? "cloud computer inventory is unavailable"}. Keep the current Box account and retry`,
               });
             }
-            if (!inspected.identity) {
-              // Reconcile exact stale receipts while the current credential is
-              // still available. Leaving one behind would make a later token
-              // addition demand access to a Box the provider proved is gone.
-              retireDeletedBoxCreate(recovery.boxId);
-              continue;
-            }
-            const listed = currentById.get(inspected.identity.boxId);
-            if (listed && listed.name !== inspected.identity.name) {
-              return json(res, 503, { error: "ascii.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
-            }
-            currentById.set(inspected.identity.boxId, inspected.identity);
-            journalBoxResources.push(inspected.identity);
+            // The old token may be the reason this deletion is stuck. A
+            // target-bound operation/identity proved the replacement belongs
+            // to the same account, so do not deadlock credential recovery on
+            // an inventory request made with the expired token.
+            currentBoxInventory = null;
           }
-          currentBoxResources = [...currentById.values()];
+          if (currentBoxInventory) {
+            const currentById = new Map(
+              currentBoxInventory.instances.map((instance) => [instance.boxId, { boxId: instance.boxId, name: instance.name }]),
+            );
+            for (const recovery of boxRecovery) {
+              if (!recovery.boxId) continue;
+              // A failed provisioning attempt may never have reached the
+              // deterministic rename. The replacement credential already
+              // proved the exact deletion target, so its in-flight resource
+              // is governed by that stronger target-bound receipt rather
+              // than an OpenMausBot name check.
+              if (replacementProvedByDeletion && deletingBoxIds.has(recovery.boxId)) continue;
+              const inspected = await box.inspectBoxIdentity({ box: { token: currentBoxToken } }, recovery.boxId);
+              if (!inspected.available) {
+                return json(res, 503, {
+                  error: `${inspected.problem ?? "a remembered cloud computer could not be verified"}. Keep the current Box account and retry`,
+                });
+              }
+              if (!inspected.identity) {
+                // Reconcile exact stale receipts while the current credential is
+                // still available. Leaving one behind would make a later token
+                // addition demand access to a Box the provider proved is gone.
+                retireDeletedBoxCreate(recovery.boxId);
+                continue;
+              }
+              const listed = currentById.get(inspected.identity.boxId);
+              if (listed && listed.name !== inspected.identity.name) {
+                return json(res, 503, { error: "ascii.dev returned conflicting cloud computer identities; keep the current Box account and retry" });
+              }
+              currentById.set(inspected.identity.boxId, inspected.identity);
+              journalBoxResources.push(inspected.identity);
+            }
+            currentBoxResources = [...currentById.values()];
+          }
         }
 
         if (changingLocalVmMode) {
@@ -16084,7 +16268,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const check = await box.verifyToken(newBoxToken);
         if (!check.ok) return json(res, 400, { error: check.message });
       }
-      if (changingBoxToken && !currentBoxToken && boxRecovery.length > 0) {
+      if (changingBoxToken && (!currentBoxToken || replacementProvedByDeletion) && boxRecovery.length > 0) {
         if (!nextBoxToken) {
           return json(res, 409, { error: "restore the Box account that owns the remembered cloud computers before clearing it" });
         }
@@ -16092,6 +16276,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!recovery.boxId) {
             return json(res, 409, { error: "finish reconciling pending cloud computer creation before changing the Box account" });
           }
+          if (replacementProvedByDeletion && deletingBoxIds.has(recovery.boxId)) continue;
           const inspected = await box.inspectBoxIdentity({ box: { token: nextBoxToken } }, recovery.boxId);
           if (!inspected.available) {
             return json(res, 503, {

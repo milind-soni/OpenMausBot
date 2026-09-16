@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
+import { parseOrganizationBranding } from "./organization-branding.mjs";
 
 const TOKEN = /^omd_[A-Za-z0-9_-]{43}$/;
 const UUID = /^[a-f0-9-]{36}$/;
@@ -94,6 +95,7 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
   let grant = null, connection = null, pending = null, state = { status: "signed-out" };
   let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null;
   let generation = 0, timer = null, closed = false, controller = new AbortController(), refreshing = null;
+  let branding = parseOrganizationBranding(null);
   const snapshot = () => structuredClone(state);
   const publish = (next) => { state = next; onState(snapshot()); return snapshot(); };
   const stopTimer = () => { if (timer) clearTimeout(timer); timer = null; };
@@ -106,6 +108,7 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
   const view = (status, message) => ({ status, ...(message ? { message } : {}), ...(connection ? {
     organization: { id: connection.organizationId, name: connection.organizationName }, email: connection.email,
     deviceId: connection.deviceId, expiresAt: connection.expiresAt,
+    branding,
     providers: connection.providers.map(({ id, configured, models }) => ({ id, configured, models: [...models] })),
     cloudBackups: state.cloudBackups ?? false,
   } : {}) });
@@ -195,6 +198,7 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
       await applyConnection(next);
       if (!current(stamp)) return snapshot();
       connection = next;
+      branding = parseOrganizationBranding(result.branding);
       publish({ ...view("connected"), cloudBackups: Boolean(result.cloudBackups) });
     } catch (error) {
       if (!current(stamp)) return snapshot();

@@ -153,6 +153,7 @@ const dumpEnv = Object.fromEntries(
     "FAKE_ACP_DUMP_PROMPT",
     "TEST_POLICY",
     "OPENCODE_API_KEY",
+    "OPENCODE_PERMISSION",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",

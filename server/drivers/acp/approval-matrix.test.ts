@@ -52,6 +52,7 @@ describe("remaining ACP approval mappings", () => {
         FAKE_ACP_DUMP: dump,
         FAKE_ACP_RPC_DUMP: rpcDump,
         OPENCODE_API_KEY: "fixture-only",
+        OPENCODE_PERMISSION: '{"external_directory":"ask"}',
       },
       config: { cli: FAKE_CLI, fullAuto: true },
     });
@@ -72,6 +73,12 @@ describe("remaining ACP approval mappings", () => {
         expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
         expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === turnId)).toBe(false);
         expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(argv);
+        if (driver === OpenCodeDriver) {
+          const native = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
+          expect(native).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });
+          if (approvalMode === "full") expect(native).toMatchObject({ "*": "allow", read: "allow", bash: "allow", edit: "allow" });
+          else expect(native).toEqual({ external_directory: "ask" });
+        }
         expect(JSON.parse(readFileSync(rpcDump, "utf8")))
           .toContain(approvalMode === "full" ? "session/new" : "session/load");
         if (driver === DroidAgentDriver) {

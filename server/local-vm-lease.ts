@@ -68,4 +68,9 @@ export class LocalVmLeasePool {
     }
     return lease;
   }
+
+  /** Drop an idle per-target lane after its owning bot and VM are gone. */
+  forget(targetKey: string): void {
+    this.leases.delete(targetKey);
+  }
 }

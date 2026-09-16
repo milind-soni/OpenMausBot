@@ -200,7 +200,7 @@ export class TeamSetupRequestService {
     if (!permission.ok) throw new TeamSetupError(permission.error, permission.status);
     const chief = this.chief(request.botId);
     const lines = [`Why: ${request.reason}`];
-    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, and skills. Generated project files remain. Active work or owned computers can block deletion.");
+    if (request.deletion) lines.push(`Delete @${request.deletion.name} (${request.deletion.botId}).`, "Permanently removes this bot, all its conversations, memory, instructions, skills, and any computer owned only by it. Generated project files and shared team computers remain. Active work or an unavailable provider can block deletion safely.");
     if (request.newTeams.length) lines.push(`Create teams: ${request.newTeams.map((name) => JSON.stringify(name)).join(", ")}.`, `Authorize @${chief.name} to coordinate and propose setup changes in these new teams.`);
     for (const operation of request.operations) {
       const current = this.options.store.bot(operation.botId);

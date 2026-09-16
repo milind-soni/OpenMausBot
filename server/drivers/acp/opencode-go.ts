@@ -377,6 +377,18 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     ? ensureOpenCodeInjectModel(normalizeLegacyOpenCodeModel(model, env), env)
     : model,
   transformEnv: stripForeignProviderKeys,
+  applyTurnEnv: (env, { fullAuto }) => {
+    if (!fullAuto) return;
+    // Scope native permissions to this child, not the user's OpenCode config.
+    // A wildcard alone leaves OpenCode's more-specific external-directory and
+    // read rules in place. Replace the built-in rules as well, including path
+    // maps, so Full means the same thing inside the provider and in OMB.
+    env.OPENCODE_PERMISSION = JSON.stringify(Object.fromEntries([
+      "*", "external_directory", "read", "edit", "bash", "glob", "grep",
+      "list", "task", "lsp", "skill", "webfetch", "websearch", "codesearch",
+      "todoread", "todowrite", "doom_loop",
+    ].map((permission) => [permission, "allow"])));
+  },
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: async (env, config) => (

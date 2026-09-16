@@ -8,13 +8,23 @@ import { expect, it } from "vitest";
 // regression, not proof of a real provider or conversation workflow.
 const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
 function section(start: string, end: string) {
-  const from = source.indexOf(start), to = source.indexOf(end, from + start.length);
+  // Anchor both markers to the start of a line. `function bindTurnComputer(`
+  // also matches INSIDE `async function bindTurnComputer(`, which silently cut
+  // the slice after the `async ` and left it dangling — the extracted code then
+  // died with `ReferenceError: async is not defined` instead of failing here
+  // with a readable "section moved". Anchoring makes drift loud again.
+  const lineStart = (marker: string, from: number) => {
+    if (from === 0 && source.startsWith(marker)) return 0;
+    const at = source.indexOf(`\n${marker}`, from);
+    return at < 0 ? -1 : at + 1;
+  };
+  const from = lineStart(start, 0), to = from < 0 ? -1 : lineStart(end, from + start.length);
   if (from < 0 || to <= from) throw new Error(`Cleanup test section moved: ${start}`);
   return source.slice(from, to);
 }
 const code = ts.transpileModule([
   section("async function interruptDirectThread(", "/** Stop left teammates"),
-  section("function releaseTurnResources(", "function bindTurnComputer("),
+  section("function releaseTurnResources(", "async function bindTurnComputer("),
   section("async function stopCompanyInstances(", "async function persistProviderInstance("),
 ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
 const reloadProvidersCode = ts.transpileModule(

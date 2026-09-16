@@ -148,11 +148,14 @@ describe("archive / delete confirmation", () => {
     expect(copy.tone).toBe("neutral");
   });
 
-  it("delete copy names the bot and spells out that it is permanent", () => {
+  it("delete copy names the bot and warns about its owned computer", () => {
     const copy = botConfirmCopy("delete", "Willow");
 
     expect(copy.title).toContain("Willow");
     expect(copy.body).toMatch(/permanently/i);
+    expect(copy.body).toMatch(/any computer it owns/i);
+    expect(copy.body).toMatch(/files and browser sign-ins/i);
+    expect(copy.body).toMatch(/shared team computers remain/i);
     expect(copy.tone).toBe("danger");
   });
 
@@ -173,13 +176,14 @@ describe("archive / delete confirmation", () => {
 });
 
 describe("bot deletion feedback", () => {
-  it("disables the destructive action while persistent computers are checked", () => {
+  it("disables the destructive action while the bot and its computer are deleted", () => {
     const markup = renderToStaticMarkup(createElement(BotDeleteMenuItem, {
       deleting: true,
       onClick: vi.fn(),
     }));
 
-    expect(markup).toContain("Checking computers…");
+    expect(markup).toContain("Deleting bot and owned computer…");
+    expect(markup).toContain('title="Deleting this bot and any computer it owns"');
     expect(markup).toContain('disabled=""');
     expect(markup).toContain('aria-busy="true"');
   });

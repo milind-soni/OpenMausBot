@@ -112,7 +112,7 @@ export function OrganizationSettings() {
         <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.cancelEnrollment())}>{t("organization.cancel")}</button>
       </div>}
       {enrolled && <div className="flex flex-col gap-3">
-        <div><div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
+        <div>{connection.branding?.logo && <img src={connection.branding.logo} alt="Organization logo" className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
           <div className="break-all text-[13px] text-ink-secondary">{connection.email}</div></div>
         {connection.status === "reauth-required" ? <p role="alert" className="text-[13px] text-ink-secondary">{t("organization.reauth")}</p> : connection.status === "connected" ? <>
           <p className="text-[13px] text-ink-secondary">{t("organization.modelHelp")}</p>

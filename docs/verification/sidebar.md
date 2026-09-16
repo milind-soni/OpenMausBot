@@ -20,3 +20,6 @@ Verified on 2026-09-05 against the isolated renderer. Static regression coverage
 in `src/components/SidebarBotListItem.test.ts` checks dialog semantics/copy,
 chief labels, role badges, and working/waiting indicators. The interaction checks
 above are manual browser verification, not assertions made by those unit tests.
+This fixture covers the sidebar confirmation and bot-row result only; it does
+not exercise Settings > Computers deletion or provider completion polling.
+Those paths are covered by the computer-section and server Box inventory tests.

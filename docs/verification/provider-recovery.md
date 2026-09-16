@@ -11,6 +11,7 @@ Pass the path to an already installed CLI. These checks never update it.
 node --experimental-strip-types scripts/verify-grok-images.ts /absolute/path/to/grok
 node --experimental-strip-types scripts/verify-claude-auth-settings.ts /absolute/path/to/claude
 node --experimental-strip-types scripts/verify-claude-auth-settings.ts /absolute/path/to/claude --api-key
+node --experimental-strip-types scripts/verify-opencode-permissions.ts /absolute/path/to/opencode
 ```
 
 - Grok must deliver the **exact** synthetic PNG bytes to a loopback model.
@@ -25,6 +26,13 @@ node --experimental-strip-types scripts/verify-claude-auth-settings.ts /absolute
   personal SessionStart hook must not run. OMB retains project settings but
   projects only account authentication from personal settings. Explicit OMB
   credentials/endpoints take precedence as a pair.
+- OpenCode must actually read a synthetic file **outside** its workspace in
+  Full mode without a permission request. The same native session resumes in
+  Ask, where denying the request prevents the read, then resumes in Full and
+  reads it again. Only the spawned turn receives the native permission
+  override; personal/project configuration is not rewritten. Verified with
+  OpenCode 1.18.27 on macOS; this does not prove Windows filesystem ACLs or
+  third-party plugins and custom agent policies.
 
 These prove transport/auth integration, not hosted image interpretation,
 subscription entitlement, Console-profile availability, or production API

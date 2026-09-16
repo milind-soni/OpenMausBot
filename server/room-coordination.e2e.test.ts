@@ -333,3 +333,25 @@ it("waits for busy peers and then completes without the user relaying messages",
   expect(f.nodes().every((n: any) => n.status === "completed")).toBe(true);
   expect((await f.messages(f.source.activeTaskId)).some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
 }), 45_000);
+
+// An unresolvable bot_ids entry used to get "The addressed agent no longer
+// exists" whether it had ever been a bot id or not, carrying no id and no
+// way back, so a model reads its teammate as permanently gone. Both cases
+// now name the id the caller sent and point at list_bots, like the other
+// comms refusals in the server.
+it.each([
+  ["a display name in a bot_ids slot", false],
+  ["a hidden teammate's id", true],
+] as const)("refuses %s with a message the caller can act on", (_case, hidden) => withRooms(async f => {
+  if (hidden) await f.api(`/api/bots/${f.target.id}`, { hidden: true }, "PATCH");
+  const botId = hidden ? f.target.id : f.target.name;
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [botId], message: "Review CSV", request_key: "review" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const refused = f.provider().find((turn: any) => turn.botId === f.sender.id)
+    .evidence.find((entry: any) => entry.step).response.result.content[0].text;
+  expect(refused).toBe(hidden
+    ? `The bot with id "${botId}" is no longer available — call list_bots for the ones you can reach`
+    : `No bot with id "${botId}" — call list_bots and copy the exact id from the result`);
+}), 45_000);

@@ -10,12 +10,22 @@
 // bot is not working, and the fix is usually a setting only a person can
 // change, so a retry cannot clear it. A routine failure already buzzed;
 // this makes an interactive turn behave the same way.
+// A routine parked behind a busy target earns one notice after half an
+// hour: from outside the schedule looks broken, and only a person can
+// decide whether the busy work or the routine matters more.
 //
 // Delivery is a separate concern. The harness emits a frame; whoever is
 // listening decides what to do with it — desktop and paired-phone local
 // notifications today, and closed-app APNs delivery once a relay exists.
 
-export type NotifyKind = "approval" | "question" | "done" | "routine-failed" | "turn-failed" | "takeover";
+export type NotifyKind =
+  | "approval"
+  | "question"
+  | "done"
+  | "routine-failed"
+  | "routine-deferred"
+  | "turn-failed"
+  | "takeover";
 
 export interface Notification {
   kind: NotifyKind;
@@ -98,6 +108,8 @@ export function buildNotification(
           ? `${who} needs your hands`
           : kind === "routine-failed"
             ? `${who}'s routine failed`
+            : kind === "routine-deferred"
+              ? `${who}'s routine is waiting`
             : kind === "turn-failed"
               ? `${who} couldn't start`
               : `${who} finished`;

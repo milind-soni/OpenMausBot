@@ -53,9 +53,13 @@ For deletion, ask separately:
 > Delete Patch. Show me the deletion confirmation first.
 
 `propose_bot_deletion` produces a separate destructive review naming the exact
-bot. Existing lifecycle guards reject active work and owned computers before
-removal. Bot conversations, memory, instructions and skills are removed;
-generated project files remain. The Chief cannot delete itself.
+bot. Lifecycle guards reject active work. Before removing the bot, the server
+discovers and deletes its exact managed Box, VPS container, and per-bot Local
+VM (including that VM's private workspace). Shared team computers are left
+alone. A provider outage, unresolved ownership, unmanaged name collision, or
+unconfirmed provider deletion keeps the bot so deletion can be retried. Bot
+conversations, memory, instructions and skills are then removed; generated
+project files remain. The Chief cannot delete itself.
 
 ## Assertions and failure boundaries
 
@@ -80,8 +84,12 @@ All bot changes, new-team grants and the result receipt use one atomic
 `bots.json` write before publishing bot mutations. The separate team registry
 is saved first: if the bot write subsequently fails, an empty named team can
 remain, but no bot, model, membership or Chief-access changes are applied.
-Deletion similarly saves removal and its receipt before deleting bot data.
-The deletion write-failure fixture obstructs the exact temporary `bots.json`
+Bot-record removal similarly saves its receipt before deleting bot data, but
+external computers cannot join that file transaction. With several independent
+providers, one owned computer can be removed before a later provider fails; the
+bot stays, the completed cleanup is not rolled back, and a retry safely
+rediscovers and removes what remains. The deletion write-failure fixture has no
+owned external computer: it obstructs the exact temporary `bots.json`
 destination, exercises the real DELETE lifecycle, and checks that the complete
 bot, conversations, routines, webhooks and solo/shared calendar calls are
 unchanged in memory and on disk. It restores that fixture file and retries

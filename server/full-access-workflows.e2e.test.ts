@@ -164,6 +164,15 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     const handoffs = JSON.parse(readFileSync(join(dataDir, "room-handoffs.json"), "utf8"));
     expect(handoffs.every((node: any) => node.status === "completed")).toBe(true);
     expect(providerTurns().filter(turn => turn.botId === peer.id)).toHaveLength(1);
+    // A Full-access Chief's delegation runs Full: Ada's own level is Ask,
+    // yet the work Clive handed her ran without a single card, her pair
+    // thread with Clive is now Full, and the thread says where that came from.
+    const peerTurn = providerTurns().find(turn => turn.botId === peer.id)!;
+    expect(peerTurn.permissionMode).toBe("bypassPermissions");
+    expect((await bots()).find(bot => bot.id === peer.id).approvalMode ?? "ask").toBe("ask");
+    expect(await unanswered(peerTurn.threadId)).toHaveLength(0);
+    expect((await messages(peerTurn.threadId)).some(message => message.kind === "activity" && /^Full access — delegated by Clive, a Chief of Staff with Full access$/.test(message.tool?.name ?? ""))).toBe(true);
+    evidence.push({ delegatedFullAccess: { peerThreadId: peerTurn.threadId, permissionMode: peerTurn.permissionMode } });
 
     const askTurn = await run(chief, ask.threadId, "Prepare a profile change, routine, named skill, and specialist for review in this Ask task.", [
       step("propose_profile", { title: "Pending Ask title", reason: "Ask task requires review" }),
@@ -190,6 +199,9 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(persisted.find((bot: any) => bot.id === chief.id).tasks.find((task: any) => task.threadId === ask.threadId).approvalMode).toBe("ask");
     expect(persisted.find((bot: any) => bot.id === inverse.id)).toMatchObject({ title: "Applied from Full task", approvalMode: "ask" });
     expect(persisted.find((bot: any) => bot.id === inverse.id).tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode).toBe("full");
+    // the delegated pair thread stays Full on disk; Ada's own default does not move
+    expect(persisted.find((bot: any) => bot.id === peer.id).approvalMode).not.toBe("full");
+    expect(persisted.find((bot: any) => bot.id === peer.id).tasks.find((task: any) => task.threadId === peerTurn.threadId)).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: [] });
     expect(JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8")).routines[0]).toMatchObject({ enabled: false, schedule });
     evidence.push({ persistedBots: persisted, routines: await api("GET", "/api/routines"), handoffs,
       fullMessages: await messages(chief.activeTaskId), askMessages: await messages(ask.threadId), inverseMessages: await messages(inverse.activeTaskId) });

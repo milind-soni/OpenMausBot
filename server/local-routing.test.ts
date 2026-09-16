@@ -52,8 +52,34 @@ describe("local computer routing", () => {
     expect(
       shouldMountLocalComputer({
         requested: "local",
+        hostPlatform: "freebsd",
+        providerSupportsLocal: true,
+      }),
+    ).toBe(false);
+  });
+
+  // The Windows build ships the CUA driver and offers "This computer" in
+  // the UI; the server must not refuse what the app just offered.
+  it("treats Windows like macOS: explicit selection and Auto both mount", () => {
+    expect(
+      shouldMountLocalComputer({
+        requested: "local",
         hostPlatform: "win32",
         providerSupportsLocal: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldMountLocalComputer({
+        requested: undefined,
+        hostPlatform: "win32",
+        providerSupportsLocal: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldMountLocalComputer({
+        requested: "local",
+        hostPlatform: "win32",
+        providerSupportsLocal: false,
       }),
     ).toBe(false);
   });

@@ -49,6 +49,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
   const emitted: any[] = [];
   const changed: any[] = [];
   const failed: any[] = [];
+  const deferred: any[] = [];
   const options: RoutineManagerOptions = {
     file: tempFile(),
     now: () => now,
@@ -79,6 +80,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     },
     onRunChanged: (run) => changed.push(run),
     onRunFailed: (run) => failed.push(run),
+    onRunDeferred: (run) => deferred.push(run),
   };
   const manager = new RoutineManager(options);
   return {
@@ -95,6 +97,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     interruptedGoals,
     changed,
     failed,
+    deferred,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setGoal: (value: typeof goal) => (goal = value),
@@ -200,6 +203,47 @@ describe("cron routines use the existing persistent scheduler", () => {
     h.manager.handleRuntimeEvent({ eventId: "done", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "turn.completed", ok: true });
     h.setNow(start + 7 * 60_000); await h.manager.tick();
     expect(h.manager.listRuns()).toHaveLength(2); expect(h.started).toHaveLength(2);
+  });
+
+  it("stamps busy-target deferral, notices once past the window, then dispatches normally", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    const queued = h.manager.listRuns()[0];
+    expect(queued).toMatchObject({ status: "queued", deferredAt: routine.nextRunAt });
+    expect(h.changed.at(-1)).toMatchObject({ id: queued!.id, deferredAt: routine.nextRunAt });
+    // The stamp is durable: a restart neither loses the wait nor re-notices.
+    expect(new RoutineManager(h.options).listRuns()[0]?.deferredAt).toBe(routine.nextRunAt);
+    h.setNow(routine.nextRunAt! + 29 * 60_000); await h.manager.tick();
+    expect(h.deferred).toHaveLength(0);
+    h.setNow(routine.nextRunAt! + 30 * 60_000); await h.manager.tick();
+    expect(h.deferred).toHaveLength(1);
+    h.setNow(routine.nextRunAt! + 45 * 60_000); await h.manager.tick();
+    expect(h.deferred).toHaveLength(1);
+    expect(h.manager.listRuns()[0]).toMatchObject({
+      status: "queued",
+      deferredNoticeAt: routine.nextRunAt! + 30 * 60_000,
+    });
+    h.setBot("ready"); await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns()[0]?.status).toBe("running");
+  });
+
+  it("leaves promptly dispatched runs unstamped and quiet", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    expect(h.manager.listRuns()[0]?.deferredAt).toBe(routine.nextRunAt);
+    h.setBot("ready"); h.setNow(routine.nextRunAt! + 5 * 60_000); await h.manager.tick();
+    expect(h.deferred).toHaveLength(0);
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns()[0]?.status).toBe("running");
+    // A run that dispatches on its first tick is never stamped at all.
+    const clean = harness(start);
+    const prompt = clean.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    clean.setNow(prompt.nextRunAt!); await clean.manager.tick();
+    expect(clean.manager.listRuns()[0]?.deferredAt).toBeUndefined();
+    expect(clean.started).toHaveLength(1);
   });
 
   it("pause cancels queued work, survives restart, and resume chooses the next calendar date", async () => {
@@ -364,7 +408,10 @@ describe("persistent routine results destinations", () => {
       expect(run).toMatchObject({ status: trigger === "missed" ? "missed" : "queued" });
       expect(run?.resultsThreadId).toBe(allocated ? "results-2" : destination === "chosen" ? "chosen" : undefined);
       expect(h.created()).toBe(allocated ? 2 : 0);
-      expect(h.changed).toHaveLength(1);
+      // A scheduled retry lands behind the still-busy bot, so the queued
+      // receipt publishes once for creation and once for its deferral stamp.
+      expect(h.changed).toHaveLength(trigger === "schedule" ? 2 : 1);
+      if (trigger === "schedule") expect(h.changed.at(-1)).toMatchObject({ id: run!.id, deferredAt: due });
       expect(h.failed).toHaveLength(trigger === "missed" ? 1 : 0);
       // Both broadcast events and transcript lifecycle callbacks must see
       // their matching destination and receipt in the already-saved file.

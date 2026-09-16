@@ -12,6 +12,7 @@ import {
   approvalModeForOrigin,
   autoVerdict,
   deliverFullAccessApproval,
+  delegationInheritsFullAccess,
 } from "./auto-approve.ts";
 
 describe("Full access delivery", () => {
@@ -115,5 +116,24 @@ describe("tools that ask a person", () => {
 
   it("still answers an ordinary tool under Full access", () => {
     expect(autoVerdict("full", "Read").approve).toBeTruthy();
+  });
+});
+
+describe("delegationInheritsFullAccess", () => {
+  const base = { senderIsChief: true, senderHasFullAccess: true, sameBot: false, recipientDriverKind: "claudeAgent" };
+  it("passes a Full-access Chief's access to the teammate it delegates to", () => {
+    expect(delegationInheritsFullAccess(base)).toBe(true);
+    for (const recipientDriverKind of ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo"]) {
+      expect(delegationInheritsFullAccess({ ...base, recipientDriverKind })).toBe(true);
+    }
+  });
+  it("passes nothing on from an ordinary bot, a Chief without Full access, or a bot to itself", () => {
+    expect(delegationInheritsFullAccess({ ...base, senderIsChief: false })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...base, senderHasFullAccess: false })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...base, sameBot: true })).toBe(false);
+  });
+  it("leaves a teammate whose engine has no Full mode on its own level", () => {
+    expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: "hermes" })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: undefined })).toBe(false);
   });
 });

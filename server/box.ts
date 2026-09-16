@@ -17,12 +17,23 @@ import { loadEnvironmentId } from "./environment.ts";
 import {
   adoptResolvedBox,
   beginBoxCreate,
+  boxCreateRecoverySnapshot,
   discardBoxCreate,
   rememberCreatedBox,
   resolveBoxCreate,
   retireDeletedBoxCreate,
   type BoxCreateRequest,
 } from "./box-create-idempotency.ts";
+import {
+  boxDeletionSnapshot,
+  getBoxDeletion,
+  hasPendingBoxDeletionForBot,
+  markBoxDeletionAccepted,
+  markBoxDeletionBlocked,
+  prepareBoxDeletion,
+  retireBoxDeletion,
+  type BoxDeletionRecord,
+} from "./box-delete-journal.ts";
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -76,6 +87,7 @@ const BOX_STATES = new Set([
   "provisioned",
   "cloning",
   "starting",
+  "removing",
   "error",
 ]);
 // Provider listings are account-wide. Hash the durable local environment id
@@ -122,7 +134,7 @@ export interface ManagedBoxInventory {
 
 export interface BoxIdentityInspection {
   available: boolean;
-  identity: { boxId: string; name: string } | null;
+  identity: { boxId: string; name: string; state: string } | null;
   problem: string | null;
 }
 
@@ -176,6 +188,8 @@ async function boxJson(cfg: AppConfig, path: string, opts: RequestInit = {}) {
 
 interface BoxDeletionOperation {
   id: string;
+  kind: "box";
+  targetId: string;
   status: "pending" | "processing" | "blocked" | "completed";
 }
 
@@ -197,7 +211,7 @@ function boxDeletionOperation(
     || operation?.targetId !== boxId
     || !BOX_DELETE_OPERATION_STATES.has(status)
   ) return null;
-  return { id, status: status as BoxDeletionOperation["status"] };
+  return { id, kind: "box", targetId: boxId, status: status as BoxDeletionOperation["status"] };
 }
 
 function deletionBlockedError(boxId: string): Error & { status: number } {
@@ -211,47 +225,179 @@ function boxDeleteProvedAbsent(result: Awaited<ReturnType<typeof boxJson>>): boo
   return result.status === 404 || result.status === 410;
 }
 
-/** DELETE /boxes only accepts background deletion. Keep the durable create
- * receipt until its operation completes. If operation polling is unavailable,
- * a direct 404/410 is the only alternate proof that this Box identity is gone. */
-async function confirmAcceptedBoxDeletion(cfg: AppConfig, boxId: string, acceptedBody: any): Promise<void> {
-  let operation = boxDeletionOperation(acceptedBody, boxId);
-  if (operation?.status === "completed") return;
-  if (operation?.status === "blocked") throw deletionBlockedError(boxId);
+/** Retire the create receipt before the deletion fence. If that first durable
+ * write fails, the fence remains and no caller can reuse a Box whose ownership
+ * recovery is uncertain. */
+function finishRecordedBoxDeletion(boxId: string): void {
+  retireDeletedBoxCreate(boxId);
+  forgetBoxId(boxId);
+  retireBoxDeletion(boxId);
+}
 
-  if (operation) {
-    for (const delayMs of BOX_DELETE_OPERATION_POLL_DELAYS_MS) {
+type BoxDeletionReconciliation = "confirmed" | "pending" | "blocked";
+
+/** Reconcile one durable deletion against the exact provider operation/Box.
+ * Account LIST omission is never evidence: it is eventually consistent. */
+async function reconcileRecordedBoxDeletion(
+  cfg: AppConfig,
+  initial: BoxDeletionRecord,
+  pollDelaysMs: readonly number[] = [],
+): Promise<BoxDeletionReconciliation> {
+  let record = initial;
+  if (record.phase === "accepted" && record.status === "completed") {
+    finishRecordedBoxDeletion(record.boxId);
+    return "confirmed";
+  }
+
+  if (record.phase === "accepted" && record.operationId) {
+    for (const delayMs of pollDelaysMs) {
       if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       let polled: Awaited<ReturnType<typeof boxJson>>;
       try {
-        polled = await boxJson(cfg, `/deletion-operations/${operation.id}`, {
+        polled = await boxJson(cfg, `/deletion-operations/${record.operationId}`, {
           signal: AbortSignal.timeout(20_000),
         });
       } catch {
         break;
       }
       if (!polled.ok) break;
-      const current = boxDeletionOperation(polled.body, boxId, operation.id);
-      if (!current) break;
-      operation = current;
-      if (operation.status === "completed") return;
-      if (operation.status === "blocked") throw deletionBlockedError(boxId);
+      const operation = boxDeletionOperation(polled.body, record.boxId, record.operationId);
+      if (!operation) break;
+      if (operation.status === "blocked") {
+        record = markBoxDeletionBlocked(record.boxId, operation);
+        break;
+      }
+      record = markBoxDeletionAccepted(record.boxId, operation);
+      if (operation.status === "completed") {
+        finishRecordedBoxDeletion(record.boxId);
+        return "confirmed";
+      }
     }
   }
 
-  const inspected = await inspectBoxIdentity(cfg, boxId);
-  if (!inspected.available) {
+  // A direct immutable-id 404/410 is the only alternate completion proof.
+  // A live identity keeps the fence even when the operation endpoint is down.
+  const inspected = await inspectBoxIdentity(cfg, record.boxId);
+  if (!inspected.available) return record.phase === "blocked" ? "blocked" : "pending";
+  if (!inspected.identity) {
+    finishRecordedBoxDeletion(record.boxId);
+    return "confirmed";
+  }
+  if (inspected.identity.name !== record.name) {
     throw Object.assign(
-      new Error(`${inspected.problem ?? "the cloud computer deletion could not be verified"}; its recovery record was kept`),
+      new Error("A cloud computer being deleted no longer has its remembered name — repair it in ascii.dev before continuing"),
       { status: 503 },
     );
   }
-  if (inspected.identity) {
+  return record.phase === "blocked" ? "blocked" : "pending";
+}
+
+/** Prove that a replacement token can see every durable deletion target
+ * before Settings swaps credentials. Unlike normal reconciliation, a bare
+ * 404 is not completion proof here: it may simply be a different account. */
+export async function verifyBoxDeletionCredential(cfg: AppConfig): Promise<void> {
+  cfg = snapshotBoxConfig(cfg);
+  for (const initial of boxDeletionSnapshot()) {
+    let record = initial;
+    let operationAuthorized = false;
+    if (record.phase === "accepted" && record.operationId) {
+      let polled: Awaited<ReturnType<typeof boxJson>> | null = null;
+      try {
+        polled = await boxJson(cfg, `/deletion-operations/${record.operationId}`, {
+          signal: AbortSignal.timeout(20_000),
+        });
+      } catch {
+        // The exact Box identity below can still prove account continuity.
+      }
+      if (polled?.ok) {
+        const operation = boxDeletionOperation(polled.body, record.boxId, record.operationId);
+        if (operation) {
+          operationAuthorized = true;
+          record = operation.status === "blocked"
+            ? markBoxDeletionBlocked(record.boxId, operation)
+            : markBoxDeletionAccepted(record.boxId, operation);
+          if (operation.status === "completed") {
+            finishRecordedBoxDeletion(record.boxId);
+            continue;
+          }
+        }
+      }
+    }
+
+    if (operationAuthorized) continue;
+
+    const inspected = await inspectBoxIdentity(cfg, record.boxId);
+    if (inspected.available && inspected.identity?.name === record.name) continue;
+    if (!inspected.available) {
+      throw Object.assign(
+        new Error(`${inspected.problem ?? "a deleting cloud computer could not be verified"}. Retry with the Box account that owns it`),
+        { status: 503 },
+      );
+    }
     throw Object.assign(
-      new Error(`ascii.dev accepted deletion of ${boxId}, but it is not confirmed yet — retry after it finishes`),
+      new Error("that Box token cannot access the cloud computers whose deletion is still being reconciled"),
+      { status: 409 },
+    );
+  }
+}
+
+/** Bind a successful DELETE response to the durable target before polling.
+ * A malformed receipt leaves the prepared fence intact. */
+async function confirmAcceptedBoxDeletion(
+  cfg: AppConfig,
+  record: BoxDeletionRecord,
+  acceptedBody: any,
+  pollDelaysMs: readonly number[] = BOX_DELETE_OPERATION_POLL_DELAYS_MS,
+): Promise<BoxDeletionReconciliation> {
+  const operation = boxDeletionOperation(acceptedBody, record.boxId);
+  if (!operation) {
+    const inspected = await inspectBoxIdentity(cfg, record.boxId);
+    if (inspected.available && !inspected.identity) {
+      finishRecordedBoxDeletion(record.boxId);
+      return "confirmed";
+    }
+    throw Object.assign(
+      new Error(`ascii.dev returned an invalid deletion receipt for ${record.boxId}; its deletion fence was kept`),
       { status: 503 },
     );
   }
+  const next = operation.status === "blocked"
+    ? markBoxDeletionBlocked(record.boxId, operation)
+    : markBoxDeletionAccepted(record.boxId, operation);
+  return reconcileRecordedBoxDeletion(cfg, next, pollDelaysMs);
+}
+
+/** Send (or explicitly retry) DELETE only after the immutable target is on
+ * disk. The returned pending state always has a validated operation receipt. */
+async function requestRecordedBoxDeletion(
+  cfg: AppConfig,
+  identity: { boxId: string; name: string; ownerBotId: string | null },
+  pollDelaysMs: readonly number[] = BOX_DELETE_OPERATION_POLL_DELAYS_MS,
+): Promise<BoxDeletionReconciliation> {
+  const deletion = prepareBoxDeletion(identity);
+  let removed: Awaited<ReturnType<typeof boxJson>>;
+  try {
+    removed = await boxJson(cfg, `/boxes/${identity.boxId}`, {
+      method: "DELETE",
+      headers: { "X-Ascii-Confirm-Delete": identity.boxId },
+    });
+  } catch (error) {
+    throw Object.assign(
+      new Error("Could not confirm whether ascii.dev accepted the delete. The computer was kept fenced; retry Delete to reconcile it"),
+      { status: 503, cause: error },
+    );
+  }
+  if (boxDeleteProvedAbsent(removed)) {
+    finishRecordedBoxDeletion(identity.boxId);
+    return "confirmed";
+  }
+  if (!removed.ok) {
+    markBoxDeletionBlocked(identity.boxId);
+    throw Object.assign(new Error(boxErrorMessage(removed.status, "box delete", removed.body)), { status: removed.status });
+  }
+  const confirmation = await confirmAcceptedBoxDeletion(cfg, deletion, removed.body, pollDelaysMs);
+  if (confirmation === "blocked") throw deletionBlockedError(identity.boxId);
+  return confirmation;
 }
 
 function boxBotNameParts(botId: string): { prefix: string; hash: string } {
@@ -279,6 +425,7 @@ export async function boxNameMatchesBot(botId: string, name: string): Promise<bo
 }
 
 export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000 } = {}) {
+  assertBoxNotDeleting(boxId);
   const res = await boxFetch(cfg, `/boxes/${boxId}/commands`, {
     method: "POST",
     body: JSON.stringify({ command }),
@@ -299,8 +446,10 @@ export async function runCommand(cfg: AppConfig, boxId: string, command: string,
 //   2) WebRTC stream (POST /desktop) as fallback — STUN-only, can hang.
 // The desktopUrl stored on the box object is NOT usable on its own.
 async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_000 } = {}) {
+  assertBoxNotDeleting(boxId);
   const t0 = Date.now();
   while (Date.now() - t0 < vncBudgetMs) {
+    assertBoxNotDeleting(boxId);
     const { body } = await boxJson(cfg, `/boxes/${boxId}/desktop?vnc=1`, { method: "POST" });
     const url = body?.desktopUrl ?? body?.url;
     if (url) return url;
@@ -312,8 +461,10 @@ async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_
 }
 
 async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
+  assertBoxNotDeleting(boxId);
   const t0 = Date.now();
   while (Date.now() - t0 < budgetMs) {
+    assertBoxNotDeleting(boxId);
     const { body } = await boxJson(cfg, `/boxes/${boxId}`);
     const state = body?.box?.state;
     if (READY.has(state)) return body.box;
@@ -416,22 +567,132 @@ export async function listManagedBoxes(
     legacyName: legacyBoxNameFor(owner.botId),
     owner,
   })));
-  const ownerByCurrentName = new Map(namedOwners.map(({ currentName, owner }) => [currentName, owner] as const));
-  const ownerByLegacyName = new Map(namedOwners.map(({ legacyName, owner }) => [legacyName, owner] as const));
-  const boxIdCounts = new Map<string, number>();
-  for (const candidate of listed.boxes) {
-    if (!candidate || typeof candidate !== "object") continue;
-    const boxId = typeof candidate.id === "string" ? candidate.id : "";
-    if (BOX_ID.test(boxId)) boxIdCounts.set(boxId, (boxIdCounts.get(boxId) ?? 0) + 1);
-  }
   const invalidInventory = (problem: string): ManagedBoxInventory => ({
     configured: true,
     available: false,
     problem,
     instances: [],
   });
+
+  // A successful create is journaled before the account-wide LIST is
+  // guaranteed to include it. Reconcile that durable identity with the
+  // authoritative direct endpoint so Settings can still display and delete
+  // the computer. Credential replacement probes deliberately opt out: their
+  // token must be judged only by the account inventory it can list.
+  let candidates = [...listed.boxes];
+  if (options.adoptLegacy !== false) {
+    const namedOwnerByBotId = new Map(namedOwners.map((entry) => [entry.owner.botId, entry] as const));
+    let recoveries: ReturnType<typeof boxCreateRecoverySnapshot>;
+    try {
+      recoveries = boxCreateRecoverySnapshot();
+    } catch {
+      return invalidInventory("OpenMausBot could not safely read its cloud computer recovery records");
+    }
+    for (const recovery of recoveries) {
+      if (!recovery.resolved || !recovery.boxId) continue;
+      const namedOwner = namedOwnerByBotId.get(recovery.botId);
+      if (!namedOwner) continue;
+
+      const matchingRows = candidates.filter((candidate) => candidate?.id === recovery.boxId);
+      if (matchingRows.length > 1) {
+        return invalidInventory("ascii.dev returned a conflicting id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      }
+      if (matchingRows.length === 1) {
+        const listedName = typeof matchingRows[0]?.name === "string" ? matchingRows[0].name : "";
+        if (listedName !== namedOwner.currentName && listedName !== namedOwner.legacyName) {
+          return invalidInventory("A remembered cloud computer no longer has its OpenMausBot owner name — repair it in ascii.dev before continuing");
+        }
+        continue;
+      }
+
+      const inspected = await inspectBoxIdentity(cfg, recovery.boxId);
+      if (!inspected.available) {
+        return invalidInventory(inspected.problem ?? "A remembered cloud computer could not be verified");
+      }
+      if (!inspected.identity) {
+        // Direct 404/410 is stronger than an eventually-consistent LIST row.
+        candidates = candidates.filter((candidate) => candidate?.id !== recovery.boxId);
+        retireDeletedBoxCreate(recovery.boxId);
+        continue;
+      }
+      if (
+        inspected.identity.name !== namedOwner.currentName
+        && inspected.identity.name !== namedOwner.legacyName
+      ) {
+        return invalidInventory("A remembered cloud computer no longer has its OpenMausBot owner name — repair it in ascii.dev before continuing");
+      }
+      const directCandidate = {
+        id: inspected.identity.boxId,
+        name: inspected.identity.name,
+        state: inspected.identity.state,
+      };
+      candidates.push(directCandidate);
+    }
+
+    let deletions: BoxDeletionRecord[];
+    try {
+      deletions = boxDeletionSnapshot();
+    } catch {
+      return invalidInventory("OpenMausBot could not safely read its cloud computer deletion records");
+    }
+    for (const deletion of deletions) {
+      let state: BoxDeletionReconciliation;
+      try {
+        state = await reconcileRecordedBoxDeletion(cfg, deletion, [0]);
+      } catch (error) {
+        return invalidInventory(error instanceof Error ? error.message : "A cloud computer deletion could not be verified");
+      }
+      if (state === "confirmed") {
+        // LIST may still contain a stale row after the exact operation/direct
+        // endpoint proved deletion. Do not let it resurrect the computer.
+        candidates = candidates.filter((candidate) => candidate?.id !== deletion.boxId);
+        continue;
+      }
+
+      const matchingRows = candidates.filter((candidate) => candidate?.id === deletion.boxId);
+      if (matchingRows.length > 1) {
+        return invalidInventory("ascii.dev returned a conflicting id for a cloud computer being deleted");
+      }
+      if (matchingRows.length === 1) {
+        if (matchingRows[0]?.name !== deletion.name) {
+          return invalidInventory("A cloud computer being deleted no longer has its remembered name — repair it in ascii.dev before continuing");
+        }
+        if (getBoxDeletion(deletion.boxId)?.phase === "accepted") {
+          matchingRows[0] = { ...matchingRows[0], state: "removing" };
+          candidates = candidates.map((candidate) => candidate?.id === deletion.boxId ? matchingRows[0] : candidate);
+        }
+        continue;
+      }
+
+      const current = getBoxDeletion(deletion.boxId);
+      if (!current) continue;
+      if (current.phase === "accepted") {
+        candidates.push({ id: current.boxId, name: current.name, state: "removing" });
+        continue;
+      }
+      // A prepared request may have lost its response, and a blocked request
+      // is retryable. Keep the exact row actionable only after a direct read.
+      const inspected = await inspectBoxIdentity(cfg, current.boxId);
+      if (!inspected.available || !inspected.identity || inspected.identity.name !== current.name) {
+        return invalidInventory(inspected.problem ?? "A cloud computer deletion target could not be verified");
+      }
+      candidates.push({
+        id: inspected.identity.boxId,
+        name: inspected.identity.name,
+        state: inspected.identity.state,
+      });
+    }
+  }
+  const ownerByCurrentName = new Map(namedOwners.map(({ currentName, owner }) => [currentName, owner] as const));
+  const ownerByLegacyName = new Map(namedOwners.map(({ legacyName, owner }) => [legacyName, owner] as const));
+  const boxIdCounts = new Map<string, number>();
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
+    const boxId = typeof candidate.id === "string" ? candidate.id : "";
+    if (BOX_ID.test(boxId)) boxIdCounts.set(boxId, (boxIdCounts.get(boxId) ?? 0) + 1);
+  }
   const ownedBoxByBot = new Map<string, string>();
-  for (const candidate of listed.boxes) {
+  for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object") continue;
     const name = typeof candidate.name === "string" ? candidate.name : "";
     const owner = ownerByCurrentName.get(name) ?? ownerByLegacyName.get(name) ?? null;
@@ -449,7 +710,7 @@ export async function listManagedBoxes(
   const instances: ManagedBoxInventoryInstance[] = [];
   const seenBoxIds = new Set<string>();
   const scopedPrefix = scopedBoxPrefix();
-  for (const candidate of listed.boxes) {
+  for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object") continue;
     const boxId = typeof candidate.id === "string" ? candidate.id : "";
     const name = typeof candidate.name === "string" ? candidate.name : "";
@@ -506,7 +767,8 @@ export async function listManagedBoxes(
 
 /** Direct identity proof for a Box remembered in the local create journal.
  * Unlike account LIST, this endpoint is not eventually consistent. Only the
- * immutable id and provider name cross this boundary. */
+ * immutable id, provider name and allowlisted lifecycle state cross this
+ * boundary. */
 export async function inspectBoxIdentity(cfg: AppConfig, boxId: string): Promise<BoxIdentityInspection> {
   cfg = snapshotBoxConfig(cfg);
   if (!BOX_ID.test(boxId)) {
@@ -534,7 +796,7 @@ export async function inspectBoxIdentity(cfg: AppConfig, boxId: string): Promise
   if (returnedId !== boxId || name.length === 0 || name.length > 100 || /[\r\n]/.test(name)) {
     return { available: false, identity: null, problem: "ascii.dev returned an invalid cloud computer identity" };
   }
-  return { available: true, identity: { boxId, name }, problem: null };
+  return { available: true, identity: { boxId, name, state: safeBoxState(candidate.state) }, problem: null };
 }
 
 function inventoryFailure(inventory: ManagedBoxInventory): Error & { status: number } {
@@ -545,6 +807,21 @@ function inventoryFailure(inventory: ManagedBoxInventory): Error & { status: num
   ) as Error & { status: number };
   error.status = inventory.configured ? 503 : 409;
   return error;
+}
+
+function deletionFenceError(): Error & { status: number } {
+  return Object.assign(
+    new Error("this cloud computer is being deleted — wait for it to finish, or retry Delete if it needs attention"),
+    { status: 409 },
+  );
+}
+
+function assertBoxNotDeleting(boxId: string): void {
+  if (getBoxDeletion(boxId)) throw deletionFenceError();
+}
+
+function assertBotBoxNotDeleting(botId: string): void {
+  if (hasPendingBoxDeletionForBot(botId)) throw deletionFenceError();
 }
 
 async function revalidateManagedBox(
@@ -568,6 +845,7 @@ const QUIESCE_BROWSER = [
 ].join("; ");
 
 async function stopBox(cfg: AppConfig, boxId: string): Promise<void> {
+  assertBoxNotDeleting(boxId);
   // Browser shutdown is best-effort, but the provider stop is not: Settings
   // must never say a computer is sleeping when ascii.dev rejected the action.
   await runCommand(cfg, boxId, QUIESCE_BROWSER, { timeoutMs: 5_000 }).catch(() => null);
@@ -590,6 +868,7 @@ export async function sleepManagedBox(
   claim?: ManagedBoxMutationClaim,
 ) {
   cfg = snapshotBoxConfig(cfg);
+  assertBoxNotDeleting(boxId);
   const instance = await revalidateManagedBox(cfg, owners, boxId);
   if (instance.inUse) {
     throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 });
@@ -616,8 +895,22 @@ export async function deleteManagedBox(
   boxId: string,
   confirmName: string,
   claim?: ManagedBoxMutationClaim,
+  options: { pollDelaysMs?: readonly number[] } = {},
 ) {
   cfg = snapshotBoxConfig(cfg);
+  const remembered = getBoxDeletion(boxId);
+  if (remembered) {
+    const reconciled = await reconcileRecordedBoxDeletion(cfg, remembered, [0]);
+    if (reconciled === "confirmed") return { ok: true };
+    // A validated accepted operation owns this target. Retrying DELETE would
+    // create a second operation and weaken the only trustworthy receipt.
+    const current = getBoxDeletion(boxId);
+    if (current?.phase === "accepted") {
+      return { ok: true, pending: true as const };
+    }
+    // Prepared (ambiguous request) and blocked records may be retried only by
+    // this explicit Settings/bot-deletion path after fresh identity checks.
+  }
   const instance = await revalidateManagedBox(cfg, owners, boxId);
   if (instance.inUse) {
     throw Object.assign(new Error("this cloud computer is in use — stop its bot's work first"), { status: 409 });
@@ -627,16 +920,15 @@ export async function deleteManagedBox(
   }
   const release = claim?.(instance);
   try {
-    const removed = await boxJson(cfg, `/boxes/${instance.boxId}`, {
-      method: "DELETE",
-      headers: { "X-Ascii-Confirm-Delete": instance.boxId },
-    });
-    if (!removed.ok && !boxDeleteProvedAbsent(removed)) {
-      throw Object.assign(new Error(boxErrorMessage(removed.status, "box delete", removed.body)), { status: removed.status });
+    const confirmation = await requestRecordedBoxDeletion(cfg, {
+      boxId: instance.boxId,
+      name: instance.name,
+      ownerBotId: instance.ownerBotId,
+    }, options.pollDelaysMs);
+    if (confirmation === "pending") {
+      forgetBoxId(instance.boxId);
+      return { ok: true, pending: true as const };
     }
-    if (removed.ok) await confirmAcceptedBoxDeletion(cfg, instance.boxId, removed.body);
-    retireDeletedBoxCreate(instance.boxId);
-    forgetBoxId(instance.boxId);
     return { ok: true };
   } finally {
     release?.();
@@ -645,6 +937,7 @@ export async function deleteManagedBox(
 
 export async function findBox(cfg: AppConfig, botId: string) {
   cfg = snapshotBoxConfig(cfg);
+  assertBotBoxNotDeleting(botId);
   const cachedId = boxIdCache.get(botId);
   if (cachedId) {
     let direct: Awaited<ReturnType<typeof boxJson>> | null = null;
@@ -878,6 +1171,32 @@ async function createBox(cfg: AppConfig, botId: string, env: Record<string, stri
   return trialTtl === null ? first : requestBoxCreate(cfg, botId, trialTtl, env);
 }
 
+/** A prior explicit delete always wins over provisioning. Reconcile/retry the
+ * old immutable target, then require a fresh provision request so one click
+ * can never both erase and silently recreate the same computer. */
+async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string): Promise<void> {
+  const remembered = boxDeletionSnapshot().filter((record) => record.ownerBotId === botId);
+  if (!remembered.length) return;
+  for (const deletion of remembered) {
+    let state = await reconcileRecordedBoxDeletion(cfg, deletion, [0]);
+    if (state !== "confirmed") {
+      const current = getBoxDeletion(deletion.boxId);
+      if (current?.phase === "prepared" || current?.phase === "blocked") {
+        state = await requestRecordedBoxDeletion(cfg, {
+          boxId: current.boxId,
+          name: current.name,
+          ownerBotId: current.ownerBotId,
+        });
+      }
+    }
+    if (state !== "confirmed") throw deletionFenceError();
+  }
+  throw Object.assign(
+    new Error("the previous cloud computer deletion finished — retry to create a new computer"),
+    { status: 409 },
+  );
+}
+
 /** Box state for the Computer panel. */
 export async function boxStatus(cfg: AppConfig, botId: string) {
   cfg = snapshotBoxConfig(cfg);
@@ -899,12 +1218,16 @@ export async function provisionBox(cfg: AppConfig, botId: string, _botName: stri
   if (!boxConfigured(cfg)) {
     throw new Error('box provider not enabled — add {"box":{"token":"…"}} to ~/.openmausbot/config.json');
   }
+  await finishPriorDeletionBeforeProvision(cfg, botId);
   const vmName = await boxNameFor(botId);
   let box = await findBox(cfg, botId);
   let created = false;
   let createRequest: BoxCreateRequest | null = null;
   try {
     if (!box) {
+      // Deletion can be prepared by another process after the initial lookup.
+      // Never create a replacement until the durable fence is reconciled.
+      assertBotBoxNotDeleting(botId);
       // Provider-side backstop: archives itself (billing pauses, disk
       // survives) if every stop path dies. Trial accounts get one narrower
       // retry when ascii.dev reports their shorter TTL ceiling.
@@ -932,35 +1255,37 @@ export async function provisionBox(cfg: AppConfig, botId: string, _botName: stri
     return { boxId: box.id, machineName: vmName, reused: !created, state: ready.state, joinUrl };
   } catch (error) {
     if (!created || !box?.id) throw error;
-    const cleanup = await boxJson(cfg, `/boxes/${box.id}`, {
-      method: "DELETE",
-      headers: { "X-Ascii-Confirm-Delete": box.id },
-    }).catch(() => null);
-    if (cleanup && (cleanup.ok || boxDeleteProvedAbsent(cleanup))) {
-      if (cleanup.ok) {
-        try {
-          await confirmAcceptedBoxDeletion(cfg, box.id, cleanup.body);
-        } catch (cleanupError) {
-          const message = error instanceof Error ? error.message : String(error);
-          const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-          throw new Error(`${message}. The new computer's deletion was not confirmed: ${cleanupMessage}. Check box ${box.id} in ascii.dev.`);
-        }
-      }
+    const originalMessage = error instanceof Error ? error.message : String(error);
+    // Capture the provider's current name when possible. Naming may be the
+    // step that failed, so the desired deterministic name is only a fallback
+    // for the durable fence, never proof of a later live identity.
+    const inspected = await inspectBoxIdentity(cfg, box.id);
+    if (inspected.available && !inspected.identity) {
+      retireDeletedBoxCreate(box.id);
       boxIdCache.delete(botId);
-      if (createRequest) {
-        // A stale record is safe (the next retry verifies its Box ID), so a
-        // cleanup-journal write failure must not hide the original error.
-        try {
-          discardBoxCreate(createRequest);
-        } catch {
-          /* verified absent before any future create */
-        }
-      }
       throw error;
     }
+    let cleanupConfirmation: BoxDeletionReconciliation;
+    try {
+      cleanupConfirmation = await requestRecordedBoxDeletion(cfg, {
+        boxId: box.id,
+        name: inspected.identity?.name ?? vmName,
+        ownerBotId: botId,
+      });
+    } catch (cleanupError) {
+      const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
+      throw new Error(`${originalMessage}. The new computer's deletion was not confirmed: ${cleanupMessage}. Check box ${box.id} in ascii.dev.`);
+    }
+    if (cleanupConfirmation === "confirmed") throw error;
     boxIdCache.delete(botId);
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${message}. The new computer could not be removed automatically; delete box ${box.id} in ascii.dev.`);
+    throw Object.assign(
+      new Error(
+        `${originalMessage}. ascii.dev accepted deletion of the new computer, but it is still pending; `
+        + `its recovery record was kept, along with its deletion fence. Check box ${box.id} in ascii.dev.`,
+        { cause: error },
+      ),
+      { status: 503 },
+    );
   }
 }
 

@@ -2177,9 +2177,9 @@ export async function persistBotUpdate(
   return modeBot;
 }
 
-/** Bot removal is intentionally non-optimistic. The server may require the
- * person to clean up a persistent computer first, so local state changes only
- * after the delete boundary accepts the request. */
+/** Bot removal is intentionally non-optimistic. The server first removes any
+ * computer owned only by this bot, so local state changes only after that
+ * durable cleanup and the bot deletion both succeed. */
 const pendingBotDeletions = new Map<string, Promise<void>>();
 
 export async function requestConfirmedBotDeletion(

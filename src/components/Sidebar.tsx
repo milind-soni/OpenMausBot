@@ -1,4 +1,5 @@
 import { track } from "@/lib/analytics";
+import { OrganizationIdentity } from "./OrganizationIdentity";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -812,8 +813,9 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
 
 /** Copy for the archive / delete confirmation dialogs. Archiving keeps
  * everything and is reversible from Archived bots; deleting is not — the
- * server drops every task transcript, the workspace (files + memory), and
- * staged skill state with the bot. */
+ * server drops every task transcript, the workspace (files + memory), staged
+ * skill state, and any private computer the bot owns. Shared team computers
+ * remain. */
 export function botConfirmCopy(kind: BotConfirmKind, name: string) {
   return kind === "archive"
     ? {
@@ -1978,6 +1980,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       </div>
 
       <DesktopWorkspaceSwitcher compact={density === "icons"} />
+      <OrganizationIdentity compact={density === "icons"} />
       {/* Search */}
       <div className={cn("pt-1 pb-3", density === "icons" ? "hidden" : "px-3")}>
         <div className="flex items-center gap-2 rounded-md border border-hairline/40 bg-inset/40 px-2.5 py-1.5 focus-within:border-accent/50">

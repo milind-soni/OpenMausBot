@@ -166,6 +166,9 @@ export function parseSince(value: string, now = Date.now()): number | null {
     return day.getTime();
   }
   if (/^\d{12,}$/.test(text)) return Number(text);
-  const parsed = Date.parse(value.trim());
+  // A bare YYYY-MM-DD is the one form Date.parse reads as UTC midnight. Read
+  // it as the start of that local day, like "today", the brief's times, and
+  // the memory/log/YYYY-MM-DD.md day names.
+  const parsed = Date.parse(/^\d{4}-\d{2}-\d{2}$/.test(text) ? `${text}T00:00` : value.trim());
   return Number.isFinite(parsed) ? parsed : null;
 }

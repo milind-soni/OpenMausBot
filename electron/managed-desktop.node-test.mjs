@@ -14,6 +14,19 @@ const grant = () => ({ portalOrigin: origin, token, deviceId, organizationId, em
 const session = saved => ({ desktopContractVersion: 1, modelAccessToken: modelToken, device: { id: deviceId, organizationId, email: saved.email, revokedAt: null, expiresAt: saved.expiresAt },
   organization: { id: organizationId, name: "Example company" }, providers: [{ id: "openrouter", configured: true, models: ["fixture/model"] }], cloudBackups: true });
 const settle = async () => { for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve)); };
+const branding = { logo: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZkAAAAASUVORK5CYII=", icons: [] };
+test("branding refreshes with the granted organization and disappears on disconnect", async t => {
+  const saved = grant(); let current = branding;
+  const f = fixture(t, { saved, handler: (url, options) => url.endsWith("/session") && options.method !== "DELETE" ? Response.json({ ...session(saved), branding: current }) : null });
+  await f.client.start(); assert.deepEqual(f.client.state().branding, branding);
+  assert.equal(f.applied.at(-1).branding, undefined, "cosmetic metadata never changes the runtime's strict model grant");
+  assert.equal(f.record.value.branding, undefined, "branding is not persisted with credentials");
+  current = { logo: "https://tracker.invalid/image", icons: [] };
+  await f.client.refresh();
+  assert.equal(f.client.state().status, "connected", "bad cosmetic data cannot break model access");
+  assert.deepEqual(f.client.state().branding, { logo: null, icons: [] });
+  await f.client.disconnect(); assert.equal(f.client.state().branding, undefined);
+});
 function fixture(t, { saved = null, handler, apply, write } = {}) {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const applied = [], requests = [], opened = [], states = [], record = { value: saved };

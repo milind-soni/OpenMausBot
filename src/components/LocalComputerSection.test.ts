@@ -13,6 +13,7 @@ import {
   computerInventoryRequest,
   confirmComputerAction,
   localVmInventoryState,
+  reconcileCloudInventoryPayload,
   perBotLocalVmDeletePlan,
   reconcileCloudInventorySnapshot,
   vpsComputerRemovePlan,
@@ -307,9 +308,53 @@ describe("cloud computer inventory UI", () => {
     expect(cloudComputerInventoryState(ownedCloudComputer)).toBe("Running");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "archived" })).toBe("Sleeping");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "archiving" })).toBe("Going to sleep");
+    expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "removing" })).toBe("Removing");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "provisioning" })).toBe("Starting");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, state: "unknown" })).toBe("Needs attention");
     expect(cloudComputerInventoryState({ ...ownedCloudComputer, inUse: true })).toBe("In use");
+  });
+
+  it("keeps a provider-accepted deletion visible while it is still pending", () => {
+    const pending = reconcileCloudInventorySnapshot(
+      [ownedCloudComputer],
+      [ownedCloudComputer],
+      { [ownedCloudComputer.boxId]: "deleting" },
+    );
+
+    expect(pending.instances).toEqual([{ ...ownedCloudComputer, state: "removing" }]);
+    expect(pending.overrides).toEqual({ [ownedCloudComputer.boxId]: "deleting" });
+    const markup = renderCard({ instances: pending.instances });
+    expect(markup).toContain("Removing");
+    // Sleep and Delete stay unavailable until the bounded confirmation pass
+    // either observes absence or restores the provider's actual row.
+    expect(markup.match(/disabled=""/g)).toHaveLength(2);
+  });
+
+  it("clears a pending deletion only after inventory confirms absence", () => {
+    const settled = reconcileCloudInventorySnapshot(
+      [],
+      [{ ...ownedCloudComputer, state: "removing" }],
+      { [ownedCloudComputer.boxId]: "deleting" },
+    );
+
+    expect(settled.instances).toEqual([]);
+    expect(settled.overrides).toEqual({});
+  });
+
+  it("does not treat an unavailable or unconfigured empty inventory as proof of deletion", () => {
+    for (const payload of [
+      { configured: true, available: false, problem: "Box is unavailable", instances: [] },
+      { configured: false, available: false, problem: null, instances: [] },
+    ]) {
+      const result = reconcileCloudInventoryPayload(
+        payload,
+        [{ ...ownedCloudComputer, state: "removing" }],
+        { [ownedCloudComputer.boxId]: "deleting" },
+      );
+
+      expect(result.instances).toEqual([{ ...ownedCloudComputer, state: "removing" }]);
+      expect(result.overrides).toEqual({ [ownedCloudComputer.boxId]: "deleting" });
+    }
   });
 
   it("keeps cloud badge meaning and delete requests stable when the language changes", () => {
@@ -345,6 +390,14 @@ describe("cloud computer inventory UI", () => {
       first.overrides,
     );
     expect(later.instances).toEqual([]);
+
+    const confirmedAbsent = reconcileCloudInventorySnapshot(
+      [],
+      later.instances,
+      later.overrides,
+    );
+    expect(confirmedAbsent.instances).toEqual([]);
+    expect(confirmedAbsent.overrides).toEqual({});
   });
 
   it("keeps a successful sleep visible until LIST reaches a sleeping state", () => {

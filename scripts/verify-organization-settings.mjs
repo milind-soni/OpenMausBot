@@ -22,7 +22,11 @@ if (process.versions.electron && process.argv.includes(flag)) {
   app.setPath("sessionData", join(output, "user-data"));
   app.commandLine.appendSwitch("disable-background-networking");
   const localOrigin = new URL(url).origin;
+  const localOriginGuard = createRequire(import.meta.url)("../electron/local-origin.cjs");
+  localOriginGuard.setLocalOrigin(localOrigin);
   const organization = { id: "11111111-1111-4111-8111-111111111111", name: "Fixture Studio" };
+  const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZkAAAAASUVORK5CYII=";
+  let branding = { logo: image, icons: [{ id: "33333333-3333-4333-8333-333333333333", name: "Studio helper", image }] };
   const device = { id: "22222222-2222-4222-8222-222222222222", organizationId: organization.id, email: "employee@example.test", expiresAt: Date.now() + 60_000, revokedAt: null };
   const token = `omd_${randomBytes(32).toString("base64url")}`;
   const modelToken = `omg_${randomBytes(32).toString("base64url")}`;
@@ -42,7 +46,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     if (req.url === "/api/desktop/session" && req.headers.authorization === `Bearer ${token}`) {
       if (req.method === "DELETE") { revoked = true; revokes++; return reply(200, { revoked: true }); }
       if (revoked) return reply(401, { error: "invalid_token" });
-      return reply(200, { desktopContractVersion: 1, organization, device, modelAccessToken: modelToken, cloudBackups: false,
+      return reply(200, { desktopContractVersion: 1, organization, branding, device, modelAccessToken: modelToken, cloudBackups: false,
         providers: [{ id: "anthropic", configured: true, models: ["claude-fixture"] }, { id: "openrouter", configured: true, models: ["fixture/writer", "fixture/reader"] }] });
     }
     reply(404, { error: "not_found" });
@@ -76,7 +80,10 @@ if (process.versions.electron && process.argv.includes(flag)) {
   ipcMain.handle("companion:state", () => ({ running: false, enabled: false, devices: [], bind: null, publicUrl: null }));
   ipcMain.handle("perm:status", () => ({}));
   ipcMain.handle("window:state", () => ({ maximized: false, fullscreen: false }));
-  ipcMain.handle("desktop:capabilities", () => createRequire(import.meta.url)("../electron/capabilities.cjs").desktopCapabilities({ platform: process.platform }));
+  ipcMain.handle("desktop:capabilities", event => createRequire(import.meta.url)("../electron/capabilities.cjs").desktopCapabilities({
+    platform: process.platform,
+    remote: !localOriginGuard.isLocalSender(event),
+  }));
   ipcMain.handle("workspaces:state", () => createRequire(import.meta.url)("../electron/environments.cjs").workspaceSummary({ activeId: "local", environments: [] }));
   ipcMain.handle("environments:state", () => ({ activeId: "local", environments: [] }));
   ipcMain.handle("desktop-remote:state", () => ({ active: false }));
@@ -122,14 +129,29 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await click("Cancel sign-in");
     await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "cancel restored form");
     assert.equal(saved, null);
-    await openAdvanced(); await click("Sign in to custom Admin");
+    await openAdvanced(); await fillAddress(); await click("Sign in to custom Admin");
     await until(() => browserRequests.length === 2, "second browser request"); approved = true;
     await until(() => evaluate("document.body.textContent.includes('Fixture Studio')"), "approved company connected");
     assert.equal(await evaluate("document.body.textContent.includes('Approved models: 2')"), true);
     assert.equal(await evaluate("JSON.stringify(window.ogb.organization).includes('token')"), false);
     assert.equal(await evaluate("window.ogb.organization.state().then(s => /om[dg]_/.test(JSON.stringify(s)))"), false);
     assert.equal(await evaluate("typeof window.ogb.organization.connection"), "undefined");
+    assert.equal(await evaluate("window.ogb.getCapabilities().then(value => value.dictation.available)"), process.platform === "darwin", "organisation sign-in does not turn the local renderer into a remote workspace");
     assert.ok(grantsApplied > 0);
+    await until(() => evaluate("document.querySelector('img[alt=\"Organization logo\"]')?.naturalWidth > 0"), "organization logo decoded");
+    await win.loadURL(`${url}?branding=1`);
+    await until(() => evaluate("Boolean(document.querySelector('[aria-label=\"Use Studio helper icon\"]'))"), "organization icon library");
+    await evaluate("document.querySelector('[aria-label=\"Use Studio helper icon\"]').click()");
+    await until(() => evaluate("Boolean(window.fixtureBot?.avatarUrl?.startsWith('/api/'))"), "icon saved as local avatar attachment");
+    const avatar = await evaluate("window.fixtureBot.avatarUrl");
+    assert.equal(await evaluate("fetch(window.fixtureBot.avatarUrl).then(r => r.ok)"), true, "local avatar pixels are retrievable");
+    writeFileSync(join(output, "organization-branding.png"), (await win.webContents.capturePage()).toPNG());
+    branding = { logo: null, icons: [] };
+    await click("Refresh");
+    await until(() => evaluate("!document.querySelector('[aria-label=\"Use Studio helper icon\"]') && !document.querySelector('img[alt=\"Organization logo\"]')"), "admin removal propagated");
+    assert.equal(await evaluate("window.fixtureBot.avatarUrl"), avatar, "removing a shared icon preserves the chosen local avatar");
+    await win.loadURL(url);
+    await until(() => evaluate("document.body.textContent.includes('Fixture Studio')"), "settings restored");
     writeFileSync(join(output, "organization-connected.png"), (await win.webContents.capturePage()).toPNG());
     win.setSize(390, 780);
     await until(() => evaluate("innerWidth === 390"), "narrow viewport");
@@ -143,7 +165,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await click("Disconnect from organization");
     await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "confirmed disconnect");
     assert.equal(saved, null); assert.equal(revokes, 1); assert.ok(clearsApplied > 0);
-    await openAdvanced(); await click("Sign in to custom Admin");
+    await openAdvanced(); await fillAddress(); await click("Sign in to custom Admin");
     await until(() => browserRequests.length === 3, "third browser request"); approved = true;
     await until(() => evaluate("document.body.textContent.includes('Fixture Studio')"), "reconnected company");
     revoked = true; await click("Refresh");
@@ -173,7 +195,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await evaluate("new Promise(resolve => setTimeout(resolve, 180))"); // Capture settled navigation colors.
     writeFileSync(join(output, "organization-in-app.png"), (await win.webContents.capturePage()).toPNG());
     const receipt = { passed: true, renderer: "OrganizationSettings + actual app shell", preload: "electron/preload.cjs", client: "electron/managed-desktop.mjs",
-      checks: ["one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
+      checks: ["organization logo and icon grid", "chosen icon becomes a durable local attachment", "admin removal clears branding without deleting chosen avatar", "one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "organisation sign-in preserves local desktop capabilities", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
       limitation: "Synthetic loopback Admin, in-memory credential store and fake utility-process acknowledgement; not proof of real Admin consent, OS keychain, native driver execution, private runtime synchronization, backups or public DNS/TLS." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
     console.log(JSON.stringify(receipt));
@@ -193,7 +215,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     plugins: [react(), tailwindcss(), {
       name: "organization-fixture",
       resolveId(id) { if (id === "virtual:organization-fixture") return `\0${id}`; },
-      load(id) { if (id === "\0virtual:organization-fixture") return `import React from 'react'; import { createRoot } from 'react-dom/client'; import { OrganizationSettings } from '/src/components/OrganizationSettings.tsx'; import { setLocale } from '/src/lib/i18n.ts'; import '/src/styles.css'; setLocale('en'); localStorage.setItem('omb-analytics-opt-out','1'); const root = createRoot(document.getElementById('root')); if(location.search.includes('app=1')) { document.body.classList.remove('p-4'); import('/src/App.tsx').then(({default: App}) => root.render(React.createElement(App))); } else root.render(React.createElement('main',{className:'mx-auto flex max-w-xl flex-col gap-4'},React.createElement(OrganizationSettings)));`; },
+      load(id) { if (id === "\0virtual:organization-fixture") return `import React from 'react'; import { createRoot } from 'react-dom/client'; import { OrganizationSettings } from '/src/components/OrganizationSettings.tsx'; import { setLocale } from '/src/lib/i18n.ts'; import { StoreProvider } from '/src/state/store.tsx'; import { BotProfileAvatarCard } from '/src/components/BotProfileAvatarCard.tsx'; import { OrganizationIdentity } from '/src/components/OrganizationIdentity.tsx'; import '/src/styles.css'; setLocale('en'); localStorage.setItem('omb-analytics-opt-out','1'); const root = createRoot(document.getElementById('root')); if(location.search.includes('app=1')) { document.body.classList.remove('p-4'); import('/src/App.tsx').then(({default: App}) => root.render(React.createElement(App))); } else if(location.search.includes('branding=1')) { function Fixture() { const [bot, setBot] = React.useState({ id:'fixture-avatar', name:'Studio bot', color:'green', mascotBody:'cursor', avatarCrop:'mascot', messages:[] }); window.fixtureBot = bot; return React.createElement(StoreProvider, null, React.createElement('main', {className:'mx-auto flex max-w-xl flex-col gap-4'}, React.createElement(OrganizationIdentity), React.createElement(OrganizationSettings), React.createElement(BotProfileAvatarCard, {bot, activeState:'idle', mascotMotion:null, onPatch: patch => setBot(b => ({...b,...patch}))}))); } root.render(React.createElement(Fixture)); } else root.render(React.createElement('main',{className:'mx-auto flex max-w-xl flex-col gap-4'},React.createElement(OrganizationSettings)));`; },
       configureServer(server) { server.middlewares.use((req, res, next) => {
         if (req.url?.split("?")[0] !== "/__organization.html") return next();
         void server.transformIndexHtml(req.url, '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Isolated Organisation Settings</title></head><body class="bg-app p-4"><div id="root"></div><script type="module" src="/@id/virtual:organization-fixture"></script></body></html>')

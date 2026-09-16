@@ -167,6 +167,34 @@ IF EXIST "%dp0%\\node.exe" (
 endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\bin\\ombfake.js" %*
 `;
 
+// ...and npm's own npm.cmd / npx.cmd, which Node's installer puts beside
+// node.exe with CRLF endings: the CLI entry sits in a variable, next to a
+// helper script
+const npmLauncher = (name: "npm" | "npx") => {
+  const upper = name.toUpperCase();
+  return `:: Created by npm, please don't edit manually.
+@ECHO OFF
+
+SETLOCAL
+
+SET "NODE_EXE=%~dp0\\node.exe"
+IF NOT EXIST "%NODE_EXE%" (
+  SET "NODE_EXE=node"
+)
+
+SET "NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"
+SET "${upper}_CLI_JS=%~dp0\\node_modules\\npm\\bin\\${name}-cli.js"
+FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (
+  SET "NPM_PREFIX_${upper}_CLI_JS=%%F\\node_modules\\npm\\bin\\${name}-cli.js"
+)
+IF EXIST "%NPM_PREFIX_${upper}_CLI_JS%" (
+  SET "${upper}_CLI_JS=%NPM_PREFIX_${upper}_CLI_JS%"
+)
+
+"%NODE_EXE%" "%${upper}_CLI_JS%" %*
+`.replaceAll("\n", "\r\n");
+};
+
 describe("resolveCli", () => {
   it.skipIf(process.platform === "win32")("is identity off Windows — the kernel already resolves PATH and #!", () => {
     expect(resolveCli("claude", ["-p", "hi"])).toEqual({ command: "claude", args: ["-p", "hi"] });
@@ -225,6 +253,22 @@ winOnly("resolveCli (Windows)", () => {
       execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
     );
     expect(stdout.trim()).toBe("js target -p,hi");
+  });
+
+  it.each(["npm", "npx"] as const)("parses npm's own %s.cmd down to `node <cli.js>`, not its prefix helper", async (name) => {
+    writeFileSync(join(dir, `${name}.cmd`), npmLauncher(name));
+    const bin = join(dir, "node_modules", "npm", "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, "npm-prefix.js"), "console.log('prefix helper');\n");
+    writeFileSync(join(bin, `${name}-cli.js`), `console.log('${name} entry ' + process.argv.slice(2).join(','));\n`);
+    onPath();
+    const r = resolveCli(name, ["-y", "mcp-remote"]);
+    expect(r.args).toEqual([join(bin, `${name}-cli.js`), "-y", "mcp-remote"]);
+    expect(r.command.toLowerCase()).toMatch(/node\.exe$/);
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
+    );
+    expect(stdout.trim()).toBe(`${name} entry -y,mcp-remote`);
   });
 
   it("prefers the PATHEXT hit over the extensionless sibling npm installs beside it", () => {

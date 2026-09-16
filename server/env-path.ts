@@ -273,7 +273,12 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     return null;
   }
   const dir = dirname(shim);
-  const targets = [...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
+  // npm's own npm.cmd / npx.cmd, installed beside node.exe, name their entry
+  // in a variable next to a helper script that is not the CLI:
+  // SET "NPX_CLI_JS=%~dp0\node_modules\npm\bin\npx-cli.js". The launcher's
+  // switch to a globally upgraded npm is not followed; this node's npm runs.
+  const npmEntry = /^SET "NP[MX]_CLI_JS=%~dp0\\([^"]+)"/im.exec(text);
+  const targets = [...(npmEntry ? [npmEntry] : []), ...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
     .map((m) => join(dir, m[1]))
     .filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
   const script = targets.find((p) => /\.[cm]?js$/i.test(p));

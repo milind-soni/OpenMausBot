@@ -129,6 +129,13 @@ export interface RoutineRun {
   scheduledFor: number;
   status: RoutineRunStatus;
   manual: boolean;
+  /** First tick a queued run was skipped because its target bot or room was
+   * busy. Deferral behind a busy target is unbounded, so this timestamp is
+   * what surfaces the wait instead of leaving the run looking freshly queued. */
+  deferredAt?: number;
+  /** When the one-per-run deferral notice was raised, so restarts and repeat
+   * ticks stay quiet. */
+  deferredNoticeAt?: number;
   /** Why this receipt exists. Kept optional so version-1 files migrate in place. */
   triggerSource?: RoutineRunTrigger;
   webhookId?: string;
@@ -271,6 +278,8 @@ export interface RoutineManagerOptions {
   /** Projects every durable transition into the source conversation. */
   onRunChanged?: (run: RoutineRun) => void;
   onRunFailed?: (run: RoutineRun) => void;
+  /** Raised once when a queued run has waited out the deferral notice window. */
+  onRunDeferred?: (run: RoutineRun) => void;
   /** A successful provider turn is intermediate while its peer work or
    * queued continuation still belongs to this detached execution. */
   hasPendingDelegations?: (threadId: string) => boolean;
@@ -280,6 +289,10 @@ const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
 /** How long before a due routine the computer is asked to stay awake. */
 const WAKE_HORIZON_MS = 60 * 60_000;
+
+/** How long a run may sit deferred behind a busy target before the user
+ * hears about it once. Surfacing only; dispatch semantics stay unchanged. */
+export const ROUTINE_DEFERRAL_NOTICE_MS = 30 * 60_000;
 const MAX_DATE_MS = 8_640_000_000_000_000;
 const LOCAL_DAY_MS = 24 * 60 * 60_000;
 const INTERVAL_RESTRICTION_SEARCH_MS = 9 * LOCAL_DAY_MS;
@@ -1435,7 +1448,23 @@ export class RoutineManager {
           }
         }
         const state = this.targetState(run);
-        if (state === "busy") continue;
+        if (state === "busy") {
+          // A queued run behind a busy target is deferred, not silent. Stamp
+          // the wait once so receipts and cards can say how long it has been
+          // held; the run still dispatches the moment the target frees.
+          if (run.deferredAt == null) {
+            run.deferredAt = now;
+            this.save();
+            this.emitRun(run);
+          }
+          if (run.deferredNoticeAt == null && now - run.deferredAt >= ROUTINE_DEFERRAL_NOTICE_MS) {
+            run.deferredNoticeAt = now;
+            this.save();
+            this.emitRun(run);
+            this.options.onRunDeferred?.(cloneRun(run));
+          }
+          continue;
+        }
         if (state === "missing") {
           this.failRun(run, this.missingTargetMessage(run.target));
           continue;

@@ -583,7 +583,7 @@ const TOOLS = [
   },
   {
     name: "propose_bot_deletion",
-    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions and skills; generated project files remain. Running work and owned computers can block deletion. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: when the user explicitly asks to delete a named teammate, submit a separate deletion request for that exact bot. Deletion removes its conversations, memory, instructions, skills, and any computer owned only by it; generated project files and shared team computers remain. Running work or an unavailable computer provider can block deletion safely. Never delete yourself, substitute an archive, or put deletion into a setup batch. If review is pending, the decision and result resume you once." + PROPOSAL_OUTCOME,
     inputSchema: { type: "object", additionalProperties: false, properties: {
       bot_id: { type: "string", minLength: 1 }, reason: { type: "string", minLength: 1, maxLength: 500 },
     }, required: ["bot_id", "reason"] },

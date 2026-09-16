@@ -132,6 +132,8 @@ const deferredGate = (): DeferredGate => {
 };
 let managedBoxListGate: DeferredGate | null = null;
 let managedBoxCreateGate: DeferredGate | null = null;
+let managedBoxDeleteGate: DeferredGate | null = null;
+const managedBoxRejectedTokens = new Set<string>();
 const managedBoxCreateBodies: Array<Record<string, unknown>> = [];
 type ManagedBoxCreateMode = "refuse" | "ambiguous" | "fail-rename" | "success";
 let managedBoxCreateMode: ManagedBoxCreateMode = "refuse";
@@ -139,10 +141,17 @@ let managedBoxCreateId = "bx_cdefghjk";
 let managedBoxCreateName = "";
 const managedBoxCreatedIds = new Set<string>();
 const managedBoxDeleteConfirmations: Array<{ boxId: string; confirmation?: string }> = [];
+type ManagedBoxDeletionStatus = "pending" | "processing" | "blocked" | "completed";
+const managedBoxDeletionOperationId = "bdop_0123456789abcdef0123456789abcdef";
+let managedBoxDeletionStatuses: ManagedBoxDeletionStatus[] = [];
+let managedBoxLastDeletionStatus: ManagedBoxDeletionStatus = "completed";
+let managedBoxDeletionTarget = "";
+let managedBoxDeleteRemovesRow = true;
 let home: string;
 let staticDir: string;
 let fakeClaudeDump: string;
 let fakeDockerFixture: string;
+let fakeVpsFixture: string;
 let fakeDockerLog: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias: string; status: string; toolkit: { slug: string } }> = [];
@@ -161,6 +170,12 @@ const managedBoxNameForFixture = (botId: string): string => {
   const botPrefix = botId.slice(0, 8).toLowerCase().replace(/[^a-z0-9]/g, "") || "bot";
   const botHash = createHash("sha256").update(botId).digest("hex").slice(0, 6);
   return `ogb-${environmentScope}-${botPrefix}-${botHash}`;
+};
+
+const managedVpsNameForFixture = (botId: string): string => {
+  const botPrefix = botId.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 12) || "bot";
+  const botHash = createHash("sha256").update(botId).digest("hex").slice(0, 12);
+  return `openmausbot-vps-${botPrefix}-${botHash}`;
 };
 
 const expectStoppedTestServerCleanly = (serverChild: ChildProcess, capturedStderr: string): void => {
@@ -326,21 +341,38 @@ beforeAll(async () => {
   const fakeDockerDir = join(home, "fake-docker-bin");
   const fakeDockerProgram = join(fakeDockerDir, "docker-empty.mjs");
   fakeDockerFixture = join(home, ".openmausbot", "fake-unmanaged-container");
+  fakeVpsFixture = join(home, ".openmausbot", "fake-vps-container.json");
   fakeDockerLog = join(home, ".openmausbot", "fake-docker-calls.log");
   mkdirSync(fakeDockerDir, { recursive: true });
   writeFileSync(fakeDockerProgram, [
-    'import { appendFileSync, existsSync, readFileSync } from "node:fs";',
+    'import { appendFileSync, existsSync, readFileSync, rmSync } from "node:fs";',
     'const args = process.argv.slice(2);',
     `const fixture = ${JSON.stringify(fakeDockerFixture)};`,
+    `const vpsFixture = ${JSON.stringify(fakeVpsFixture)};`,
     `const log = ${JSON.stringify(fakeDockerLog)};`,
-    'if (existsSync(fixture)) {',
+    'if (existsSync(vpsFixture) && args[0] === "-H") {',
     '  appendFileSync(log, `${args.join(" ")}\\n`);',
-    '  const expected = readFileSync(fixture, "utf8").trim();',
-    '  if (args[0] === "info") { process.stdout.write("29\\n"); process.exit(0); }',
-    '  if (args[0] === "inspect" && args[1] === expected) {',
-    '    process.stdout.write(JSON.stringify([{ Config: { Image: "unmanaged", Labels: {} }, State: { Running: true } }]));',
+    '  const spec = JSON.parse(readFileSync(vpsFixture, "utf8"));',
+    '  if (args[2] === "container" && args[3] === "ls") { process.stdout.write(`${spec.id.slice(0, 12)}\\n`); process.exit(0); }',
+    '  if (args[2] === "container" && args[3] === "inspect") {',
+    '    process.stdout.write(JSON.stringify([{ Id: spec.id, Name: `/${spec.name}`, Config: { Labels: { "com.openmausbot.vps": "1", "com.openmausbot.container": spec.name } }, State: { Status: "exited", Running: false } }]));',
     '    process.exit(0);',
     '  }',
+    '  if (args[2] === "rm" && args[3] === "-f" && args[4] === spec.id) { rmSync(vpsFixture, { force: true }); process.exit(0); }',
+    '  process.exit(127);',
+    '}',
+    'if (existsSync(fixture)) {',
+    '  appendFileSync(log, `${args.join(" ")}\\n`);',
+    '  const raw = readFileSync(fixture, "utf8").trim();',
+    '  let spec = null; try { spec = JSON.parse(raw); } catch {}',
+    '  const expected = spec?.name ?? raw;',
+    '  if (args[0] === "info") { process.stdout.write("29\\n"); process.exit(0); }',
+    '  if (args[0] === "inspect" && args[1] === expected) {',
+    '    const labels = spec?.managed ? { "com.openmausbot.local-vm": "1", "com.openmausbot.workspace": "1", "com.openmausbot.local-vm-target": spec.targetLabel } : {};',
+    '    process.stdout.write(JSON.stringify([{ Config: { Image: "fixture", Labels: labels }, State: { Running: false }, Mounts: spec?.workspace ? [{ Type: "bind", Source: spec.workspace, Destination: "/home/cua/workspace", RW: true }] : [] }]));',
+    '    process.exit(0);',
+    '  }',
+    '  if (args[0] === "rm" && args.at(-1) === expected && spec?.managed) { rmSync(fixture, { force: true }); process.exit(0); }',
     '  process.exit(127);',
     '}',
     'if (args[0] === "-H" && args[2] === "container" && args[3] === "ls") process.exit(0);',
@@ -711,6 +743,10 @@ beforeAll(async () => {
       const path = req.url ?? "/";
       const requestUrl = new URL(path, "http://box.invalid");
       boxRouteCalls.push({ method, path });
+      if (managedBoxRejectedTokens.has(String(req.headers.authorization))) {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ ok: false, code: "unauthorized" }));
+      }
       if (method === "GET" && requestUrl.pathname === "/boxes") {
         const listGate = managedBoxListGate;
         if (listGate) {
@@ -723,6 +759,23 @@ beforeAll(async () => {
             ? { ok: true, boxes: managedBoxListRowsOverride ?? managedBoxRows, pageInfo: { nextCursor: null } }
             : { ok: false, message: "fixture list unavailable" },
         ));
+      }
+      if (method === "GET" && requestUrl.pathname === `/deletion-operations/${managedBoxDeletionOperationId}`) {
+        managedBoxLastDeletionStatus = managedBoxDeletionStatuses.shift() ?? managedBoxLastDeletionStatus;
+        if (managedBoxLastDeletionStatus === "completed" && managedBoxDeletionTarget) {
+          managedBoxRows = managedBoxRows.filter((row) => row.id !== managedBoxDeletionTarget);
+          managedBoxCreatedIds.delete(managedBoxDeletionTarget);
+        }
+        return res.end(JSON.stringify({
+          ok: true,
+          type: "deletion.operation",
+          operation: {
+            id: managedBoxDeletionOperationId,
+            kind: "box",
+            targetId: managedBoxDeletionTarget,
+            status: managedBoxLastDeletionStatus,
+          },
+        }));
       }
       res.setHeader("content-type", "application/json");
       res.statusCode = 200;
@@ -767,7 +820,7 @@ beforeAll(async () => {
       if (method === "GET" && boxMatch) {
         const row = managedBoxRows.find((candidate) => candidate.id === boxMatch[1]);
         const exists = row ?? (managedBoxCreatedIds.has(boxMatch[1]!)
-          ? { id: boxMatch[1], state: "idle" }
+          ? { id: boxMatch[1], name: `provider-${boxMatch[1]}`, state: "idle" }
           : null);
         if (!exists) {
           res.statusCode = 404;
@@ -822,9 +875,30 @@ beforeAll(async () => {
           res.statusCode = 409;
           return res.end(JSON.stringify({ ok: false, message: "confirmation mismatch" }));
         }
-        managedBoxRows = managedBoxRows.filter((row) => row.id !== deleteMatch[1]);
-        managedBoxCreatedIds.delete(deleteMatch[1]!);
+        const deleteGate = managedBoxDeleteGate;
+        if (deleteGate) {
+          deleteGate.enter();
+          await deleteGate.wait;
+        }
+        if (managedBoxDeleteRemovesRow) {
+          managedBoxRows = managedBoxRows.filter((row) => row.id !== deleteMatch[1]);
+          managedBoxCreatedIds.delete(deleteMatch[1]!);
+        }
         res.statusCode = 202;
+        if (managedBoxDeletionStatuses.length || !managedBoxDeleteRemovesRow) {
+          managedBoxDeletionTarget = deleteMatch[1]!;
+          managedBoxLastDeletionStatus = managedBoxDeletionStatuses.shift() ?? "pending";
+          return res.end(JSON.stringify({
+            ok: true,
+            type: "deletion.operation",
+            operation: {
+              id: managedBoxDeletionOperationId,
+              kind: "box",
+              targetId: deleteMatch[1],
+              status: managedBoxLastDeletionStatus,
+            },
+          }));
+        }
         return res.end(JSON.stringify({ ok: true, type: "deletion.operation" }));
       }
       return res.end(JSON.stringify({ ok: true }));
@@ -2327,6 +2401,19 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/team-computers/${requestId}/control`, { action: "release" })).status).toBe(200);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(200);
       expect((await record()).state).toBe("archived");
+
+      // Deleting one member of the assigned team must never treat the shared
+      // computer as that bot's owned resource. The team record and paid Box
+      // survive for the remaining (or future) members of the section.
+      const sharedBoxId = managedBoxCreateId;
+      expect((await api("DELETE", `/api/bots/${bot.id}`))).toMatchObject({ status: 200, body: { ok: true } });
+      botId = "";
+      expect(managedBoxDeleteConfirmations.some(({ boxId }) => boxId === sharedBoxId)).toBe(false);
+      expect(managedBoxRows).toContainEqual(expect.objectContaining({ id: sharedBoxId, state: "archived" }));
+      expect(await record()).toMatchObject({ id: requestId, section, state: "archived" });
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
     } finally {
       managedBoxCreateGate?.release();
       await pendingCreate?.catch(() => undefined);
@@ -2413,24 +2500,34 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "hold the shared desktop" })).status).toBe(202);
       await promptedOnBox(1, botIds[0]);
       expect(existsSync(fakeClaudeDump)).toBe(false);
+      // A sibling thread can wait, and Stop must cancel that pending claim
+      // without interrupting the thread which already owns the desktop.
+      const firstThread = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { id: string }) => b.id === botIds[0]).threadId;
+      const sibling = (await api("POST", `/api/bots/${botIds[0]}/tasks`, { title: "Waiting sibling" })).body.task;
+      expect((await api("POST", `/api/bots/${botIds[0]}/messages`, { text: "wait then cancel", threadId: sibling.threadId })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/Waiting for computer/);
+      expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
+      await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/Computer wait ended/);
+      expect(promptsOnBox()).toBe(1);
+      expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
         expect((await api("POST", `/api/team-computers/${requestId}/${action}`, { acknowledgeCost: true })).status).toBe(409);
       }
       expect((await api("PATCH", `/api/team-computers/${requestId}`, { section: null, acknowledgeSharedAccess: true })).status).toBe(409);
       expect((await api("PATCH", `/api/bots/${botIds[0]}`, { computer: "off" })).status).toBe(409);
 
-      // The room's different bot cannot concurrently claim the physical Box.
+      // The room waits rather than failing or concurrently driving the Box.
       expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the occupied shared desktop" })).status).toBe(202);
       await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
         (group: { id: string }) => group.id === roomId,
-      )), { timeout: 5_000 }).toMatch(/another thread is using this computer/);
-      await idle(botIds[1]);
+      )), { timeout: 5_000 }).toMatch(/Waiting for computer/);
       expect(promptsOnBox()).toBe(1);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, {})).status).toBe(200);
       await idle(botIds[0]);
 
-      rmSync(fakeClaudeDump, { force: true });
-      expect((await api("POST", `/api/groups/${roomId}/messages`, { text: "use the released shared desktop" })).status).toBe(202);
+      // No Retry or second user message: releasing the owner wakes the turn.
       await promptedOnBox(2, botIds[1]);
       expect(existsSync(fakeClaudeDump)).toBe(false);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
@@ -2714,7 +2811,187 @@ describe("harness HTTP API", () => {
     }
   });
 
-  it("keeps a bot when its hidden Box exists or the provider cannot prove it absent", async () => {
+  it("deletes a bot-owned Box automatically even after the bot changes destination", async () => {
+    let botId = "";
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      const managedName = managedBoxNameForFixture(bot.id);
+      managedBoxRows = [{ id: "bx_23456789", name: managedName, state: "archived" }];
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: null, cloudBackend: "vps" })).status).toBe(200);
+
+      const deleted = await api("DELETE", `/api/bots/${bot.id}`);
+
+      expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(managedBoxDeleteConfirmations).toContainEqual({
+        boxId: "bx_23456789",
+        confirmation: "bx_23456789",
+      });
+      expect(managedBoxRows).toEqual([]);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
+      botId = "";
+    } finally {
+      managedBoxListStatus = 200;
+      managedBoxRows = [];
+      managedBoxDeleteConfirmations.length = 0;
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      boxRouteCalls.length = 0;
+    }
+  });
+
+  it("keeps a reviewed deletion target that changes during slow cloud cleanup", async () => {
+    const chief = (await api("POST", "/api/bots", { name: "Deletion Chief", section: "Deletion race" })).body.bot;
+    const target = (await api("POST", "/api/bots", { name: "Deletion Target", section: "Deletion race" })).body.bot;
+    let targetDeleted = false;
+    try {
+      expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true })).status).toBe(200);
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      managedBoxRows = [{
+        id: "bx_456789ab",
+        name: managedBoxNameForFixture(target.id),
+        state: "archived",
+      }];
+
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const proposedResponse = await fetch(`${BASE}/api/internal/bot-deletion-requests`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          fromBotId: chief.id,
+          fromThreadId: chief.threadId,
+          targetBotId: target.id,
+          reason: "Verify a reviewed deletion stays bound to the exact target profile",
+        }),
+      });
+      expect(proposedResponse.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposedResponse.json());
+
+      managedBoxDeleteGate = deferredGate();
+      const resolving = fetch(`${BASE}/api/threads/${chief.threadId}/respond`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: BASE,
+        },
+        body: JSON.stringify({ requestId: proposed.requestId, behavior: "allow" }),
+      });
+      await managedBoxDeleteGate.entered;
+      const changed = await api("PATCH", `/api/bots/${target.id}`, {
+        title: "Changed while cloud cleanup was pending",
+      });
+      expect(changed.status).toBe(200);
+      managedBoxDeleteGate.release();
+      managedBoxDeleteGate = null;
+
+      const response = await resolving;
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        ok: true,
+        outcome: "rejected",
+        result: { state: "cancelled", error: expect.stringMatching(/deletion target changed/i) },
+      });
+      const fleet = (await api("GET", "/api/bots?messages=0")).body.bots;
+      expect(fleet.find((candidate: { id: string }) => candidate.id === target.id)).toMatchObject({
+        title: "Changed while cloud cleanup was pending",
+      });
+      expect(managedBoxDeleteConfirmations).toHaveLength(1);
+    } finally {
+      managedBoxDeleteGate?.release();
+      managedBoxDeleteGate = null;
+      managedBoxRows = [];
+      managedBoxDeleteConfirmations.length = 0;
+      await api("POST", `/api/bots/${chief.id}/interrupt`, {}).catch(() => undefined);
+      const removed = await api("DELETE", `/api/bots/${target.id}`).catch(() => undefined);
+      targetDeleted = removed?.status === 200 || removed?.status === 404;
+      if (!targetDeleted) await api("DELETE", `/api/bots/${target.id}`).catch(() => undefined);
+      // Clear the Box token BEFORE deleting the Chief. interruptTurn is
+      // asynchronous, so the Chief can still be busy here, and while a token
+      // is configured a busy bot's delete is refused with 409 (index.ts:6673).
+      // That refusal was swallowed by the catch below, leaving this Chief in
+      // the store for the rest of the file — and because setChiefOfStaff is
+      // per-section (store.ts:2020), electing a Chief in the default section
+      // never cleared it, so the team-import test's store-wide count saw two.
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      // interruptTurn is asynchronous, so wait for the Chief to actually
+      // settle before deleting it: several delete guards refuse a busy bot
+      // (index.ts:6650-6674), and swallowing that 409 is what leaked.
+      await expect.poll(async () =>
+        (await api("GET", "/api/bots?messages=0")).body.bots.find((bot: { id: string }) => bot.id === chief.id)?.busy !== true,
+      { timeout: 15_000 }).toBe(true);
+      await api("DELETE", `/api/bots/${chief.id}`).catch(() => undefined);
+      // Assert the cleanup actually happened rather than trusting the catch.
+      expect((await api("GET", "/api/bots")).body.bots.some((bot: { id: string }) => bot.id === chief.id)).toBe(false);
+      boxRouteCalls.length = 0;
+    }
+  });
+
+  it("keeps the bot while an owned Box deletion is pending and finishes on retry", async () => {
+    let botId = "";
+    try {
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      const managedName = managedBoxNameForFixture(bot.id);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        computer: "cloud",
+        cloudBackend: "box",
+      })).status).toBe(200);
+      managedBoxCreateMode = "success";
+      managedBoxCreateId = "bx_3456789a";
+      managedBoxCreateName = managedName;
+      expect((await api("POST", `/api/bots/${bot.id}/computer/provision`, {})).status).toBe(200);
+      managedBoxDeleteRemovesRow = false;
+      managedBoxDeletionStatuses = ["pending"];
+
+      const pending = await api("DELETE", `/api/bots/${bot.id}`);
+      expect(pending.status).toBe(409);
+      expect(pending.body.error).toMatch(/deletion has started.*bot was kept/i);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(true);
+      expect(managedBoxDeleteConfirmations).toHaveLength(1);
+
+      // Losing the old token must not strand the exact deletion receipt.
+      // A replacement that can read that target-bound operation proves
+      // account continuity and may be saved; a second DELETE is never sent.
+      managedBoxRejectedTokens.add("Bearer box_route");
+      managedBoxDeletionStatuses = ["completed"];
+      const tokenChange = await api("PUT", "/api/config", { box: { token: "box_route_rotated" } });
+      expect(tokenChange.status).toBe(200);
+      expect(managedBoxDeleteConfirmations).toHaveLength(1);
+
+      // A later provider completion is reconciled from the durable operation
+      // receipt. No second DELETE is sent, and only then may the owner vanish.
+      const completed = await api("DELETE", `/api/bots/${bot.id}`);
+      expect(completed).toMatchObject({ status: 200, body: { ok: true } });
+      expect(managedBoxDeleteConfirmations).toHaveLength(1);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
+      botId = "";
+    } finally {
+      managedBoxDeleteRemovesRow = true;
+      managedBoxCreateMode = "refuse";
+      managedBoxCreateId = "bx_cdefghjk";
+      managedBoxCreateName = "";
+      managedBoxCreatedIds.clear();
+      managedBoxDeletionStatuses = [];
+      managedBoxLastDeletionStatus = "completed";
+      managedBoxDeletionTarget = "";
+      managedBoxRejectedTokens.clear();
+      managedBoxRows = [];
+      managedBoxDeleteConfirmations.length = 0;
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      boxRouteCalls.length = 0;
+    }
+  });
+
+  it("keeps a bot when its Box provider is unavailable and fences deletion races", async () => {
     let botId = "";
     let guardBotId = "";
     let roomId = "";
@@ -2722,19 +2999,7 @@ describe("harness HTTP API", () => {
       expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
       const bot = (await api("POST", "/api/bots")).body.bot;
       botId = bot.id;
-      const managedName = managedBoxNameForFixture(bot.id);
-      managedBoxRows = [{ id: "bx_23456789", name: managedName, state: "archived" }];
-
-      // Ownership follows the bot id, not its current destination/backend.
-      const moved = await api("PATCH", `/api/bots/${bot.id}`, { computer: null, cloudBackend: "vps" });
-      expect(moved.status).toBe(200);
-      const guarded = await api("DELETE", `/api/bots/${bot.id}`);
-      expect(guarded.status).toBe(409);
-      expect(guarded.body.error).toMatch(/cloud computer.*Settings.*Computers/i);
-      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
-        (candidate: { id: string }) => candidate.id === bot.id,
-      )).toBe(true);
-
+      managedBoxRows = [{ id: "bx_23456789", name: managedBoxNameForFixture(bot.id), state: "archived" }];
       managedBoxListStatus = 503;
       const unavailable = await api("DELETE", `/api/bots/${bot.id}`);
       expect(unavailable.status).toBe(503);
@@ -2859,7 +3124,19 @@ describe("harness HTTP API", () => {
       expect(rememberedDelete.status).toBe(409);
       expect(rememberedDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
 
+      // The Box created successfully even though deterministic naming failed.
+      // If the original credential expires, the target-bound deletion fence
+      // is sufficient proof for a valid replacement; the unresolved create
+      // receipt must not deadlock Settings or require the failed name.
+      managedBoxRejectedTokens.add("Bearer box_route");
+      expect((await api("PUT", "/api/config", {
+        box: { token: "box_route_rotated" },
+      })).status).toBe(200);
+
       managedBoxCreateMode = "success";
+      const cleanupRetry = await api("POST", `/api/bots/${rememberedBot.id}/computer/provision`, {});
+      expect(cleanupRetry.status).toBe(409);
+      expect(cleanupRetry.body.error).toMatch(/previous cloud computer deletion finished.*retry/i);
       expect((await api("POST", `/api/bots/${rememberedBot.id}/computer/provision`, {})).status).toBe(200);
       expect((await api("POST", `/api/computers/boxes/${managedBoxCreateId}/delete`, {
         confirmName: managedBoxCreateName,
@@ -2875,12 +3152,13 @@ describe("harness HTTP API", () => {
       managedBoxCreateMode = "refuse";
       managedBoxCreateId = "bx_cdefghjk";
       managedBoxCreateName = "";
+      managedBoxRejectedTokens.clear();
       await api("PUT", "/api/config", { box: { token: "" } });
       boxRouteCalls.length = 0;
     }
   });
 
-  it("keeps a bot owner when a resolved journal Box is missing from an eventually-consistent LIST", async () => {
+  it("finds and deletes a remembered Box even while account LIST omits it", async () => {
     let botId = "";
     try {
       managedBoxRows = [];
@@ -2895,16 +3173,21 @@ describe("harness HTTP API", () => {
 
       managedBoxListRowsOverride = [];
       boxRouteCalls.length = 0;
-      const deletion = await api("DELETE", `/api/bots/${bot.id}`);
-      expect(deletion.status).toBe(409);
-      expect(deletion.body.error).toMatch(/remembered cloud computer.*Settings.*Computers/i);
-      expect(boxRouteCalls).toContainEqual({ method: "GET", path: `/boxes/${managedBoxCreateId}` });
+      const inventory = await api("GET", "/api/computers/boxes");
+      expect(inventory.status).toBe(200);
+      expect(inventory.body.instances).toContainEqual(expect.objectContaining({
+        boxId: managedBoxCreateId,
+        name: managedBoxCreateName,
+        ownerBotId: bot.id,
+      }));
 
-      managedBoxListRowsOverride = null;
-      expect((await api("POST", `/api/computers/boxes/${managedBoxCreateId}/delete`, {
-        confirmName: managedBoxCreateName,
-      })).status).toBe(202);
-      expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
+      const deletion = await api("DELETE", `/api/bots/${bot.id}`);
+      expect(deletion).toMatchObject({ status: 200, body: { ok: true } });
+      expect(boxRouteCalls).toContainEqual({ method: "GET", path: `/boxes/${managedBoxCreateId}` });
+      expect(managedBoxDeleteConfirmations).toContainEqual({
+        boxId: managedBoxCreateId,
+        confirmation: managedBoxCreateId,
+      });
       botId = "";
     } finally {
       managedBoxListRowsOverride = null;
@@ -6934,6 +7217,74 @@ describe("harness HTTP API", () => {
       rmSync(fakeDockerLog, { force: true });
       await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } }).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  });
+
+  it("removes a managed per-bot Local VM and its private files with the bot", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    let workspacePath = "";
+    try {
+      expect((await api("PATCH", "/api/config", {
+        localVm: { mode: "per-bot", maxInstances: 2 },
+      })).status).toBe(200);
+      const status = await api("GET", `/api/bots/${bot.id}/local-computer`);
+      expect(status.status).toBe(200);
+      workspacePath = status.body.workspace_path;
+      mkdirSync(workspacePath, { recursive: true });
+      writeFileSync(join(workspacePath, "private-session.txt"), "delete me");
+      writeFileSync(fakeDockerFixture, JSON.stringify({
+        name: status.body.container_name,
+        workspace: workspacePath,
+        targetLabel: String(status.body.target_key).replace(/^bot:/, ""),
+        managed: true,
+      }));
+      rmSync(fakeDockerLog, { force: true });
+
+      const deleted = await api("DELETE", `/api/bots/${bot.id}`);
+
+      expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(readFileSync(fakeDockerLog, "utf8").split("\n")).toContain(
+        `rm -f ${status.body.container_name}`,
+      );
+      expect(existsSync(workspacePath)).toBe(false);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
+    } finally {
+      rmSync(fakeDockerFixture, { force: true });
+      rmSync(fakeDockerLog, { force: true });
+      if (workspacePath) rmSync(workspacePath, { recursive: true, force: true });
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      await api("PATCH", "/api/config", { localVm: { mode: "shared", maxInstances: 2 } }).catch(() => undefined);
+    }
+  });
+
+  it("removes the exact managed VPS computer with its bot", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const containerId = "a".repeat(64);
+    const containerName = managedVpsNameForFixture(bot.id);
+    try {
+      expect((await api("PUT", "/api/config", {
+        vps: { sshAlias: "fixture-vps" },
+      })).status).toBe(200);
+      writeFileSync(fakeVpsFixture, JSON.stringify({ id: containerId, name: containerName }));
+      rmSync(fakeDockerLog, { force: true });
+
+      const deleted = await api("DELETE", `/api/bots/${bot.id}`);
+
+      expect(deleted).toMatchObject({ status: 200, body: { ok: true } });
+      expect(readFileSync(fakeDockerLog, "utf8").split("\n")).toContain(
+        `-H ssh://fixture-vps rm -f ${containerId}`,
+      );
+      expect(existsSync(fakeVpsFixture)).toBe(false);
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.some(
+        (candidate: { id: string }) => candidate.id === bot.id,
+      )).toBe(false);
+    } finally {
+      rmSync(fakeVpsFixture, { force: true });
+      rmSync(fakeDockerLog, { force: true });
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+      await api("PUT", "/api/config", { vps: { sshAlias: "" } }).catch(() => undefined);
     }
   });
 
