@@ -119,6 +119,192 @@ export function resolveThreadRefs(text: string, threads: ThreadRefCandidate[], c
   return spans.length ? spans : [{ text }];
 }
 
+// ── canonical thread links ─────────────────────────────────────────────
+// openmausbot://thread/<id>?bot=<owner> is the one spelling a copied
+// reference has, in the clipboard and inside sent messages. The bot id is
+// optional when parsing — a bare link or a raw UUID resolves by preference
+// — but copy always emits it, so a paste round-trips to the exact thread.
+
+/** Where a canonical link points. `botId` is the owner the link was copied
+ * from, when it carries one. */
+export interface ThreadRefAddress {
+  threadId: string;
+  botId?: string;
+}
+
+const THREAD_URL_PREFIX = "openmausbot://thread/";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_LIMIT = 256;
+
+const plainId = (value: string): string | null => {
+  // oxlint-disable-next-line no-control-regex -- a thread id never carries control characters
+  if (!value || value.length > ID_LIMIT || /[\u0000-\u001f]/.test(value)) return null;
+  return value;
+};
+
+/** The canonical link for a thread a person can copy. */
+export function threadRefUrl(ref: { botId: string; threadId: string }): string {
+  return THREAD_URL_PREFIX + encodeURIComponent(ref.threadId) + "?bot=" + encodeURIComponent(ref.botId);
+}
+
+/** Parse a canonical thread link; null for anything else, including
+ * near-misses with extra path, extra query or a foreign scheme. */
+export function parseThreadRefUrl(value: string): ThreadRefAddress | null {
+  const raw = value.trim();
+  if (!raw.toLowerCase().startsWith(THREAD_URL_PREFIX)) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.username || url.password || url.port || url.hash) return null;
+  if (url.hostname.toLowerCase() !== "thread") return null;
+  let threadId: string;
+  try {
+    threadId = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    return null;
+  }
+  if (!threadId || threadId.includes("/") || url.pathname.slice(1) !== encodeURIComponent(threadId)) return null;
+  const keys = [...url.searchParams.keys()];
+  if (keys.some((key) => key !== "bot")) return null;
+  const bot = url.searchParams.get("bot");
+  if (keys.length > 1 || (bot !== null && !bot)) return null;
+  const thread = plainId(threadId);
+  const owner = bot === null ? undefined : plainId(bot);
+  if (!thread || owner === null) return null;
+  return owner ? { threadId: thread, botId: owner } : { threadId: thread };
+}
+
+/** Whether a value is shaped like a thread link at all — even one that
+ * fails strict parsing. Markdown must never hand such a URL to the shell
+ * as an external link, live or dead. */
+export function looksLikeThreadRefUrl(value: string): boolean {
+  return value.trim().toLowerCase().startsWith(THREAD_URL_PREFIX);
+}
+
+/** A raw thread id on its own: the UUID form the server mints. */
+export function isThreadUuid(value: string): boolean {
+  return UUID.test(value.trim());
+}
+
+/** Resolve an address (or bare UUID) against the visible threads. The
+ * link's own bot wins when it names one; otherwise the same preference a
+ * #Title mention uses: the open bot's thread, then the newest, then a
+ * deterministic first — flagged ambiguous so the chip can name the bot. */
+export function resolveThreadRefAddress(
+  threads: ThreadRefCandidate[],
+  address: ThreadRefAddress,
+  currentBotId?: string,
+): ResolvedThreadRef | null {
+  const candidates = threads.filter((thread) => thread.threadId === address.threadId);
+  if (!candidates.length) return null;
+  const pinned = address.botId ? candidates.filter((thread) => thread.botId === address.botId) : [];
+  if (pinned.length === 1) return { ...pinned[0], title: pinned[0].title.trim(), ambiguous: false };
+  if (pinned.length > 1) return pick(pinned, currentBotId);
+  return pick(candidates, currentBotId);
+}
+
+// ── sent-message serialization ─────────────────────────────────────────
+// A resolvable #Title becomes a markdown link whose URL carries the thread
+// id, so bots and API consumers keep the machine-readable reference. The
+// label keeps the title readable; escapes keep brackets in titles parseable.
+
+const escapeThreadLabel = (title: string): string =>
+  title.replace(/[[\]\\]/g, "\\$&");
+const unescapeThreadLabel = (label: string): string => label.replace(/\\(.)/g, "$1");
+
+/** The markdown shape a thread reference is sent as. */
+export function threadRefMarkdown(ref: ResolvedThreadRef): string {
+  return "[" + escapeThreadLabel(ref.title) + "](" + threadRefUrl(ref) + ")";
+}
+
+interface MarkdownLinkSpan {
+  /** exact source text of the run */
+  raw: string;
+  /** a markdown link to a thread: label plus parsed address when valid */
+  link?: { label: string; address: ThreadRefAddress | null };
+}
+
+const THREAD_LINK_MD = /\[((?:\\.|[^\\\]])*)\]\((openmausbot:\/\/thread\/[^()\s]*)\)/g;
+
+/** Split text into plain runs and markdown links that point at threads.
+ * Every matched link is kept verbatim by the serializer — live or dead —
+ * the way markdown leaves a link's label alone. */
+function splitThreadLinkMarkdown(text: string): MarkdownLinkSpan[] {
+  if (!text.includes("](")) return [{ raw: text }];
+  const spans: MarkdownLinkSpan[] = [];
+  let last = 0;
+  for (const match of text.matchAll(THREAD_LINK_MD)) {
+    const at = match.index ?? 0;
+    if (at > last) spans.push({ raw: text.slice(last, at) });
+    spans.push({ raw: match[0], link: { label: match[1], address: parseThreadRefUrl(match[2]) } });
+    last = at + match[0].length;
+  }
+  if (last < text.length) spans.push({ raw: text.slice(last) });
+  return spans.length ? spans : [{ raw: text }];
+}
+
+/** The text a send carries: resolvable #Title runs become canonical links;
+ * existing links and unknown titles pass through untouched. */
+export function serializeThreadRefs(text: string, threads: ThreadRefCandidate[], currentBotId?: string): string {
+  if (!groupTitles(threads).length) return text;
+  return splitThreadLinkMarkdown(text)
+    .map((span) => span.link ? span.raw : resolveThreadRefs(span.raw, threads, currentBotId)
+      .map((run) => run.ref ? threadRefMarkdown(run.ref) : run.text)
+      .join(""))
+    .join("");
+}
+
+/** One run of display text, linked when `ref` is set. Covers both forms a
+ * message holds: a canonical markdown link (label shown, dead link kept as
+ * raw text) and a #Title mention (the person's own spelling). */
+export interface ThreadRefDisplaySpan {
+  text: string;
+  ref?: ResolvedThreadRef;
+}
+
+export function splitThreadRefsForDisplay(text: string, threads: ThreadRefCandidate[], currentBotId?: string): ThreadRefDisplaySpan[] {
+  const spans: ThreadRefDisplaySpan[] = [];
+  for (const span of splitThreadLinkMarkdown(text)) {
+    if (span.link) {
+      const ref = span.link.address ? resolveThreadRefAddress(threads, span.link.address, currentBotId) : null;
+      spans.push(ref ? { text: unescapeThreadLabel(span.link.label), ref } : { text: span.raw });
+    } else {
+      spans.push(...resolveThreadRefs(span.raw, threads, currentBotId));
+    }
+  }
+  return spans.length ? spans : [{ text }];
+}
+
+/** The whole paste is one thread reference — a canonical link, the markdown
+ * link shape messages carry, or a raw UUID — and it resolves to a visible
+ * thread: the #Title token the composer holds, plus what it resolved to.
+ * null when the paste is not a reference or names no known thread, so an
+ * unknown id stays plain text. */
+export function threadTokenFromPaste(
+  pasted: string,
+  threads: ThreadRefCandidate[],
+  currentBotId?: string,
+): { token: string; ref: ResolvedThreadRef } | null {
+  const trimmed = pasted.trim();
+  if (!trimmed) return null;
+  const wrapped = /^\[((?:\\.|[^\\\]])*)\]\((openmausbot:\/\/thread\/[^()\s]*)\)$/.exec(trimmed);
+  const address = wrapped
+    ? parseThreadRefUrl(wrapped[2])
+    : parseThreadRefUrl(trimmed) ?? (isThreadUuid(trimmed) ? { threadId: trimmed } : null);
+  if (!address) return null;
+  const ref = resolveThreadRefAddress(threads, address, currentBotId);
+  if (!ref) return null;
+  // '#Title' is the token of choice, but a numeric or '#' prefixed title
+  // can never re-resolve through that spelling — those pastes hold the
+  // canonical markdown link instead, which sends and displays the same.
+  const title = ref.title.trim();
+  const token = linkable(title) && !title.startsWith("#") ? `#${title}` : threadRefMarkdown(ref);
+  return { token, ref };
+}
+
 // ── remark plugin ──────────────────────────────────────────────────────
 // Splits markdown text nodes into thread-link nodes that render through
 // the markdown `span` component as data-thread-* attributes. Code, links

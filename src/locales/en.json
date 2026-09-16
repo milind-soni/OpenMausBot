@@ -728,6 +728,7 @@
   "task.closedBy": "closed by {name}",
   "task.closed": "Closed",
   "task.archive": "Archive",
+  "task.copyLink": "Copy link",
   "task.unarchive": "Unarchive",
   "task.archived": "Archived",
   "thread.gone": "That thread is no longer here.",

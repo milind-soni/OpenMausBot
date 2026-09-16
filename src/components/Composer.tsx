@@ -49,12 +49,14 @@ import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForCompose
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
+import { useThreadRefs } from "./ThreadRefs";
 import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { mentionChoicesForQuery } from "@/lib/mentions";
+import { serializeThreadRefs, threadTokenFromPaste } from "@/lib/thread-refs";
 import {
   composerSlashTrigger,
   goalTextFromComposer,
@@ -106,6 +108,7 @@ export function Composer({
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
   const { state, dispatch } = useStore();
+  const { threads, currentBotId } = useThreadRefs();
   const { capabilities } = useDesktopCapabilities();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
@@ -480,7 +483,9 @@ export function Composer({
       return;
     }
     // named `body`, not `t` — that name belongs to the catalog lookup now
-    const body = composeMessage(effectiveText, attachments);
+    // resolvable "#Title" runs leave as canonical links, so the thread id
+    // stays machine-readable in the stored send and the model's context
+    const body = composeMessage(serializeThreadRefs(effectiveText, threads, currentBotId), attachments);
     if (!body) return;
     const sentDraft: ComposerDraftSnapshot = {
       draftId,
@@ -569,8 +574,31 @@ export function Composer({
         return;
       }
     }
-    // a wall of text becomes a chip instead of burying the input
     const pasted = e.clipboardData.getData("text/plain");
+    // a pasted thread reference — canonical link, its markdown shape, or a
+    // raw UUID — becomes the token the composer holds when it names a
+    // thread the person can see; anything else stays ordinary text
+    const reference = threadTokenFromPaste(pasted, threads, currentBotId);
+    if (reference) {
+      e.preventDefault();
+      const start = e.currentTarget.selectionStart ?? text.length;
+      const end = e.currentTarget.selectionEnd ?? start;
+      // "#Title" only links at a word boundary, so keep the token clear of
+      // the words it may land between
+      const word = /[\p{L}\p{N}_]/u;
+      const lead = start > 0 && word.test(text[start - 1] ?? "") ? " " : "";
+      const trail = end < text.length && word.test(text[end] ?? "") ? " " : "";
+      const token = lead + reference.token + trail;
+      editText(text.slice(0, start) + token + text.slice(end));
+      const at = start + token.length;
+      setCaret(at);
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        inputRef.current?.setSelectionRange(at, at);
+      });
+      return;
+    }
+    // a wall of text becomes a chip instead of burying the input
     if (!isLongPaste(pasted)) return;
     e.preventDefault();
     // Preserve native paste replacement semantics: if text was

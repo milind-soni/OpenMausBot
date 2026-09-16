@@ -1,7 +1,43 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { orderedSidebarThreads, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+
+// The More menu lives behind component state and a portal, which a static
+// render never reaches. SidebarThreadRow uses exactly useState, useRef and
+// useEffect; stubbing those three (initial values first, state kept across a
+// re-render) lets this suite render the row directly, click the real action
+// button, and see the menu the click opened — the same extract-and-call
+// approach the ThreadRefs tests use for onClick props.
+const rowHooks = vi.hoisted(() => {
+  const slots: unknown[] = [];
+  let cursor = 0;
+  const begin = (fresh: boolean) => {
+    cursor = 0;
+    if (fresh) slots.length = 0;
+  };
+  const useState = (initial: unknown): [unknown, (value: unknown) => void] => {
+    const index = cursor++;
+    if (index >= slots.length) slots[index] = typeof initial === "function" ? (initial as () => unknown)() : initial;
+    const setValue = (value: unknown) => {
+      slots[index] = typeof value === "function" ? (value as (previous: unknown) => unknown)(slots[index]) : value;
+    };
+    return [slots[index], setValue];
+  };
+  return { begin, useState };
+});
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react")>();
+  return {
+    ...actual,
+    useState: rowHooks.useState as unknown as typeof actual.useState,
+    useRef: ((initial: unknown) => ({ current: initial })) as unknown as typeof actual.useRef,
+    useEffect: (() => undefined) as unknown as typeof actual.useEffect,
+  };
+});
+
+beforeEach(() => rowHooks.begin(true));
 
 describe("sidebar thread visibility", () => {
   const tasks = Array.from({ length: 10 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}`, ...(index > 7 ? { projectId: "research" } : {}) }));
@@ -26,6 +62,7 @@ describe("sidebar thread visibility", () => {
   it("shows Queued only for idle threads, preserving Working and Waiting", () => {
     const render = (busy = false, activity?: "waiting-on-you") => renderToStaticMarkup(createElement(SidebarThreadRow, {
       task: { threadId: "queued", title: "Next job", queued: true, busy, activity },
+      ownerId: "scout",
       current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
     }));
     expect(render()).toContain("Next job · Queued");
@@ -39,7 +76,7 @@ describe("sidebar thread visibility", () => {
 describe("threads a bot opened", () => {
   const openedBy = { botId: "scout", name: "Scout", at: 5 };
   const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
   }));
   it("says who opened the thread in plain words, and nothing for the person's own", () => {
     expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
@@ -70,7 +107,7 @@ describe("threads a bot closed", () => {
   const openedBy = { botId: "pm", name: "Parker", at: 5 };
   const closedBy = { botId: "pm", name: "Parker", at: 9 };
   const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"], current = false) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, current, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    task, ownerId: "pm", current, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
   }));
   it("folds closed threads out of the default list without spending the six recent rows on them", () => {
     // newest first: three helper threads the PM opened and closed sit on top of the person's own
@@ -154,7 +191,7 @@ describe("orderedSidebarThreads", () => {
 
 describe("archived threads", () => {
   const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
   }));
   it("folds archived threads out of the default list, but never when they need the person", () => {
     const rows = [
@@ -184,5 +221,81 @@ describe("archived threads", () => {
     expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0"]);
     expect(threadByline({ archivedAt: 0 })).toBe("Archived");
     expect(render({ threadId: "1", title: "Put away", archivedAt: 0 })).toContain("Archived");
+  });
+});
+
+describe("Copy link", () => {
+  type RowTask = Parameters<typeof SidebarThreadRow>[0]["task"];
+  type RowProps = { children?: unknown; [key: string]: unknown };
+  type RowNode = { $$typeof?: unknown; type?: unknown; props?: RowProps; children?: unknown };
+
+  const renderRow = (task: RowTask, ownerId: string, fresh = true): RowNode => {
+    rowHooks.begin(fresh);
+    return SidebarThreadRow({ task, ownerId, current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn() }) as RowNode;
+  };
+
+  const walk = (node: unknown, visit: (element: RowNode) => void): void => {
+    if (Array.isArray(node)) {
+      node.forEach((child) => walk(child, visit));
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    const element = node as RowNode;
+    if (element.$$typeof !== undefined || element.type !== undefined) visit(element);
+    walk(element.props?.children ?? element.children, visit);
+  };
+
+  const textOf = (node: unknown): string => {
+    if (typeof node === "string") return node;
+    if (Array.isArray(node)) return node.map(textOf).join("");
+    if (!node || typeof node !== "object") return "";
+    const element = node as RowNode;
+    return textOf(element.props?.children ?? element.children);
+  };
+
+  const buttonWithLabel = (tree: RowNode, label: string) => {
+    let found: RowNode | undefined;
+    walk(tree, (element) => {
+      if (!found && element.type === "button" && textOf(element).includes(label)) found = element;
+    });
+    return found;
+  };
+
+  const moreMenuButton = (tree: RowNode) => {
+    let found: RowNode | undefined;
+    walk(tree, (element) => {
+      if (!found && element.props && "aria-expanded" in element.props) found = element;
+    });
+    return found;
+  };
+
+  it("writes the exact canonical link for the row's owner to the clipboard", () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    // a bot-owned row and a room-owned row: the owner id, not anything else,
+    // is what the copied link must carry as ?bot=
+    const rows = [
+      { task: { threadId: "qa-245", title: "QA PR 245" }, ownerId: "scout", link: "openmausbot://thread/qa-245?bot=scout" },
+      { task: { threadId: "monday-1", title: "Monday plan" }, ownerId: "standup", link: "openmausbot://thread/monday-1?bot=standup" },
+    ];
+    for (const { task, ownerId, link } of rows) {
+      const closed = renderRow(task, ownerId);
+      expect(buttonWithLabel(closed, "Copy link")).toBeUndefined();
+      const more = moreMenuButton(closed);
+      expect(more?.props).toBeDefined();
+      const openMenu = more!.props!.onClick as (event: unknown) => void;
+      openMenu({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
+      const menu = renderRow(task, ownerId, false);
+      const copy = buttonWithLabel(menu, "Copy link");
+      expect(copy).toBeDefined();
+      expect(textOf(copy)).toContain("Copy link");
+      (copy!.props!.onClick as () => void)();
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith(link);
+      writeText.mockClear();
+    }
+    vi.unstubAllGlobals();
   });
 });

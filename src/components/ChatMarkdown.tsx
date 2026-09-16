@@ -29,7 +29,7 @@ import {
   getSnippetFileName,
 } from "../lib/code-block";
 import { repairMarkdownTables } from "../lib/markdown-tables";
-import { remarkThreadRefs } from "../lib/thread-refs";
+import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
 
@@ -94,6 +94,9 @@ export const localFilePath = (href?: string): string | null => {
 /** Keep only the local URL spellings our message-scoped file renderer knows
  * about; all ordinary links still use react-markdown's protocol allow-list. */
 export function chatUrlTransform(value: string): string {
+  // thread links render as chips below, never as external anchors; the
+  // scheme must survive the allow-list so the anchor component sees it
+  if (looksLikeThreadRefUrl(value)) return value;
   if (/^file:\/\//i.test(value) || WINDOWS_PATH.test(value) || value.startsWith("\\\\")) {
     return localFilePath(value) ? value : "";
   }
@@ -546,6 +549,13 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
             return <span {...rest}>{children}</span>;
           },
           a({ href, children }: { href?: string; children?: ReactNode }) {
+            // a canonical thread link is a chip whatever text carries it;
+            // a dead one keeps its label as plain text rather than handing
+            // the app's own scheme to the shell
+            const address = href ? parseThreadRefUrl(href) : null;
+            const ref = address ? resolveThreadRefAddress(threads, address, currentBotId) : null;
+            if (ref) return <ThreadLink target={ref} ambiguous={ref.ambiguous}>{children}</ThreadLink>;
+            if (address || (href && looksLikeThreadRefUrl(href))) return <span className="break-words">{children}</span>;
             const localPath = localFilePath(href);
             if (localPath) return <LocalFileLink filePath={localPath} message={message}>{children}</LocalFileLink>;
             return (
