@@ -19,6 +19,18 @@ function instance(snapshot: InstanceInfo["snapshot"]): InstanceInfo {
 }
 
 describe("needsCli / needsSignIn", () => {
+  it("distinguishes an absent CLI from a detected but broken engine", () => {
+    const missing = { ...instance({ state: "unavailable" }), cliDefault: "kimi", cliCandidates: [] };
+    expect(engineStatus(missing)).toBe("Not installed");
+    expect(engineStatus({ ...missing, cliCandidates: ["/tools/kimi"] })).toBe("Setup required");
+    expect(engineStatus({ ...missing, cli: "/custom/kimi" })).toBe("Setup required");
+  });
+
+  it("shows prerequisite preparation and installation distinctly", () => {
+    const missing = instance({ state: "unavailable" });
+    expect(engineStatus({ ...missing, install: { server: { package: "kimi", phase: "preparing" } } })).toBe("Preparing required tools");
+    expect(engineStatus({ ...missing, install: { server: { package: "kimi", phase: "installing" } } })).toBe("Installing");
+  });
   it("treats a missing binary as a CLI install, not a sign-in", () => {
     const missing = instance({ state: "unavailable", reason: "`kimi` CLI not found" });
     expect(needsCli(missing)).toBe(true);

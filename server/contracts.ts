@@ -369,9 +369,9 @@ export interface EngineInstall {
   };
   /** Settings can install or update this engine on the machine running the
    * server, as the server's own user, into a directory the app owns. Set by
-   * the registry when the install one-liner is an npm package and npm is on
-   * PATH; never something a client chooses. */
-  server?: { package: string };
+   * the registry for supported npm packages, including private prerequisite
+   * setup when npm is absent; never something a client chooses. */
+  server?: { package: string; phase?: "preparing" | "installing" };
 }
 
 export interface ProviderAuthenticationStart {

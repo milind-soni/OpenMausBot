@@ -586,7 +586,7 @@ export interface EngineInstall {
   needsNode?: boolean;
   managed?: { label: string; downloadBytes: number };
   /** the server can install or update this engine itself, no terminal */
-  server?: { package: string };
+  server?: { package: string; phase?: "preparing" | "installing" };
 }
 
 /** One row of GET /api/instances — the model picker's data. */

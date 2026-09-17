@@ -1,11 +1,12 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, serverInstallFor } from "./engine-install.ts";
+import { enginesBinDir, enginesPrefix, installNpmEngine, npmPackageOf, serverInstallFor, systemNpmCommand } from "./engine-install.ts";
 import { augmentedPath, findCliCandidates, registerPathDir, resetPathCacheForTests } from "./env-path.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import * as procs from "./procs.ts";
+import * as runtime from "./node-runtime.ts";
 
 // A stand-in npm: records its arguments, honours --prefix, and behaves per
 // FAKE_NPM_MODE. Nothing reaches a registry or the network.
@@ -29,6 +30,16 @@ else {
 `;
 
 describe("npm package detection", () => {
+  it("runs Windows npm through node and its JS entry, never a cmd shim", async () => {
+    const base = mkdtempSync(join(tmpdir(), "omb-win-npm-"));
+    try {
+      const npmCli = join(base, "node_modules", "npm", "bin", "npm-cli.js");
+      mkdirSync(join(npmCli, ".."), { recursive: true });
+      writeFileSync(npmCli, "// npm fixture");
+      expect(systemNpmCommand(join(base, "node.exe"), join(base, "npm.cmd"), "win32")).toEqual({ command: join(base, "node.exe"), args: [npmCli], bin: base });
+      expect(systemNpmCommand(join(base, "node.exe"), join(base, "missing", "npm.cmd"), "win32")).toBeNull();
+    } finally { await removeTempDir(base); }
+  });
   it("reads only a plain npm one-liner", () => {
     expect(npmPackageOf({ command: { linux: "npm install -g @anthropic-ai/claude-code" } })).toBe("@anthropic-ai/claude-code");
     expect(npmPackageOf({ command: { darwin: "npm install -g mmx-cli" } })).toBe("mmx-cli");
@@ -41,6 +52,30 @@ describe("npm package detection", () => {
   it("lays the prefix out per platform", () => {
     expect(enginesBinDir("/data", "linux")).toBe(join("/data", "tools", "npm", "bin"));
     expect(enginesBinDir("/data", "win32")).toBe(enginesPrefix("/data"));
+  });
+});
+
+describe("managed npm reuse on every platform", () => {
+  it("uses explicit Node/npm JS for successive installs even when a broken npm shim is on PATH", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-managed-npm-"));
+    const npmCli = join(scratch, "npm-cli.mjs");
+    const log = join(scratch, "calls.json");
+    writeFileSync(npmCli, `import { appendFileSync } from 'node:fs'; appendFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)) + '\\n');`);
+    writeFileSync(join(scratch, process.platform === "win32" ? "npm.cmd" : "npm"), "a wrapper that must never be executed", { mode: 0o755 });
+    const managed = { node: process.execPath, npmCli, bin: dirname(process.execPath) };
+    vi.spyOn(runtime, "managedNodePaths").mockReturnValue(managed);
+    vi.spyOn(runtime, "ensureManagedNode").mockResolvedValue(managed);
+    try {
+      const options = { baseDir: join(scratch, "data"), path: [scratch, dirname(process.execPath)].join(delimiter) };
+      await installNpmEngine("first-engine", options);
+      await installNpmEngine("second-engine", options);
+      const invocations = readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line) as string[]);
+      expect(invocations.map((args) => args.at(-1))).toEqual(["first-engine@latest", "second-engine@latest"]);
+    } finally {
+      vi.restoreAllMocks();
+      resetPathCacheForTests();
+      await removeTempDir(scratch);
+    }
   });
 });
 
@@ -66,6 +101,7 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     process.env.PATH = originalPath;
     delete process.env.FAKE_NPM_LOG;
     delete process.env.FAKE_NPM_MODE;
@@ -133,11 +169,27 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     }
   });
 
-  it("says plainly when npm is missing", async () => {
+  it("offers automatic prerequisite setup when npm is missing", async () => {
     // The PATH scan also looks in standard install locations, which a test
     // cannot empty, so absence is injected at both call sites.
-    expect(serverInstallFor({ command: { linux: "npm install -g fake-engine" } }, false)).toBeNull();
+    expect(serverInstallFor({ command: { linux: "npm install -g fake-engine", darwin: "npm install -g fake-engine", win32: "npm install -g fake-engine" } }, false)).toEqual({ package: "fake-engine" });
     mkdirSync(join(scratch, "empty"));
-    await expect(installNpmEngine("fake-engine", { baseDir: base, path: join(scratch, "empty") })).rejects.toThrow("npm is not installed");
+    // Exercise the real npm process with a private-runtime boundary fixture.
+    const npmCli = join(scratch, "npm-cli.mjs");
+    writeFileSync(npmCli, FAKE_NPM);
+    vi.spyOn(runtime, "ensureManagedNode").mockResolvedValue({ node: process.execPath, npmCli, bin: join(process.execPath, "..") });
+    await installNpmEngine("fake-engine", { baseDir: base, path: join(scratch, "empty"), cli: "fakebin" });
+    expect(calls()).toHaveLength(1);
+    expect(findCliCandidates("fakebin")).toContain(join(enginesBinDir(base), "fakebin"));
+  });
+
+  it("prepares a private runtime instead of using an obsolete system Node", async () => {
+    writeFileSync(join(binDir, "node"), "#!/bin/sh\necho v18.20.0\n", { mode: 0o755 });
+    const npmCli = join(scratch, "private-npm.mjs");
+    writeFileSync(npmCli, FAKE_NPM);
+    vi.spyOn(runtime, "ensureManagedNode").mockResolvedValue({ node: process.execPath, npmCli, bin: dirname(process.execPath) });
+    await installNpmEngine("fake-engine", { baseDir: base, path: binDir, cli: "fakebin" });
+    expect(calls()).toHaveLength(1);
+    expect(findCliCandidates("fakebin")).toContain(join(enginesBinDir(base), "fakebin"));
   });
 });

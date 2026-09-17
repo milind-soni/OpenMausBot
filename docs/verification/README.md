@@ -139,6 +139,9 @@ with an offline CLI and custom-domain validation without touching live accounts.
 The [engine library fixture](engines-ui.md) checks onboarding and Settings cards,
 responsive layouts, theme contrast, and status refreshes without losing drafts.
 
+The [one-click engines recipe](one-click-engines.md) checks private prerequisite
+setup without system npm, clean-machine onboarding, and install/retry/sign-in transitions.
+
 The [Claude account recipe](claude-account.md) checks sign-out, cancellation and
 retry against an offline Claude CLI confined to a disposable home.
 
