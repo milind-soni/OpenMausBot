@@ -8,7 +8,8 @@ import {
   localComputerSelectable,
   persistedComputerSelectionMatches,
   resolveBoxPanelAction,
-  shouldPollCloudPreview,
+  astraDriving,
+  cloudDesktopReady,
 } from "./local-computer";
 
 describe("local computer UI eligibility", () => {
@@ -190,7 +191,15 @@ describe("local computer UI eligibility", () => {
     ).toBe("local");
   });
 
-  it("refuses cloud preview polling when a stale ready phase belongs to Auto or another destination", () => {
+  it("marks the screen only while the agent, not a person, is at the wheel", () => {
+    expect(astraDriving({ held: false, busy: true })).toBe(true);
+    // A person who took control drives; the agent's beam has to go out.
+    expect(astraDriving({ held: true, busy: true })).toBe(false);
+    // An idle bot owns nothing, even with the wheel.
+    expect(astraDriving({ held: false, busy: false })).toBe(false);
+  });
+
+  it("refuses cloud desktop actions when a stale ready phase belongs to Auto or another destination", () => {
     const ready = {
       computer: "cloud" as const,
       cloudBackend: "box" as const,
@@ -200,15 +209,15 @@ describe("local computer UI eligibility", () => {
       resolvedComputer: "cloud" as const,
       resolvedCloudBackend: "box" as const,
     };
-    expect(shouldPollCloudPreview(ready)).toBe(true);
-    expect(shouldPollCloudPreview({ ...ready, computer: undefined })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, computer: "local" })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, phase: "starting" })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, botId: "bot-b" })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, resolvedBotId: null })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, resolvedComputer: undefined })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, cloudBackend: "vps" })).toBe(false);
-    expect(shouldPollCloudPreview({ ...ready, resolvedCloudBackend: "vps" })).toBe(false);
+    expect(cloudDesktopReady(ready)).toBe(true);
+    expect(cloudDesktopReady({ ...ready, computer: undefined })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, computer: "local" })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, phase: "starting" })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, botId: "bot-b" })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, resolvedBotId: null })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, resolvedComputer: undefined })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, cloudBackend: "vps" })).toBe(false);
+    expect(cloudDesktopReady({ ...ready, resolvedCloudBackend: "vps" })).toBe(false);
   });
 
   it("rejects stale persisted selections in both cloud-backend switch directions", () => {

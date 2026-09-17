@@ -141,18 +141,6 @@ const __APP_VERSION__: string;
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
       onSpeechEnd(cb: (info: { code: number | null; reason?: string }) => void): () => void;
-      /** Call-mode streaming STT (Deepgram, main-process socket): an
-       * open-mic session delivering one utterance per endpointed phrase.
-       * Present on desktop builds; the call loop prefers it over Apple
-       * Speech so calls work on Windows and any platform with a mic. */
-      callStt?: {
-        start(): Promise<number>;
-        audio(id: number, chunk: ArrayBuffer): Promise<void>;
-        stop(id: number): Promise<void>;
-        onOpen(cb: (id: number) => void): () => void;
-        onUtterance(cb: (id: number, utterance: { text: string; partial: boolean }) => void): () => void;
-        onError(cb: (id: number, message: string) => void): () => void;
-      };
       /** Absolute path of a dropped File ("" when the drag carried no
        * file on disk). Absent in older builds of the shell. */
       getPathForFile?(file: File): string;
@@ -213,23 +201,9 @@ const __APP_VERSION__: string;
       saveFile?(filePath: string): Promise<string | null>;
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "composioApiKey" | "xaiApiKey" | "visionApiKey" | "dictationApiKey" | "picovoiceAccessKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
+        name: "composioApiKey" | "xaiApiKey" | "visionApiKey" | "picovoiceAccessKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "openaiImageApiKey" | "customImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
-      /** Hold-to-dictate streaming STT (Deepgram). The renderer streams mic
-       * audio; the main process owns the WebSocket and the key. */
-      dictation?: {
-        start(): Promise<number>;
-        audio(id: number, chunk: ArrayBuffer): Promise<void>;
-        finish(id: number): Promise<string>;
-        cancel(id: number): Promise<void>;
-        onOpen(cb: (id: number) => void): () => void;
-        onPartial(cb: (id: number, partialText: string) => void): () => void;
-        onError(cb: (id: number, message: string) => void): () => void;
-        /** Deepgram endpointed an utterance — the auto-stop signal for
-         * button/wake-word dictation. */
-        onUtterance(cb: (id: number, utterance: string) => void): () => void;
-      };
       /** Copy dictated text into the system clipboard. Resolves once written. */
       writeClipboardText?(text: string): Promise<{ written: boolean }>;
       /** Read the system clipboard (the Handy dictation bridge detects the

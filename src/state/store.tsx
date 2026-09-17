@@ -418,7 +418,6 @@ export interface ConfigStatus {
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
   vision?: { configured: boolean; url?: string };
-  dictation?: { configured: boolean };
   /** The "Astra" wake word's Picovoice AccessKey is saved (never echoed). */
   wakeWord?: { configured: boolean };
   /** what this server is entitled to; Settings shows only what works here */

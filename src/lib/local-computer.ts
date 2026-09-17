@@ -104,10 +104,17 @@ export function resolveBoxPanelAction({
   return autoLocal ? "local" : "auto-unavailable";
 }
 
+/** Whether the agent — not a person — is at this computer's wheel. The
+ * Computer panel marks exactly this window with its beam: a bot that is merely
+ * selected, or a person who has taken control, drives nothing. */
+export function astraDriving({ held, busy }: { held: boolean; busy: boolean }): boolean {
+  return !held && busy;
+}
+
 /** A stale ready phase can survive one render while the selected bot or its
- * destination changes. Keep every cloud preview POST behind the durable,
+ * destination changes. Every cloud desktop action stays behind the durable,
  * explicit Cloud choice as well as the resolved phase. */
-export function shouldPollCloudPreview(
+export function cloudDesktopReady(
   {
     computer,
     cloudBackend,

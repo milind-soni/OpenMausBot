@@ -2,22 +2,21 @@
 // the "Astra" wake word drives.
 //
 // Difference from hold-to-dictate (clipboard-dictation.ts): there is no
-// gesture to finalize, so END OF SPEECH has to be detected. Three signals
-// cooperate, each covering the others' failure modes:
-//   1. Deepgram's endpointer (speech_final) — the speaker finished a phrase.
-//   2. A local silence watchdog — trailing RMS below threshold for ~600 ms
-//      once an utterance was heard, so background noise cannot hold the mic
-//      open forever and a missed endpointer still stops the recording.
-//   3. A hard max-duration cap — a stuck session always ends, transcript or
+// gesture to finalize, so END OF SPEECH has to be detected. Two signals
+// cooperate, each covering the other's failure mode:
+//   1. A local silence watchdog — trailing RMS below threshold for ~600 ms
+//      once speech was heard. It is the ONLY endpointer here: the offline
+//      engine decodes a finished file, so nothing remote reports an endpoint.
+//   2. A hard max-duration cap — a stuck session always ends, transcript or
 //      not.
 // While the bot is speaking (TTS) the session is SUSPENDED: frames are
-// dropped and endpoint events ignored, the same half-duplex rule the call
-// view uses, so the microphone never transcribes the bot's own voice.
+// dropped, the same half-duplex rule the call view uses, so the microphone
+// never transcribes the bot's own voice.
 //
 // The event machine below is pure and unit-tested; the hook only wires
-// browser audio and the bridge to it.
+// browser audio and the offline transcriber to it.
 
-import { floatToPcm16 } from "./clipboard-dictation";
+import { DICTATION_UNAVAILABLE, createDictationCapture, type DictationCapture } from "./dictation-capture";
 
 export type VoiceDictationPhase = "idle" | "starting" | "listening" | "finalizing";
 
@@ -78,7 +77,7 @@ export function isSilentLevel(rms: number): boolean {
 }
 
 /** Pure transition step. The hook reads the RESULT (not the event) to decide
- * side effects — a phase entering "finalizing" means flush Deepgram now. */
+ * side effects — a phase entering "finalizing" means transcribe now. */
 export function stepVoiceDictation(state: VoiceDictationState, event: VoiceDictationEvent): VoiceDictationState {
   switch (event.type) {
     case "begin":
@@ -136,43 +135,38 @@ export function mergeDictatedText(base: string, dictated: string): string {
   return `${left} ${right}`;
 }
 
-const PCM_SAMPLE_RATE = 16000;
-const PCM_CHUNK_FRAMES = 4096;
-
 export interface VoiceDictationCallbacks {
-  /** Live transcript (committed + interim). */
-  onPartial?: (text: string) => void;
   /** The final transcript, once the session ends (stop, auto-stop or cap). */
   onResult: (text: string) => void;
   onError: (message: string) => void;
   /** Recording indicator for the pill/button. */
   onActiveChange?: (active: boolean) => void;
+  /** Finalization began: the mic is closed and the offline engine is decoding
+   * the recording. It takes a beat on a cold model, so the UI can say so. */
+  onTranscribing?: () => void;
 }
 
 /**
- * Drives one voice-note dictation session. Returns null when the bridge
- * lacks the dictation surface (browser/dev shells).
+ * Drives one voice-note dictation session on the offline engine.
+ *
+ * The audio path is the same one hold-to-dictate uses: frames are captured
+ * here and decoded on this machine by the user's own Handy install. Because
+ * Handy decodes a finished file rather than a stream, `heardUtterance` — the
+ * flag the silence watchdog waits on before it may end a turn — is set from
+ * the LOCAL level signal instead of a remote endpoint event. Everything above
+ * (the transitions, the auto-stop rules, the 5-minute cap) is unchanged, so
+ * the timing behaves exactly as it did with a streaming recognizer.
+ *
+ * Returns null when the bridge lacks the transcription surface (browser and
+ * dev shells), which the caller reports rather than silently doing nothing.
  */
 export function createVoiceDictationSession(callbacks: VoiceDictationCallbacks) {
-  const bridge = window.ogb;
-  if (!bridge?.dictation) return null;
-  // A captured narrowed alias: closures below outlive the type narrowing at
-  // the check above, so every dictation call goes through `d`.
-  const d = bridge.dictation;
-
   let state: VoiceDictationState = INITIAL_VOICE_DICTATION_STATE;
   let disposed = false;
   let suspended = false;
-  let stream: MediaStream | null = null;
-  let context: AudioContext | null = null;
-  let processor: ScriptProcessorNode | null = null;
-  let sessionId: number | null = null;
+  let capture: DictationCapture | null = null;
   let finalizeInFlight = false;
-  let silenceTimer: number | undefined;
-  let offOpen: (() => void) | null = null;
-  let offPartial: (() => void) | null = null;
-  let offUtterance: (() => void) | null = null;
-  let offError: (() => void) | null = null;
+  let capTimer: number | undefined;
 
   const emit = () => callbacks.onActiveChange?.(state.phase === "listening" || state.phase === "starting");
 
@@ -181,145 +175,131 @@ export function createVoiceDictationSession(callbacks: VoiceDictationCallbacks) 
     const before = state;
     state = stepVoiceDictation(state, event);
     if (state === before) return;
-    if (before.partial !== state.partial) callbacks.onPartial?.(state.partial);
-    if ((before.phase === "listening" || before.phase === "starting") !== (state.phase === "listening" || state.phase === "starting")) emit();
+    const wasLive = before.phase === "listening" || before.phase === "starting";
+    const isLive = state.phase === "listening" || state.phase === "starting";
+    if (wasLive !== isLive) emit();
     if (state.phase === "finalizing" && before.phase !== "finalizing") void finalize();
     if (shouldAutoStop(state)) stop();
     if (shouldForceStop(state, Date.now())) stop();
   };
 
-  const scheduleCapCheck = () => {
-    window.clearInterval(silenceTimer);
-    // The interval serves both the watchdog countdown bookkeeping (chunks
-    // come from audio events, not the clock) and the max-duration check.
-    silenceTimer = window.setInterval(() => {
-      if (shouldForceStop(state, Date.now())) stop();
-    }, 1000);
-  };
-
-  const cleanupAudio = () => {
-    window.clearInterval(silenceTimer);
-    try {
-      processor?.disconnect();
-    } catch {}
-    processor = null;
-    void context?.close().catch(() => {});
-    context = null;
-    for (const track of stream?.getTracks() ?? []) track.stop();
-    stream = null;
+  /** Manual stop, wake-word stop, or the watchdog: begin finalization. */
+  const stop = () => {
+    if (state.phase === "starting") {
+      capture?.discard();
+      capture = null;
+      dispatch({ type: "reset" });
+      return;
+    }
+    dispatch({ type: "stop", now: Date.now() });
   };
 
   const finalize = async () => {
     if (finalizeInFlight) return;
     finalizeInFlight = true;
-    const id = sessionId;
-    sessionId = null;
-    cleanupAudio();
-    const text = id !== null ? await d.finish(id).catch(() => "") : "";
-    finalizeInFlight = false;
-    if (disposed) return;
-    offPartial?.();
-    offUtterance?.();
-    offError?.();
-    offOpen?.();
-    offPartial = offUtterance = offError = offOpen = null;
-    dispatch({ type: "finish", text });
-    const finalText = text.trim();
-    if (finalText) callbacks.onResult(finalText);
-    else callbacks.onError("Nothing was picked up — try speaking a little louder.");
-  };
-
-  /** Manual stop, wake-word stop, or the watchdog: begin finalization. */
-  const stop = () => dispatch({ type: "stop", now: Date.now() });
-
-  const pump = (input: Float32Array) => {
-    if (disposed || state.phase !== "listening") return;
-    if (suspended) return; // the bot is talking: drop frames (half-duplex)
-    dispatch({ type: "level", rms: rmsOf(input) });
-    if (sessionId === null) return;
-    const pcm = floatToPcm16(input);
-    void d.audio(sessionId, pcm).catch(() => {});
+    const active = capture;
+    window.clearInterval(capTimer);
+    capTimer = undefined;
+    if (!active) {
+      finalizeInFlight = false;
+      return;
+    }
+    callbacks.onTranscribing?.();
+    try {
+      const text = await active.transcribe();
+      if (disposed || capture !== active || state.error) return;
+      dispatch({ type: "finish", text });
+      const finalText = text.trim();
+      if (finalText) callbacks.onResult(finalText);
+      else callbacks.onError("Nothing was picked up — try speaking a little louder.");
+    } catch {
+      if (!disposed && capture === active && !state.error) {
+        dispatch({ type: "fail", message: "Handy transcription failed." });
+        callbacks.onError("Handy transcription failed.");
+      }
+    } finally {
+      finalizeInFlight = false;
+      if (capture === active) capture = null;
+    }
   };
 
   const start = async () => {
+    if (disposed || state.phase !== "idle" || finalizeInFlight) return;
     dispatch({ type: "begin", now: Date.now() });
-    scheduleCapCheck();
+    if (disposed) return;
+    let session: DictationCapture | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      if (disposed) {
-        for (const track of stream.getTracks()) track.stop();
+      session = createDictationCapture({
+        // No endpointerFrames: the watchdog above owns "the speaker stopped",
+        // so the tested silence rules stay the single source of truth. The
+        // capture's own memory ceiling still reports through onAutoStop.
+        onAutoStop: () => stop(),
+        onLevel: (level) => {
+          if (disposed || suspended) return;
+          // First speech of this session: silence now means "done" — the
+          // signal a streaming recognizer's endpointer used to supply.
+          if (level.hasSpeech && !state.heardUtterance) dispatch({ type: "utterance" });
+          dispatch({ type: "level", rms: level.rms });
+        },
+        onError: (message) => {
+          if (!disposed && capture === session) {
+            dispatch({ type: "fail", message });
+            callbacks.onError(message);
+          }
+        },
+      });
+      if (!session) {
+        dispatch({ type: "fail", message: DICTATION_UNAVAILABLE });
+        callbacks.onError(DICTATION_UNAVAILABLE);
         return;
       }
-      const id = await d.start();
-      if (disposed) {
-        void d.cancel(id).catch(() => {});
+      capture = session;
+      session.setMuted(suspended);
+      await session.start();
+      if (disposed || capture !== session) {
+        session.discard();
         return;
       }
-      sessionId = id;
-      context = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
-      const source = context.createMediaStreamSource(stream);
-      processor = context.createScriptProcessor(PCM_CHUNK_FRAMES, 1, 1);
-      processor.onaudioprocess = (event) => pump(event.inputBuffer.getChannelData(0));
-      source.connect(processor);
-      // Capture must never reach the speakers; a muted sink keeps the graph
-      // pulling while the processor reads the input side directly.
-      const mute = context.createGain();
-      mute.gain.value = 0;
-      processor.connect(mute);
-      mute.connect(context.destination);
-
-      offOpen = d.onOpen((openId) => {
-        if (openId === sessionId) dispatch({ type: "opened" });
-      });
-      offPartial = d.onPartial((id2, text) => {
-        if (id2 === sessionId) dispatch({ type: "partial", text });
-      });
-      offUtterance = d.onUtterance((id2) => {
-        if (id2 === sessionId && !suspended) dispatch({ type: "utterance" });
-      });
-      offError = d.onError((id2, message) => {
-        if (id2 === sessionId) dispatch({ type: "fail", message });
-      });
+      dispatch({ type: "opened" });
+      // The interval only checks the cap; the silence countdown is driven by
+      // audio frames, not the clock.
+      capTimer = window.setInterval(() => {
+        if (shouldForceStop(state, Date.now())) stop();
+      }, 1000);
     } catch (error) {
-      cleanupAudio();
-      sessionId = null;
+      if (capture !== session) return;
+      capture = null;
+      window.clearInterval(capTimer);
+      capTimer = undefined;
       const message = error instanceof Error ? error.message : String(error);
-      dispatch({
-        type: "fail",
-        message: /permission|denied/i.test(message)
-          ? "Microphone access was denied — allow it, then press the mic again."
-          : /No Deepgram key/i.test(message)
-            ? message
-            : "Could not reach the transcription stream. Check your Deepgram key and connection.",
-      });
-      callbacks.onError(state.error ?? message);
+      const failure = /permission|denied/i.test(message)
+        ? "Microphone access was denied — allow it, then press the mic again."
+        : "The microphone could not start. Check Microphone access, then try again.";
+      dispatch({ type: "fail", message: failure });
+      callbacks.onError(failure);
     }
   };
 
   return {
-    /** Open the mic and begin capturing. The hook/wake session calls this
-     * once; auto-stop, manual stop and the cap go through stop(). */
-    start,
     /** Live state (for the pill). */
     get state(): VoiceDictationState {
       return state;
     },
-    /** Mute the mic while the bot speaks; frames and endpoints are ignored. */
+    /** Open the mic and begin capturing. The auto-stop, the manual stop and
+     * the cap all funnel through stop(). */
+    start,
+    /** The bot speaks: stop counting silence and drop frames, so its own
+     * voice can neither end the user's turn nor land in the recording. */
     setSuspended(next: boolean) {
       suspended = next;
+      capture?.setMuted(next);
     },
     stop,
     dispose() {
       disposed = true;
-      window.clearInterval(silenceTimer);
-      offPartial?.();
-      offUtterance?.();
-      offError?.();
-      offOpen?.();
-      const id = sessionId;
-      sessionId = null;
-      if (id !== null) void d.cancel(id).catch(() => {});
-      cleanupAudio();
+      window.clearInterval(capTimer);
+      capture?.discard();
+      capture = null;
       state = { ...INITIAL_VOICE_DICTATION_STATE };
     },
   };

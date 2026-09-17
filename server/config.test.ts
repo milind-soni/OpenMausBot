@@ -776,6 +776,8 @@ describe("credential env preference", () => {
     "BOX_TOKEN",
     "OPENCODE_API_KEY",
     "ASTRA_TTS_KEY",
+    "ASTRA_DICTATION_KEY",
+    "ASTRA_PICOVOICE_KEY",
     "ASTRA_OPENAI_IMAGE_KEY",
     "COMPOSIO_API_KEY",
   ] as const;
@@ -793,6 +795,39 @@ describe("credential env preference", () => {
       else process.env[name] = saved[name];
     }
     rmSync(join(DATA_DIR, "config.json"), { force: true });
+  });
+
+  it("ignores retired dictation config/env while preserving supported voice credentials", () => {
+    const path = join(DATA_DIR, "config.json");
+    const legacy = { dictation: { key: "fixture-legacy-file" } };
+    writeFileSync(path, JSON.stringify(legacy));
+    process.env.ASTRA_DICTATION_KEY = "fixture-legacy-env";
+    process.env.ASTRA_PICOVOICE_KEY = "fixture-wake-env";
+    process.env.ASTRA_TTS_KEY = "fixture-tts-env";
+    expect(parseStoredConfig(legacy)).toEqual({});
+    const patch = parseConfigPatch({
+      dictation: { key: "fixture-new-ignored" },
+      wakeWord: { accessKey: "fixture-wake-new" },
+      tts: { key: "fixture-tts-new", provider: "system" },
+    });
+    expect(patch).not.toHaveProperty("dictation");
+    expect(loadConfig()).not.toHaveProperty("dictation");
+    expect(loadConfig().wakeWord?.accessKey).toBe("fixture-wake-env");
+    expect(loadConfig().tts?.key).toBe("fixture-tts-env");
+    saveConfig(patch);
+    syncCredentialEnv(patch);
+    expect(process.env.ASTRA_DICTATION_KEY).toBe("fixture-legacy-env");
+    expect(loadConfig().wakeWord?.accessKey).toBe("fixture-wake-new");
+    expect(loadConfig().tts).toMatchObject({ key: "fixture-tts-new", provider: "system" });
+    // Unknown raw stored fields survive unrelated saves, but are never live config.
+    expect(JSON.parse(readFileSync(path, "utf8")).dictation).toEqual(legacy.dictation);
+    expect(loadConfig()).not.toHaveProperty("dictation");
+    const childEnv = { ASTRA_DICTATION_KEY: "fixture-legacy-env", PATH: "keep" };
+    stripWorkspaceCredentialEnv(childEnv);
+    expect(childEnv).toEqual({ PATH: "keep" });
+    rmSync(path);
+    saveConfig(parseConfigPatch({ dictation: { key: "fixture-new-ignored" } }));
+    expect(JSON.parse(readFileSync(path, "utf8"))).not.toHaveProperty("dictation");
   });
 
   it("prefers env over the config file for every credential", () => {

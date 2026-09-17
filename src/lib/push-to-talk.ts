@@ -1,79 +1,101 @@
+// The call's talk key: the bare SPACE BAR.
+//
+// One gesture carries all three things a voice call needs, which is why it is
+// the space bar rather than a chord:
+//
+//   not held   the agent runs the call — its own endpointer decides when the
+//              user's turn ended, exactly as before;
+//   press      "I am talking now". The ear opens, and if the agent is mid
+//              sentence this IS the interruption: its audio stops in the same
+//              tick, because talking over an agent that keeps talking is not
+//              a conversation;
+//   release    the turn is over — the utterance is finalized and sent, so the
+//              agent answers what was just said.
+//
+// While the key is down the automatic endpointer stands aside (see
+// OfflineCallStt.holdTurn): a breath in the middle of a sentence is not the
+// end of a turn, and the user is already telling us where the turn ends.
+//
+// Space is a heavily shared key, so two things are deliberately excluded: a
+// text field keeps its space bar (typing is never talking), and any modifier
+// turns the gesture into somebody else's shortcut.
 import { useEffect, useRef, useState } from "react";
 
-import { currentCall } from "./call";
+type TalkKeyEvent = Pick<KeyboardEvent, "code" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "repeat">;
 
-type ModifierEvent = Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code" | "repeat">;
-
-export function isPushToTalkPress(event: ModifierEvent): boolean {
-  const modifier =
-    event.code === "AltLeft" ||
-    event.code === "AltRight" ||
-    event.code === "ControlLeft" ||
-    event.code === "ControlRight";
-  return modifier && event.altKey && event.ctrlKey && !event.repeat;
+/** Space alone, not an auto-repeat, no modifiers. */
+export function isTalkKey(event: TalkKeyEvent): boolean {
+  return (
+    event.code === "Space" &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    !event.repeat
+  );
 }
 
-/** Hold Control + Option to replace automatic endpointing with a manually
- * finalized utterance. The ordinary call listener remains the default. */
-export function usePushToTalk(targetId: string, enabled: boolean, onError: () => void): boolean {
-  const [active, setActive] = useState(false);
-  const held = useRef(false);
-  const enabledRef = useRef(enabled);
-  const onErrorRef = useRef(onError);
-  enabledRef.current = enabled;
-  onErrorRef.current = onError;
+/** A field the user is typing in owns its own space bar. */
+export function isTypingTarget(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null;
+  if (!element || typeof element.tagName !== "string") return false;
+  const tag = element.tagName.toLowerCase();
+  if (tag === "input" || tag === "textarea" || tag === "select") return true;
+  return element.isContentEditable === true;
+}
+
+export interface CallTalkHandlers {
+  /** True while this call is the live one in this window. */
+  isCallLive: () => boolean;
+  /** Space went down: open the ear and, if the agent is speaking, cut it off. */
+  onTalkStart: () => void;
+  /** Space came up: finalize the turn so the agent can answer. */
+  onTalkEnd: () => void;
+}
+
+/** True while the talk key is held, for the on-screen indicator. */
+export function useCallTalk(handlers: CallTalkHandlers): boolean {
+  const [talking, setTalking] = useState(false);
+  const callbacks = useRef(handlers);
+  callbacks.current = handlers;
 
   useEffect(() => {
-    if (enabled) return;
-    held.current = false;
-    setActive(false);
-  }, [enabled]);
+    let down = false;
 
-  useEffect(() => {
-    const bridge = window.ogb;
-    if (!bridge?.speechFinish) return;
-
-    const finish = () => {
-      if (!held.current) return;
-      held.current = false;
-      setActive(false);
-      void bridge.speechFinish?.();
+    const end = () => {
+      if (!down) return;
+      down = false;
+      setTalking(false);
+      callbacks.current.onTalkEnd();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (
-        held.current ||
-        !enabledRef.current ||
-        currentCall() !== targetId ||
-        !isPushToTalkPress(event)
-      ) {
-        return;
-      }
+      if (down || !isTalkKey(event) || isTypingTarget(event.target)) return;
+      if (!callbacks.current.isCallLive()) return;
+      // The page must not scroll under the call, and a focused button must not
+      // also activate: the space bar belongs to the conversation here.
       event.preventDefault();
-      held.current = true;
-      setActive(true);
-      void bridge.speechStart().catch(() => {
-        held.current = false;
-        setActive(false);
-        onErrorRef.current();
-      });
+      down = true;
+      setTalking(true);
+      callbacks.current.onTalkStart();
     };
     const onKeyUp = (event: KeyboardEvent) => {
-      if (!held.current || (event.altKey && event.ctrlKey)) return;
+      if (!down || event.code !== "Space") return;
       event.preventDefault();
-      finish();
+      end();
     };
-    const onBlur = () => finish();
 
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
-    window.addEventListener("blur", onBlur);
+    // A focus steal mid-hold means the keyup never arrives in this window:
+    // finalize what was said rather than leaving the microphone pinned open.
+    window.addEventListener("blur", end);
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
-      window.removeEventListener("blur", onBlur);
-      held.current = false;
+      window.removeEventListener("blur", end);
+      down = false;
     };
-  }, [targetId]);
+  }, []);
 
-  return active;
+  return talking;
 }

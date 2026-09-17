@@ -97,8 +97,8 @@ describe("createWakeWordSession", () => {
     const onActiveChange = vi.fn();
     const wake = create({ onActiveChange, onError });
     wake.start();
-    h.callbacks().onError("No Deepgram key");
-    expect(onError).toHaveBeenCalledWith("No Deepgram key");
+    h.callbacks().onError("Handy is unavailable");
+    expect(onError).toHaveBeenCalledWith("Handy is unavailable");
     expect(h.dispose).toHaveBeenCalledTimes(1);
     expect(onActiveChange).toHaveBeenLastCalledWith(false);
   });

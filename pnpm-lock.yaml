@@ -32,12 +32,21 @@ importers:
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
+      img-fx:
+        specifier: 0.5.1
+        version: 0.5.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.186.0)
+      liquid-gooey:
+        specifier: 0.2.1
+        version: 0.2.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       lucide-react:
         specifier: ^0.539.0
         version: 0.539.0(react@19.2.8)
       mdast-util-from-markdown:
         specifier: ^2.0.3
         version: 2.0.3
+      metal-fx:
+        specifier: 2.0.10
+        version: 2.0.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       posthog-js:
         specifier: ^1.415.6
         version: 1.415.6
@@ -71,6 +80,9 @@ importers:
       thinking-orbs:
         specifier: ^0.3.1
         version: 0.3.1(react@19.2.8)
+      three:
+        specifier: ^0.186.0
+        version: 0.186.0
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -2971,6 +2983,13 @@ packages:
     resolution: {integrity: sha512-vK9P5/iUfdl95AI+JVyUuIcVtd4ofvtrOr3HNtM2yxC9bnMbEdp3x01OhQNnjb8IJYi38VlTE3mBXwcfvywuSw==}
     engines: {node: '>= 14'}
 
+  img-fx@0.5.1:
+    resolution: {integrity: sha512-CXIFGoGgK5F80d8I+VXZ96dmfkWqb4EGpecAIVXVXhuUVqCe1571Xhf5oGZ4qmTce0UoTfNMKLQDOgSAbIbH0w==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
+      three: '>=0.149.0'
+
   inflight@1.0.6:
     resolution: {integrity: sha512-k92I/b08q4wvFscXCLvqfsHCrjrF7yiXsQuIVvVE7N82W3+aqpzuUdBbfhWcy/FZR3/4IgflMgKLOsvPDrGCJA==}
     deprecated: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
@@ -3155,6 +3174,12 @@ packages:
     resolution: {integrity: sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ==}
     engines: {node: '>= 12.0.0'}
 
+  liquid-gooey@0.2.1:
+    resolution: {integrity: sha512-BRb0Rscie4JCHFmk4bkWxM+p03c34sidLgNE8XFJGRGEyWM/Wf0FYztJH3CfMWwOVajd4dVurAFe+BTSj8Eeeg==}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+
   lodash.escaperegexp@4.1.2:
     resolution: {integrity: sha512-TM9YBvyC84ZxE3rgfefxUWiQKLilstD6k7PTGt6wfbtXF8ixIJLOL3VYyV/z+ZiPLsVxAsKAFVwWlWeb2Y8Yyw==}
 
@@ -3257,6 +3282,12 @@ packages:
 
   mdast-util-to-string@4.0.0:
     resolution: {integrity: sha512-0H44vDimn51F0YwvxSJSm0eCDOJTRlmN0R1yBh4HLj9wiV1Dn0QoXGbvFAWj2hSItVTlCmBF1hqKlIyUBVFLPg==}
+
+  metal-fx@2.0.10:
+    resolution: {integrity: sha512-XOeKBZl4xFw+l+7oe/zBt0AK2w87QWpa7QoSgd0c0MzkglQr49vejCVvkl+E3acKHW1K+SEJ8Pyis8v8BCjDpQ==}
+    peerDependencies:
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
 
   micromark-core-commonmark@2.0.3:
     resolution: {integrity: sha512-RDBrHEMSxVFLg6xvnXmb1Ayr2WzLAWjeSATAoxwKYJV94TeNavgoIdA0a9ytzDSVzBy2YKFK+emCPOEibLeCrg==}
@@ -3995,6 +4026,9 @@ packages:
     resolution: {integrity: sha512-3BG1aeB1RUTxItCml/BBuIz5JRM4kZqGuyx+vouv0fXTtcR9ZNoKjWGneHPx94y74GxgArwJZ1qbJR5dt54kSw==}
     peerDependencies:
       react: '>=18.0.0'
+
+  three@0.186.0:
+    resolution: {integrity: sha512-cr/fIM2ddMSVbYVgkfD4jLJv7Fh/8ZTjvo+7gQeSVGUZHxpx9FDwoL5iC7hUz/LiRA8wMbqfnb90xKfm1/HHkQ==}
 
   tiny-async-pool@1.3.0:
     resolution: {integrity: sha512-01EAw5EDrcVrdgyCLgoSPvqznC0sVxDSVeiOz09FUpjh71G79VCqneOr+xvt7T1r76CF6ZZfPjHorN2+d+3mqA==}
@@ -6892,6 +6926,12 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  img-fx@0.5.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(three@0.186.0):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
+      three: 0.186.0
+
   inflight@1.0.6:
     dependencies:
       once: 1.4.0
@@ -7023,6 +7063,11 @@ snapshots:
       lightningcss-linux-x64-musl: 1.32.0
       lightningcss-win32-arm64-msvc: 1.32.0
       lightningcss-win32-x64-msvc: 1.32.0
+
+  liquid-gooey@0.2.1(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   lodash.escaperegexp@4.1.2: {}
 
@@ -7231,6 +7276,11 @@ snapshots:
   mdast-util-to-string@4.0.0:
     dependencies:
       '@types/mdast': 4.0.4
+
+  metal-fx@2.0.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+    dependencies:
+      react: 19.2.8
+      react-dom: 19.2.8(react@19.2.8)
 
   micromark-core-commonmark@2.0.3:
     dependencies:
@@ -8274,6 +8324,8 @@ snapshots:
   thinking-orbs@0.3.1(react@19.2.8):
     dependencies:
       react: 19.2.8
+
+  three@0.186.0: {}
 
   tiny-async-pool@1.3.0:
     dependencies:

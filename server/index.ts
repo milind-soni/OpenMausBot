@@ -8284,7 +8284,6 @@ function configStatus() {
     opencodeGo: { configured: Boolean(cfg.opencodeGo?.apiKey) },
     // the chosen voice is a setting, not a secret; the key is reported the
     // same configured-or-not way as every other credential
-    dictation: { configured: Boolean(cfg.dictation?.key) },
     wakeWord: { configured: Boolean(cfg.wakeWord?.accessKey) },
     tts: tts.describeVoice(cfg),
     imageGen: avatarImageStatus(cfg),

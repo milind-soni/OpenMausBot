@@ -4,10 +4,9 @@
 // thing that comes out is "the phrase was heard". No audio leaves the
 // machine, nothing is transcribed here. Hearing "Astra" starts one
 // voice-dictation session (voice-dictation.ts); when the speaker finishes
-// (Deepgram's endpointer + the silence watchdog), the transcript lands in
-// the composer via appendComposerDraft, the same path the Verify card's
-// Save button uses — it updates a mounted composer live and survives the
-// composer being unmounted.
+// (the local silence watchdog), the transcript lands in the composer via
+// appendComposerDraft, the same path the Verify card's Save button uses — it
+// updates a mounted composer live and survives the composer being unmounted.
 //
 // Suspension rules (mirroring the call view's half-duplex rule):
 //   - while the bot SPEAKS (TTS), detection pauses — Astra must never wake
@@ -26,8 +25,6 @@ import { Porcupine, PorcupineWorker, type PorcupineKeyword } from "@picovoice/po
 import { WebVoiceProcessor } from "@picovoice/web-voice-processor";
 
 import { appendComposerDraft } from "./drafts";
-import { wakeDictationEngine } from "./handy";
-import { createHandyDictationSession } from "./handy-dictation";
 import { createVoiceDictationSession } from "./voice-dictation";
 
 export const WAKE_PHRASE = "Astra";
@@ -145,16 +142,13 @@ export class WakeWordController {
 }
 
 /** One wake→dictate cycle. The controller never touches the composer or the
- * transcription engines themselves; this object owns the session while a
+ * transcription engine itself; this object owns the session while a
  * transcript is being captured, so a second "Astra" cannot double-open it.
- * The engine is chosen per start(): the built-in Deepgram bridge (cloud,
- * needs a key) or the user's own Handy app (offline, transcript arrives via
- * the clipboard). */
+ * There is one engine now — the user's own Handy install, decoded offline —
+ * so start() has no choice to make. */
 export function createWakeWordSession(callbacks: {
   onActiveChange?: (active: boolean) => void;
-  /** Live partials (cloud engine only — Handy delivers one final result). */
-  onPartial?: (text: string) => void;
-  /** Handy only: recording ended, transcription runs inside Handy. */
+  /** The mic is closed and the offline engine is decoding the recording. */
   onTranscribing?: () => void;
   onError: (message: string) => void;
 }) {
@@ -178,38 +172,12 @@ export function createWakeWordSession(callbacks: {
     },
     start() {
       if (session) return;
-      if (wakeDictationEngine() === "handy") {
-        const handy = createHandyDictationSession({
-          onActiveChange: (active) => {
-            if (active) callbacks.onActiveChange?.(true);
-          },
-          onTranscribing: () => callbacks.onTranscribing?.(),
-          onTranscript: (text) => {
-            if (!session) return;
-            deliver(text);
-            teardown();
-          },
-          onError: (message) => {
-            if (!session) return;
-            callbacks.onError(message);
-            teardown();
-          },
-        });
-        if (!handy) {
-          callbacks.onError("Handy dictation isn't available in this build.");
-          return;
-        }
-        session = handy as Disposable;
-        callbacks.onActiveChange?.(true);
-        handy.start();
-        return;
-      }
-      const cloud = createVoiceDictationSession({
+      const dictation = createVoiceDictationSession({
         onActiveChange: (active) => {
           if (!active) return;
           callbacks.onActiveChange?.(true);
         },
-        onPartial: (text) => callbacks.onPartial?.(text),
+        onTranscribing: () => callbacks.onTranscribing?.(),
         onResult: (text) => {
           // A disposed session's final event can race the teardown that
           // disposed it; only the live session may write or tear down.
@@ -223,13 +191,13 @@ export function createWakeWordSession(callbacks: {
           teardown();
         },
       });
-      if (!cloud) {
+      if (!dictation) {
         callbacks.onError("Dictation isn't available in this build.");
         return;
       }
-      session = cloud as Disposable;
+      session = dictation as Disposable;
       callbacks.onActiveChange?.(true);
-      void cloud.start();
+      void dictation.start();
     },
     /** The composer is the destination only while it is mounted; a thread
      * switch mid-dictation ends the capture instead of writing into a

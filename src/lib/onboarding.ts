@@ -120,6 +120,8 @@ export function beatWidth(beat: BeatId): number {
 /** The OS preference, plus a dev hook the preview page uses to show the
  * reduced variant without changing system settings. */
 export function reducedMotion(): boolean {
-  if (typeof document !== "undefined" && document.documentElement.dataset.reducedMotion === "true") return true;
+  // The dataset hook is a dev affordance, so a document without it (or a
+  // partial stub standing in for one in a test) simply has no override.
+  if (document?.documentElement?.dataset?.reducedMotion === "true") return true;
   return globalThis.window?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }

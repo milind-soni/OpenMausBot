@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -8,9 +8,9 @@ import {
   Power,
   RotateCcw,
 } from "lucide-react";
-
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { reducedMotion } from "@/lib/onboarding";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 
 const LINUX_GUIDE_URL =
@@ -21,6 +21,27 @@ export function LinuxLocalControl() {
   const local = capabilities.localComputer;
   const [pending, setPending] = useState<"enable" | "disable" | "retry" | null>(null);
   const [error, setError] = useState<string | { key: "computer.linux.stopFailed" } | null>(null);
+  // The Beta badge wears the metal effect, but the engine behind it is a WebGL
+  // bundle: it loads on demand rather than riding the Computer panel's chunk
+  // for one word. The plain pill shows first and is the whole fallback if the
+  // import never lands, which is also what the OS reduced-motion preference
+  // asks for.
+  const still = reducedMotion();
+  const [MetalBadge, setMetalBadge] = useState<typeof import("metal-fx")["MetalBadge"] | null>(null);
+  useEffect(() => {
+    if (still) return;
+    let alive = true;
+    void import("metal-fx")
+      .then((mod) => {
+        if (alive) setMetalBadge(() => mod.MetalBadge);
+      })
+      .catch(() => {
+        // No WebGL2, no badge: the plain pill below already said "Beta".
+      });
+    return () => {
+      alive = false;
+    };
+  }, [still]);
 
   if (capabilities.host.platform !== "linux") return null;
   const busy = pending !== null || local.status === "checking" || local.status === "starting";
@@ -56,6 +77,10 @@ export function LinuxLocalControl() {
           <div id="linux-local-control-title" className="flex items-center gap-2 text-[15px] font-medium text-ink">
             <MonitorCog size={16} className={ready ? "text-success" : "text-ink-secondary"} />
             {t("computer.linux.title")}
+            {/* The badge carries the one word the meta line used to spell out. */}
+            {MetalBadge && !still
+              ? <MetalBadge strength={0.5} scale={0.7}>{t("computer.linux.beta")}</MetalBadge>
+              : <span className="rounded-full bg-control px-2 py-0.5 text-[10px] text-ink-secondary">{t("computer.linux.beta")}</span>}
           </div>
           <div className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
             {t("computer.linux.meta", { session: wayland ? "Wayland" : "Xorg" })}

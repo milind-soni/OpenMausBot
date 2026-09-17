@@ -95,11 +95,14 @@ export function listPiperVoices(voicesDir: string = VOICES_DIR): Voice[] {
 
 /**
  * Synthesis knobs, passed explicitly because each one changes product
- * behavior rather than just the wire (same rule as the Deepgram query):
+ * behavior rather than just the wire:
  *
- *   lengthScale      speaking rate; <1 is faster. Piper's 1.0 is a measured,
- *                    lecture pace — 0.95 reads as conversation without
- *                    sounding hurried.
+ *   lengthScale      speaking rate; <1 is faster. Measured on en_US-ryan-high
+ *                    over one fixed sentence: 0.95 → 238 wpm, 1.0 → 226,
+ *                    1.2 → 210, 1.3 → 197. Nothing above 1.0 is a "lecture
+ *                    pace" in practice — 1.0 is already faster than
+ *                    conversational English (~150 wpm) — so 1.2 is the value
+ *                    that buys natural delivery instead of a hurried read.
  *   noiseScale       generator noise (expressiveness/variation).
  *   noiseW           phoneme-width noise (cadence variation). Both noise
  *                    values stay at piper's own defaults: upstream tuned them
@@ -121,7 +124,7 @@ export interface PiperTuning {
 }
 
 export const PIPER_TUNING: PiperTuning = {
-  lengthScale: 0.95,
+  lengthScale: 1.2,
   noiseScale: 0.667,
   noiseW: 0.8,
   sentenceSilence: 0.05,

@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
-import { handyPath, setHandyPath, setWakeDictationEngine, wakeDictationEngine } from "@/lib/handy";
+import { handyPath, setHandyPath } from "@/lib/handy";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
@@ -341,18 +341,9 @@ function ToolCallsRow() {
   );
 }
 
-/** The "Astra" wake word: a Picovoice AccessKey row plus the on/off switch.
- * The detector runs in the renderer (see wake-word.ts); the server only
- * stores the key and the feature flag. The transcription ENGINE is a
- * renderer choice: the built-in Deepgram bridge (cloud) or the user's own
- * Handy app (offline, transcript via clipboard). */
 function WakeWordSection() {
   const { state, dispatch } = useStore();
   const enabled = state.config?.features?.wakeWord === true;
-  // The words after "Astra" are transcribed by Deepgram, so the cloud engine
-  // is half-useless without that key — say so instead of failing live.
-  const deepgramReady = state.config?.dictation?.configured === true;
-  const [engine, setEngine] = useState(wakeDictationEngine());
   const [path, setPath] = useState(handyPath());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -379,51 +370,21 @@ function WakeWordSection() {
       <div className="flex flex-col gap-3">
         <ApiKeyRow section="wakeWord" />
         <div>
-          <div className="mb-1.5 text-[13px] text-ink-secondary">{t("settings.wakeWord.engine")}</div>
-          <div className="inline-flex rounded-xl bg-inset p-1" role="radiogroup" aria-label={t("settings.wakeWord.engine")}>
-            {([
-              { value: "cloud", label: t("settings.wakeWord.engineCloud"), hint: deepgramReady ? undefined : t("settings.wakeWord.needDictationKey") },
-              { value: "handy", label: t("settings.wakeWord.engineHandy"), hint: undefined },
-            ] as const).map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={engine === option.value}
-                onClick={() => {
-                  setWakeDictationEngine(option.value);
-                  setEngine(option.value);
-                }}
-                className={cn(
-                  "rounded-lg px-3.5 py-1.5 text-[12.5px] transition-colors",
-                  engine === option.value ? "bg-raised text-ink shadow" : "text-ink-secondary hover:text-ink",
-                )}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-          {engine === "cloud" && !deepgramReady ? (
-            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("settings.wakeWord.needDictationKey")}</p>
-          ) : null}
+          <div className="mb-1.5 text-[13px] text-ink-secondary">{t("settings.wakeWord.handyPath")}</div>
+          <input
+            aria-label={t("settings.wakeWord.handyPath")}
+            type="text"
+            value={path}
+            onChange={(e) => {
+              setPath(e.target.value);
+              setHandyPath(e.target.value);
+            }}
+            placeholder="%LOCALAPPDATA%\Handy\handy.exe"
+            spellCheck={false}
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          />
+          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("settings.wakeWord.handyPathHint")}</p>
         </div>
-        {engine === "handy" ? (
-          <div>
-            <div className="mb-1.5 text-[13px] text-ink-secondary">{t("settings.wakeWord.handyPath")}</div>
-            <input
-              type="text"
-              value={path}
-              onChange={(e) => {
-                setPath(e.target.value);
-                setHandyPath(e.target.value);
-              }}
-              placeholder="%LOCALAPPDATA%\Handy\handy.exe"
-              spellCheck={false}
-              className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-            />
-            <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("settings.wakeWord.handyPathHint")}</p>
-          </div>
-        ) : null}
         <div className="flex items-center justify-between gap-4">
           <div className="text-[14px] font-medium text-ink">{t("settings.wakeWord.enable")}</div>
           <Switch
@@ -770,7 +731,6 @@ export function SettingsModal() {
                   <OpenAiCompatUrl />
                   <ApiKeyRow section="vision" />
                   <VisionUrl />
-                  <ApiKeyRow section="dictation" />
                   <WakeWordSection />
                   <ApiKeyRow section="xai" testProvider="xai" />
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>

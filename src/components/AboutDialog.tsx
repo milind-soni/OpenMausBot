@@ -2,6 +2,9 @@
 // Small on purpose: the interesting settings live in the settings panel, and
 // this exists so a bug report can quote a version number.
 import { useEffect, useRef } from "react";
+import { MetalText } from "metal-fx";
+
+import { reducedMotion } from "@/lib/onboarding";
 
 import {
   APP_NAME,
@@ -46,8 +49,15 @@ export function AboutDialog({ open, onClose }: { open: boolean; onClose: () => v
         className="w-full max-w-[360px] rounded-2xl border border-hairline/50 bg-panel p-6 text-center shadow-2xl"
       >
         <img src="/app-icon.svg" alt="" width={56} height={56} className="mx-auto size-14" />
+        {/* The wordmark wears the metal effect; under the OS reduced-motion
+            preference it is the plain heading, which is the same text either
+            way — MetalText keeps a live span of real glyphs in the DOM. */}
         <h2 id="about-dialog-title" className="mt-3 text-[17px] font-semibold text-ink">
-          {APP_NAME}
+          {reducedMotion() ? APP_NAME : (
+            <MetalText font="600 17px/1 Inter, sans-serif" color="var(--color-ink)" strength={0.7}>
+              {APP_NAME}
+            </MetalText>
+          )}
         </h2>
         <p className="mt-1 text-[13px] text-ink-secondary">
           Version {appVersion()}

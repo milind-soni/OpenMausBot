@@ -26,14 +26,15 @@ import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/
 import { speaker } from "@/lib/tts";
 import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
-import { floatToPcm16 } from "@/lib/clipboard-dictation";
+import { useCallTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { cn } from "@/lib/cn";
 import { track } from "@/lib/analytics";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { createOfflineCallStt } from "@/lib/offline-call-stt";
+import { Liquid } from "liquid-gooey";
+import { MetalFx } from "metal-fx";
 
 /** Spoken answers to a permission card. Anything else is read as a reply
  * to the bot, not as consent — an approval must never be granted by a
@@ -77,12 +78,8 @@ export function CallTargetButton({
   const { state, dispatch } = useStore();
   const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
   const active = useOnCall() === targetId;
-  // Calls listen three ways: Apple Speech on macOS (on-device dictation),
-  // the Deepgram call stream (window.ogb.callStt), and — when there is no
-  // Deepgram key — the user's own Handy install, transcribing locally.
   const supported =
     (capabilities.dictation.available && Boolean(window.ogb?.speechStart)) ||
-    Boolean(window.ogb?.callStt) ||
     Boolean(window.ogb?.handyTranscribeFile);
   const localVoice = localSystemVoiceActive();
   const configured = localVoice || Boolean(state.config?.tts?.configured);
@@ -101,7 +98,7 @@ export function CallTargetButton({
     : !capabilitiesReady
       ? "Checking call availability"
       : !supported
-        ? "Calls currently need the macOS desktop app"
+        ? "Calls need the desktop app with offline dictation"
         : !configured
           ? "Set up a voice in an agent profile to make calls"
           : !voiceReady
@@ -110,12 +107,10 @@ export function CallTargetButton({
 
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
-    : !capabilities.dictation.available && !window.ogb?.callStt && !window.ogb?.handyTranscribeFile
-      ? "Calls need a Deepgram key (Settings → Connections) on this platform — speech recognition runs in the cloud here."
-      : !window.ogb?.speechStart && !window.ogb?.callStt
-        ? "The speech service is unavailable in this app build. Restart or update Astra."
+    : !supported
+      ? "Offline calls need Handy. Set its path in Settings → Wake word."
         : !configured
-          ? "Add an ElevenLabs API key — or switch to the built-in Mac voices — so the bot can speak during calls."
+          ? "Choose an offline Piper voice, a built-in Mac voice, or configure ElevenLabs for call playback."
           : !voiceReady
             ? voices.length > 1
               ? "Give every group member a voice before starting a group call."
@@ -206,20 +201,25 @@ export function CallOverlay({ bot }: { bot: Bot }) {
   return <Call bot={bot} />;
 }
 
-const PCM_SAMPLE_RATE = 16000;
-const PCM_CHUNK_FRAMES = 4096;
 
 function Call({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
+  const { dispatch } = useStore();
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const pushToTalk = usePushToTalk(bot.id, phase === "listening", () => {
-    setNote("Push to talk couldn't start. Check Microphone and Speech Recognition access.");
-  });
-
+  // The chrome ring and the liquid cluster are both motion. Under the OS
+  // reduced-motion preference the ring holds still and the pieces keep their
+  // places; the call itself must never depend on an animation.
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const messages = visibleMessages(bot);
   const approval = pendingApprovals(messages)[0];
   const question = messages.find(
@@ -263,44 +263,10 @@ function Call({ bot }: { bot: Bot }) {
 
   const hush = useCallback(() => {
     void window.ogb?.speechStop();
-    // The offline ear finalizes whatever it caught when muted; the cloud
-    // ear just stops being fed (the session stays open — cheap).
+    // Keep microphone input muted throughout playback.
     offlineSttRef.current?.setMuted(true);
   }, []);
 
-  // The two listening engines share this guard: mute the mic while the bot
-  // speaks (a half-duplex call — see the header comment), so the renderer
-  // stops feeding the Deepgram stream and the main process stops recognizing.
-  // The offline ear (Handy) additionally has no persistent session to keep
-  // open: hush() finalizes, and listen() restarts capture for the next turn.
-  const callSttSession = useRef<number | null>(null);
-  const callSttStream = useRef<MediaStream | null>(null);
-  const callSttContext = useRef<AudioContext | null>(null);
-  const callSttProcessor = useRef<ScriptProcessorNode | null>(null);
-  const callSttMuted = useRef(false);
-
-  const closeCallSttAudio = useCallback(() => {
-    try {
-      callSttProcessor.current?.disconnect();
-    } catch {}
-    callSttProcessor.current = null;
-    void callSttContext.current?.close().catch(() => {});
-    callSttContext.current = null;
-    for (const track of callSttStream.current?.getTracks() ?? []) track.stop();
-    callSttStream.current = null;
-  }, []);
-
-  const stopCallStt = useCallback(() => {
-    const id = callSttSession.current;
-    callSttSession.current = null;
-    if (id !== null) void window.ogb?.callStt?.stop(id).catch(() => {});
-    closeCallSttAudio();
-  }, [closeCallSttAudio]);
-
-  // Offline ear: the user's own Handy install, no key — created once per
-  // call and only on non-macOS hosts, where Apple Speech has no keyless
-  // call ear to displace (speech.mjs refuses non-darwin, so listen() would
-  // otherwise end in the dead speechStart call at the bottom).
   const offlineSttRef = useRef<ReturnType<typeof createOfflineCallStt> | null>(null);
   const stopOfflineStt = useCallback(() => {
     offlineSttRef.current?.stop();
@@ -308,14 +274,11 @@ function Call({ bot }: { bot: Bot }) {
   }, []);
   const ensureOfflineStt = useCallback(() => {
     if (offlineSttRef.current) return offlineSttRef.current;
-    if (state.config?.dictation?.configured) return null; // cloud is cheaper
     if (window.ogb?.platform === "darwin") return null; // Apple Speech's call
     const session = createOfflineCallStt({
       onUtterance: (said) => {
-        // Phase-independent (not gated on "listening"): the turn may be the
-        // user speaking over the tail of the bot's answer. It is still a
-        // whole utterance the endpointer closed — feed the shared path.
-        if (!alive.current || currentCall() !== bot.id) return;
+        // Late decodes must not interrupt playback or submit another turn.
+        if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
         setHeard(said);
         handleUtterance(said);
       },
@@ -331,15 +294,68 @@ function Call({ bot }: { bot: Bot }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bot.id]);
 
+  const talkStart = useCallback(() => {
+    if (!alive.current || currentCall() !== bot.id) return;
+    // An interruption is speech, not silence: cut the agent off in the same
+    // tick. Bumping the generation invalidates the in-flight say(), so the
+    // call cannot resume the sentence it was reading.
+    if (phaseRef.current === "speaking") {
+      sayGeneration.current += 1;
+      speaker.stop();
+    }
+    move("listening");
+    const offline = ensureOfflineStt();
+    if (offline) {
+      offline.setMuted(false);
+      // The user owns the end of this turn (the release finalizes it), so the
+      // silence endpointer must not ship a half sentence at the first pause.
+      offline.holdTurn(true);
+      void offline.start().catch((error: unknown) => {
+        if (!alive.current || currentCall() !== bot.id) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setNote(
+          /permission|denied/i.test(message)
+            ? "Microphone access was denied — allow it, then hold Space to talk."
+            : "The microphone couldn't start. Check Microphone access, then hold Space to talk.",
+        );
+      });
+      return;
+    }
+    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+      if (alive.current && currentCall() === bot.id) {
+        setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
+      }
+    });
+  }, [bot.id, ensureOfflineStt, move]);
+
+  const talkEnd = useCallback(() => {
+    const offline = offlineSttRef.current;
+    if (offline) {
+      // finalize → onUtterance → handleUtterance sends the turn, exactly as an
+      // endpointed utterance would.
+      offline.finishTurn();
+      return;
+    }
+    void window.ogb?.speechFinish?.();
+  }, []);
+
+  // The talk key owns the space bar while this call is up: hold it to talk,
+  // and hold it during the agent's own sentence to cut that sentence off.
+  const talking = useCallTalk({
+    isCallLive: () => alive.current && currentCall() === bot.id,
+    onTalkStart: talkStart,
+    onTalkEnd: talkEnd,
+  });
+
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== bot.id) return;
     move("listening");
     setHeard("");
     setNote(null);
-    // Offline ear first when the cloud ear has no key (Windows without
-    // Deepgram): Handy listens turn-by-turn, same half-duplex contract.
+    // Handy handles offline listening on non-macOS desktops.
     const offline = ensureOfflineStt();
     if (offline) {
+      offline.setMuted(false);
       void offline.start().catch((error) => {
         stopOfflineStt();
         if (alive.current && currentCall() === bot.id) {
@@ -349,69 +365,13 @@ function Call({ bot }: { bot: Bot }) {
       });
       return;
     }
-    // Deepgram call stream (Windows and every non-mac desktop build).
-    if (window.ogb?.callStt) {
-      void (async () => {
-        try {
-          callSttMuted.current = false;
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          if (!alive.current || currentCall() !== bot.id || callSttSession.current !== null) {
-            for (const track of stream.getTracks()) track.stop();
-            return;
-          }
-          callSttStream.current = stream;
-          const id = await window.ogb!.callStt!.start();
-          if (!alive.current || currentCall() !== bot.id) {
-            void window.ogb?.callStt?.stop(id).catch(() => {});
-            closeCallSttAudio();
-            return;
-          }
-          callSttSession.current = id;
-          // 16 kHz capture — exactly what Deepgram's linear16/16000 contract
-          // expects (same pipeline as hold-to-dictate).
-          const context = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
-          callSttContext.current = context;
-          const source = context.createMediaStreamSource(stream);
-          const processor = context.createScriptProcessor(PCM_CHUNK_FRAMES, 1, 1);
-          callSttProcessor.current = processor;
-          processor.onaudioprocess = (event) => {
-            if (callSttSession.current !== id) return;
-            if (callSttMuted.current) return;
-            const pcm = floatToPcm16(event.inputBuffer.getChannelData(0));
-            void window.ogb?.callStt?.audio(id, pcm).catch(() => {});
-          };
-          source.connect(processor);
-          // Muted output feeds the destination so the graph runs to pull the
-          // mic, but raw capture never reaches the speakers.
-          const mute = context.createGain();
-          mute.gain.value = 0;
-          processor.connect(mute);
-          mute.connect(context.destination);
-        } catch (error) {
-          stopCallStt();
-          if (alive.current && currentCall() === bot.id) {
-            const message = error instanceof Error ? error.message : String(error);
-            setNote(
-              /permission|denied/i.test(message)
-                ? "Microphone access was denied — allow it, then call again."
-                : /No Deepgram key/i.test(message)
-                  ? message
-                  : "The microphone couldn't start. Check Microphone access and your Deepgram key.",
-            );
-          }
-        }
-      })();
-      return;
-    }
-    // Apple Speech (macOS) — the only caller that reaches this line: the
-    // offline ear swallowed non-macOS hosts without a Deepgram key, and the
-    // Deepgram stream took those with one.
+    // Native on-device recognition remains available on macOS.
     void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
     });
-  }, [bot.id, closeCallSttAudio, ensureOfflineStt, move, stopCallStt, stopOfflineStt]);
+  }, [bot.id, ensureOfflineStt, move, stopOfflineStt]);
 
   /** Speak, with the microphone closed for the duration (see the header
    * comment — an open mic during playback is a feedback loop). */
@@ -423,14 +383,7 @@ function Call({ bot }: { bot: Bot }) {
       // never observe an old "listening" phase and reopen the mic.
       move("speaking");
       hush();
-      // Deepgram path: stop FEEDING the stream while speaking (the session
-      // stays open — cheap) so the bot never transcribes its own voice. The
-      // offline ear has no idle session to keep; hush() finalizes whatever
-      // the user was saying (delivered even mid-"speaking"), and listen()
-      // reopens capture afterwards.
-      callSttMuted.current = true;
       await speaker.speak(text, { botId: bot.id, voiceId: bot.voice });
-      callSttMuted.current = false;
       return alive.current && currentCall() === bot.id && sayGeneration.current === mine;
     },
     [bot.id, bot.voice, hush, move],
@@ -460,9 +413,6 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   // ── the microphone ───────────────────────────────────────────────────
-  // One shared "an utterance was finalized" path: Apple Speech delivers it
-  // through onSpeechTranscript(partials→final), the Deepgram call stream
-  // through callStt.onUtterance. The body below is that shared path.
   const handleUtterance = useCallback(
     (said: string) => {
       setHeard(said);
@@ -552,7 +502,7 @@ function Call({ bot }: { bot: Bot }) {
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== bot.id) return;
       if (code === 2) {
-        if (!window.ogb?.callStt) setNote("Calls need macOS dictation, which isn't available here yet.");
+        if (!offlineSttRef.current) setNote("Offline speech recognition is unavailable in this build.");
         return;
       }
       if (code === 1) {
@@ -567,35 +517,18 @@ function Call({ bot }: { bot: Bot }) {
       // to be listening, that means the user's turn ended — start the next
       if (phaseRef.current === "listening") listen();
     });
-    // Deepgram call stream: one event per endpointed utterance, feeding the
-    // same shared path Apple Speech's finals use. The session keeps running
-    // for the whole call — phases gate whether utterances are consumed.
-    const offUtterance = window.ogb?.callStt?.onUtterance((id, utterance) => {
-      if (!alive.current || currentCall() !== bot.id) return;
-      if (callSttSession.current !== id || phaseRef.current !== "listening") return;
-      const said = utterance.text.trim();
-      if (!said) return;
-      handleUtterance(said);
-    });
-    const offCallSttError = window.ogb?.callStt?.onError((id, message) => {
-      if (!alive.current || currentCall() !== bot.id || callSttSession.current !== id) return;
-      setNote(message);
-    });
     if (bot.busy && !approval && !question) move("working");
     else listen();
     return () => {
       offTranscript();
       offEnd();
-      offUtterance?.();
-      offCallSttError?.();
       void window.ogb?.speechStop();
-      stopCallStt();
       stopOfflineStt();
     };
     // busy/approval are intentionally initial snapshots. Their live changes
     // are handled below without tearing down native event listeners.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id, bot.threadId, dispatch, handleUtterance, listen, move, stopCallStt, stopOfflineStt]);
+  }, [bot.id, bot.threadId, dispatch, handleUtterance, listen, move, stopOfflineStt]);
 
   // ── narrate the work, speak the answer, read the approvals ───────────
   useEffect(() => {
@@ -687,30 +620,26 @@ function Call({ bot }: { bot: Bot }) {
     }
   }, [bot.busy, hush, listen, move]);
 
-  // Escape hangs up; space interrupts whatever is being said
+  // Escape hangs up. The space bar is deliberately NOT handled here: useCallTalk
+  // owns it (hold to talk, hold during a sentence to interrupt), and two
+  // handlers on one key would both fire on the same press.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        endCall(bot.id);
-      } else if (e.code === "Space" && speaker.isSpeaking()) {
-        e.preventDefault();
-        sayGeneration.current += 1;
-        speaker.stop();
-        listen();
-      }
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      endCall(bot.id);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [bot.id, listen]);
+  }, [bot.id]);
 
   const mascotState =
     phase === "listening" ? "listening" : phase === "speaking" ? "sending" : phase === "sending" ? "thinking" : "working";
   const status =
     phase === "listening"
-      ? pushToTalk
-        ? "Push to talk"
-        : "Listening"
+      ? talking
+        ? "Talking — release Space to send"
+        : "Listening — hold Space to talk"
       : phase === "sending"
         ? "One moment"
         : phase === "speaking"
@@ -746,7 +675,7 @@ function Call({ bot }: { bot: Bot }) {
         {phase === "listening" ? (
           heard || (
             <span className="text-ink-secondary">
-              {pushToTalk ? "Release Control + Option to send…" : "Say something…"}
+              {talking ? "Release Space to send…" : "Say something… hold Space to talk"}
             </span>
           )
         ) : (
@@ -767,29 +696,59 @@ function Call({ bot }: { bot: Bot }) {
       )}
       {speech.error && <div className="max-w-[420px] text-center text-[12.5px] text-danger">{speech.error}</div>}
 
-      <div className="flex items-center gap-3">
+      {/* The call's controls as one liquid mass: pieces merge where they meet,
+          and the talk pill — the gesture that actually drives the call — wears
+          the chrome ring. `strength` tracks the talk state so the ring is lit
+          while the user is speaking and dim when the agent has the floor. */}
+      <Liquid
+        blur={6}
+        contrast={18}
+        fill="var(--color-panel)"
+        shadow="0 2px 10px rgba(0,0,0,.45)"
+        className="flex items-center gap-2.5"
+      >
         {speaker.isSpeaking() && (
-          <button
-            onClick={() => {
-              sayGeneration.current += 1;
-              speaker.stop();
-              listen();
-            }}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
-          >
-            Interrupt
-          </button>
+          <Liquid.Item transition="bouncy">
+            <button
+              onClick={() => {
+                sayGeneration.current += 1;
+                speaker.stop();
+                listen();
+              }}
+              className="rounded-full border border-hairline/50 px-4 py-2 text-[13.5px] text-ink hover:bg-raised"
+            >
+              Interrupt
+            </button>
+          </Liquid.Item>
         )}
-        <button
-          onClick={() => endCall(bot.id)}
-          className="flex items-center gap-2 rounded-full bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
-        >
-          <PhoneOff size={16} /> Hang up
-        </button>
-      </div>
+        <Liquid.Item transition="bouncy" delay={40}>
+          <MetalFx
+            variant="button"
+            preset="chromatic"
+            strength={talking ? 1 : 0.35}
+            paused={reducedMotion}
+            className="rounded-full"
+          >
+            <div
+              aria-live="polite"
+              className={cn("px-5 py-2.5 text-[13.5px]", talking ? "text-ink" : "text-ink-secondary")}
+            >
+              {talking ? "Talking — release Space" : "Hold Space to talk"}
+            </div>
+          </MetalFx>
+        </Liquid.Item>
+        <Liquid.Item transition="bouncy" delay={80}>
+          <button
+            onClick={() => endCall(bot.id)}
+            className="flex items-center gap-2 rounded-full bg-danger px-5 py-2.5 text-[14px] font-medium text-white hover:brightness-110"
+          >
+            <PhoneOff size={16} /> Hang up
+          </button>
+        </Liquid.Item>
+      </Liquid>
 
       <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Space interrupts · Esc hangs up
+        Hold Space to talk · Space also interrupts · Esc hangs up
       </div>
     </div>
   );

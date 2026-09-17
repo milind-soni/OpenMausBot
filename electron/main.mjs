@@ -19,7 +19,6 @@ import {
   readSafeLogTail,
 } from "./diagnostics.mjs";
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
-import { dictationQueryUrl, dictationSocketProtocols, startDictationSession } from "./dictation-stt.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
@@ -2099,7 +2098,6 @@ const CREDENTIAL_PATCH = {
   visionApiKey: (value) => ({ vision: { key: value } }),
   boxToken: (value) => ({ box: { token: value } }),
   opencodeGoApiKey: (value) => ({ opencodeGo: { apiKey: value } }),
-  dictationApiKey: (value) => ({ dictation: { key: value } }),
   picovoiceAccessKey: (value) => ({ wakeWord: { accessKey: value } }),
   ttsKey: (value) => ({ tts: { key: value } }),
   openaiImageApiKey: (value) => ({ imageGen: { key: value } }),
@@ -2152,125 +2150,6 @@ ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, valu
   saveWorkspaceCredential(name, value),
 ));
 
-// ── Hold-to-dictate streaming STT (Deepgram) ──
-// The renderer captures mic audio and streams PCM16 frames; this process owns
-// the WebSocket so the Deepgram key never enters the renderer. One session
-// per hold; finish() flushes Deepgram's buffer (Finalize) and returns the
-// paste text.
-const dictationSessions = new Map();
-let dictationSessionSeq = 0;
-
-ipcMain.handle(
-  "dictation:start",
-  localOnly("dictation:start", (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win) throw new Error("No window attached to the dictation request");
-    const apiKey = secureCredentials?.dictationApiKey ?? process.env.ASTRA_DICTATION_KEY ?? "";
-    if (!apiKey) {
-      throw new Error(
-        "No Deepgram key. Save one in Settings → Connections (or set ASTRA_DICTATION_KEY and relaunch).",
-      );
-    }
-    const id = ++dictationSessionSeq;
-    const socket = new WebSocket(dictationQueryUrl(), dictationSocketProtocols(apiKey));
-    const session = startDictationSession({
-      socket,
-      onPartial: (partialText) => {
-        if (!win.isDestroyed()) win.webContents.send("dictation:partial", id, partialText);
-      },
-      onError: (message) => {
-        if (!win.isDestroyed()) win.webContents.send("dictation:error", id, message);
-      },
-      onOpen: () => {
-        if (!win.isDestroyed()) win.webContents.send("dictation:open", id);
-      },
-      // Deepgram endpointed an utterance (speech_final). Button-triggered
-      // dictation treats this as "the speaker finished" and stops on its
-      // own; hold-to-dictate has no onUtterance consumer and is unaffected.
-      onUtterance: (utterance) => {
-        if (!win.isDestroyed()) win.webContents.send("dictation:utterance", id, utterance);
-      },
-    });
-    dictationSessions.set(id, session);
-    return id;
-  }),
-);
-
-ipcMain.handle(
-  "dictation:audio",
-  localOnly("dictation:audio", (_event, id, chunk) => {
-    // chunk arrives as an ArrayBuffer over the bridge.
-    dictationSessions.get(id)?.send(Buffer.from(chunk));
-  }),
-);
-
-ipcMain.handle("dictation:finish", localOnly("dictation:finish", async (_event, id) => {
-  const session = dictationSessions.get(id);
-  dictationSessions.delete(id);
-  if (!session) return "";
-  const text = await session.finish();
-  session.cancel();
-  return text;
-}));
-
-ipcMain.handle("dictation:cancel", localOnly("dictation:cancel", (_event, id) => {
-  const session = dictationSessions.get(id);
-  dictationSessions.delete(id);
-  session?.cancel();
-}));
-
-// ── Call-mode streaming STT (Windows & friends) ──
-// The same Deepgram pipeline as hold-to-dictate, in open-mic form: instead of
-// hold/release + Finalize, this session stays open and delivers one event per
-// endpointed utterance (speech_final), the way Apple Speech delivers finals
-// to the call loop on macOS. The renderer owns mic capture; this process owns
-// the socket so the Deepgram key never enters the renderer.
-const callSttSessions = new Map();
-let callSttSessionSeq = 0;
-
-ipcMain.handle(
-  "call-stt:start",
-  localOnly("call-stt:start", (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win) throw new Error("No window attached to the call stream");
-    const apiKey = secureCredentials?.dictationApiKey ?? process.env.ASTRA_DICTATION_KEY ?? "";
-    if (!apiKey) {
-      throw new Error(
-        "No Deepgram key. Save one in Settings → Connections (or set ASTRA_DICTATION_KEY and relaunch) to talk on calls.",
-      );
-    }
-    const id = ++callSttSessionSeq;
-    const socket = new WebSocket(dictationQueryUrl(), dictationSocketProtocols(apiKey));
-    const session = startDictationSession({
-      socket,
-      onOpen: () => {
-        if (!win.isDestroyed()) win.webContents.send("call-stt:open", id);
-      },
-      onError: (message) => {
-        if (!win.isDestroyed()) win.webContents.send("call-stt:error", id, message);
-      },
-      onUtterance: (text) => {
-        if (!win.isDestroyed()) win.webContents.send("call-stt:utterance", id, { text, partial: false });
-      },
-    });
-    callSttSessions.set(id, session);
-    return id;
-  }),
-);
-
-ipcMain.handle(
-  "call-stt:audio",
-  localOnly("call-stt:audio", (_event, id, chunk) => {
-    callSttSessions.get(id)?.send(Buffer.from(chunk));
-  }),
-);
-
-ipcMain.handle("call-stt:stop", localOnly("call-stt:stop", (_event, id) => {
-  const session = callSttSessions.get(id);
-  callSttSessions.delete(id);
-  session?.finish().catch(() => {});
-}));
-
 ipcMain.handle("clipboard:write-text", localOnly("clipboard:write-text", (_event, text) => {
   if (typeof text !== "string") throw new Error("clipboard:write-text needs a string");
   clipboard.writeText(text);
@@ -2284,8 +2163,8 @@ ipcMain.handle("clipboard:read-text", localOnly("clipboard:read-text", () => {
 }));
 
 // Headless transcription through the user's own Handy install: a WAV goes
-// in, the transcript comes back. Used for call turns where there is no
-// Deepgram key — the same offline model the user already runs, no cloud.
+// in, the transcript comes back. Call turns use the same offline model the
+// user already runs, with no cloud speech service or API key.
 // Handled in this single spot so the toggle and file paths share one
 // resolution of the executable.
 ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async (_event, wavData, handyPath) => {
@@ -2364,7 +2243,7 @@ ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => 
 }));
 
 // The wake word needs the Picovoice AccessKey in the renderer (Porcupine
-// runs there), so unlike the Deepgram key this one crosses the bridge —
+// runs there), so this key crosses the bridge —
 // but only on an explicit, local-only request while the user has the
 // feature enabled, and it never lands in config the server echoes back.
 ipcMain.handle("wake-word:access-key", localOnly("wake-word:access-key", () => {

@@ -5,7 +5,11 @@ import type { Bot } from "@/state/store";
 import { browserAvailable, type FeatureFlagConfig } from "@/lib/feature-flags";
 
 const fixture = vi.hoisted(() => {
-  vi.stubGlobal("window", {});
+  // The panel's beam and its reduced-motion query both read this browser API,
+  // so the fabricated window needs it too — a real one always has it.
+  vi.stubGlobal("window", {
+    matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+  });
   vi.stubGlobal("document", { visibilityState: "visible" });
   vi.stubGlobal("localStorage", { getItem: () => "browser" });
   return { config: {} as FeatureFlagConfig };

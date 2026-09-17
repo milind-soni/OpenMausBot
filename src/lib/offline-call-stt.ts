@@ -1,4 +1,4 @@
-// Offline call listening: when there is no Deepgram key, the call mic is
+// Offline call listening: the call mic is
 // driven through the user's own Handy install (https://handy.computer) —
 // the same offline model their Ctrl+Space dictation already uses.
 //
@@ -7,10 +7,10 @@
 //   thresholds as the wake-word watchdog) finalizes an utterance → the
 //   utterance is encoded as a WAV in memory → main hands it to
 //   `Handy --transcribe-file --json` → the transcript flows through the
-//   exact same handleUtterance path the cloud engines feed.
+//   shared handleUtterance path used by native dictation.
 //
-// Nothing here records to disk, uploads, or needs a key. Audio lives in
-// memory until the WAV encode, and Handy never leaves this machine.
+// The renderer buffers in memory. The desktop bridge writes a temporary WAV
+// for Handy and removes it afterwards. Audio is never uploaded.
 import { handyPath } from "./handy";
 
 export const PCM_SAMPLE_RATE = 16000;
@@ -92,10 +92,17 @@ export interface OfflineCallStt {
   stop: () => void;
   /** While true, frames are dropped (the bot is speaking). */
   setMuted: (muted: boolean) => void;
+  /** While true the SILENCE ENDPOINTER is off: the user holds the talk key
+   * and therefore decides when the turn ends, so a pause between two words
+   * cannot ship half a sentence. The max-length cap still applies. */
+  holdTurn: (held: boolean) => void;
+  /** Close the current turn NOW — the talk key was released. Transcribes
+   * whatever was captured and delivers it through onUtterance. */
+  finishTurn: () => void;
 }
 
 /** One offline listening session for a call. Null when the bridge lacks the
- * headless-transcription surface (browser/dev shells fall back to cloud). */
+ * headless-transcription surface (browser/dev shells report unavailable). */
 export function createOfflineCallStt(callbacks: OfflineCallSttCallbacks): OfflineCallStt | null {
   const bridge = window.ogb;
   if (!bridge?.handyTranscribeFile) return null;
@@ -103,12 +110,17 @@ export function createOfflineCallStt(callbacks: OfflineCallSttCallbacks): Offlin
   let stream: MediaStream | null = null;
   let context: AudioContext | null = null;
   let processor: ScriptProcessorNode | null = null;
+  let source: MediaStreamAudioSourceNode | null = null;
+  let gain: GainNode | null = null;
+  let starting: Promise<void> | undefined;
   let muted = false;
   let stopped = false;
   let utterance: Float32Array[] = [];
   let utteranceFrames = 0;
   let framesSilent = 0;
   let hasSpeech = false;
+  /** The talk key is held: the user is talking and owns the turn's end. */
+  let held = false;
   /** A WAV is inside Handy right now; Handy runs one model load per call,
    * so transcriptions are strictly serialized — never interleaved. */
   let transcribing = false;
@@ -126,8 +138,7 @@ export function createOfflineCallStt(callbacks: OfflineCallSttCallbacks): Offlin
   const finalize = () => {
     if (stopped) return;
     if (transcribing) {
-      // Keep capturing — everything buffered ships right after the current
-      // WAV, in order. Dropping it here would eat the user's words.
+      // Keep at most one bounded pending utterance while Handy is busy.
       pendingAfterTranscribe = true;
       return;
     }
@@ -173,11 +184,14 @@ export function createOfflineCallStt(callbacks: OfflineCallSttCallbacks): Offlin
   };
 
   const closeCapture = () => {
-    try {
-      processor?.disconnect();
-    } catch {}
+    if (processor) processor.onaudioprocess = null;
+    for (const node of [source, processor, gain]) {
+      try { node?.disconnect(); } catch {}
+    }
+    source = null;
     processor = null;
-    void context?.close().catch(() => {});
+    gain = null;
+    try { void context?.close().catch(() => {}); } catch {}
     context = null;
     for (const track of stream?.getTracks() ?? []) track.stop();
     stream = null;
@@ -185,49 +199,79 @@ export function createOfflineCallStt(callbacks: OfflineCallSttCallbacks): Offlin
 
   return {
     async start() {
-      // listen() fires again after every turn; reopening must never stack a
-      // second capture graph on top of the last one.
-      closeCapture();
-      muted = false;
-      resetUtterance();
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      context = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
-      const source = context.createMediaStreamSource(stream);
-      processor = context.createScriptProcessor(4096, 1, 1);
-      processor.onaudioprocess = (event) => {
-        if (stopped || muted) return;
-        const samples = event.inputBuffer.getChannelData(0);
-        const silent = isSilentFrame(samples);
-        if (!silent) {
-          hasSpeech = true;
-          framesSilent = 0;
-        } else {
-          framesSilent = stepSilence(framesSilent, true);
+      if (stopped) return;
+      if (starting) return starting;
+      if (stream) return;
+      starting = (async () => {
+        const opened = await navigator.mediaDevices.getUserMedia({ audio: true });
+        if (stopped) {
+          for (const track of opened.getTracks()) track.stop();
+          return;
         }
-        if (hasSpeech) {
-          utterance.push(new Float32Array(samples));
-          utteranceFrames += samples.length;
-          // The cap is in SAMPLES (16 kHz) — 2,592 frames, not 234 "ms".
-          if (utteranceFrames >= MAX_UTTERANCE_SAMPLES) finalize();
-          else if (shouldFinalize(framesSilent, hasSpeech)) finalize();
-        } else if (shouldFinalize(framesSilent, false)) {
-          resetUtterance();
-        }
-      };
-      source.connect(processor);
-      const mute = context.createGain();
-      mute.gain.value = 0;
-      processor.connect(mute);
-      mute.connect(context.destination);
+        stream = opened;
+        context = new AudioContext({ sampleRate: PCM_SAMPLE_RATE });
+        source = context.createMediaStreamSource(stream);
+        processor = context.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (event) => {
+          if (stopped || muted) return;
+          const samples = event.inputBuffer.getChannelData(0).subarray(0, MAX_UTTERANCE_SAMPLES - utteranceFrames);
+          if (!samples.length) return;
+          const silent = isSilentFrame(samples);
+          if (!silent) {
+            hasSpeech = true;
+            framesSilent = 0;
+          } else {
+            framesSilent = stepSilence(framesSilent, true);
+          }
+          if (hasSpeech) {
+            utterance.push(new Float32Array(samples));
+            utteranceFrames += samples.length;
+            if (utteranceFrames >= MAX_UTTERANCE_SAMPLES) finalize();
+            // The cap always applies; the silence endpointer yields to a held
+            // talk key, because a pause mid-thought is not the end of a turn.
+            else if (!held && shouldFinalize(framesSilent, hasSpeech)) finalize();
+          } else if (!held && shouldFinalize(framesSilent, false)) {
+            resetUtterance();
+          }
+        };
+        source.connect(processor);
+        gain = context.createGain();
+        gain.gain.value = 0;
+        processor.connect(gain);
+        gain.connect(context.destination);
+      })();
+      try {
+        await starting;
+      } catch (error) {
+        closeCapture();
+        if (!stopped) throw error;
+      } finally {
+        starting = undefined;
+      }
     },
     stop() {
       stopped = true;
       pendingAfterTranscribe = false;
+      resetUtterance();
       closeCapture();
     },
     setMuted(next: boolean) {
+      // Muting can precede the first start() of a turn: carry it into the
+      // graph about to open, or the bot's own voice lands in the recording.
       muted = next;
-      if (next && hasSpeech) finalize();
+      if (next) {
+        pendingAfterTranscribe = false;
+        resetUtterance();
+      }
+    },
+    holdTurn(next: boolean) {
+      held = next;
+    },
+    finishTurn() {
+      // Release the hold first: the endpointer must not fire a second
+      // finalize on the same audio once the turn is already being decoded.
+      held = false;
+      finalize();
     },
   };
 }

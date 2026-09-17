@@ -29,6 +29,18 @@ async function bootWithLegacyDir(legacyName: string) {
     instances: { fixture: { driver: "migration-test-shadow" } },
   }));
   writeFileSync(join(legacy, "keep-me.txt"), "carried over");
+  // A bot's cwd is captured at creation and realpath()ed every turn, so a
+  // rename that carried the directory but not the stored string would fail
+  // the first turn with ENOENT. Seed one bot to pin the rebase — and a prose
+  // field that merely mentions the path, which is the user's text, not a path.
+  const workspaceId = "e2090318-e3e2-4d9c-94cd-2182caa8ed98";
+  mkdirSync(join(legacy, "workspaces", workspaceId), { recursive: true });
+  writeFileSync(join(legacy, "bots.json"), JSON.stringify([{
+    id: "migrated-bot",
+    threadId: "thread-1",
+    cwd: join(legacy, "workspaces", workspaceId),
+    soul: `Notes for this bot live in ${join(legacy, "workspaces", workspaceId)}.`,
+  }], null, 2));
   // The provisioned Piper engine is the heaviest thing a rename has to carry:
   // it lives INSIDE the data dir, so losing it silently downgrades the user to
   // the robotic built-in voice with no error to explain why.
@@ -87,6 +99,19 @@ describe("legacy data dir", () => {
     // The engine binary is platform-named, so assert the dir it lives in.
     expect(existsSync(join(fresh, "piper", "piper.exe"))).toBe(true);
     expect(existsSync(join(fresh, "piper", "voices", "en_US-ryan-high.onnx"))).toBe(true);
+  });
+
+  it("rebases a stored bot cwd onto the renamed dir and leaves prose alone", () => {
+    const fresh = join(home, ".astra");
+    const bots = JSON.parse(readFileSync(join(fresh, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
+    const rebased = join(fresh, "workspaces", "e2090318-e3e2-4d9c-94cd-2182caa8ed98");
+    expect(bots[0].cwd).toBe(rebased);
+    // The path the stored cwd now names must really exist — that realpath()
+    // is what the failing turn ran.
+    expect(existsSync(String(bots[0].cwd))).toBe(true);
+    // The same path inside the bot's own prose is text, not a resolved path:
+    // it still names the dir this boot migrated (`.opengrokbot`), untouched.
+    expect(String(bots[0].soul)).toContain(join(home, ".opengrokbot", "workspaces"));
   });
 
   it("migrates the OpenMausBot data dir the same way", async () => {

@@ -1,12 +1,14 @@
 // The bot's computer, in the right-side slot. Where it runs decides the
-// whole flow: explicit cloud → provision the box on open (idempotent) and preview
-// via SSE frames or a ~4s screenshot poll. macOS local mode keeps the legacy
-// in-panel capture. Linux local mode is an automation readiness state and its
-// separate preview remains explicitly user-initiated. Auto only reads an
-// existing Box's state: opening this panel never creates, wakes, bootstraps,
-// screenshots, or opens one, regardless of engine.
+// whole flow: explicit cloud → provision the box on open (idempotent). This
+// panel carries no screen image: while Astra drives, a border-beam rides the
+// frame, and the live desktop stays a separate, user-initiated window. Nothing
+// here polls, decodes, or renders a screenshot, so the panel paints at once.
+// Auto only reads an existing Box's state: opening this panel never creates,
+// wakes, bootstraps, or opens one, regardless of engine.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
+import { BorderBeam } from "border-beam";
+import { ThinkingOrb } from "thinking-orbs";
 import {
   CalendarClock,
   Columns2,
@@ -17,7 +19,6 @@ import {
   Globe,
   Hand,
   Loader2,
-  Maximize2,
   Monitor,
   Moon,
   Power,
@@ -25,13 +26,11 @@ import {
   Smartphone,
   X,
 } from "lucide-react";
-import { api, ApiError, useStore, type Bot } from "@/state/store";
+import { api, useStore, type Bot } from "@/state/store";
 import type { CloudBackend } from "../../server/contracts.ts";
 import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { usePageVisible } from "@/lib/page-visible";
-import { CloudScreenPreview } from "./CloudScreenPreview";
-import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
@@ -40,18 +39,18 @@ import { AndroidDevicePanel, useAndroidUsbDevices } from "./AndroidDevicePanel";
 import { BrowserPanel } from "./BrowserPanel";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { transitionComputerControlLease, type ComputerControlAction } from "@/lib/computer-control";
-import { LocalScreenPreview } from "./LocalScreenPreview";
 import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
+  astraDriving,
   autoSelectsLocalComputer,
   instanceSupportsLocalComputer,
   localComputerDisabledReason,
   localComputerSelectable,
   persistedComputerSelectionMatches,
   resolveBoxPanelAction,
-  shouldPollCloudPreview,
+  cloudDesktopReady,
 } from "@/lib/local-computer";
 import {
   readComputerPanelView,
@@ -208,7 +207,7 @@ export function ComputerPanel({
       && resolvedComputerSelection.computer === bot.computer
       && resolvedComputerSelection.cloudBackend === cloudBackend,
   );
-  const cloudPreviewReady = shouldPollCloudPreview({
+  const cloudPreviewReady = cloudDesktopReady({
     computer: bot.computer,
     cloudBackend,
     phase,
@@ -250,23 +249,16 @@ export function ComputerPanel({
     };
   }, [bot.id, bot.computer, cloudBackend, flushBotPatches]);
   const [boxState, setBoxState] = useState<string | null>(null);
-  const [polledFrame, setPolledFrame] = useState<{ png: string; mime: string } | null>(null);
-  const [previewError, setPreviewError] = useState<Error | string | null>(null);
-  const [previewRefreshing, setPreviewRefreshing] = useState(false);
-  const [previewRetry, setPreviewRetry] = useState(0);
-  const [vmFrame, setVmFrame] = useState<string | null>(null);
   // The Local VM's interactive noVNC viewer (passworded, autoconnect). The
   // preview below is a periodic screenshot that swallows clicks — this URL is
   // the only way a person can actually drive the VM.
   const [vmViewerUrl, setVmViewerUrl] = useState<string | null>(null);
   const [vmStatus, setVmStatus] = useState<LocalVmStatus | null>(null);
   const [vpsStatus, setVpsStatus] = useState<VpsComputerStatus | null>(null);
-  const [localFrame, setLocalFrame] = useState<string | null>(null);
   const [pending, setPending] = useState<
     "join" | "sleep" | "provision" | "vps-replace" | "vm-create" | "vm-recreate" | "vm-delete" | null
   >(null);
   const [controlPending, setControlPending] = useState(false);
-  const [viewerOpen, setViewerOpen] = useState(false);
   const [error, setError] = useState<Error | string | null>(null);
   const errorText = panelErrorText(error);
   const [panelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
@@ -306,28 +298,6 @@ export function ComputerPanel({
     setPanelView(readComputerPanelView(bot.id));
   }, [bot.id]);
 
-  // Pause the screenshot poll while this bot's viewer is open; seed from the
-  // live viewer so a remount/switch mid-session doesn't wrongly resume it.
-  useEffect(() => {
-    let alive = true;
-    const dv = window.ogb?.desktopViewer;
-    if (dv?.currentState) {
-      void dv
-        .currentState()
-        .then((s) => {
-          if (alive) setViewerOpen(s.open && s.contextId === bot.id);
-        })
-        .catch(() => {});
-    }
-    const off = dv?.onState((viewer) => {
-      if (viewer.contextId === bot.id) setViewerOpen(viewer.open);
-    });
-    return () => {
-      alive = false;
-      off?.();
-    };
-  }, [bot.id]);
-
   useEffect(() => {
     if ((!androidConnected && panelView === "android") || (!browserEnabled && panelView === "browser")) {
       setPanelView("computer");
@@ -360,19 +330,15 @@ export function ComputerPanel({
   // resolve the mode on open; box endpoints are only ever hit on the
   // cloud path, so local/off can never render a JSON error as an image
   useEffect(() => {
-    // Other tabs own their surfaces. Do not provision a VM, wake a box,
-    // or churn preview state while reading routine history.
+    // Other tabs own their surfaces. Do not provision a VM or wake a box
+    // while reading routine history.
     if (panelView !== "computer") return;
     let alive = true;
     setResolvedComputerSelection(null);
     setPhase("checking");
-    setPolledFrame(null);
-    setPreviewError(null);
-    setVmFrame(null);
     setVmViewerUrl(null);
     setVmStatus(null);
     setVpsStatus(null);
-    setLocalFrame(null);
     setError(null);
     // The selection may be optimistic for up to the profile debounce. Never
     // let it choose a provider until the PATCH lane confirms server state.
@@ -609,161 +575,47 @@ export function ComputerPanel({
     computerSelectionPersisted,
   ]);
 
-  // Only frames received during this connection may replace its preview.
-  // A cached SSE frame must never mask every subsequent screenshot poll.
+  // No screenshot is fetched, polled, or decoded here. What remains is one
+  // probe in local mode: the first real capture is what makes macOS raise its
+  // Screen Recording prompt (there is no reliable pre-grant flow on macOS
+  // 15+), so a denial has to be discovered by trying. The frame itself is
+  // thrown away — only the fact of the capture is used, to offer the Settings
+  // repair path instead of spinning.
   const pageVisible = usePageVisible();
-  const live = state.screens[bot.id];
-  const latestLive = useRef({ frame: live, at: 0 });
-  const previewBusy = useRef(bot.busy);
-  useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
-  useEffect(() => {
-    if (!cloudPreviewReady) {
-      latestLive.current = { frame: live, at: 0 };
-      return;
-    }
-    if (latestLive.current.frame === live) return;
-    latestLive.current = { frame: live, at: 0 };
-    if (cloudPreviewReady && live) {
-      latestLive.current.at = Date.now();
-      setPolledFrame(live);
-      setPreviewError(null);
-      setPreviewRefreshing(false);
-    }
-  }, [live, cloudPreviewReady]);
-
-  useEffect(() => {
-    if (panelView !== "computer" || !cloudPreviewReady || viewerOpen || !pageVisible || pending || controlPending) return;
-    let inFlight = false;
-    let lastAttemptAt = -Infinity;
-    let retryDelay: number | null = null;
-    let contentionSince: number | null = null;
-    const controller = new AbortController();
-    setPreviewError(null);
-    setPreviewRefreshing(true);
-    const shoot = async () => {
-      if (inFlight || controller.signal.aborted) return;
-      if (Date.now() - lastAttemptAt < (retryDelay ?? (previewBusy.current ? 4000 : 30_000))) return;
-      // Resume polling if a busy bot stops publishing frames. A single old
-      // SSE event is not evidence of a working stream for the whole turn.
-      if (previewBusy.current && Date.now() - latestLive.current.at < 10_000) return;
-      inFlight = true;
-      retryDelay = null;
-      const startedAt = Date.now();
-      try {
-        const { png, format } = await api(`/api/bots/${bot.id}/computer/screenshot`, {
-          method: "POST",
-          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
-        });
-        if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
-          if (typeof png !== "string" || !png.trim()) throw new LocalizedPanelError("computer.err.emptyFrame");
-          setPolledFrame({ png, mime: format === "jpeg" ? "image/jpeg" : "image/png" });
-          setPreviewError(null);
-          setPreviewRefreshing(false);
-          contentionSince = null;
-        }
-      } catch (e) {
-        if (!controller.signal.aborted && latestLive.current.at <= startedAt) {
-          // A canceled client request can leave its capture running on the
-          // host. Contention is temporary, not a disconnected computer.
-          if (e instanceof ApiError && isRemoteScreenshotContention(e)) {
-            retryDelay = 1000;
-            contentionSince ??= Date.now();
-            const prolonged = Date.now() - contentionSince >= 10_000;
-            setPreviewError(prolonged ? e : null);
-            setPreviewRefreshing(!prolonged);
-          } else {
-            contentionSince = null;
-            setPreviewRefreshing(false);
-            setPreviewError(e instanceof Error && e.name === "TimeoutError"
-              ? new LocalizedPanelError("computer.err.frameTimeout")
-              : e instanceof Error ? e : new LocalizedPanelError("computer.err.screenUnavailable"));
-          }
-        }
-      } finally {
-        inFlight = false;
-        lastAttemptAt = Date.now();
-      }
-    };
-    void shoot();
-    // Read the current cadence without aborting a capture on every busy
-    // transition. Only connection/action changes replace its generation.
-    const timer = setInterval(shoot, 1000);
-    return () => {
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [panelView, cloudPreviewReady, bot.id, cloudBackend, viewerOpen, pageVisible, pending, controlPending, previewRetry]);
-
-  // Local VM preview comes directly from Cua Driver through the harness. It
-  // does not use the password-protected noVNC viewer or cloud endpoints.
-  const vmInFlight = useRef(false);
-  useEffect(() => {
-    if (panelView !== "computer" || phase !== "vm" || viewerOpen || !pageVisible) return;
-    let alive = true;
-    const shoot = async () => {
-      if (vmInFlight.current) return;
-      vmInFlight.current = true;
-      try {
-        const { image } = await api(`/api/bots/${bot.id}/local-computer/screenshot`, { method: "POST" });
-        if (alive && typeof image === "string") setVmFrame(image);
-      } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        vmInFlight.current = false;
-      }
-    };
-    void shoot();
-    const timer = window.setInterval(() => void shoot(), bot.busy ? 3000 : 30_000);
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-    };
-  }, [panelView, phase, bot.id, viewerOpen, pageVisible, bot.busy]);
-
-  // local preview: frames from the Electron main process. The FIRST capture
-  // attempt is what makes macOS show the Screen Recording prompt (there is
-  // no reliable pre-grant flow on macOS 15+), so repeated empty frames mean
-  // the user denied — surface the Settings repair path instead of spinning.
   const [localMisses, setLocalMisses] = useState(0);
   useEffect(() => {
     if (panelView !== "computer" || phase !== "local" || !window.ogb || isLinux || !pageVisible) return;
     let alive = true;
     setLocalMisses(0);
-    const shoot = async () => {
+    const probe = async () => {
       try {
-        const url = await window.ogb!.screenFrame();
-        if (alive && url) setLocalFrame(url);
-        else if (alive) setLocalMisses((n) => n + 1);
+        const captured = await window.ogb!.screenFrame();
+        if (alive && !captured) setLocalMisses((n) => n + 1);
       } catch {
         if (alive) setLocalMisses((n) => n + 1);
       }
     };
-    void shoot();
-    // A real ScreenCaptureKit capture + PNG encode per tick: idle bots get a
-    // slow heartbeat, working ones the live cadence.
-    const timer = setInterval(shoot, bot.busy ? 3000 : 30_000);
+    void probe();
     return () => {
       alive = false;
-      clearInterval(timer);
     };
-  }, [panelView, phase, isLinux, pageVisible, bot.busy, bot.id]);
-
-  const frameSrc =
-    phase === "vm"
-      ? vmFrame
-      : phase === "local" && !isLinux
-      ? localFrame
-      : cloudPreviewReady || (bot.computer === "cloud" && phase === "starting")
-        ? polledFrame && `data:${polledFrame.mime};base64,${polledFrame.png}`
-        : null;
-  const previewOpensDesktop = Boolean(
-    frameSrc &&
-      ((phase === "vm" && vmViewerUrl) || cloudPreviewReady),
-  );
+  }, [panelView, phase, isLinux, pageVisible, bot.id]);
 
   // who-is-driving: SSE keeps this fresh; the mount fetch covers a panel
   // opened after the last frame (e.g. an app reload mid-hold)
   const control = state.computerControl[bot.id] ?? { held: false, helpReason: null };
+  // The beam rides the frame for exactly the window where the agent is at the
+  // wheel and nothing has taken it back — a bot that is merely selected, or a
+  // person driving, gets no beam.
+  const driving = astraDriving({ held: control.held === true, busy: bot.busy === true });
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   useEffect(() => {
     let alive = true;
     api(`/api/bots/${bot.id}/computer/control`)
@@ -1102,9 +954,12 @@ export function ComputerPanel({
         </div>
       ) : (
       <div className="flex-1 overflow-y-auto px-5 pb-5">
-          {/* Screen preview */}
+          {/* {name}'s screen, marked rather than mirrored: the beam rides the
+              frame while the agent drives, and the live desktop is a separate
+              window this panel never renders. */}
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{t("computer.screenOf", { name: bot.name })}</span>
+            {driving && <span className="text-[11px]">{t("vm.state.inUse")}</span>}
             {phase === "local" && <span className="text-[11px]">{t("computer.badge.local")}</span>}
             {phase === "vm" && <span className="text-[11px]">{t("vm.dest.vm")}</span>}
             {(phase === "show-ready-box" || phase === "show-sleeping-box" || phase === "show-pending-box") && (
@@ -1112,53 +967,21 @@ export function ComputerPanel({
             )}
             {computerStatusCurrent && bot.computer === "cloud" && cloudBackend === "vps" && (phase === "ready" || phase === "starting") && <span className="text-[11px]">{t("computer.badge.vps")}</span>}
         </div>
+        <BorderBeam
+          size="md"
+          colorVariant={driving ? "colorful" : "mono"}
+          strength={driving ? 0.85 : 0.3}
+          active={driving && !reducedMotion}
+          className="block w-full rounded-xl"
+        >
         <div className="relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-card">
-          {cloudPreviewReady || (bot.computer === "cloud" && phase === "starting") ? (
-            <CloudScreenPreview
-              key={`${bot.id}:${cloudBackend}`}
-              src={frameSrc}
-              name={bot.name}
-              error={panelErrorText(previewError)}
-              refreshing={previewRefreshing}
-              retry={previewRetry}
-              starting={phase === "starting"}
-              opening={pending === "join"}
-              disabled={controlPending}
-              onOpen={() => void openDesktop()}
-              onRetry={(discardFrame) => {
-                latestLive.current.at = 0;
-                if (discardFrame) setPolledFrame(null);
-                setPreviewError(null);
-                setPreviewRefreshing(true);
-                setPreviewRetry((n) => n + 1);
-              }}
-            />
-          ) : frameSrc && previewOpensDesktop ? (
-            <button
-              type="button"
-              onClick={() => void openDesktop()}
-              disabled={controlPending || pending === "join"}
-              className="group relative flex h-full w-full cursor-pointer items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-wait"
-              aria-label={t("computer.openLiveDesktopAria", { name: bot.name })}
-              title={t("computer.openLiveDesktop")}
-            >
-              <img
-                src={frameSrc}
-                alt={t("computer.screenOf", { name: bot.name })}
-                className="h-full w-full object-contain transition group-hover:brightness-75 group-focus-visible:brightness-75"
-              />
-              <span className="pointer-events-none absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/70 px-2 py-1 text-[11px] font-medium text-white opacity-80 shadow-sm transition group-hover:opacity-100 group-focus-visible:opacity-100">
-                {pending === "join" ? <Loader2 size={12} className="animate-spin" /> : <Maximize2 size={12} />}
-                {t("computer.open")}
+          {driving ? (
+            <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 px-6 text-center">
+              <ThinkingOrb state={control.helpReason ? "connecting" : "working"} size={64} paused={reducedMotion} />
+              <span className="text-[12px] text-ink-secondary">
+                {t("computer.astraDriving", { name: bot.name })}
               </span>
-            </button>
-          ) : frameSrc ? (
-            <img
-              src={frameSrc}
-              alt={t("computer.screenOf", { name: bot.name })}
-              className="h-full w-full object-contain"
-              title={phase === "vm" ? t("computer.watchOnly") : undefined}
-            />
+            </div>
           ) : (
             <div className="flex flex-col items-center gap-2 px-6 text-center text-ink-secondary">
               {phase === "checking" || phase === "starting" || phase === "vm" || (phase === "local" && !isLinux) ? (
@@ -1268,6 +1091,7 @@ export function ComputerPanel({
             </div>
           )}
         </div>
+        </BorderBeam>
 
         {errorText && (
           <div className="mt-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">
@@ -1435,7 +1259,6 @@ export function ComputerPanel({
           </div>
         )}
 
-        <LocalScreenPreview />
         <LinuxLocalControl />
         <MacLocalControl />
 

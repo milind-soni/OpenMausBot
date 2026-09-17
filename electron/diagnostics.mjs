@@ -22,6 +22,7 @@ export const CREDENTIAL_ENV_NAMES = [
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
   "ASTRA_TTS_KEY",
+  // Legacy Deepgram secret: old logs/env dumps still need redaction.
   "ASTRA_DICTATION_KEY",
   "ASTRA_PICOVOICE_KEY",
   "ASTRA_OPENAI_IMAGE_KEY",

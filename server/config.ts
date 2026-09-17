@@ -3,7 +3,7 @@
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 import { readFileSync, mkdirSync, existsSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
@@ -327,9 +327,6 @@ const appConfigSchema = z.object({
    * engine: "elevenlabs" (default; needs a key) or "system" (the Mac's
    * built-in voices, no key). */
   tts: z.object({ key: optionalText, voice: optionalText, provider: z.enum(["elevenlabs", "system", "piper"]).optional() }).optional(),
-  /** Composer dictation (hold Ctrl+Space): the Deepgram streaming key. The
-   * desktop shell, not a provider driver, consumes it. */
-  dictation: z.object({ key: optionalText }).optional(),
   /** The "Astra" wake word: the Picovoice AccessKey for the renderer's
    * on-device Porcupine detector. Stored and reported configured-or-not
    * only; the key never leaves the server except to the user's own
@@ -400,7 +397,6 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" | "piper" };
-  dictation?: { key?: string };
   wakeWord?: { accessKey?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
@@ -575,7 +571,6 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "profile",
   "language",
   "tts",
-  "dictation",
   "wakeWord",
   "imageGen",
   "vps",
@@ -619,6 +614,80 @@ export function ensureDirs() {
   }
   for (const dir of [DATA_DIR, EVENTS_DIR, NATIVE_DIR]) mkdirSync(dir, { recursive: true });
   migrateLegacyFeatureFlags();
+  migrateLegacyDataDirPaths();
+}
+
+/** A bot's `cwd` — and a room's — is captured when it is created rather than
+ * recomputed from DATA_DIR, and checkpoints realpath() it on every turn. The
+ * rename above moves the directory, so a stored string still names a path
+ * that no longer exists and the first turn dies with ENOENT. Rebase those
+ * stored paths once, before the store loads them. Idempotent: a tree with no
+ * retired prefix is left byte-for-byte alone. */
+function migrateLegacyDataDirPaths(): void {
+  const retired = LEGACY_DATA_DIRS.filter((dir) => dir !== DATA_DIR);
+  if (!retired.length) return;
+  for (const name of ["bots.json", "groups.json"]) {
+    const file = join(DATA_DIR, name);
+    if (!existsSync(file)) continue;
+    let stored: JsonValue;
+    try {
+      stored = parseJson(readFileSync(file, "utf8"));
+    } catch (error) {
+      // A store this app owns should always parse; a hand-edited one is left
+      // untouched and reported rather than overwritten.
+      console.error(`[config] ${name} unreadable for data-dir path migration: ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    const { value, changed } = rebaseRetiredDataDirPaths(stored, retired);
+    if (!changed) continue;
+    try {
+      writeFileAtomic(file, JSON.stringify(value, null, 2), { mode: 0o600 });
+      console.log(`[config] ${name}: rebased stored paths onto the renamed data dir`);
+    } catch (error) {
+      console.error(`[config] could not rebase paths in ${name}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+/** The new location for a stored path that names a retired data dir, or null
+ * when the value is not one. Only a whole value counts: the old dir inside a
+ * bot's prose is the user's own text, not a path the app resolves. */
+export function rebaseRetiredDataDirPath(value: string, retired: readonly string[]): string | null {
+  const fold = (text: string) => (process.platform === "win32" ? text.toLowerCase() : text);
+  for (const dir of retired) {
+    const prefix = fold(dir);
+    const candidate = fold(value);
+    if (candidate === prefix) return DATA_DIR;
+    if (candidate.startsWith(`${prefix}${sep}`)) return join(DATA_DIR, value.slice(dir.length + 1));
+  }
+  return null;
+}
+
+function rebaseRetiredDataDirPaths(node: JsonValue, retired: readonly string[]): { value: JsonValue; changed: boolean } {
+  if (typeof node === "string") {
+    const rebased = rebaseRetiredDataDirPath(node, retired);
+    return rebased === null ? { value: node, changed: false } : { value: rebased, changed: true };
+  }
+  if (Array.isArray(node)) {
+    let changed = false;
+    const value = node.map((item) => {
+      const next = rebaseRetiredDataDirPaths(item, retired);
+      changed ||= next.changed;
+      return next.value;
+    });
+    return { value, changed };
+  }
+  if (node && typeof node === "object") {
+    let changed = false;
+    const value: JsonObject = {};
+    for (const [key, item] of Object.entries(node)) {
+      const next = rebaseRetiredDataDirPaths(item, retired);
+      changed ||= next.changed;
+      value[key] = next.value;
+    }
+    return { value, changed };
+  }
+  return { value: node, changed: false };
 }
 
 /** `features.skillRecorder` became `features.skillAuthoring` when the Teach a
@@ -687,8 +756,6 @@ export function loadConfig(): AppConfig {
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
   if (process.env.ASTRA_TTS_KEY !== undefined) cfg.tts.key = process.env.ASTRA_TTS_KEY;
-  cfg.dictation = { ...cfg.dictation };
-  if (process.env.ASTRA_DICTATION_KEY !== undefined) cfg.dictation.key = process.env.ASTRA_DICTATION_KEY;
   cfg.wakeWord = { ...cfg.wakeWord };
   if (process.env.ASTRA_PICOVOICE_KEY !== undefined) cfg.wakeWord.accessKey = process.env.ASTRA_PICOVOICE_KEY;
   cfg.imageGen = { ...cfg.imageGen };
@@ -722,7 +789,6 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.box?.token, "BOX_TOKEN"],
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "ASTRA_TTS_KEY"],
-    [patch.dictation?.key, "ASTRA_DICTATION_KEY"],
     [patch.wakeWord?.accessKey, "ASTRA_PICOVOICE_KEY"],
     [patch.imageGen?.key, "ASTRA_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "ASTRA_CUSTOM_IMAGE_KEY"],
@@ -765,6 +831,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
   "ASTRA_TTS_KEY",
+  // Legacy Deepgram secret: no longer consumed, but must not leak to children.
   "ASTRA_DICTATION_KEY",
   "ASTRA_PICOVOICE_KEY",
   "ASTRA_OPENAI_IMAGE_KEY",
@@ -819,7 +886,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "openaiCompat", "vision", "composio", "box", "opencodeGo", "tts", "dictation", "wakeWord", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
+  for (const key of ["xai", "anthropic", "openaiCompat", "vision", "composio", "box", "opencodeGo", "tts", "wakeWord", "imageGen", "profile", "rooms", "threads", "localVm", "features", "budgets", "billing", "onboarding"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

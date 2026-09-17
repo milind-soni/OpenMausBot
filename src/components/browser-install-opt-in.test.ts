@@ -5,8 +5,12 @@ import type { FeatureFlagConfig } from "@/lib/feature-flags";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 const fixture = vi.hoisted(() => {
-  vi.stubGlobal("window", {});
-  vi.stubGlobal("document", { visibilityState: "visible" });
+  // The panel reads the OS reduced-motion preference (border-beam reads it too),
+  // so the fabricated browser needs the one API both ask for.
+  vi.stubGlobal("window", {
+    matchMedia: () => ({ matches: false, addEventListener: () => {}, removeEventListener: () => {} }),
+  });
+  vi.stubGlobal("document", { visibilityState: "visible", documentElement: { dataset: {} } });
   vi.stubGlobal("localStorage", { getItem: () => "browser" });
   return { config: {} as FeatureFlagConfig, browserMcp: true, dispatch: vi.fn() };
 });

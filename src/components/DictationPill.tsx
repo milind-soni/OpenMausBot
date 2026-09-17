@@ -1,7 +1,7 @@
 // Status surfaces for dictation, bottom-center:
 //   - hold-Ctrl+Space clipboard dictation (a border-beam glow marks the
-//     live hold, since it ends the moment the keys release);
-//   - the "Astra" wake word: armed indicator, live partials while a
+//     live hold, through capture and decoding);
+//   - the "Astra" wake word: armed indicator, listening/decoding feedback while a
 //     wake-triggered transcript is captured, and errors.
 // Renders nothing in the browser/dev (no bridge) and when there is nothing
 // to show.
@@ -28,6 +28,16 @@ export function DictationPill() {
     noteTimer.current = window.setTimeout(() => setNote(null), 5000);
   };
 
+  const [holdTranscribing, setHoldTranscribing] = useState(false);
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
   const active = useClipboardDictation(
     (text) => {
       const write = window.ogb?.writeClipboardText?.(text);
@@ -40,17 +50,18 @@ export function DictationPill() {
         .catch(() => flash("Clipboard unavailable"));
     },
     (message) => flash(message),
+    () => setHoldTranscribing(true),
   );
+  useEffect(() => { if (!active) setHoldTranscribing(false); }, [active]);
 
   // Wake word: owned here so the detector lives exactly as long as the pill
   // (which is mounted for the whole app session). Suspension follows the
   // speaker and the call state; a detection starts one wake session whose
-  // partials render in place of the idle indicator.
+  // status renders in place of the idle indicator.
   const wakeEnabled = state.config?.features?.wakeWord === true && wakeWordSupported();
   const [wakeArmed, setWakeArmed] = useState(false);
   const [wakeActive, setWakeActive] = useState(false);
   const [wakeTranscribing, setWakeTranscribing] = useState(false);
-  const [wakePartial, setWakePartial] = useState("");
   const wakeSessionRef = useRef<ReturnType<typeof createWakeWordSession> | null>(null);
   const controllerRef = useRef<WakeWordController | null>(null);
 
@@ -60,18 +71,15 @@ export function DictationPill() {
       onActiveChange: (next) => {
         setWakeActive(next);
         if (!next) {
-          setWakePartial("");
           setWakeTranscribing(false);
         }
       },
-      onPartial: setWakePartial,
       onTranscribing: () => setWakeTranscribing(true),
       onError: (message) => flash(message),
     });
     wakeSessionRef.current = wakeSession;
     const controller = new WakeWordController({
       onDetected: () => {
-        setWakePartial("");
         wakeSession.start();
       },
       onError: (message) => flash(message),
@@ -107,7 +115,7 @@ export function DictationPill() {
   useEffect(() => {
     if (!wakeEnabled) return;
     const sync = () => {
-      const suspend = speaker.isSpeaking() || currentCall() !== null;
+      const suspend = active || speaker.isSpeaking() || currentCall() !== null;
       controllerRef.current?.setSuspended(suspend);
       if (suspend) wakeSessionRef.current?.stop();
     };
@@ -118,40 +126,31 @@ export function DictationPill() {
       unsubscribe();
       window.clearInterval(interval);
     };
-  }, [wakeEnabled]);
+  }, [wakeEnabled, active]);
 
   useEffect(() => () => window.clearTimeout(noteTimer.current), []);
 
-  const wakeListening = wakeActive && wakePartial.length > 0;
-  if (!active && !note && !(wakeEnabled && wakeArmed) && !wakeListening && !wakeTranscribing) return null;
+  if (!active && !note && !(wakeEnabled && wakeArmed) && !wakeActive) return null;
+  const decoding = active ? holdTranscribing : wakeTranscribing;
+  const live = active || wakeActive;
+  const message = live
+    ? decoding ? t("wake.transcribing") : active ? "Recording… release to copy" : t("wake.detected")
+    : note ?? "“Astra”";
 
   return (
-    <BorderBeam size="line" colorVariant={active ? "colorful" : "mono"} strength={active ? 0.9 : 0.45} active={active || wakeActive} className="animate-panel-in fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-hairline/40 bg-panel px-3.5 py-1.5 text-[12.5px] text-ink shadow-2xl shadow-black/50">
-      {active ? (
-        <span className="flex items-center gap-2">
-          <Mic size={13} className="text-accent" /> Recording… release to copy
+    <BorderBeam
+      size="line"
+      colorVariant={live ? "colorful" : "mono"}
+      strength={live ? 0.7 : 0.35}
+      active={live && !reducedMotion}
+      className="motion-safe:animate-panel-in fixed bottom-4 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border border-hairline/40 bg-panel px-3.5 py-1.5 text-[12.5px] text-ink shadow-2xl shadow-black/50"
+    >
+      <span role="status" aria-live="polite" aria-atomic="true" className="flex min-w-0 items-center gap-2">
+        <span aria-hidden="true" className="shrink-0">
+          {live ? <ThinkingOrb state={decoding ? "weaving" : "listening"} size={20} paused={reducedMotion} /> : <Mic size={13} />}
         </span>
-      ) : wakeTranscribing ? (
-        <span className="flex items-center gap-2 text-ink-secondary">
-          <ThinkingOrb state="weaving" size={20} /> {t("wake.transcribing")}
-        </span>
-      ) : wakeListening ? (
-        <span className="flex max-w-[420px] items-center gap-2 truncate" title={wakePartial}>
-          <ThinkingOrb state="listening" size={20} paused={Boolean(speaker.isSpeaking())} /> {wakePartial}
-        </span>
-      ) : wakeActive ? (
-        <span className="flex items-center gap-2 text-ink-secondary">
-          <ThinkingOrb state="listening" size={20} /> {t("wake.detected")}
-        </span>
-      ) : wakeEnabled && wakeArmed ? (
-        <span className="flex items-center gap-2 text-ink-secondary">
-          <Mic size={13} className="text-ink-secondary" /> “Astra”
-        </span>
-      ) : (
-        <span className="block max-w-[420px] truncate" title={note ?? ""}>
-          {note}
-        </span>
-      )}
+        <span className="truncate" title={message}>{message}</span>
+      </span>
     </BorderBeam>
   );
 }

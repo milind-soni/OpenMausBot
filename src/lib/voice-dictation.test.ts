@@ -1,4 +1,64 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createVoiceDictationSession } from "./voice-dictation";
+import { createDictationCapture, type DictationCaptureOptions } from "./dictation-capture";
+
+vi.mock("./dictation-capture", () => ({
+  DICTATION_UNAVAILABLE: "Handy unavailable",
+  createDictationCapture: vi.fn(),
+}));
+
+function sessionHarness() {
+  const captures: ReturnType<typeof mockCapture>[] = [];
+  function mockCapture(options: DictationCaptureOptions) {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const pending = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+    return { options, resolve, reject, start: vi.fn(() => pending), discard: vi.fn(),
+      transcribe: vi.fn().mockResolvedValue("hello"), setMuted: vi.fn() };
+  }
+  vi.mocked(createDictationCapture).mockImplementation((options) => {
+    const capture = mockCapture(options);
+    captures.push(capture);
+    return capture;
+  });
+  const setInterval = vi.fn(() => 1);
+  vi.stubGlobal("window", { setInterval, clearInterval: vi.fn() });
+  const callbacks = { onResult: vi.fn(), onError: vi.fn(), onActiveChange: vi.fn(), onTranscribing: vi.fn() };
+  const session = createVoiceDictationSession(callbacks);
+  return { session, captures, callbacks, setInterval };
+}
+
+afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+
+describe("voice session races", () => {
+  it("stop during starting discards and never arms a timer on late open", async () => {
+    const h = sessionHarness();
+    const starting = h.session.start();
+    h.session.stop();
+    expect(h.captures[0].discard).toHaveBeenCalled();
+    h.captures[0].resolve();
+    await starting;
+    expect(h.session.state.phase).toBe("idle");
+    expect(h.setInterval).not.toHaveBeenCalled();
+    expect(h.callbacks.onResult).not.toHaveBeenCalled();
+    expect(h.callbacks.onError).not.toHaveBeenCalled();
+  });
+
+  it("an old start rejection cannot clear or report over a newer capture", async () => {
+    const h = sessionHarness();
+    const old = h.session.start();
+    h.session.stop();
+    const next = h.session.start();
+    h.captures[1].resolve();
+    await next;
+    h.captures[0].reject(new Error("permission denied"));
+    await old;
+    expect(h.session.state.phase).toBe("listening");
+    expect(h.callbacks.onError).not.toHaveBeenCalled();
+    h.session.dispose();
+    expect(h.captures[1].discard).toHaveBeenCalled();
+  });
+});
 
 import {
   INITIAL_VOICE_DICTATION_STATE,

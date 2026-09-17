@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Loader2, Sparkles } from "lucide-react";
+import { ImageGeneration } from "img-fx";
 
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { normalizeImageGenerationUrl, type AvatarImageProvider } from "../../shared/image-generation";
@@ -37,6 +38,15 @@ export function AvatarImageGenerator({
   const [direction, setDirection] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The generation mosaic is motion; the OS preference freezes it.
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setReducedMotion(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
   const provider = providerDraft ?? savedProvider;
   const customUrl = urlDraft ?? imageGen?.customUrl ?? "";
   const customModel = modelDraft ?? imageGen?.customModel ?? "";
@@ -269,8 +279,30 @@ export function AvatarImageGenerator({
           disabled={busy || !configured || unsaved}
           className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white hover:brightness-110 disabled:opacity-50"
         >
-          {generating ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-          {generating ? "Generating…" : "Generate avatar"}
+          {generating ? (
+            // An image is being drawn, so the button shows the effect that
+            // exists for exactly this moment: a churning pixel mosaic. It
+            // holds still under the OS reduced-motion preference.
+            <ImageGeneration
+              preset="pixels-organic"
+              strength={0.65}
+              paused={reducedMotion}
+              className="rounded-lg"
+            >
+              <span
+                aria-live="polite"
+                className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-white"
+              >
+                <Loader2 size={13} className="animate-spin" />
+                Generating…
+              </span>
+            </ImageGeneration>
+          ) : (
+            <>
+              <Sparkles size={13} />
+              Generate avatar
+            </>
+          )}
         </button>
       </div>
       {unsaved && <p role="status" className="mt-2 text-[11px] text-ink-secondary">Save your connection changes before generating.</p>}

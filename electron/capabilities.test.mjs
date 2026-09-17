@@ -60,8 +60,8 @@ describe("desktop capabilities", () => {
 
   it("offers local computer control on win32 with a live driver connection", () => {
     // The bundled cua-driver ships on Windows; only the dictation engine
-    // (Apple Speech) stays macOS-gated here — Deepgram dictation is gated
-    // separately by the desktop bridge, not by this capability.
+    // (Apple Speech) stays macOS-gated here. Handy's offline bridge is
+    // independent of this native capability.
     const capabilities = desktopCapabilities({
       platform: "win32",
       env: {},

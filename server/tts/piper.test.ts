@@ -69,6 +69,15 @@ describe("piperSynthesisArgs", () => {
     expect(PIPER_TUNING.sentenceSilence).toBeLessThan(0.2);
   });
 
+  it("keeps the speaking rate at a conversational pace, not a sprint", () => {
+    // Measured on en_US-ryan-high over one fixed sentence: 0.95 spoke at
+    // 238 wpm and 1.0 at 226 — both well past conversational English, which
+    // is what "sounds like a machine" mostly is. The guard is a band, not a
+    // constant: anything at or below 1.0 is back to the hurried read.
+    expect(PIPER_TUNING.lengthScale).toBeGreaterThan(1);
+    expect(PIPER_TUNING.lengthScale).toBeLessThan(1.4);
+  });
+
   it("omits --speaker unless one is chosen", () => {
     expect(piperSynthesisArgs("m.onnx", "o.wav")).not.toContain("--speaker");
     const withSpeaker = piperSynthesisArgs("m.onnx", "o.wav", { ...PIPER_TUNING, speaker: 3 });

@@ -12,7 +12,7 @@ import { track } from "@/lib/analytics";
 import { normalizeState } from "@/lib/mascot";
 import { speaker } from "@/lib/tts";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { usePushToTalk } from "@/lib/push-to-talk";
+import { useCallTalk } from "@/lib/push-to-talk";
 import { useStore, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
@@ -64,9 +64,6 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
-  const pushToTalk = usePushToTalk(group.id, phase === "listening", () => {
-    setNote("Push to talk couldn't start. Check Microphone and Speech Recognition access.");
-  });
 
   const messages = group.messages;
   const approval = pendingApprovals(messages)[0];
@@ -125,6 +122,37 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       }
     });
   }, [group.id, move]);
+
+  // The space bar is the talk key here too: hold it to talk, hold it while a
+  // member is mid-answer to interrupt that answer.
+  const talkStart = useCallback(() => {
+    if (!alive.current || currentCall() !== group.id) return;
+    if (phaseRef.current === "speaking") {
+      sayGeneration.current += 1;
+      // Drop sentences still queued for this answer, not just the one
+      // currently audible — otherwise the room talks over the interruption.
+      queueGeneration.current += 1;
+      queuedJobs.current.clear();
+      speaker.stop();
+    }
+    move("listening");
+    setSpeakingMemberId(null);
+    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+      if (alive.current && currentCall() === group.id) {
+        setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
+      }
+    });
+  }, [group.id, move]);
+
+  const talkEnd = useCallback(() => {
+    void window.ogb?.speechFinish?.();
+  }, []);
+
+  const talking = useCallTalk({
+    isCallLive: () => alive.current && currentCall() === group.id,
+    onTalkStart: talkStart,
+    onTalkEnd: talkEnd,
+  });
 
   const scheduleListen = useCallback(
     (force = false, delay = 140) => {
@@ -441,7 +469,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   const focusId = speakingMember?.id ?? workingMember?.id;
   const status =
     phase === "listening"
-      ? pushToTalk
+      ? talking
         ? "Push to talk"
         : "Listening"
       : phase === "sending"
@@ -511,8 +539,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         {phase === "listening" ? (
           heard || (
             <span className="text-ink-secondary">
-              {pushToTalk
-                ? "Release Control + Option to send…"
+              {talking
+                ? "Release Space to send…"
                 : "Say a name, say “everyone,” or just talk to the group…"}
             </span>
           )
@@ -554,7 +582,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       </div>
 
       <div className="text-[11.5px] text-ink-secondary/70">
-        Hold Control + Option to talk · Say a member’s name to direct the turn · Space interrupts · Esc hangs up
+        Hold Space to talk · Say a member’s name to direct the turn · Space also interrupts · Esc hangs up
       </div>
     </div>
   );
