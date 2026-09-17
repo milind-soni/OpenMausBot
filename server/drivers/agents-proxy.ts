@@ -405,10 +405,10 @@ const TOOLS = [
   },
   {
     name: "coordinate_bots",
-    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Name 1-4 bot_ids: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
+    description: "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       group_id: { type: "string", description: "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly." },
-      bot_ids: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, uniqueItems: true },
+      bot_ids: { type: "array", items: { type: "string", description: "A teammate's id exactly as list_bots or your roster prints it ([id: …]). A teammate's unique display name also resolves; a name shared by two reachable teammates is refused." }, minItems: 1, maxItems: 4, uniqueItems: true },
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Self-contained question or task for these teammates. Send separate requests when responsibilities differ." },
       request_key: { type: "string", description: "A short unique assignment key. Reuse for an identical retry." },
       rework: { type: "boolean", description: "True only for concrete additional work from someone who already completed a request." },
@@ -434,7 +434,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        bot_id: { type: "string", description: "The target bot's id (from list_bots)." },
+        bot_id: { type: "string", description: "The target bot's id (from list_bots or your roster); a unique teammate name also resolves." },
         message: { type: "string", description: "What to say / ask the bot." },
       },
       required: ["bot_id", "message"],
@@ -447,7 +447,7 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        bot_id: { type: "string", description: "The target bot's id (from list_bots)." },
+        bot_id: { type: "string", description: "The target bot's id (from list_bots or your roster); a unique teammate name also resolves." },
         message: { type: "string", description: "What the peer should do / answer." },
         reason: { type: "string", description: "Optional one-line reason for the delegation (shown to the user as a chip)." },
       },
@@ -671,6 +671,21 @@ const TOOLS = [
         old_text: { type: "string", minLength: 1, description: "Exact unique existing passage for replace, supersede, or remove. Omit for append." },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "retry_thread",
+    description:
+      "Chief of Staff only. Resume a teammate's thread whose last run failed, stalled or could not start — the one an incident report named — exactly where it stopped, keeping its conversation and files. The teammate gets a line saying you asked for the retry and why. Use it when the cause looks transient (a crash, a timeout, a busy service). Use delegate_bot with a corrected brief instead when the request itself needs to change, and tell the person instead when only they can fix the cause (a sign-in, a missing credential, an unanswered question). Never retry the same thread more than twice.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        bot_id: { type: "string", description: "The teammate's id, from the incident report or list_bots." },
+        thread_id: { type: "string", description: "The failed thread's id, from the incident report." },
+        note: { type: "string", description: "Optional: one sentence for the teammate about what to watch for this time." },
+      },
+      required: ["bot_id", "thread_id"],
     },
   },
   {
@@ -1520,6 +1535,18 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     }
     const entry = typeof r.entry === "string" && r.entry ? ` Entry: ${r.entry}` : "";
     return { text: `Memory updated.${entry}${r.truncated ? " MEMORY.md exceeds the prompt load budget; keep it short and curated." : ""}` };
+  }
+  if (name === "retry_thread") {
+    const botId = String(args.bot_id ?? "").trim();
+    const threadId = String(args.thread_id ?? "").trim();
+    const note = typeof args.note === "string" ? args.note.trim() : "";
+    if (!botId || !threadId) return { text: "retry_thread needs bot_id and thread_id — both are in the incident report.", isError: true };
+    const r = await api("/api/internal/retry-thread", {
+      method: "POST",
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, toBotId: botId, toThreadId: threadId, ...(note ? { note } : {}) }),
+    });
+    if (r.error) return { text: `Couldn't retry that thread: ${String(r.error)}`, isError: true };
+    return { text: typeof r.message === "string" ? r.message : "The thread is running again. Its result stays in that thread; you are not woken for it — check it later with session_search or list_threads if you need to." };
   }
   if (name === "memory_log") {
     if (typeof args.text !== "string" || !args.text.trim()) {

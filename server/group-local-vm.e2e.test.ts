@@ -40,7 +40,14 @@ async function until<T>(read: () => T | Promise<T>, accept: (value: T) => boolea
     await new Promise(r => setTimeout(r, 40));
   }
 }
-const dump = () => until(() => existsSync(dumpFile) ? JSON.parse(readFileSync(dumpFile, "utf8")) : null, Boolean);
+// The fake writes its dump in one go, but a poll can still land between the
+// open and the close of that write and read a truncated file — macOS CI hit
+// "Unexpected end of JSON input" here. A partial file is "not yet", not a
+// failure: parse errors fall through to the next poll.
+const dump = () => until(() => {
+  if (!existsSync(dumpFile)) return null;
+  try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
+}, Boolean);
 const idle = (botId: string) => until(() => api("GET", "/api/bots?messages=0"), s => !s.bots.find((b: any) => b.id === botId)?.busy);
 const computer = (d: any) => d.mcpConfig.mcpServers.computer;
 const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, { headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` } });
@@ -354,6 +361,186 @@ describe("Group Local VM ownership on the real isolated server", () => {
     vmState({ clockOffset: 31 * 60_000 });
     expect((await gate(c)).status).toBe(401);
     await stop(group.id); await idle(bots[0].id); vmState();
+  });
+
+  it("never trips the lazy first-screen-call claim on an eagerly claimed turn", async () => {
+    // Issue #1361 seam check: dispatch still claims, so the gate's lazy
+    // branch (no computer entry yet) must stay unreachable and the poll
+    // must answer with the plain not-held snapshot, not contention text.
+    const { bots, group } = await room();
+    await send(group.id);
+    const c = computer(await dump());
+    const body = await (await gate(c)).json();
+    expect(body).toEqual({ held: false, helpOpen: false });
+    await stop(group.id); await idle(bots[0].id);
+  });
+
+  it("runs a screen-less Auto turn to completion while another thread holds the Local VM (issue #1361 AC1)", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "VM holder" });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Screen-less Auto" });
+    try {
+      await api("PATCH", `/api/bots/${holder.id}`, { computer: "vm" });
+      await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the VM" });
+      await until(async () => (await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === holder.id)?.busy, Boolean);
+      // The dump file is shared with the holder's fake CLI. Consume the
+      // holder's dump and remove it, so the assertion below can only pass
+      // on the Auto turn's own mount, never the holder's leftover file.
+      await dump();
+      rmSync(dumpFile, { force: true });
+      // The Auto attach mounts the computer MCP without claiming the VM, so
+      // this dispatch must not block behind the holder's eager claim.
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "No screen work today" });
+      expect(computer(await dump())).toBeTruthy();
+      await until(async () => (await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === auto.id)?.busy, Boolean);
+      writeFileSync(finishFile, "finish");
+      await idle(auto.id); await idle(holder.id);
+      const state = await api("GET", "/api/bots?messages=30");
+      const activities = (botId: string) => (state.bots.find((b: any) => b.id === botId)?.messages ?? [])
+        .filter((m: any) => m.kind === "activity")
+        .map((m: any) => m.tool?.name ?? "");
+      expect(activities(auto.id).join("|")).not.toContain("Waiting for its turn");
+      expect(activities(holder.id).join("|")).not.toContain("Waiting for its turn");
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await api("POST", `/api/bots/${holder.id}/interrupt`, {});
+      await idle(auto.id); await idle(holder.id);
+      await api("DELETE", `/api/bots/${auto.id}`); await api("DELETE", `/api/bots/${holder.id}`);
+    }
+  });
+
+  it("claims a lazily attached Auto VM on the first screen call and proceeds on release (issue #1361 AC2)", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Steering Auto" });
+    const { bot: holder } = await api("POST", "/api/bots", { name: "VM holder" });
+    try {
+      await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
+      await api("PATCH", `/api/bots/${holder.id}`, { computer: "vm" });
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Take a screenshot when free" });
+      const autoComputer = computer(await dump());
+      expect(autoComputer).toBeTruthy();
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${holder.id}/messages`, { text: "Hold the VM" });
+      // busy flips before setup claims the VM, so it is not a contention
+      // signal. Each fake CLI dumps once, on its first prompt, after the
+      // eager claim and mount: the fresh dump is the lease-held sync point.
+      const holderComputer = computer(await dump());
+      expect(holderComputer).toBeTruthy();
+      expect((await gate(holderComputer)).status).toBe(200);
+      // First screen tools/call: the gate fires the deferred claim, answers
+      // with the contention text, and the existing wait activity appears.
+      const first = await (await gate(autoComputer)).json();
+      expect(first).toMatchObject({ held: true, helpOpen: false,
+        blockedReason: "Another thread is using this computer. This call was not performed. Pause computer work until that thread finishes, then take a fresh screenshot before acting." });
+      await until(async () => {
+ const state = await api("GET", "/api/bots?messages=30");
+        return (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
+          .some((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Waiting for its turn on this computer"));
+      }, Boolean);
+      // Releasing the holder lets the waiting claim land; the next poll passes.
+      await api("POST", `/api/bots/${holder.id}/interrupt`, {}); await idle(holder.id);
+      await until(async () => {
+        const state = await api("GET", "/api/bots?messages=30");
+        return (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
+          .some((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Computer free"));
+      }, Boolean);
+      expect(await (await gate(autoComputer)).json()).toEqual({ held: false, helpOpen: false });
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await api("POST", `/api/bots/${holder.id}/interrupt`, {});
+      await idle(auto.id); await idle(holder.id);
+      await api("DELETE", `/api/bots/${auto.id}`); await api("DELETE", `/api/bots/${holder.id}`);
+    }
+  });
+
+  it("keeps refusing screen calls after a rejected lazy claim (issue #1361 F1)", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Rejected claim Auto" });
+    try {
+      await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Use the VM when it is ready" });
+      const autoComputer = computer(await dump());
+      expect(autoComputer).toBeTruthy();
+      // The VM dies between dispatch and the first screen call: the fired
+      // claim rejects inside readyLocalVmForTurn — after bindTurnComputer
+      // already left a turn-computer entry behind.
+      vmState({ failed: true });
+      const refused = { held: true, helpOpen: false,
+        blockedReason: expect.stringMatching(/^This turn could not claim the Local VM \(.+\)\. This call was not performed\. Do not retry computer work in this turn/) };
+      const first = await (await gate(autoComputer)).json() as any;
+      expect(first).toEqual(refused);
+      // Honest about why. The contention text would send the model into a
+      // screenshot loop waiting on a "thread" that does not exist.
+      expect(first.blockedReason).not.toContain("Another thread");
+      // The mount is still live, but every later poll for this generation
+      // must keep refusing: falling through to held:false would let the
+      // bridge forward screen calls onto a VM this turn never claimed.
+      await new Promise(r => setTimeout(r, 150));
+      expect(await (await gate(autoComputer)).json()).toEqual(refused);
+      expect(await (await gate(autoComputer)).json()).toEqual(refused);
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await idle(auto.id);
+      await api("DELETE", `/api/bots/${auto.id}`);
+    }
+  });
+
+  it("lets an uncontended first screen call through with an honest answer (issue #1361 AC3)", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Free VM Auto" });
+    try {
+      await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Take a screenshot" });
+      const autoComputer = computer(await dump());
+      expect(autoComputer).toBeTruthy();
+      // Nobody holds the VM. The gate fires the deferred claim, lets it
+      // land, and answers truthfully: the very first screen call proceeds.
+      // Answering held here — as an unconditional "fire and refuse" did —
+      // told every Auto VM turn that another thread had the computer.
+      expect(await (await gate(autoComputer)).json()).toEqual({ held: false, helpOpen: false });
+      const state = await api("GET", "/api/bots?messages=30");
+      const activities = (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
+        .filter((m: any) => m.kind === "activity").map((m: any) => m.tool?.name ?? "");
+      expect(activities.join("|")).not.toContain("Waiting for its turn");
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await idle(auto.id);
+      await api("DELETE", `/api/bots/${auto.id}`);
+    }
+  });
+
+  it("releases everything a rejected lazy claim took, so the next turn gets the VM (issue #1361 F2)", async () => {
+    vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: auto } = await api("POST", "/api/bots", { name: "Rejected then idle" });
+    const { bot: next } = await api("POST", "/api/bots", { name: "Next VM user" });
+    try {
+      await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
+      await api("PATCH", `/api/bots/${next.id}`, { computer: "vm" });
+      await api("POST", `/api/bots/${auto.id}/messages`, { text: "Use the VM" });
+      const autoComputer = computer(await dump());
+      vmState({ failed: true });
+      expect((await (await gate(autoComputer)).json() as any).held).toBe(true);
+      // The rejected claim had already bound the turn resource and taken
+      // the exclusive lease. The auto turn is still running — only its
+      // screen calls are refused — so without an explicit unwind the
+      // desktop stays serialised behind a turn that never got it, which is
+      // the exact symptom this feature exists to remove.
+      vmState();
+      rmSync(dumpFile, { force: true });
+      await api("POST", `/api/bots/${next.id}/messages`, { text: "Hold the VM" });
+      expect(computer(await dump())).toBeTruthy();
+      await until(async () => (await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === next.id)?.busy, Boolean);
+      const state = await api("GET", "/api/bots?messages=30");
+      const activities = (state.bots.find((b: any) => b.id === next.id)?.messages ?? [])
+        .filter((m: any) => m.kind === "activity").map((m: any) => m.tool?.name ?? "");
+      expect(activities.join("|")).not.toContain("Waiting for its turn");
+    } finally {
+      writeFileSync(finishFile, "finish");
+      await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await api("POST", `/api/bots/${next.id}/interrupt`, {});
+      await idle(auto.id); await idle(next.id);
+      await api("DELETE", `/api/bots/${auto.id}`); await api("DELETE", `/api/bots/${next.id}`);
+    }
   });
   it.each(["timeout", "stall"])("releases %s bookkeeping after the interrupt grace period", async (failure) => {
     const { bots, group } = await room();

@@ -285,6 +285,9 @@ data class BotTask(
     val modelSelection: ModelSelection? = null,
     val activity: String? = null,
     val busy: Boolean? = null,
+    /** This thread's own turn is done and a dispatched teammate has not
+     * settled yet (#1223): a wait, never work. Newer harnesses only. */
+    val waitingOnTeammate: Boolean? = null,
     val unread: Boolean? = null,
     val approvalMode: String? = null,
     val autoApprove: Boolean? = null,
@@ -336,6 +339,8 @@ data class Bot(
     val avatarCrop: AvatarCrop? = null,
     val busy: Boolean? = null,
     val activity: String? = null,
+    /** A dispatched teammate has not settled; the bot waits, it does not work. */
+    val waitingOnTeammate: Boolean? = null,
     val pinned: Boolean? = null,
     val hidden: Boolean? = null,
     /** Desktop sidebar section. Missing or blank means the built-in Bots area. */
@@ -372,6 +377,7 @@ fun Bot.forTask(requestedThreadId: String): Bot? {
         modelSelection = task.modelSelection ?: modelSelection,
         busy = task.busy ?: if (selected) busy else false,
         activity = task.activity ?: if (selected) activity else null,
+        waitingOnTeammate = task.waitingOnTeammate ?: if (selected) waitingOnTeammate else null,
         unread = task.unread ?: if (selected) unread else false,
         approvalMode = task.approvalMode ?: task.autoApprove?.let { if (it) "auto" else "ask" } ?: approvalMode,
         autoApprove = task.autoApprove ?: autoApprove,

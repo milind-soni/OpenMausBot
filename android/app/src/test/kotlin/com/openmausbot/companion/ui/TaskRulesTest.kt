@@ -50,6 +50,7 @@ class TaskRulesTest {
         )
         assertTrue(TaskRules.demandsAttention(task("t1").copy(activity = "waiting-on-you")))
         assertFalse(TaskRules.demandsAttention(task("t1").copy(activity = "idle")))
+        assertTrue(TaskRules.demandsAttention(task("t1").copy(waitingOnTeammate = true)))
     }
 
     @Test

@@ -33,11 +33,20 @@ export interface RuntimeEventBase {
   itemId?: string;
   requestId?: string;
   raw?: { source: string; payload: unknown };
+  /** Text the provider's own client produced instead of the model (an API
+   * error it reports as a reply). Rendered like any other item, but not a
+   * sign that the model received or acted on the prompt. */
+  synthetic?: boolean;
 }
 
 export type RuntimeEvent = RuntimeEventBase &
   (
-    | { type: "session.started"; sessionId: string | null; model?: string | null }
+    | {
+        type: "session.started"; sessionId: string | null; model?: string | null;
+        /** the provider refused the turn's resumeCursor and this new session
+         * was started from the turn's recoveryText */
+        rebuilt?: boolean;
+      }
     | { type: "session.model-variants"; model: string; variants: ModelVariantState }
     | { type: "session.exited"; reason?: string }
     | { type: "turn.started" }

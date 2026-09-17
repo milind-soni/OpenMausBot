@@ -441,7 +441,10 @@ describe("Qwen / Hermes ACP turns", () => {
       await instance.adapter.sendTurn({ threadId: "t-qwen", text: "hi", model: "omlx::gemma-4-31b-it-bf16" });
       await recorder.until((e) => e.type === "turn.completed");
       const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
-      expect(seen.argv).toEqual(["--acp"]);
+      // No approvalMode on the turn, so the instance's legacy fullAuto stands
+      // and Qwen spells it natively. Model routing is what this asserts; the
+      // flag is here to pin that local injection never rewrites the argv.
+      expect(seen.argv).toEqual(["--acp", "--yolo"]);
       expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toContainEqual({
         method: "session/set_config_option", params: {
           sessionId: "fake-acp-session", configId: "model", value: "gemma-4-31b-it-bf16(openai)",
@@ -514,7 +517,10 @@ describe("room turns must pass the picker model", () => {
       await instance.adapter.sendTurn({ threadId: "t-qwen-bare", text: "hi" });
       await recorder.until((e) => e.type === "turn.completed");
       const seen = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
-      expect(seen.argv).toEqual(["--acp"]);
+      // No approvalMode on the turn, so the instance's legacy fullAuto stands
+      // and Qwen spells it natively. Model routing is what this asserts; the
+      // flag is here to pin that local injection never rewrites the argv.
+      expect(seen.argv).toEqual(["--acp", "--yolo"]);
     } finally {
       await instance.dispose();
     }

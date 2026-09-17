@@ -2,7 +2,9 @@
 // server: a bot patched to cloudBackend:"vps" must get the managed container
 // mounted as its computer (integrations.localComputer → the "computer" MCP
 // server), carry the VPS system-prompt clause, never provision from Auto,
-// and hold/clear its activeVpsThreads claim across the turn.
+// hold/clear its activeVpsThreads claim across the turn, and run several
+// of its threads on the VPS at once — the desktop alone is exclusive, and
+// only from the first computer call on.
 //
 // The "injected VpsCommandRunner" is a fake `docker` executable on
 // OMB_EXTRA_PATH: the server runs in its own process, so injection happens
@@ -501,6 +503,90 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       rmSync(join(fixtureDir, "hold"), { force: true });
       expect((await changing).status).toBe(200);
       expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+    },
+    60_000,
+  );
+
+  // Arjav, Sep 17: a bot's 3-hourly routines sat behind its own long task
+  // with "Waiting for computer — … is using it", then failed after 30
+  // minutes. The container is shared by the bot, but only the desktop
+  // inside it needs one driver at a time, and only once someone drives it.
+  it(
+    "runs two turns of one bot on the VPS at once; the desktop is claimed by the first computer call and waited for by name",
+    async () => {
+      writeFileSync(dockerLog, "");
+      rmSync(gateFile, { force: true });
+      rmSync(`${acpDump}.mcp.json`, { force: true });
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      writeFileSync(join(dirname(dockerLog), "container.name"), vpsContainerName(bot.id));
+      await api("PATCH", `/api/bots/${bot.id}`, { name: "TCPR operator", modelSelection: { instanceId: "vps", model: "fake-model" } });
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "vps" })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" })).status).toBe(200);
+      const mountedComputer = () => {
+        const servers = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8")) as Array<{ name: string; args?: string[]; env?: Array<{ name: string; value: string }> }>;
+        const computer = servers.find((server) => server.name === "computer");
+        expect(computer, "no computer MCP server reached the agent").toBeTruthy();
+        const env = (name: string) => computer!.env?.find((entry) => entry.name === name)?.value ?? "";
+        return { args: computer!.args ?? [], url: env("OMB_CONTROL_URL"), token: env("OMB_CONTROL_TOKEN") };
+      };
+      const gate = async (mount: { url: string; token: string }) =>
+        (await fetch(mount.url, { headers: { authorization: `Bearer ${mount.token}` } })).json() as Promise<any>;
+      const activities = async (threadId: string) =>
+        ((await api("GET", `/api/threads/${threadId}/messages`)).body.messages as any[])
+          .filter((m) => m.kind === "activity").map((m) => String(m.tool?.name ?? ""));
+      const taskBusy = async (threadId: string) => Boolean((await botById(bot.id))?.tasks?.find((t: any) => t.threadId === threadId)?.busy);
+
+      const refill = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "TCPR 3 hour capacity refill" })).body.task;
+      const check = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Queue check" })).body.task;
+      try {
+        // the long task: gated open, so it holds its turn for as long as we like
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { threadId: refill.threadId, text: "Refill capacity on the VPS" })).status).toBe(202);
+        await until(async () => existsSync(`${acpDump}.mcp.json`) && await taskBusy(refill.threadId), "the long VPS turn");
+        const refillMount = mountedComputer();
+        expect(refillMount.args).toContain("production-vps");
+        rmSync(`${acpDump}.mcp.json`, { force: true });
+
+        // a second thread of the same bot starts NOW, with the VPS mounted,
+        // instead of queueing behind the long task until it ends
+        expect((await api("POST", `/api/bots/${bot.id}/messages`, { threadId: check.threadId, text: "Check the queue on the VPS" })).status).toBe(202);
+        await until(async () => existsSync(`${acpDump}.mcp.json`) && await taskBusy(check.threadId), "the second VPS turn, while the first still runs");
+        const checkMount = mountedComputer();
+        expect(checkMount.args).toContain("production-vps");
+        expect(checkMount.token).not.toBe(refillMount.token);
+        expect(await taskBusy(refill.threadId)).toBe(true);
+        expect((await activities(check.threadId)).join("|")).not.toContain("Waiting for its turn");
+        expect((await activities(refill.threadId)).join("|")).not.toContain("Waiting for its turn");
+        // the alias is pinned while ANY of the bot's threads runs on the VPS
+        expect((await api("PUT", "/api/config", { vps: { sshAlias: "other-vps" } })).status).toBe(409);
+
+        // The desktop: nobody has touched it, so the second thread's first
+        // computer call claims it at once…
+        expect(await gate(checkMount)).toEqual({ held: false, helpOpen: false });
+        // …and the long task's first computer call finds it taken: refused
+        // with the pause text, and its chip names who is running what.
+        expect(await gate(refillMount)).toMatchObject({
+          held: true, helpOpen: false,
+          blockedReason: "Another thread is using this computer. This call was not performed. Pause computer work until that thread finishes, then take a fresh screenshot before acting.",
+        });
+        await until(async () => (await activities(refill.threadId)).includes(
+          "Waiting for its turn on this computer — TCPR operator is running Queue check. Starts automatically when that finishes.",
+        ), "the wait chip naming the holder");
+
+        // both turns finish; the wait settles as free-and-continuing or as
+        // stopped, depending on which turn ended first — never as an error
+        writeFileSync(gateFile, "open");
+        await until(async () => (await botById(bot.id))?.busy === false, "both turns settling");
+        const settled = await activities(refill.threadId);
+        expect(settled.some((name) => name === "Computer free — continuing" || name === "Stopped waiting for the computer")).toBe(true);
+        expect(settled.join("|")).not.toMatch(/still busy|error/i);
+        // the last thread out clears the claim: the alias can move again
+        expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+      } finally {
+        writeFileSync(gateFile, "open");
+        await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: refill.threadId });
+        await api("POST", `/api/bots/${bot.id}/interrupt`, { threadId: check.threadId });
+      }
     },
     60_000,
   );

@@ -20,6 +20,7 @@ describe("buildNotification", () => {
     expect(buildNotification("routine-failed", bot, "thread-1", "boom")?.title).toBe("Scout's routine failed");
     expect(buildNotification("routine-deferred", bot, "thread-1", "target busy for 30 minutes")?.title)
       .toBe("Scout's routine is waiting");
+    expect(buildNotification("incident", bot, "thread-1", "the run stopped: exit_before_result")?.title).toBe("Scout hit a problem");
     expect(buildNotification("turn-failed", bot, "thread-1", "the Local VM is not ready")?.title)
       .toBe("Scout couldn't start");
   });

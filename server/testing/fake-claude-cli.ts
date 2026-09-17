@@ -12,6 +12,8 @@
 //                        whole-message frame, plus subagent noise to drop)
 //                      | not-logged-in (the frames a signed-out CLI really
 //                        sends, captured from 2.1.263)
+//                      | api-error (the CLI reports a non-auth API error as
+//                        assistant text, then an error result; no model output)
 //   FAKE_CLAUDE_DUMP   path to write {argv, env, prompt, systemPrompt,
 //                      mcpConfig} as JSON,
 //                      so the test can assert on argv shape and env hygiene.
@@ -280,8 +282,18 @@ const playTurn = (prompt: JsonValue) => {
     process.exit(3);
   }
 
+  if (mode === "api-error") {
+    const text = "API Error: 529 Overloaded. This is a server-side issue, usually temporary.";
+    out({ type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text }] }, error: "unknown", is_api_error_message: true });
+    out({ type: "result", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", result: text });
+    turnRunning = false;
+    finishIfDone();
+    return;
+  }
+
   if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
-    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt).then(text => {
+    const progress = (text: string) => out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+    void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt, undefined, progress).then(text => {
       out({ type: "assistant", message: { content: [{ type: "text", text }] } });
       out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
     }).catch(error => {

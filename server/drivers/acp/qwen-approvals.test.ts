@@ -12,8 +12,11 @@ describe("qwenApprovalArgs", () => {
     expect(qwenApprovalArgs(false, "edits")).toEqual(["--approval-mode", "auto-edit"]);
     expect(qwenApprovalArgs(false, "auto")).toEqual(["--approval-mode", "auto"]);
     expect(qwenApprovalArgs(true, "full")).toEqual(["--yolo"]);
-    // Full wins however the mode was spelled
+    // core.ts rederives fullAuto from the turn's own mode, so `true` here only
+    // ever means "this turn is Full" — except on the legacy path, where a turn
+    // carrying no mode at all leaves the instance's stored flag standing.
     expect(qwenApprovalArgs(true, "ask")).toEqual(["--yolo"]);
+    expect(qwenApprovalArgs(true, undefined)).toEqual(["--yolo"]);
   });
 });
 

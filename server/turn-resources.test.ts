@@ -34,6 +34,19 @@ describe("thread resource ownership", () => {
     expect(leases.owns("browser:one", next)).toBe(true);
   });
 
+  it("releases one resource early without dropping the owner's others", () => {
+    const leases = new TurnResources();
+    expect(leases.claim("computer:vm:shared", a)).toBe(true);
+    expect(leases.claim("browser:one", a)).toBe(true);
+    leases.releaseOne("computer:vm:shared", a);
+    expect(leases.owns("computer:vm:shared", a)).toBe(false);
+    expect(leases.claim("computer:vm:shared", b)).toBe(true);
+    expect(leases.owns("browser:one", a)).toBe(true);
+    // Only the exact owner may drop it: a stale generation is a no-op.
+    leases.releaseOne("computer:vm:shared", { ...b, generation: "stale" });
+    expect(leases.owns("computer:vm:shared", b)).toBe(true);
+  });
+
   it("prevents parent/child project overlap and symlink aliases, not sibling folders", () => {
     const root = mkdtempSync(join(tmpdir(), "omb-thread-resources-"));
     try {

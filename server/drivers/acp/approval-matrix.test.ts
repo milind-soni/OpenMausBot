@@ -7,9 +7,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import type { ApprovalMode } from "../../../shared/approval-mode.ts";
 import { ensureDirs } from "../../config.ts";
+import type { ProviderDriver } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents } from "../../testing/events.ts";
+import type { AcpConfig } from "./core.ts";
 import { CustomAcpDriver } from "./custom.ts";
 import { DroidAgentDriver } from "./droid.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
@@ -25,15 +28,25 @@ const OpenCodeDriver = createOpenCodeDriver(async () => ({
 }));
 
 describe("remaining ACP approval mappings", () => {
-  it.each([
+  // Engines that own an approval ladder spell the turn's level on argv, so the
+  // expected command line varies per mode; every other row keeps one fixed argv
+  // and steers the whole ladder through OMB. The instance below always stores
+  // fullAuto: true, so a mode with no entry here is the proof that the legacy
+  // instance flag on its own never adds a bypass flag.
+  const cases: {
+    driver: ProviderDriver<AcpConfig>;
+    argv: string[];
+    native?: Partial<Record<ApprovalMode, string[]>>;
+  }[] = [
     { driver: OpenCodeDriver, argv: ["acp"] },
-    { driver: GeminiAgentDriver, argv: ["--acp"] },
-    { driver: QwenAgentDriver, argv: ["--acp"] },
+    { driver: GeminiAgentDriver, argv: ["--acp"], native: { full: ["--yolo"] } },
+    { driver: QwenAgentDriver, argv: ["--acp"], native: { full: ["--yolo"], auto: ["--approval-mode", "auto"] } },
     { driver: KimiAgentDriver, argv: ["acp"] },
     { driver: HermesAgentDriver, argv: ["acp"] },
     { driver: DroidAgentDriver, argv: ["exec", "-o", "acp"] },
     { driver: CustomAcpDriver, argv: [] },
-  ])("$driver.driverKind preserves residual requests across Full → Auto → Ask", async ({ driver, argv }) => {
+  ];
+  it.each(cases)("$driver.driverKind preserves residual requests across Full → Auto → Ask", async ({ driver, argv, native }) => {
     ensureDirs();
     const scratch = mkdtempSync(join(tmpdir(), "omb-approval-matrix-"));
     const dump = join(scratch, "spawn.json");
@@ -58,9 +71,11 @@ describe("remaining ACP approval mappings", () => {
     });
     const recorder = recordEvents(instance.adapter);
     try {
-      // Unsupported Full must remain interactive too, even if an old instance
-      // stored fullAuto=true. Only the explicit receiving-bot mode controls
-      // each fresh or resumed turn; adapter-level legacy bypass cannot win.
+      // The residual request reaches the user at every level, including the
+      // ones an engine claims natively. Full is unsupported on most rows here
+      // and must stay interactive even though the instance stored
+      // fullAuto=true; where Full is supported the flag tracks the turn's own
+      // mode, so the legacy instance value still cannot outrank Ask or Auto.
       for (const approvalMode of ["full", "auto", "ask"] as const) {
         const { turnId } = await instance.adapter.sendTurn({
           threadId: "approval-matrix-thread",
@@ -72,7 +87,7 @@ describe("remaining ACP approval mappings", () => {
         const opened = await recorder.until((event) => event.type === "request.opened" && event.turnId === turnId);
         expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
         expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === turnId)).toBe(false);
-        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(argv);
+        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual([...argv, ...(native?.[approvalMode] ?? [])]);
         if (driver === OpenCodeDriver) {
           const native = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
           expect(native).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });

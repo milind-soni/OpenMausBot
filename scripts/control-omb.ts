@@ -325,6 +325,53 @@ export interface VerificationServer {
   close(): Promise<void>;
 }
 
+/** The environment of a verification server child: a temporary home in
+ * `dataDir`, the fake engine's knobs from `parentEnv`, node on PATH, and
+ * nothing else from the parent shell. A test that restarts its own fixture
+ * server on the same data uses this too. */
+export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, dataDir: string, port: number): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = {};
+  const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
+  for (const [key, value] of Object.entries(parentEnv)) {
+    const normalized = key.toUpperCase();
+    if (value && platformKeys.has(normalized)) childEnv[normalized] = value;
+  }
+  const fixtureTemp = join(dataDir, "tmp");
+  Object.assign(childEnv, {
+    HOME: dataDir,
+    USERPROFILE: dataDir,
+    APPDATA: join(dataDir, "AppData", "Roaming"),
+    LOCALAPPDATA: join(dataDir, "AppData", "Local"),
+    XDG_CONFIG_HOME: join(dataDir, ".config"),
+    XDG_CACHE_HOME: join(dataDir, ".cache"),
+    XDG_DATA_HOME: join(dataDir, ".local", "share"),
+    TEMP: fixtureTemp,
+    TMP: fixtureTemp,
+    TMPDIR: fixtureTemp,
+    HERMES_HOME: join(dataDir, ".hermes"),
+    OMB_DATA_DIR: dataDir,
+    OMB_PORT: String(port),
+    OMB_WEBHOOK_PORT: String(port + 1),
+    // The fixture's default CLI behaviour; a caller that sets
+    // FAKE_CLAUDE_MODE explicitly overrides it below to drive the CLI's
+    // failure paths (exit-early, dead-session, hang...) through the real
+    // server. Nothing else from the parent shell reaches the fixture.
+    FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
+    FAKE_CLAUDE_DUMP: join(dataDir, "fake-claude-dump.json"),
+    // Keep the environment hermetic while allowing POSIX to resolve the
+    // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
+    // fixture through spawnCli without a shell.
+    PATH: dirname(process.execPath),
+  });
+  // The fake engine's own knobs (mode, replies, tool calls) are the one thing
+  // a caller may script into the child: FAKE_CLAUDE_* crosses, nothing else.
+  for (const [key, value] of Object.entries(parentEnv)) {
+    // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
+    if (key.startsWith("FAKE_CLAUDE_") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
+  }
+  return childEnv;
+}
+
 /** Start one foreground-owned, fake-engine server with no access to user data. */
 export async function launchVerificationServer(
   parentEnv: NodeJS.ProcessEnv = process.env,
@@ -381,44 +428,7 @@ export async function launchVerificationServer(
   }, null, 2));
 
   const log = openSync(logPath, "a", 0o600);
-  const childEnv: NodeJS.ProcessEnv = {};
-  const platformKeys = new Set(["SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"]);
-  for (const [key, value] of Object.entries(parentEnv)) {
-    const normalized = key.toUpperCase();
-    if (value && platformKeys.has(normalized)) childEnv[normalized] = value;
-  }
-  Object.assign(childEnv, {
-    HOME: dataDir,
-    USERPROFILE: dataDir,
-    APPDATA: join(dataDir, "AppData", "Roaming"),
-    LOCALAPPDATA: join(dataDir, "AppData", "Local"),
-    XDG_CONFIG_HOME: join(dataDir, ".config"),
-    XDG_CACHE_HOME: join(dataDir, ".cache"),
-    XDG_DATA_HOME: join(dataDir, ".local", "share"),
-    TEMP: fixtureTemp,
-    TMP: fixtureTemp,
-    TMPDIR: fixtureTemp,
-    HERMES_HOME: join(dataDir, ".hermes"),
-    OMB_DATA_DIR: dataDir,
-    OMB_PORT: String(port),
-    OMB_WEBHOOK_PORT: String(port + 1),
-    // The fixture's default CLI behaviour; a caller that sets
-    // FAKE_CLAUDE_MODE explicitly overrides it below to drive the CLI's
-    // failure paths (exit-early, dead-session, hang...) through the real
-    // server. Nothing else from the parent shell reaches the fixture.
-    FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
-    FAKE_CLAUDE_DUMP: fixtureDumpPath,
-    // Keep the environment hermetic while allowing POSIX to resolve the
-    // fake CLI's `#!/usr/bin/env node` shebang. Windows resolves that same
-    // fixture through spawnCli without a shell.
-    PATH: dirname(process.execPath),
-  });
-  // The fake engine's own knobs (mode, replies, tool calls) are the one thing
-  // a caller may script into the child: FAKE_CLAUDE_* crosses, nothing else.
-  for (const [key, value] of Object.entries(parentEnv)) {
-    // FAKE_CLAUDE_DUMP stays the launcher's: assertions read fixtureDumpPath.
-    if (key.startsWith("FAKE_CLAUDE_") && key !== "FAKE_CLAUDE_DUMP" && value) childEnv[key] = value;
-  }
+  const childEnv = verificationServerEnvironment(parentEnv, dataDir, port);
   // Opt-in live Local VM fixture: keep the temporary home and fake engine,
   // granting only the explicitly selected machine connection and static UI.
   if (localVm) Object.assign(childEnv, {

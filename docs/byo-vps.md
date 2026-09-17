@@ -104,6 +104,21 @@ running and verified. If no local fallback exists, the turn now explains why the
 of silently running without a computer. Enable **Start VPS automatically** per bot to let Auto prepare or wake
 that bot's managed container; the switch is deliberately off by default.
 
+## Several turns at once
+
+Each bot has one container, but the container is not the bottleneck — the desktop inside it is. Any number of
+the bot's threads (chats, tasks, routines) can run with the VPS mounted at the same time. The desktop goes to
+the first thread that calls a computer tool (a screenshot, a click, a command through the Cua driver) and stays
+with that turn until it ends; threads that never touch the computer tools are never held up. A thread that
+reaches for the screen while another holds it shows
+
+> Waiting for its turn on this computer — *bot* is running *thread*. Starts automatically when that finishes.
+
+and its computer calls are refused with a note telling the model to pause screen work; the chip settles as
+"Computer free — continuing" when the desktop lands, or "Stopped waiting for the computer" if the turn ends
+first. A wait gives up after 30 minutes and names the holder. Container lifecycle actions (create, start,
+stop) are still one at a time per container.
+
 ## Troubleshooting
 
 Work up the same path the app takes, cheapest signal first:

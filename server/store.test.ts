@@ -838,10 +838,21 @@ describe("Store", () => {
     const bot = store.createBot();
     const original = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "v1" });
     const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer to v1" });
+    const events: Array<Record<string, unknown>> = [];
+    store.onChange((e) => events.push(e as unknown as Record<string, unknown>));
 
     const edited = store.branchMessage(bot.threadId, original.id, "v2")!;
     expect(edited.parentId).toBe(original.parentId); // sibling, not child
     expect(store.activeLeaf(bot.threadId)).toBe(edited.id);
+    // Clients learn the new leaf from a thread frame, right after the
+    // message: a branched message does not chain onto their current leaf,
+    // so without this frame the edit stays hidden until the reply's
+    // snapshot lands. The order matters — the leaf must name a message
+    // the client already has.
+    expect(events.filter((e) => e.type === "message" || e.type === "thread")).toEqual([
+      { type: "message", threadId: bot.threadId, message: edited },
+      { type: "thread", threadId: bot.threadId, activeLeafId: edited.id },
+    ]);
 
     const path = store.activePath(bot.threadId);
     expect(path.map((m) => m.text)).toContain("v2");
@@ -1009,8 +1020,11 @@ describe("Store change stream", () => {
     store.branchMessage(bot.threadId, first.id, "b");
     store.setActiveLeaf(bot.threadId, first.id);
     store.toggleReaction(bot.threadId, first.id, "👍", "user");
-    expect(events.map((e) => e.type)).toEqual(["message.patch", "message", "thread", "message.patch"]);
-    expect(events[2]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: expect.any(String) });
+    // branchMessage emits message THEN thread (the fork moves the leaf);
+    // setActiveLeaf emits thread; a reaction is a patch
+    expect(events.map((e) => e.type)).toEqual(["message.patch", "message", "thread", "thread", "message.patch"]);
+    expect(events[2]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: (events[1] as any).message.id });
+    expect(events[3]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: expect.any(String) });
   });
 
   it("announces screen frames whose pixels are pruned", () => {

@@ -176,6 +176,36 @@ Give a bot its own voice and a channel stops sounding like one person.
 composer mic (on-device Apple speech recognition — desktop app) · SupaMaus cursor mascots with role-aware
 expressions · screenshots of the bot's work folded into the transcript.
 
+## Powered By
+
+<div align="center">
+
+![Claude](https://img.shields.io/badge/Claude-d97757?logo=claude&logoColor=white)
+![Codex](https://img.shields.io/badge/Codex-000000)
+![Grok](https://img.shields.io/badge/Grok%20CLI-000000?logo=x&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-2B2E3A?logo=electron&logoColor=9FEAF9)
+![React](https://img.shields.io/badge/React-20232A?logo=react&logoColor=61DAFB)
+![Vite](https://img.shields.io/badge/Vite-646CFF?logo=vite&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind%20CSS-0F172A?logo=tailwindcss&logoColor=38BDF8)
+![Composio](https://img.shields.io/badge/Composio-e6493a)
+![Cua](https://img.shields.io/badge/Cua%20Driver-1f2937)
+![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white)
+![Fish Audio](https://img.shields.io/badge/Fish%20Audio-2563eb)
+![Polar](https://img.shields.io/badge/Polar-0062ff)
+
+</div>
+
+| Service | Purpose |
+|---|---|
+| **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
+| **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
+| **React + Vite + Tailwind CSS** | The chat app UI and its build |
+| **Box** ([box.ascii.dev](https://box.ascii.dev)) | Each bot's cloud computer |
+| **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
+| **Cua Driver** | Native computer use on your own machine |
+| **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
+| **Polar** | One-time and monthly project support |
+
 ## How it works
 
 Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE

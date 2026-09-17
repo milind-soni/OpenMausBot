@@ -33,6 +33,12 @@ export class TurnResources {
       if (sameOwner(current, owner)) this.owners.delete(key);
     }
   }
+
+  /** Drop one of an owner's claims early, when the sequence that took it
+   * could not finish. The owner's other claims stand until settle. */
+  releaseOne(resource: string, owner: TurnOwner): void {
+    if (this.owns(resource, owner)) this.owners.delete(resource);
+  }
 }
 
 function sameOwner(a: TurnOwner, b: TurnOwner): boolean {

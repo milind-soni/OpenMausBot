@@ -340,11 +340,11 @@ it("waits for busy peers and then completes without the user relaying messages",
 // now name the id the caller sent and point at list_bots, like the other
 // comms refusals in the server.
 it.each([
-  ["a display name in a bot_ids slot", false],
+  ["a name nobody has in a bot_ids slot", false],
   ["a hidden teammate's id", true],
 ] as const)("refuses %s with a message the caller can act on", (_case, hidden) => withRooms(async f => {
   if (hidden) await f.api(`/api/bots/${f.target.id}`, { hidden: true }, "PATCH");
-  const botId = hidden ? f.target.id : f.target.name;
+  const botId = hidden ? f.target.id : "Nobody";
   f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [botId], message: "Review CSV", request_key: "review" } }];
   await f.start(); expect((await f.wait()).status).toBe("settled");
   expect(f.nodes()).toEqual([]);
@@ -353,5 +353,27 @@ it.each([
     .evidence.find((entry: any) => entry.step).response.result.content[0].text;
   expect(refused).toBe(hidden
     ? `The bot with id "${botId}" is no longer available — call list_bots for the ones you can reach`
-    : `No bot with id "${botId}" — call list_bots and copy the exact id from the result`);
+    : `No bot with id or name "${botId}" — call list_bots and copy the exact id from the result`);
 }), 45_000);
+
+// The Chief's roster names teammates, so a Chief reaches for the name it can
+// see. A name that means exactly one reachable teammate is the teammate; the
+// work runs as if the id had been sent. Two teammates sharing a name is the
+// person's naming, so that is refused with the way to the ids, not guessed.
+it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous one", () => withRooms(async f => {
+  f.plan[f.sender.id].steps = [{ arguments: { group_id: f.destination.id, bot_ids: [f.target.name], request_key: "work", message: "Please build CSV" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const node = f.nodes().find((n: any) => n.parentId);
+  expect(node.botId).toBe(f.target.id);
+  expect(node.status).toBe("completed");
+  expect((await f.messages(f.destination.activeTaskId)).some((m: any) => m.text?.includes("Please build CSV"))).toBe(true);
+
+  const twin = (await f.cli("new-bot", "--name", f.target.name, "--section", "A")).bot;
+  expect(twin.id).not.toBe(f.target.id);
+  f.plan[f.sender.id] = { steps: [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [f.target.name], message: "Review CSV", request_key: "review" } }], reply: "Refused" };
+  f.savePlan(); await f.cli("send-channel", "--channel", f.source.id, "--text", "@Director Ask again");
+  expect((await f.wait()).status).toBe("settled");
+  const refused = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1)
+    .evidence.find((entry: any) => entry.step).response.result.content[0].text;
+  expect(refused).toBe(`2 reachable teammates are named "${f.target.name}" — call list_bots and use the id of the one you mean`);
+}), 60_000);

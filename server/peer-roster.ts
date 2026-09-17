@@ -100,6 +100,39 @@ export function reachablePeers<T extends RosterMember>(bots: readonly T[], from:
   return bots.filter(bot => canReachPeer(from, bot));
 }
 
+/** What a bot wrote in a bot-id slot, resolved to a teammate.
+ *
+ * Models copy ids from list_bots most of the time, but a Chief reading its
+ * roster reaches for the name it sees there, and a name that names exactly
+ * one reachable teammate is not a mistake worth refusing: the refusal reads
+ * as a teammate that is gone, and the person is then told the platform lost
+ * their team (#1348). Names resolve only inside `reachablePeers` — the same
+ * set list_bots and the roster show — so a name can never reach a bot the id
+ * could not. An id is always taken as an id, hidden or unreachable included:
+ * the route says what is wrong with it. Two reachable teammates with one
+ * name is the person's naming, not the model's error, so it is refused with
+ * the way out instead of picking one. */
+export function resolveTeammate<T extends RosterMember>(
+  bots: readonly T[],
+  from: RosterMember,
+  raw: string,
+): { id: string; byName: boolean } | { error: string } {
+  const wanted = raw.trim();
+  if (bots.some(bot => bot.id === wanted)) return { id: wanted, byName: false };
+  const fold = (value: string) => value.replace(/^@/, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const name = fold(wanted);
+  // The caller's own argument is echoed, flattened and clipped like any
+  // other text that lands in a model's context, never a bot's persona.
+  const shown = peerName(wanted) || wanted;
+  if (!name) return { error: `No bot with id "${shown}" — call list_bots and copy the exact id from the result` };
+  const matches = reachablePeers(bots, from).filter(bot => fold(bot.name) === name);
+  if (matches.length === 1) return { id: matches[0]!.id, byName: true };
+  if (matches.length > 1) {
+    return { error: `${matches.length} reachable teammates are named "${shown}" — call list_bots and use the id of the one you mean` };
+  }
+  return { error: `No bot with id or name "${shown}" — call list_bots and copy the exact id from the result` };
+}
+
 // The roster is interpolated into a TRUSTED bot's system prompt on every
 // turn, and its inputs (name/title/description) are user-editable and — via
 // team import — third-party-authored. Caps bound both the token spend and
@@ -180,7 +213,12 @@ export function renderRoster(team: readonly RosterMember[], opts: RosterOptions)
     const role = clip(bot.title ?? "", ROSTER_ROLE_MAX) || "General assistant";
     const about = opts.about ? clip(bot.description ?? "", ROSTER_ABOUT_MAX) : "";
     const availability = peerStatusWords(peerStatus(bot.activity, bot.busy));
-    return `- ${name} — ${role}${about ? `: ${about}` : ""} (${availability})`;
+    // The id rides on every line because it is what the comms tools take. A
+    // Chief that only ever saw names in its prompt reached for the name it
+    // could see, was refused with "no longer exists", and told the person
+    // the platform had lost its team (#1348). Ids are the harness's own
+    // uuids, clipped anyway: bots.json is hand-editable.
+    return `- ${name} — ${role}${about ? `: ${about}` : ""} (${availability}) [id: ${clip(bot.id, ROSTER_NAME_MAX)}]`;
   });
   return (
     lines.join("\n") +

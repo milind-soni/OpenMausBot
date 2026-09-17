@@ -93,7 +93,9 @@ export function buildNotification(
               ? `${who}'s routine is waiting`
             : kind === "turn-failed"
               ? `${who} couldn't start`
-              : `${who} finished`;
+              : kind === "incident"
+                ? `${who} hit a problem`
+                : `${who} finished`;
 
   // A "finished" with nothing to say is not worth a notification — the
   // badge in the sidebar already carries that much.

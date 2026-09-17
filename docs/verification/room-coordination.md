@@ -99,6 +99,15 @@ with ordinary tool chips hidden. Screenshots and JSON are retained beside the
 fixture's printed server log; all fixture processes and temporary data are closed.
 Follow-up checks cover retained report context and withholding after peer access
 is revoked, without mirroring a second visible transcript.
+Addressing checks cover what a bot may put in a `bot_ids` slot: an id is always
+an id; a name that means exactly one reachable teammate resolves to it and the
+work runs as if the id had been sent; a name nobody has is refused with the
+argument echoed and `list_bots` named (`No bot with id or name "…"`); a hidden
+teammate's id is refused as no longer available; a name two reachable teammates
+share is refused with the count and the way to the ids, never guessed. The same
+resolution serves `ask_bot` and `delegate_bot`, and every roster line the Chief
+and its peers read carries the teammate's `[id: …]`, so the tools can be called
+straight from the prompt.
 Unit checks cover bounded depth/fan-out, idempotent retry, original request
 retention, automatic return, cancellation and restart without replay, and the
 scoped stop: unstarted work cancelled, a running teammate left with its

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Runs before every push: the three checks that are fast locally and that,
+# when they fail in CI, fail on every platform for a reason no reviewer can
+# fix — a type error, a lint error, a locale catalog that went stale. About
+# a minute here saves a 20-minute CI cycle and a red PR. The test suite is
+# deliberately NOT here: it takes 19 minutes, and CI shards it.
+#
+# Installed by `pnpm install` through scripts/install-git-hooks.mjs (sets
+# core.hooksPath). Skip once with `git push --no-verify`, or for a session
+# with OMB_SKIP_HOOKS=1.
+set -e
+if [ -n "$OMB_SKIP_HOOKS" ]; then
+  echo "pre-push: skipped (OMB_SKIP_HOOKS is set)"
+  exit 0
+fi
+cd "$(git rev-parse --show-toplevel)"
+echo "pre-push: lint, typecheck, locale check (git push --no-verify to skip)"
+pnpm lint
+pnpm typecheck
+pnpm i18n:check

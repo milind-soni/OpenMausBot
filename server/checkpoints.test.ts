@@ -262,6 +262,28 @@ describe("refusals", () => {
     expect(await checkpointsEnabled(bot, linkedHome)).toBe(false);
   });
 
+  // Windows folder names are case-insensitive: every spelling below is the
+  // same folder on disk. Only side-effect-free checks here — on a build that
+  // missed the refusal, a snapshot would stage the whole home folder.
+  it.runIf(process.platform === "win32")("refuses the home and protected folders in any Windows spelling", async () => {
+    const { bot } = workspace();
+    expect(refusalReason(homedir().toLowerCase())).toBe("checkpoints are not taken in the home folder");
+    expect(refusalReason(homedir().toUpperCase())).toBe("checkpoints are not taken in the home folder");
+    for (const [name, spelling] of [["Desktop", "DESKTOP"], ["Documents", "documents"], ["Downloads", "DownLoads"]]) {
+      // A machine without the folder answers "does not exist", also a refusal.
+      const expected = existsSync(join(homedir(), name!))
+        ? `checkpoints are not taken in the ${name} folder`
+        : "the working folder does not exist";
+      expect(refusalReason(join(homedir(), spelling!))).toBe(expected);
+    }
+    // The 8.3 alias of Documents, on volumes that keep short names.
+    const shortDocuments = join(homedir(), "DOCUME~1");
+    if (existsSync(shortDocuments) && existsSync(join(homedir(), "Documents"))) {
+      expect(refusalReason(shortDocuments)).toBe("checkpoints are not taken in the Documents folder");
+    }
+    expect(await checkpointsEnabled(bot, homedir().toUpperCase())).toBe(false);
+  });
+
   it("lists nothing (and creates nothing) for a folder never snapshotted", async () => {
     const { bot, cwd } = workspace();
     expect(await listCheckpoints(bot, cwd)).toEqual([]);

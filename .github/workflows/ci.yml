@@ -5,33 +5,118 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The merge queue runs CI on the PR merged onto the current main BEFORE it
+  # lands, so a PR that is green alone but red together with what just
+  # merged is stopped in the queue instead of on main (that shape reddened
+  # main twice in Sep 2026). Turning the queue on is a branch-ruleset
+  # setting; this trigger is what lets CI report on those runs.
+  merge_group:
 
 # least privilege: CI only reads the checkout, it never writes back
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A merge-queue group runs under its own ref and must never be cancelled
+  # by a later PR push; PR runs are superseded by the next push as before.
+  group: ci-${{ github.event_name == 'merge_group' && github.event.merge_group.head_ref || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: typecheck + test (${{ matrix.os }})
+  # ── The test leg, in pieces ──────────────────────────────────────────────
+  # One `typecheck + test (<os>)` job used to run everything in sequence:
+  # typecheck, lint, the whole vitest suite, then three smokes that only ran
+  # when everything before them passed. The suite runs its files serially
+  # (vite.config.ts, fileParallelism:false) and takes 17–19 minutes on one
+  # runner, so slow runners hit the job cap and read as red PRs, and a broken
+  # smoke stayed hidden behind any vitest failure for a day. Each piece is now
+  # its own job: platform-independent checks run once, the suite runs in three
+  # shards per platform, and every smoke reports on its own. The `gate` jobs
+  # at the end keep the three check names the branch ruleset requires.
+  static:
+    name: typecheck + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Validate locale catalogs
+        run: pnpm i18n:check
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm check:electron
+      - name: production UI build
+        run: pnpm exec vite build
+
+  vitest:
+    # vitest splits the file list deterministically across shards, so a
+    # failure names the same shard on every run and one shard is reproducible
+    # locally with the same --shard flag.
+    name: vitest (${{ matrix.os }}, shard ${{ matrix.shard }}/4)
     strategy:
       fail-fast: false
       matrix:
         # The harness and pure desktop capabilities stay portable across all
         # supported host platforms. POSIX-only process tests self-skip.
         os: [macos-latest, ubuntu-latest, windows-latest]
+        shard: [1, 2, 3, 4]
     runs-on: ${{ matrix.os }}
-    # vite.config.ts runs the suite with fileParallelism:false on purpose, so
-    # wall time is the sum of every file and grows with each one added. The
-    # 20m cap was set when healthy macOS/Linux runs took ~15m; they now reach
-    # ~20m and cancel mid-`Run tests`, which reads as a red PR for a reason
-    # no PR caused. These caps exist to catch a hang, not to ration normal
-    # growth, so give each platform real margin over its observed run.
-    # Keep every check and each test's own timeout unchanged.
-    timeout-minutes: ${{ matrix.os == 'windows-latest' && 35 || 30 }}
+    # vitest splits by file count, not by duration, so the shard holding the
+    # heavy e2e files ran 13 minutes on macOS/Ubuntu and 19 on Windows with
+    # three shards; four keeps the heaviest near 10 and 15. The cap catches a
+    # hang, not normal growth: raise it with the suite, or add a shard.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 25 || 20 }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Prepare Electron test runtime
+        # Electron lazily downloads its runtime on first import. Resolve it
+        # before Vitest starts so a cold download cannot consume the fixture
+        # timeout.
+        run: node --input-type=commonjs -e "require('electron')"
+      - name: Run tests
+        # The github-actions reporter turns each failure into an annotation
+        # on the PR, so the failing test and its assertion are readable
+        # without opening the job log.
+        run: pnpm exec vitest run --shard=${{ matrix.shard }}/4 --reporter=default --reporter=github-actions
+      - name: Broker and Electron unit tests
+        if: matrix.shard == 1
+        run: pnpm broker:test && pnpm test:electron
+
+  packaged-server:
+    # `pnpm build:server`, then the bundle is copied out of the repo and run
+    # with no node_modules in reach: every bare import must be inlined.
+    name: packaged server smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:packaged-server
+
+  windows-cua:
+    name: Windows CUA host smoke
+    runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
@@ -41,34 +126,59 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Smoke the staged Windows CUA host (no computer actions)
-        if: matrix.os == 'windows-latest'
         timeout-minutes: 5
         run: pnpm build:cua:win && pnpm smoke:cua-win
-      - name: Validate locale catalogs
-        if: matrix.os == 'ubuntu-latest'
-        run: pnpm i18n:check
+
+  electron-smokes:
+    # Real Electron utility processes against disposable homes and fake CLIs.
+    # Never the live app. Each script prints its own evidence lines.
+    name: Electron smokes (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - name: Prepare Electron test runtime
-        # Electron 43 lazily downloads its runtime on first import. Resolve it
-        # before Vitest starts so a cold download cannot consume the fixture
-        # timeout.
         run: node --input-type=commonjs -e "require('electron')"
-      - run: pnpm typecheck
-      - run: pnpm lint
-      - name: Run tests
-        run: pnpm test
-      - run: pnpm check:electron
       - name: Verify native approval mode transitions
-        if: matrix.os == 'macos-latest'
         run: pnpm exec electron scripts/smoke-approval-modes.cjs
       - name: Verify app permissions and guarded display capture
-        if: matrix.os == 'macos-latest'
         run: node scripts/smoke-app-permissions.mjs
       - name: Verify paired phone authorization against packaged harness
-        if: matrix.os == 'macos-latest'
-        run: pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
-      - name: production UI build
-        if: matrix.os == 'ubuntu-latest'
-        run: pnpm exec vite build
+        # Forks dist-server/index.js: the bundle the packaged-server job
+        # builds in ITS checkout. This job builds its own copy.
+        run: pnpm build:server && pnpm build:companion && pnpm exec electron scripts/smoke-phone-relay-auth.cjs
+
+  gate:
+    # The branch ruleset requires exactly these three check names — they were
+    # the per-OS test job. Each now reports the combined result of every job
+    # above, so the requirement holds without a settings change. Once the
+    # ruleset requires this gate directly, collapse the matrix to one job.
+    name: typecheck + test (${{ matrix.os }})
+    needs: [static, vitest, packaged-server, windows-cua, electron-smokes]
+    if: always()
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every required job passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module -e '
+            const needs = JSON.parse(process.env.NEEDS);
+            const rows = Object.entries(needs).map(([job, { result }]) => `${result.padEnd(9)} ${job}`);
+            console.log(rows.join("\n"));
+            const bad = Object.entries(needs).filter(([, { result }]) => result !== "success");
+            if (bad.length) { console.error(`\n${bad.length} required job(s) did not pass: ${bad.map(([job]) => job).join(", ")}`); process.exit(1); }
+          '
 
   cloudflared-linux-arm64:
     name: cloudflared installer (Linux ARM64)

@@ -1268,7 +1268,11 @@ struct ChatView: View {
                         .animation(.easeOut(duration: 0.15), value: canSend)
                     }
                     .frame(minHeight: 44)
-                    .glassCapsule(interactive: false)
+                    // A capsule at one line (44pt tall, 22pt corners) that
+                    // keeps those 22pt corners as the draft grows, the way
+                    // Messages does. A true Capsule would round to half the
+                    // height, and a five-line draft became a giant pill.
+                    .glassSheet(cornerRadius: 22)
                 }
             }
         }

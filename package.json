@@ -1,7 +1,7 @@
 {
   "name": "openmausbot",
   "private": true,
-  "version": "0.1.82",
+  "version": "0.1.84",
   "description": "A local-first chat app for running a team of AI agents.",
   "homepage": "https://github.com/milind-soni/OpenMausBot",
   "repository": {
@@ -22,6 +22,7 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "clean": "node scripts/clean.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs",
     "lint": "oxlint --deny-warnings .",
     "check:contrast": "node scripts/check-skin-contrast.mjs",
     "i18n:check": "node scripts/generate-locale.mjs --check",

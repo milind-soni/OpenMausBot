@@ -223,9 +223,14 @@ app.whenReady().then(async () => {
           return !state.busy && state;
         });
         const text = settled.messages.slice(before).map((message) => message.text ?? "").join("\n");
-        assert.match(text, /list_bots:/);
-        assert.match(text, /session_search:/);
-        assert.equal((text.match(/list_bots:/g) ?? []).length, 2, "Repeated reads complete without another prompt");
+        // The fixture emits one `<tool>: <result>` chunk per read, each at the
+        // start of a line. Anchor on that: session_search now recalls the
+        // previous turn's memory log, so its own result text quotes an earlier
+        // "list_bots: Reachable teammates: …" mid-line and an unanchored count
+        // sees three reads where the agent only performed two.
+        assert.match(text, /^list_bots:/m);
+        assert.match(text, /^session_search:/m);
+        assert.equal((text.match(/^list_bots:/gm) ?? []).length, 2, "Repeated reads complete without another prompt");
       } else {
         const card = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((candidate) => candidate.id === bot.id)));
         assert.equal((await api(`/api/bots/${bot.id}/respond`, "POST", { requestId: card.requestId, behavior: "deny" })).status, 200);

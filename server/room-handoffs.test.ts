@@ -7,11 +7,12 @@ import { removeTempDir } from "./testing/cleanup.ts";
 
 const addr = (id: string) => ({ groupId: id, threadId: `${id}-thread`, botId: `${id}-bot` });
 /** Builds an engine over a temp file, with hooks and clock the test can override. */
-async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, file: string) => Promise<void> | void, now: () => number = Date.now) {
+async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, file: string) => Promise<void> | void, now: () => number = Date.now,
+  limits: Partial<typeof ROOM_HANDOFF_LIMITS> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "room-handoff-unit-"));
   const hooks: RoomHandoffHooks = { validate: () => undefined, busy: () => false,
     run: vi.fn(async () => ({ ok: true, text: "done" })), report: vi.fn(), changed: () => {} };
-  try { const file = join(dir, "requests.json"); await test(new RoomHandoffs(file, hooks, now), hooks, file); }
+  try { const file = join(dir, "requests.json"); await test(new RoomHandoffs(file, hooks, now, limits), hooks, file); }
   finally { await removeTempDir(dir); }
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
@@ -275,7 +276,7 @@ describe("room handoff lifetime budget", () => {
       expect(engine.nodes.get("turn")?.status).toBe("completed");
     }, () => nowMs);
   });
-  it("keeps a minimum runway for running work past the ceiling, then fails it with its status", async () => {
+  it("pauses the lifetime clock while work executes, then fails it at the wall-clock hard cap", async () => {
     let nowMs = 0;
     await fixture(async (engine, hooks) => {
       let aborted = false;
@@ -285,17 +286,38 @@ describe("room handoff lifetime budget", () => {
       engine.sourceSettled("turn", true);
       nowMs = 24 * 60_000; engine.tick(); await flush();
       expect(node.status).toBe("running");
-      nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
+      // Past the tree ceiling and the node's own runway: the fixed clock
+      // failed running work here, but the clock paused at 24m, so only 24m
+      // of the 30m budget has aged and the node keeps executing.
+      nowMs = 24 * 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs + 1_000;
       engine.tick(); await flush();
       expect(node.status).toBe("running");
       expect(aborted).toBe(false);
-      nowMs = 24 * 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs + 1;
+      // The wall-clock hard cap ignores pauses: a tree that never stops
+      // executing still dies instead of extending its runway forever.
+      nowMs = 45 * 60_000;
       engine.tick(); await flush();
       expect(node.status).toBe("failed");
       expect(aborted).toBe(true);
-      expect(node.result).toContain("Room handoff lifetime budget exhausted");
+      expect(node.result).toContain("Room handoff hard cap exhausted");
       expect(node.result).toContain("node was running");
-    }, () => nowMs);
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("refuses new work when only the hard-cap remainder is too short to honor the runway", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      hooks.run = () => new Promise(() => {});
+      const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+      engine.sourceSettled("turn", true);
+      engine.tick(); await flush();
+      expect(node.status).toBe("running");
+      // 40m of wall clock with the tree paused leaves the full 30m lifetime
+      // budget unspent, but only 5m before the 45m hard cap: less runway than
+      // enqueue promises, so admission must refuse the follow-up.
+      nowMs = 40 * 60_000;
+      expect(() => engine.enqueue(node, "follow", node.id, addr("C"), "work", "more"))
+        .toThrow("Room handoff budget exhausted");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
   });
   it("resumes a waiting parent past the ceiling and gives the follow-up its own runway", async () => {
     let nowMs = 0;
@@ -311,7 +333,8 @@ describe("room handoff lifetime budget", () => {
       engine.sourceSettled("turn", true);
       nowMs = 21 * 60_000; engine.tick(); await flush();
       expect(engine.children("turn")[0].status).toBe("running");
-      // The child finishes inside its own runway but past the tree ceiling.
+      // The child finishes inside its own runway but past the tree ceiling;
+      // its execution paused the clock, so the parent still owes its resume.
       nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000;
       finish.build({ ok: true, text: "done" }); await flush();
       engine.tick(); await flush();
@@ -321,14 +344,40 @@ describe("room handoff lifetime budget", () => {
       expect(parent.status).toBe("running");
       expect(resumedAt).toEqual([ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000]);
       expect(parent.startedAt).toBe(ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000);
+      // The fixed clock failed the resumed parent at its runway edge; the
+      // paused clock keeps it alive until the wall-clock hard cap claims it.
       nowMs = ROOM_HANDOFF_LIMITS.lifetimeMs + 60_000 + ROOM_HANDOFF_LIMITS.minRunwayMs;
       engine.tick(); await flush();
       expect(parent.status).toBe("running");
-      nowMs += 1;
+      nowMs = 45 * 60_000;
       engine.tick(); await flush();
       expect(parent.status).toBe("failed");
-      expect(parent.result).toContain("Room handoff lifetime budget exhausted");
+      expect(parent.result).toContain("Room handoff hard cap exhausted");
       expect(parent.result).toContain("node was running");
+    }, () => nowMs, { hardCapMs: 45 * 60_000 });
+  });
+  it("pauses the lifetime clock while work executes and resumes it once execution stops", async () => {
+    let nowMs = 0;
+    await fixture(async (engine, hooks) => {
+      const finish: Record<string, (result: { ok: boolean; text: string }) => void> = {};
+      hooks.run = node => new Promise(resolve => { finish[node.key] = resolve; });
+      engine.enqueue(addr("A"), "turn", undefined, addr("B"), "build", "build");
+      engine.sourceSettled("turn", true);
+      nowMs = 10 * 60_000; engine.tick(); await flush();
+      expect(engine.children("turn")[0].status).toBe("running");
+      // 19m of wall clock has passed but the clock paused at 10m: the root
+      // has aged 10m, so a follow-up still has a full runway. The fixed
+      // clock refused here with only 1m of lifetime remaining.
+      nowMs = 29 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("C"), "followup", "more work")).not.toThrow();
+      finish.build({ ok: true, text: "done" }); await flush();
+      hooks.busy = () => true;
+      engine.tick(); await flush();
+      // Execution stopped and the clock resumed: by 46m the root has aged
+      // 27m, and the 3m left cannot serve a minimum runway.
+      nowMs = 46 * 60_000;
+      expect(() => engine.enqueue(addr("A"), "turn", undefined, addr("D"), "late", "more work"))
+        .toThrow(/budget exhausted: only 3m of the 30m tree lifetime remains/);
     }, () => nowMs);
   });
   it("refuses follow-up work when the remaining lifetime cannot serve a minimum runway", () => {

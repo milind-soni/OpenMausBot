@@ -160,21 +160,25 @@ export function refusalReason(cwd: string): string | null {
   let dir: string;
   try {
     stat = statSync(requested);
-    dir = realpathSync(requested);
+    dir = realpathSync.native(requested);
   } catch {
     return "the working folder does not exist";
   }
   if (!stat.isDirectory()) return "the working folder is not a folder";
   // Compare canonical paths too: otherwise /tmp/home-link -> $HOME bypasses
   // the refusal while git still follows the symlink into the protected tree.
+  // The native realpath also settles Windows' spellings of one folder —
+  // c:\users\me, C:\Users\me\DOCUME~1 — and names compare case-insensitively
+  // there, as turn-resources.ts does for workspace claims.
+  const same = (a: string, b: string) => process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
   if (dir === parse(dir).root) return "checkpoints are not taken at the filesystem root";
   const requestedHome = resolve(homedir());
-  const home = existsSync(requestedHome) ? realpathSync(requestedHome) : requestedHome;
-  if (requested === requestedHome || dir === home) return "checkpoints are not taken in the home folder";
+  const home = existsSync(requestedHome) ? realpathSync.native(requestedHome) : requestedHome;
+  if (same(requested, requestedHome) || same(dir, home)) return "checkpoints are not taken in the home folder";
   for (const name of ["Desktop", "Documents", "Downloads"]) {
     const requestedProtected = join(requestedHome, name);
-    const protectedDir = existsSync(requestedProtected) ? realpathSync(requestedProtected) : requestedProtected;
-    if (requested === requestedProtected || dir === protectedDir) {
+    const protectedDir = existsSync(requestedProtected) ? realpathSync.native(requestedProtected) : requestedProtected;
+    if (same(requested, requestedProtected) || same(dir, protectedDir)) {
       return `checkpoints are not taken in the ${name} folder`;
     }
   }
