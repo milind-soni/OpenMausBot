@@ -5,7 +5,12 @@ import { createServer, type Server } from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "../config.ts";
+import { piperInstallable, piperTarget } from "./piper-install.ts";
 import { piperAvailable } from "./piper.ts";
+
+/** The one-click install is offered where a pinned engine exists for this
+ * platform and architecture — same idea as `onBuiltInPlatform` below. */
+const onInstallablePlatform = piperInstallable(piperTarget());
 
 let server: Server;
 /** every request the stub saw, so tests can assert on what we sent */
@@ -75,14 +80,18 @@ describe("configuration", () => {
   it("never reports the key itself", async () => {
     const { describeVoice } = await voice();
     const described = describeVoice(cfg({ key: "sk-secret", voice: "v-1" }));
-    // piperAvailable rides along so Settings can grey out the offline
-    // engine before the user asks for it; the key itself never does.
+    // piperAvailable and the install fields ride along so Settings can grey out
+    // the offline engine, offer the one-click install and show its progress
+    // before the user asks for any of it; the key itself never does.
     expect(described).toEqual({
       configured: true,
       ready: true,
       voice: "v-1",
       provider: "elevenlabs",
       piperAvailable: false,
+      piperInstallable: onInstallablePlatform,
+      piperInstalling: false,
+      piperInstallError: null,
     });
     expect(JSON.stringify(described)).not.toContain("sk-secret");
   });
@@ -212,6 +221,9 @@ describe("built-in macOS voices", () => {
       voice: "Albert",
       provider: "system",
       piperAvailable: false,
+      piperInstallable: onInstallablePlatform,
+      piperInstalling: false,
+      piperInstallError: null,
     });
   });
 
