@@ -183,10 +183,6 @@ const bridge = {
   /** One-way toggle of the Handy offline dictation app. Resolves { ok };
    * { ok: false, error } when the executable is missing. */
   handyToggle: (handyPath) => ipcRenderer.invoke("handy:toggle", handyPath),
-  /** The same toggle with Handy's own post-processing switched on. */
-  handyTogglePostProcess: (handyPath) => ipcRenderer.invoke("handy:toggle-post-process", handyPath),
-  /** Cancel the recording or transcription Handy is running right now. */
-  handyCancel: (handyPath) => ipcRenderer.invoke("handy:cancel", handyPath),
   /** Read-only view of Handy's engine: selected model, installed models and
    * this device. Astra never writes Handy's settings file; pass `model` to
    * pin an engine for Astra's own calls instead. */

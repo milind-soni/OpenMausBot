@@ -33,8 +33,6 @@ test("local preload retains Handy, clipboard and native speech without cloud STT
   assert.equal(Object.hasOwn(bridge, "callStt"), false);
   const wav = new ArrayBuffer(8);
   await bridge.handyToggle("fixture-handy");
-  await bridge.handyTogglePostProcess("fixture-handy");
-  await bridge.handyCancel("fixture-handy");
   await bridge.handyModels("fixture-handy");
   await bridge.handyTranscribeFile(wav, "fixture-handy", "fixture-model");
   await bridge.readClipboardText();
@@ -43,19 +41,19 @@ test("local preload retains Handy, clipboard and native speech without cloud STT
   await bridge.speechStop();
   await bridge.speechFinish();
   assert.deepEqual(calls.map(([channel]) => channel), [
-    "handy:toggle", "handy:toggle-post-process", "handy:cancel", "handy:models",
+    "handy:toggle", "handy:models",
     "handy:transcribe-file", "clipboard:read-text", "clipboard:write-text",
     "speech:start", "speech:stop", "speech:finish",
   ]);
-  assert.equal(calls[4][1], wav);
-  assert.equal(calls[4][2], "fixture-handy");
-  assert.equal(calls[4][3], "fixture-model");
+  assert.equal(calls[2][1], wav);
+  assert.equal(calls[2][2], "fixture-handy");
+  assert.equal(calls[2][3], "fixture-model");
 });
 
 test("remote preload exposes neither local transcription nor cloud STT", () => {
   const { bridge } = loadBridge(true);
   for (const name of [
-    "dictation", "callStt", "handyToggle", "handyTogglePostProcess", "handyCancel", "handyModels",
+    "dictation", "callStt", "handyToggle", "handyModels",
     "handyTranscribeFile", "speechStart", "readClipboardText",
   ]) {
     assert.equal(Object.hasOwn(bridge, name), false, name);

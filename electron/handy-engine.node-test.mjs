@@ -8,7 +8,9 @@ import test from "node:test";
 
 import {
   HANDY_BARE_EXE,
+  handyDataDir,
   handyExeMissing,
+  handyExeName,
   isHandyModelFile,
   readHandyCatalog,
   readHandyEngine,
@@ -69,7 +71,7 @@ test("the readout reports Handy's selection alongside what is actually on disk",
 
     const status = await readHandyEngine({
       handyPath: "",
-      appDataDir,
+      dataDir: dir,
       environment: environment((candidate) => candidate.endsWith("handy.exe")),
     });
     assert.equal(status.ok, true);
@@ -127,7 +129,11 @@ test("the catalog call is bounded and asks for JSON", async () => {
 test("an install with nothing readable reports that honestly instead of throwing", async () => {
   const appDataDir = mkdtempSync(join(tmpdir(), "astra-handy-engine-absent-"));
   try {
-    const status = await readHandyEngine({ handyPath: "", appDataDir, environment: environment(() => false) });
+    const status = await readHandyEngine({
+      handyPath: "",
+      dataDir: join(appDataDir, "com.pais.handy"),
+      environment: environment(() => false),
+    });
     assert.equal(status.ok, true);
     assert.equal(status.found, false);
     assert.equal(status.selected, null);
@@ -135,4 +141,33 @@ test("an install with nothing readable reports that honestly instead of throwing
   } finally {
     rmSync(appDataDir, { recursive: true, force: true });
   }
+});
+
+test("Linux resolves the bare name it actually ships and skips the Windows guess", () => {
+  assert.equal(handyExeName("win32"), "Handy.exe");
+  assert.equal(handyExeName("linux"), "handy");
+  assert.equal(resolveHandyExe("", environment(() => false, "linux")), "handy");
+  // A Windows-only install path must never be invented off Windows.
+  const windowsOnly = join("C:\\Users\\fixture", "AppData", "Local", "Handy", "handy.exe");
+  assert.equal(resolveHandyExe("", environment((candidate) => candidate === windowsOnly, "linux")), "handy");
+  assert.equal(handyExeMissing("handy", () => false, "linux"), true);
+  assert.equal(handyExeMissing("handy", () => true, "linux"), false);
+});
+
+test("Handy's state directory follows the platform's data dir, not Electron's appData", () => {
+  const home = "/home/fixture";
+  const appData = "/home/fixture/.config";
+  assert.equal(
+    handyDataDir({ home, platform: "linux", appData, env: {} }),
+    join(home, ".local", "share", "com.pais.handy"),
+  );
+  assert.equal(
+    handyDataDir({ home, platform: "linux", appData, env: { XDG_DATA_HOME: "/data/home" } }),
+    join("/data/home", "com.pais.handy"),
+  );
+  // Windows and macOS are the two where Electron's appData already agrees.
+  assert.equal(
+    handyDataDir({ home, platform: "win32", appData: "C:\\Users\\fixture\\AppData\\Roaming" }),
+    join("C:\\Users\\fixture\\AppData\\Roaming", "com.pais.handy"),
+  );
 });

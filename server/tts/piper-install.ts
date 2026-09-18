@@ -190,7 +190,7 @@ export async function installPiper(options: PiperInstallOptions = {}): Promise<v
     // on the engine binary, so it must appear only once the installation is
     // complete. Doing it the other way round reports a usable engine while the
     // voice is still downloading — the panel then hides the install button and
-    // speaking fails with "no voice models", which is exactly what it look like
+    // speaking fails with "no voice models", which is exactly what it looks like
     // when the order is wrong.
     const voicesDir = join(root, "voices");
     await mkdir(voicesDir, { recursive: true });

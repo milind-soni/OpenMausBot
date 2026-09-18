@@ -24,6 +24,7 @@ import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import {
   HANDY_MISSING_ERROR,
+  handyDataDir,
   handyExeMissing,
   readHandyCatalog,
   readHandyEngine,
@@ -2173,7 +2174,15 @@ ipcMain.handle("clipboard:read-text", localOnly("clipboard:read-text", () => {
 // call rather than at import time — app.getPath is only meaningful once
 // Electron is up.
 function handyEnvironment() {
-  return { home: app.getPath("home"), platform: process.platform, exists: fs.existsSync };
+  return {
+    home: app.getPath("home"),
+    platform: process.platform,
+    exists: fs.existsSync,
+    // Handy's own state directory is derived from these in handy-engine.mjs:
+    // Electron's appData is not Tauri's data dir on Linux.
+    appData: app.getPath("appData"),
+    env: process.env,
+  };
 }
 
 // Headless transcription through the user's own Handy install: a WAV goes
@@ -2226,16 +2235,15 @@ ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async
   }
 }));
 
-// One-way controls for Handy (https://handy.computer), the offline
-// speech-to-text app. Handy exposes no status IPC upstream, so the caller
-// drives recording off its own mic watchdog and detects the result through
-// the clipboard. Handy's own Tauri global-shortcut hook stays registered:
-// keystroke and spawn both reach the same coordinator, and a rapid second
-// toggle only adds one no-op key event on top.
+// The one control this app has over Handy (https://handy.computer), the
+// offline speech-to-text app: --toggle-transcription, which the installed
+// build declares (`handy --help`). Dictation and calls do not use it — they
+// capture in the renderer and post a finished WAV — so this is the bridge's
+// only way to drive Handy's own recorder. Handy's own Tauri global-shortcut
+// hook stays registered: keystroke and spawn both reach the same coordinator,
+// and a rapid second toggle only adds one no-op key event on top.
 //
-// Every flag here is one the installed Handy actually declares (`handy
-// --help`): --toggle-transcription, --toggle-post-process, --cancel. Success
-// means "the process started", exactly as upstream behaves — a second
+// Success means "the process started", exactly as upstream behaves — a second
 // invocation hands off to the running instance and exits, while a cold one
 // starts Handy and stays up, so waiting for an exit code would hang.
 function spawnHandyFlag(flag, handyPath) {
@@ -2250,12 +2258,6 @@ function spawnHandyFlag(flag, handyPath) {
 }
 
 ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => spawnHandyFlag("--toggle-transcription", handyPath)));
-
-/** The same toggle with Handy's own post-processing (its LLM cleanup) on. */
-ipcMain.handle("handy:toggle-post-process", localOnly("handy:toggle-post-process", (_event, handyPath) => spawnHandyFlag("--toggle-post-process", handyPath)));
-
-/** Cancel whatever Handy is recording or transcribing right now. */
-ipcMain.handle("handy:cancel", localOnly("handy:cancel", (_event, handyPath) => spawnHandyFlag("--cancel", handyPath)));
 
 // What Handy would transcribe with, reported read-only. The renderer shows
 // this instead of guessing: Handy's selected model is the thing that actually
@@ -2280,10 +2282,11 @@ function runHandyCommand(exe, args, timeoutMs) {
 }
 
 ipcMain.handle("handy:models", localOnly("handy:models", async (_event, handyPath) => {
+  const environment = handyEnvironment();
   const engine = await readHandyEngine({
     handyPath,
-    appDataDir: app.getPath("appData"),
-    environment: handyEnvironment(),
+    dataDir: handyDataDir(environment),
+    environment,
   });
   if (!engine.found) return { ...engine, catalog: [] };
   return {

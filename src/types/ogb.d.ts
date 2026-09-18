@@ -212,10 +212,6 @@ const __APP_VERSION__: string;
       /** Toggle Handy (the offline speech-to-text app) on or off. Resolves
        * { ok: false, error } when the executable is missing. */
       handyToggle?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
-      /** The same toggle with Handy's own post-processing switched on. */
-      handyTogglePostProcess?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
-      /** Cancel the recording or transcription Handy is running right now. */
-      handyCancel?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
       /** Read-only view of Handy's engine, for Settings. Astra never writes
        * Handy's settings file — see HandyEngineStatus. */
       handyModels?(handyPath: string): Promise<HandyEngineStatus>;

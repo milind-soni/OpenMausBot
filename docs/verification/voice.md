@@ -112,15 +112,17 @@ Mocked WebAudio tests do not establish real-device recognition quality or latenc
 
 Composer dictation, wake dictation and call turns capture audio in the renderer
 and hand a finished WAV to the user's own Handy install. The IPC surface is one
-executable resolution plus five channels:
+executable resolution plus three channels:
 
 | Channel | Handy flag |
 | --- | --- |
 | `handy:toggle` | `--toggle-transcription` |
-| `handy:toggle-post-process` | `--toggle-post-process` |
-| `handy:cancel` | `--cancel` |
 | `handy:transcribe-file` | `--transcribe-file <wav> --json [--model <id>]` |
 | `handy:models` | reads `settings_store.json` and `models/`; spawns nothing |
+
+`handy:toggle` drives Handy's own recorder, and is the bridge's only control over it:
+dictation and call turns capture in the renderer and post a finished WAV, so they
+never toggle or cancel Handy's recording.
 
 `--model` is Astra's own pin (Settings → Wake word), not a change to Handy:
 Handy owns its settings file and rewrites it on exit, so switching the engine
@@ -129,9 +131,16 @@ read-only for the same reason, and reports Handy's `selected_model` separately
 from the models actually on disk — the two differ when a model was selected
 before it finished downloading.
 
-Executable resolution lives in `electron/handy-engine.mjs` (Settings path →
-`PATH` → `%LOCALAPPDATA%\Handy` → `/Applications/Handy.app/Contents/MacOS/handy`)
-and is pinned without an Electron process:
+Handy's own state is read from Tauri's app data directory:
+`%APPDATA%\com.pais.handy` on Windows,
+`~/Library/Application Support/com.pais.handy` on macOS, and
+`$XDG_DATA_HOME` (or `~/.local/share`)/`com.pais.handy` on Linux. Only the Linux case
+differs from Electron's own appData, so the directory is derived in `handy-engine.mjs`
+rather than handed in by the shell. Executable resolution lives there too: the
+Settings path, else `PATH`, else the platform's standard install location
+(`%LOCALAPPDATA%\Handy` on Windows, the `Handy.app` bundle on macOS, and the bare
+`handy` on Linux, where the packaged app has no single install location to guess at).
+It is pinned without an Electron process:
 
 ```sh
 node --test electron/handy-engine.node-test.mjs electron/preload.node-test.mjs

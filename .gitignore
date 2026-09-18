@@ -25,6 +25,7 @@ cloudflare/control-plane/worker-configuration.d.ts
 .claude/worktrees/
 .vercel/
 .pi/
+.freebuff/
 
 # Release signing material. The signing keys for the mobile stores belong to the
 # maintainer and never enter this repository; these patterns are the second line
