@@ -1,7 +1,11 @@
 import { createElement, type Dispatch } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { initialState, StoreProvider, useStore, type Action, type BotAnnouncement } from "./store";
+import { initialState, MESSAGE_PAGE_SIZE, StoreProvider, useStore, type Action, type BotAnnouncement } from "./store";
+
+/** The snapshot path the store reconciles against: a bounded page, so a
+ * settings recovery never pulls every transcript with it. */
+const SNAPSHOT = `/api/bots?messages=${MESSAGE_PAGE_SIZE}`;
 
 const bot: BotAnnouncement = {
   id: "bot", threadId: "thread", name: "Fixture", title: "", description: "",
@@ -66,7 +70,7 @@ describe("thread setting save recovery", () => {
     const requests = vi.fn<typeof fetch>(async (path) => {
       if (path === "/api/bots/bot") return profileSave.promise;
       if (path === "/api/bots/bot/tasks/thread") return response({ error: "Save failed" }, 500);
-      if (path === "/api/bots") return reconciled.promise;
+      if (path === SNAPSHOT) return reconciled.promise;
       return response({});
     });
     const controls = mount(requests);
@@ -89,14 +93,14 @@ describe("thread setting save recovery", () => {
     const reconcile = deferred();
     const requests = vi.fn<typeof fetch>(async (path) => {
       if (path === "/api/bots/bot/tasks/thread") return response({ error: "Save failed" }, 500);
-      if (path === "/api/bots") return reconcile.promise;
+      if (path === SNAPSHOT) return reconcile.promise;
       return response({});
     });
     const controls = mount(requests);
     controls.update();
     controls.send();
     await flush();
-    expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", "/api/bots"]);
+    expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", SNAPSHOT]);
     reconcile.resolve(response({ bots: [bot] }));
     await flush();
     // The failed send is never silently retried using a different model.
@@ -107,7 +111,7 @@ describe("thread setting save recovery", () => {
   });
 
   it.each(["unreachable", "missing bot"])("stays blocked when reconciliation is %s", async (failure) => {
-    const requests = vi.fn<typeof fetch>(async (path) => path === "/api/bots"
+    const requests = vi.fn<typeof fetch>(async (path) => path === SNAPSHOT
       ? response({ bots: [], error: "Offline" }, failure === "unreachable" ? 503 : 200)
       : response({ error: "Save failed" }, 500));
     const controls = mount(requests);
@@ -115,7 +119,7 @@ describe("thread setting save recovery", () => {
     await flush();
     controls.send();
     await flush();
-    expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", "/api/bots"]);
+    expect(requests.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot/tasks/thread", SNAPSHOT]);
   });
 
   it("does not let an old reconciliation clear a newer write", async () => {
@@ -123,7 +127,7 @@ describe("thread setting save recovery", () => {
     const nextWrite = deferred();
     let writes = 0;
     const requests = vi.fn<typeof fetch>(async (path) => {
-      if (path === "/api/bots") return reconcile.promise;
+      if (path === SNAPSHOT) return reconcile.promise;
       if (path === "/api/bots/bot/tasks/thread") return ++writes === 1
         ? response({ error: "Save failed" }, 500) : nextWrite.promise;
       return response({});

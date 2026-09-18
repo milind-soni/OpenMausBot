@@ -1070,6 +1070,26 @@ export function GroupView({ group }: { group: Group }) {
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= group.messages.length ? null : nextEnd }));
   };
 
+  // Scrollback across the network: the snapshot holds a bounded page, and
+  // everything before it is still on the server. Asking for it prepends rows
+  // exactly like expanding the local window, so the same height capture keeps
+  // the viewport still — here it is applied when the transcript grows at the
+  // front rather than when the boundary moves.
+  const olderPending = Boolean(state.loadingOlder[group.threadId]);
+  const loadOlder = () => {
+    preExpandHeight.current = scrollRef.current?.scrollHeight ?? null;
+    setBottomFollow(false);
+    dispatch({ type: "loadOlderMessages", threadId: group.threadId });
+  };
+  const oldestId = group.messages[0]?.id;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (preExpandHeight.current === null || !el) return;
+    el.scrollTop += el.scrollHeight - preExpandHeight.current;
+    preExpandHeight.current = null;
+    previousScrollTop.current = el.scrollTop;
+  }, [oldestId]);
+
   const atEnd = () => {
     const el = scrollRef.current;
     return !el || el.scrollHeight - el.scrollTop - el.clientHeight < BOTTOM_FOLLOW_THRESHOLD;
@@ -1311,7 +1331,7 @@ export function GroupView({ group }: { group: Group }) {
               </div>
             </div>
           )}
-          {hiddenCount > 0 && (
+          {hiddenCount > 0 ? (
             <div className="flex justify-center pt-2">
               <button
                 onClick={showEarlier}
@@ -1320,7 +1340,17 @@ export function GroupView({ group }: { group: Group }) {
                 {t("chat.showEarlier", { count: hiddenCount })}
               </button>
             </div>
-          )}
+          ) : group.hasMore ? (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={loadOlder}
+                disabled={olderPending}
+                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-60"
+              >
+                {olderPending ? t("chat.loadingEarlier") : t("chat.loadEarlier")}
+              </button>
+            </div>
+          ) : null}
           <Transcript
             group={group}
             members={members}

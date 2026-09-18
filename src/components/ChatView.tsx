@@ -1093,6 +1093,26 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= messages.length ? null : nextEnd }));
   };
 
+  // Scrollback across the network: the snapshot holds a bounded page, and
+  // everything before it is still on the server. Asking for it prepends rows
+  // exactly like expanding the local window, so the same height capture keeps
+  // the viewport still — here it is applied when the transcript grows at the
+  // front rather than when the boundary moves.
+  const olderPending = Boolean(state.loadingOlder[bot.threadId]);
+  const loadOlder = () => {
+    preExpandHeight.current = scrollRef.current?.scrollHeight ?? null;
+    setBottomFollow(false);
+    dispatch({ type: "loadOlderMessages", threadId: bot.threadId });
+  };
+  const oldestId = messages[0]?.id;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (preExpandHeight.current === null || !el) return;
+    el.scrollTop += el.scrollHeight - preExpandHeight.current;
+    preExpandHeight.current = null;
+    previousScrollTop.current = el.scrollTop;
+  }, [oldestId]);
+
   // keyboard is a scroll gesture too (upstream lesson): PageUp/Home/ArrowUp
   // break follow like an upward wheel; the at-end onScroll check re-arms it.
   // ArrowUp only counts outside inputs — in the composer it edits, not scrolls.
@@ -1325,7 +1345,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           aria-live="polite"
           aria-label={t("chat.conversationWith", { name: bot.name })}
         >
-          {hiddenCount > 0 && (
+          {hiddenCount > 0 ? (
             <div className="flex justify-center pt-2">
               <button
                 onClick={showEarlier}
@@ -1334,7 +1354,17 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 {t("chat.showEarlier", { count: hiddenCount })}
               </button>
             </div>
-          )}
+          ) : bot.hasMore ? (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={loadOlder}
+                disabled={olderPending}
+                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-60"
+              >
+                {olderPending ? t("chat.loadingEarlier") : t("chat.loadEarlier")}
+              </button>
+            </div>
+          ) : null}
           <MessagesList
             bot={bot}
             locale={activeLocale()}

@@ -13793,9 +13793,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!switched) return json(res, 404, { error: "no such channel task" });
       const fresh = groupWithThread(switched);
       broadcast({ kind: "group", group: fresh });
-      const responseGroup = url.searchParams.get("messages") === "0"
+      const requestedMessages = url.searchParams.get("messages");
+      const switchLimit = pageSize(requestedMessages);
+      if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      // "0" predates paging and means settings only — no `messages` key at
+      // all, which clients tell apart from an empty page. A positive page is
+      // the transcript a client can actually hold; omitting the parameter
+      // keeps the whole transcript, as it always did.
+      const responseGroup = requestedMessages === "0"
         ? { ...publicGroupState(switched), tasks: store.groupTasks(switched.id) }
-        : fresh;
+        : switchLimit === undefined
+          ? fresh
+          : {
+              ...publicGroupState(switched),
+              tasks: store.groupTasks(switched.id),
+              ...messagePage(switched.threadId, switchLimit),
+            };
       return json(res, 200, { group: responseGroup });
     }
     if (m && method === "PATCH") {
@@ -15860,9 +15873,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!switched) return json(res, 404, { error: "no such task" });
       const fresh = botWithThread(switched);
       broadcast({ kind: "bot", bot: fresh });
-      const responseBot = url.searchParams.get("messages") === "0"
+      const requestedMessages = url.searchParams.get("messages");
+      const switchLimit = pageSize(requestedMessages);
+      if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      // See the channel switch above: "0" is settings only, a positive page
+      // is a bounded transcript, and no parameter is the whole thread.
+      const responseBot = requestedMessages === "0"
         ? { ...wireBot(switched), tasks: store.tasks(switched.id).map(wireTask) }
-        : fresh;
+        : switchLimit === undefined
+          ? fresh
+          : {
+              ...wireBot(switched),
+              tasks: store.tasks(switched.id).map(wireTask),
+              ...messagePage(switched.threadId, switchLimit),
+            };
       return json(res, 200, { bot: responseBot });
     }
     if (m && method === "PATCH") {

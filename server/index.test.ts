@@ -9672,6 +9672,54 @@ describe("message pages", () => {
     expect((await api("GET", `/api/threads/${full.threadId}/messages?limit=1.5`)).status).toBe(400);
   });
 
+  it("bounds a channel task switch the same way as a snapshot", async () => {
+    const full = await seedRoom(6);
+    const created = await api("POST", `/api/groups/${full.id}/tasks`, { title: "Second" });
+    expect(created.status).toBe(201);
+
+    // switching back with a page bounds the transcript it answers with
+    const paged = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=2`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.group.threadId).toBe(full.threadId);
+    expect(paged.body.group.messages).toHaveLength(2);
+    expect(paged.body.group.hasMore).toBe(true);
+    expect(paged.body.group.tasks).toHaveLength(2);
+
+    // "0" predates paging: settings only, no transcript key at all
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const settings = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=0`);
+    expect(settings.status).toBe(200);
+    expect(settings.body.group).not.toHaveProperty("messages");
+
+    // and no parameter still answers with the whole thread
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const whole = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}`);
+    expect(whole.body.group.messages).toHaveLength(6);
+    expect(whole.body.group).not.toHaveProperty("hasMore");
+
+    expect((await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=lots`)).status).toBe(400);
+    await api("DELETE", `/api/groups/${full.id}`);
+  });
+
+  it("bounds a bot thread switch the same way as a snapshot", async () => {
+    const { body } = await api("GET", "/api/bots?messages=0");
+    const bot = body.bots[0];
+    const created = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Second" });
+    expect(created.status).toBe(201);
+
+    const paged = await api("POST", `/api/bots/${bot.id}/tasks/${bot.threadId}?messages=1`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.bot.threadId).toBe(bot.threadId);
+    expect(paged.body.bot.messages.length).toBeLessThanOrEqual(1);
+    expect(paged.body.bot).toHaveProperty("hasMore");
+
+    await api("POST", `/api/bots/${bot.id}/tasks/${created.body.task.threadId}`);
+    const settings = await api("POST", `/api/bots/${bot.id}/tasks/${bot.threadId}?messages=0`);
+    expect(settings.body.bot).not.toHaveProperty("messages");
+
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${created.body.task.threadId}`);
+  });
+
   it("404s an image on a message that has none", async () => {
     const full = await seedRoom(1);
     const res = await fetch(`${BASE}/api/threads/${full.threadId}/messages/${full.messages[0].id}/image`);
