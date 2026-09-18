@@ -224,6 +224,7 @@ it("reattaches rebuilt personal providers before a Company restore failure", asy
       instances: () => [personal],
     },
     instanceConfigs: () => ({ personal: { driver: "fake" } }), cfg: {},
+    invalidateRoomContinuationsForInstance: () => {},
     managedDesktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
   });
   vm.runInContext(reloadProvidersCode, context, { filename: "index.ts (provider reload fixture)" });

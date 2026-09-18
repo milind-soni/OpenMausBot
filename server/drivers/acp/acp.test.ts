@@ -6,7 +6,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ import { ensureDirs, NATIVE_DIR } from "../../config.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
+import { acpInstructionReceiptPath, writeAcpInstructionReceipt } from "./instruction-receipts.ts";
 import { GrokAgentDriver, grokAcceptsUnadvertisedImages } from "./grok.ts";
 import { GeminiAgentDriver } from "./gemini.ts";
 import { KimiAgentDriver } from "./kimi.ts";
@@ -234,6 +235,9 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_IMAGE_CAPABILITY;
     delete process.env.FAKE_ACP_GROK_VERSION;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
+    delete process.env.FAKE_ACP_RECEIPT_FILE;
+    delete process.env.FAKE_ACP_RECEIPT_MODE;
+    delete process.env.FAKE_ACP_PROMPT_ASSERTIONS;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -807,11 +811,10 @@ describe("ACP turns (fake CLI)", () => {
           "--permission-mode", "auto",
           "agent", "-m", model, "--reasoning-effort", "high", "stdio",
         ]);
-        const sessionMethod = resumeCursor ? "session/load" : "session/new";
-        const sent = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8")
-          .trim().split("\n").map((line) => JSON.parse(line))
-          .find((entry) => entry.dir === "out" && entry.msg.method === sessionMethod);
-        expect(sent.msg.params.mcpServers).toEqual([{ name: "agents", ...agents, env: [] }]);
+        // Native diagnostics intentionally omit MCP configuration. The fake
+        // provider's disposable capture is the boundary proof for this test.
+        const sent = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
+        expect(sent).toEqual([{ name: "agents", ...agents, env: [] }]);
         expect(JSON.parse(readFileSync(`${dump}.config.json`, "utf8"))).toEqual([
           { method: "session/set_model", params: { sessionId: "fake-acp-session", modelId: model } },
         ]);
@@ -1032,8 +1035,12 @@ describe("ACP turns (fake CLI)", () => {
   it("falls through to session/new when session/load returns null", async () => {
     process.env.FAKE_ACP_LOAD_NULL = "1";
     await create(GrokAgentDriver);
+    writeAcpInstructionReceipt("acp-test", "bot-resume-null", "t-resume-null", "gone-cursor", [
+      { id: "identity", label: "Identity", text: "IDENTITY", bytes: 8 },
+    ]);
     await instance.adapter.sendTurn({
       threadId: "t-resume-null",
+      botId: "bot-resume-null",
       text: "go",
       resumeCursor: "gone-cursor",
     });
@@ -1042,6 +1049,122 @@ describe("ACP turns (fake CLI)", () => {
     expect(started).toMatchObject({ sessionId: "fake-acp-session" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+    expect(existsSync(acpInstructionReceiptPath("acp-test", "bot-resume-null", "t-resume-null", "gone-cursor"))).toBe(false);
+  });
+
+  it("does not resend unchanged ACP instruction sections on a resumed turn", async () => {
+    const dump = join(scratch, "prompt-receipt.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create(GrokAgentDriver);
+    const systemSections = [
+      { id: "identity", label: "Identity", text: "IDENTITY", bytes: 8 },
+      { id: "memory", label: "Memory", text: "MEMORY", bytes: 6 },
+    ];
+    const first = await instance.adapter.sendTurn({
+      threadId: "t-acp-receipt",
+      botId: "bot-acp-receipt",
+      text: "first",
+      system: "IDENTITYMEMORY",
+      systemSections,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-acp-receipt",
+      botId: "bot-acp-receipt",
+      text: "second",
+      system: "IDENTITYMEMORY",
+      systemSections,
+      resumeCursor: "fake-acp-session",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")) as Array<{ type?: string; text?: string }>;
+    expect(prompt).toEqual([{ type: "text", text: "second" }]);
+  });
+
+  it("records semantic prompt assertions without retaining prompt bodies", async () => {
+    const receipts = join(scratch, "fake-acp-receipts.ndjson");
+    process.env.FAKE_ACP_RECEIPT_FILE = receipts;
+    process.env.FAKE_ACP_RECEIPT_MODE = "1";
+    process.env.FAKE_ACP_PROMPT_ASSERTIONS = JSON.stringify([
+      { contains: ["A1"], absent: ["A2"] },
+      { contains: ["A2"], absent: ["A1"], occurrences: [{ text: "A2", expected: 1 }] },
+    ]);
+    await create(GrokAgentDriver);
+    const first = await instance.adapter.sendTurn({
+      threadId: "t-acp-semantic-receipt",
+      botId: "bot-acp-semantic-receipt",
+      text: "A1",
+      system: "SYSTEM",
+      systemSections: [{ id: "identity", label: "Identity", text: "SYSTEM", bytes: 6 }],
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-acp-semantic-receipt",
+      botId: "bot-acp-semantic-receipt",
+      text: "A2",
+      system: "SYSTEM",
+      systemSections: [{ id: "identity", label: "Identity", text: "SYSTEM", bytes: 6 }],
+      resumeCursor: "fake-acp-session",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const rows = readFileSync(receipts, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const prompts = rows.filter((row) => row.method === "session/prompt");
+    expect(prompts).toHaveLength(2);
+    expect(prompts.map((row) => row.checks)).toEqual([
+      { contains_0: true, absent_0: true },
+      { contains_0: true, absent_0: true, occurrences_0: 1 },
+    ]);
+    expect(JSON.stringify(prompts)).not.toContain("A1");
+    expect(JSON.stringify(prompts)).not.toContain("A2");
+  });
+
+  it("rebuilds recovery history exactly once after a rejected ACP load", async () => {
+    const dump = join(scratch, "prompt-recovery.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    process.env.FAKE_ACP_LOAD_NULL = "1";
+    await create(GrokAgentDriver);
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-acp-recovery",
+      botId: "bot-acp-recovery",
+      text: "current",
+      system: "IDENTITY",
+      systemSections: [{ id: "identity", label: "Identity", text: "IDENTITY", bytes: 8 }],
+      resumeCursor: "gone-session",
+      recoveryText: "history\n\ncurrent",
+      promptPlan: { owner: "room", botId: "bot-acp-recovery", reason: "resume" },
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")) as Array<{ type?: string; text?: string }>;
+    expect(prompt).toEqual([{ type: "text", text: "IDENTITY\n\nhistory\n\ncurrent" }]);
+    const plans = readFileSync(join(NATIVE_DIR, "t-acp-recovery.ndjson"), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line))
+      .filter((entry) => entry.source === "prompt.plan");
+    expect(plans).toHaveLength(1);
+    expect(plans[0].msg.turnTextBytes).toBe(Buffer.byteLength("current", "utf8"));
+    expect(plans[0].msg.recoveryTextBytes).toBe(Buffer.byteLength("history\n\ncurrent", "utf8"));
+  });
+
+  it("does not replay after ACP prompt acceptance becomes uncertain", async () => {
+    process.env.FAKE_ACP_MODE = "fail-after-text";
+    await create(GrokAgentDriver);
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-acp-no-replay",
+      botId: "bot-acp-no-replay",
+      text: "current",
+      system: "IDENTITY",
+      systemSections: [{ id: "identity", label: "Identity", text: "IDENTITY", bytes: 8 }],
+      resumeCursor: "existing-session",
+      recoveryText: "history\n\ncurrent",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const requests = readFileSync(join(NATIVE_DIR, "t-acp-no-replay.ndjson"), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.dir === "out" && entry.msg?.method === "session/prompt");
+    expect(requests).toHaveLength(1);
   });
 
   it("applyTurnEnv sees the picker model after resolveTurnModel", async () => {

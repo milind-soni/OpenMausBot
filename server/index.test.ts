@@ -38,10 +38,10 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
 const FAKE_CLAUDE_CLI = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
 const FAKE_MCP_SERVER = join(SERVER_DIR, "testing", "fake-mcp-server.ts");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const BASE = `http://127.0.0.1:${PORT}`;
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
-const WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
+let PORT!: number;
+let BASE!: string;
+let WEBHOOK_PORT!: number;
+let WEBHOOK_BASE!: string;
 const TEST_CAPABILITY_KEY = "index-fixture-internal-capability";
 
 async function mintTestCapability(
@@ -334,6 +334,12 @@ const statusWithHeaders = (headers: Record<string, string>): Promise<number> =>
   });
 
 beforeAll(async () => {
+  // Probe the complete listener pair before spawning. A stale local app on a
+  // random port must never become this fixture's silent HTTP server.
+  PORT = await freePortBlock([0, 1], 18_800, 10_000);
+  BASE = `http://127.0.0.1:${PORT}`;
+  WEBHOOK_PORT = PORT + 1;
+  WEBHOOK_BASE = `http://127.0.0.1:${WEBHOOK_PORT}`;
   home = mkdtempSync(join(tmpdir(), "omb-api-test-"));
   writeFileSync(join(home, "fake-agent-browser"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
   staticDir = join(home, "static");
@@ -4462,10 +4468,12 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    // the single-Chief invariant survives the manifest's chiefOfStaff claim
-    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id)).toEqual([
-      trusted.id,
-    ]);
+    // Chief election is per section: the manifest cannot claim the role in
+    // its fresh section, and it cannot disturb the trusted bot's section.
+    expect(after.bots.find((bot: { id: string }) => bot.id === impostor.id)?.chiefOfStaff).toBeUndefined();
+    expect(after.bots.filter((bot: { chiefOfStaff?: boolean; section?: string }) =>
+      bot.chiefOfStaff && bot.section === trustedAfter.section,
+    ).map((bot: { id: string }) => bot.id)).toEqual([trusted.id]);
 
     // a legacy v1 file carries a room block; import ignores it entirely —
     // it neither creates a room nor touches the existing one sharing its name

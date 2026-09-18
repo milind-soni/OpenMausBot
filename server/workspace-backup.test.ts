@@ -184,6 +184,28 @@ describe("encrypted full workspace backups", () => {
     } finally { db.close(); }
   });
 
+  it("excludes private room continuations and ACP receipts while preserving destination state", async () => {
+    const source = directory();
+    const target = directory();
+    json(join(source, "bots.json"), []);
+    writeFileSync(join(source, "room-continuations.json"), "source-private-cursor");
+    mkdirSync(join(source, "acp-instructions"));
+    writeFileSync(join(source, "acp-instructions", "source-receipt.json"), "source-private-receipt");
+    writeFileSync(join(target, "room-continuations.json"), "destination-private-cursor");
+    mkdirSync(join(target, "acp-instructions"));
+    writeFileSync(join(target, "acp-instructions", "destination-receipt.json"), "destination-private-receipt");
+
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const data = join(target, ".backups", staged.id, "staged", "data");
+    expect(existsSync(join(data, "room-continuations.json"))).toBe(false);
+    expect(existsSync(join(data, "acp-instructions"))).toBe(false);
+    commitPendingWorkspaceRestore(target, staged.id);
+    applyPendingWorkspaceRestore(target);
+    expect(readFileSync(join(target, "room-continuations.json"), "utf8")).toBe("destination-private-cursor");
+    expect(readFileSync(join(target, "acp-instructions", "destination-receipt.json"), "utf8")).toBe("destination-private-receipt");
+  });
+
   it("authenticates before extraction and leaves the existing workspace unchanged for wrong passwords or damaged ciphertext", async () => {
     const source = directory();
     json(join(source, "bots.json"), []);

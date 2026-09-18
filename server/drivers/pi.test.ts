@@ -329,6 +329,114 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
   });
 
+  it("rebuilds bounded history once when switch_session rejects a dead cursor", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-recovery-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("dead-session", { FAKE_PI_DUMP: dump });
+    const recoveryText = "User: prior room line\nAssistant: prior reply\nUser: current request";
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-dead-session",
+      text: "current request",
+      resumeCursor: "/fake/pi-session-gone.json",
+      recoveryText,
+      system: "SYSTEM_SENTINEL",
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+    const records = readFileSync(dump, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as any);
+    expect(records.filter((record) => record.prompt).map((record) => record.prompt.message)).toEqual([
+      `SYSTEM_SENTINEL\n\n${recoveryText}`,
+    ]);
+    expect(records.filter((record) => record.session).map((record) => record.session)).toEqual([
+      { command: "new_session", sessionFile: "/fake/pi-session-1.json" },
+    ]);
+    const plans = readFileSync(join(NATIVE_DIR, "t-dead-session.ndjson"), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line))
+      .filter((entry) => entry.source === "prompt.plan");
+    expect(plans).toHaveLength(0);
+  });
+
+  it("keeps recovery bytes separate from current turn bytes in the native receipt", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-recovery-plan-"));
+    const dump = join(dir, "dump.jsonl");
+    const nativeThread = "t-pi-recovery-plan";
+    await create("dead-session", { FAKE_PI_DUMP: dump });
+    const recoveryText = "prior room line";
+    const first = await instance.adapter.sendTurn({
+      threadId: nativeThread,
+      text: "current request",
+      system: "SYSTEM",
+      systemSections: [{ id: "identity", label: "Identity", text: "SYSTEM", bytes: 6 }],
+      resumeCursor: "/fake/pi-session-gone.json",
+      recoveryText,
+      promptPlan: { owner: "room", botId: "bot-pi-recovery", reason: "resume" },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const plans = readFileSync(join(NATIVE_DIR, `${nativeThread}.ndjson`), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line))
+      .filter((entry) => entry.source === "prompt.plan");
+    expect(plans).toHaveLength(1);
+    expect(plans[0].msg.turnTextBytes).toBe(Buffer.byteLength("current request", "utf8"));
+    expect(plans[0].msg.recoveryTextBytes).toBe(Buffer.byteLength(recoveryText, "utf8"));
+  });
+
+  it("reports Pi's full system block at the native prompt boundary", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-plan-"));
+    const nativeThread = "t-pi-prompt-plan";
+    await create(undefined, { FAKE_PI_DUMP: join(dir, "dump.jsonl") });
+    const sections = [{ id: "identity", label: "Identity", text: "SYSTEM", bytes: 6 }];
+    const first = await instance.adapter.sendTurn({
+      threadId: nativeThread,
+      text: "first",
+      system: "SYSTEM",
+      systemSections: sections,
+      promptPlan: { owner: "direct", botId: "bot-pi", reason: "new" },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const firstSession = recorder.events.find((event) => event.type === "session.started" && event.turnId === first.turnId) as { sessionId: string };
+    const second = await instance.adapter.sendTurn({
+      threadId: nativeThread,
+      text: "second",
+      system: "SYSTEM",
+      systemSections: sections,
+      resumeCursor: firstSession.sessionId,
+      promptPlan: { owner: "direct", botId: "bot-pi", reason: "resume" },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    const plans = readFileSync(join(NATIVE_DIR, `${nativeThread}.ndjson`), "utf8")
+      .trim().split("\n").map((line) => JSON.parse(line))
+      .filter((entry) => entry.source === "prompt.plan");
+    expect(plans).toHaveLength(2);
+    expect(plans.map((entry) => entry.msg.mode)).toEqual(["fresh", "resume"]);
+    expect(plans.map((entry) => entry.msg.systemSentBytes)).toEqual([6, 6]);
+    expect(plans.map((entry) => entry.msg.recoveryTextBytes)).toEqual([0, 0]);
+    expect(plans[1].msg.sections).toEqual([{ id: "identity", bytes: 6, sent: true }]);
+  });
+
+  it("records semantic prompt assertions without retaining Pi prompt bodies", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-semantic-receipt-"));
+    const receipts = join(dir, "receipts.ndjson");
+    await create(undefined, {
+      FAKE_PI_RECEIPT_FILE: receipts,
+      FAKE_PI_RECEIPT_MODE: "1",
+      FAKE_PI_PROMPT_ASSERTIONS: JSON.stringify([
+        { contains: ["PI_A1"], absent: ["PI_A2"] },
+        { contains: ["PI_A2"], absent: ["PI_A1"], occurrences: [{ text: "PI_A2", expected: 1 }] },
+      ]),
+    });
+    const first = await instance.adapter.sendTurn({ threadId: "t-pi-semantic", text: "PI_A1" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === first.turnId);
+    const second = await instance.adapter.sendTurn({ threadId: "t-pi-semantic", text: "PI_A2" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === second.turnId);
+    const prompts = readFileSync(receipts, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(prompts).toHaveLength(2);
+    expect(prompts.map((row) => row.checks)).toEqual([
+      { contains_0: true, absent_0: true },
+      { contains_0: true, absent_0: true, occurrences_0: 1 },
+    ]);
+    expect(JSON.stringify(prompts)).not.toContain("PI_A1");
+    expect(JSON.stringify(prompts)).not.toContain("PI_A2");
+  });
+
   it("fails promptly when the pi process exits before replying", async () => {
     await create("exit-early");
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-exit", text: "hi" });

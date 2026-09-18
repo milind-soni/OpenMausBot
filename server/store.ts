@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
@@ -19,6 +20,13 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
+import {
+  deleteBot as deleteRoomContinuationsForBot,
+  deleteThread as deleteRoomContinuationsForThread,
+  invalidateGroup as invalidateRoomContinuationsForGroup,
+  invalidateBot as invalidateRoomContinuationsForBot,
+  invalidateOwner as invalidateRoomContinuationOwner,
+} from "./room-continuations.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
@@ -27,6 +35,10 @@ import type {
   OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
+
+const ROOM_CONTINUATION_AUTHORITY_FIELDS = [
+  "peers", "section", "managedSections", "chiefOfStaff", "hidden", "approvePeerComms", "alwaysAllow",
+] as const;
 // Re-exported under their historical names so server-side importers keep working.
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
@@ -735,6 +747,7 @@ export class Store {
       // its old grants. Update existing objects so in-flight checks see it.
       this.saveBots(this.bots.map((bot) => grants.has(bot.id) ? { ...bot, managedSections: grants.get(bot.id)! } : bot));
       for (const bot of revoked) bot.managedSections = grants.get(bot.id)!;
+      for (const bot of revoked) invalidateRoomContinuationsForBot(bot.id);
       for (const bot of revoked) this.emit({ type: "bot", botId: bot.id });
     }
     changeEmptySection(name, nextName);
@@ -820,6 +833,11 @@ export class Store {
   patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
+    const membershipChanged = Object.hasOwn(patch, "memberIds") &&
+      !isDeepStrictEqual(group.memberIds, patch.memberIds);
+    const sectionChanged = Object.hasOwn(patch, "section") && group.section !== patch.section;
+    const defaultResponderChanged = Object.hasOwn(patch, "defaultResponder") &&
+      !isDeepStrictEqual(group.defaultResponder, patch.defaultResponder);
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
       this.rememberSections([patch.section]);
     }
@@ -833,6 +851,7 @@ export class Store {
       group.memberIds,
       Boolean(group.dm),
     );
+    if (membershipChanged || sectionChanged || defaultResponderChanged) invalidateRoomContinuationsForGroup(id);
     this.saveGroups();
     this.emit({ type: "group", groupId: group.id });
     return group;
@@ -842,6 +861,11 @@ export class Store {
    * per-thread event logs. Every delete path funnels here — task, group,
    * and bot deletion — so the logs cannot outlive the thread anywhere. */
   private deleteThreadRecord(threadId: string) {
+    for (const group of this.groups) {
+      if (group.threadId === threadId || group.tasks?.some((task) => task.threadId === threadId)) {
+        deleteRoomContinuationsForThread(group.id, threadId);
+      }
+    }
     this.threads.delete(threadId);
     mdb.deleteThread(threadId);
     for (const file of [
@@ -863,6 +887,7 @@ export class Store {
     this.groups = this.groups.filter((g) => g.id !== id);
     this.saveGroups();
     for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) {
+      deleteRoomContinuationsForThread(group.id, threadId);
       this.deleteThreadRecord(threadId);
     }
     this.emit({ type: "group.deleted", groupId: id });
@@ -988,6 +1013,7 @@ export class Store {
     if (!group || group.dm || !group.tasks || group.tasks.length < 2) return null;
     if (!group.tasks.some((task) => task.threadId === threadId)) return null;
     group.tasks = group.tasks.filter((task) => task.threadId !== threadId);
+    deleteRoomContinuationsForThread(group.id, threadId);
     this.deleteThreadRecord(threadId);
     if (group.threadId === threadId) {
       const next = group.tasks[0]!;
@@ -1332,6 +1358,8 @@ export class Store {
         request.newTeams.some((name) => !name) || (request.newTeams.length && !chief.chiefOfStaff)) throw new Error("Invalid reviewed Chief team scope");
     const nextBots = [...this.bots];
     const changed: BotRecord[] = [];
+    const modelChangedBotIds = new Set<string>();
+    const roomAuthorityChangedBotIds = new Set<string>();
     for (const operation of request.operations) {
       const at = nextBots.findIndex((bot) => bot.id === operation.botId);
       let next: BotRecord;
@@ -1351,6 +1379,14 @@ export class Store {
         if (at < 0) throw new Error("A setup target no longer exists");
         const previous = nextBots[at];
         next = { ...previous, ...operation.fields };
+        if (ROOM_CONTINUATION_AUTHORITY_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(operation.fields, field))) {
+          roomAuthorityChangedBotIds.add(previous.id);
+        }
+        if (operation.fields.modelSelection &&
+            (operation.fields.modelSelection.instanceId !== previous.modelSelection.instanceId ||
+             operation.fields.modelSelection.model !== previous.modelSelection.model)) {
+          modelChangedBotIds.add(previous.id);
+        }
         if (operation.fields.modelSelection) next.tasks = previous.tasks?.map((task) => ({
           ...task,
           modelSelection: structuredClone(task.modelSelection ?? previous.modelSelection),
@@ -1374,10 +1410,12 @@ export class Store {
     // extend this Chief's reach. Existing teams require owner settings.
     if (request.newTeams.length) {
       nextChief.managedSections = managedSections;
+      roomAuthorityChangedBotIds.add(chief.id);
     }
     nextBots[chiefAt] = nextChief;
     this.saveBots(nextBots);
     this.bots = nextBots;
+    for (const botId of new Set([...modelChangedBotIds, ...roomAuthorityChangedBotIds])) invalidateRoomContinuationsForBot(botId);
     for (const bot of changed) {
       try { writeSoulMirror(bot.id, bot.soul ?? ""); } catch (error) {
         console.warn(`[bot-folder] could not refresh reviewed setup mirror for ${bot.id}: ${(error as Error).message}`);
@@ -1404,6 +1442,7 @@ export class Store {
     // workspace data. A failed save must leave the bot recoverable in place.
     this.saveBots(nextBots);
     this.bots = nextBots;
+    deleteRoomContinuationsForBot(id);
     this.legacyActivities.delete(id);
     // every task's transcript goes with the bot, not just the open one
     for (const threadId of new Set([bot.threadId, ...(bot.tasks ?? []).map((t) => t.threadId)])) {
@@ -1431,6 +1470,15 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
+    const modelChanged = patch.modelSelection !== undefined &&
+      (patch.modelSelection.instanceId !== bot.modelSelection.instanceId ||
+       patch.modelSelection.model !== bot.modelSelection.model);
+    // Native room sessions retain the provider's private history. A route or
+    // authority edit must therefore rotate that member's continuation before
+    // its next room turn, or a resumed provider could still see data that the
+    // current peer/section policy no longer permits.
+    const roomRouteChanged = ROOM_CONTINUATION_AUTHORITY_FIELDS
+      .some((key) => Object.prototype.hasOwnProperty.call(patch, key));
     // Runtime revocations must become effective in memory even when disk is
     // unavailable. Profile edits use the separate atomic path below.
     Object.assign(bot, patch);
@@ -1444,6 +1492,7 @@ export class Store {
       bot.unread = bot.tasks!.some((candidate) => candidate.unread);
     }
     this.saveBots();
+    if (modelChanged || roomRouteChanged) invalidateRoomContinuationsForBot(id);
     this.emit({ type: "bot", botId: id });
     return bot;
   }
@@ -1536,6 +1585,7 @@ export class Store {
         const patch = patches.get(bot.id);
         if (patch) Object.assign(bot, patch);
       }
+      for (const botId of changedIds) invalidateRoomContinuationsForBot(botId);
       for (const botId of changedIds) this.emit({ type: "bot", botId });
     }
     this.rememberSections([targetSection]);
@@ -1597,6 +1647,7 @@ export class Store {
       changed.push(bot);
     }
     if (changed.length) this.saveBots();
+    for (const bot of changed) invalidateRoomContinuationsForBot(bot.id);
     for (const bot of changed) this.emit({ type: "bot", botId: bot.id });
     return changed;
   }
@@ -1827,6 +1878,9 @@ export class Store {
     const bot = this.bot(botId);
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
+    const modelChanged = patch.modelSelection !== undefined &&
+      (patch.modelSelection.instanceId !== (task.modelSelection ?? bot.modelSelection).instanceId ||
+       patch.modelSelection.model !== (task.modelSelection ?? bot.modelSelection).model);
     if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
     for (const key of TASK_PATCH_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(patch, key)) {
@@ -1837,6 +1891,10 @@ export class Store {
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
     bot.unread = bot.tasks!.some((candidate) => candidate.unread);
     this.saveBots();
+    if (modelChanged) {
+      const group = this.groupByThread(threadId);
+      if (group) invalidateRoomContinuationOwner({ groupId: group.id, threadId, botId }, "model-changed");
+    }
     this.emit({ type: "bot", botId });
     return task;
   }
@@ -1849,6 +1907,10 @@ export class Store {
     const bot = this.bot(botId);
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
+    const profileModelChanged = updateBotDefault &&
+      (selection.instanceId !== bot.modelSelection.instanceId || selection.model !== bot.modelSelection.model);
+    const taskModelChanged = selection.instanceId !== (task.modelSelection ?? bot.modelSelection).instanceId ||
+      selection.model !== (task.modelSelection ?? bot.modelSelection).model;
     const patch = { modelSelection: structuredClone(selection),
       ...(resetApprovalToAsk ? { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] } : {}) };
     const nextTask = { ...task, ...taskPatch, ...patch,
@@ -1868,6 +1930,12 @@ export class Store {
     this.saveBots(this.bots.map((candidate) => candidate === bot ? next : candidate));
     bot.tasks!.forEach((candidate, index) => Object.assign(candidate, nextTasks[index]));
     if (updateBotDefault) Object.assign(bot, patch);
+    if (profileModelChanged) {
+      invalidateRoomContinuationsForBot(botId);
+    } else if (taskModelChanged) {
+      const group = this.groupByThread(threadId);
+      if (group) invalidateRoomContinuationOwner({ groupId: group.id, threadId, botId }, "model-changed");
+    }
     this.emit({ type: "bot", botId });
     return task;
   }

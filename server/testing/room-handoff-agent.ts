@@ -6,20 +6,49 @@ import { createInterface } from "node:readline";
 import { waitForExit } from "./cleanup.ts";
 
 export async function runRoomHandoffAgent(argv: string[], planPath: string, prompt?: unknown): Promise<string> {
-  const arg = (flag: string) => argv[argv.indexOf(flag) + 1];
-  const config = JSON.parse(readFileSync(arg("--mcp-config"), "utf8"));
+  const arg = (flag: string) => {
+    const index = argv.indexOf(flag);
+    return index >= 0 ? argv[index + 1] : undefined;
+  };
+  const requiredArg = (flag: string): string => {
+    const value = arg(flag);
+    if (!value) throw new Error(`Missing fixture argument ${flag}`);
+    return value;
+  };
+  const config = JSON.parse(readFileSync(requiredArg("--mcp-config"), "utf8"));
   const integration = Object.values(config.mcpServers as Record<string, { command: string; args: string[]; env: Record<string, string> }>)
     .find(s => s.env?.OMB_BOT_ID);
   if (!integration) throw new Error("The room agent did not receive its agents integration");
   const botId = integration.env.OMB_BOT_ID;
-  const system = readFileSync(arg("--append-system-prompt-file"), "utf8");
+  const threadId = integration.env.OMB_THREAD_ID;
+  const system = readFileSync(requiredArg("--append-system-prompt-file"), "utf8");
   // Claude snapshots the launch-time system prompt for a session. A retained
   // process or --resume launch receives changed turn-scoped instructions in
   // the user message, so inspect both surfaces just as the model does.
-  const turnContext = `${system}\n${JSON.stringify(prompt)}`;
-  const resumed = turnContext.includes("Your downstream room requests have settled.");
   const basePlan = JSON.parse(readFileSync(planPath, "utf8"))[botId] ?? {};
   const previous = existsSync(`${planPath}.evidence.jsonl`) ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
+  const initialTurnContext = `${system}\n${JSON.stringify(prompt)}`;
+  // The scripted plan distinguishes a provider-session resume from a fresh
+  // human follow-up. The server can retain a process (or pass --resume) for
+  // both, so use the turn-scoped coordination instruction as the fixture's
+  // semantic signal, just as the model does.
+  const resumed = initialTurnContext.includes("Your downstream room requests have settled.");
+  const nativeSessionId = arg("--resume") ?? arg("--session-id");
+  // A real resumed provider session retains its earlier user turns even when
+  // Diff 2 sends only the unseen room delta. Include those recorded turns in
+  // the fixture's model-visible context so scripted assertions exercise the
+  // same history surface without changing the bytes sent by the server.
+  const priorTurnContext = nativeSessionId
+    ? previous
+      .filter((entry) => entry.botId === botId && entry.threadId === threadId &&
+        (!nativeSessionId || !entry.nativeSessionId || entry.nativeSessionId === nativeSessionId))
+      .map((entry) => JSON.stringify(entry.prompt))
+      .join("\n")
+    : "";
+  const turnContext = `${system}\n${priorTurnContext}\n${JSON.stringify(prompt)}`;
+  // A scripted bot plan is ordered by provider turns for that bot. A bot can
+  // have several task threads, so scoping this counter to the current thread
+  // would replay the first scripted step on every newly opened task.
   const turnIndex = previous.filter(p => p.botId === botId).length;
   const plan = basePlan.turns ? basePlan.turns[turnIndex] : basePlan;
   if (!plan) throw new Error(`Unexpected extra fixture turn ${turnIndex} for ${botId}`);
@@ -88,7 +117,8 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
     closing = true;
     clearTimeout(timer); clearTimeout(delayTimer); clearInterval(gateTimer); lines.close(); child.stdin.destroy();
     await waitForExit(child, { signal: "SIGTERM", graceMs: 500 });
-    appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId: integration.env.OMB_THREAD_ID,
+    appendFileSync(`${planPath}.evidence.jsonl`, JSON.stringify({ botId, turnIndex, threadId,
+      nativeSessionId,
       model: argv.includes("--model") ? arg("--model") : undefined,
       permissionMode: argv.includes("--permission-mode") ? arg("--permission-mode") : undefined,
       snapshotMode: argv.includes("--system-prompt-snapshot") ? arg("--system-prompt-snapshot") : undefined,

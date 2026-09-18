@@ -402,7 +402,6 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     await loadCatalog(environment, config.cli),
     environment,
   ),
-  buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });
 
 export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undefined {

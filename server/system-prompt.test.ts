@@ -75,6 +75,13 @@ describe("buildSystemPrompt", () => {
     expect(soul.bytes).toBe(Buffer.byteLength(soul.text, "utf8"));
     expect(built.text).toBe("You are Kiwi." + soul.text + " Your memory file is X.");
   });
+
+  it("rejects duplicate section ids before filtering empty sections", () => {
+    expect(() => buildSystemPrompt("You are Kiwi.", "", [
+      { id: "memory", label: "Memory", text: "" },
+      { id: "memory", label: "Memory", text: "later" },
+    ])).toThrow("Duplicate system prompt section id: memory");
+  });
 });
 
 describe("computerPrompt", () => {

@@ -111,7 +111,6 @@ const support: AcpSupport = {
 
   isAuthenticated: geminiIsAuthenticated,
 
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
 export const GeminiAgentDriver = createAcpDriver(support);

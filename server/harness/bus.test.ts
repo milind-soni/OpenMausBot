@@ -87,6 +87,14 @@ describe("EventBus", () => {
     expect(logged).toContain("«redacted");
   });
 
+  it("does not persist provider session cursors", () => {
+    const bus = new EventBus();
+    bus.publish(testEvent({ type: "session.started", sessionId: "private-native-session", model: "fake" }));
+    const logged = readFileSync(join(EVENTS_DIR, "thread-1.ndjson"), "utf8");
+    expect(logged).not.toContain("private-native-session");
+    expect(JSON.parse(logged).sessionId).toBeNull();
+  });
+
   it("reports an incomplete log once while continuing live delivery", () => {
     rmSync(EVENTS_DIR, { recursive: true, force: true });
     const bus = new EventBus();

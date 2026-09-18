@@ -52,6 +52,8 @@ import {
   mergeLocalInject,
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
+import { appendPromptPlan } from "./prompt-plan.ts";
+import { classifyResumeFailure, recoveryPromptFor } from "../resume-recovery.ts";
 
 const DRIVER_KIND = "piAgent";
 const PI_ARGS = ["--mode", "rpc", "--no-session"];
@@ -86,6 +88,52 @@ function piNativeLogMessage(message: Record<string, unknown>): Record<string, un
         : value;
     }),
   };
+}
+
+/** Pi receives the complete OpenMausBot system block on every RPC prompt.
+ * Emit the dispatch receipt at that boundary rather than letting the server's
+ * generic resume estimate claim that the block was omitted. */
+function appendPiPromptPlan(
+  threadId: string,
+  turn: SendTurnInput,
+  providerInstanceId: string,
+  resumed: boolean,
+  resumeRejected: boolean,
+  recoveryTextSent: boolean,
+): void {
+  const metadata = turn.promptPlan;
+  if (!metadata) return;
+  const sections = turn.systemSections ?? [];
+  const system = turn.system ?? sections.map((section) => section.text).join("");
+  const mode = metadata.reason === "window-rotated" || metadata.reason === "restart-uncertain"
+    ? "rotate"
+    : resumeRejected
+      ? "recovery"
+      : resumed
+        ? "resume"
+        : "fresh";
+  appendPromptPlan(threadId, {
+    mode,
+    owner: metadata.owner,
+    botId: metadata.botId,
+    providerInstanceId,
+    systemBuiltBytes: Buffer.byteLength(system, "utf8"),
+    systemSentBytes: Buffer.byteLength(system, "utf8"),
+    // Recovery text is reported separately. Counting the provider-bound
+    // combined message here would double-count the bounded history.
+    turnTextBytes: Buffer.byteLength(turn.text, "utf8"),
+    recoveryTextBytes: recoveryTextSent && turn.recoveryText
+      ? Buffer.byteLength(turn.recoveryText, "utf8")
+      : 0,
+    sections: sections.map((section) => ({
+      id: section.id,
+      bytes: Buffer.byteLength(section.text, "utf8"),
+      sent: system.length > 0,
+    })),
+    ...(metadata.roomMessagesSent !== undefined ? { roomMessagesSent: metadata.roomMessagesSent } : {}),
+    ...(metadata.roomMessagesRetained !== undefined ? { roomMessagesRetained: metadata.roomMessagesRetained } : {}),
+    reason: resumeRejected ? "resume-rejected" : metadata.reason,
+  });
 }
 
 /** Harness effort → pi thinking level (`set_thinking_level`). The sets match
@@ -512,7 +560,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       if (controlsHost && fullAuto) {
         throw new Error("local computer control requires the interactive approval broker");
       }
-      const turnId = newId();
+      const turnId = turn.turnId ?? newId();
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
       let settled = false;
       // pi's RPC surface accepts image content directly. Read before spawning
@@ -788,21 +836,55 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // sessionFile, which switch_session expects as `sessionPath`.
       const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
-      try {
-        const command = sessionPath ? "switch_session" : "new_session";
-        const hsPromise = awaitResponse(command);
-        send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
-        const hs = (await hsPromise) as { sessionFile?: string; sessionId?: string } | undefined;
-        if (hs?.sessionFile) sessionFile = hs.sessionFile;
+      let promptText = turn.text;
+      let resumed = false;
+      let resumeRejected = false;
+      let recoveryTextSent = false;
+      if (sessionPath) {
+        try {
+          const hsPromise = awaitResponse("switch_session");
+          send({ type: "switch_session", sessionPath });
+          const hs = (await hsPromise) as { sessionFile?: string; sessionId?: string } | undefined;
+          if (hs?.sessionFile) sessionFile = hs.sessionFile;
+          resumed = true;
+        } catch {
+          // The switch was rejected before pi saw the prompt. Rebuild the
+          // bounded transcript once on a fresh native session; never resend
+          // after the prompt boundary has been crossed.
+          const recovery = recoveryPromptFor({
+            recoveryText: turn.recoveryText,
+            currentText: turn.text,
+            failure: classifyResumeFailure({ attempted: true, rejected: true, promptSubmitted: false, producedOutput: false }),
+          });
+          promptText = recovery.text;
+          recoveryTextSent = recovery.replayed;
+          sessionFile = null;
+          resumeRejected = true;
+        }
+      }
+      if (!sessionFile) {
+        try {
+          const hsPromise = awaitResponse("new_session");
+          send({ type: "new_session" });
+          const hs = (await hsPromise) as { sessionFile?: string; sessionId?: string } | undefined;
+          if (hs?.sessionFile) sessionFile = hs.sessionFile;
+          emit({
+            ...base(threadId, turnId),
+            type: "session.started",
+            sessionId: sessionFile ?? hs?.sessionId ?? null,
+            model: turn.model ?? null,
+          });
+        } catch {
+          // without a session we can still try a bare prompt; pi --no-session
+          // accepts a prompt without an explicit session.
+        }
+      } else {
         emit({
           ...base(threadId, turnId),
           type: "session.started",
-          sessionId: sessionFile ?? hs?.sessionId ?? null,
+          sessionId: sessionFile,
           model: turn.model ?? null,
         });
-      } catch {
-        // without a session we can still try a bare prompt; pi --no-session
-        // accepts a prompt without an explicit session.
       }
 
       // pin the chosen model (composite id or host::model inject → provider + modelId)
@@ -829,8 +911,10 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
-      const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
+      const system = turn.system ?? (turn.systemSections ?? []).map((section) => section.text).join("");
+      const message = system ? `${system}\n\n${promptText}` : promptText;
       try {
+        appendPiPromptPlan(threadId, turn, instanceId, resumed, resumeRejected, recoveryTextSent);
         send({ type: "prompt", message, ...(images.length ? { images } : {}) });
       } catch {
         settle(false);
@@ -887,6 +971,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         capabilities: {
           // model is set per turn via set_model before prompt
           sessionModelSwitch: "in-session",
+          promptPlan: "driver",
           // Integrations arrive as stdio MCP servers mounted by the
           // pi-mcp-extension (pi core has no MCP client of its own).
           agentsMcp: true,

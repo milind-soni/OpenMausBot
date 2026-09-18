@@ -389,7 +389,6 @@ const support = (run: typeof execCli): AcpSupport => ({
     }
   },
 
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 });
 
 export function createCursorAgentDriver(run: typeof execCli = execCli) {

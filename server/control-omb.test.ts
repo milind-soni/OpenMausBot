@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -11,6 +11,7 @@ import {
   HELP_UI,
   launchVerificationServer,
   runControlOmb,
+  validateVerificationDataDir,
 } from "../scripts/control-omb.ts";
 import { installedChrome, UI_MUTATING } from "../scripts/testing/control-omb-ui.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -235,6 +236,30 @@ describe("control-omb command mapping", () => {
 });
 
 describe("control-omb isolated verification loop", () => {
+  it("accepts an aliased canonical temp root but rejects an escaping final symlink", async () => {
+    const root = mkdtempSync(join(tmpdir(), "omb-verify-root-"));
+    const outside = mkdtempSync(join(tmpdir(), "omb-verify-outside-"));
+    const aliasParent = mkdtempSync(join(tmpdir(), "omb-verify-alias-"));
+    const aliasRoot = join(aliasParent, "root");
+    const realDataDir = join(root, "openmausbot-verify-data-alias");
+    mkdirSync(realDataDir);
+    const escaped = join(root, "openmausbot-verify-data-escaped");
+    try {
+      const directoryLinkType = process.platform === "win32" ? "junction" : "dir";
+      symlinkSync(root, aliasRoot, directoryLinkType);
+      expect(validateVerificationDataDir(join(aliasRoot, "openmausbot-verify-data-alias"), aliasRoot))
+        .toBe(realpathSync(realDataDir));
+      symlinkSync(outside, escaped, directoryLinkType);
+      expect(() => validateVerificationDataDir(escaped, root)).toThrow(/real directory|symlink/);
+    } finally {
+      if (existsSync(aliasRoot)) unlinkSync(aliasRoot);
+      if (existsSync(escaped)) unlinkSync(escaped);
+      await removeTempDir(aliasParent);
+      await removeTempDir(root);
+      await removeTempDir(outside);
+    }
+  });
+
   it.each([
     "tcp://127.0.0.1:2375",
     "ssh://user@production.example/run/podman.sock",
@@ -258,7 +283,7 @@ describe("control-omb isolated verification loop", () => {
     try {
       const doctor = await runControlOmb(["doctor"], { env }) as any;
       expect(doctor.ok).toBe(true);
-      expect(doctor.availableEngines).toEqual(["claude"]);
+      expect(doctor.availableEngines).toContain("claude");
 
       const created = await runControlOmb(["new-bot", "--name", "Verification Probe"], { env }) as any;
       const botId = created.bot.id as string;

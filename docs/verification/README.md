@@ -47,6 +47,7 @@ Use only mapped, tested commands:
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
+- [Token efficiency — ACP receipts and room continuity](token-efficiency.md)
 - [In-chat team coordination](room-coordination.md)
 - [Chief access to additional teams](team-access.md)
 - [Engines and Doctor](engines.md)

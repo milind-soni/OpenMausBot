@@ -5,7 +5,7 @@
 // / set_model, and streams a scripted turn in response to `prompt`. Failure
 // modes mirror how the real CLI misbehaves:
 //
-//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | turn-error | no-models | exit-early
+//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | turn-error | no-models | exit-early | dead-session
 //   FAKE_PI_MODELS comma-separated provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP   path to append {argv, env} JSON, so a test can assert argv shape
 //                  and env hygiene (no leaked secrets into the pi child).
@@ -13,6 +13,29 @@
 import { appendFileSync, readFileSync } from "node:fs";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
+type PromptAssertion = {
+  contains?: string[];
+  absent?: string[];
+  occurrences?: Array<{ text: string; expected?: number }>;
+};
+const receiptFile = process.env.FAKE_PI_RECEIPT_FILE ?? "";
+const receiptMode = process.env.FAKE_PI_RECEIPT_MODE === "1";
+const promptAssertions: PromptAssertion[] = (() => {
+  try {
+    const parsed = JSON.parse(process.env.FAKE_PI_PROMPT_ASSERTIONS ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is PromptAssertion => Boolean(entry && typeof entry === "object")) : [];
+  } catch {
+    return [];
+  }
+})();
+let promptAssertionIndex = (() => {
+  if (!receiptFile) return 0;
+  try {
+    return readFileSync(receiptFile, "utf8").split("\n").filter(Boolean).length;
+  } catch {
+    return 0;
+  }
+})();
 const modelPairs = (process.env.FAKE_PI_MODELS ?? "ollama-cloud/glm-5.2,openai/gpt-4o")
   .split(",")
   .filter(Boolean)
@@ -72,6 +95,33 @@ if (mode === "exit-early") {
 const send = (obj: any) => process.stdout.write(JSON.stringify(obj) + "\n");
 let sessionCounter = 0;
 let currentSessionFile: string | null = null;
+
+function recordReceipt(message: string): void {
+  if (!receiptMode || !receiptFile) return;
+  const assertion = promptAssertions[promptAssertionIndex++];
+  const checks: Record<string, boolean | number> = {};
+  for (const [index, value] of (assertion?.contains ?? []).entries()) checks[`contains_${index}`] = message.includes(value);
+  for (const [index, value] of (assertion?.absent ?? []).entries()) checks[`absent_${index}`] = !message.includes(value);
+  for (const [index, occurrence] of (assertion?.occurrences ?? []).entries()) {
+    let count = 0;
+    let offset = 0;
+    while ((offset = message.indexOf(occurrence.text, offset)) !== -1) {
+      count += 1;
+      offset += Math.max(occurrence.text.length, 1);
+    }
+    checks[`occurrences_${index}`] = count;
+  }
+  try {
+    appendFileSync(receiptFile, `${JSON.stringify({
+      method: "prompt",
+      sessionId: `session-${process.pid}`,
+      promptBytes: Buffer.byteLength(message, "utf8"),
+      ...(Object.keys(checks).length ? { checks } : {}),
+    })}\n`, { mode: 0o600 });
+  } catch {
+    /* receipt evidence must never break the fake provider */
+  }
+}
 
 // A faithful happy turn: a couple of text deltas then a terminal turn_end.
 const streamTurn = () => {
@@ -180,10 +230,20 @@ function handle(cmd: any) {
     case "new_session":
       sessionCounter += 1;
       currentSessionFile = `/fake/pi-session-${sessionCounter}.json`;
+      if (process.env.FAKE_PI_DUMP) {
+        try { appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ session: { command: "new_session", sessionFile: currentSessionFile } }) + "\n"); } catch {}
+      }
       send({ type: "response", command: "new_session", success: true, data: { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile } });
       return;
     case "switch_session":
+      if (mode === "dead-session") {
+        send({ type: "response", command: "switch_session", success: false, error: "session not found" });
+        return;
+      }
       currentSessionFile = cmd.sessionPath ?? currentSessionFile;
+      if (process.env.FAKE_PI_DUMP) {
+        try { appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ session: { command: "switch_session", sessionFile: currentSessionFile } }) + "\n"); } catch {}
+      }
       send({ type: "response", command: "switch_session", success: true, data: { sessionId: "s-resumed", sessionFile: currentSessionFile } });
       return;
     case "set_model": {
@@ -209,6 +269,7 @@ function handle(cmd: any) {
       send({ type: "response", command: "set_thinking_level", success: true });
       return;
     case "prompt":
+      recordReceipt(typeof cmd.message === "string" ? cmd.message : "");
       if (process.env.FAKE_PI_DUMP) {
         try {
           appendFileSync(

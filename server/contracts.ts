@@ -10,6 +10,7 @@ import type { EffortLevel } from "../shared/wire.ts";
 import type {
   DriverKind, InstanceId, ModelVariantOption, RuntimeEventListener, ThreadId, TurnId,
 } from "../shared/runtime-events.ts";
+import type { PromptSection } from "./system-prompt.ts";
 
 // These contract types live in shared/wire.ts now (part of the wire model);
 // re-exported here so existing server-side importers keep working.
@@ -89,6 +90,11 @@ export type RequestOutcome = "allowed-once" | "rejected" | "answered" | "unavail
 // carrying the provider-native continuation (e.g. a claude session id).
 export interface SendTurnInput {
   threadId: ThreadId;
+  /** Server-assigned correlation id for turns that must bind provider
+   * lifecycle events before sendTurn() resolves (room continuation setup).
+   * Provider adapters keep this internal id on their canonical events; it is
+   * never sent to a provider or persisted as continuation state. */
+  turnId?: TurnId;
   /** The bot this turn belongs to. threadIds are meant to be unique per bot
    * task, but a driver's process-level resource maps (permission-broker
    * socket, CLI session) key off threadId alone — botId lets a driver namespace
@@ -127,6 +133,19 @@ export interface SendTurnInput {
    * request every turn ignore both and keep reading `system`. */
   systemStable?: string;
   systemVolatile?: string;
+  /** Ordered system-prompt sections for adapters that can update a native
+   * session without replaying unchanged instructions. Other drivers keep
+   * using `system`, `systemStable`, and `systemVolatile`. */
+  systemSections?: PromptSection[];
+  /** Content-free dispatch metadata for provider-native prompt receipts. It
+   * carries no prompt text, cursors, or hashes. */
+  promptPlan?: {
+    owner: "direct" | "room";
+    botId: string;
+    reason: string;
+    roomMessagesSent?: number;
+    roomMessagesRetained?: number;
+  };
   /** Coordinated teammate turns may resume a Claude conversation whose
    * earlier system prompt contained a different assignment. Refresh that
    * prompt when the provider supports it; the current brief also arrives
@@ -248,6 +267,9 @@ export interface ProviderAdapter {
     effortLevels?: readonly EffortLevel[];
     /** The driver validates and applies model-specific variant IDs per session. */
     modelVariants?: boolean;
+    /** Native prompt composition/receipt instrumentation is emitted by the
+     * driver itself. The server must not append its pre-dispatch estimate. */
+    promptPlan?: "driver";
     /** True when the driver keeps a live session across turns and can take
      * a user message MID-TURN (delivered before the model's next call —
      * "steer"). The composer stays open during a turn on such an engine;

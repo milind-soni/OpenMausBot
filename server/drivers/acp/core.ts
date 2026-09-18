@@ -50,7 +50,11 @@ import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
 import { appendNative } from "../native.ts";
+import { appendPromptPlan } from "../prompt-plan.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
+import { classifyResumeFailure, recoveryPromptFor } from "../../resume-recovery.ts";
+import { composeAcpPrompt } from "./prompt-composer.ts";
+import { deleteAcpInstructionReceipt, writeAcpInstructionReceipt } from "./instruction-receipts.ts";
 
 export interface AcpConfig {
   cli: string;
@@ -155,8 +159,6 @@ export interface AcpSupport {
   requireAuthenticationBeforeSpawn?: boolean;
   /** Classify provider-native failures without coupling the core to messages. */
   classifyError?(error: unknown): ProviderErrorCode | undefined;
-  /** Compose the session/prompt text. Default prepends the persona. */
-  buildPromptText?(turn: SendTurnInput): string;
   /** Rewrite a picker id (`omlx::model`) into the CLI-native id before spawn
    * and session/select. Local inject writers live here so the child sees a
    * model it already knows. */
@@ -221,6 +223,50 @@ async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
     data: (await readFile(image.path)).toString("base64"),
     mimeType: image.mime,
   })));
+}
+
+function appendAcpPromptPlan(
+  threadId: string,
+  originalTurn: SendTurnInput,
+  providerInstanceId: string,
+  composition: ReturnType<typeof composeAcpPrompt>,
+): void {
+  const metadata = originalTurn.promptPlan;
+  if (!metadata) return;
+  const sections = originalTurn.systemSections ?? [];
+  const systemBuilt = originalTurn.system ?? sections.map((section) => section.text).join("");
+  const mode = metadata.reason === "window-rotated" || metadata.reason === "restart-uncertain" ? "rotate"
+    : composition.mode === "recovery" ? "recovery"
+    : composition.mode === "resume" ? "resume"
+      : composition.mode === "replacement" ? "fresh" : "fresh";
+  const sent = new Set(composition.sentSectionIds);
+  appendPromptPlan(threadId, {
+    mode,
+    owner: metadata.owner,
+    botId: metadata.botId,
+    providerInstanceId,
+    systemBuiltBytes: Buffer.byteLength(systemBuilt, "utf8"),
+    systemSentBytes: Buffer.byteLength(composition.systemSentText, "utf8"),
+    // Keep the current turn and bounded recovery history as separate
+    // counters. `composition` may carry a recovery-expanded prompt, but
+    // these fields describe the original dispatch inputs exactly once.
+    turnTextBytes: Buffer.byteLength(originalTurn.text, "utf8"),
+    recoveryTextBytes: composition.recoveryTextSent && originalTurn.recoveryText
+      ? Buffer.byteLength(originalTurn.recoveryText, "utf8")
+      : 0,
+    sections: sections.map((section) => ({
+      id: section.id,
+      bytes: Buffer.byteLength(section.text, "utf8"),
+      sent: sent.has(section.id),
+    })),
+    ...(metadata.roomMessagesSent !== undefined ? { roomMessagesSent: metadata.roomMessagesSent } : {}),
+    ...(metadata.roomMessagesRetained !== undefined ? { roomMessagesRetained: metadata.roomMessagesRetained } : {}),
+    reason: composition.mode === "recovery"
+      ? "resume-rejected"
+      : composition.mode === "replacement"
+        ? "receipt-missing"
+        : metadata.reason,
+  });
 }
 
 function sanitizeToolLogValue(value: unknown, budget: { nodes: number; text: number }, depth = 0): unknown {
@@ -483,7 +529,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (controlsHost && turnConfig.fullAuto && turn.approvalMode !== "full") {
           throw new Error("local computer control requires interactive provider approvals");
         }
-        const turnId = newId();
+        const turnId = turn.turnId ?? newId();
         const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
         const env = childEnv(turnConfig);
         if (
@@ -530,6 +576,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const asks = new Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>();
         let nextId = 1;
         let sessionId: string | null = null;
+        let sessionLoadSucceeded = false;
+        let resumeRejected = false;
         let sessionConfigResult: any = null;
         const modelOf = (result: any): string | null => {
           const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
@@ -989,6 +1037,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             // a fresh native session forgets what the previous one allowed
             if (!cursor) sessionAllows.delete(threadId);
             let sessionResult: any = null;
+            let promptText = turn.text;
             if (cursor) {
               try {
                 sessionResult = await request(
@@ -996,7 +1045,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   { sessionId: cursor, cwd, mcpServers: sessionServers },
                   LOAD_SESSION_TIMEOUT,
                   (result) => {
-                    if (result) {
+                    if (result !== null && result !== undefined) {
+                      sessionLoadSucceeded = true;
                       sessionId = cursor;
                       receiveModelVariants(result);
                     }
@@ -1004,6 +1054,24 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 );
               } catch {
                 /* session gone, load unsupported, or too slow — start fresh */
+              }
+              if (!sessionLoadSucceeded) {
+                // The native cursor was rejected before the new prompt
+                // boundary. Its instruction receipt is no longer reachable
+                // after the replacement session starts, so remove it now
+                // instead of leaving a direct-thread orphan behind.
+                if (turn.botId && cursor) deleteAcpInstructionReceipt(instanceId, turn.botId, threadId, cursor);
+                resumeRejected = true;
+                promptText = recoveryPromptFor({
+                  recoveryText: turn.recoveryText,
+                  currentText: turn.text,
+                  failure: classifyResumeFailure({
+                    attempted: true,
+                    rejected: true,
+                    promptSubmitted: state.promptSent,
+                    producedOutput: false,
+                  }),
+                }).text;
               }
             }
             if (!sessionId) {
@@ -1083,11 +1151,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw error;
             }
             emitSessionStarted();
-            const text = support.buildPromptText
-              ? support.buildPromptText(turn)
-              : turn.system
-                ? `${turn.system}\n\n${turn.text}`
-                : turn.text;
+            const composed = composeAcpPrompt({
+              turn: promptText === turn.text ? turn : { ...turn, text: promptText },
+              providerInstanceId: instanceId,
+              nativeSessionId: sessionId,
+              resumed: sessionLoadSucceeded,
+              resumeRejected,
+              recoveryTextSent: resumeRejected && promptText !== turn.text,
+            });
+            const text = composed.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(images)
               : [];
@@ -1097,11 +1169,30 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (turn.variant !== undefined && requestedVariantOption().currentValue !== turn.variant) {
               throw new Error(`${support.displayName} changed variant before the prompt`);
             }
+            appendAcpPromptPlan(threadId, turn, instanceId, composed);
             state.promptSent = true;
             const result = await request("session/prompt", {
               sessionId,
               prompt: [{ type: "text", text }, ...imageBlocks],
             });
+            // A receipt is evidence that the provider returned a protocol
+            // result, not that we merely attempted to send the prompt. If the
+            // result is missing or uncertain, the old receipt stays in place
+            // and the next turn sends more instruction text safely.
+            if (result != null && composed.sections.length > 0) {
+              try {
+                writeAcpInstructionReceipt(
+                  instanceId,
+                  turn.botId ?? "",
+                  threadId,
+                  sessionId,
+                  composed.sections,
+                );
+              } catch {
+                // Receipt persistence is advisory after prompt acceptance. A
+                // later turn will conservatively send a replacement block.
+              }
+            }
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
             const usage = result?.usage ?? result?._meta ?? {};
@@ -1178,6 +1269,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           provider: DRIVER_KIND,
           capabilities: {
             sessionModelSwitch: "unsupported",
+            promptPlan: "driver",
             agentsMcp: true,
         customMcp: true,
             computerMcp: true,

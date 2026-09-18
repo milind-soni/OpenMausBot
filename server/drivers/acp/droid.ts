@@ -267,7 +267,6 @@ const support: AcpSupport = {
 
   // House convention for ACP harnesses (grok, gemini, kimi all do this): the
   // persona rides in the prompt text rather than a CLI system-prompt flag.
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
 export const DroidAgentDriver = createAcpDriver(support);

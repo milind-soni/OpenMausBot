@@ -228,7 +228,7 @@ posixOnly("mid-turn steering e2e", () => {
         type: "image",
         source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" },
       },
-      { type: "text", text: "look at this\n\n\n\nand this\n\n" },
+      { type: "text", bytes: Buffer.byteLength("look at this\n\n\n\nand this\n\n", "utf8") },
     ]);
   }, 40_000);
 
@@ -319,8 +319,8 @@ posixOnly("mid-turn steering e2e", () => {
       .trim().split("\n").map((line) => JSON.parse(line));
     const steerRow = nativeRows.find((row) => row.dir === "out" && row.msg?.method === "turn/steer")?.msg;
     expect(steerRow?.params).toMatchObject({
-      threadId: "codex-thread-1",
-      input: [{ type: "text", text: "and also this" }],
+      threadId: "[native session id omitted]",
+      input: [{ type: "text", bytes: expect.any(Number) }],
       expectedTurnId: "turn-1",
     });
 
@@ -428,7 +428,7 @@ posixOnly("mid-turn steering e2e", () => {
     const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${room.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const steerRow = nativeRows.find((row) => row.dir === "out" && row.msg?.method === "turn/steer")?.msg;
-    expect(steerRow?.params).toMatchObject({ input: [{ type: "text", text: "steer these room words" }] });
+    expect(steerRow?.params).toMatchObject({ input: [{ type: "text", bytes: expect.any(Number) }] });
 
     await api("POST", `/api/groups/${room.id}/interrupt`, {});
     await waitFor(async () => (await getGroup())?.working === false, "the steered room turn to settle");

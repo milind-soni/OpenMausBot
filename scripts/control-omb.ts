@@ -2,9 +2,9 @@
 // Thin, agent-friendly CLI over the same guarded MCP operations exposed to
 // external clients. It deliberately owns no second API client or wait loop.
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, mkdirSync, mkdtempSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, lstatSync, mkdirSync, mkdtempSync, openSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
@@ -15,6 +15,7 @@ import { freePortBlock } from "../server/testing/ports.ts";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const FAKE_CLI = join(ROOT, "server", "testing", "fake-claude-cli.ts");
+const FAKE_ACP_CLI = join(ROOT, "server", "testing", "fake-acp-cli.ts");
 // `ui` verbs never discover anything: each takes the handle its launch printed.
 const MUTATING = new Set([
   "new-bot", "new-channel", "send", "send-channel", "interrupt", "set-model", "edit",
@@ -321,8 +322,92 @@ export async function runControlOmb(
 export interface VerificationServer {
   info: { url: string; pid: number; dataDir: string; logPath: string };
   fixtureDumpPath: string;
+  fakeAcpReceiptPath: string;
   child: ChildProcess;
+  stop(): Promise<void>;
   close(): Promise<void>;
+}
+
+export interface VerificationServerOptions {
+  /** Reuse an already-created verification directory across a restart. */
+  dataDir?: string;
+  /** Start room continuation dispatch enabled or disabled for transition tests. */
+  continuity?: boolean;
+  /** Override the fake ACP's scripted mode for this isolated process. */
+  fakeAcpMode?: string;
+  /** Use the fake OpenCode ACP surface for model-variant room fixtures. */
+  fakeAcpVariants?: Record<string, {
+    id?: string;
+    currentValue?: string;
+    options: readonly { value?: string; id?: string; name?: string }[];
+  }>;
+  /** Content-free provider-bound prompt checks for synthetic E2E sentinels.
+   * Values are consumed only by the repository-owned fake ACP and receipts
+   * record booleans/counts, never the supplied strings. */
+  fakeAcpPromptAssertions?: ReadonlyArray<{
+    contains?: readonly string[];
+    absent?: readonly string[];
+    occurrences?: ReadonlyArray<{ text: string }>;
+  }>;
+}
+
+const VERIFICATION_DATA_PREFIX = "openmausbot-verify-data-";
+
+/** Return true when `candidate` is the root itself or a path-aware child. */
+function pathWithin(root: string, candidate: string): boolean {
+  const remainder = relative(root, candidate);
+  return remainder === "" || (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder));
+}
+
+/**
+ * Canonicalize a path even when its final component has not been created yet.
+ * Existing ancestors are resolved first, so an escaping symlink cannot be
+ * followed by a recursive mkdir before the containment check runs.
+ */
+function canonicalPathForContainment(path: string): string {
+  const missing: string[] = [];
+  let cursor = resolve(path);
+  for (;;) {
+    try {
+      const canonical = realpathSync(cursor);
+      return join(canonical, ...missing.reverse());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = dirname(cursor);
+      if (parent === cursor) throw error;
+      missing.push(basename(cursor));
+      cursor = parent;
+    }
+  }
+}
+
+/**
+ * Validate and canonicalize a reusable verification DATA_DIR. The final
+ * directory must be a real, owned `openmausbot-verify-data-*` child of the
+ * canonical temporary root; symlinked parents are allowed only when their
+ * resolved target remains inside that root.
+ */
+export function validateVerificationDataDir(dataDir: string, temporaryRoot = tmpdir()): string {
+  if (!isAbsolute(dataDir)) throw new ControlOmbError("verification dataDir must be an absolute path");
+  const root = realpathSync(resolve(temporaryRoot));
+  const requested = resolve(dataDir);
+  if (!basename(requested).startsWith(VERIFICATION_DATA_PREFIX)) {
+    throw new ControlOmbError("verification dataDir must be an isolated openmausbot-verify-data-* temp directory");
+  }
+  let existing: ReturnType<typeof lstatSync> | undefined;
+  try {
+    existing = lstatSync(requested);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (existing && (!existing.isDirectory() || existing.isSymbolicLink())) {
+    throw new ControlOmbError("verification dataDir must be an owned real directory, not a symlink");
+  }
+  const canonical = canonicalPathForContainment(requested);
+  if (!pathWithin(root, canonical) || canonical === root) {
+    throw new ControlOmbError("verification dataDir must be an isolated child of the temporary root");
+  }
+  return canonical;
 }
 
 /** Start one foreground-owned, fake-engine server with no access to user data. */
@@ -336,9 +421,10 @@ export async function launchVerificationServer(
   enterprise?: { dir: string; licenseKey: string },
   room?: { scripted: boolean },
   /** Optional repository-owned fake providers for multi-engine setup checks. */
-  extraProviders: Array<"codex"> = [],
+  extraProviders: ReadonlyArray<"codex" | "acp" | "opencode"> = [],
   /** Programmatic tests only: an owned loopback Box provider, never a live account. */
   boxFixtureApi?: string,
+  options: VerificationServerOptions = {},
 ): Promise<VerificationServer> {
   if (boxFixtureApi) {
     if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
@@ -358,9 +444,33 @@ export async function launchVerificationServer(
   const url = `http://127.0.0.1:${port}`;
   // Native browser daemons use UNIX sockets; a macOS temp home can exceed
   // their path limit. This is still an owned, randomly named fixture only.
-  const dataDir = mkdtempSync(join(browser && process.platform !== "win32" ? "/tmp" : tmpdir(), "openmausbot-verify-data-"));
+  const fixtureRoot = realpathSync(resolve(browser && process.platform !== "win32" ? "/tmp" : tmpdir()));
+  // A reused path is still an owned verification fixture. The first process
+  // may be stopped before the replacement starts, so the final replacement
+  // must retain cleanup ownership rather than leaving its temp DATA_DIR behind.
+  const requestedDataDir = options.dataDir === undefined
+    ? mkdtempSync(join(fixtureRoot, VERIFICATION_DATA_PREFIX))
+    : resolve(options.dataDir);
+  if (options.dataDir !== undefined) {
+    // Canonicalize ancestors before creating a reusable directory. Otherwise
+    // recursive mkdir could follow an escaping symlink before validation.
+    validateVerificationDataDir(requestedDataDir, fixtureRoot);
+    let existing: ReturnType<typeof lstatSync> | undefined;
+    try {
+      existing = lstatSync(requestedDataDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (!existing) mkdirSync(requestedDataDir, { recursive: true, mode: 0o700 });
+  }
+  const dataDir = validateVerificationDataDir(requestedDataDir, fixtureRoot);
+  if (typeof process.getuid === "function" && statSync(dataDir).uid !== process.getuid()) {
+    throw new ControlOmbError("verification dataDir must be owned by the fixture user");
+  }
+  mkdirSync(dataDir, { recursive: true });
   const fixtureTemp = join(dataDir, "tmp");
   const fixtureDumpPath = join(dataDir, "fake-claude-dump.json");
+  const fakeAcpReceiptPath = join(dataDir, "fake-acp-receipts.ndjson");
   mkdirSync(fixtureTemp, { recursive: true });
   const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
@@ -368,8 +478,46 @@ export async function launchVerificationServer(
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({
     ...(boxFixtureApi ? { box: { token: "box_verification_fixture" } } : {}),
     instances: {
+      ...(boxFixtureApi ? { computer: {
+        driver: "boxAgent", displayName: "Verification Computer",
+      } } : {}),
       ...(extraProviders.includes("codex") ? { codex: {
         driver: "codex", displayName: "Verification Codex", config: { cli: fileURLToPath(new URL("../server/testing/fake-codex-app-server.ts", import.meta.url)) },
+      } } : {}),
+      ...(extraProviders.includes("acp") ? { acp: {
+        driver: "geminiAgent",
+        displayName: "Verification ACP",
+        config: { cli: FAKE_ACP_CLI },
+        environment: {
+          FAKE_ACP_MODE: options.fakeAcpMode ?? "receipt",
+          FAKE_ACP_RECEIPT_FILE: fakeAcpReceiptPath,
+          FAKE_ACP_RECEIPT_MODE: "1",
+          ...(options.fakeAcpPromptAssertions
+            ? { FAKE_ACP_PROMPT_ASSERTIONS: JSON.stringify(options.fakeAcpPromptAssertions) }
+            : {}),
+        },
+      } } : {}),
+      ...(extraProviders.includes("opencode") ? { opencode: {
+        driver: "opencodeGo",
+        displayName: "Verification OpenCode ACP",
+        config: { cli: FAKE_ACP_CLI },
+        environment: {
+          OPENCODE_API_KEY: "opencode_verification_fixture",
+          FAKE_ACP_MODE: options.fakeAcpMode ?? "receipt",
+          FAKE_ACP_MODELS: "opencode/fixture-model",
+          FAKE_ACP_VARIANTS: JSON.stringify(options.fakeAcpVariants ?? {
+            "opencode/fixture-model": {
+              id: "effort",
+              currentValue: "low",
+              options: ["low", "high"].map((value) => ({ value, name: value })),
+            },
+          }),
+          FAKE_ACP_RECEIPT_FILE: fakeAcpReceiptPath,
+          FAKE_ACP_RECEIPT_MODE: "1",
+          ...(options.fakeAcpPromptAssertions
+            ? { FAKE_ACP_PROMPT_ASSERTIONS: JSON.stringify(options.fakeAcpPromptAssertions) }
+            : {}),
+        },
       } } : {}),
       claude: {
         driver: "claudeAgent",
@@ -402,6 +550,10 @@ export async function launchVerificationServer(
     OMB_DATA_DIR: dataDir,
     OMB_PORT: String(port),
     OMB_WEBHOOK_PORT: String(port + 1),
+    // Continuation/delta coverage is opt-in in normal installs. Verification
+    // fixtures default to enabled, with an explicit override for rollback
+    // transition tests that restart the same private DATA_DIR.
+    OMB_ROOM_SESSION_CONTINUITY: options.continuity === false ? "0" : "1",
     // The fixture's default CLI behaviour; a caller that sets
     // FAKE_CLAUDE_MODE explicitly overrides it below to drive the CLI's
     // failure paths (exit-early, dead-session, hang...) through the real
@@ -467,14 +619,22 @@ export async function launchVerificationServer(
   }
 
   let closed = false;
+  let stopped = false;
+  const stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    await waitForExit(child, { signal: "SIGTERM" });
+  };
   return {
     info: { url, pid: child.pid!, dataDir, logPath },
     fixtureDumpPath,
+    fakeAcpReceiptPath,
     child,
+    stop,
     async close() {
       if (closed) return;
       closed = true;
-      await waitForExit(child, { signal: "SIGTERM" });
+      await stop();
       await removeTempDir(dataDir);
     },
   };

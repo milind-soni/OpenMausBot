@@ -461,7 +461,6 @@ const support: AcpSupport = {
       `model "${native}"`,
     );
   },
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
 export const HermesAgentDriver = createAcpDriver(support);

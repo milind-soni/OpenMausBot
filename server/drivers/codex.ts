@@ -649,7 +649,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       }
       let autoAcceptPermissions = approvalMode === "full";
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
-      const turnId = newId();
+      const turnId = turn.turnId ?? newId();
       // a retry relaunches the whole app-server; the backoff is scaled down in
       // tests so a fake's transient failures don't stall real seconds
       const retryScale = Number(process.env.FAKE_CODEX_RETRY_SCALE ?? "1");

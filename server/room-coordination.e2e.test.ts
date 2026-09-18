@@ -321,7 +321,14 @@ it.each([false, true])("retains reports behind compact receipts for later turns,
   expect((await f.wait()).status).toBe("settled");
   const followup = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);
   expect(followup.turnIndex).toBe(2);
-  expect(JSON.stringify(followup.prompt).includes(report)).toBe(!revoked);
+  // The resumed provider session already owns the report from the prior
+  // turn, so the bounded delta need not resend it. A route revocation rotates
+  // the session and rebuilds from the access-checked room transcript.
+  expect(JSON.stringify(followup.prompt).includes(report)).toBe(false);
+  if (!revoked) {
+    const resumed = f.provider().find((turn: any) => turn.botId === f.sender.id && turn.turnIndex === 1);
+    expect(JSON.stringify(resumed.prompt).includes(report)).toBe(true);
+  }
   expect(f.nodes()).toHaveLength(2);
 }), 45_000);
 

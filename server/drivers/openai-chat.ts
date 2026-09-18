@@ -290,7 +290,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
 
-    const turnId = newId();
+    const turnId = turn.turnId ?? newId();
     const abort = new AbortController();
     const messages = messagesFor(turn);
     const model = turn.model || options.models().default;

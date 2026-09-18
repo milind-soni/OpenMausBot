@@ -32,6 +32,10 @@ const run = enabled ? it : it.skip;
 // A forced run may still have Chrome for Testing to download (agent-browser can
 // be cached while Chrome is not), so give every forced run the long budget.
 const LAUNCH_TIMEOUT_MS = forced ? 600_000 : 180_000;
+// A successful credential save rebuilds the provider fleet before the API
+// answers. On a loaded verification host that restart can take longer than
+// Vitest's five-second polling default.
+const SAVE_TIMEOUT_MS = 30_000;
 
 // Synthetic provider outcomes exercise the UI, not the commands themselves.
 const TOOL_CALLS = JSON.stringify([
@@ -160,7 +164,7 @@ describe("control-omb ui drives the real renderer", () => {
     await click("Connections");
     await type("fixture-saved-key");
     await save();
-    await expect.poll(() => evaluate(`${input}.value`)).toBe("");
+    await expect.poll(() => evaluate(`${input}.value`), { timeout: SAVE_TIMEOUT_MS }).toBe("");
     await click("Appearance");
     await click("Connections");
     await expect.poll(() => evaluate(`${testButton}?.disabled`)).toBe(false);
@@ -195,7 +199,7 @@ describe("control-omb ui drives the real renderer", () => {
     await type("fixture-replacement-key");
     await evaluate("window.rejectKeySave = false");
     await save();
-    await expect.poll(() => evaluate(`${input}.value`)).toBe("");
+    await expect.poll(() => evaluate(`${input}.value`), { timeout: SAVE_TIMEOUT_MS }).toBe("");
     await expect.poll(() => evaluate(`${testButton}.disabled`)).toBe(false);
     await click("Test");
     await expect.poll(() => evaluate("window.keyTests")).toEqual([

@@ -1081,7 +1081,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Internal relaunches are still the turn acknowledged to the harness.
       // A new user message gets a fresh id, but retry/recovery must not orphan
       // its capability, coordination result or queued continuation ownership.
-      const turnId = logicalTurnId ?? newId();
+      const turnId = logicalTurnId ?? turn.turnId ?? newId();
       const retryAbort = new AbortController();
       const retry = retryState.get(threadId) ?? { attempt: 0, cancelled: false };
       // A fresh user turn starts un-cancelled. A relaunch must keep a Stop

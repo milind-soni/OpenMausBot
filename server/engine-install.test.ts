@@ -9,7 +9,10 @@ import * as procs from "./procs.ts";
 
 // A stand-in npm: records its arguments, honours --prefix, and behaves per
 // FAKE_NPM_MODE. Nothing reaches a registry or the network.
-const FAKE_NPM = `#!/usr/bin/env node
+// PATH is deliberately restricted to this fixture's bin directory. Use the
+// current Node executable directly so the fake does not accidentally depend
+// on a separately discoverable `node` command.
+const FAKE_NPM = `#!${process.execPath}
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 const args = process.argv.slice(2);

@@ -15,6 +15,15 @@ import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListe
 const INCOMPLETE_LOG_MESSAGE =
   "Canonical event history is incomplete: OpenMausBot could not write one or more events to disk. Live updates will continue.";
 
+function redactedRuntimeEvent(event: RuntimeEvent): RuntimeEvent {
+  const redacted = redactSecrets(event) as RuntimeEvent;
+  // Native provider session ids are private continuation cursors. The server
+  // still receives the raw event in memory for cursor binding, but canonical
+  // event files and the inspector never persist or return that value.
+  if (event.type === "session.started") return { ...redacted, sessionId: null } as RuntimeEvent;
+  return redacted;
+}
+
 export class EventBus {
   private listeners = new Set<RuntimeEventListener>();
   private unsubscribes = new Map<string, () => void>();
@@ -43,7 +52,7 @@ export class EventBus {
 
   publish(event: RuntimeEvent) {
     const pendingWarning = this.pendingLogWarnings.get(event.threadId);
-    const persistedEvents = pendingWarning ? [pendingWarning, redactSecrets(event)] : [redactSecrets(event)];
+    const persistedEvents = pendingWarning ? [pendingWarning, redactedRuntimeEvent(event)] : [redactedRuntimeEvent(event)];
     try {
       // the canonical log is a file people paste into bug reports; scrub
       // credential-shaped content (tool titles, request summaries, reply

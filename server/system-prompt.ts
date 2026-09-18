@@ -10,6 +10,14 @@ import { soulSystemPrompt } from "./bot-folder.ts";
 export type PromptPart = { id: string; label: string; text: string };
 export type PromptSection = PromptPart & { bytes: number };
 
+/** The complete prompt and its ordered, measured sections. */
+export type SystemPromptResult = {
+  text: string;
+  sections: PromptSection[];
+  stable: string;
+  volatile: string;
+};
+
 /** Sections whose text legitimately differs between two turns of one live
  * conversation: memory, because a bot writes to MEMORY.md mid-conversation,
  * mentions, which describe the message being sent right now, and outstanding
@@ -27,12 +35,17 @@ export function buildSystemPrompt(
   persona: string,
   soul: string,
   parts: PromptPart[],
-): { text: string; sections: PromptSection[]; stable: string; volatile: string } {
+): SystemPromptResult {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
     ...parts,
   ];
+  const ids = new Set<string>();
+  for (const part of ordered) {
+    if (ids.has(part.id)) throw new Error(`Duplicate system prompt section id: ${part.id}`);
+    ids.add(part.id);
+  }
   const sections = ordered
     .filter((part) => part.text.length > 0)
     .map((part) => ({ ...part, bytes: Buffer.byteLength(part.text, "utf8") }));

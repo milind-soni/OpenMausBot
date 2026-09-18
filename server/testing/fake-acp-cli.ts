@@ -7,7 +7,7 @@
 //
 //   FAKE_ACP_LOAD_NULL  return null for session/load so the resume cursor is
 //                       ignored and the driver falls through to session/new
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | no-auth | auth-required | permission | question
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | no-auth | auth-required | permission | question | dead-session
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -44,12 +44,42 @@
 //                        replay?}, emitted after the named RPC response.
 //   FAKE_ACP_USAGE_ROOT  put the prompt result's usage at the root instead of
 //                        under _meta (what opencode 1.18.18 actually does)
+//   FAKE_ACP_RECEIPT_FILE  append sanitized RPC receipts in receipt mode
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_ACP_MODE ?? "happy";
+const receiptFile = process.env.FAKE_ACP_RECEIPT_FILE || process.env.FAKE_ACP_RECEIPT || "";
+const receiptMode = mode === "receipt" || process.env.FAKE_ACP_RECEIPT_MODE === "1";
+type PromptAssertion = {
+  contains?: string[];
+  absent?: string[];
+  occurrences?: Array<{ text: string; expected?: number }>;
+};
+const promptAssertions: PromptAssertion[] = (() => {
+  try {
+    const parsed = JSON.parse(process.env.FAKE_ACP_PROMPT_ASSERTIONS ?? "[]");
+    return Array.isArray(parsed) ? parsed.filter((entry): entry is PromptAssertion => Boolean(entry && typeof entry === "object")) : [];
+  } catch {
+    return [];
+  }
+})();
+let promptAssertionIndex = (() => {
+  if (!receiptFile) return 0;
+  try {
+    return readFileSync(receiptFile, "utf8").split("\n").filter(Boolean)
+      .filter((line) => JSON.parse(line).method === "session/prompt").length;
+  } catch {
+    return 0;
+  }
+})();
+// Receipt fixtures must exercise real session identity cleanup. Keep the
+// historical id for ordinary driver tests, but make each isolated receipt
+// process own a distinct protocol id and a sanitized evidence alias.
+const fakeSessionId = receiptMode ? `fake-acp-session-${process.pid}` : "fake-acp-session";
+const receiptSessionAlias = receiptMode ? `session-${process.pid}` : "session-1";
 const ONE_PIXEL_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 // opencode-shaped surface: the session carries its own model catalog and the
 // model is chosen with session/set_config_option, because `opencode acp` takes
@@ -258,6 +288,38 @@ const recordMethod = (method: string) => {
   rpcMethods.push(method);
   if (process.env.FAKE_ACP_RPC_DUMP) writeFileSync(process.env.FAKE_ACP_RPC_DUMP, JSON.stringify(rpcMethods));
 };
+const recordReceipt = (message: any) => {
+  if (!receiptMode || !receiptFile || typeof message?.method !== "string") return;
+  const nativeSessionId = message.params?.sessionId;
+  const prompt = Array.isArray(message.params?.prompt) ? message.params.prompt : [];
+  const promptText = prompt
+    .filter((content: any) => content?.type === "text" && typeof content.text === "string")
+    .map((content: any) => content.text)
+    .join("");
+  const assertion = message.method === "session/prompt" ? promptAssertions[promptAssertionIndex++] : undefined;
+  const checks: Record<string, boolean | number> = {};
+  for (const [index, value] of (assertion?.contains ?? []).entries()) {
+    checks[`contains_${index}`] = promptText.includes(value);
+  }
+  for (const [index, value] of (assertion?.absent ?? []).entries()) {
+    checks[`absent_${index}`] = !promptText.includes(value);
+  }
+  for (const [index, occurrence] of (assertion?.occurrences ?? []).entries()) {
+    let count = 0;
+    let offset = 0;
+    while ((offset = promptText.indexOf(occurrence.text, offset)) !== -1) {
+      count += 1;
+      offset += Math.max(occurrence.text.length, 1);
+    }
+    checks[`occurrences_${index}`] = count;
+  }
+  appendFileSync(receiptFile, `${JSON.stringify({
+    method: message.method,
+    sessionId: typeof nativeSessionId === "string" ? receiptSessionAlias : message.method === "session/new" ? `session-new-${process.pid}` : null,
+    promptBytes: Buffer.byteLength(promptText, "utf8"),
+    ...(Object.keys(checks).length ? { checks } : {}),
+  })}\n`, { mode: 0o600 });
+};
 
 // session/set_mode + session/set_model calls seen this run
 const configCalls: Array<{ method: string; params: unknown }> = [];
@@ -376,6 +438,7 @@ function handle(msg: any) {
   }
   if (!msg.method) return;
   recordMethod(msg.method);
+  recordReceipt(msg);
 
   switch (msg.method) {
     case "initialize": {
@@ -436,14 +499,14 @@ function handle(msg: any) {
       const opts = configOptions();
       const mdls = sessionModels();
       resultAndConfigUpdates(msg.id, {
-        sessionId: "fake-acp-session",
+        sessionId: fakeSessionId,
         ...(opts ? { configOptions: opts } : {}),
         ...(mdls ? { models: mdls } : {}),
-      }, "session/new", "fake-acp-session");
+      }, "session/new", fakeSessionId);
       break;
     }
     case "session/load": {
-      if (process.env.FAKE_ACP_LOAD_NULL) {
+      if (process.env.FAKE_ACP_LOAD_NULL || mode === "dead-session") {
         result(msg.id, null);
         break;
       }

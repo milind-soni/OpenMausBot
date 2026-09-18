@@ -712,7 +712,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         type: "image",
         source: { type: "base64", media_type: "image/jpeg", data: "[image data: 12 base64 chars]" },
       },
-      { type: "text", text: "describe both" },
+      { type: "text", bytes: 13 },
     ]);
   });
 

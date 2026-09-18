@@ -273,7 +273,6 @@ const support: AcpSupport = {
   // `--append-system-prompt`/`--rules` are accepted by the CLI but do NOT
   // reach the agent-stdio system prompt (verified against 1.0.0), so the
   // persona is prepended codex-style.
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
 export const GrokAgentDriver = createAcpDriver(support);

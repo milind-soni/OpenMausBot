@@ -72,7 +72,16 @@ describe("remaining ACP approval mappings", () => {
         const opened = await recorder.until((event) => event.type === "request.opened" && event.turnId === turnId);
         expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
         expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === turnId)).toBe(false);
-        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(argv);
+        const expectedArgv = driver === QwenAgentDriver
+          ? approvalMode === "full"
+            ? [...argv, "--yolo"]
+            : approvalMode === "auto"
+              ? [...argv, "--approval-mode", "auto"]
+              : argv
+          : driver === GeminiAgentDriver && approvalMode === "full"
+            ? [...argv, "--yolo"]
+            : argv;
+        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual(expectedArgv);
         if (driver === OpenCodeDriver) {
           const native = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
           expect(native).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });

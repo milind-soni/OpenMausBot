@@ -237,7 +237,6 @@ const support: AcpSupport = {
   pickAuthMethod: () => null,
   authFailure: "continue",
   isAuthenticated: () => true,
-  buildPromptText: (turn) => (turn.system ? `${turn.system}\n\n${turn.text}` : turn.text),
 };
 
 export const QwenAgentDriver = createAcpDriver(support);

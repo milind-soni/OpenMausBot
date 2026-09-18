@@ -111,7 +111,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
         throw new Error("this bot has no computer yet — open the Computer panel and provision one");
       }
       if (active.has(threadId)) throw new Error("a turn is already running on this thread");
-      const turnId = newId();
+      const turnId = turn.turnId ?? newId();
       const model = turn.model || MODELS.default;
 
       const prompt = [
