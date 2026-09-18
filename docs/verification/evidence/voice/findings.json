@@ -1,9 +1,9 @@
 {
   "ok": true,
   "platform": "win32",
-  "url": "http://127.0.0.1:20259",
-  "dataDir": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verify-data-jmAdVW",
-  "logPath": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verification-evidence\\server-1789763474835-19024.log",
+  "url": "http://127.0.0.1:20705",
+  "dataDir": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verify-data-crbJvv",
+  "logPath": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verification-evidence\\server-1789765160961-21832.log",
   "previewUrl": "http://127.0.0.1:5173/__voice.html",
   "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "installMode": "one-click download inside the fixture",
@@ -48,6 +48,6 @@
     "the one-click install finished: tts.piperAvailable is true with no error, the host untouched",
     "voices the panel can choose: en_US-amy-medium (Amy, offline neural voice — medium quality)",
     "Piper installed and in use: piper-installed.png (75886 bytes)",
-    "the pictured engine speaks: a real 148680-byte 22.05 kHz WAV (3.37s) from /api/tts/speak"
+    "the pictured engine speaks: a real 144072-byte 22.05 kHz WAV (3.27s) from /api/tts/speak"
   ]
 }

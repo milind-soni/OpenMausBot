@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "platform": "win32",
+  "url": "http://127.0.0.1:20579",
+  "dataDir": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verify-data-ARVJub",
+  "logPath": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verification-evidence\\server-1789766397927-27092.log",
+  "previewUrl": "http://127.0.0.1:5173/__threads.html",
+  "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "newestMessageId": "7050a02f-14d4-42a7-816e-114f47457f62",
+  "screenshots": [
+    {
+      "state": "Astra, dark (default skin)",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\astra-app\\astra-app-dark.png",
+      "bytes": 197439
+    },
+    {
+      "state": "Astra, light (Atelier)",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\astra-app\\astra-app-light.png",
+      "bytes": 217381
+    }
+  ],
+  "findings": [
+    "created Scout (50cc88ad-ad3e-4d07-834e-b7f57e54f8f7), Ledger (54197bf0-88bd-46c3-bba4-17851108e913), Astra (483241a6-3ef8-450c-8667-88a110d59b7b) in the fixture",
+    "the fixture answered through the fake engine: 4 message(s) on Astra, newest 7050a02f-14d4-42a7-816e-114f47457f62",
+    "the frame was checked before the shutter: the sidebar row for Astra, the newest transcript row (data-mid 7050a02f-14d4-42a7-816e-114f47457f62) and a resolved model chip were all on screen",
+    "Astra, dark (default skin): astra-app-dark.png (197439 bytes)",
+    "the light picture is the same page reloaded with omb-skin=atelier",
+    "Astra, light (Atelier): astra-app-light.png (217381 bytes)"
+  ]
+}
