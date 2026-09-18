@@ -212,9 +212,17 @@ const __APP_VERSION__: string;
       /** Toggle Handy (the offline speech-to-text app) on or off. Resolves
        * { ok: false, error } when the executable is missing. */
       handyToggle?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
+      /** The same toggle with Handy's own post-processing switched on. */
+      handyTogglePostProcess?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
+      /** Cancel the recording or transcription Handy is running right now. */
+      handyCancel?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
+      /** Read-only view of Handy's engine, for Settings. Astra never writes
+       * Handy's settings file — see HandyEngineStatus. */
+      handyModels?(handyPath: string): Promise<HandyEngineStatus>;
       /** Headless transcription of WAV bytes through the user's Handy
-       * install (offline model). Returns the transcript text. */
-      handyTranscribeFile?(wav: ArrayBuffer, handyPath: string): Promise<{ ok: boolean; text?: string; error?: string }>;
+       * install (offline model). `model` pins the engine for this call;
+       * omitted, Handy uses the model selected in its own window. */
+      handyTranscribeFile?(wav: ArrayBuffer, handyPath: string, model?: string): Promise<{ ok: boolean; text?: string; error?: string }>;
       /** The Picovoice AccessKey for the "Astra" wake word, from the OS-backed
        * encrypted store (or ASTRA_PICOVOICE_KEY in dev). Null when none is
        * saved — the wake word then stays off and Settings explains why. */
@@ -230,6 +238,36 @@ const __APP_VERSION__: string;
       };
     };
   }
+}
+
+/** What the desktop shell can honestly report about the user's Handy
+ * install. `installed` is what Handy's own models directory contains, which
+ * can differ from `selected` when a model was chosen but never downloaded. */
+export interface HandyEngineStatus {
+  ok: boolean;
+  /** False when no Handy executable could be found at all. */
+  found: boolean;
+  /** The executable this shell would spawn. */
+  exe: string;
+  /** The model selected inside Handy, or null when unreadable. */
+  selected: string | null;
+  /** Model directories present in Handy's own models folder. Covers custom
+   * models the catalog does not know about. */
+  installed: string[];
+  /** Handy's own catalog (`--list-models --json`), trimmed. Empty when Handy
+   * could not answer, which the panel must treat as "unknown", not "none". */
+  catalog: HandyCatalogModel[];
+  device: { platform: string; arch: string; cpu: string; cores: number; ramGB: number };
+}
+
+/** One catalog entry. `id` is what `--model` accepts — deliberately not the
+ * models-directory folder name, which Handy rejects. */
+export interface HandyCatalogModel {
+  id: string;
+  /** Display name ("Parakeet V2"), falling back to the id. */
+  name: string;
+  sizeMB: number;
+  downloaded: boolean;
 }
 
 export interface LinuxLocalControlStatus {

@@ -11,7 +11,7 @@
 //
 // The renderer buffers in memory. The desktop bridge writes a temporary WAV
 // for Handy and removes it afterwards. Audio is never uploaded.
-import { handyPath } from "./handy";
+import { handyModel, handyPath } from "./handy";
 
 export const PCM_SAMPLE_RATE = 16000;
 /** Louder than this counts as speech (matches SILENCE_RMS_THRESHOLD). */
@@ -158,7 +158,7 @@ export function createOfflineCallStt(callbacks: OfflineCallSttCallbacks): Offlin
     }
     const wav = encodeWav(merged);
     void bridge
-      .handyTranscribeFile!(wav, handyPath())
+      .handyTranscribeFile!(wav, handyPath(), handyModel())
       .then((result) => {
         transcribing = false;
         if (stopped) return;

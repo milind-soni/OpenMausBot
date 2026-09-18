@@ -105,6 +105,25 @@ describe("dictation capture lifecycle", () => {
     expect(h.transcribe).toHaveBeenCalledTimes(1);
   });
 
+  it("hands Handy the pinned model along with the recording", async () => {
+    // Only the pin key is stored, so the executable path still resolves to
+    // "detect it yourself": the two preferences must not be confused for each
+    // other, and the id must reach Handy as a third argument.
+    const stored = new Map([["astra.handy-model.v1", "parakeet-tdt-0.6b-v2"]]);
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: () => {},
+    });
+    const h = harness();
+    h.permission.resolve(h.stream);
+    await h.capture.start();
+    h.frame();
+    const result = h.capture.transcribe();
+    h.decode.resolve({ ok: true, text: "pinned" });
+    await expect(result).resolves.toBe("pinned");
+    expect(h.transcribe).toHaveBeenCalledWith(expect.anything(), "", "parakeet-tdt-0.6b-v2");
+  });
+
   it.each(["success", "error", "reject"])("drops late decode %s after discard", async (result) => {
     const h = harness();
     h.permission.resolve(h.stream);

@@ -12,7 +12,7 @@
 // Trade-off, stated plainly: Handy decodes a finished file, so there is no
 // interim text while the user speaks. The endpointer still gives a natural
 // stop, and the pill shows listening → transcribing instead of live words.
-import { handyPath } from "./handy";
+import { handyModel, handyPath } from "./handy";
 import { PCM_SAMPLE_RATE, encodeWav, isSilentFrame, stepSilence } from "./offline-call-stt";
 
 /** Capture frames are 4096 samples (~256 ms at 16 kHz). */
@@ -172,7 +172,9 @@ export function createDictationCapture(options: DictationCaptureOptions): Dictat
           if (!hasSpeech) return "";
           const wav = encodeWav(merged());
           chunks = [];
-          const result = await bridge.handyTranscribeFile!(wav, handyPath());
+          // The pinned model is Astra's own preference; empty hands the
+          // choice back to Handy's selected model.
+          const result = await bridge.handyTranscribeFile!(wav, handyPath(), handyModel());
           if (discarded) return "";
           if (!result.ok) {
             options.onError(result.error ?? "Handy could not transcribe the recording.");

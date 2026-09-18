@@ -22,6 +22,13 @@ import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
+import {
+  HANDY_MISSING_ERROR,
+  handyExeMissing,
+  readHandyCatalog,
+  readHandyEngine,
+  resolveHandyExe,
+} from "./handy-engine.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
 import { defaultSaveName, withSavableFile } from "./save-file.mjs";
@@ -2162,22 +2169,22 @@ ipcMain.handle("clipboard:read-text", localOnly("clipboard:read-text", () => {
   return clipboard.readText();
 }));
 
+// Everything the Handy channels need to know about this machine, resolved per
+// call rather than at import time — app.getPath is only meaningful once
+// Electron is up.
+function handyEnvironment() {
+  return { home: app.getPath("home"), platform: process.platform, exists: fs.existsSync };
+}
+
 // Headless transcription through the user's own Handy install: a WAV goes
 // in, the transcript comes back. Call turns use the same offline model the
 // user already runs, with no cloud speech service or API key.
-// Handled in this single spot so the toggle and file paths share one
-// resolution of the executable.
-ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async (_event, wavData, handyPath) => {
-  let exe = typeof handyPath === "string" && handyPath.trim() ? handyPath.trim() : null;
-  if (!exe) {
-    exe = "Handy.exe";
-    try {
-      const fallback = path.join(app.getPath("home"), "AppData", "Local", "Handy", "handy.exe");
-      if (!fs.existsSync("Handy.exe") && fs.existsSync(fallback)) exe = fallback;
-    } catch {}
-  }
-  if (!fs.existsSync(exe) && exe === "Handy.exe") {
-    return { ok: false, error: "Handy.exe not found — set its path in Settings → Wake word." };
+// `model` pins the engine for this one call (`--model`); left empty, Handy
+// uses whichever model the user selected in Handy's own window.
+ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async (_event, wavData, handyPath, model) => {
+  const exe = resolveHandyExe(handyPath, handyEnvironment());
+  if (handyExeMissing(exe)) {
+    return { ok: false, error: HANDY_MISSING_ERROR };
   }
   const bytes = wavData instanceof ArrayBuffer ? Buffer.from(wavData)
     : ArrayBuffer.isView(wavData) ? Buffer.from(wavData.buffer, wavData.byteOffset, wavData.byteLength)
@@ -2192,9 +2199,11 @@ ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async
     await fs.promises.writeFile(wavPath, bytes);
     const { execFile } = require("node:child_process");
     const run = await new Promise((resolve) => {
+      const args = ["--transcribe-file", wavPath, "--json"];
+      if (typeof model === "string" && model.trim()) args.push("--model", model.trim());
       execFile(
         exe,
-        ["--transcribe-file", wavPath, "--json"],
+        args,
         { timeout: 90_000, maxBuffer: 1024 * 1024, windowsHide: true },
         (error, stdout) => resolve({ error, stdout: typeof stdout === "string" ? stdout : "" }),
       );
@@ -2217,29 +2226,70 @@ ipcMain.handle("handy:transcribe-file", localOnly("handy:transcribe-file", async
   }
 }));
 
-// One-way toggle of Handy's dictation (https://handy.computer), the
-// offline speech-to-text app. No status IPC exists upstream, so the caller
+// One-way controls for Handy (https://handy.computer), the offline
+// speech-to-text app. Handy exposes no status IPC upstream, so the caller
 // drives recording off its own mic watchdog and detects the result through
 // the clipboard. Handy's own Tauri global-shortcut hook stays registered:
 // keystroke and spawn both reach the same coordinator, and a rapid second
 // toggle only adds one no-op key event on top.
-ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => {
-  let exe = typeof handyPath === "string" && handyPath.trim() ? handyPath.trim() : null;
-  if (!exe) {
-    // Empty setting: PATH lookup first, then the standard per-user NSIS
-    // install location (Handy is not on PATH in a default install).
-    exe = "Handy.exe";
-    try {
-      const fallback = path.join(app.getPath("home"), "AppData", "Local", "Handy", "handy.exe");
-      if (!fs.existsSync("Handy.exe") && fs.existsSync(fallback)) exe = fallback;
-    } catch {}
-  }
+//
+// Every flag here is one the installed Handy actually declares (`handy
+// --help`): --toggle-transcription, --toggle-post-process, --cancel. Success
+// means "the process started", exactly as upstream behaves — a second
+// invocation hands off to the running instance and exits, while a cold one
+// starts Handy and stays up, so waiting for an exit code would hang.
+function spawnHandyFlag(flag, handyPath) {
+  const exe = resolveHandyExe(handyPath, handyEnvironment());
+  if (handyExeMissing(exe)) return Promise.resolve({ ok: false, error: HANDY_MISSING_ERROR });
   const { spawn } = require("node:child_process");
   return new Promise((resolve) => {
-    const child = spawn(exe, ["--toggle-transcription"], { windowsHide: true, stdio: "ignore" });
+    const child = spawn(exe, [flag], { windowsHide: true, stdio: "ignore" });
     child.once("error", (error) => resolve({ ok: false, error: error instanceof Error ? error.message : String(error) }));
     child.once("spawn", () => resolve({ ok: true }));
   });
+}
+
+ipcMain.handle("handy:toggle", localOnly("handy:toggle", (_event, handyPath) => spawnHandyFlag("--toggle-transcription", handyPath)));
+
+/** The same toggle with Handy's own post-processing (its LLM cleanup) on. */
+ipcMain.handle("handy:toggle-post-process", localOnly("handy:toggle-post-process", (_event, handyPath) => spawnHandyFlag("--toggle-post-process", handyPath)));
+
+/** Cancel whatever Handy is recording or transcribing right now. */
+ipcMain.handle("handy:cancel", localOnly("handy:cancel", (_event, handyPath) => spawnHandyFlag("--cancel", handyPath)));
+
+// What Handy would transcribe with, reported read-only. The renderer shows
+// this instead of guessing: Handy's selected model is the thing that actually
+// decides the transcript, and on a machine with several models downloaded it
+// is the difference between "local Parakeet" and "local Whisper Large".
+// `handy --list-models --json` is the only source of ids that `--model`
+// accepts (they are not the on-disk folder names), so the picker is built from
+// it. Bounded on purpose: a catalog that cannot answer leaves the picker with
+// what the disk already shows instead of hanging Settings behind a CLI call.
+const HANDY_CATALOG_TIMEOUT_MS = 20_000;
+
+function runHandyCommand(exe, args, timeoutMs) {
+  const { execFile } = require("node:child_process");
+  return new Promise((resolve, reject) => {
+    execFile(
+      exe,
+      args,
+      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+      (error, stdout) => (error ? reject(error) : resolve(typeof stdout === "string" ? stdout : "")),
+    );
+  });
+}
+
+ipcMain.handle("handy:models", localOnly("handy:models", async (_event, handyPath) => {
+  const engine = await readHandyEngine({
+    handyPath,
+    appDataDir: app.getPath("appData"),
+    environment: handyEnvironment(),
+  });
+  if (!engine.found) return { ...engine, catalog: [] };
+  return {
+    ...engine,
+    catalog: await readHandyCatalog({ exe: engine.exe, run: runHandyCommand, timeoutMs: HANDY_CATALOG_TIMEOUT_MS }),
+  };
 }));
 
 // The wake word needs the Picovoice AccessKey in the renderer (Porcupine

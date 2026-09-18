@@ -107,3 +107,40 @@ Before release, manually smoke-test a real desktop microphone: hold/release,
 Escape during permission and decode, stop-button transcription, wake detection,
 and repeated call turns across bot playback. Check the reduced-motion setting.
 Mocked WebAudio tests do not establish real-device recognition quality or latency.
+
+## Handy: the desktop dictation engine
+
+Composer dictation, wake dictation and call turns capture audio in the renderer
+and hand a finished WAV to the user's own Handy install. The IPC surface is one
+executable resolution plus five channels:
+
+| Channel | Handy flag |
+| --- | --- |
+| `handy:toggle` | `--toggle-transcription` |
+| `handy:toggle-post-process` | `--toggle-post-process` |
+| `handy:cancel` | `--cancel` |
+| `handy:transcribe-file` | `--transcribe-file <wav> --json [--model <id>]` |
+| `handy:models` | reads `settings_store.json` and `models/`; spawns nothing |
+
+`--model` is Astra's own pin (Settings → Wake word), not a change to Handy:
+Handy owns its settings file and rewrites it on exit, so switching the engine
+there would change dictation in every app on the machine. `handy:models` is
+read-only for the same reason, and reports Handy's `selected_model` separately
+from the models actually on disk — the two differ when a model was selected
+before it finished downloading.
+
+Executable resolution lives in `electron/handy-engine.mjs` (Settings path →
+`PATH` → `%LOCALAPPDATA%\Handy` → `/Applications/Handy.app/Contents/MacOS/handy`)
+and is pinned without an Electron process:
+
+```sh
+node --test electron/handy-engine.node-test.mjs electron/preload.node-test.mjs
+```
+
+Success means "the process started", exactly as upstream behaves: a second
+invocation hands off to the running instance and exits, while a cold one starts
+Handy and stays up, so waiting for an exit code would hang.
+
+The Settings readout (selected model, models on disk, device advice, pinned
+model) is renderer-only and not driven by the harness. Its advice tiers are
+pinned by `src/lib/handy.test.ts`; the panel itself is a manual check.
