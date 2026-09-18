@@ -8,6 +8,7 @@ import * as elevenlabs from "./elevenlabs.ts";
 import * as systemVoices from "./system-voices.ts";
 import * as windowsVoices from "./windows-voices.ts";
 import * as piper from "./piper.ts";
+import * as piperInstall from "./piper-install.ts";
 
 export type VoiceProvider = "elevenlabs" | "system" | "piper";
 
@@ -79,12 +80,18 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
 /** What the settings panel needs. Never includes the key — same write-only
  * rule as every other credential. */
 export function describeVoice(cfg: AppConfig) {
+  const install = piperInstall.piperInstallState();
   return {
     configured: providerConfigured(cfg),
     ready: voiceConfigured(cfg),
     voice: cfg.tts?.voice ?? "",
     provider: voiceProvider(cfg),
     piperAvailable: piper.piperAvailable(),
+    /** So Settings can offer the one-click install instead of only pointing at
+     * the docs, and can say why the offer is absent on this platform. */
+    piperInstallable: piperInstall.piperInstallable(piperInstall.piperTarget()),
+    piperInstalling: install.installing,
+    piperInstallError: install.error,
   };
 }
 

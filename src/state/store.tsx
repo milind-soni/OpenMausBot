@@ -436,7 +436,18 @@ export interface ConfigStatus {
   /** Voice (ElevenLabs). `configured` = a key is saved; `ready` = a key AND
    * a voice, which is what it takes to actually speak. The key itself is
    * never echoed back. */
-  tts?: { configured: boolean; ready: boolean; voice: string; provider?: "elevenlabs" | "system" | "piper"; piperAvailable?: boolean };
+  tts?: {
+    configured: boolean;
+    ready: boolean;
+    voice: string;
+    provider?: "elevenlabs" | "system" | "piper";
+    piperAvailable?: boolean;
+    /** Whether this platform has a Piper build to install, and how that
+     * install is going — the one engine the user obtains from Settings. */
+    piperInstallable?: boolean;
+    piperInstalling?: boolean;
+    piperInstallError?: string | null;
+  };
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
     configured: boolean;

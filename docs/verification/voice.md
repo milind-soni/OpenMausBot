@@ -144,3 +144,65 @@ Handy and stays up, so waiting for an exit code would hang.
 The Settings readout (selected model, models on disk, device advice, pinned
 model) is renderer-only and not driven by the harness. Its advice tiers are
 pinned by `src/lib/handy.test.ts`; the panel itself is a manual check.
+
+## Provisioning Piper (offline neural speech)
+
+Piper is per machine: an absent engine is reported, never worked around. There
+are two ways to get it, and both end in the same `~/.astra/piper` layout.
+
+**From Settings** — `POST /api/tts/piper/install` answers `202` and installs the
+engine plus `en_US-amy-medium` in the background, reporting progress through the
+config frame (`tts.piperInstalling` / `tts.piperInstallError`) exactly like the
+browser engine's install. Every artifact is pinned to a SHA-256 in
+`server/tts/piper-install.ts` and is refused if the hash does not match, and
+`tts.piperInstallable` is false on targets piper publishes no build for
+(Windows on arm64), where the docs below are still the answer.
+
+Two invariants sit behind that route, both learned the hard way:
+
+- **The engine lands last.** Availability keys on the engine binary, so the
+  voice files are downloaded first; an install interrupted mid-flight reports
+  "not installed" rather than a usable engine with no voice.
+- **The staging directory is never left behind**, so a retry starts clean.
+
+**By hand** — on Windows, with the data directory at `~/.astra`:
+
+```sh
+curl -sL -o /tmp/piper.zip https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip
+unzip -q /tmp/piper.zip -d /tmp/piper-extract
+mkdir -p ~/.astra/piper/voices && cp -r /tmp/piper-extract/piper/. ~/.astra/piper/
+curl -sL -o ~/.astra/piper/voices/en_US-amy-medium.onnx \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx
+curl -sL -o ~/.astra/piper/voices/en_US-amy-medium.onnx.json \
+  https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json
+```
+
+Voice choice is a speed decision on a laptop: measured on a 4-core i7-8550U
+with no GPU, `en_US-amy-medium` synthesized 4.16s of audio in 0.96s (real-time
+factor 0.23), while the `high` tier is more natural and slower.
+
+With the engine present, `GET /api/config` must report `tts.piperAvailable:
+true`, `tts.ready: true`, and `POST /api/tts/speak` must return real WAV bytes.
+Prove it on a disposable fixture rather than the user's install. Either install
+into the fixture with `POST /api/tts/piper/install` and poll until
+`tts.piperAvailable` is true, or (offline) copy a provisioned `piper/` into the
+printed `dataDir` — availability is evaluated per request. Then PUT
+`{ tts: { provider: "piper", voice: "en_US-amy-medium" } }`, require
+`GET /api/tts/voices` to list the voice, and require `RIFF` bytes back from
+`/api/tts/speak`.
+
+Recorded run (Windows, 4-core i7-8550U, isolated fixture): `202` on install,
+`piperInstalling` observed mid-flight, `piperAvailable` true with no error, the
+voice listed as `en_US-amy-medium` ("Amy"), and a real 131,784-byte 22.05 kHz
+WAV (2.99 s) from `/api/tts/speak` — with the host's own `~/.astra/piper`
+untouched.
+
+`scripts/verify-voice.ts` deliberately asserts the opposite case — the fixture
+home has no engine, so Piper must refuse honestly — and it still passes with
+Piper provisioned on the host, because the fixture cannot see it.
+
+The installer's guard rails are pinned without a network by
+`server/tts/piper-install.test.ts`: the hash gate, the refusal on unsupported
+targets, the download it must not start when Piper is already installed, the
+absence of a half-install after a failed voice download, and the staging
+directory it must never leave behind.

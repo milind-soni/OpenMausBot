@@ -224,6 +224,7 @@ import {
   type TaskRecord,
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
+import * as piperInstall from "./tts/piper-install.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
@@ -14565,6 +14566,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       } catch (e) {
         return json(res, 200, { voices: [], error: e instanceof Error ? e.message : String(e) });
       }
+    }
+    // Piper is the one voice engine that is not on the machine by default:
+    // the user asks for it here, and the download is hash-pinned and reported
+    // through the config frame's tts block. Nothing fetches on its own, and a
+    // second request while one is running joins the first.
+    if (method === "POST" && path === "/api/tts/piper/install") {
+      const target = piperInstall.piperTarget();
+      if (!piperInstall.piperInstallable(target)) {
+        return json(res, 409, {
+          error: `Piper publishes no engine for ${target} — install it manually (see the voice docs).`,
+        });
+      }
+      const { started, done } = piperInstall.startPiperInstall({ log: (line) => console.log(line) });
+      // The download takes minutes, not milliseconds: answer now, and let the
+      // config frame carry the progress and then the outcome (the same shape
+      // the browser engine's install uses). The first broadcast is what tells
+      // the panel it is installing rather than merely pending.
+      if (started) {
+        broadcast({ kind: "config", ...configStatus() });
+        void done.then(() => broadcast({ kind: "config", ...configStatus() }));
+      }
+      return json(res, 202, { installing: true });
     }
     if (method === "POST" && path === "/api/tts/speak") {
       const body = await readBody(req);

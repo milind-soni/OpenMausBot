@@ -55,8 +55,29 @@ export function VoiceSettings({
   const hostPlatform = capabilities.host.platform;
   const systemVoicesAvailable = hostPlatform === "darwin" || hostPlatform === "win32";
   // Piper's availability is what the server reports: the engine is
-  // provisioned per machine, so the option only appears when it exists.
+  // provisioned per machine, so the option only appears when it exists — and
+  // where this platform has a build, it can be installed from right here.
   const piperAvailable = tts?.piperAvailable === true;
+  const piperInstallable = tts?.piperInstallable === true;
+  const [installBusy, setInstallBusy] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  // The server keeps installing after the 202, so its flag outlives this
+  // request and decides the label; the local flag covers the round trip.
+  const piperInstalling = tts?.piperInstalling === true || installBusy;
+  const piperInstallError = tts?.piperInstallError ?? installError;
+
+  const installPiper = async () => {
+    if (piperInstalling) return;
+    setInstallBusy(true);
+    setInstallError(null);
+    try {
+      await api("/api/tts/piper/install", { method: "POST" });
+    } catch (cause) {
+      setInstallError(cause instanceof Error ? cause.message : "Piper could not be installed.");
+    } finally {
+      setInstallBusy(false);
+    }
+  };
   const hostConfigured = Boolean(tts?.configured);
   const configured = usesLocalSystem || hostConfigured;
 
@@ -185,7 +206,8 @@ export function VoiceSettings({
         </div>
       )}
 
-      {!workspaceConfigurationLocked && (systemVoicesAvailable || provider === "system" || provider === "piper" || piperAvailable) && (
+      {!workspaceConfigurationLocked &&
+        (systemVoicesAvailable || provider === "system" || provider === "piper" || piperAvailable || piperInstallable) && (
         <div className="mt-4">
           <div className="mb-2 text-[13px] text-ink-secondary">Voice engine</div>
           <div className="inline-flex rounded-xl bg-inset p-1" role="radiogroup" aria-label="Voice engine">
@@ -195,7 +217,9 @@ export function VoiceSettings({
                 value: "piper",
                 label: "Piper · realistic, offline",
                 available: piperAvailable,
-                unavailableReason: "Piper is not provisioned on this machine yet — see the docs for the one-time setup",
+                unavailableReason: piperInstallable
+                  ? "Piper is not installed on this machine yet — install it below"
+                  : "Piper is not provisioned on this machine yet — see the docs for the one-time setup",
               },
               {
                 value: "system",
@@ -221,6 +245,30 @@ export function VoiceSettings({
               </button>
             ))}
           </div>
+          {!piperAvailable && piperInstallable ? (
+            <div className="mt-3">
+              <button
+                type="button"
+                disabled={piperInstalling}
+                onClick={() => void installPiper()}
+                className={cn(
+                  "rounded-lg border border-hairline/40 px-3 py-1.5 text-[12.5px] text-ink transition-colors hover:border-hairline disabled:opacity-50",
+                  piperInstalling && "cursor-wait",
+                )}
+              >
+                {piperInstalling ? "Installing Piper…" : "Install Piper"}
+              </button>
+              <p className="mt-1 text-[12px] leading-relaxed text-ink-secondary">
+                Neural voices that run on this computer. One download (the engine and one voice) into this
+                workspace's data folder, checked against a pinned hash before it is unpacked.
+              </p>
+              {piperInstallError ? (
+                <p role="alert" className="mt-1 text-[12px] text-danger">
+                  {piperInstallError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
 
