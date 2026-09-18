@@ -1,0 +1,53 @@
+{
+  "ok": true,
+  "platform": "win32",
+  "url": "http://127.0.0.1:20259",
+  "dataDir": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verify-data-jmAdVW",
+  "logPath": "C:\\Users\\User\\AppData\\Local\\Temp\\astra-verification-evidence\\server-1789763474835-19024.log",
+  "previewUrl": "http://127.0.0.1:5173/__voice.html",
+  "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "installMode": "one-click download inside the fixture",
+  "screenshots": [
+    {
+      "state": "Handy engine readout (dark)",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\voice\\handy-engine-dark.png",
+      "bytes": 166253
+    },
+    {
+      "state": "Handy engine readout (light)",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\voice\\handy-engine-light.png",
+      "bytes": 214667
+    },
+    {
+      "state": "the one-click Piper offer",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\voice\\piper-install-offer.png",
+      "bytes": 94529
+    },
+    {
+      "state": "Piper installing, from that same button",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\voice\\piper-installing.png",
+      "bytes": 95026
+    },
+    {
+      "state": "Piper installed and in use",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\voice\\piper-installed.png",
+      "bytes": 75886
+    }
+  ],
+  "findings": [
+    "Handy readout source: the real install at C:\\Users\\User\\AppData\\Local\\Handy\\handy.exe — selected handy-computer/canary-180m-flash-gguf/canary-180m-flash-Q8_0.gguf, 1 model folder(s) on disk, 85 catalog entries (2 downloaded)",
+    "readout names Handy's selected model the way Handy does: Canary 180M Flash",
+    "readout lists the models it can run: Canary 180M Flash, Parakeet V2",
+    "the readout does not print folder names: parakeet-tdt-0.6b-v2-int8 on disk is not an id --model accepts, so Handy's own catalog names are shown instead",
+    "readout rendered the machine's own advice line and its installed/not-installed verdict",
+    "Handy engine readout (dark): handy-engine-dark.png (166253 bytes)",
+    "Handy engine readout (light): handy-engine-light.png (214667 bytes)",
+    "piper before the install: available=false installable=true",
+    "the one-click Piper offer: piper-install-offer.png (94529 bytes)",
+    "Piper installing, from that same button: piper-installing.png (95026 bytes)",
+    "the one-click install finished: tts.piperAvailable is true with no error, the host untouched",
+    "voices the panel can choose: en_US-amy-medium (Amy, offline neural voice — medium quality)",
+    "Piper installed and in use: piper-installed.png (75886 bytes)",
+    "the pictured engine speaks: a real 148680-byte 22.05 kHz WAV (3.37s) from /api/tts/speak"
+  ]
+}

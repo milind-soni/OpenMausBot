@@ -151,8 +151,55 @@ invocation hands off to the running instance and exits, while a cold one starts
 Handy and stays up, so waiting for an exit code would hang.
 
 The Settings readout (selected model, models on disk, device advice, pinned
-model) is renderer-only and not driven by the harness. Its advice tiers are
-pinned by `src/lib/handy.test.ts`; the panel itself is a manual check.
+model) is renderer-only: it is drawn from the bridge above, so the shared
+control surface cannot reach it. Its advice tiers are pinned by
+`src/lib/handy.test.ts`, and the panel itself is photographed on a fixture —
+see [Pictures of both panels](#pictures-of-both-panels).
+
+## Pictures of both panels
+
+Two surfaces in this feature cannot be driven by the control surface, because
+neither is reachable from it: the readout above, and the one-click Piper offer
+inside the agent voice panel. `scripts/verify-voice-ui.ts` photographs both,
+from the shipped components, on the standard isolated fixture — the same
+launcher, a disposable home, and a disposable browser driven over CDP:
+
+```sh
+node --experimental-strip-types scripts/verify-voice-ui.ts
+# ASTRA_CAPTURE_CHROME=/path/to/chrome overrides the browser it drives
+```
+
+It mounts `scripts/testing/voice-preview.tsx`, which renders the real
+`SettingsModal` (Connections, where the wake-word card lives) and the real
+`VoiceSettings` through the real store and the real config API. The one
+synthesized part is the desktop bridge, which does not exist outside Electron:
+the Handy snapshot handed to it is measured here *by* `electron/handy-engine.mjs`,
+so on a machine with Handy installed the readout is drawn from the real selected
+model, the real models folder and Handy's real `--list-models` catalog.
+
+Recorded run (Windows, isolated fixture, headless Chrome):
+
+| Picture | What it shows |
+| --- | --- |
+| [`handy-engine-dark.png`](evidence/voice/handy-engine-dark.png) and [`handy-engine-light.png`](evidence/voice/handy-engine-light.png) | Settings → Connections → Dictation engine: "Handy's model: Canary 180M Flash", the models it can run, this machine's advice and verdict, and the pin — on the dark and light skins |
+| [`piper-install-offer.png`](evidence/voice/piper-install-offer.png) | the agent voice panel before the install: the engine radios with Piper listed but unavailable, and the one-click offer |
+| [`piper-installing.png`](evidence/voice/piper-installing.png) | the same button mid-install, which is the state the config frame reports |
+| [`piper-installed.png`](evidence/voice/piper-installed.png) | Piper selected, the offer gone, and the voice it brought ("Amy — offline neural voice — medium quality") ready to try |
+
+The run installs through the real route — `POST /api/tts/piper/install`, the
+hash-pinned download, the host's own `~/.astra/piper` untouched — and the engine
+it pictured then returns a real 22.05 kHz WAV from `/api/tts/speak`: about 3.4 s
+of audio (147,144 bytes on one run, 148,680 on the next), because Piper's sampler
+is not bit-reproducible. `findings.json` beside the pictures is the newest run's
+own report, and the pictures themselves come out byte-identical every time, which
+is what makes them usable as before/after evidence.
+
+These pictures are worth exactly this much: they prove the panels render the real
+data honestly, down to naming `parakeet-tdt-0.6b-v2` ("Parakeet V2") rather than
+the `parakeet-tdt-0.6b-v2-int8` folder on disk, because only a catalog id is
+something `--model` accepts. They do not prove the Electron side of the bridge:
+the real IPC and preload are pinned by
+`electron/handy-engine.node-test.mjs` and `electron/preload.node-test.mjs`.
 
 ## Provisioning Piper (offline neural speech)
 
@@ -204,7 +251,8 @@ Recorded run (Windows, 4-core i7-8550U, isolated fixture): `202` on install,
 `piperInstalling` observed mid-flight, `piperAvailable` true with no error, the
 voice listed as `en_US-amy-medium` ("Amy"), and a real 131,784-byte 22.05 kHz
 WAV (2.99 s) from `/api/tts/speak` — with the host's own `~/.astra/piper`
-untouched.
+untouched. The same route is photographed end to end in
+[Pictures of both panels](#pictures-of-both-panels).
 
 `scripts/verify-voice.ts` deliberately asserts the opposite case — the fixture
 home has no engine, so Piper must refuse honestly — and it still passes with
