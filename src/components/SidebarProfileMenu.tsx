@@ -216,7 +216,7 @@ export function SidebarProfileMenu() {
     },
     {
       key: "shortcuts",
-      label: "Keyboard shortcuts",
+      label: t("sidebar.menu.shortcuts"),
       icon: <Keyboard size={18} />,
       trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
       onSelect: () => {

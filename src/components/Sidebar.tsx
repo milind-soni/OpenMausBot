@@ -1570,6 +1570,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   }, [densityOpen]);
 
   useEffect(() => {
+    if (!plusOpen) return;
+    const closePlusMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPlusOpen(false);
+    };
+    window.addEventListener("keydown", closePlusMenu);
+    return () => window.removeEventListener("keydown", closePlusMenu);
+  }, [plusOpen]);
+
+  useEffect(() => {
+    if (!attentionOpen) return;
+    const closeAttentionMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAttentionOpen(false);
+    };
+    window.addEventListener("keydown", closeAttentionMenu);
+    return () => window.removeEventListener("keydown", closeAttentionMenu);
+  }, [attentionOpen]);
+
+  useEffect(() => {
     if (remoteClient) return;
     return window.ogb?.onPackageInstall?.((url) => {
       setTeamInstallUrl(url);
