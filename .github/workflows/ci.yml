@@ -54,6 +54,9 @@ jobs:
         run: pnpm exec vite build
 
   vitest:
+    # Admit the expensive runner fan-out only after the quick checks pass.
+    # A failing preflight still fails the required gates; nothing is waived.
+    needs: static
     # vitest splits the file list deterministically across shards, so a
     # failure names the same shard on every run and one shard is reproducible
     # locally with the same --shard flag.
@@ -94,6 +97,7 @@ jobs:
         run: pnpm broker:test && pnpm test:electron
 
   packaged-server:
+    needs: static
     # `pnpm build:server`, then the bundle is copied out of the repo and run
     # with no node_modules in reach: every bare import must be inlined.
     name: packaged server smoke (${{ matrix.os }})
@@ -114,6 +118,7 @@ jobs:
       - run: pnpm test:packaged-server
 
   windows-cua:
+    needs: static
     name: Windows CUA host smoke
     runs-on: windows-latest
     timeout-minutes: 10
@@ -130,6 +135,7 @@ jobs:
         run: pnpm build:cua:win && pnpm smoke:cua-win
 
   electron-smokes:
+    needs: static
     # Real Electron utility processes against disposable homes and fake CLIs.
     # Never the live app. Each script prints its own evidence lines.
     name: Electron smokes (macOS)
@@ -181,6 +187,7 @@ jobs:
           '
 
   cloudflared-linux-arm64:
+    needs: static
     name: cloudflared installer (Linux ARM64)
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 5
@@ -201,6 +208,7 @@ jobs:
           "$OMB_ARM64_FIXTURE/dist-native/cloudflared/linux-arm64/cloudflared" version
 
   foss:
+    needs: static
     # LICENSING.md promises that deleting enterprise/ leaves a working
     # open-source edition. Prove it on every change: typecheck, the edition
     # tests, and a boot that reports "oss" even with a key set.
@@ -232,6 +240,7 @@ jobs:
           kill %1; wait %1 || true
 
   control-plane:
+    needs: static
     name: control-plane check + workerd tests + dry run
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -250,6 +259,7 @@ jobs:
       - run: pnpm control-plane:dry-run
 
   ui-smoke:
+    needs: static
     # Advisory, outside the required `test` matrix: the renderer recipe in
     # docs/verification/chat-ui.md run by a machine. It downloads the pinned
     # agent-browser release (digest verified) and its Chrome, drives the real
@@ -290,6 +300,7 @@ jobs:
           retention-days: 7
 
   package-linux:
+    needs: static
     name: package + smoke (Ubuntu 24.04 x64)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -357,6 +368,7 @@ jobs:
           retention-days: 7
 
   ios:
+    needs: static
     name: Swift tests + iOS build + thread UI
     runs-on: macos-latest
     timeout-minutes: 35
@@ -395,6 +407,7 @@ jobs:
   # ios/Tests/CompanionCoreTests/Fixtures, so a path filter would skip the
   # Kotlin suite on exactly the change that breaks it.
   android:
+    needs: static
     name: Kotlin tests + Android build
     runs-on: ubuntu-24.04
     timeout-minutes: 25

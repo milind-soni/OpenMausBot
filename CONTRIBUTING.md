@@ -254,7 +254,13 @@ out of its commits and screenshots.
 
 ## CI, in one glance
 
-Every PR runs the same checks, each as its own job so a failure names itself:
+Every PR runs the same checks, each as its own job so a failure names itself.
+The quick static job runs first; only after it passes do the expensive test and
+build jobs enter the runner queue. This saves capacity on submissions with type,
+lint or build errors, without skipping any checks on mergeable PRs. The required
+gates still fail if preflight fails or a required test job is skipped. It adds
+the preflight duration to an otherwise idle runner pool; it does not cure a
+GitHub-wide scheduling backlog.
 
 - **typecheck + lint** — typecheck, lint, locale catalogs (`pnpm i18n:check`), Electron syntax check, production UI build. Once, on Ubuntu; none of it is platform-specific.
 - **vitest (os, shard n/4)** — the suite on macOS, Ubuntu and Windows, split into four shards each. The suite runs its files serially on purpose (fake CLIs and a real harness server), so one runner takes ~19 minutes; a shard takes 4–10. To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.
