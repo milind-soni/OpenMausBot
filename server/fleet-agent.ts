@@ -32,16 +32,33 @@ const MAX_BODY = 256 * 1024;
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    let text = "";
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let destroyed = false;
     req.on("data", (chunk: Buffer) => {
-      text += chunk.toString("utf8");
-      if (text.length > MAX_BODY) reject(Object.assign(new Error("request too large"), { status: 413 }));
+      if (destroyed) return;
+      bytes += chunk.length;
+      if (bytes > MAX_BODY) {
+        // Stop buffering and drop the connection: a client that keeps
+        // sending after the 413 must not grow the socket or this buffer.
+        destroyed = true;
+        reject(Object.assign(new Error("request too large"), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on("end", () => {
+      if (destroyed) return;
+      const text = Buffer.concat(chunks).toString("utf8");
       if (!text.trim()) return resolve({});
       try {
         const value: unknown = JSON.parse(text);
-        resolve(value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
+        if (value === null || typeof value !== "object" || Array.isArray(value)) {
+          reject(Object.assign(new Error("body must be a JSON object"), { status: 400 }));
+        } else {
+          resolve(value as Record<string, unknown>);
+        }
       } catch {
         reject(Object.assign(new Error("body must be JSON"), { status: 400 }));
       }
