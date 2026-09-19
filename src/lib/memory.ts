@@ -2,6 +2,7 @@
 // routes answer with, the calls, and the pure wording helpers the panel
 // renders from — kept here so the sentences can be tested without React.
 import { ApiError, api } from "@/state/store";
+import { formatBytes } from "./format-bytes";
 
 export const MEMORY_INDEX = "MEMORY.md";
 
@@ -114,9 +115,8 @@ export function openMemoryLocation(botId: string, target: MemoryOpenTarget): Pro
 
 // ── wording ───────────────────────────────────────────────────────────
 
-export function formatBytes(bytes: number): string {
-  return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 102.4) / 10} KB`;
-}
+// The byte formatter lives in format-bytes.ts, shared with the composer.
+export { formatBytes };
 
 /** "just now", "3 min ago", "2 hr ago", "yesterday", "Sep 3" — the
  * journal is read for what happened recently, so recent rows get the

@@ -3,7 +3,7 @@
 import { CalendarClock, FileText, Plus } from "lucide-react";
 import { useState } from "react";
 import { useStore, type Bot } from "@/state/store";
-import type { Routine, RoutineRun, RoutineRunOn } from "@/lib/routines";
+import type { Routine, RoutineRun, RoutineRunOn } from "../../../shared/routines";
 import { t } from "@/lib/i18n";
 import { RoutineEditor } from "../RoutinesPage";
 import { RoutineList } from "../routines/RoutineList";
