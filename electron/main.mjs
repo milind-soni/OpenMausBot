@@ -14,11 +14,10 @@ import { attachUpdaterWindow, startUpdater, registerUpdaterIpc } from "./updater
 import {
   buildDiagnosticsReport,
   diagnosticsFileName,
-  formatDesktopCrashRecord,
   installDesktopCrashListeners,
   readSafeLogTail,
 } from "./diagnostics.mjs";
-import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
+import { workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
@@ -31,7 +30,6 @@ import {
   ensureManagedComposioCredentials,
   managedComposioAccess,
   managedComposioChildEnvironment,
-  normalizeManagedComposioBrokerUrl,
 } from "./managed-composio.mjs";
 import {
   createManagedCompanionTunnel,
@@ -41,7 +39,6 @@ import {
   withManagedCompanionTunnelAccess,
   withoutManagedCompanionTunnelAccess,
 } from "./managed-companion-tunnel.mjs";
-import { createSecureCredentialState } from "./secure-credential-state.mjs";
 import {
   createPhoneSecretSaveCoordinator,
   createPhoneSecretIdentity,
@@ -59,7 +56,6 @@ import {
   withoutDesktopCompanionAccess,
 } from "./desktop-companion-client.mjs";
 import { isKnownSkin, skinChrome } from "./skin-overlay.cjs";
-import { readSecureCredentials } from "./secure-credentials.mjs";
 import { createControlPlaneClient } from "./control-plane-client.mjs";
 import {
   companionAccountCleanupPending,
@@ -75,6 +71,25 @@ import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
+import {
+  DESKTOP_CRASH_LOG,
+  LOG_DIR,
+  recordDesktopCrash,
+  slog,
+} from "./main/crash-log.mjs";
+import {
+  installWindowStatePersistence,
+  readWindowState,
+} from "./main/window-state.mjs";
+import {
+  composioBrokerUrl,
+  credentialStoreUnavailable,
+  desktopDataDir,
+  initializeSecureCredentialStore,
+  secureCredentialState,
+  secureCredentials,
+  updateSecureCredentialDocument,
+} from "./main/secure-config.mjs";
 
 const { desktopCapabilities, nativeDesktopActions } = capabilitiesModule;
 const nativeActions = nativeDesktopActions(process.platform);
@@ -87,13 +102,12 @@ const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.
 const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
 const { createTrustedApprovalModeCoordinator } = require("./approval-trusted-mode.cjs");
 const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-server-auth.cjs");
-const { MIN_BOUNDS, normalizeUnreadCount, parseWindowState, resolveWindowState } = require("./window-state.cjs");
+const { MIN_BOUNDS, normalizeUnreadCount, resolveWindowState } = require("./window-state.cjs");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
 // resolve to ::1 and paint a black window
 const DEV_URL = process.env.ELECTRON_START_URL ?? "http://127.0.0.1:5199";
-const DEFAULT_COMPOSIO_BROKER_URL = "https://openmausbot-composio.milindsoni201.workers.dev";
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
@@ -106,67 +120,6 @@ let mainWindow = null;
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
 let unreadOverlayIcon = null;
-
-function windowStateFile() {
-  return path.join(app.getPath("userData"), "window-state.json");
-}
-
-function readWindowState() {
-  try {
-    return parseWindowState(fs.readFileSync(windowStateFile(), "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function writeWindowState(win) {
-  if (!win || win.isDestroyed()) return;
-  const file = windowStateFile();
-  const temporary = `${file}.${process.pid}.tmp`;
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(
-      temporary,
-      JSON.stringify({ bounds: win.getNormalBounds(), maximized: win.isMaximized() }),
-      { mode: 0o600 },
-    );
-    fs.renameSync(temporary, file);
-  } catch (error) {
-    try {
-      fs.rmSync(temporary, { force: true });
-    } catch {}
-    slog(`window state save failed: ${error?.message ?? error}`);
-  }
-}
-
-function installWindowStatePersistence(win) {
-  let timer = null;
-  const flush = () => {
-    if (timer) clearTimeout(timer);
-    timer = null;
-    writeWindowState(win);
-  };
-  const schedule = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, 250);
-    timer.unref?.();
-  };
-  win.on("resize", schedule);
-  win.on("move", schedule);
-  // The renderer's caption buttons track the native maximize state (the
-  // restore/maximize glyph flips); a lost push just leaves a stale glyph
-  // until the next toggle, so a send failure is not fatal.
-  const pushMaximized = () => {
-    try {
-      if (!win.isDestroyed()) win.webContents.send("window:maximized-changed", win.isMaximized());
-    } catch {}
-  };
-  win.on("maximize", pushMaximized);
-  win.on("unmaximize", pushMaximized);
-  win.on("maximize", schedule);
-  win.on("unmaximize", schedule);
-  win.on("close", flush);
-}
 
 function applyUnreadBadge(win = mainWindow) {
   const count = normalizeUnreadCount(unreadCount);
@@ -259,8 +212,6 @@ app.on("second-instance", (_event, commandLine) => {
 // our API shape, not just a 200).
 let serverProc = null;
 let serverReady = !app.isPackaged;
-let secureCredentials = {};
-let secureCredentialState = null;
 let desktopDataDirLease = null;
 let managedDesktop = null;
 let companyBackupController = null;
@@ -318,14 +269,6 @@ const serverSupervisor = createServerSupervisor({
   log: slog,
 });
 
-function desktopDataDir() {
-  // Match the historical desktop fallback for an unset or empty override,
-  // then pass this exact resolved path to the utility child. server/config.ts
-  // intentionally treats an empty OMB_DATA_DIR differently, so inheriting it
-  // without normalization would lease one directory and write another.
-  return process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
-}
-
 async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_MS) {
   if (!proc) return true;
   const exited = utilityServerExits.get(proc);
@@ -349,126 +292,6 @@ let phoneSecretIdentity = null;
 let desktopRemoteAccess = null;
 let desktopCompanionRelay = null;
 
-const CREDENTIALS_FILE = path.join(app.getPath("userData"), "credentials.bin");
-
-/** Set once per launch: true when the store could not be READ, which is not
- * the same as the user having saved nothing. Everything downstream — the
- * server's view of "configured", and whether we may register a fresh
- * installation — keys off this rather than off an empty object. */
-let credentialStoreUnavailable = false;
-
-async function loadSecureCredentials() {
-  const result = await readSecureCredentials({
-    exists: () => fs.existsSync(CREDENTIALS_FILE),
-    isAvailable: () => safeStorage.isAsyncEncryptionAvailable(),
-    readFile: () => fs.readFileSync(CREDENTIALS_FILE),
-    decrypt: (buffer) => safeStorage.decryptStringAsync(buffer),
-    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  });
-  credentialStoreUnavailable = result.status === "unavailable";
-  if (credentialStoreUnavailable) {
-    // Deliberately loud. A silent {} here is what made a keychain hiccup
-    // look like "your connected apps are gone".
-    slog(`credential store unreadable after retries (${result.error}); saved keys are not loaded this launch`);
-  }
-  return result.credentials;
-}
-
-async function saveSecureCredentials(credentials) {
-  // A failed read means we do not know what the existing encrypted document
-  // contains. Never derive a replacement from that incomplete view: boot
-  // migrations must leave plaintext in place so a later launch can retry.
-  if (credentialStoreUnavailable) {
-    throw new Error("The operating-system credential store could not be read this launch");
-  }
-  if (!(await safeStorage.isAsyncEncryptionAvailable())) {
-    throw new Error("The operating-system credential store is unavailable");
-  }
-  fs.mkdirSync(path.dirname(CREDENTIALS_FILE), { recursive: true });
-  const encrypted = await safeStorage.encryptStringAsync(JSON.stringify(credentials));
-  const temporary = `${CREDENTIALS_FILE}.${process.pid}.tmp`;
-  fs.writeFileSync(temporary, encrypted, { mode: 0o600 });
-  fs.renameSync(temporary, CREDENTIALS_FILE);
-}
-
-async function secureComposioConfig() {
-  const dataDir = desktopDataDir();
-  const configPath = path.join(dataDir, "config.json");
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    if (!config?.composio || typeof config.composio !== "object") return;
-    let changed = false;
-    const apiKey = config?.composio?.apiKey;
-    if (typeof apiKey === "string" && apiKey.trim().startsWith("ak_")) {
-      if (!secureCredentials.composioApiKey) {
-        secureCredentials.composioApiKey = apiKey.trim();
-        await saveSecureCredentials(secureCredentials);
-      }
-      config.composio.apiKey = "";
-      changed = true;
-    } else if (typeof apiKey === "string" && apiKey.trim()) {
-      config.composio.apiKey = "";
-      changed = true;
-    }
-    // These were the old Connect credential and endpoint. They are no longer
-    // read; remove them during the upgrade so an unused secret is not left in
-    // plaintext indefinitely.
-    for (const field of ["key", "url"]) {
-      if (Object.hasOwn(config.composio, field)) {
-        delete config.composio[field];
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    const temporary = `${configPath}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(config, null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, configPath);
-  } catch (error) {
-    if (error?.code !== "ENOENT") slog(`credential migration failed: ${error?.message ?? error}`);
-  }
-}
-
-// The remaining workspace credentials (xai/box/voice/OpenCode keys) get
-// the same at-rest treatment as the Composio key above. New packaged-app
-// saves go straight through credential:set below; this boot-time sweep also
-// migrates plaintext left by older versions or direct development clients.
-// See workspace-credentials.mjs for the exact rules.
-async function secureWorkspaceConfig() {
-  const dataDir = desktopDataDir();
-  const configPath = path.join(dataDir, "config.json");
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    const migrated = migrateWorkspaceCredentials(config, secureCredentials);
-    // credentials.bin first: if the OS store cannot take the secrets, the
-    // plaintext stays put and the next boot retries — losing the only copy
-    // is the one unacceptable outcome
-    if (migrated.credentialsChanged) await saveSecureCredentials(migrated.credentials);
-    secureCredentials = migrated.credentials;
-    if (!migrated.configChanged) return;
-    const temporary = `${configPath}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(migrated.config, null, 2), { mode: 0o600 });
-    fs.renameSync(temporary, configPath);
-  } catch (error) {
-    if (error?.code !== "ENOENT") slog(`credential migration failed: ${error?.message ?? error}`);
-  }
-}
-
-function composioBrokerUrl() {
-  const configured = process.env.OMB_COMPOSIO_BROKER_URL?.trim();
-  return normalizeManagedComposioBrokerUrl(
-    configured || (app.isPackaged ? DEFAULT_COMPOSIO_BROKER_URL : ""),
-  );
-}
-
-// The packaged app has no terminal: everything about the server child's life
-// goes to server.log in the OS log dir (~/Library/Logs/OpenMausBot on macOS,
-// Console.app-visible; %APPDATA%\OpenMausBot\logs on Windows), which is also
-// why stdio is piped, not inherited — under a Finder/Explorer launch the
-// parent's stdio leads nowhere and a failed boot is otherwise undiagnosable.
-const LOG_DIR = app.getPath("logs");
-const DESKTOP_CRASH_LOG = path.join(LOG_DIR, "desktop-crashes.log");
-const DESKTOP_CRASH_LOG_MAX_BYTES = 512 * 1024;
-let logStream = null;
 let desktopShutdownStarted = false;
 import {
   companionAdvertisedHostedUrl,
@@ -531,75 +354,6 @@ const routineWake = createRoutineWakeHold({
   log: (line) => slog(line),
 });
 
-function slog(line) {
-  try {
-    if (!logStream) {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
-      logStream = fs.createWriteStream(path.join(LOG_DIR, "server.log"), { flags: "a" });
-    }
-    logStream.write(`[${new Date().toISOString()}] ${line}\n`);
-  } catch {
-    /* logging must never break startup */
-  }
-}
-
-// The server stream is intentionally asynchronous, but a fatal main-process
-// exception may terminate Electron before such a write is flushed. Crash
-// metadata gets its own tiny synchronous file. The formatter admits only a
-// fixed set of fields, so renderer URLs, page titles, exception messages and
-// absolute paths never land on disk or in a public bug report.
-function recordDesktopCrash(event) {
-  let handle = null;
-  try {
-    const record = formatDesktopCrashRecord(event);
-    if (!record) return;
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-
-    const flags =
-      fs.constants.O_WRONLY |
-      fs.constants.O_APPEND |
-      (process.platform === "win32" ? 0 : fs.constants.O_NOFOLLOW);
-    let before = null;
-    try {
-      before = fs.lstatSync(DESKTOP_CRASH_LOG);
-      if (!before.isFile() || before.nlink !== 1) return;
-      handle = fs.openSync(DESKTOP_CRASH_LOG, flags);
-    } catch (error) {
-      if (error?.code !== "ENOENT") return;
-      // O_EXCL makes first creation race-safe on Windows, where O_NOFOLLOW is
-      // unavailable, as well as on POSIX.
-      try {
-        handle = fs.openSync(
-          DESKTOP_CRASH_LOG,
-          flags | fs.constants.O_CREAT | fs.constants.O_EXCL,
-          0o600,
-        );
-      } catch {
-        return;
-      }
-    }
-
-    const stats = fs.fstatSync(handle);
-    // A hard-linked or non-regular target is not an app-owned crash log.
-    if (!stats.isFile() || stats.nlink !== 1) return;
-    if (before && (before.dev !== stats.dev || before.ino !== stats.ino)) return;
-    // A renderer crash loop must not grow a persistent log without bound.
-    // The diagnostics export reads only a bounded tail, so dropping older
-    // crash metadata here preserves the useful part of the record.
-    if (stats.size >= DESKTOP_CRASH_LOG_MAX_BYTES) fs.ftruncateSync(handle, 0);
-    if (process.platform !== "win32") fs.fchmodSync(handle, 0o600);
-    fs.writeFileSync(handle, `[${new Date().toISOString()}] ${record}\n`, "utf8");
-  } catch {
-    /* crash diagnostics must never change app lifecycle */
-  } finally {
-    if (handle !== null) {
-      try {
-        fs.closeSync(handle);
-      } catch {}
-    }
-  }
-}
-
 // uncaughtExceptionMonitor observes Node's fatal path without converting it
 // into a handled exception. In particular, an unhandled rejection still
 // follows Node's normal exit behaviour after its metadata is persisted.
@@ -622,19 +376,6 @@ let companionAccountService = null;
 let companionDesiredThisLaunch = false;
 let companionLaunchGeneration = 0;
 let advertisementTransition = Promise.resolve();
-
-/** The one serialized credential mutation hook. Account onboarding and every
- * other runtime credential writer share this state, so persisting a tunnel
- * token can never overwrite an API key saved at the same time (or vice
- * versa). */
-export async function updateSecureCredentialDocument(derive, afterPersist) {
-  if (!secureCredentialState) throw new Error("Secure credentials are not ready");
-  try {
-    return await secureCredentialState.update(derive, afterPersist);
-  } finally {
-    secureCredentials = secureCredentialState.read();
-  }
-}
 
 async function ensurePhoneSecretIdentity() {
   const existing = readPhoneSecretIdentity(secureCredentialState?.read() ?? secureCredentials);
@@ -2691,30 +2432,9 @@ app.whenReady().then(async () => {
     installDesktopMutationHeader();
   }
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
-  secureCredentials = await loadSecureCredentials();
-  // The AssemblyAI key only fed the removed Teach a skill recorder, and its
-  // set/clear handler went with it; drop the orphaned secret rather than
-  // keep a third-party key at rest with no way to remove it.
-  if (secureCredentials && Object.hasOwn(secureCredentials, "assemblyAiApiKey") && !credentialStoreUnavailable) {
-    try {
-      const { assemblyAiApiKey: _removed, ...rest } = secureCredentials;
-      await saveSecureCredentials(rest);
-      secureCredentials = rest;
-    } catch (error) {
-      slog(`orphaned AssemblyAI key not removed: ${error?.message ?? error}`);
-    }
-  }
-  if (app.isPackaged) {
-    await secureComposioConfig();
-    await secureWorkspaceConfig();
-  }
-  // Boot migrations above are deliberately sequential. From this point on,
-  // every account/API-key writer must use the shared serialized state.
-  // An unreadable store must not become a WRITE of an empty document.
-  secureCredentialState = createSecureCredentialState(secureCredentials, saveSecureCredentials, {
-    writable: !credentialStoreUnavailable,
-  });
-  secureCredentials = secureCredentialState.read();
+  // Load credentials.bin, migrate plaintext config.json secrets, then arm
+  // the shared serialized credential state (electron/main/secure-config.mjs).
+  await initializeSecureCredentialStore();
   if (app.isPackaged) await ensurePhoneSecretIdentity();
   desktopRemoteAccess = desktopCompanionAccess(secureCredentials);
   const hostedAccount = desktopRemoteAccess ? null : ensureCompanionAccountService();
