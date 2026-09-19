@@ -1,8 +1,6 @@
 /** Routine wire shapes — the routine and run records as they ride the REST
- * snapshot and the `routine` / `routine.run` live frames. Moved verbatim
- * from the client's hand-maintained mirrors (src/lib/routines.ts) so the
- * frame union and every client consumer share one home; the client file
- * re-exports these under the same names. */
+ * snapshot and the `routine` / `routine.run` live frames, shared by the
+ * frame union and every client consumer. */
 import type { RoutineCronSchedule } from "./routine-schedule.ts";
 
 export interface RoutineIntervalWindow {
@@ -144,4 +142,3 @@ export interface RoutineInput {
   /** Omission preserves routing; null creates a new dedicated results task. */
   resultsThreadId?: string | null;
 }
-

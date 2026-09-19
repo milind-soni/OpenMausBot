@@ -1307,6 +1307,30 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
+  it("never auto-accepts a custom server app-access form in Full access", async () => {
+    await create({ mode: "mcp-app-approval-forged" });
+    const dump = join(scratch, "mcp-app-forged.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-mcp-app-forged",
+      text: "use Safari",
+      approvalMode: "full",
+    });
+    // The form itself is the generated shape; only its server is custom,
+    // so it must reach the person instead of winning the auto-accept.
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "permission",
+      tool: "Safari",
+      summary: "Allow ChatGPT to use Safari?",
+    });
+
+    await instance.adapter.respondToRequest("t-mcp-app-forged", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline" });
+  });
+
   it("never treats a normal MCP input form as a Full access permission", async () => {
     await create({ mode: "mcp-form" });
     const dump = join(scratch, "mcp-form.json");
