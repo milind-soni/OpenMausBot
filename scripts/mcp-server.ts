@@ -3,35 +3,14 @@
 // Standard JSON-RPC 2.0 stdio transport for external agent orchestration (Hermes, Claude Desktop, Cursor, etc.).
 import readline from "node:readline";
 
-export function validateBaseUrl(url: string): string {
-  const trimmed = url.replace(/\/+$/, "");
-  let parsed: URL;
-  try {
-    parsed = new URL(trimmed);
-  } catch {
-    throw new Error(`Invalid OpenMausBot URL: '${url}'`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-    throw new Error("OpenMausBot URL must use http:// or https://");
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("OpenMausBot URL must not contain credentials; use OPENMAUSBOT_TOKEN instead");
-  }
-  if ((parsed.pathname !== "/" && parsed.pathname !== "") || parsed.search || parsed.hash) {
-    throw new Error("OpenMausBot URL must be an origin without a path, query, or fragment");
-  }
-  const hostname = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  const isLoopback = hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
-  if (parsed.protocol === "http:" && !isLoopback && process.env.ALLOW_INSECURE_HTTP !== "true") {
-    throw new Error(
-      `Insecure cleartext HTTP origin '${parsed.origin}' is rejected. Use https:// or set ALLOW_INSECURE_HTTP=true.`,
-    );
-  }
-  return parsed.origin;
-}
+import { configuredServerUrl, validateBaseUrl } from "../shared/server-endpoint.ts";
 
-const configuredUrl = process.env.OPENMAUSBOT_URL ||
-  (process.env.OMB_PORT ? `http://127.0.0.1:${process.env.OMB_PORT}` : undefined);
+import { isRecord, ToolInputError, type ToolHandler } from "./mcp-server/context.ts";
+import { TOOL_HANDLERS, type ToolName } from "./mcp-server/registry.ts";
+
+export { ToolInputError };
+
+const configuredUrl = configuredServerUrl(process.env);
 
 export const OMB_BASE_URL = validateBaseUrl(configuredUrl || "http://127.0.0.1:8799");
 const DISCOVERY_URLS = configuredUrl
@@ -118,12 +97,12 @@ export async function request(path: string, options: RequestInit = {}, baseUrl?:
 }
 
 export interface McpToolDefinition {
-  name: string;
+  name: ToolName;
   description: string;
   inputSchema: {
     type: "object";
     properties: Record<string, unknown>;
-    required?: string[];
+    required?: readonly string[];
     additionalProperties?: boolean;
   };
   annotations?: {
@@ -141,7 +120,7 @@ const MUTATING = { readOnlyHint: false, destructiveHint: false, idempotentHint: 
 const DESTRUCTIVE = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } as const;
 const AGENT_ACTION = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true } as const;
 
-export const TOOLS: McpToolDefinition[] = [
+export const TOOLS = [
   {
     name: "get_system_health",
     description: "Check whether the OpenMausBot server is reachable.",
@@ -454,16 +433,16 @@ export const TOOLS: McpToolDefinition[] = [
     },
     annotations: DESTRUCTIVE,
   },
-];
+] as const satisfies readonly McpToolDefinition[];
 
-function parsePositiveLimit(raw: unknown, fallback = 30, maximum = 200): number {
-  const parsed = Math.floor(Number(raw));
-  return Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, maximum) : fallback;
-}
+// McpToolDefinition keys the list above by the registry's ToolName, so an
+// entry without a handler fails to typecheck; this constant fails the build
+// the other way round — the two records cannot drift apart.
+export const toolsCoverHandlers: Exclude<ToolName, (typeof TOOLS)[number]["name"]> extends never
+  ? true
+  : "every tool handler needs an entry in the tool list"
+  = true;
 
-function isRecord(value: unknown): value is Record<string, any> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function valueHasType(value: unknown, type: string): boolean {
   if (type === "null") return value === null;
@@ -519,8 +498,6 @@ function schemaError(schema: Record<string, any>, value: unknown, path: string):
   return null;
 }
 
-export class ToolInputError extends Error {}
-
 export function validateToolArguments(name: unknown, args: unknown): asserts args is Record<string, unknown> {
   if (typeof name !== "string" || !name) throw new ToolInputError("tool name must be a non-empty string");
   const tool = TOOLS.find((candidate) => candidate.name === name);
@@ -530,255 +507,6 @@ export function validateToolArguments(name: unknown, args: unknown): asserts arg
   if (error) throw new ToolInputError(error);
 }
 
-function stringArg(args: Record<string, unknown>, key: string, options: { trim?: boolean; allowEmpty?: boolean; max?: number } = {}): string {
-  const raw = args[key];
-  if (typeof raw !== "string") throw new ToolInputError(`${key} must be a string`);
-  const value = options.trim === false ? raw : raw.trim();
-  if (!options.allowEmpty && !value) throw new ToolInputError(`${key} must not be empty`);
-  if (options.max && value.length > options.max) throw new ToolInputError(`${key} must be at most ${options.max} characters`);
-  return value;
-}
-
-function optionalStringArg(
-  args: Record<string, unknown>,
-  key: string,
-  options: { trim?: boolean; allowEmpty?: boolean; max?: number } = {},
-): string | undefined {
-  if (!(key in args)) return undefined;
-  return stringArg(args, key, options);
-}
-
-function idArg(args: Record<string, unknown>, key: string): string {
-  const value = stringArg(args, key);
-  if (!/^[\w-]+$/.test(value)) throw new ToolInputError(`${key} is not a valid OpenMausBot ID`);
-  return value;
-}
-
-function stringArrayArg(args: Record<string, unknown>, key: string): string[] {
-  const value = args[key];
-  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== "string" || !item.trim())) {
-    throw new ToolInputError(`${key} must be a non-empty list of IDs`);
-  }
-  return [...new Set(value.map((item) => item.trim()))];
-}
-
-function records(value: unknown): Array<Record<string, any>> {
-  return Array.isArray(value) ? value.filter(isRecord) : [];
-}
-
-function projectTask(task: Record<string, any>, activeThreadId: unknown) {
-  return {
-    taskId: task.threadId,
-    title: task.title,
-    createdAt: task.createdAt,
-    ...(typeof task.busy === "boolean" ? { busy: task.busy } : {}),
-    ...(task.activity ? { activity: task.activity } : {}),
-    ...(task.modelSelection ? { modelSelection: task.modelSelection } : {}),
-    ...(typeof activeThreadId === "string" ? { active: task.threadId === activeThreadId } : {}),
-    ...(task.usage ? { usage: task.usage } : {}),
-  };
-}
-
-function botTaskState(bot: Record<string, any>, taskId: string) {
-  const task = records(bot.tasks).find((candidate) => candidate.threadId === taskId);
-  if (task && (typeof task.busy === "boolean" || typeof task.activity === "string")) return task;
-  // Older servers cannot run non-selected tasks and expose only bot activity.
-  return bot.threadId === taskId ? bot : { busy: false, activity: "idle" };
-}
-
-function projectBot(bot: Record<string, any>) {
-  return {
-    id: bot.id,
-    name: bot.name,
-    title: bot.title,
-    description: bot.description,
-    section: bot.section ?? null,
-    chiefOfStaff: Boolean(bot.chiefOfStaff),
-    modelSelection: bot.modelSelection,
-    busy: Boolean(bot.busy),
-    activity: bot.activity,
-    unread: Boolean(bot.unread),
-    activeTaskId: bot.threadId,
-    tasks: records(bot.tasks).map((task) => projectTask(task, bot.threadId)),
-  };
-}
-
-function projectChannel(channel: Record<string, any>) {
-  return {
-    id: channel.id,
-    name: channel.name,
-    memberIds: channel.memberIds,
-    bulletin: channel.bulletin,
-    defaultResponder: channel.defaultResponder,
-    section: channel.section ?? null,
-    directMessage: Boolean(channel.dm),
-    working: Boolean(channel.working),
-    busyBotId: channel.busyBotId ?? null,
-    activeTaskId: channel.threadId,
-    tasks: records(channel.tasks).map((task) => projectTask(task, channel.threadId)),
-  };
-}
-
-function projectMessage(message: Record<string, any>) {
-  const card = isRecord(message.card)
-    ? {
-        title: message.card.title,
-        subtitle: message.card.subtitle,
-        options: message.card.options,
-        answered: message.card.answered,
-        dismissed: message.card.dismissed,
-      }
-    : undefined;
-  const tool = isRecord(message.tool)
-    ? { name: message.tool.name, ok: message.tool.ok, spoken: message.tool.spoken, setup: message.tool.setup,
-        ...(message.tool.terminal === true ? { terminal: true } : {}),
-      }
-    : undefined;
-  const connector = isRecord(message.connector)
-    ? {
-        slug: message.connector.slug,
-        label: message.connector.label,
-        description: message.connector.description,
-        status: message.connector.status,
-        dismissed: message.connector.dismissed,
-        resumed: message.connector.resumed,
-      }
-    : undefined;
-  const secret = isRecord(message.secret)
-    ? {
-        target: message.secret.target,
-        label: message.secret.label,
-        description: message.secret.description,
-        placeholder: message.secret.placeholder,
-        helpUrl: message.secret.helpUrl,
-        provided: message.secret.provided,
-        dismissed: message.secret.dismissed,
-        resumed: message.secret.resumed,
-      }
-    : undefined;
-  return {
-    id: message.id,
-    at: message.at,
-    role: message.role,
-    kind: message.kind,
-    text: message.text,
-    from: message.from,
-    replyToId: message.replyToId,
-    reactions: message.reactions,
-    steered: message.steered,
-    queued: message.queued,
-    ...(tool ? { tool } : {}),
-    ...(card ? { card } : {}),
-    ...(connector ? { connector } : {}),
-    ...(secret ? { secret } : {}),
-    ...(message.kind === "screen" ? { hasImage: Boolean(message.hasImage || message.png) } : {}),
-  };
-}
-
-async function fleet(fetcher: (path: string, options?: RequestInit) => Promise<any>) {
-  return fetcher("/api/bots?messages=0");
-}
-
-function taskBelongsTo(owner: Record<string, any>, taskId: string): boolean {
-  return owner.threadId === taskId || records(owner.tasks).some((task) => task.threadId === taskId);
-}
-
-function messageNeedsInput(message: Record<string, any>): boolean {
-  const card = isRecord(message.card) && message.card.requestId && !message.card.answered && !message.card.dismissed;
-  const connector = isRecord(message.connector) &&
-    !message.connector.dismissed &&
-    !message.connector.resumed &&
-    message.connector.status !== "connected";
-  const secret = isRecord(message.secret) && !message.secret.provided && !message.secret.dismissed;
-  return Boolean(card || connector || secret);
-}
-
-function dispatchFailedAfterLatestUser(messages: Array<Record<string, any>>): boolean {
-  const lastUser = messages.findLastIndex((message) => message.role === "user");
-  const turnMessages = messages.slice(lastUser + 1);
-  // Only an explicit terminal receipt overrides prose. Existing providers
-  // also emit diagnostics on intentional cancellation, which remain settled.
-  if (turnMessages.some((message) => message.tool?.terminal === true && message.tool.ok === false)) return true;
-  if (turnMessages.some((message) => message.role === "bot" && message.kind === "text" && message.text?.trim())) {
-    return false;
-  }
-  return turnMessages.some(
-    (message) =>
-      message.kind === "activity" &&
-      message.tool?.ok === false &&
-      typeof message.tool?.name === "string" &&
-      /^error:/i.test(message.tool.name.trim()),
-  );
-}
-
-async function conversationTail(
-  fetcher: (path: string, options?: RequestInit) => Promise<any>,
-  taskId: string,
-  limit = 10,
-) {
-  const page = await fetcher(`/api/threads/${encodeURIComponent(taskId)}/messages?limit=${limit}`);
-  const raw = records(page.messages);
-  return {
-    raw,
-    messages: raw.map(projectMessage),
-    hasMore: Boolean(page.hasMore),
-  };
-}
-
-function normalizeResponder(value: unknown): Record<string, string> | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) throw new ToolInputError("default_responder must be an object");
-  if (value.kind === "everyone" || value.kind === "mentions") return { kind: value.kind };
-  if (value.kind === "member" && typeof value.bot_id === "string" && value.bot_id.trim()) {
-    return { kind: "member", botId: value.bot_id.trim() };
-  }
-  throw new ToolInputError("default_responder is invalid");
-}
-
-async function checkedModelSelection(
-  args: Record<string, unknown>,
-  fetcher: (path: string, options?: RequestInit) => Promise<any>,
-) {
-  const instanceId = stringArg(args, "instance_id");
-  const model = stringArg(args, "model");
-  const effort = optionalStringArg(args, "effort");
-  const described = await fetcher("/api/instances");
-  const instance = records(described.instances).find((candidate) => candidate.instanceId === instanceId);
-  if (!instance) throw new ToolInputError(`model instance not found: ${instanceId}`);
-  if (instance.snapshot?.state !== "available") throw new ToolInputError(`model instance is unavailable: ${instanceId}`);
-  const models = isRecord(instance.models) ? instance.models : {};
-  const offered = records(models.options).map((option) => option.id).filter((id) => typeof id === "string");
-  if (models.default !== model && !offered.includes(model)) {
-    throw new ToolInputError(`model '${model}' is not offered by instance '${instanceId}'`);
-  }
-  const efforts = Array.isArray(instance.capabilities?.effortLevels) ? instance.capabilities.effortLevels : [];
-  if (effort && !efforts.includes(effort)) {
-    throw new ToolInputError(`effort '${effort}' is not offered by instance '${instanceId}'`);
-  }
-  return { instanceId, model, ...(effort ? { effort } : {}) };
-}
-
-function taskRoute(targetType: unknown, targetId: string): string {
-  if (targetType === "bot") return `/api/bots/${encodeURIComponent(targetId)}/tasks`;
-  if (targetType === "channel") return `/api/groups/${encodeURIComponent(targetId)}/tasks`;
-  throw new ToolInputError("target_type must be bot or channel");
-}
-
-function sleep(ms: number, signal?: AbortSignal) {
-  return new Promise<void>((resolve, reject) => {
-    if (signal?.aborted) return reject(signal.reason ?? new Error("Request cancelled"));
-    const onAbort = () => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      reject(signal?.reason ?? new Error("Request cancelled"));
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
 
 export async function handleToolCall(
   name: string,
@@ -790,444 +518,13 @@ export async function handleToolCall(
     ? (path: string, options: RequestInit = {}) => baseFetcher(path, { ...options, signal: options.signal ?? signal })
     : baseFetcher;
   validateToolArguments(name, args);
-  switch (name) {
-    case "get_system_health": {
-      const res = await fetcher("/api/health");
-      if (res?.app !== "openmausbot") throw new Error("The configured endpoint is not an OpenMausBot server");
-      return {
-        status: "connected",
-        endpoint: discoveredBaseUrl ?? OMB_BASE_URL,
-        app: "openmausbot",
-        packaged: Boolean(res.static),
-      };
-    }
-
-    case "list_bots": {
-      const res = await fleet(fetcher);
-      return { bots: records(res.bots).map(projectBot) };
-    }
-
-    case "get_bot_messages": {
-      const botId = idArg(args, "bot_id");
-      const res = await fleet(fetcher);
-      const bot = records(res.bots).find((candidate) => candidate.id === botId);
-      if (!bot) throw new Error(`Bot not found: ${botId}`);
-      const taskId = args.task_id === undefined ? String(bot.threadId) : idArg(args, "task_id");
-      if (!taskBelongsTo(bot, taskId)) throw new Error(`Task '${taskId}' does not belong to bot '${botId}'`);
-      const limit = parsePositiveLimit(args.limit, 30, 200);
-      const page = await fetcher(`/api/threads/${encodeURIComponent(taskId)}/messages?limit=${limit}`);
-      return {
-        bot: projectBot(bot),
-        taskId,
-        messages: records(page.messages).map(projectMessage),
-        hasMore: Boolean(page.hasMore),
-      };
-    }
-
-    case "send_bot_message": {
-      const botId = idArg(args, "bot_id");
-      const text = stringArg(args, "text", { trim: true, max: 100_000 });
-      const state = await fleet(fetcher);
-      const bot = records(state.bots).find((candidate) => candidate.id === botId);
-      if (!bot) throw new Error(`Bot not found: ${botId}`);
-      const taskId = args.task_id === undefined ? String(bot.threadId) : idArg(args, "task_id");
-      if (!taskBelongsTo(bot, taskId)) throw new Error(`Task '${taskId}' does not belong to bot '${botId}'`);
-      const busyChannel = records(state.groups).find((channel) => channel.busyBotId === botId);
-      if (busyChannel) {
-        throw new Error(`Bot '${botId}' is working in channel '${busyChannel.id}'; send to or interrupt that channel instead`);
-      }
-      await fetcher(`/api/bots/${encodeURIComponent(botId)}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ text, threadId: taskId }),
-      });
-      return { success: true, botId, taskId };
-    }
-
-    case "create_bot": {
-      const name = stringArg(args, "name", { max: 100 });
-      const title = optionalStringArg(args, "title", { trim: false, allowEmpty: true, max: 200 });
-      const description = optionalStringArg(args, "description", { trim: false, allowEmpty: true, max: 4_000 });
-      const section = optionalStringArg(args, "section", { max: 60 });
-      const wantsModel = args.instance_id !== undefined || args.model !== undefined || args.effort !== undefined;
-      if (wantsModel && (args.instance_id === undefined || args.model === undefined)) {
-        throw new ToolInputError("instance_id and model must be provided together");
-      }
-      const selection = wantsModel ? await checkedModelSelection(args, fetcher) : undefined;
-      const created = await fetcher("/api/bots", {
-        method: "POST",
-        body: JSON.stringify({
-          name,
-          ...(title !== undefined ? { title } : {}),
-          ...(description !== undefined ? { description } : {}),
-          ...(section !== undefined ? { section } : {}),
-          ...(selection ? { modelSelection: selection, requireAvailableModel: true } : {}),
-        }),
-      });
-      if (!isRecord(created?.bot) || typeof created.bot.id !== "string") {
-        throw new Error("OpenMausBot did not return the created bot");
-      }
-      return { success: true, bot: projectBot(created.bot) };
-    }
-
-    case "update_bot_profile": {
-      const botId = idArg(args, "bot_id");
-      const patch: Record<string, unknown> = {};
-      if (args.name !== undefined) patch.name = stringArg(args, "name", { max: 100 });
-      if (args.title !== undefined) patch.title = stringArg(args, "title", { trim: false, allowEmpty: true, max: 200 });
-      if (args.description !== undefined) patch.description = stringArg(args, "description", { trim: false, allowEmpty: true, max: 4_000 });
-      if ("section" in args) patch.section = args.section === null ? null : stringArg(args, "section", { max: 60 });
-      if (!Object.keys(patch).length) throw new ToolInputError("provide at least one profile field to update");
-      const result = await fetcher(`/api/bots/${encodeURIComponent(botId)}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-      if (!isRecord(result?.bot)) {
-        throw new Error("OpenMausBot did not return the updated bot");
-      }
-      return { success: true, bot: projectBot(result.bot) };
-    }
-
-    case "list_channels": {
-      const res = await fleet(fetcher);
-      return { channels: records(res.groups).map(projectChannel) };
-    }
-
-    case "get_channel_messages": {
-      const channelId = idArg(args, "channel_id");
-      const res = await fleet(fetcher);
-      const channel = records(res.groups).find((candidate) => candidate.id === channelId);
-      if (!channel) throw new Error(`Channel not found: ${channelId}`);
-      const taskId = args.task_id === undefined ? String(channel.threadId) : idArg(args, "task_id");
-      if (!taskBelongsTo(channel, taskId)) throw new Error(`Task '${taskId}' does not belong to channel '${channelId}'`);
-      const limit = parsePositiveLimit(args.limit, 30, 200);
-      const page = await fetcher(`/api/threads/${encodeURIComponent(taskId)}/messages?limit=${limit}`);
-      return {
-        channel: projectChannel(channel),
-        taskId,
-        messages: records(page.messages).map(projectMessage),
-        hasMore: Boolean(page.hasMore),
-      };
-    }
-
-    case "send_channel_message": {
-      const channelId = idArg(args, "channel_id");
-      const text = stringArg(args, "text", { trim: true, max: 100_000 });
-      const state = await fleet(fetcher);
-      const channel = records(state.groups).find((candidate) => candidate.id === channelId);
-      if (!channel) throw new Error(`Channel not found: ${channelId}`);
-      const taskId = args.task_id === undefined ? String(channel.threadId) : idArg(args, "task_id");
-      if (!taskBelongsTo(channel, taskId)) {
-        throw new Error(`Task '${taskId}' does not belong to channel '${channelId}'`);
-      }
-      if (channel.threadId !== taskId) {
-        throw new Error(`Task '${taskId}' is not active for channel '${channelId}'; switch to it before sending`);
-      }
-      await fetcher(`/api/groups/${encodeURIComponent(channelId)}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ text, threadId: taskId }),
-      });
-      return { success: true, channelId, taskId };
-    }
-
-    case "create_channel": {
-      const name = stringArg(args, "name", { max: 100 });
-      const memberIds = stringArrayArg(args, "member_ids");
-      const section = optionalStringArg(args, "section", { max: 60 });
-      const bulletin = optionalStringArg(args, "bulletin", { trim: false, allowEmpty: true, max: 12_000 }) ?? "";
-      const requestedResponder = normalizeResponder(args.default_responder);
-      if (requestedResponder?.kind === "member" && !memberIds.includes(requestedResponder.botId)) {
-        throw new ToolInputError("default_responder bot must be a channel member");
-      }
-      const responder = requestedResponder ?? { kind: "member", botId: memberIds[0] };
-      const created = await fetcher("/api/groups", {
-        method: "POST",
-        body: JSON.stringify({
-          name,
-          memberIds,
-          ...(section ? { section } : {}),
-          setup: { bulletin, defaultResponder: responder },
-        }),
-      });
-      if (!isRecord(created?.group) || typeof created.group.id !== "string") {
-        throw new Error("OpenMausBot did not return the created channel");
-      }
-      return { success: true, channel: projectChannel(created.group) };
-    }
-
-    case "update_channel": {
-      const channelId = idArg(args, "channel_id");
-      const patch: Record<string, unknown> = {};
-      if (args.name !== undefined) patch.name = stringArg(args, "name", { max: 100 });
-      if (args.member_ids !== undefined) patch.memberIds = stringArrayArg(args, "member_ids");
-      if (args.section !== undefined) patch.section = args.section === null ? null : stringArg(args, "section", { max: 60 });
-      if (args.bulletin !== undefined) patch.bulletin = stringArg(args, "bulletin", { trim: false, allowEmpty: true, max: 12_000 });
-      if (args.default_responder !== undefined) patch.defaultResponder = normalizeResponder(args.default_responder);
-      if (Object.keys(patch).length === 0) throw new ToolInputError("provide at least one channel field to update");
-      const memberIds = patch.memberIds as string[] | undefined;
-      const responder = patch.defaultResponder as Record<string, string> | undefined;
-      if (memberIds && responder?.kind === "member" && !memberIds.includes(responder.botId)) {
-        throw new ToolInputError("default_responder bot must be a channel member");
-      }
-      const result = await fetcher(`/api/groups/${encodeURIComponent(channelId)}`, {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-      if (!isRecord(result?.group)) {
-        throw new Error("OpenMausBot did not return the updated channel");
-      }
-      return { success: true, channel: projectChannel(result.group) };
-    }
-
-    case "create_task": {
-      const targetId = idArg(args, "target_id");
-      const title = optionalStringArg(args, "title", { max: 80 });
-      const route = taskRoute(args.target_type, targetId);
-      const result = await fetcher(route, { method: "POST", body: JSON.stringify(title ? { title } : {}) });
-      if (!isRecord(result?.task) || typeof result.task.threadId !== "string") {
-        throw new Error("OpenMausBot did not return the created task");
-      }
-      const activeTaskId = result.bot?.threadId ?? result.group?.threadId ?? result.task?.threadId;
-      return {
-        success: true,
-        targetType: args.target_type,
-        targetId,
-        task: projectTask(result.task, activeTaskId),
-      };
-    }
-
-    case "switch_task": {
-      const targetId = idArg(args, "target_id");
-      const taskId = idArg(args, "task_id");
-      const route = taskRoute(args.target_type, targetId);
-      const result = await fetcher(`${route}/${encodeURIComponent(taskId)}?messages=0`, { method: "POST", body: "{}" });
-      const target = args.target_type === "bot" ? result.bot : result.group;
-      return {
-        success: true,
-        targetType: args.target_type,
-        targetId,
-        taskId,
-        ...(isRecord(target)
-          ? { target: args.target_type === "bot" ? projectBot(target) : projectChannel(target) }
-          : {}),
-      };
-    }
-
-    case "rename_task": {
-      const targetId = idArg(args, "target_id");
-      const taskId = idArg(args, "task_id");
-      const title = stringArg(args, "title", { max: 80 });
-      const route = taskRoute(args.target_type, targetId);
-      const result = await fetcher(`${route}/${encodeURIComponent(taskId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ title }),
-      });
-      if (!isRecord(result?.task)) {
-        throw new Error("OpenMausBot did not return the renamed task");
-      }
-      return {
-        success: true,
-        targetType: args.target_type,
-        targetId,
-        task: projectTask(result.task, undefined),
-      };
-    }
-
-    case "search_messages": {
-      const query = stringArg(args, "query", { max: 500 });
-      const limit = parsePositiveLimit(args.limit, 40, 100);
-      const params = new URLSearchParams({ q: query, limit: String(limit) });
-      if (args.task_id !== undefined) params.set("threadId", idArg(args, "task_id"));
-      const result = await fetcher(`/api/search?${params.toString()}`);
-      return { hits: records(result.hits) };
-    }
-
-    case "wait_for_conversation": {
-      const targetType = args.target_type;
-      if (targetType !== "bot" && targetType !== "channel") {
-        throw new ToolInputError("target_type must be bot or channel");
-      }
-      const targetId = idArg(args, "target_id");
-      const timeoutSeconds = parsePositiveLimit(args.timeout_seconds, 30, 120);
-      const deadline = Date.now() + timeoutSeconds * 1_000;
-      const startupGraceDeadline = Math.min(deadline, Date.now() + 750);
-      let state = await fleet(fetcher);
-      const collection = targetType === "bot" ? records(state.bots) : records(state.groups);
-      let target = collection.find((candidate) => candidate.id === targetId);
-      if (!target) throw new Error(`${targetType === "bot" ? "Bot" : "Channel"} not found: ${targetId}`);
-      const taskId = args.task_id === undefined ? String(target.threadId) : idArg(args, "task_id");
-      if (!taskBelongsTo(target, taskId)) {
-        throw new Error(`Task '${taskId}' does not belong to ${targetType} '${targetId}'`);
-      }
-      let sawBusy = false;
-      while (true) {
-        const liveCollection = targetType === "bot" ? records(state.bots) : records(state.groups);
-        target = liveCollection.find((candidate) => candidate.id === targetId);
-        if (!target) throw new Error(`${targetType === "bot" ? "Bot" : "Channel"} not found: ${targetId}`);
-        if (!taskBelongsTo(target, taskId)) {
-          throw new Error(`Task '${taskId}' no longer belongs to ${targetType} '${targetId}'`);
-        }
-        const projectedTarget = targetType === "bot" ? projectBot(target) : projectChannel(target);
-        const terminal = async (status: string, existingTail?: Awaited<ReturnType<typeof conversationTail>>) => {
-          const tail = existingTail ?? await conversationTail(fetcher, taskId);
-          const needsInput = tail.raw.some(messageNeedsInput);
-          const terminalStatus = status === "settled" && dispatchFailedAfterLatestUser(tail.raw)
-            ? "failed"
-            : status;
-          return {
-            status: needsInput ? "needs-user" : terminalStatus,
-            targetType,
-            targetId,
-            taskId,
-            target: projectedTarget,
-            messages: tail.messages,
-            hasMore: tail.hasMore,
-          };
-        };
-
-        if (targetType === "bot") {
-          const task = botTaskState(target, taskId);
-          const busyChannel = task === target && records(state.groups).find((channel) => channel.busyBotId === targetId);
-          if (busyChannel) {
-            throw new Error(`Bot '${targetId}' is working in channel '${busyChannel.id}'; wait on that channel instead`);
-          }
-          if (task.activity === "waiting-on-you") return terminal("needs-user");
-          if (task.activity === "dead") return terminal("failed");
-          if (task.activity === "no-signal") return terminal("stalled");
-          if (!task.busy) return terminal("settled");
-          sawBusy = true;
-        } else {
-          if (target.threadId !== taskId) return terminal("settled");
-          const tail = await conversationTail(fetcher, taskId);
-          if (tail.raw.some(messageNeedsInput)) {
-            return terminal("needs-user", tail);
-          }
-          const channelWorking = target.working === true || Boolean(target.busyBotId);
-          if (channelWorking) {
-            sawBusy = true;
-            const busyBotId = target.busyBotId;
-            if (busyBotId) {
-              const speaker = records(state.bots).find((bot) => bot.id === busyBotId);
-              if (!speaker) return terminal("stalled");
-              if (speaker.activity === "waiting-on-you") return terminal("needs-user");
-              if (speaker.activity === "dead") return terminal("failed");
-              if (speaker.activity === "no-signal") return terminal("stalled");
-            }
-          } else {
-            const latest = tail.raw.at(-1);
-            // New servers expose `working` synchronously before returning a
-            // channel send. The short grace remains only for older servers
-            // that have no operation-level field and report a user message
-            // just before their first speaker becomes busy.
-            if (sawBusy || target.working === false || latest?.role !== "user") {
-              return terminal("settled", tail);
-            }
-            if (Date.now() >= startupGraceDeadline) {
-              return terminal("settled", tail);
-            }
-          }
-        }
-
-        if (Date.now() >= deadline) return terminal("timed-out");
-        await sleep(Math.min(500, Math.max(0, deadline - Date.now())), signal);
-        state = await fleet(fetcher);
-      }
-    }
-
-    case "set_bot_model": {
-      const botId = idArg(args, "bot_id");
-      const current = await fleet(fetcher);
-      const bot = records(current.bots).find((candidate) => candidate.id === botId);
-      if (!bot) throw new Error(`Bot not found: ${botId}`);
-      if (args.task_id !== undefined) {
-        const taskId = idArg(args, "task_id");
-        if (!taskBelongsTo(bot, taskId)) throw new Error(`Task '${taskId}' does not belong to bot '${botId}'`);
-        if (botTaskState(bot, taskId).busy) throw new Error("Interrupt the task or let it finish before changing its model");
-        const selection = await checkedModelSelection(args, fetcher);
-        const res = await fetcher(`${taskRoute("bot", botId)}/${encodeURIComponent(taskId)}`, {
-          method: "PATCH",
-          body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
-        });
-        if (!isRecord(res?.task)) throw new Error("OpenMausBot did not return the updated task");
-        return { success: true, botId, task: projectTask(res.task, bot.threadId) };
-      }
-      if (bot.busy) throw new Error("Interrupt the bot or let it finish before changing its model");
-      const selection = await checkedModelSelection(args, fetcher);
-      const res = await fetcher(`/api/bots/${encodeURIComponent(botId)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ modelSelection: selection, requireAvailableModel: true }),
-      });
-      return { success: true, bot: projectBot(res.bot) };
-    }
-
-    case "edit_bot_message": {
-      const botId = idArg(args, "bot_id");
-      const messageId = idArg(args, "message_id");
-      const text = String(args.text ?? "").trim();
-      if (!text) throw new Error("text is required");
-      const current = await fleet(fetcher);
-      const bot = records(current.bots).find((candidate) => candidate.id === botId);
-      if (!bot) throw new Error(`Bot not found: ${botId}`);
-      let threadId: string | undefined;
-      if (args.task_id !== undefined) {
-        threadId = idArg(args, "task_id");
-        if (!taskBelongsTo(bot, threadId)) throw new Error(`Task '${threadId}' does not belong to bot '${botId}'`);
-        if (botTaskState(bot, threadId).busy) throw new Error("Interrupt the task or let it finish before editing a message");
-      } else if (bot.busy) {
-        // the server refuses a rewind under a live turn — branching beneath
-        // a dying turn is how a thread ends up with two tails
-        throw new Error("Interrupt the bot or let it finish before editing a message");
-      }
-      const res = await fetcher(
-        `/api/bots/${encodeURIComponent(botId)}/messages/${encodeURIComponent(messageId)}/edit`,
-        { method: "POST", body: JSON.stringify({ text, ...(threadId ? { threadId } : {}) }) },
-      );
-      return { success: true, botId, message: res?.message ?? null };
-    }
-
-    case "list_available_models": {
-      const res = await fetcher("/api/instances");
-      return {
-        instances: records(res.instances).map((instance) => ({
-          instanceId: instance.instanceId,
-          driverKind: instance.driverKind,
-          displayName: instance.displayName,
-          snapshot: { state: instance.snapshot?.state },
-          models: instance.models,
-          capabilities: instance.capabilities,
-          access: instance.access,
-        })),
-      };
-    }
-
-    case "interrupt_conversation": {
-      const targetType = args.target_type;
-      if (targetType !== "bot" && targetType !== "channel") {
-        throw new ToolInputError("target_type must be bot or channel");
-      }
-      const targetId = idArg(args, "target_id");
-      const current = await fleet(fetcher);
-      const target = (targetType === "bot" ? records(current.bots) : records(current.groups))
-        .find((candidate) => candidate.id === targetId);
-      if (!target) throw new Error(`${targetType === "bot" ? "Bot" : "Channel"} not found: ${targetId}`);
-      const taskId = args.task_id === undefined ? String(target.threadId) : idArg(args, "task_id");
-      if (!taskBelongsTo(target, taskId)) throw new Error(`Task '${taskId}' does not belong to ${targetType} '${targetId}'`);
-      if (targetType === "bot") {
-        const busyChannel = botTaskState(target, taskId) === target && records(current.groups).find((channel) => channel.busyBotId === targetId);
-        if (busyChannel) {
-          throw new Error(`Bot '${targetId}' is working in channel '${busyChannel.id}'; interrupt that channel instead`);
-        }
-      }
-      const route = targetType === "bot" ? "bots" : "groups";
-      await fetcher(`/api/${route}/${encodeURIComponent(targetId)}/interrupt`, {
-        method: "POST",
-        body: JSON.stringify({ threadId: taskId }),
-      });
-      return { success: true, targetType, targetId, taskId };
-    }
-
-    default:
-      throw new ToolInputError(`Unknown tool: ${name}`);
-  }
+  const handler = (TOOL_HANDLERS as Record<string, ToolHandler>)[name];
+  if (!handler) throw new ToolInputError(`Unknown tool: ${name}`);
+  return handler(args, {
+    fetch: fetcher,
+    signal,
+    endpoint: () => discoveredBaseUrl ?? OMB_BASE_URL,
+  });
 }
 
 export function formatResponse(id: string | number | null, result?: unknown, error?: { code?: number; message?: string }) {
