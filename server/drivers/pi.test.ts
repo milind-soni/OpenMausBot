@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
@@ -615,6 +615,149 @@ describe("PiDriver turns (fake CLI)", () => {
     };
     expect(written.providers.omlx.baseUrl).toBe("http://127.0.0.1:8080/v1");
     expect(written.providers.omlx.models.some((m) => m.id === "MiniMax-M3-4bit")).toBe(true);
+  });
+});
+
+describe("rpc protocol v2", () => {
+  // Throwaway v2-capable pi, written per test the way the codex
+  // device-auth fixture writes its fake CLI (spawnCli resolves the shebang
+  // to node <script>, so it runs everywhere). FAKE_PI_V2_MODE picks the
+  // flavor; "vanilla" ignores negotiate_protocol like pi 0.82.1.
+  const V2_FAKE = `#!/usr/bin/env node
+  const mode = process.env.FAKE_PI_V2_MODE ?? "vanilla";
+  const send = (obj) => process.stdout.write(JSON.stringify(obj) + "\\n");
+  const chunk = (payload, chunkId, count) => {
+    const bytes = Buffer.from(JSON.stringify(payload));
+    const size = Math.ceil(bytes.length / count);
+    for (let i = 0; i < count; i++) {
+      const part = bytes.subarray(i * size, i * size + size);
+      send({ type: "rpc_chunk", chunkId, index: i, count, byteLength: part.length, data: part.toString("base64") });
+    }
+  };
+  const catalog = {
+    type: "response",
+    command: "get_available_models",
+    success: true,
+    data: {
+      models: [
+        { provider: "ollama-cloud", id: "glm-5.2", name: "glm-5.2" },
+        { provider: "openai", id: "gpt-4o", name: "GPT-4o" },
+      ],
+    },
+  };
+  let buf = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (c) => {
+    buf += c;
+    let nl;
+    while ((nl = buf.indexOf("\\n")) !== -1) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (!line.trim()) continue;
+      let cmd;
+      try {
+        cmd = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      switch (cmd.type) {
+        case "negotiate_protocol":
+          if (mode !== "vanilla") {
+            send({ type: "response", command: "negotiate_protocol", success: true, data: { protocolVersion: 2 } });
+          }
+          continue;
+        case "get_available_models":
+          if (mode === "chunked-catalog") chunk(catalog, "models-1", 3);
+          else send(catalog);
+          continue;
+        case "new_session":
+          send({ type: "response", command: "new_session", success: true, data: { sessionId: "s-1", sessionFile: "/fake/v2-session.json" } });
+          continue;
+        case "prompt":
+          send({ type: "response", command: "prompt", success: true });
+          send({ type: "agent_start" });
+          send({ type: "turn_start" });
+          if (mode === "chunked-turn") {
+            chunk({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello from chunks" } }, "delta-1", 2);
+            // wrong index for its count: the driver must drop the group and keep going
+            send({ type: "rpc_chunk", chunkId: "bad-1", index: 3, count: 2, byteLength: 2, data: Buffer.from("no").toString("base64") });
+            chunk({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 9, output: 1 } }, usage: { input: 9, output: 1 } }, "end-1", 3);
+          } else {
+            send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Hello unchunked" } });
+            send({ type: "turn_end", message: { stopReason: "end_turn", usage: { input: 9, output: 1 } }, usage: { input: 9, output: 1 } });
+          }
+          send({ type: "agent_end" });
+          continue;
+        default:
+          continue;
+      }
+    }
+  });
+  process.stdin.on("end", () => process.exit(0));
+  `;
+
+  let v2Cli: string;
+
+  beforeEach(() => {
+    ensureDirs();
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-v2-"));
+    v2Cli = join(dir, "fake-pi-v2.mjs");
+    writeFileSync(v2Cli, V2_FAKE, { mode: 0o755 });
+    chmodSync(v2Cli, 0o755);
+  });
+
+  it("reassembles a 3-chunk get_available_models response into the full catalog", async () => {
+    const catalog = await fetchPiModels(v2Cli, {
+      PATH: process.env.PATH ?? "",
+      HOME: join(tmpdir(), "omb-pi-v2-no-settings"),
+      FAKE_PI_V2_MODE: "chunked-catalog",
+    });
+    expect(catalog.options).toEqual([
+      { id: "ollama-cloud/glm-5.2", label: "glm-5.2", custom: true, provider: "ollama-cloud" },
+      { id: "openai/gpt-4o", label: "GPT-4o", custom: true, provider: "openai" },
+    ]);
+    expect(catalog.default).toBe("ollama-cloud/glm-5.2");
+  });
+
+  it("still parses today's unchunked catalog when the server never negotiates", async () => {
+    const catalog = await fetchPiModels(FAKE_CLI, {
+      PATH: process.env.PATH ?? "",
+      HOME: join(tmpdir(), "omb-pi-v2-vanilla"),
+    });
+    expect(catalog.options.map((o) => o.id)).toEqual(["ollama-cloud/glm-5.2", "openai/gpt-4o"]);
+  });
+
+  it("reassembles chunked turn frames and drops a corrupt chunk group without crashing", async () => {
+    const errors: string[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+      errors.push(args.map(String).join(" "));
+    });
+    try {
+      const home = mkdtempSync(join(tmpdir(), "omb-pi-v2-turn-"));
+      const instance = await PiDriver.create({
+        instanceId: "pi-v2-turn",
+        displayName: undefined,
+        environment: { HOME: home, FAKE_PI_V2_MODE: "chunked-turn" },
+        enabled: true,
+        config: { cli: v2Cli, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        const { turnId } = await instance.adapter.sendTurn({ threadId: "t-v2-chunks", text: "hi" });
+        const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+        expect(done).toMatchObject({ ok: true, stopReason: "end_turn", usage: { input: 9, output: 1 } });
+        expect(
+          recorder.events.find((e) => e.type === "content.delta" && (e as { delta?: string }).delta === "Hello from chunks"),
+        ).toMatchObject({ streamKind: "assistant_text" });
+        expect(errors.filter((line) => line.includes("rpc_chunk"))).toHaveLength(1);
+        expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(false);
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+      }
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
 

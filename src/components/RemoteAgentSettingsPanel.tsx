@@ -26,7 +26,7 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
   const pendingPatch = useRef<RemoteProfilePatch | null>(null);
   const patchQueue = useRef<Promise<void> | null>(null);
 
-  const close = () => dispatch({ type: "toggleSettings", open: false });
+  const close = () => dispatch({ type: "closeOverlay", kind: "settings" });
   const patch = (next: RemoteProfilePatch): Promise<void> => {
     pendingPatch.current = { ...pendingPatch.current, ...next };
     if (patchQueue.current) return patchQueue.current;

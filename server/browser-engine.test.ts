@@ -20,6 +20,7 @@ import {
   isMusl,
   pinnedBinaryPath,
   prepareBrowserSessionState,
+  recycleBrowserDaemon,
   resolveAgentBrowserBinary,
 } from "./browser-engine.ts";
 import { AGENT_BROWSER_VERSION, agentBrowserReleaseUrl, agentBrowserReleaseVersion, resolveAgentBrowserReleaseAsset } from "./browser-engine-release.ts";
@@ -156,6 +157,102 @@ describe("deleting one browser session's saved logins", () => {
     const { options } = fixture();
     expect(await clearBrowserSessionState("fixture-browser", session, options)).toBe(false);
     expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("recycling a wedged browser daemon", () => {
+  function fixture(namespace?: string) {
+    const home = mkdtempSync(join(tmpdir(), "omb-browser-recycle-"));
+    scratch.push(home);
+    const directory = namespace ? join(home, ".agent-browser", "namespaces", namespace, "run") : join(home, ".agent-browser");
+    mkdirSync(directory, { recursive: true });
+    const env: NodeJS.ProcessEnv = { HOME: home, USERPROFILE: home, ...(namespace ? { AGENT_BROWSER_NAMESPACE: namespace } : {}) };
+    return { home, directory, env };
+  }
+
+  /** A stand-in for the detached engine daemon: a real process OMB did not
+   * spawn as a child of any CLI, ending only when recycled or killed. */
+  function daemon(script = "setInterval(() => {}, 5000)"): ReturnType<typeof spawn> & { exited: Promise<void> } {
+    const child = spawn(process.execPath, ["-e", script], { stdio: "ignore" });
+    return Object.assign(child, { exited: new Promise<void>((done) => child.once("close", () => done())) });
+  }
+
+  it("terminates the daemon process and clears its cached socket/pid files", async () => {
+    const { directory, env } = fixture();
+    const child = daemon();
+    try {
+      expect(child.pid).toBeTruthy();
+      writeFileSync(join(directory, "work.pid"), String(child.pid));
+      for (const name of ["work.sock", "work.version", "work.config", "work.stream"]) writeFileSync(join(directory, name), "stale");
+      expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: "work" }, 2_000)).toBe(true);
+      await child.exited;
+      for (const name of ["work.pid", "work.sock", "work.version", "work.config", "work.stream"]) expect(existsSync(join(directory, name)), name).toBe(false);
+    } finally {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+    }
+  });
+
+  it("force-kills a daemon that outlives the graceful term", async () => {
+    const { directory, env } = fixture();
+    const child = daemon('process.on("SIGTERM", () => {}); setInterval(() => {}, 100);');
+    try {
+      writeFileSync(join(directory, "work.pid"), String(child.pid));
+      expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: "work" }, 1_500)).toBe(true);
+      await child.exited;
+      expect(existsSync(join(directory, "work.pid"))).toBe(false);
+    } finally {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+    }
+  });
+
+  it("clears a stale socket when no daemon pid exists, so the next command spawns fresh", async () => {
+    const { directory, env } = fixture();
+    writeFileSync(join(directory, "work.sock"), "stale");
+    expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: "work" })).toBe(true);
+    expect(existsSync(join(directory, "work.sock"))).toBe(false);
+  });
+
+  it("reaches the daemon through its namespace run directory", async () => {
+    const { directory, env } = fixture("omb-fleet");
+    const child = daemon();
+    try {
+      writeFileSync(join(directory, "work.pid"), String(child.pid));
+      writeFileSync(join(directory, "work.sock"), "stale");
+      expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: "work" }, 2_000)).toBe(true);
+      await child.exited;
+      expect(existsSync(join(directory, "work.sock"))).toBe(false);
+    } finally {
+      try { child.kill("SIGKILL"); } catch { /* already exited */ }
+    }
+  });
+
+  it("prefers the explicit socket dir and the XDG runtime over the home directory", async () => {
+    const { directory: homeDirectory, env } = fixture();
+    const socketDir = mkdtempSync(join(tmpdir(), "omb-browser-sockets-"));
+    const runtimeDir = mkdtempSync(join(tmpdir(), "omb-browser-runtime-"));
+    scratch.push(socketDir, runtimeDir);
+    mkdirSync(join(runtimeDir, "agent-browser"), { recursive: true });
+    for (const directory of [homeDirectory, join(runtimeDir, "agent-browser")]) writeFileSync(join(directory, "work.sock"), "stale");
+    writeFileSync(join(socketDir, "work.sock"), "stale");
+    expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: "work", AGENT_BROWSER_SOCKET_DIR: socketDir })).toBe(true);
+    expect(existsSync(join(socketDir, "work.sock"))).toBe(false);
+    expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: "work", XDG_RUNTIME_DIR: runtimeDir })).toBe(true);
+    expect(existsSync(join(runtimeDir, "agent-browser", "work.sock"))).toBe(false);
+    expect(existsSync(join(homeDirectory, "work.sock"))).toBe(true); // a lower-priority dir is never touched
+  });
+
+  it.each(["", "../work", "work/client", "x".repeat(97)])("refuses an invalid session %j without touching files", async (session) => {
+    const { directory, env } = fixture();
+    writeFileSync(join(directory, "work.sock"), "stale");
+    expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_SESSION: session })).toBe(false);
+    expect(existsSync(join(directory, "work.sock"))).toBe(true);
+  });
+
+  it("refuses an invalid namespace rather than guessing its socket directory", async () => {
+    const { directory, env } = fixture();
+    writeFileSync(join(directory, "work.sock"), "stale");
+    expect(await recycleBrowserDaemon({ ...env, AGENT_BROWSER_NAMESPACE: "Bad/Name", AGENT_BROWSER_SESSION: "work" })).toBe(false);
+    expect(existsSync(join(directory, "work.sock"))).toBe(true);
   });
 });
 

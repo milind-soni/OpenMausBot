@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import { browserRuntimeEnv, type BrowserRuntime } from "./browser-runtime.ts";
-import { closeBrowserSession } from "./browser-engine.ts";
+import { closeBrowserSession, recycleBrowserDaemon } from "./browser-engine.ts";
 
 const execute = promisify(execFile);
 const MAX_FRAME = 3 * 1024 * 1024;
@@ -79,6 +79,25 @@ export function browserStreamPort(value: unknown): number {
     throw new BrowserLiveError("The browser did not provide a valid local stream. Update or reinstall the browser engine.", 503);
   }
   return data.port;
+}
+
+interface BrowserCommandFailure { detail: string; missingBinary: boolean; }
+
+/** A bounded, single-line excerpt of the engine's own failure, plus whether
+ * that failure actually names a missing binary — the only case where telling
+ * the viewer to check the installed engine can help. A Chrome launch failure
+ * (the common 503 behind this path) is not a missing engine, and hiding its
+ * reason sent operators hunting for the daemon PID by hand. */
+function browserCommandFailure(error: unknown): BrowserCommandFailure {
+  if (!(error instanceof Error)) return { detail: "", missingBinary: false };
+  const execution = error as NodeJS.ErrnoException & { stderr?: unknown };
+  const source = typeof execution.stderr === "string" && execution.stderr.trim() ? execution.stderr : error.message;
+  return { detail: source.replace(/\s+/gu, " ").trim().slice(0, 400), missingBinary: execution.code === "ENOENT" };
+}
+
+function browserCommandFailureMessage(failure: BrowserCommandFailure): string {
+  const core = failure.detail ? `The browser could not complete this action: ${failure.detail}` : "The browser could not complete this action.";
+  return failure.missingBinary ? `${core} Check that the browser engine is installed, then reconnect.` : core;
 }
 
 type Action = { type: "take" | "release" | "restart" } | { type: "ack"; seq: number }
@@ -254,21 +273,37 @@ export class BrowserLive {
     if (viewer.pressedKeys.size || viewer.pressedButtons.size) this.runtime.abandonHumanInput(viewer.session, viewer.id);
   }
 
-  private async command(viewer: Viewer, args: string[]): Promise<ObjectValue> {
+  private async runViewerCommand(viewer: Viewer, args: string[], env: NodeJS.ProcessEnv): Promise<ObjectValue> {
+    const { stdout } = await execute(viewer.spec.command, [...args, "--json", "--no-webmcp"], {
+      env, timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
+    });
+    if (!this.current(viewer)) throw new Error("stale viewer");
+    const result = object(JSON.parse(stdout));
+    const data = object(result?.data);
+    if (result?.success !== true || !data) throw new Error("browser command failed");
+    return data;
+  }
+
+  private async command(viewer: Viewer, args: string[], options: { launch?: boolean } = {}): Promise<ObjectValue> {
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
+    const failed = (error: unknown): BrowserLiveError => new BrowserLiveError(browserCommandFailureMessage(browserCommandFailure(error)), 503);
     try {
-      const { stdout } = await execute(viewer.spec.command, [...args, "--json", "--no-webmcp"], {
-        env, timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
-      });
-      if (!this.current(viewer)) throw new Error("stale viewer");
-      const result = object(JSON.parse(stdout));
-      const data = object(result?.data);
-      if (result?.success !== true || !data) throw new Error("browser command failed");
-      return data;
+      return await this.runViewerCommand(viewer, args, env);
     } catch (error) {
       console.warn("browser-live:", error);
-      throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503);
+      if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
+      // A daemon holding broken Chrome launch state fails every command,
+      // including close (it needs Chrome too), so reconnecting alone loops on
+      // this 503 forever. End that daemon and retry the launch once against
+      // the fresh one; only a launch may recycle, never an in-page action.
+      if (!options.launch || !(await recycleBrowserDaemon(env).catch(() => false))) throw failed(error);
+      try { return await this.runViewerCommand(viewer, args, env); }
+      catch (error) {
+        console.warn("browser-live:", error);
+        if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
+        throw failed(error);
+      }
     }
   }
 
@@ -327,15 +362,15 @@ export class BrowserLive {
     options.res.once("close", () => this.close(viewer));
     options.res.once("error", () => this.close(viewer));
     try {
-      let status = await this.command(viewer, ["stream", "status"]);
+      let status = await this.command(viewer, ["stream", "status"], { launch: true });
       if (status.enabled !== true) {
-        try { status = await this.command(viewer, ["stream", "enable"]); }
+        try { status = await this.command(viewer, ["stream", "enable"], { launch: true }); }
         catch { status = await this.command(viewer, ["stream", "status"]); } // Another view may have enabled the same session.
       }
       const port = browserStreamPort(status);
       viewer.port = port;
       // `open` without a URL is an idempotent launch, never navigation away from the bot's page.
-      if (status.connected !== true) await this.command(viewer, ["open"]);
+      if (status.connected !== true) await this.command(viewer, ["open"], { launch: true });
       const socket = new WebSocket(`ws://127.0.0.1:${port}/?pacing=ack&maxFps=15`);
       viewer.socket = socket;
       options.res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", "X-Accel-Buffering": "no", Connection: "keep-alive" });

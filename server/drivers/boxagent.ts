@@ -15,11 +15,10 @@ import type {
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
-  RuntimeEvent,
-  RuntimeEventListener,
   SendTurnInput,
 } from "../contracts.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { newId } from "../contracts.ts";
+import { createDriverSessionRuntime } from "./driver-runtime.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "boxAgent";
@@ -75,19 +74,16 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
   async create(input: DriverCreateInput<BoxAgentConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
     const token = input.environment.BOX_TOKEN ?? process.env.BOX_TOKEN ?? "";
-    const listeners = new Set<RuntimeEventListener>();
-    const active = new Map<string, { cancel: () => void; turnId: string; boxId: string }>();
-
-    const emit = (event: RuntimeEvent) => {
-      for (const l of Array.from(listeners)) l(event);
-    };
-    const base = (threadId: string, turnId: string) => ({
-      eventId: newEventId(),
-      provider: DRIVER_KIND,
-      threadId,
-      turnId,
-      createdAt: new Date().toISOString(),
+    interface Turn {
+      cancel: () => void;
+      turnId: string;
+      boxId: string;
+    }
+    const runtime = createDriverSessionRuntime<Turn>({
+      driverKind: DRIVER_KIND,
+      stopTurn: (turn) => turn.cancel(),
     });
+    const { emit, base } = runtime;
 
     const api = async (path: string, opts: RequestInit = {}) => {
       const res = await fetch(`${BOX_API}${path}`, {
@@ -110,7 +106,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
       if (!boxId) {
         throw new Error("this bot has no computer yet — open the Computer panel and provision one");
       }
-      if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      runtime.assertThreadIdle(threadId);
       const turnId = newId();
       const model = turn.model || MODELS.default;
 
@@ -134,7 +130,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
       const promptId = started?.promptRun?.id ?? started?.prompt?.id ?? started?.promptId ?? null;
 
       let cancelled = false;
-      active.set(threadId, {
+      runtime.setTurn(threadId, {
         turnId,
         boxId,
         cancel: () => {
@@ -209,7 +205,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
               // below can never see a terminal state, so settle off the
               // events themselves instead of hanging to the 30-min ceiling
               if (!promptId && /complete|finish|done|success|fail|error/i.test(kind)) {
-                active.delete(threadId);
+                runtime.endTurn(threadId);
                 flushAssistantText();
                 const failed = /fail|error/i.test(kind);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: !failed, stopReason: failed ? kind : null, cost: null });
@@ -235,7 +231,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                   pendingText = "(finished)";
                 }
                 flushAssistantText();
-                active.delete(threadId);
+                runtime.endTurn(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: true, stopReason: null, cost: null });
                 return;
               }
@@ -243,7 +239,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
                 const runError = [run?.error, run?.failureReason, run?.message].find((v) => typeof v === "string" && v.trim());
                 if (problem || runError || /failed|error/i.test(state)) throw new Error(problem ?? runError ?? `the box run ${state}`);
                 flushAssistantText();
-                active.delete(threadId);
+                runtime.endTurn(threadId);
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: state, cost: null });
                 return;
               }
@@ -254,11 +250,11 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
           }
           // cancelled
           flushAssistantText();
-          active.delete(threadId);
+          runtime.endTurn(threadId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
         } catch (e) {
           flushAssistantText();
-          active.delete(threadId);
+          runtime.endTurn(threadId);
           emit({ ...base(threadId, turnId), type: "runtime.error", message: (e as Error).message });
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "error", cost: null });
         }
@@ -290,21 +286,13 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
         provider: DRIVER_KIND,
         capabilities: { sessionModelSwitch: "in-session" },
         sendTurn,
-        interruptTurn: async (threadId) => active.get(threadId)?.cancel(),
+        interruptTurn: async (threadId) => runtime.turn(threadId)?.cancel(),
         respondToRequest: async () => "unavailable" as const, // this engine has no asks to answer
-        hasSession: (threadId) => active.has(threadId),
-        stopAll: async () => {
-          for (const { cancel } of active.values()) cancel();
-        },
-        onEvent: (listener) => {
-          listeners.add(listener);
-          return () => listeners.delete(listener);
-        },
+        hasSession: (threadId) => runtime.hasSession(threadId),
+        stopAll: () => runtime.stopAll(),
+        onEvent: runtime.onEvent,
       },
-      dispose: async () => {
-        for (const { cancel } of active.values()) cancel();
-        listeners.clear();
-      },
+      dispose: () => runtime.dispose(),
     };
   },
 };

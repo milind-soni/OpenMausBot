@@ -16,7 +16,7 @@ function machine(options: { root?: boolean; files?: Record<string, string>; fail
       return failing ? { code: 1, output: "Failed to start: boom secret-token\n" } : { code: 0, output: "" };
     },
     pathExists: (path) => files.has(path),
-    usage: () => ({ turns: 0, costUsd: null, billableUsd: null }),
+    usage: async () => ({ turns: 0, costUsd: null, billableUsd: null }),
     readText: (path, owner) => { if (owner) calls.push(`read ${path} as ${owner}`); return files.get(path) ?? null; },
     writeText: (path, content, mode, owner) => { calls.push(`write ${path} ${mode.toString(8)}${owner ? ` as ${owner}` : ""}`); files.set(path, content); },
     mkdir: (path, mode, owner) => { calls.push(`mkdir ${path} ${mode.toString(8)}${owner ? ` as ${owner}` : ""}`); },

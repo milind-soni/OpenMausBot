@@ -90,7 +90,18 @@ posixOnly("mid-turn steering e2e", () => {
     );
     child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
-      env: { ...(process.env.PATH ? { PATH: process.env.PATH } : {}), HOME: home, USERPROFILE: home, OMB_PORT: String(PORT) },
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        HOME: home,
+        USERPROFILE: home,
+        OMB_PORT: String(PORT),
+        // Keep the host's real agent-browser out of this suite: a machine
+        // that has it installed would route bot deletion's browser-data
+        // erasure through the real binary, and the wedged fake pipe above
+        // makes that confirmation fail. CI (no such binary) resolves the
+        // engine as unavailable; pin a missing path so every host matches.
+        OMB_AGENT_BROWSER_PATH: join(home, "no-agent-browser"),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     child.stderr!.on("data", (c) => (stderr += c));

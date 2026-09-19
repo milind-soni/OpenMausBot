@@ -3,7 +3,7 @@
 // prints them for an operator to paste into a root shell, and never builds
 // a shell command from user input. The fleet agent (fleet-agent.ts) reuses
 // the same planner and executor over a Unix socket.
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, rmSync } from "node:fs";
 import { posix } from "node:path";
 import { writeFileAtomic } from "./atomic.ts";
@@ -81,7 +81,7 @@ export interface FleetDeps {
   run(argv: string[]): Promise<{ code: number | null; output: string }>;
   pathExists(path: string): boolean;
   readText(path: string, owner?: string): string | null;
-  usage(dataDir: string, owner: string, now: Date): FleetUsageTotals;
+  usage(dataDir: string, owner: string, now: Date): Promise<FleetUsageTotals>;
   writeText(path: string, content: string, mode: number, owner?: string): void;
   mkdir(path: string, mode: number, owner?: string): void;
   appendOnce(path: string, line: string): void;
@@ -184,21 +184,77 @@ if (action === "mkdir") {
 process.stdout.write(JSON.stringify(result));
 `;
 
-function tenantIo(owner: string, file: string, action: "read" | "write" | "mkdir" | "usage", content?: string, mode?: number): string | null | FleetUsageTotals {
-  assertUnixUser(owner);
-  const options = { encoding: "utf8" as const, timeout: 5_000, killSignal: "SIGKILL" as const, cwd: "/", env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] as ["pipe", "pipe", "pipe"] };
-  const account = execFileSync("/usr/bin/getent", ["passwd", owner], { ...options, maxBuffer: 8192 }).trim().split(":");
+type TenantFileAction = "read" | "write" | "mkdir" | "usage";
+type TenantExecOptions = {
+  encoding: "utf8";
+  timeout: number;
+  killSignal: NodeJS.Signals;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  stdio: ["pipe", "pipe", "pipe"];
+  maxBuffer: number;
+  input?: string;
+};
+
+function tenantExecOptions(): Omit<TenantExecOptions, "maxBuffer" | "input"> {
+  return { encoding: "utf8", timeout: 5_000, killSignal: "SIGKILL", cwd: "/", env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "pipe"] };
+}
+
+function tenantIdentity(owner: string, file: string, passwd: string): { uid: number; gid: number; home: string } {
+  const account = passwd.trim().split(":");
   const uid = Number(account[2]);
   const gid = Number(account[3]);
   const home = account[5];
   if (account.length !== 7 || account[0] !== owner || !Number.isSafeInteger(uid) || uid <= 0 || !Number.isSafeInteger(gid) || gid <= 0 || !home?.startsWith("/") || posix.normalize(home) !== home || !file.startsWith(`${home}/`) || posix.normalize(file) !== file) {
     throw new Error(`unsafe filesystem identity or path for ${owner}`);
   }
+  return { uid, gid, home };
+}
+
+function tenantIoError(action: TenantFileAction, owner: string): Error {
+  // Do not repeat helper stderr: tenant-controlled file contents may be secret.
+  return new Error(`could not ${action} workspace file as ${owner}: check ownership, links, file size and permissions`);
+}
+
+function tenantIo(owner: string, file: string, action: "read" | "write" | "mkdir", content?: string, mode?: number): string | null {
+  assertUnixUser(owner);
+  const options = tenantExecOptions();
+  const { uid, gid, home } = tenantIdentity(owner, file, execFileSync("/usr/bin/getent", ["passwd", owner], { ...options, maxBuffer: 8192 }));
   try {
-    return JSON.parse(execFileSync(process.execPath, ["--eval", TENANT_IO], { ...options, maxBuffer: action === "usage" ? 8192 : 32 * 1024 * 1024, input: JSON.stringify({ uid, gid, home, file, action, content, mode }) })) as string | null | FleetUsageTotals;
+    return JSON.parse(execFileSync(process.execPath, ["--eval", TENANT_IO], { ...options, maxBuffer: 32 * 1024 * 1024, input: JSON.stringify({ uid, gid, home, file, action, content, mode }) })) as string | null;
   } catch {
-    // Do not repeat helper stderr: tenant-controlled file contents may be secret.
-    throw new Error(`could not ${action} workspace file as ${owner}: check ownership, links, file size and permissions`);
+    throw tenantIoError(action, owner);
+  }
+}
+
+function execFileUtf8(command: string, args: string[], options: TenantExecOptions): Promise<string> {
+  // execFile never consumes ExecFileSync's `input` option, so the request is
+  // written to the helper's stdin directly; it also stays on the options
+  // object so tests can assert the payload remains aggregate-only.
+  return new Promise((resolve, reject) => {
+    const child = execFile(command, args, options, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    });
+    if (child.stdin) {
+      // A helper killed before draining its request must not crash the agent
+      // with an unhandled stream error; the exec callback reports the failure.
+      child.stdin.on("error", () => {});
+      child.stdin.end(options.input ?? "");
+    }
+  });
+}
+
+// Usage is the dashboard's hot path: both spawns are awaited instead of
+// blocking the root agent's event loop, so a poll never stalls a mutation.
+async function tenantUsage(owner: string, file: string, content: string): Promise<FleetUsageTotals> {
+  assertUnixUser(owner);
+  const options = tenantExecOptions();
+  const { uid, gid, home } = tenantIdentity(owner, file, await execFileUtf8("/usr/bin/getent", ["passwd", owner], { ...options, maxBuffer: 8192 }));
+  try {
+    return JSON.parse(await execFileUtf8(process.execPath, ["--eval", TENANT_IO], { ...options, maxBuffer: 8192, input: JSON.stringify({ uid, gid, home, file, action: "usage", content }) })) as FleetUsageTotals;
+  } catch {
+    throw tenantIoError("usage", owner);
   }
 }
 
@@ -222,9 +278,9 @@ export function defaultFleetDeps(): FleetDeps {
       }),
     pathExists: (path) => { try { lstatSync(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; } },
     readText: (path, owner) => owner ? tenantIo(owner, path, "read") as string | null : (existsSync(path) ? readFileSync(path, "utf8") : null),
-    usage: (dataDir, owner, now) => {
+    usage: async (dataDir, owner, now) => {
       const at = now.toISOString();
-      return tenantIo(owner, posix.join(dataDir, "usage", `${at.slice(0, 7)}.jsonl`), "usage", at) as FleetUsageTotals;
+      return tenantUsage(owner, posix.join(dataDir, "usage", `${at.slice(0, 7)}.jsonl`), at);
     },
     writeText: (path, content, mode, owner) => {
       if (owner) { tenantIo(owner, path, "write", content, mode); return; }

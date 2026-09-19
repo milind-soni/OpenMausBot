@@ -19,9 +19,20 @@ describe("self-hosted server pairing links", () => {
   });
 
   it.each([
+    "http://192.168.1.10:8799/pair#code=ABCD-EFGH-JKLM",
+    "http://10.0.0.5/pair/#code=ABCD-EFGH-JKLM",
+    "http://172.20.3.4:9000/pair#code=ABCD-EFGH-JKLM",
+    "http://[fe80::1]/pair#code=ABCD-EFGH-JKLM",
+    "http://myhost.local/pair#code=ABCD-EFGH-JKLM",
+  ])("accepts a plain-http link to a private LAN host: %s", (link) => {
+    expect(isServerPairingLink(link)).toBe(true);
+  });
+
+  it.each([
     "",
     "ABCD-EFGH-JKLM",
     "http://bots.example.com/pair#code=ABCD-EFGH-JKLM",
+    "http://127.0.0.1:8799/pair#code=ABCD-EFGH-JKLM",
     "https:example.com/pair#code=ABCD-EFGH-JKLM",
     "https://user:secret@bots.example.com/pair#code=ABCD-EFGH-JKLM",
     "https://bots.example.com",

@@ -26,6 +26,16 @@ import { createAcpDriver, type AcpSupport } from "./core.ts";
  * Matching walks from most to least specific, and `auto` is special-cased
  * because Cursor calls that entry `default[]` while naming it "Auto".
  *
+ * A single base can advertise both Standard and Fast variants
+ * (`composer-2.5[fast=false]` vs `[fast=true]`). Picking the first listed
+ * id would let a bare "Composer 2.5" slug silently resolve to Fast whenever
+ * that variant happens to come first. When several ids share the requested
+ * base, a bare slug prefers `fast=false` (or a display name that does not
+ * say "Fast"); an explicit "Composer 2.5 Fast" / `composer-2.5-fast`
+ * selection maps onto its parameterised id by normalised name. If only the
+ * fast variant exists, the bare slug still takes it — unavailable is worse.
+ * Advertisement order never decides.
+ *
  * Returns null when nothing matches, including when the agent advertised no
  * models at all. The caller then falls back to sending the slug unchanged,
  * which is what older CLIs that ignore the model list still expect.
@@ -39,15 +49,65 @@ export function resolveCursorAcpModelId(
   const ids = available.filter((m) => typeof m?.modelId === "string" && m.modelId);
   if (!ids.length) return null;
   const base = (id: string) => id.split("[")[0].trim().toLowerCase();
+  const normalize = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const isFastVariant = (modelId: string, name?: string): boolean => {
+    const open = modelId.indexOf("[");
+    if (open >= 0) {
+      const close = modelId.lastIndexOf("]");
+      const params = modelId.slice(open + 1, close >= 0 ? close : undefined);
+      for (const part of params.split(",")) {
+        const [key, raw] = part.split("=");
+        if (key?.trim().toLowerCase() === "fast") return raw?.trim().toLowerCase() === "true";
+      }
+    }
+    return /(?:^|\s)fast$/.test(normalize(name ?? "")) || /(?:^|-)fast$/.test(base(modelId));
+  };
+  // Prefer the requested speed when several advertised ids match; break
+  // remaining ties on modelId so list order cannot change the outcome.
+  const pickPreferred = (matches: typeof ids, preferFast: boolean): string | null => {
+    if (!matches.length) return null;
+    let best = matches[0]!;
+    for (const candidate of matches.slice(1)) {
+      const bestFast = isFastVariant(best.modelId!, best.name);
+      const candidateFast = isFastVariant(candidate.modelId!, candidate.name);
+      if (candidateFast !== bestFast) {
+        if (preferFast ? candidateFast : !candidateFast) best = candidate;
+        continue;
+      }
+      if (candidate.modelId! < best.modelId!) best = candidate;
+    }
+    return best.modelId!;
+  };
+  const wantFast = /(?:^|\s)fast$/.test(normalize(want));
 
   const exact = ids.find((m) => m.modelId!.toLowerCase() === want);
   if (exact) return exact.modelId!;
 
-  const byBase = ids.find((m) => base(m.modelId!) === want);
-  if (byBase) return byBase.modelId!;
+  const byName = pickPreferred(
+    ids.filter((m) => normalize(m.name ?? "") === normalize(want)),
+    wantFast,
+  );
+  if (byName) return byName;
 
-  const byName = ids.find((m) => (m.name ?? "").trim().toLowerCase() === want);
-  if (byName) return byName.modelId!;
+  // Display names use spaces where catalog ids use hyphens ("Composer 2.5"
+  // vs composer-2.5), so base matching compares the normalised forms.
+  const byBase = pickPreferred(
+    ids.filter((m) => normalize(base(m.modelId!)) === normalize(want)),
+    wantFast,
+  );
+  if (byBase) return byBase;
+
+  // Catalog ids like `composer-2.5-fast` share the ACP base `composer-2.5`.
+  if (want.endsWith("-fast")) {
+    const stripped = want.slice(0, -"-fast".length);
+    if (stripped) {
+      const byFastSlug = pickPreferred(
+        ids.filter((m) => normalize(base(m.modelId!)) === normalize(stripped)),
+        true,
+      );
+      if (byFastSlug) return byFastSlug;
+    }
+  }
 
   if (want === "auto" || want === "default") {
     const dflt = ids.find((m) => base(m.modelId!) === "default");

@@ -23,11 +23,18 @@ export type PromptSection = PromptPart & { bytes: number };
  * turn that tagged a bot. */
 const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding"]);
 
+/** The sections a person edits as their bot's standing identity — the
+ * persona (name/title/description) and SOUL.md. Everything else in the
+ * stable half is harness context that legitimately changes as the
+ * conversation and workspace move (a pinned surface, a mounted tool), so
+ * only these two count as "the soul" for edit detection (#1346). */
+const STANDING_SECTIONS = new Set(["persona", "soul"]);
+
 export function buildSystemPrompt(
   persona: string,
   soul: string,
   parts: PromptPart[],
-): { text: string; sections: PromptSection[]; stable: string; volatile: string } {
+): { text: string; sections: PromptSection[]; stable: string; volatile: string; standing: string } {
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
@@ -38,7 +45,13 @@ export function buildSystemPrompt(
     .map((part) => ({ ...part, bytes: Buffer.byteLength(part.text, "utf8") }));
   const halves = (volatile: boolean) =>
     sections.filter((section) => VOLATILE_SECTIONS.has(section.id) === volatile).map((section) => section.text).join("");
-  return { text: sections.map((section) => section.text).join(""), sections, stable: halves(false), volatile: halves(true) };
+  return {
+    text: sections.map((section) => section.text).join(""),
+    sections,
+    stable: halves(false),
+    volatile: halves(true),
+    standing: sections.filter((section) => STANDING_SECTIONS.has(section.id)).map((section) => section.text).join(""),
+  };
 }
 
 export type ComputerPromptKind = "vm-private" | "vm-shared" | "box" | "box-agent" | "vps" | "local";

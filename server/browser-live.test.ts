@@ -6,8 +6,9 @@ import { BrowserLive, browserStreamPort, normalizeBrowserLiveMessage, parseBrows
 
 const execute = vi.hoisted(() => vi.fn());
 const nativeClose = vi.hoisted(() => vi.fn());
+const nativeRecycle = vi.hoisted(() => vi.fn());
 const nativeInput = vi.fn();
-vi.mock("./browser-engine.ts", () => ({ closeBrowserSession: nativeClose }));
+vi.mock("./browser-engine.ts", () => ({ closeBrowserSession: nativeClose, recycleBrowserDaemon: nativeRecycle }));
 vi.mock("node:child_process", async (original) => {
   const actual = await original<typeof import("node:child_process")>();
   const { promisify } = await import("node:util");
@@ -79,6 +80,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", nativeInput);
   nativeInput.mockReset().mockImplementation(async () => Response.json({ success: true, data: { dispatched: true } }));
   nativeClose.mockReset().mockResolvedValue(true);
+  nativeRecycle.mockReset().mockResolvedValue(true);
   execute.mockReset().mockResolvedValue(output(ready));
 });
 afterEach(() => { live.closeAll(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
@@ -194,15 +196,49 @@ describe("authenticated browser viewer relay", () => {
       ["stream", "status", "--json", "--no-webmcp"], ["stream", "enable", "--json", "--no-webmcp"], ["open", "--json", "--no-webmcp"],
     ]);
   });
-  it("fails closed on missing ports and sanitizes CLI errors without ending an unwritten error response", async () => {
+  it("fails closed on missing ports and surfaces the engine's own launch failure without ending an unwritten error response", async () => {
     execute.mockResolvedValueOnce(output({ enabled: true, connected: true, port: null }));
     await expect(open()).rejects.toThrow("valid local stream");
     expect(SocketFixture.instances).toHaveLength(0);
-    execute.mockRejectedValueOnce(new Error("PASSWORD=secret CLI args"));
+    const chromeFailure = Object.assign(new Error("Command failed: agent-browser stream status"), {
+      stderr: "Chrome exited early (exit code: 1)\n[ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:257] Missing X server or $DISPLAY\n",
+    });
+    execute.mockRejectedValueOnce(chromeFailure).mockRejectedValueOnce(chromeFailure);
     const res = new ResponseFixture();
-    await expect(live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse, spec: { command: "/engine" } })).rejects.toThrow("browser could not complete");
+    await expect(live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true, res: res as unknown as ServerResponse, spec: { command: "/engine" } })).rejects
+      .toThrow("Chrome exited early (exit code: 1) [ERROR:ui/ozone/platform/x11/ozone_platform_x11.cc:257] Missing X server or $DISPLAY");
+    expect(nativeRecycle).toHaveBeenCalledTimes(1); // one recycle per request, even when the fresh daemon fails too
     expect(res.writableEnded).toBe(false);
     expect(res.chunks).toHaveLength(0);
+  });
+  it("recycles a wedged daemon and retries the launch, so later requests work instead of looping on 503", async () => {
+    execute.mockRejectedValueOnce(Object.assign(new Error("Command failed"), { stderr: "Chrome exited before providing DevTools URL" }));
+    const { action } = await open(); // the retried launch falls through to the fixture's ready stream status
+    expect(nativeRecycle).toHaveBeenCalledTimes(1);
+    expect(nativeRecycle.mock.calls[0]?.[0]).toMatchObject({ AGENT_BROWSER_SESSION: "profile-a", AGENT_BROWSER_SOCKET_DIR: "/isolated/socket" });
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls[1]?.[1]).toEqual(["stream", "status", "--json", "--no-webmcp"]);
+    await action({ type: "take" });
+    await action({ type: "navigate", url: "https://example.com" }); // a fresh session serves the next request
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+  it("keeps the installed-engine hint only when the binary itself is missing", async () => {
+    execute.mockRejectedValue(Object.assign(new Error("spawn /engine ENOENT"), { code: "ENOENT" }));
+    await expect(open()).rejects.toThrow(
+      "The browser could not complete this action: spawn /engine ENOENT Check that the browser engine is installed, then reconnect.",
+    );
+    expect(nativeRecycle).toHaveBeenCalledTimes(1);
+  });
+  it("surfaces the launch failure without the install hint when the daemon cannot be recycled", async () => {
+    nativeRecycle.mockResolvedValueOnce(false);
+    execute.mockRejectedValue(Object.assign(new Error("Command failed"), { stderr: "Chrome exited before providing DevTools URL" }));
+    let failure: Error | undefined;
+    await open().catch((error: unknown) => { failure = error as Error; });
+    expect(failure?.message).toContain("Chrome exited before providing DevTools URL");
+    expect(failure?.message).not.toContain("engine is installed");
+    expect((failure as { status?: number } | undefined)?.status).toBe(503);
+    expect(execute).toHaveBeenCalledTimes(1); // no retry once the daemon survived
+    expect(nativeRecycle).toHaveBeenCalledTimes(1);
   });
   it("only acknowledges the exact frame rendered by this bound viewer", async () => {
     const { res, socket, action } = await open();

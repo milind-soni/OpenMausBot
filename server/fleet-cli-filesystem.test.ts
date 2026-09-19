@@ -1,4 +1,4 @@
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { execFileSync, type ExecFileOptionsWithStringEncoding, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
 import { linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,17 +8,31 @@ import { emptyRegistry, fleetLayout, MANAGED_OPENROUTER } from "./fleet.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { readUsage, summarizeUsage, type UsageRow } from "./usage-ledger.ts";
 
+// The async usage path spawns through execFile; both seams are recorded so the
+// helper's options and aggregate-only request stay observable either way.
+type RecordedOptions = ExecFileSyncOptionsWithStringEncoding & ExecFileOptionsWithStringEncoding;
 const fixture = vi.hoisted(() => ({ home: "", account: "", calls: [] as { command: string; args: string[]; options: ExecFileSyncOptionsWithStringEncoding }[] }));
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
+  const account = () => fixture.account || `omb-acme:x:${process.getuid!()}:${process.getgid!()}:fixture:${fixture.home}:/usr/sbin/nologin\n`;
   return {
     ...actual,
     execFileSync: (command: string, args: string[], options: ExecFileSyncOptionsWithStringEncoding) => {
       fixture.calls.push({ command, args, options });
       // Only account discovery is synthetic. The actual unprivileged Node helper
       // runs against a disposable home; no useradd, chown or system services run.
-      if (command === "/usr/bin/getent") return fixture.account || `omb-acme:x:${process.getuid!()}:${process.getgid!()}:fixture:${fixture.home}:/usr/sbin/nologin\n`;
+      if (command === "/usr/bin/getent") return account();
       return actual.execFileSync(command, args, options);
+    },
+    execFile: (command: string, args: string[], options: RecordedOptions, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
+      fixture.calls.push({ command, args, options });
+      if (command === "/usr/bin/getent") {
+        callback(null, account(), "");
+        // A stand-in child with no stdin to feed: the caller only writes the
+        // helper request, and getent reads none.
+        return { stdin: { on() {}, end() {} } };
+      }
+      return actual.execFile(command, args, options, callback);
     },
   };
 });
@@ -156,7 +170,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
     return join(directory, "2026-09.jsonl");
   }
 
-  it("summarizes the current month inside the actual helper without returning raw ledger rows", () => {
+  it("summarizes the current month inside the actual helper without returning raw ledger rows", async () => {
     const monthly = usageFile();
     const rows = [
       usageRow({ at: "2026-09-01T00:00:00.000Z", costUsd: 0 }),
@@ -166,7 +180,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
     ];
     writeFileSync(monthly, rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
     const reference = summarizeUsage(readUsage(data, { from: new Date("2026-09-01T00:00:00Z"), to: now }), "bot").total;
-    const result = deps.usage(data, "omb-acme", now);
+    const result = await deps.usage(data, "omb-acme", now);
     expect(result).toEqual({ turns: reference.turns, costUsd: reference.costUsd, billableUsd: reference.billableUsd });
     expect(result).toEqual({ turns: 4, costUsd: 1.75, billableUsd: null });
     expect(JSON.stringify(result)).not.toContain("fixture-private");
@@ -176,7 +190,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
     expect(String(child.options.input)).not.toContain("fixture-private");
   });
 
-  it("ignores malformed, torn and out-of-date records, with inclusive UTC month/start and now boundaries", () => {
+  it("ignores malformed, torn and out-of-date records, with inclusive UTC month/start and now boundaries", async () => {
     const monthly = usageFile();
     const valid = usageRow({ at: now.toISOString(), costUsd: 0.5 });
     const records: unknown[] = [
@@ -193,32 +207,32 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
     symlinkSync("/dev/zero", join(data, "usage", "2026-08.jsonl"));
     symlinkSync("/dev/zero", join(data, "usage", "2026-10.jsonl"));
     const reference = summarizeUsage(readUsage(data, { from: new Date("2026-09-01T00:00:00Z"), to: now }), "bot").total;
-    expect(deps.usage(data, "omb-acme", now)).toEqual({ turns: reference.turns, costUsd: reference.costUsd, billableUsd: null });
-    expect(deps.usage(data, "omb-acme", now)).toEqual({ turns: 2, costUsd: 0.75, billableUsd: null });
+    expect(await deps.usage(data, "omb-acme", now)).toEqual({ turns: reference.turns, costUsd: reference.costUsd, billableUsd: null });
+    expect(await deps.usage(data, "omb-acme", now)).toEqual({ turns: 2, costUsd: 0.75, billableUsd: null });
   });
 
-  it("keeps turns without valid prices unpriced and rejects numeric overflow without exposing rows", () => {
+  it("keeps turns without valid prices unpriced and rejects numeric overflow without exposing rows", async () => {
     const monthly = usageFile();
     const rows = [usageRow({ costUsd: null }), usageRow({ costUsd: -5 }), { ...usageRow(), costUsd: "fixture-private-secret" }];
     writeFileSync(monthly, rows.map((row) => JSON.stringify(row)).join("\n"));
-    expect(deps.usage(data, "omb-acme", now)).toEqual({ turns: 3, costUsd: null, billableUsd: null });
+    expect(await deps.usage(data, "omb-acme", now)).toEqual({ turns: 3, costUsd: null, billableUsd: null });
     writeFileSync(monthly, [usageRow({ costUsd: Number.MAX_VALUE }), usageRow({ costUsd: Number.MAX_VALUE })].map((row) => JSON.stringify(row)).join("\n"));
-    expect(() => deps.usage(data, "omb-acme", now)).toThrow(/^could not usage workspace file as omb-acme: check ownership, links, file size and permissions$/);
+    await expect(deps.usage(data, "omb-acme", now)).rejects.toThrow(/^could not usage workspace file as omb-acme: check ownership, links, file size and permissions$/);
   });
 
-  it("returns empty totals for missing nested data, missing usage directory and missing month", () => {
+  it("returns empty totals for missing nested data, missing usage directory and missing month", async () => {
     const empty = { turns: 0, costUsd: null, billableUsd: null };
-    expect(deps.usage(join(fixture.home, "absent", "nested", ".openmausbot"), "omb-acme", now)).toEqual(empty);
-    expect(deps.usage(data, "omb-acme", now)).toEqual(empty);
+    expect(await deps.usage(join(fixture.home, "absent", "nested", ".openmausbot"), "omb-acme", now)).toEqual(empty);
+    expect(await deps.usage(data, "omb-acme", now)).toEqual(empty);
     mkdirSync(data);
-    expect(deps.usage(data, "omb-acme", now)).toEqual(empty);
+    expect(await deps.usage(data, "omb-acme", now)).toEqual(empty);
     const monthly = usageFile();
-    expect(deps.usage(data, "omb-acme", now)).toEqual(empty);
+    expect(await deps.usage(data, "omb-acme", now)).toEqual(empty);
     writeFileSync(monthly, "");
-    expect(deps.usage(data, "omb-acme", now)).toEqual(empty);
+    expect(await deps.usage(data, "omb-acme", now)).toEqual(empty);
   });
 
-  it.each(["symlink", "fifo", "directory", "hardlink", "ancestor", "oversized"])("refuses an unsafe %s usage ledger promptly without exposing raw content", (kind) => {
+  it.each(["symlink", "fifo", "directory", "hardlink", "ancestor", "oversized"])("refuses an unsafe %s usage ledger promptly without exposing raw content", async (kind) => {
     const monthly = usageFile();
     const secret = "fixture-private-ledger-secret";
     const outside = join(root, "outside-ledger");
@@ -234,7 +248,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
       writeFileSync(monthly, secret);
     } else writeFileSync(monthly, Buffer.alloc(4 * 1024 * 1024 + 1, secret));
     const start = performance.now();
-    expect(() => deps.usage(targetData, "omb-acme", now)).toThrow(/^could not usage workspace file as omb-acme: check ownership, links, file size and permissions$/);
+    await expect(deps.usage(targetData, "omb-acme", now)).rejects.toThrow(/^could not usage workspace file as omb-acme: check ownership, links, file size and permissions$/);
     // Special files must fail on descriptor checks, not wait for the 5s kill deadline.
     expect(performance.now() - start).toBeLessThan(2000);
     expect(readFileSync(outside, "utf8")).toBe(secret);

@@ -10,7 +10,10 @@ export type ApprovalMode = (typeof APPROVAL_MODES)[number];
  * `edits` (auto-accept edits) exists where the engine has such a mode:
  * Claude and Grok `acceptEdits`, Antigravity `auto_edit`, Qwen `auto-edit`,
  * Gemini `auto_edit`. Codex's Ask already runs `workspace-write`, so an edits
- * level would change nothing there. */
+ * level would change nothing there. `full` needs only the app's own
+ * request/verdict plumbing, which the OpenAI-compatible chat drivers
+ * (OpenRouter, Groq, …) implement too: their permission asks arrive as
+ * request cards a Full grant answers. */
 export function supportsApprovalMode(driverKind: string | undefined, mode: ApprovalMode): boolean {
   if (mode === "custom") return driverKind === "codex";
   if (mode === "edits") return ["claudeAgent", "grokAgent", "antigravityAgent", "qwenAgent", "geminiAgent"].includes(driverKind ?? "");

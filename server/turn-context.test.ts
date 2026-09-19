@@ -35,6 +35,7 @@ describe("buildTurnContext", () => {
       { rewound: true, fresh: false, externallyUpdated: false },
       { rewound: false, fresh: true, externallyUpdated: false },
       { rewound: false, fresh: false, externallyUpdated: true },
+      { rewound: false, fresh: false, externallyUpdated: false, soulChanged: true },
     ]) {
       const out = buildTurnContext({ text: "hi", transcript, ...flags, replaysNatively: true });
       expect(out.turnText).toBe("hi");
@@ -64,6 +65,36 @@ describe("buildTurnContext", () => {
     expect(out.turnText).toContain("received an update outside your provider session");
     expect(out.turnText).toContain("@Worker replied to the delegated task");
     expect(out.turnText.endsWith("what did they find?")).toBe(true);
+  });
+
+  it("replays instead of resuming when an edited soul cannot reach the running session", () => {
+    // #1346: below its prompt-refresh floor a provider replays the system
+    // prompt the session started with, so the branch must move to a fresh
+    // session — the same replay externallyUpdated gets, under its own
+    // marker, so the model knows why it is seeing its history inline.
+    const out = buildTurnContext({
+      text: "what now?",
+      transcript,
+      rewound: false,
+      fresh: false,
+      externallyUpdated: false,
+      soulChanged: true,
+      replaysNatively: false,
+    });
+    expect(out.resume).toBe(false);
+    expect(out.turnText).toContain("instructions were updated");
+    expect(out.turnText).toContain("User: my dog is named Biscuit");
+    expect(out.turnText).not.toContain("update outside your provider session"); // distinct marker
+    expect(out.turnText.endsWith("what now?")).toBe(true);
+  });
+
+  it("keeps resuming when the soul is unchanged or the change went unreported", () => {
+    // the flag is opt-in: a caller that cannot detect soul drift (or a
+    // provider that refreshes prompts in place) keeps today's behaviour
+    expect(buildTurnContext({ text: "hi", transcript, rewound: false, fresh: false, externallyUpdated: false, replaysNatively: false }))
+      .toEqual({ turnText: "hi", resume: true });
+    expect(buildTurnContext({ text: "hi", transcript, rewound: false, fresh: false, externallyUpdated: false, soulChanged: false, replaysNatively: false }))
+      .toEqual({ turnText: "hi", resume: true });
   });
 });
 

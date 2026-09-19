@@ -37,13 +37,11 @@ import type {
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
-  RuntimeEvent,
-  RuntimeEventListener,
   SendTurnInput,
   TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { newId } from "../contracts.ts";
 import {
   decodeInjectId,
   encodeInjectId,
@@ -51,6 +49,7 @@ import {
   localHost,
   mergeLocalInject,
 } from "./local-inject.ts";
+import { createDriverSessionRuntime } from "./driver-runtime.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -134,6 +133,8 @@ interface PiModelsResponse {
   type: "response";
   command: "get_available_models";
   success: boolean;
+  /** Set by v1 servers when a frame exceeded the transport limit. */
+  error?: string;
   data?: { models?: PiModelEntry[] };
 }
 
@@ -162,6 +163,95 @@ export function parsePiCatalog(stdout: string, fallbackDefault = ""): ModelCatal
   }
   if (!def && options.length) def = options[0]!.id;
   return { default: def, options };
+}
+
+/** The protocol v2 negotiation line, written before the first real command
+ * on every pi stdin. v2 makes an oversized response arrive as base64
+ * rpc_chunk groups instead of a "transport limit" error stub; stdin order is
+ * preserved, so negotiating first upgrades how every following response is
+ * encoded. No reply is awaited and no ready frame is expected — vanilla pi
+ * 0.82.1 simply ignores the command, which keeps it on v1 exactly as today. */
+const PI_NEGOTIATE_LINE =
+  JSON.stringify({ id: "negotiate", type: "negotiate_protocol", protocolVersion: 2 }) + "\n";
+
+/** One rpc_chunk of a protocol v2 frame stream — see PiRpcChunkReassembler. */
+interface PiRpcChunkFrame {
+  type: "rpc_chunk";
+  chunkId: string;
+  index: number;
+  count: number;
+  byteLength: number;
+  data: string;
+}
+
+function isRpcChunkLine(parsed: unknown): parsed is PiRpcChunkFrame {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  return (parsed as { type?: unknown }).type === "rpc_chunk";
+}
+
+function validRpcChunkShape(chunk: PiRpcChunkFrame): boolean {
+  return (
+    chunk.chunkId.length > 0 &&
+    Number.isInteger(chunk.count) &&
+    chunk.count >= 2 &&
+    Number.isInteger(chunk.index) &&
+    chunk.index >= 0 &&
+    chunk.index < chunk.count &&
+    Number.isInteger(chunk.byteLength) &&
+    chunk.byteLength >= 0 &&
+    typeof chunk.data === "string"
+  );
+}
+
+/** Reassembles protocol v2 rpc_chunk groups into the logical frame they
+ * encode, mirroring omp's RpcFrameDecoder validation: every chunk of one
+ * chunkId shares its count (always >= 2), indices are sequential from 0,
+ * and each byteLength matches its decoded buffer. On any violation the
+ * partial group is dropped with one console.error and the stream continues
+ * — a corrupt chunk sequence must never crash a turn. */
+class PiRpcChunkReassembler {
+  private groups = new Map<string, { count: number; chunks: PiRpcChunkFrame[] }>();
+
+  /** Feed one parsed stdout line. Returns the frame for the per-line handler
+   * — the line itself when it is not chunk traffic, or the reassembled frame
+   * once its group completes — or null while chunks are still buffered (or a
+   * malformed group was dropped). */
+  feed(parsed: unknown): { frame: unknown } | null {
+    if (!isRpcChunkLine(parsed)) return { frame: parsed };
+    if (!validRpcChunkShape(parsed)) return this.reject(parsed.chunkId, "malformed chunk fields");
+    const group = this.groups.get(parsed.chunkId);
+    if (group) {
+      if (group.count !== parsed.count) return this.reject(parsed.chunkId, "count changed within one chunkId");
+      if (group.chunks.some((chunk) => chunk.index === parsed.index)) {
+        return this.reject(parsed.chunkId, "duplicate chunk index");
+      }
+    }
+    const chunks = [...(group?.chunks ?? []), parsed];
+    if (chunks.length < parsed.count) {
+      this.groups.set(parsed.chunkId, { count: parsed.count, chunks });
+      return null;
+    }
+    this.groups.delete(parsed.chunkId);
+    chunks.sort((a, b) => a.index - b.index);
+    if (chunks.some((chunk, i) => chunk.index !== i)) {
+      return this.reject(parsed.chunkId, "indices not sequential from 0");
+    }
+    const decoded = chunks.map((chunk) => Buffer.from(chunk.data, "base64"));
+    if (decoded.some((bytes, i) => bytes.length !== chunks[i]!.byteLength)) {
+      return this.reject(parsed.chunkId, "byteLength does not match decoded bytes");
+    }
+    try {
+      return { frame: JSON.parse(Buffer.concat(decoded).toString("utf8")) };
+    } catch {
+      return this.reject(parsed.chunkId, "concatenated payload is not JSON");
+    }
+  }
+
+  private reject(chunkId: unknown, reason: string): null {
+    if (typeof chunkId === "string") this.groups.delete(chunkId);
+    console.error(`pi: dropped malformed rpc_chunk group ${JSON.stringify(chunkId)}: ${reason}`);
+    return null;
+  }
 }
 
 /** Split a picker id into pi's `{provider, modelId}`. Accepts both the
@@ -320,6 +410,7 @@ export async function fetchPiModels(
   return new Promise((resolve) => {
     let buf = "";
     let done = false;
+    const reassembler = new PiRpcChunkReassembler();
     const fallbackDefault = readPiDefaultModel(env);
     const finish = (catalog: ModelCatalog) => {
       if (done) return;
@@ -341,8 +432,30 @@ export async function fetchPiModels(
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
         if (!line.trim()) continue;
-        const parsed = parsePiCatalog(line + "\n", fallbackDefault);
-        if (parsed.options.length || line.includes('"get_available_models"')) {
+        let raw: unknown;
+        try {
+          raw = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        // rpc_chunk traffic becomes a catalog candidate only once its group
+        // is reassembled — never finish early on a raw chunk line.
+        const out = reassembler.feed(raw);
+        if (out === null) continue;
+        const res = out.frame as PiModelsResponse;
+        const isCatalogResponse = res?.type === "response" && res.command === "get_available_models";
+        if (
+          isCatalogResponse &&
+          res.success === false &&
+          typeof res.error === "string" &&
+          res.error.toLowerCase().includes("transport limit")
+        ) {
+          // A v1 server replaces an oversized frame with an error stub; say
+          // why the catalog came back empty instead of resolving silently.
+          console.error("pi: catalog response hit the RPC transport limit:", res.error);
+        }
+        const parsed = parsePiCatalog(JSON.stringify(out.frame) + "\n", fallbackDefault);
+        if (parsed.options.length || isCatalogResponse) {
           clearTimeout(timer);
           finish(parsed);
           return;
@@ -352,6 +465,10 @@ export async function fetchPiModels(
     child.on("error", () => finish({ default: "", options: [] }));
     child.on("close", () => finish({ default: "", options: [] }));
     try {
+      // Negotiate v2 first (see PI_NEGOTIATE_LINE) so an oversized catalog
+      // response is chunked rather than stubbed; a server that errors on or
+      // ignores it stays on v1 exactly as today.
+      child.stdin.write(PI_NEGOTIATE_LINE);
       child.stdin.write(JSON.stringify({ id: "catalog", type: "get_available_models" }) + "\n");
     } catch {
       finish({ default: "", options: [] });
@@ -478,30 +595,23 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     // pi's model-catalog network boundary.
     await readModels();
 
-    const listeners = new Set<RuntimeEventListener>();
-    // one active turn per thread
-    const active = new Map<string, {
+    interface Turn {
       stop: () => void;
       turnId: string;
       pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
       child?: { stdin: { write: (s: string) => void } };
-    }>();
-
-    const emit = (event: RuntimeEvent) => {
-      for (const l of Array.from(listeners)) l(event);
-    };
-    const base = (threadId: string, turnId: string) => ({
-      eventId: newEventId(),
-      provider: DRIVER_KIND,
+    }
+    // one active turn per thread
+    const runtime = createDriverSessionRuntime<Turn>({
+      driverKind: DRIVER_KIND,
       providerInstanceId: instanceId,
-      threadId,
-      turnId,
-      createdAt: new Date().toISOString(),
+      stopTurn: (turn) => turn.stop(),
     });
+    const { emit, base } = runtime;
 
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
-      if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      runtime.assertThreadIdle(threadId);
       // Per-bot Ask/Auto is authoritative for harness turns. Preserve the
       // legacy instance flag only for direct adapter callers that omit it.
       const fullAuto = turn.approvalMode === undefined ? config.fullAuto : false;
@@ -575,6 +685,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       })();
       let buf = "";
+      // Stitch protocol v2 rpc_chunk groups back into logical frames
+      // before the per-line handler below sees them.
+      const reassembler = new PiRpcChunkReassembler();
       let assistantText = "";
       // resolve one-shot RPC responses (new_session / switch_session / set_model)
       const responseWaiters = new Map<string, { resolve: (data: unknown) => void; reject: (err: Error) => void; timer: NodeJS.Timeout }>();
@@ -636,7 +749,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             /* best effort */
           }
         }
-        active.delete(threadId);
+        runtime.endTurn(threadId);
       };
 
       const stop = () => {
@@ -652,7 +765,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         settle(true, "cancelled");
       };
-      active.set(threadId, { stop, turnId, pending, child });
+      runtime.setTurn(threadId, { stop, turnId, pending, child });
 
       const onEvent = (evt: PiEvent) => {
         appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
@@ -762,7 +875,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           buf = buf.slice(nl + 1);
           if (!line.trim()) continue;
           try {
-            onEvent(JSON.parse(line) as PiEvent);
+            const out = reassembler.feed(JSON.parse(line));
+            if (out !== null) onEvent(out.frame as PiEvent);
           } catch {
             /* skip non-JSON line */
           }
@@ -781,6 +895,16 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       });
 
       emit({ ...base(threadId, turnId), type: "turn.started" });
+
+      // Negotiate protocol v2 before the first real command on this stdin
+      // (see PI_NEGOTIATE_LINE). No reply is awaited: vanilla pi emits no
+      // ready frame, and a server that errors on or ignores negotiation
+      // keeps today's v1 behavior.
+      try {
+        child.stdin.write(PI_NEGOTIATE_LINE);
+      } catch {
+        /* stay on v1 */
+      }
 
       // handshake: resume the remembered session or start a fresh one. The
       // harness persists session.started.sessionId as the resumeCursor and
@@ -908,9 +1032,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           effortLevels: EFFORT_LEVELS,
         },
         sendTurn,
-        interruptTurn: async (threadId) => active.get(threadId)?.stop(),
+        interruptTurn: async (threadId) => runtime.turn(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
-          const entry = active.get(threadId);
+          const entry = runtime.turn(threadId);
           const answer = entry?.pending.get(requestId);
           if (!entry || !answer) return "unavailable";
           entry.pending.delete(requestId);
@@ -924,19 +1048,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           });
           return decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected";
         },
-        hasSession: (threadId) => active.has(threadId),
-        stopAll: async () => {
-          for (const { stop } of active.values()) stop();
-        },
-        onEvent: (listener) => {
-          listeners.add(listener);
-          return () => listeners.delete(listener);
-        },
+        hasSession: (threadId) => runtime.hasSession(threadId),
+        stopAll: () => runtime.stopAll(),
+        onEvent: runtime.onEvent,
       },
-      dispose: async () => {
-        for (const { stop } of active.values()) stop();
-        listeners.clear();
-      },
+      dispose: () => runtime.dispose(),
     };
   },
 };

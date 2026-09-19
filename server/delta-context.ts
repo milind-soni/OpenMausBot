@@ -11,6 +11,7 @@
 // say what the session holds, the turn replays as it would without records.
 
 import type { RuntimeEvent } from "./contracts.ts";
+import type { Message } from "./store.ts";
 
 /** One active-branch message as a provider would read it. */
 export interface ContextMessage {
@@ -43,6 +44,11 @@ export interface HandedState {
    * that carried it is counted here too, so it is not offered again. */
   through?: string;
   ids: string[];
+}
+
+/** Active-branch messages a provider reads as conversation context. */
+export function isContextMessage(m: Message): boolean {
+  return Boolean((m.kind === "text" && m.text) || m.roomRequest?.phase === "result");
 }
 
 export const UNSEEN_MAX_MESSAGES = 12;

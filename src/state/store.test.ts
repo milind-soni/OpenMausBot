@@ -6,6 +6,7 @@ import {
   currentTaskBot,
   initialState,
   loadSnapshotBoundary,
+  overlayOpen,
   openNotificationTarget,
   openThread,
   persistBotUpdate,
@@ -21,10 +22,11 @@ import {
   type Group,
   type Message,
   type Action,
+  type OverlayKind,
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
-import type { RoutineRun } from "../lib/routines";
+import type { RoutineRun } from "../../shared/routines";
 
 describe("screen frame ownership", () => {
   it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
@@ -311,16 +313,16 @@ describe("independent bot threads", () => {
 
 describe("keyboard shortcuts dialog state", () => {
   it("opens and closes without replacing bot settings navigation", () => {
-    expect(initialState.shortcutsOpen).toBe(false);
-    expect(initialState.botSettingsSection).toBe("overview");
-    expect(initialState.botSettingsExpandAccordion).toBe(false);
-    const state = { ...initialState, botSettingsSection: "soul" as const };
-    const opened = reducer(state, { type: "toggleShortcuts", open: true });
-    expect(opened.shortcutsOpen).toBe(true);
-    expect(opened.botSettingsSection).toBe("soul");
-    const closed = reducer(opened, { type: "toggleShortcuts" });
-    expect(closed.shortcutsOpen).toBe(false);
-    expect(closed.botSettingsSection).toBe("soul");
+    expect(overlayOpen(initialState, "shortcuts")).toBe(false);
+    expect(initialState.overlays.botSettingsSection).toBe("overview");
+    expect(initialState.overlays.botSettingsExpandAccordion).toBe(false);
+    const state = { ...initialState, overlays: { ...initialState.overlays, botSettingsSection: "soul" as const } };
+    const opened = reducer(state, { type: "openOverlay", kind: "shortcuts", open: true });
+    expect(overlayOpen(opened, "shortcuts")).toBe(true);
+    expect(opened.overlays.botSettingsSection).toBe("soul");
+    const closed = reducer(opened, { type: "openOverlay", kind: "shortcuts" });
+    expect(overlayOpen(closed, "shortcuts")).toBe(false);
+    expect(closed.overlays.botSettingsSection).toBe("soul");
   });
 });
 
@@ -1689,50 +1691,53 @@ describe("bot settings section", () => {
     messages: [],
   } as never as Bot;
 
-  it("toggleSettings with a section sets it and opens", () => {
+  it("openOverlay(settings) with a section sets it and opens", () => {
     const next = reducer(initialState, {
-      type: "toggleSettings",
+      type: "openOverlay",
+      kind: "settings",
       open: true,
       section: "identity",
     });
-    expect(next.settingsOpen).toBe(true);
-    expect(next.botSettingsSection).toBe("identity");
-    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(overlayOpen(next, "settings")).toBe(true);
+    expect(next.overlays.botSettingsSection).toBe("identity");
+    expect(next.overlays.botSettingsExpandAccordion).toBe(true);
   });
 
-  it("toggleSettings leaves the computer panel and inspector open, closes app settings", () => {
-    const withPanels = { ...initialState, computerOpen: true, inspectorOpen: true, appSettingsOpen: true };
-    const next = reducer(withPanels, { type: "toggleSettings", open: true });
-    expect(next.settingsOpen).toBe(true);
-    expect(next.computerOpen).toBe(true);
-    expect(next.inspectorOpen).toBe(true);
-    expect(next.appSettingsOpen).toBe(false);
+  it("openOverlay(settings) leaves the computer panel and inspector open, closes app settings", () => {
+    const withPanels = { ...initialState, overlays: { ...initialState.overlays, open: ["computer", "inspector", "appSettings"] as OverlayKind[] } };
+    const next = reducer(withPanels, { type: "openOverlay", kind: "settings", open: true });
+    expect(overlayOpen(next, "settings")).toBe(true);
+    expect(overlayOpen(next, "computer")).toBe(true);
+    expect(overlayOpen(next, "inspector")).toBe(true);
+    expect(overlayOpen(next, "appSettings")).toBe(false);
   });
 
   it("reopens the same section after a collapse without remounting settings", () => {
-    const opened = reducer(initialState, { type: "toggleSettings", open: true, section: "usage" });
-    const collapsed = reducer(opened, { type: "toggleSettings", open: true });
-    expect(collapsed.settingsOpen).toBe(true);
-    expect(collapsed.botSettingsExpandAccordion).toBe(false);
-    const reopened = reducer(collapsed, { type: "toggleSettings", open: true, section: "usage" });
-    expect(reopened.botSettingsSection).toBe("usage");
-    expect(reopened.botSettingsExpandAccordion).toBe(true);
+    const opened = reducer(initialState, { type: "openOverlay", kind: "settings", open: true, section: "usage" });
+    const collapsed = reducer(opened, { type: "openOverlay", kind: "settings", open: true });
+    expect(overlayOpen(collapsed, "settings")).toBe(true);
+    expect(collapsed.overlays.botSettingsExpandAccordion).toBe(false);
+    const reopened = reducer(collapsed, { type: "openOverlay", kind: "settings", open: true, section: "usage" });
+    expect(reopened.overlays.botSettingsSection).toBe("usage");
+    expect(reopened.overlays.botSettingsExpandAccordion).toBe(true);
   });
 
-  it("toggleSettings without a section keeps it", () => {
+  it("openOverlay(settings) without a section keeps it", () => {
     const state = reducer(initialState, {
-      type: "toggleSettings",
+      type: "openOverlay",
+      kind: "settings",
       open: true,
       section: "soul",
     });
-    expect(state.botSettingsExpandAccordion).toBe(true);
+    expect(state.overlays.botSettingsExpandAccordion).toBe(true);
     const next = reducer(state, {
-      type: "toggleSettings",
+      type: "openOverlay",
+      kind: "settings",
       open: true,
     });
-    expect(next.botSettingsSection).toBe("soul");
+    expect(next.overlays.botSettingsSection).toBe("soul");
     // Bare reopen (mascot) must not auto-expand a leftover section.
-    expect(next.botSettingsExpandAccordion).toBe(false);
+    expect(next.overlays.botSettingsExpandAccordion).toBe(false);
   });
 
   it.each(["identity", "model"] as const)("opens a bot's %s settings without leaving the team map or reading its conversations", (section) => {
@@ -1743,12 +1748,12 @@ describe("bot settings section", () => {
       bots: [{ ...bot, unread: true }],
       groups: [{ id: "room", unread: true } as Group],
     };
-    const next = reducer(state, { type: "toggleSettings", botId: bot.id, section });
+    const next = reducer(state, { type: "openOverlay", kind: "settings", botId: bot.id, section });
     expect(next.selectedId).toBe(bot.id);
     expect(next.activeView).toBe("team-map");
-    expect(next.settingsOpen).toBe(true);
-    expect(next.botSettingsSection).toBe(section);
-    expect(next.botSettingsExpandAccordion).toBe(true);
+    expect(overlayOpen(next, "settings")).toBe(true);
+    expect(next.overlays.botSettingsSection).toBe(section);
+    expect(next.overlays.botSettingsExpandAccordion).toBe(true);
     expect(next.bots).toBe(state.bots);
     expect(next.groups).toBe(state.groups);
   });
@@ -1760,24 +1765,22 @@ describe("bot settings section", () => {
       activeView: "team-map" as const,
       selectedId: bot.id,
       bots: [bot, other],
-      settingsOpen: true,
-      botSettingsSection: "soul" as const,
-      botSettingsExpandAccordion: true,
+      overlays: { ...initialState.overlays, open: ["settings"] as OverlayKind[], botSettingsSection: "soul" as const, botSettingsExpandAccordion: true },
     };
-    const next = reducer(state, { type: "toggleSettings", botId: other.id });
+    const next = reducer(state, { type: "openOverlay", kind: "settings", botId: other.id });
     expect(next.selectedId).toBe(other.id);
     expect(next.activeView).toBe("team-map");
-    expect(next.settingsOpen).toBe(true);
-    expect(next.botSettingsSection).toBe("overview");
-    expect(next.botSettingsExpandAccordion).toBe(false);
+    expect(overlayOpen(next, "settings")).toBe(true);
+    expect(next.overlays.botSettingsSection).toBe("overview");
+    expect(next.overlays.botSettingsExpandAccordion).toBe(false);
 
-    const model = reducer(next, { type: "toggleSettings", botId: bot.id, section: "model" });
-    expect(model.settingsOpen).toBe(true);
-    expect(model.botSettingsSection).toBe("model");
-    expect(model.botSettingsExpandAccordion).toBe(true);
-    expect(reducer(model, { type: "toggleSettings", botId: bot.id }).settingsOpen).toBe(true);
-    expect(reducer(model, { type: "toggleSettings", botId: bot.id, open: false }).settingsOpen).toBe(false);
-    expect(reducer(model, { type: "toggleSettings" }).settingsOpen).toBe(false);
+    const model = reducer(next, { type: "openOverlay", kind: "settings", botId: bot.id, section: "model" });
+    expect(overlayOpen(model, "settings")).toBe(true);
+    expect(model.overlays.botSettingsSection).toBe("model");
+    expect(model.overlays.botSettingsExpandAccordion).toBe(true);
+    expect(overlayOpen(reducer(model, { type: "openOverlay", kind: "settings", botId: bot.id }), "settings")).toBe(true);
+    expect(overlayOpen(reducer(model, { type: "openOverlay", kind: "settings", botId: bot.id, open: false }), "settings")).toBe(false);
+    expect(overlayOpen(reducer(model, { type: "openOverlay", kind: "settings" }), "settings")).toBe(false);
   });
 
   it.each(["missing-bot", "hidden-bot", "room"])("ignores unavailable settings target %s", (botId) => {
@@ -1787,9 +1790,23 @@ describe("bot settings section", () => {
       selectedId: bot.id,
       bots: [bot, { ...bot, id: "hidden-bot", hidden: true }],
       groups: [{ id: "room" } as Group],
-      settingsOpen: true,
+      overlays: { ...initialState.overlays, open: ["settings"] as OverlayKind[] },
     };
-    expect(reducer(state, { type: "toggleSettings", botId, section: "identity" })).toBe(state);
+    expect(reducer(state, { type: "openOverlay", kind: "settings", botId, section: "identity" })).toBe(state);
+  });
+
+  it("closeAllOverlays empties the open list without touching remembered sections", () => {
+    const state = {
+      ...initialState,
+      overlays: {
+        ...initialState.overlays,
+        open: ["settings", "computer", "shortcuts"] as OverlayKind[],
+        botSettingsSection: "soul" as const,
+      },
+    };
+    const next = reducer(state, { type: "closeAllOverlays" });
+    expect(next.overlays.open).toEqual([]);
+    expect(next.overlays.botSettingsSection).toBe("soul");
   });
 
   it("selecting a different bot resets botSettingsSection to overview", () => {
@@ -1807,18 +1824,19 @@ describe("bot settings section", () => {
 
     // Set section to "identity" while bot-b is selected
     state = reducer(state, {
-      type: "toggleSettings",
+      type: "openOverlay",
+      kind: "settings",
       open: true,
       section: "identity",
     });
-    expect(state.botSettingsSection).toBe("identity");
+    expect(state.overlays.botSettingsSection).toBe("identity");
 
     // Select bot A → should reset to "overview" because we're changing bots
     const next = reducer(state, {
       type: "select",
       id: "bot-a",
     });
-    expect(next.botSettingsSection).toBe("overview");
+    expect(next.overlays.botSettingsSection).toBe("overview");
   });
 
   it("re-selecting the same bot keeps botSettingsSection, but selecting a different bot resets it", () => {
@@ -1831,18 +1849,19 @@ describe("bot settings section", () => {
 
     // Open settings with section "soul"
     state = reducer(state, {
-      type: "toggleSettings",
+      type: "openOverlay",
+      kind: "settings",
       open: true,
       section: "soul",
     });
-    expect(state.botSettingsSection).toBe("soul");
+    expect(state.overlays.botSettingsSection).toBe("soul");
 
     // Re-select bot A (same bot) → section should stay "soul"
     state = reducer(state, {
       type: "select",
       id: "bot-a",
     });
-    expect(state.botSettingsSection).toBe("soul");
+    expect(state.overlays.botSettingsSection).toBe("soul");
 
     // Add bot B (becomes selected)
     state = reducer(state, {
@@ -1856,7 +1875,7 @@ describe("bot settings section", () => {
       type: "select",
       id: "bot-a",
     });
-    expect(state.botSettingsSection).toBe("overview");
+    expect(state.overlays.botSettingsSection).toBe("overview");
   });
 });
 

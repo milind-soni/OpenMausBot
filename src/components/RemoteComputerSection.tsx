@@ -13,13 +13,34 @@ function errorText(error: unknown): string {
   );
 }
 
+/** A host reachable only from a private network: RFC1918 IPv4, unique-local
+ * or link-local IPv6, or an mDNS .local name. Plain-http pairing links are
+ * allowed only for these hosts because the network itself is private, so the
+ * link never crosses the public internet in the clear. */
+function isPrivateLanHost(hostname: string): boolean {
+  // URL.hostname keeps the brackets on IPv6 literals ("[fe80::1]"), so
+  // strip them before the address-family checks below.
+  const host = hostname.replace(/^\[/, "").replace(/\]$/, "");
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+  }
+  if (host.includes(":")) {
+    const first = Number.parseInt(host.split(":")[0] ?? "", 16);
+    return (first & 0xfc00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  }
+  return host.toLowerCase().endsWith(".local");
+}
+
 export function isServerPairingLink(input: string): boolean {
   const link = input.trim();
-  if (!/^https:\/\//i.test(link) || /[\s\\]/.test(link)) return false;
+  if (!/^https?:\/\//i.test(link) || /[\s\\]/.test(link)) return false;
   try {
     const url = new URL(link);
     const code = /(?:^|[#&])code=([^&]+)/.exec(url.hash)?.[1];
-    return url.protocol === "https:" && !url.username && !url.password && !url.search
+    const transportOk = url.protocol === "https:" || (url.protocol === "http:" && isPrivateLanHost(url.hostname));
+    return transportOk && !url.username && !url.password && !url.search
       && (url.pathname === "/pair" || url.pathname === "/pair/")
       && Boolean(code && decodeURIComponent(code).trim());
   } catch {

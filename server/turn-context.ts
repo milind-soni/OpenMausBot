@@ -1,11 +1,14 @@
 import { peerName } from "./peer-roster.ts";
 
-// Building the text a driver actually receives. Three situations force an
+// Building the text a driver actually receives. Four situations force an
 // inline replay of the active branch: a rewind (the visible branch changed),
 // a fresh engine (this instance has no session here — the user switched the
-// bot's model mid-thread), and an update appended outside the provider's own
-// turn. The first two coincide today but are distinct markers on purpose:
-// rewound also invalidates OTHER instances' cursors, fresh does not.
+// bot's model mid-thread), an update appended outside the provider's own
+// turn, and a soul edit a resumed session cannot receive (the provider
+// refreshes recorded prompts only above a CLI floor — Claude's is
+// --system-prompt-snapshot, 2.1.267). The first two coincide today but are
+// distinct markers on purpose: rewound also invalidates OTHER instances'
+// cursors, fresh does not.
 export interface TurnContextInput {
   /** the user's new message */
   text: string;
@@ -19,6 +22,12 @@ export interface TurnContextInput {
    * a delegated teammate returned a result). Native resume state cannot
    * contain it, so the active branch must be replayed once. */
   externallyUpdated: boolean;
+  /** the bot's soul (stable system prompt) changed since the session this
+   * turn would resume was started, on a provider that cannot refresh the
+   * recorded prompt in place. Resuming would keep the stale soul, so the
+   * branch is replayed into a fresh session instead — the same path
+   * externallyUpdated takes (#1346). */
+  soulChanged?: boolean;
   /** transcript-replay drivers get history via SendTurnInput.transcript instead */
   replaysNatively: boolean;
 }
@@ -51,6 +60,8 @@ const FRESH_PREAMBLE =
   "[You are joining this conversation mid-thread (the user switched this bot over to you). The conversation so far:]";
 const EXTERNAL_UPDATE_PREAMBLE =
   "[This conversation received an update outside your provider session. The complete current history follows so you can use that update in your next response:]";
+const SOUL_CHANGED_PREAMBLE =
+  "[Your instructions were updated since this conversation began, and this provider cannot refresh them in the running session. This is a new session under your current instructions. The conversation so far:]";
 
 /** A bot-authored message in a 1:1 conversation (a delegated reply) as a
  * replay shows it: under a provenance label, with the body JSON-encoded so it
@@ -87,13 +98,13 @@ export function buildTurnContext(input: TurnContextInput): {
   /** false when the native session must not be resumed */
   resume: boolean;
 } {
-  const { text, transcript, rewound, fresh, externallyUpdated, replaysNatively } = input;
-  const resume = !rewound && !fresh && !externallyUpdated;
+  const { text, transcript, rewound, fresh, externallyUpdated, soulChanged, replaysNatively } = input;
+  const resume = !rewound && !fresh && !externallyUpdated && !soulChanged;
   const replay = !resume && !replaysNatively && transcript.length > 0;
   if (!replay) return { turnText: text, resume };
   return {
     turnText: [
-      rewound ? REWOUND_PREAMBLE : externallyUpdated ? EXTERNAL_UPDATE_PREAMBLE : FRESH_PREAMBLE,
+      rewound ? REWOUND_PREAMBLE : externallyUpdated ? EXTERNAL_UPDATE_PREAMBLE : soulChanged ? SOUL_CHANGED_PREAMBLE : FRESH_PREAMBLE,
       "",
       ...transcript.map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`),
       "",

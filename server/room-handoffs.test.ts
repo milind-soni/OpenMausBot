@@ -5,6 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import { RoomHandoffs, ROOM_HANDOFF_LIMITS, type RoomHandoffHooks } from "./room-handoffs.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
+/** Counts calls through to the real atomic writer, so persistence tests can
+ * assert how many times the tree hit the disk without faking writes away. */
+const { atomicWrites } = vi.hoisted(() => ({ atomicWrites: vi.fn<typeof import("./atomic.ts").writeFileAtomic>() }));
+vi.mock("./atomic.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./atomic.ts")>();
+  return { ...actual, writeFileAtomic: atomicWrites.mockImplementation(actual.writeFileAtomic) };
+});
+
 const addr = (id: string) => ({ groupId: id, threadId: `${id}-thread`, botId: `${id}-bot` });
 /** Builds an engine over a temp file, with hooks and clock the test can override. */
 async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, file: string) => Promise<void> | void, now: () => number = Date.now,
@@ -13,7 +21,9 @@ async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, fil
   const hooks: RoomHandoffHooks = { validate: () => undefined, busy: () => false,
     run: vi.fn(async () => ({ ok: true, text: "done" })), report: vi.fn(), changed: () => {} };
   try { const file = join(dir, "requests.json"); await test(new RoomHandoffs(file, hooks, now, limits), hooks, file); }
-  finally { await removeTempDir(dir); }
+  // A coalesced write scheduled inside the test must land before the temp
+  // dir disappears out from under it.
+  finally { await flush(); await removeTempDir(dir); }
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
@@ -46,6 +56,7 @@ describe("addressed room request tree", () => {
     expect(engine.activeDirect("one")).toBe(false);
     expect(engine.activeDirect("two")).toBe(true);
     expect(other.status).toBe("queued");
+    engine.flushNow();
     const restarted = new RoomHandoffs(file, hooks); restarted.tick();
     expect(restarted.nodes.get(other.id)?.status).toBe("failed");
     expect(restarted.nodes.get(other.id)?.result).toContain("restart");
@@ -231,11 +242,54 @@ describe("addressed room request tree", () => {
   }));
   it("records interruption on restart without replaying side effects and fails closed on corrupt storage", () => fixture((engine, hooks, file) => {
     const { node } = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+    engine.flushNow();
     const restarted = new RoomHandoffs(file, hooks); restarted.tick();
     expect(restarted.nodes.get(node.id)?.result).toContain("restart"); expect(hooks.run).not.toHaveBeenCalled();
+    restarted.flushNow();
     expect(JSON.parse(readFileSync(file, "utf8")).every((n: { status: string }) => n.status === "failed")).toBe(true);
     writeFileSync(file, "{corrupt");
     expect(() => new RoomHandoffs(file, hooks).enqueue(addr("A"), "new", undefined, addr("B"), "work", "build")).toThrow("storage");
+  }));
+});
+describe("room handoff persistence", () => {
+  it("flushes each accepted enqueue synchronously, then coalesces same-tick status churn into one write", () => fixture(async (engine, hooks, file) => {
+    atomicWrites.mockClear();
+    engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+    // Acceptance is durable before enqueue returns: a caller that crashes
+    // right after accepting must not lose the queued node.
+    expect(atomicWrites).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toHaveLength(2);
+    engine.enqueue(addr("A"), "turn", undefined, addr("C"), "review", "check");
+    expect(atomicWrites).toHaveBeenCalledTimes(2);
+    atomicWrites.mockClear();
+    engine.sourceSettled("turn", true);
+    expect(engine.nodes.size).toBe(3);
+    expect([...engine.nodes.values()].map(n => n.key).sort()).toEqual(["review", "root", "work"]);
+    // Status churn is not user-paced: publishes inside one tick still share
+    // a single write (#1189).
+    expect(atomicWrites).not.toHaveBeenCalled();
+    await flush();
+    expect(atomicWrites).toHaveBeenCalledTimes(1);
+    expect(atomicWrites.mock.calls[0]?.[2]).toEqual({ mode: 0o600 });
+    const saved = JSON.parse(readFileSync(file, "utf8")) as Array<{ key: string }>;
+    expect(saved.map(n => n.key).sort()).toEqual(["review", "root", "work"]);
+    const reloaded = new RoomHandoffs(file, hooks);
+    expect(reloaded.nodes.size).toBe(3);
+    expect([...reloaded.nodes.values()].map(n => n.key).sort()).toEqual(["review", "root", "work"]);
+  }));
+  it("writes pending status churn immediately with flushNow", () => fixture((engine, _hooks, file) => {
+    atomicWrites.mockClear();
+    engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
+    expect(engine.nodes.size).toBe(2);
+    expect(atomicWrites).toHaveBeenCalledTimes(1);
+    atomicWrites.mockClear();
+    engine.sourceSettled("turn", true);
+    expect(atomicWrites).not.toHaveBeenCalled();
+    engine.flushNow();
+    expect(atomicWrites).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(readFileSync(file, "utf8")).find((n: { id: string }) => n.id === "turn")).toMatchObject({ status: "waiting" });
+    engine.flushNow();
+    expect(atomicWrites).toHaveBeenCalledTimes(1);
   }));
 });
 describe("room handoff lifetime budget", () => {

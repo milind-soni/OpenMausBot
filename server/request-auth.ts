@@ -26,6 +26,17 @@ export interface RequestAuthResult {
   error: string;
 }
 
+/** Who a user message is from, when that is someone other than the desktop
+ * owner. Loopback is the owner by design, so it stays unstamped and reads as
+ * the profile name; a paired or signed-in session names the person, by
+ * account email where there is one and otherwise by the device label they
+ * chose while pairing. */
+export function messageSender(auth: RequestAuth): { name: string } | undefined {
+  if (auth.kind !== "session") return undefined;
+  const name = (auth.session.email ?? auth.session.label ?? "").trim();
+  return name ? { name } : undefined;
+}
+
 const LOOPBACK_SCOPES: readonly Scope[] = ["admin", "client"];
 
 export function isLoopbackHost(host: string | undefined): boolean {

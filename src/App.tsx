@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Menu } from "lucide-react";
-import { StoreProvider, useStore } from "@/state/store";
+import { StoreProvider, overlayOpen, useStore } from "@/state/store";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
 import { FirstConversationTour } from "@/components/onboarding/FirstConversationTour";
 import { GuidedTour } from "@/components/onboarding/GuidedTour";
@@ -46,7 +46,7 @@ function Shell() {
         target.searchParams.set("share-computer", computerId);
         window.history.replaceState(null, "", `${target.pathname}${target.search}${target.hash}`);
       }
-      dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
+      dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: "desktopWorkspaces" });
     };
     const url = new URL(window.location.href);
     if (url.searchParams.get("desktop-settings") === "workspaces") {
@@ -95,10 +95,10 @@ function Shell() {
   // Kept deliberately small; every panel already closes on Esc.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.isComposing || state.shortcutsOpen) return;
+      if (e.defaultPrevented || e.isComposing || overlayOpen(state, "shortcuts")) return;
       if (shouldOpenKeyboardShortcuts(e)) {
         e.preventDefault();
-        dispatch({ type: "toggleShortcuts", open: true });
+        dispatch({ type: "openOverlay", kind: "shortcuts", open: true });
         return;
       }
 
@@ -107,7 +107,7 @@ function Shell() {
       const bots = state.bots.filter((b) => !b.hidden);
       if (e.key === "n" && !e.shiftKey) {
         e.preventDefault();
-        dispatch({ type: "toggleNewBot", open: true });
+        dispatch({ type: "openOverlay", kind: "newBot", open: true });
       } else if (/^[1-9]$/.test(e.key)) {
         const target = bots[Number(e.key) - 1];
         if (target) {
@@ -125,7 +125,7 @@ function Shell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state.bots, state.selectedId, state.shortcutsOpen, dispatch]);
+  }, [state.bots, state.selectedId, overlayOpen(state, "shortcuts"), dispatch]);
 
   useEffect(() => {
     window.ogb?.setUnreadCount?.(unreadCount);
@@ -142,12 +142,12 @@ function Shell() {
   // Picking a conversation closes the drawer: on a phone the chat is what you
   // asked for, and leaving the list up would hide it. Watching activeView too
   // catches re-selecting the bot that is already current from another view —
-  // the reducer switches the view without changing selectedId. pluginsOpen
-  // and settingsOpen cover the same idea from a different trigger: close the
+  // the reducer switches the view without changing selectedId. the plugins
+  // and settings overlays cover the same idea from a different trigger: close the
   // drawer whenever an action opens something over the chat.
   useEffect(() => {
     setDrawerOpen(false);
-  }, [state.selectedId, bot?.threadId, group?.threadId, state.activeView, state.pluginsOpen, state.settingsOpen]);
+  }, [state.selectedId, bot?.threadId, group?.threadId, state.activeView, overlayOpen(state, "plugins"), overlayOpen(state, "settings")]);
 
   useEffect(() => {
     if (state.activeView === "routines" && previousViewRef.current !== "routines") {
@@ -166,14 +166,14 @@ function Shell() {
   }, [localVmWorkspaceBotId, state.activeView, state.selectedId]);
 
   const openLocalVmWorkspace = (botId: string) => {
-    dispatch({ type: "toggleComputer", open: false });
+    dispatch({ type: "closeOverlay", kind: "computer" });
     setLocalVmWorkspaceBotId(botId);
   };
 
   const openComputerFromWorkspace = (botId: string) => {
     setLocalVmWorkspaceBotId(null);
     dispatch({ type: "select", id: botId });
-    dispatch({ type: "toggleComputer", open: true });
+    dispatch({ type: "openOverlay", kind: "computer", open: true });
   };
 
   const closeCalendar = useCallback(() => {
@@ -190,18 +190,16 @@ function Shell() {
   const nativeViewOverlayOpen =
     drawerOpen ||
     paletteOpen ||
-    state.settingsOpen ||
-    state.computerOpen ||
-    state.inspectorOpen ||
-    state.appSettingsOpen ||
-    state.pluginsOpen;
+    state.overlays.open.some((kind) =>
+      kind === "settings" || kind === "computer" || kind === "inspector" || kind === "appSettings" || kind === "plugins",
+    );
 
   // The macOS app menu's Preferences… item lives in the desktop shell, so the
   // shell signals the request over the bridge (Cmd+, accelerates the item).
   // Local-shell only: remote server pages never receive the channel, and ogb
   // is absent in the browser.
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(() => dispatch({ type: "toggleAppSettings", open: true }));
+    return window.ogb?.onOpenAppSettings?.(() => dispatch({ type: "openOverlay", kind: "appSettings", open: true }));
   }, [dispatch]);
 
   // The viewer outlives ComputerPanel and can target any bot, so release control
@@ -293,12 +291,12 @@ function Shell() {
           (Computer panel, then the usage chip): every re-render mounts a
           fresh settings panel and never removes the previous one, so the
           panels pile up and Close stops working. */}
-      {state.settingsOpen && bot && (
+      {overlayOpen(state, "settings") && bot && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} />
           : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} />
       )}
-      {state.computerOpen && bot && (
+      {overlayOpen(state, "computer") && bot && (
         remoteClient ? (
           <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} />
         ) : (
@@ -309,14 +307,14 @@ function Shell() {
           />
         )
       )}
-      {!remoteClient && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
-      {state.appSettingsOpen && <SettingsModal />}
-      {state.pluginsOpen && <PluginsPanel />}
-      {state.newBotOpen && <NewBotDialog />}
-      {state.shortcutsOpen && (
+      {!remoteClient && overlayOpen(state, "inspector") && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
+      {overlayOpen(state, "appSettings") && <SettingsModal />}
+      {overlayOpen(state, "plugins") && <PluginsPanel />}
+      {overlayOpen(state, "newBot") && <NewBotDialog />}
+      {overlayOpen(state, "shortcuts") && (
         <KeyboardShortcutsModal
-          open={state.shortcutsOpen}
-          onClose={() => dispatch({ type: "toggleShortcuts", open: false })}
+          open={overlayOpen(state, "shortcuts")}
+          onClose={() => dispatch({ type: "closeOverlay", kind: "shortcuts" })}
         />
       )}
       {/* mounted after the modals: same z-50 tier, so DOM order keeps the
@@ -351,19 +349,19 @@ function WelcomeGate() {
     });
   // Explicit desktop connection Settings need no local provider onboarding.
   // Organisation remains optional; closing Settings resumes the normal tour.
-  if (state.appSettingsOpen && ["desktopWorkspaces", "organization"].includes(state.appSettingsSection)) return null;
-  if (!state.welcomeOpen && !due) return null;
+  if (overlayOpen(state, "appSettings") && ["desktopWorkspaces", "organization"].includes(state.overlays.appSettingsSection)) return null;
+  if (!overlayOpen(state, "welcome") && !due) return null;
   const bot = state.bots.find((b) => !b.hidden) ?? null;
-  const replay = state.welcomeOpen && !due;
+  const replay = overlayOpen(state, "welcome") && !due;
   return (
     <WelcomeFlow
       bot={bot}
       replay={replay}
       onDone={() => {
         setDismissed(true);
-        dispatch({ type: "toggleWelcome", open: false });
+        dispatch({ type: "closeOverlay", kind: "welcome" });
         // the first real finish hands over to the guided tour; a replay does not
-        if (!replay) dispatch({ type: "toggleTour", open: true });
+        if (!replay) dispatch({ type: "openOverlay", kind: "tour", open: true });
       }}
     />
   );

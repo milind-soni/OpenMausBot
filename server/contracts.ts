@@ -135,6 +135,13 @@ export interface SendTurnInput {
    * request every turn ignore both and keep reading `system`. */
   systemStable?: string;
   systemVolatile?: string;
+  /** The bot's standing identity only — persona and SOUL.md, the parts a
+   * person edits. A driver that cannot refresh a resumed session's recorded
+   * prompt watches THIS half to decide whether the edit forces a fresh
+   * session (#1346): the stable half also carries context that changes
+   * mid-conversation (a pinned surface, mounted tools), and replaying the
+   * thread for those would needlessly drop native session continuity. */
+  systemStanding?: string;
   /** Coordinated teammate turns may resume a Claude conversation whose
    * earlier system prompt contained a different assignment. Refresh that
    * prompt when the provider supports it; the current brief also arrives

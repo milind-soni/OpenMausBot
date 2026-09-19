@@ -17,6 +17,7 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { chatFollowups, saveChatFollowup } from "./message-db.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -28,6 +29,8 @@ import {
   restoreHeldSteeredQueue,
   restoreSteeredMessages,
   settleHeldSteeredQueue,
+  STEER_QUEUE_MAX_BYTES,
+  STEER_QUEUE_MAX_ITEMS,
   _queuedCount,
   type SteerStore,
 } from "./steer-queue.ts";
@@ -421,6 +424,76 @@ describe("steer-queue module", () => {
     expect(_queuedCount(bot.threadId)).toBe(0);
   });
 
+});
+
+// ── unit: the per-thread busy-turn queue bounds ───────────────────────
+describe("steer-queue bounds", () => {
+  it("accepts exactly STEER_QUEUE_MAX_ITEMS queued sends and refuses the next without persisting it", () => {
+    const bot = fakeBot("bot-bound-items", "thread-bound-items", true);
+    for (let i = 0; i < STEER_QUEUE_MAX_ITEMS; i += 1) {
+      queueSteeredMessage(bot.id, bot.threadId, `note ${i}`);
+    }
+    expect(_queuedCount(bot.threadId)).toBe(STEER_QUEUE_MAX_ITEMS);
+    let refused: unknown;
+    try {
+      queueSteeredMessage(bot.id, bot.threadId, "one too many");
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({
+      status: 429,
+      message: "this thread's queued messages are full; wait for the running turn to finish or cancel a queued message",
+    });
+    // the refused send left neither a durable row nor a queue entry
+    const pending = chatFollowups("bot").filter((row) => row.threadId === bot.threadId);
+    expect(pending).toHaveLength(STEER_QUEUE_MAX_ITEMS);
+    expect(pending.some((row) => row.payload.text === "one too many")).toBe(false);
+    expect(_queuedCount(bot.threadId)).toBe(STEER_QUEUE_MAX_ITEMS);
+    // drain so later restart-driven tests in this file see nothing here
+    bot.busy = false;
+    drainSteeredMessages(fakeStore([bot]), vi.fn());
+    expect(_queuedCount(bot.threadId)).toBe(0);
+  });
+
+  it("refuses a single send whose text alone exceeds the byte ceiling", () => {
+    const bot = fakeBot("bot-bound-bytes", "thread-bound-bytes", true);
+    let refused: unknown;
+    try {
+      queueSteeredMessage(bot.id, bot.threadId, "x".repeat(STEER_QUEUE_MAX_BYTES + 1));
+    } catch (error) {
+      refused = error;
+    }
+    expect(refused).toMatchObject({ status: 429 });
+    expect(_queuedCount(bot.threadId)).toBe(0);
+    expect(chatFollowups("bot").filter((row) => row.threadId === bot.threadId)).toEqual([]);
+  });
+
+  it("trims an over-limit durable queue to the oldest allowed prefix on restore", () => {
+    const bot = fakeBot("bot-restore-bound", "thread-restore-bound", true);
+    // 30 durable pending rows a pre-bound process could have left behind
+    for (let i = 1; i <= 30; i += 1) {
+      saveChatFollowup({
+        id: `restore-bound-${i}`,
+        kind: "bot",
+        ownerId: bot.id,
+        threadId: bot.threadId,
+        payload: { text: `durable ${i}` },
+      });
+    }
+    restoreSteeredMessages();
+    expect(_queuedCount(bot.threadId)).toBe(STEER_QUEUE_MAX_ITEMS);
+    expect(queuedSteerSnapshot(() => true)[bot.threadId].map((item) => item.text))
+      .toEqual(Array.from({ length: STEER_QUEUE_MAX_ITEMS }, (_, i) => `durable ${i + 1}`));
+    const rows = chatFollowups("bot").filter((row) => row.threadId === bot.threadId);
+    expect(rows.filter((row) => row.status === "pending").map((row) => row.id))
+      .toEqual(Array.from({ length: STEER_QUEUE_MAX_ITEMS }, (_, i) => `restore-bound-${i + 1}`));
+    expect(rows.filter((row) => row.status === "cancelled").map((row) => row.id))
+      .toEqual(Array.from({ length: 30 - STEER_QUEUE_MAX_ITEMS }, (_, i) => `restore-bound-${STEER_QUEUE_MAX_ITEMS + i + 1}`));
+    // drain the kept prefix so nothing of this thread stays pending
+    bot.busy = false;
+    drainSteeredMessages(fakeStore([bot]), vi.fn());
+    expect(_queuedCount(bot.threadId)).toBe(0);
+  });
 });
 
 // ── e2e: the real server on the gated fake ACP fleet ───────────────────

@@ -28,9 +28,17 @@ type PromptContext = { input: TerminalInput; output: TerminalOutput; signal: Abo
 
 function displayText(value: string, multiline = false): string {
   const plain = stripVTControlCharacters(value);
-  // Provider-supplied labels must not issue terminal control commands.
+  // Provider-supplied labels must not issue terminal control commands. BEL is
+  // audible but zero-width, so drop it rather than pad it; stripVTControlCharacters
+  // only removes BEL inside OSC sequences, never a bare one. Newlines survive
+  // only in multiline output; every other control renders as one space so
+  // words never fuse.
   // eslint-disable-next-line no-control-regex
-  return plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => character === "\n" && multiline ? "\n" : " ");
+  return plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => {
+    if (character === "\n") return multiline ? "\n" : " ";
+    if (character === "\u0007") return "";
+    return " ";
+  });
 }
 
 /** A line-based fallback with no cursor/color output. Readline has no output

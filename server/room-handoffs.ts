@@ -37,6 +37,9 @@ export class RoomHandoffs {
   readonly nodes = new Map<string, RoomHandoff>();
   private readonly controllers = new Map<string, AbortController>();
   private loadError?: string;
+  /** True whenever the in-memory tree is ahead of the file on disk. */
+  private dirty = false;
+  private flushScheduled = false;
   private readonly file: string;
   private readonly hooks: RoomHandoffHooks;
   private readonly now: () => number;
@@ -63,7 +66,32 @@ export class RoomHandoffs {
     }
   }
 
-  private save() { writeFileAtomic(this.file, JSON.stringify([...this.nodes.values()]), { mode: 0o600 }); }
+  /** Every disk write replaces the whole collection, so a tick in which N
+   * nodes settle must not pay N back-to-back fsyncs (#1189): mark the tree
+   * dirty and schedule a single write per macrotask. Any number of
+   * publishes in the same tick then coalesce into one atomic write holding
+   * every node's latest state, while in-memory readers never wait. */
+  private save() {
+    this.dirty = true;
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    setImmediate(() => {
+      this.flushScheduled = false;
+      try { this.flushNow(); }
+      // The tree stays dirty, so the next publish retries the write, and
+      // the message matches the 250ms tick's own catch for greppability.
+      catch (error) { console.error("room handoffs:", error); }
+    });
+  }
+  /** Write the current tree synchronously instead of waiting for the
+   * scheduled flush. Callers about to lose the event loop — shutdown — use
+   * this so a pending coalesced write cannot die with the process; the
+   * already-scheduled callback then finds a clean tree and does nothing. */
+  flushNow() {
+    if (!this.dirty) return;
+    writeFileAtomic(this.file, JSON.stringify([...this.nodes.values()]), { mode: 0o600 });
+    this.dirty = false;
+  }
   private publish(...nodes: RoomHandoff[]) {
     this.save();
     this.hooks.changed(new Set(nodes.flatMap(node => node.groupId ? [node.groupId] : [])),
@@ -223,6 +251,13 @@ export class RoomHandoffs {
     if (fresh) this.nodes.set(parent.id, parent);
     this.nodes.set(node.id, node);
     try { this.publish(node, parent); } catch (e) { this.nodes.delete(node.id); if (fresh) this.nodes.delete(parent.id); throw e; }
+    // Acceptance is a durability promise: the caller may answer a user or
+    // an HTTP request the moment enqueue returns, so the accepted node must
+    // already be on disk — a crash in the one-macrotask window of the
+    // coalesced flush would silently lose it (#1189 targeted the N-settle
+    // fsync storm, not this single user-paced write). The scheduled flush
+    // then finds a clean tree and does nothing.
+    this.flushNow();
     return { node, duplicate: false };
   }
 

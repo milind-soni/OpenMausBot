@@ -1,6 +1,10 @@
 export interface LocalVmLeaseRecord {
   threadId: string;
   botId: string;
+  /** Monotonic claim ordinal for this lane. Direct threads reuse their
+   * thread id across turns, so a late release distinguishes its own claim
+   * from a replacement's by generation, never by thread id alone. */
+  generation: number;
   expiresAt: number;
 }
 
@@ -11,6 +15,7 @@ export interface LocalVmLeaseRecord {
 export class LocalVmLease {
   private record: LocalVmLeaseRecord | null = null;
   private readonly ttlMs: number;
+  private nextGeneration = 1;
 
   constructor(ttlMs: number) {
     if (!Number.isFinite(ttlMs) || ttlMs <= 0) throw new Error("Local VM lease TTL must be positive");
@@ -30,7 +35,9 @@ export class LocalVmLease {
   ): boolean {
     const current = this.current(isBotBusy, now);
     if (current && current.threadId !== threadId) return false;
-    this.record = { threadId, botId, expiresAt: now + this.ttlMs };
+    const generation = this.nextGeneration;
+    this.nextGeneration += 1;
+    this.record = { threadId, botId, generation, expiresAt: now + this.ttlMs };
     return true;
   }
 
@@ -42,8 +49,20 @@ export class LocalVmLease {
     if (this.record?.threadId === threadId) this.record.expiresAt = now + this.ttlMs;
   }
 
-  release(threadId: string): void {
-    if (this.record?.threadId === threadId) this.record = null;
+  /** The generation this thread's claim last stamped, without resolving
+   * liveness: unlike current(), a fence read must never clear the expired
+   * or idle record it is about to be compared against. */
+  generationOf(threadId: string): number | undefined {
+    return this.record?.threadId === threadId ? this.record.generation : undefined;
+  }
+
+  release(threadId: string, generation?: number): void {
+    if (this.record?.threadId !== threadId) return;
+    // A superseded turn's late callback must never release its
+    // replacement's claim; on a reused thread id only the generation
+    // tells the two claims apart.
+    if (generation !== undefined && this.record.generation !== generation) return;
+    this.record = null;
   }
 }
 

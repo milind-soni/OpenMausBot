@@ -1,9 +1,10 @@
 // Generic ACP (Agent Client Protocol) driver core — one JSON-RPC-2.0-over-
 // stdio session runtime that every ACP CLI harness (Grok Build, Gemini CLI,
 // …) rides. Modeled on t3code's AcpSessionRuntime + per-agent AcpSupport
-// split: the protocol mechanics live here, the per-harness quirks (spawn
-// argv, auth method, model catalog, sign-in check) live in a small support
-// object. Adding a harness = write server/drivers/acp/<name>.ts.
+// split: the wire protocol lives in acp/protocol.ts, the session runtime
+// here, the per-harness quirks (spawn argv, auth method, model catalog,
+// sign-in check) in a small support object. Adding a harness = write
+// server/drivers/acp/<name>.ts.
 //
 // ACP has no `turn/completed` notification: the `session/prompt` RPC *result*
 // is the completion signal (it carries stopReason + usage). Permission
@@ -19,16 +20,7 @@ import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promi
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 
 import { PROVIDER_CREDENTIAL_ENV, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
-import { decodeInjectId } from "../local-inject.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
-
-/**
- * A `host::model` pick talks to a loopback server with its own key.
- * Subscription ACP login (grok.com cached_token) must not fail that turn.
- */
-export function skipSubscriptionAuthForLocalInject(model: string | undefined): boolean {
-  return Boolean(decodeInjectId(model));
-}
 
 import type {
   DriverCreateInput,
@@ -38,19 +30,44 @@ import type {
   ProviderInstance,
   ProviderSnapshot,
   ModelCatalog,
-  ModelVariantOption,
-  RuntimeEvent,
-  RuntimeEventListener,
   SendTurnInput,
   ProviderErrorCode,
-  TurnImageInput,
 } from "../../contracts.ts";
-import { newEventId, newId } from "../../contracts.ts";
+import { newId } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
 import { appendNative } from "../native.ts";
+import { createDriverSessionRuntime, createRefreshModels } from "../driver-runtime.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
+import {
+  AcpConnection,
+  type AcpNotification,
+  type AcpServerRequest,
+  type AcpWireMessage,
+} from "./protocol.ts";
+import type {
+  AcpClientFileParams,
+  AcpInitializeResult,
+  AcpPromptResult,
+  AcpRequestPermissionParams,
+  AcpSessionConfigResult,
+  AcpSessionStartResult,
+  AcpSessionUpdateParams,
+  AcpTokenUsage,
+} from "./wire-types.ts";
+import { nativeLogMessage } from "./log-sanitize.ts";
+import {
+  acpMcpServers,
+  acpVariantOption,
+  decodeAcpConfig,
+  readAcpImageBlocks,
+  sessionOperationKey,
+  skipSubscriptionAuthForLocalInject,
+} from "./wire.ts";
+
+// Re-exported because the ACP tests import this helper from the core.
+export { skipSubscriptionAuthForLocalInject } from "./wire.ts";
 
 export interface AcpConfig {
   cli: string;
@@ -169,6 +186,8 @@ export interface AcpSupport {
    * the wire instead (droid), so this is the only place the pick can land; a
    * throw here fails the turn rather than silently running another model. */
   configureSession?(ctx: {
+    // Promise<any> is load-bearing: supports read method results opaquely
+    // (antigravity reads configOptions straight off set_config_option's).
     request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>;
     sessionId: string;
     config: AcpConfig;
@@ -189,110 +208,10 @@ const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000
 const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
-function acpVariantOption(result: any): { configId: string; options: ModelVariantOption[]; currentValue?: string } | undefined {
-  const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
-    (entry: any) => entry?.type === "select" && typeof entry.id === "string"
-      && (entry.id === "effort" || entry.category === "thought_level"),
-  );
-  if (!option) return;
-  const options: ModelVariantOption[] = [];
-  const seen = new Set<string>();
-  const collect = (entries: unknown) => {
-    if (!Array.isArray(entries)) return;
-    for (const entry of entries) {
-      if (typeof entry?.value === "string" && !seen.has(entry.value)) {
-        seen.add(entry.value);
-        options.push({ id: entry.value, label: typeof entry.name === "string" ? entry.name : entry.value });
-      } else if (Array.isArray(entry?.options)) collect(entry.options);
-    }
-  };
-  collect(option.options);
-  return {
-    configId: option.id,
-    options,
-    ...(typeof option.currentValue === "string" ? { currentValue: option.currentValue } : {}),
-  };
-}
-const TOOL_LOG_TEXT_LIMIT = 64_000;
-
-async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
-  return Promise.all(images.map(async (image) => ({
-    type: "image" as const,
-    data: (await readFile(image.path)).toString("base64"),
-    mimeType: image.mime,
-  })));
-}
-
-function sanitizeToolLogValue(value: unknown, budget: { nodes: number; text: number }, depth = 0): unknown {
-  if (depth > 12 || budget.nodes-- <= 0) return undefined;
-  if (typeof value === "string") {
-    if (/^data:image\//iu.test(value) || budget.text <= 0) return undefined;
-    const limit = Math.min(TOOL_LOG_TEXT_LIMIT, budget.text);
-    const text = value.length <= limit ? value : `[Earlier output truncated]\n\n${value.slice(-limit)}`;
-    budget.text -= text.length;
-    return text;
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((entry) => {
-      const sanitized = sanitizeToolLogValue(entry, budget, depth + 1);
-      return sanitized === undefined ? [] : [sanitized];
-    });
-  }
-  if (!value || typeof value !== "object") return value;
-  const record = value as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(record).flatMap(([key, entry]) => {
-    if ((record.type === "image" && (key === "data" || key === "blob")) ||
-      (key === "blob" && typeof record.mimeType === "string" && record.mimeType.startsWith("image/"))) return [];
-    const sanitized = sanitizeToolLogValue(entry, budget, depth + 1);
-    return sanitized === undefined ? [] : [[key, sanitized]];
-  }));
-}
-
-function sanitizeAcpToolMessage(message: any): unknown {
-  const isToolUpdate = message?.method === "session/update"
-    && ["tool_call", "tool_call_update"].includes(message?.params?.update?.sessionUpdate);
-  const isPermission = message?.method === "session/request_permission";
-  if (!isToolUpdate && !isPermission) return message;
-  return sanitizeToolLogValue(message, { nodes: 512, text: TOOL_LOG_TEXT_LIMIT });
-}
-
-function decodeAcpConfig(defaultCli: string) {
-  return (raw: unknown): AcpConfig => {
-    const o = (raw ?? {}) as Record<string, unknown>;
-    return {
-      cli: typeof o.cli === "string" ? o.cli : defaultCli,
-      fullAuto: o.fullAuto === true,
-      workspace: typeof o.workspace === "string" ? o.workspace : undefined,
-    };
-  };
-}
-
 /**
  * ACP JSON-RPC-over-stdio driver. Harness differences (argv, auth, catalog)
  * live in `support`; this is the shared handshake and turn runtime.
  */
-/** What "the same operation" means for a remembered session allow: the
- * tool call's shape with keys sorted, so two identical requests key alike
- * however the agent ordered its JSON. null when nothing identifies it. */
-function sessionOperationKey(toolCall: any): string | null {
-  const rawInput = toolCall?.rawInput;
-  const command = typeof rawInput?.command === "string" ? rawInput.command : undefined;
-  const hasInput = rawInput && typeof rawInput === "object" && Object.keys(rawInput).length > 0;
-  if (!command && !hasInput) return null;
-  const stable = (value: unknown): unknown =>
-    Array.isArray(value)
-      ? value.map(stable)
-      : value && typeof value === "object"
-        ? Object.fromEntries(Object.keys(value as Record<string, unknown>).sort().map((key) => [key, stable((value as Record<string, unknown>)[key])]))
-        : value;
-  return JSON.stringify(stable({
-    kind: toolCall?.kind,
-    title: toolCall?.title,
-    command,
-    input: rawInput,
-    locations: toolCall?.locations,
-  }));
-}
 
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   const DRIVER_KIND = support.driverKind;
@@ -333,25 +252,27 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         support.transformEnv?.(env, activeConfig, instanceId);
         return env;
       };
-      let models = support.models;
-      const refreshModels = async () => {
-        if (!support.resolveModels) return;
-        try {
-          const resolved = await support.resolveModels(childEnv(), config, instanceId);
-          if (resolved.options.length) models = resolved;
-        } catch {
-          // Keep the last usable catalog when an optional discovery source is down.
-        }
-      };
+      const { resolveModels } = support;
+      const catalog = createRefreshModels({
+        initial: support.models,
+        // no resolveModels means no live source; a down discovery source keeps the last usable catalog
+        load: resolveModels ? () => resolveModels(childEnv(), config, instanceId) : undefined,
+      });
+      const refreshModels = catalog.refreshModels;
       if (support.resolveModelsOnCreate !== false) await refreshModels();
-      const listeners = new Set<RuntimeEventListener>();
       interface Turn {
         stop: () => void;
         interrupt: () => void;
         turnId: string;
-        asks: Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>;
+          asks: Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>;
       }
-      const active = new Map<string, Turn>();
+      const runtime = createDriverSessionRuntime<Turn>({
+        driverKind: DRIVER_KIND,
+        stopTurn: (turn) => {
+          turn.stop();
+        },
+      });
+      const { emit, base } = runtime;
       // "Always allow this session", remembered by the driver when the agent
       // offered no `allow_always` of its own: the exact operations (kind,
       // title, command, input, locations) a person allowed for the session,
@@ -360,115 +281,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // nothing and is never remembered.
       const sessionAllows = new Map<string, Set<string>>();
 
-      const emit = (event: RuntimeEvent) => {
-        for (const listener of listeners) listener(event);
-      };
-
-      // ACP content blocks may carry a complete raster image inline. Keep the
-      // bytes on the wire, but never duplicate megabytes of base64 into the
-      // provider-native diagnostic log in either direction.
-      const nativeLogMessage = (msg: any): unknown => {
-        let redacted = msg;
-        const prompt = msg?.method === "session/prompt" ? msg?.params?.prompt : null;
-        if (Array.isArray(prompt)) {
-          redacted = {
-            ...msg,
-            params: {
-              ...msg.params,
-              prompt: prompt.map((content: any) =>
-                content?.type === "image" && typeof content.data === "string"
-                  ? { ...content, data: `[image data: ${content.data.length} base64 chars]` }
-                  : content
-              ),
-            },
-          };
-        }
-        const content = redacted?.params?.update?.content;
-        if (
-          redacted?.method !== "session/update" ||
-          redacted?.params?.update?.sessionUpdate !== "agent_message_chunk" ||
-          content?.type !== "image" ||
-          typeof content.data !== "string"
-        ) return support.sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
-        redacted = {
-          ...redacted,
-          params: {
-            ...redacted.params,
-            update: {
-              ...redacted.params.update,
-              content: { ...content, data: `[image data: ${content.data.length} base64 chars]` },
-            },
-          },
-        };
-        return support.sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
-      };
-      const base = (threadId: string, turnId: string) => ({
-        eventId: newEventId(),
-        provider: DRIVER_KIND,
-        threadId,
-        turnId,
-        createdAt: new Date().toISOString(),
-      });
-
-      // ACP session mcpServers: stdio is the baseline every ACP agent
-      // supports (mcpCapabilities.http/.sse only add EXTRA transports), so
-      // an injected stdio proxy — e.g. the peer-agent comms tool — attaches
-      // fine here. A url server is listed in ACP's http/sse shape and kept
-      // for the session only when the agent advertised that transport.
-      // env and headers are the ACP {name,value}[] shape.
-      type AcpMcpServer =
-        | { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }
-        | { type: "http" | "sse"; name: string; url: string; headers: Array<{ name: string; value: string }> };
-      const acpMcpServers = (turn: SendTurnInput) => {
-        const servers: AcpMcpServer[] = [];
-        const acpEnv = (env: Record<string, string>) =>
-          Object.entries(env).map(([name, value]) => ({ name, value: String(value) }));
-        const agents = turn.integrations?.agents;
-        if (agents) {
-          servers.push({ name: "agents", command: agents.command, args: agents.args, env: acpEnv(agents.env) });
-        }
-        const composio = turn.integrations?.composio;
-        if (composio) {
-          servers.push({
-            name: "composio",
-            command: composio.command,
-            args: composio.args,
-            env: acpEnv(composio.env),
-          });
-        }
-        const browser = turn.integrations?.browser;
-        if (browser) {
-          servers.push({ name: "browser", command: browser.command, args: browser.args, env: acpEnv(browser.env) });
-        }
-        // The bot's computer, mounted exactly like the Claude driver does:
-        // host and sandbox Cua connections expose Cua Driver's own MCP server.
-        // (A cloud box is not mounted here at all: a cloud turn runs ON the box.)
-        if (turn.integrations?.localComputer) {
-          const local = turn.integrations.localComputer;
-          servers.push({
-            name: "computer",
-            command: local.command,
-            args: local.args,
-            env: acpEnv(local.env ?? {}),
-          });
-        }
-        // user-configured servers, after the built-ins: a residual name
-        // collision keeps the built-in (reserved names are filtered at the
-        // config boundary; this is defense in depth).
-        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-          if (servers.some((existing) => existing.name === name)) continue;
-          if ("url" in server) {
-            servers.push({ type: server.type, name, url: server.url, headers: acpEnv(server.headers) });
-            continue;
-          }
-          servers.push({ name, command: server.command, args: server.args, env: acpEnv(server.env) });
-        }
-        return servers;
-      };
-
       const sendTurn = async (turn: SendTurnInput) => {
         const { threadId } = turn;
-        if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+        runtime.assertThreadIdle(threadId);
         // Provider-instance `fullAuto` predates per-bot approval levels. Every
         // harness turn now carries the bot's mode, so Ask/Auto must explicitly
         // put the native agent back into its interactive mode. Otherwise a
@@ -528,16 +343,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
         const state = { settled: false, promptSent: false, text: "" };
         const asks = new Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>();
-        let nextId = 1;
         let sessionId: string | null = null;
-        let sessionConfigResult: any = null;
-        const modelOf = (result: any): string | null => {
+        let sessionConfigResult: AcpSessionConfigResult | null = null;
+        const modelOf = (result: AcpSessionConfigResult | null): string | null => {
           const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
-            (entry: any) => entry?.id === (support.selectModel?.configId ?? "model"),
+            (entry) => entry?.id === (support.selectModel?.configId ?? "model"),
           );
           return typeof option?.currentValue === "string" ? option.currentValue : null;
         };
-        const receiveModelVariants = (result: any) => {
+        const receiveModelVariants = (result: AcpSessionConfigResult | null) => {
           sessionConfigResult = result;
           if (!support.modelVariants) return;
           const nativeModel = modelOf(result) ?? cliTurn.model;
@@ -562,37 +376,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return option;
         };
         let interruptTimer: ReturnType<typeof setTimeout> | null = null;
-        const rpcPending = new Map<
-          number,
-          { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }
-        >();
-
-        const send = (obj: unknown) => {
-          try {
-            child.stdin.write(JSON.stringify(obj) + "\n");
-          } catch {}
-          appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(obj) });
-        };
-        const request = (method: string, params: unknown, timeoutMs?: number, receive?: (result: any) => void) =>
-          new Promise<any>((resolve, reject) => {
-            const id = nextId++;
-            let timer: ReturnType<typeof setTimeout> | null = null;
-            if (timeoutMs) {
-              timer = setTimeout(() => {
-                rpcPending.delete(id);
-                reject(new Error(`${method} timed out`));
-              }, timeoutMs);
-              timer.unref?.();
-            }
-            rpcPending.set(id, {
-              // Consume configuration in wire order: an update following this
-              // response may arrive before the awaiting continuation resumes.
-              resolve: (result) => { receive?.(result); resolve(result); },
-              reject,
-              timer,
-            });
-            send({ jsonrpc: "2.0", id, method, params });
-          });
 
         const stop = () => killCliTree(child);
 
@@ -624,7 +407,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return candidate;
         };
 
-        const handleClientFileRequest = async (msg: any): Promise<void> => {
+        const handleClientFileRequest = async (msg: AcpServerRequest): Promise<void> => {
           const fail = (error: unknown) => send({
             jsonrpc: "2.0",
             id: msg.id,
@@ -632,7 +415,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
           try {
             if (!support.clientFileSystem) throw new Error("Client file access is disabled.");
-            const params = msg.params ?? {};
+            const params = (msg.params ?? {}) as AcpClientFileParams;
             const path = await resolveClientPath(params.path);
             if (msg.method === "fs/read_text_file") {
               const info = await stat(path);
@@ -644,8 +427,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 send({ jsonrpc: "2.0", id: msg.id, result: { content } });
                 return;
               }
-              const line = Number.isInteger(params.line) && params.line > 0 ? params.line : 1;
-              const limit = Number.isInteger(params.limit) && params.limit >= 0 ? params.limit : undefined;
+              const line = typeof params.line === "number" && Number.isInteger(params.line) && params.line > 0 ? params.line : 1;
+              const limit = typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0 ? params.limit : undefined;
               const lines = content.split("\n");
               const start = line - 1;
               send({
@@ -679,19 +462,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           state.settled = true;
           if (interruptTimer) clearTimeout(interruptTimer);
           for (const finish of asks.values()) finish("cancel", "system");
-          for (const p of rpcPending.values()) {
-            if (p.timer) clearTimeout(p.timer);
-            p.reject(new Error("turn settled"));
-          }
-          rpcPending.clear();
-          active.delete(threadId);
+          acp.failAll(new Error("turn settled"));
+          runtime.endTurn(threadId);
           flushAssistantText();
           emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null });
           stop(); // the agent process does not exit on its own
         };
 
         // server→client permission request → canonical request.opened
-        const handleServerRequest = (msg: any) => {
+        const handleServerRequest = (msg: AcpServerRequest) => {
           if (msg.method === "fs/read_text_file" || msg.method === "fs/write_text_file") {
             void handleClientFileRequest(msg);
             return;
@@ -700,7 +479,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             // never leave an unknown server request hanging — the agent blocks
             return send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
           }
-          const params = msg.params ?? {};
+          const params = (msg.params ?? {}) as AcpRequestPermissionParams;
           flushAssistantText();
           const options: Array<{ optionId?: string; kind?: string; name?: string }> = Array.isArray(params.options) ? params.options : [];
           const optionFor = (want: "allow" | "reject") =>
@@ -803,11 +582,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           });
         };
 
-        const handleNotification = (msg: any) => {
+        const handleNotification = (msg: AcpNotification) => {
           // Vendor side-channels (e.g. grok's `_x.ai/*`) are teed to the
           // native log but never normalized: the prompt result is the settle.
           if (msg.method !== "session/update") return;
-          const p = msg.params ?? {};
+          const p = (msg.params ?? {}) as AcpSessionUpdateParams;
           if (p._meta?.isReplay === true) return;
           if (support.modelVariants && p.update?.sessionUpdate === "config_option_update") {
             if (!state.settled && sessionId && p.sessionId === sessionId) receiveModelVariants(p.update);
@@ -870,44 +649,21 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         };
 
-        let buf = "";
-        // decode as UTF-8 across chunk boundaries — a raw `buf += chunk` splits
-        // multibyte characters that straddle two reads and corrupts the text
-        child.stdout.setEncoding("utf8");
-        child.stdout.on("data", (chunk) => {
-          buf += chunk;
-          let nl;
-          while ((nl = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, nl);
-            buf = buf.slice(nl + 1);
-            if (!line.trim()) continue;
-            let msg: any;
+        const acp = new AcpConnection({
+          stdout: child.stdout,
+          write: (line) => {
             try {
-              msg = JSON.parse(line);
-            } catch {
-              continue;
-            }
-            appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(msg) });
-            if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
-              const pend = rpcPending.get(msg.id);
-              if (pend) {
-                rpcPending.delete(msg.id);
-                if (pend.timer) clearTimeout(pend.timer);
-                if (msg.error) {
-                  const error = new Error(msg.error.message ?? JSON.stringify(msg.error));
-                  Object.assign(error, { code: msg.error.code, data: msg.error.data });
-                  pend.reject(error);
-                } else {
-                  pend.resolve(msg.result);
-                }
-              }
-            } else if (msg.id !== undefined && msg.method) {
-              handleServerRequest(msg);
-            } else if (msg.method) {
-              handleNotification(msg);
-            }
-          }
+              child.stdin.write(line);
+            } catch {}
+          },
+          onSend: (message) => appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(support, message) }),
+          onMessage: (message) => appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(support, message) }),
+          onServerRequest: handleServerRequest,
+          onNotification: handleNotification,
         });
+        const send = (obj: unknown) => acp.send(obj as AcpWireMessage);
+        const request = <T = unknown>(method: string, params: unknown, timeoutMs?: number, receive?: (result: T) => void): Promise<T> =>
+          acp.request<T>(method, params, timeoutMs, receive);
 
         let stderr = "";
         child.stderr.on("data", (c) => {
@@ -936,12 +692,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           interruptTimer = setTimeout(() => settle(true, "cancelled"), 5_000);
           interruptTimer.unref?.();
         };
-        active.set(threadId, { stop, interrupt, turnId, asks });
+        runtime.setTurn(threadId, { stop, interrupt, turnId, asks });
         emit({ ...base(threadId, turnId), type: "turn.started" });
 
         (async () => {
           try {
-            const init = await request(
+            const init = await request<AcpInitializeResult>(
               "initialize",
               {
                 protocolVersion: 1,
@@ -988,10 +744,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const cursor = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             // a fresh native session forgets what the previous one allowed
             if (!cursor) sessionAllows.delete(threadId);
-            let sessionResult: any = null;
+            let sessionResult: AcpSessionStartResult | null = null;
             if (cursor) {
               try {
-                sessionResult = await request(
+                sessionResult = await request<AcpSessionStartResult>(
                   support.resumeMethod === "resume" ? "session/resume" : "session/load",
                   { sessionId: cursor, cwd, mcpServers: sessionServers },
                   LOAD_SESSION_TIMEOUT,
@@ -1007,7 +763,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }
             }
             if (!sessionId) {
-              sessionResult = await request("session/new", { cwd, mcpServers: sessionServers }, NEW_SESSION_TIMEOUT, (result) => {
+              sessionResult = await request<AcpSessionStartResult>("session/new", { cwd, mcpServers: sessionServers }, NEW_SESSION_TIMEOUT, (result) => {
                 sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 receiveModelVariants(result);
               });
@@ -1098,13 +854,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(`${support.displayName} changed variant before the prompt`);
             }
             state.promptSent = true;
-            const result = await request("session/prompt", {
+            const result = await request<AcpPromptResult>("session/prompt", {
               sessionId,
               prompt: [{ type: "text", text }, ...imageBlocks],
             });
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
-            const usage = result?.usage ?? result?._meta ?? {};
+            const usage: AcpTokenUsage = result?.usage ?? result?._meta ?? {};
             if (typeof usage.inputTokens === "number" || typeof usage.outputTokens === "number") {
               emit({
                 ...base(threadId, turnId),
@@ -1170,7 +926,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         displayName: input.displayName,
         enabled: input.enabled,
         get models() {
-          return models;
+          return catalog.models;
         },
         refreshModels: support.resolveModels ? refreshModels : undefined,
         snapshot,
@@ -1193,9 +949,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             localComputerMcp: true,
           },
           sendTurn,
-          interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),
+          interruptTurn: async (threadId) => runtime.turn(threadId)?.interrupt(),
           respondToRequest: async (threadId, requestId, decision) => {
-            const turn = active.get(threadId);
+            const turn = runtime.turn(threadId);
             const finish = turn?.asks.get(requestId);
             if (!finish) return "unavailable"; // settled, timed out, or turn gone
             finish(decision.behavior, "user", decision.message, decision.always === true);
@@ -1205,19 +961,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ? "answered"
                 : "rejected";
           },
-          hasSession: (threadId) => active.has(threadId),
-          stopAll: async () => {
-            for (const { stop } of active.values()) stop();
-          },
-          onEvent: (listener) => {
-            listeners.add(listener);
-            return () => listeners.delete(listener);
-          },
+          hasSession: (threadId) => runtime.hasSession(threadId),
+          stopAll: () => runtime.stopAll(),
+          onEvent: runtime.onEvent,
         },
-        dispose: async () => {
-          for (const { stop } of active.values()) stop();
-          listeners.clear();
-        },
+        dispose: () => runtime.dispose(),
       };
     },
   };

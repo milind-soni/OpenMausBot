@@ -115,6 +115,76 @@ export async function closeBrowserSession(binaryPath: string, env: NodeJS.Proces
   return false;
 }
 
+/** Where the engine keeps a session's daemon socket and pid files. Mirrors
+ * the engine's own resolution (explicit dir, XDG runtime, home) including
+ * the namespace run directory, so recycling reaches the daemon a command
+ * would attach to. An invalid namespace has no discoverable directory. */
+function daemonSocketDirectory(env: NodeJS.ProcessEnv): string | null {
+  const home = (process.platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
+  const base = env.AGENT_BROWSER_SOCKET_DIR || (env.XDG_RUNTIME_DIR ? join(env.XDG_RUNTIME_DIR, "agent-browser") : "") || join(home, ".agent-browser");
+  const namespace = env.AGENT_BROWSER_NAMESPACE;
+  if (namespace && !/^[a-z0-9]+(?:[-_][a-z0-9]+)*$/.test(namespace)) return null;
+  return namespace ? join(base, "namespaces", namespace, "run") : base;
+}
+
+/** Recover a wedged per-session daemon by recycling its process.
+ *
+ * Once a daemon holds broken Chrome launch state, every command through it
+ * fails — including `close`, which needs Chrome first — so reconnecting loops
+ * on the same 503 until the daemon process dies. Recreate the engine's own
+ * stale-daemon recovery: detach the socket so no command re-attaches mid-kill,
+ * end the process, then clear its cached socket/pid files so the next command
+ * spawns a fresh daemon and the session restores from its saved state. */
+export async function recycleBrowserDaemon(env: NodeJS.ProcessEnv, timeoutMs = 15_000): Promise<boolean> {
+  const session = env.AGENT_BROWSER_SESSION;
+  if (!session || !/^[A-Za-z0-9_-]{1,96}$/.test(session)) return false;
+  const directory = daemonSocketDirectory(env);
+  if (!directory) return false;
+  const staleFiles = (process.platform === "win32" ? [".pid", ".version", ".config", ".stream", ".port"] : [".sock", ".pid", ".version", ".config", ".stream"])
+    .map((suffix) => join(directory, session + suffix));
+  const clearStaleFiles = (): boolean => staleFiles.every((path) => {
+    try { unlinkSync(path); return true; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT"; }
+  });
+  let pid = 0;
+  try { pid = Number.parseInt(readFileSync(join(directory, session + ".pid"), "utf8").trim(), 10); }
+  catch { return clearStaleFiles(); } // no daemon to recycle; a stale socket must not block the next spawn.
+  if (!Number.isInteger(pid) || pid <= 0) return clearStaleFiles();
+  const alive = (): boolean => {
+    try { process.kill(pid, 0); return true; }
+    // Only "no such process" is dead; EPERM still means a live daemon (the
+    // engine's own rule, so a foreign-uid daemon is never mis-cleared).
+    catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
+  };
+  if (!alive()) return clearStaleFiles();
+  if (process.platform !== "win32") {
+    try { unlinkSync(join(directory, session + ".sock")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false; }
+    try { process.kill(pid, "SIGTERM"); }
+    catch { return false; }
+  } else {
+    const ended = new Promise<boolean>((done) => {
+      let child: ReturnType<typeof spawn>;
+      try { child = spawn("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore", windowsHide: true }); }
+      catch { return done(false); }
+      child.on("error", () => done(false));
+      child.on("close", (code) => done(code === 0));
+    });
+    if (!(await ended)) return false;
+  }
+  const deadline = Date.now() + Math.max(100, timeoutMs);
+  // The engine allows one graceful second before its force kill.
+  const graceEnds = Math.min(Date.now() + 1_000, deadline);
+  while (alive() && Date.now() < graceEnds) await new Promise((resolve) => setTimeout(resolve, 25));
+  if (alive() && process.platform !== "win32") {
+    try { process.kill(pid, "SIGKILL"); }
+    catch { /* owned process already exited */ }
+  }
+  while (alive() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 25));
+  if (alive()) return false; // an unkillable daemon was not recycled
+  return clearStaleFiles();
+}
+
 const preparedBrowserSessions = new Map<string, Promise<void>>();
 
 /** Preserve only this profile's exact old file before adopting a collision-

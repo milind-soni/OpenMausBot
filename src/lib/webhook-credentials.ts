@@ -1,4 +1,9 @@
-import type { WebhookCredential } from "./webhooks.js";
+export interface WebhookCredential {
+  endpointUrl: string;
+  secret: string;
+  /** Capability URL for senders that cannot configure an Authorization header. */
+  url: string;
+}
 
 const KEY = "omb-webhook-credentials";
 

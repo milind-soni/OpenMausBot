@@ -336,6 +336,52 @@ describe("resolveCursorAcpModelId", () => {
   it("returns null for a model this session does not offer", () => {
     expect(resolveCursorAcpModelId(ADVERTISED, "no-such-model")).toBeNull();
   });
+
+  // Issue #1127: one base can advertise Standard and Fast variants together.
+  // Resolution must pick by variant, never by which id the session listed first.
+  const COMPOSER_FAST_FIRST = [
+    { modelId: "composer-2.5[fast=true]", name: "Composer 2.5 Fast" },
+    { modelId: "composer-2.5[fast=false]", name: "Composer 2.5" },
+  ];
+  const COMPOSER_STANDARD_FIRST = [
+    { modelId: "composer-2.5[fast=false]", name: "Composer 2.5" },
+    { modelId: "composer-2.5[fast=true]", name: "Composer 2.5 Fast" },
+  ];
+
+  it("resolves a bare Composer 2.5 to the non-fast id in either advertisement order", () => {
+    expect(resolveCursorAcpModelId(COMPOSER_FAST_FIRST, "Composer 2.5")).toBe("composer-2.5[fast=false]");
+    expect(resolveCursorAcpModelId(COMPOSER_STANDARD_FIRST, "Composer 2.5")).toBe("composer-2.5[fast=false]");
+  });
+
+  it("resolves a bare slug the same way when the session omits display names", () => {
+    expect(
+      resolveCursorAcpModelId(
+        COMPOSER_FAST_FIRST.map(({ modelId }) => ({ modelId })),
+        "composer-2.5",
+      ),
+    ).toBe("composer-2.5[fast=false]");
+    expect(
+      resolveCursorAcpModelId(
+        COMPOSER_STANDARD_FIRST.map(({ modelId }) => ({ modelId })),
+        "composer-2.5",
+      ),
+    ).toBe("composer-2.5[fast=false]");
+  });
+
+  it("maps an explicit Composer 2.5 Fast selection onto the fast id in either order", () => {
+    expect(resolveCursorAcpModelId(COMPOSER_FAST_FIRST, "Composer 2.5 Fast")).toBe("composer-2.5[fast=true]");
+    expect(resolveCursorAcpModelId(COMPOSER_STANDARD_FIRST, "Composer 2.5 Fast")).toBe("composer-2.5[fast=true]");
+    expect(resolveCursorAcpModelId(COMPOSER_STANDARD_FIRST, "composer-2.5-fast")).toBe("composer-2.5[fast=true]");
+  });
+
+  it("still resolves a base that only advertises one variant", () => {
+    expect(
+      resolveCursorAcpModelId([{ modelId: "composer-2.5[fast=true]", name: "Composer 2.5 Fast" }], "Composer 2.5"),
+    ).toBe("composer-2.5[fast=true]");
+    expect(
+      resolveCursorAcpModelId([{ modelId: "composer-2.5[fast=false]", name: "Composer 2.5" }], "Composer 2.5"),
+    ).toBe("composer-2.5[fast=false]");
+  });
 });
 
 describe("cursor ACP model namespace (NS: set_model wiring)", () => {

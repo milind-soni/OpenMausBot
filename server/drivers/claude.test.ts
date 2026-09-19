@@ -28,11 +28,38 @@ import {
   readClaudeAuthSettings,
   type ClaudeConfig,
 } from "./claude.ts";
+import { parseClaudeHelpFlags } from "./claude/cli-version.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
+
+/** A CLI that answers the driver's --version/--help probes itself — the
+ * shared fake has no --help — and delegates real turns to the fake, so a
+ * test can script exactly which flags a build advertises (#1187). */
+const helpProbingCli = (dir: string): string => {
+  const path = join(dir, "fake-claude-help-cli.mjs");
+  writeFileSync(path, [
+    "#!/usr/bin/env node",
+    "import { spawn } from 'node:child_process';",
+    "const argv = process.argv.slice(2);",
+    "if (argv[0] === '--help') {",
+    "  process.stdout.write(process.env.FAKE_CLAUDE_HELP ?? '');",
+    "  process.exit(0);",
+    "}",
+    "if (argv[0] === '--version') {",
+    "  console.log((process.env.FAKE_CLAUDE_VERSION ?? '2.1.232') + ' (Claude Code)');",
+    "  process.exit(0);",
+    "}",
+    `const fake = spawn(process.execPath, [${JSON.stringify(FAKE_CLI)}, ...argv], { env: process.env, stdio: 'inherit' });`,
+    "fake.on('exit', (code) => process.exit(code ?? 0));",
+    "fake.on('error', () => process.exit(1));",
+    "",
+  ].join("\n"));
+  chmodSync(path, 0o755);
+  return path;
+};
 
 /** Thread ids for the four ask-id-collision tests. Each must truncate to a
  * unique 8-char tag so no two tests share a broker socket/pipe name. */
@@ -870,6 +897,110 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(JSON.parse(readFileSync(dump, "utf8")).pid).not.toBe(firstPid);
   });
 
+  // What the harness attaches to any cursor-resuming turn (see
+  // buildRecoveryText): the conversation rebuilt inline, ending with the
+  // new message — exactly what a session launched without its history needs.
+  const soulRecoveryText = [
+    "[Your previous session for this conversation could not be resumed, so this is a new session. The conversation so far:]",
+    "",
+    "User: first",
+    "",
+    "[Now reply to the user's latest message:]",
+    "",
+    "second",
+  ].join("\n");
+
+  it("replays the thread into a fresh session when a soul edit cannot reach an old CLI", async () => {
+    const dump = join(scratch, "soul-replay.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    await instance.adapter.sendTurn({
+      threadId: "t-soul-replay",
+      text: "first",
+      system: "You are Testy.",
+      systemStable: "You are Testy.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const firstSession = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    rmSync(dump);
+
+    recorder.events.length = 0;
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-soul-replay",
+      text: "second",
+      resumeCursor: firstSession,
+      recoveryText: soulRecoveryText,
+      system: "You are Grumpy now.",
+      systemStable: "You are Grumpy now.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // 2.1.232 predates --system-prompt-snapshot, so --resume would replay
+    // the Testy prompt the session STARTED with. The cursor is dropped and
+    // the edited soul reaches the model in a fresh session that also
+    // carries the conversation replay (#1346).
+    expect(seen.argv).not.toContain("--resume");
+    expect(seen.argv).not.toContain(firstSession);
+    expect(seen.argv).toContain("--session-id");
+    expect(seen.systemPrompt).toContain("You are Grumpy now.");
+    expect(seen.prompt.message.content).toContain("User: first");
+    expect(seen.prompt.message.content.endsWith("second")).toBe(true);
+
+    // the replay session recorded the new prompt, so a later turn resumes
+    // it instead of replaying the whole thread a second time
+    const replaySession = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    rmSync(dump);
+    recorder.events.length = 0;
+    const third = await instance.adapter.sendTurn({
+      threadId: "t-soul-replay",
+      text: "third",
+      model: "claude-other",
+      resumeCursor: replaySession,
+      system: "You are Grumpy now.",
+      systemStable: "You are Grumpy now.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
+    const resumed = JSON.parse(readFileSync(dump, "utf8"));
+    expect(resumed.argv[resumed.argv.indexOf("--resume") + 1]).toBe(replaySession);
+    expect(resumed.prompt.message.content).toBe("third");
+  });
+
+  it("refreshes an edited soul in place on a CLI with --system-prompt-snapshot", async () => {
+    const dump = join(scratch, "soul-snapshot.json");
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.267" });
+    await instance.adapter.sendTurn({
+      threadId: "t-soul-snapshot",
+      text: "first",
+      system: "You are Testy.",
+      systemStable: "You are Testy.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const firstSession = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    rmSync(dump);
+
+    recorder.events.length = 0;
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-soul-snapshot",
+      text: "second",
+      resumeCursor: firstSession,
+      recoveryText: soulRecoveryText,
+      system: "You are Grumpy now.",
+      systemStable: "You are Grumpy now.",
+      refreshSystemPrompt: true,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // the snapshot flag refreshes the recorded prompt on --resume: the same
+    // session continues under the new soul, with no conversation replay
+    expect(seen.argv[seen.argv.indexOf("--resume") + 1]).toBe(firstSession);
+    expect(seen.argv[seen.argv.indexOf("--system-prompt-snapshot") + 1]).toBe("off");
+    expect(seen.systemPrompt).toContain("You are Grumpy now.");
+    expect(seen.prompt.message.content).toBe("second");
+  });
+
   it("launches a new session with the volatile half already in the system prompt", async () => {
     await create();
     const dump = join(scratch, "volatile-spawn.json");
@@ -997,6 +1128,66 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await instance.adapter.sendTurn({ threadId: "t-compact-off", text: "hi" });
     await recorder.until((e) => e.type === "turn.completed");
     expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--autocompact");
+  });
+
+  it("withholds --autocompact when the CLI's own --help does not list it", async () => {
+    const dump = join(scratch, "autocompact-help-absent.json");
+    await create(undefined, {
+      FAKE_CLAUDE_DUMP: dump,
+      FAKE_CLAUDE_VERSION: "2.1.232",
+      FAKE_CLAUDE_HELP: [
+        "Usage: claude [options]",
+        "",
+        "Options:",
+        "  --verbose",
+        "  --strict-mcp-config",
+        "  --setting-sources <sources...>",
+      ].join("\n"),
+    }, { cli: helpProbingCli(scratch) });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-autocompact-help-absent", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // 2.1.232 sits above the 2.1.122 floor, but the build's help is what
+    // the argv must agree with: an unadvertised flag is a hard error that
+    // would kill every turn (#1187)
+    expect(seen.argv).not.toContain("--autocompact");
+    // the floor-gated isolation flags keep their existing behaviour
+    expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+  });
+
+  it("passes --autocompact to a below-floor CLI whose --help advertises it", async () => {
+    const dump = join(scratch, "autocompact-help-present.json");
+    await create(undefined, {
+      FAKE_CLAUDE_DUMP: dump,
+      FAKE_CLAUDE_VERSION: "2.1.100",
+      FAKE_CLAUDE_HELP: [
+        "Usage: claude [options]",
+        "",
+        "Options:",
+        "  --verbose",
+        "  --strict-mcp-config",
+        "  --setting-sources <sources...>",
+        "  --autocompact <tokens>",
+      ].join("\n"),
+    }, { cli: helpProbingCli(scratch) });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-autocompact-help-present", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
+  });
+
+  it("falls back to the autocompact floor when the CLI's --help cannot be read", async () => {
+    const dump = join(scratch, "autocompact-help-unreadable.json");
+    // the shared fake has no --help handler: the probe gets nothing
+    // flag-shaped back, so the 2.1.122 floor governs exactly as before
+    await create(undefined, { FAKE_CLAUDE_DUMP: dump, FAKE_CLAUDE_VERSION: "2.1.232" });
+    await instance.snapshot();
+    await instance.adapter.sendTurn({ threadId: "t-autocompact-help-unreadable", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
   });
 
   it("launches isolated from the machine's own Claude Code configuration", async () => {
@@ -1221,6 +1412,32 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.message).toContain("this machine's own Claude Code setup");
     expect(claudeCliUpdate("1.0.100 (Claude Code)", "/opt/bin/claude")?.command).toBe("/opt/bin/claude update");
+  });
+
+  it("parses the flags a CLI's --help advertises", () => {
+    const help = [
+      "Usage: claude [options] [prompt]",
+      "",
+      "Options:",
+      "  --verbose",
+      "  --setting-sources <sources...>",
+      "  --autocompact, --no-autocompact",
+      "  --max-turns <n>",
+      "  -p, --print",
+    ].join("\n");
+    expect(parseClaudeHelpFlags(help)).toEqual(new Set([
+      "--verbose",
+      "--setting-sources",
+      "--autocompact",
+      "--no-autocompact",
+      "--max-turns",
+      "--print",
+    ]));
+    // a probe that produced no help page must not read as an empty feature
+    // set: the version floors keep governing instead
+    expect(parseClaudeHelpFlags(null)).toBeNull();
+    expect(parseClaudeHelpFlags("")).toBeNull();
+    expect(parseClaudeHelpFlags("claude: command failed")).toBeNull();
   });
 
   it("forwards the bot project's own .mcp.json, which strict mode would drop", async () => {

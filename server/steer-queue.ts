@@ -49,6 +49,12 @@ interface QueueEntry {
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
+/** Per-thread ceilings for a busy turn's queue: a runaway sender must not
+ * grow memory and the durable chat-followups store without bound while the
+ * turn runs. Items counts waiting sends; bytes bounds their UTF-8 text. */
+export const STEER_QUEUE_MAX_ITEMS = 20;
+export const STEER_QUEUE_MAX_BYTES = 64 * 1024;
+
 /** A thread's queue lifted out of the map while a live steer is attempted. */
 export interface HeldSteerQueue {
   botId: string;
@@ -64,6 +70,23 @@ export function restoreSteeredMessages(): void {
     if (entry.botId !== row.ownerId) throw new Error("queued task belongs to another bot");
     entry.items.push({ ...row.payload, messageId: row.id, prompt: row.payload.prompt ?? row.payload.text });
     queues.set(row.threadId, entry);
+  }
+  // A restart must not resurrect an over-limit queue: rows written before
+  // these bounds existed are trimmed to the oldest prefix the enqueue path
+  // would still accept, and the newest overflow is cancelled exactly as a
+  // refused send would have been.
+  for (const entry of queues.values()) {
+    let kept = 0;
+    let bytes = 0;
+    while (kept < STEER_QUEUE_MAX_ITEMS && kept < entry.items.length) {
+      const item = entry.items[kept];
+      if (!item || bytes + Buffer.byteLength(item.text) > STEER_QUEUE_MAX_BYTES) break;
+      bytes += Buffer.byteLength(item.text);
+      kept += 1;
+    }
+    if (kept === entry.items.length) continue;
+    settleChatFollowups(entry.items.slice(kept).map((item) => item.messageId), "cancelled");
+    entry.items.length = kept;
   }
 }
 const listeners = new Set<() => void>();
@@ -106,6 +129,19 @@ export function queueSteeredMessage(
   // A thread cannot legitimately change owners. Refuse to merge unrelated
   // queues even if a corrupt caller reuses a thread id.
   if (entry.botId !== botId) throw new Error("queued task belongs to another bot");
+  // Bound the burst per thread: a runaway sender must not grow this queue
+  // and its durable rows without limit while the turn runs. The byte budget
+  // counts the new text too, so one huge message alone can fill it.
+  const pendingBytes = entry.items.reduce(
+    (total, queued) => total + Buffer.byteLength(queued.text),
+    Buffer.byteLength(text),
+  );
+  if (entry.items.length >= STEER_QUEUE_MAX_ITEMS || pendingBytes > STEER_QUEUE_MAX_BYTES) {
+    throw Object.assign(
+      new Error("this thread's queued messages are full; wait for the running turn to finish or cancel a queued message"),
+      { status: 429 },
+    );
+  }
   const item = {
     messageId: id,
     text,
