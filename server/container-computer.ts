@@ -13,6 +13,13 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
+import {
+  computerStatusProblem,
+  probeCuaDesktop,
+  type ComputerProblemLabels,
+  type ComputerStatusCommon,
+  type ContainerComputerBackend,
+} from "./computer-backend.ts";
 import { DATA_DIR } from "./config.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
@@ -279,28 +286,13 @@ export async function containerRuntimeStatus(
   };
 }
 
-export interface ContainerComputerStatus {
+export interface ContainerComputerStatus extends ComputerStatusCommon {
   platform: NodeJS.Platform;
   runtime: Runtime | null;
   available: Runtime[];
-  daemonUp: boolean;
-  image: boolean;
-  imageMatches: boolean;
-  managed: boolean;
-  container: "running" | "stopped" | "missing";
   network: "loopback" | "unsafe" | "unknown";
-  security: "hardened" | "unsafe" | "unknown";
   persistence: "durable" | "unsafe" | "unknown";
-  desktopReady: boolean;
-  desktop_error: string | null;
   create_supported: boolean;
-  ready: boolean;
-  problem: string | null;
-  image_ref: string;
-  image_id: string | null;
-  base_image_ref: string;
-  driver_version: string;
-  container_name: string;
   target_key: string;
   workspace_path: string;
   workspace_guest_path: string;
@@ -372,23 +364,25 @@ export function autoLocalVmAttachable(status: ContainerComputerStatus): boolean 
   return status.ready === true || localVmRecreatableOnDemand(status);
 }
 
+/** The Local VM wording for the shared problem ladder (computer-backend.ts). */
+const LOCAL_VM_PROBLEM_LABELS: ComputerProblemLabels = {
+  runtimeMissing: "Install a supported container runtime first",
+  daemonDown: (status) => `Start ${status.runtime} first`,
+  imageMissing: `Prepare the Cua desktop image with Driver ${CUA_DRIVER_VERSION}`,
+  createUnsupported: "Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port",
+  containerMissing: "Create the Local VM",
+  imageMismatch: "The existing Local VM uses an older desktop or Cua Driver; recreate it",
+  unmanaged: "The existing container was not created by OpenMausBot; recreate it",
+  networkUnsafe: "The existing Local VM exposes its viewer publicly; recreate it",
+  securityUnsafe: "The existing Local VM is missing safety limits; recreate it",
+  persistenceUnsafe: "The existing Local VM is missing its durable workspace; recreate it",
+  stopped: "This desktop image cannot safely resume; recreate the Local VM",
+  desktopFailed: "The Local VM desktop failed to start",
+  desktopNotReady: "The Local VM started, but Cua Driver is not ready yet",
+};
+
 function statusProblem(status: ContainerComputerStatus): string | null {
-  if (!status.runtime) return "Install a supported container runtime first";
-  if (!status.daemonUp) return `Start ${status.runtime} first`;
-  if (!status.image) return `Prepare the Cua desktop image with Driver ${CUA_DRIVER_VERSION}`;
-  if (status.container === "missing" && !status.create_supported) {
-    return "Per-bot Local VMs require Docker or Podman because Apple container requires a fixed host port";
-  }
-  if (status.container === "missing") return "Create the Local VM";
-  if (!status.imageMatches) return "The existing Local VM uses an older desktop or Cua Driver; recreate it";
-  if (!status.managed) return "The existing container was not created by OpenMausBot; recreate it";
-  if (status.network === "unsafe") return "The existing Local VM exposes its viewer publicly; recreate it";
-  if (status.security === "unsafe") return "The existing Local VM is missing safety limits; recreate it";
-  if (status.persistence === "unsafe") return "The existing Local VM is missing its durable workspace; recreate it";
-  if (status.container === "stopped") return "This desktop image cannot safely resume; recreate the Local VM";
-  if (status.desktop_error) return `The Local VM desktop failed to start: ${status.desktop_error}`;
-  if (!status.desktopReady) return "The Local VM started, but Cua Driver is not ready yet";
-  return null;
+  return computerStatusProblem(status, LOCAL_VM_PROBLEM_LABELS);
 }
 
 /** Shared with the BYO-VPS backend (vps-computer.ts): both containers are
@@ -599,65 +593,48 @@ export async function containerComputerStatus(
     status.security === "hardened" &&
     status.persistence === "durable";
   if (canProbe) {
-    try {
-      const expected = `cua-driver ${CUA_DRIVER_VERSION}`;
-      const version = await runner(status.runtime, cuaExecArgs(["--version"], { container: target.containerName }), 8000);
-      if (version.stdout.trim() !== expected) throw new Error(`expected ${expected}`);
-      await runner(status.runtime, cuaExecArgs(["status", "--socket", CUA_SOCKET], { container: target.containerName }), 8000);
-      const health = await runner(
-        status.runtime,
-        cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET], { container: target.containerName }),
-        15_000,
-      );
-      const report = JSON.parse(health.stdout) as { schema_version?: string; overall?: string; checks?: unknown[] };
-      if (
-        report.schema_version !== "1" ||
-        !Array.isArray(report.checks) ||
-        (report.overall !== "ok" && report.overall !== "degraded")
-      ) {
-        throw new Error(`Cua health report is ${report.overall ?? "invalid"}`);
-      }
-      const readinessShot = "/tmp/openmausbot-readiness.png";
-      await runner(
-        status.runtime,
-        cuaExecArgs([
-          "call",
-          "get_desktop_state",
-          "{}",
-          "--socket",
-          CUA_SOCKET,
-          "--screenshot-out-file",
-          readinessShot,
-        ], { container: target.containerName }),
-        20_000,
-      );
-      const captured = await runner(
-        status.runtime,
-        ["exec", target.containerName, "base64", "-w0", readinessShot],
-        20_000,
-      );
-      if (!wholeScreenshot(Buffer.from(captured.stdout.trim(), "base64")).ok) {
-        throw new Error("Cua Driver returned an incomplete readiness screenshot");
-      }
-      status.desktopReady = true;
-    } catch (error) {
+    const runtime = status.runtime;
+    const probed = await probeCuaDesktop({
+      versionMismatchError: `expected cua-driver ${CUA_DRIVER_VERSION}`,
+      version: () => runner(runtime, cuaExecArgs(["--version"], { container: target.containerName }), 8000),
+      status: () => runner(runtime, cuaExecArgs(["status", "--socket", CUA_SOCKET], { container: target.containerName }), 8000),
+      healthReport: () =>
+        runner(runtime, cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET], { container: target.containerName }), 15_000),
+      // A local exec is free, so the readiness frame is pulled back and
+      // pixel-validated here; over SSH that same validation would be a
+      // full-frame base64 transfer on every status poll.
+      desktopState: async () => {
+        const readinessShot = "/tmp/openmausbot-readiness.png";
+        await runner(
+          runtime,
+          cuaExecArgs([
+            "call",
+            "get_desktop_state",
+            "{}",
+            "--socket",
+            CUA_SOCKET,
+            "--screenshot-out-file",
+            readinessShot,
+          ], { container: target.containerName }),
+          20_000,
+        );
+        const captured = await runner(
+          runtime,
+          ["exec", target.containerName, "base64", "-w0", readinessShot],
+          20_000,
+        );
+        if (!wholeScreenshot(Buffer.from(captured.stdout.trim(), "base64")).ok) {
+          throw new Error("Cua Driver returned an incomplete readiness screenshot");
+        }
+      },
       // An empty log means XFCE and the supervisor-owned Cua daemon are
       // probably still starting. A real startup failure should be actionable
       // in the panel instead of looking like an endless readiness wait.
-      status.desktop_error = error instanceof Error ? error.message.slice(0, 320) : null;
-      try {
-        const errorLog = await runner(
-          status.runtime,
-          ["exec", target.containerName, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"],
-          4000,
-        );
-        status.desktop_error =
-          errorLog.stdout.replace(/\s+/g, " ").trim().slice(0, 320) ||
-          status.desktop_error;
-      } catch {
-        // The log may not exist during the first seconds of container boot.
-      }
-    }
+      errorLogTail: () =>
+        runner(runtime, ["exec", target.containerName, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"], 4000),
+    });
+    status.desktopReady = probed.desktopReady;
+    status.desktop_error = probed.desktop_error;
   }
 
   status.problem = statusProblem(status);
@@ -1208,3 +1185,13 @@ export function setupCommands(
   };
 }
 
+/** The Local VM arm of the shared ComputerBackend dispatch
+ * (computer-backend.ts). The module's functions already carry the target-
+ * scoped signatures callers need, so this is an identity adapter. */
+export const containerComputerBackend: ContainerComputerBackend = {
+  kind: "container",
+  status: containerComputerStatus,
+  action: containerComputerAction,
+  screenshot: containerComputerScreenshot,
+  mcp: containerComputerMcp,
+};
