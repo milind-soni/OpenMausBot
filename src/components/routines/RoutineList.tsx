@@ -1,7 +1,7 @@
 import { FileText, Loader2, Repeat2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { Routine, RoutineRun } from "@/lib/routines";
+import type { Routine, RoutineRun } from "../../../shared/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { latestRoutineRun, routineDateTime, routineNextLabel, routineRunLabel, routineRunTone, routineScheduleState } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";

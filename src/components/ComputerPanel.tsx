@@ -36,7 +36,7 @@ import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { CloudScreenPreview } from "./CloudScreenPreview";
-import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
+import { isRemoteScreenshotContention } from "@/lib/remote-desktop";
 import { CloudBackendPicker } from "./CloudBackendPicker";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { RoutinesSection } from "./bot-settings/RoutinesSection";
@@ -55,9 +55,22 @@ import {
   localComputerSelectable,
   persistedComputerSelectionMatches,
   isReadyBoxState,
-  resolveBoxPanelAction,
   shouldPollCloudPreview,
 } from "@/lib/local-computer";
+import {
+  decideBoxErrorPhase,
+  decideBoxPhase,
+  decideLocalPhase,
+  decideSelectionPhase,
+  decideVmPhase,
+  decideVpsPhase,
+  decideVpsProvisionPhase,
+  isVmAwaitingDesktop,
+  type ComputerPanelPhase,
+  type LocalVmStatus,
+  type PhaseError,
+  type VpsComputerStatus,
+} from "@/lib/computer-panel-phase";
 import {
   readComputerPanelView,
   writeComputerPanelView,
@@ -85,52 +98,17 @@ function panelErrorText(error: Error | string | null): string | null {
   return error instanceof Error ? error.message : error;
 }
 
-interface VpsComputerStatus {
-  configured: boolean;
-  imageMatches: boolean;
-  managed: boolean;
-  container: "running" | "stopped" | "missing";
-  ready: boolean;
-  problem: string | null;
-}
+/** The panel's phase set, decided by the pure deciders in
+ * `@/lib/computer-panel-phase` where a status snapshot settles it. */
+type Phase = ComputerPanelPhase;
 
-type Phase =
-  | "checking"
-  | "unconfigured"
-  | "starting"
-  | "busy-box"
-  | "ready"
-  | "vm"
-  | "vm-unavailable"
-  | "vps-unconfigured"
-  | "vps-incompatible"
-  | "vps-stopped"
-  | "local"
-  | "local-unavailable"
-  | "auto-unavailable"
-  | "team-box"
-  | "show-ready-box"
-  | "show-sleeping-box"
-  | "show-pending-box"
-  | "browser"
-  | "off"
-  | "error";
-
-interface LocalVmStatus {
-  mode: "shared" | "per-bot";
-  max_instances: number;
-  image: boolean;
-  create_supported: boolean;
-  container: "running" | "stopped" | "missing";
-  imageMatches: boolean;
-  managed: boolean;
-  network: "loopback" | "unsafe" | "unknown";
-  security: "hardened" | "unsafe" | "unknown";
-  persistence: "durable" | "unsafe" | "unknown";
-  desktopReady: boolean;
-  ready: boolean;
-  problem: string | null;
-  viewer_url: string;
+/** Map a decider's error payload onto the panel's error state. */
+function phaseErrorToPanelError(error: PhaseError | null): Error | string | null {
+  if (!error) return null;
+  if (error.kind === "localized") {
+    return new LocalizedPanelError(error.key, error.problem, error.fallbackKey);
+  }
+  return error.text;
 }
 
 const computerControlSnapshotSchema = z.object({
@@ -484,33 +462,23 @@ export function ComputerPanel({
     // The selection may be optimistic for up to the profile debounce. Never
     // let it choose a provider until the PATCH lane confirms server state.
     if (!computerSelectionPersisted || !surfaceReady) return;
-    if (bot.computer === undefined) {
-      setPhase("auto-unavailable");
-      return;
-    }
-
-    if (bot.computer === "off") {
-      setPhase("off");
-      return;
-    }
-    // Browser-only bots own no desktop: the Browser tab is their whole
-    // screen, so this tab must not wake a box or start host capture.
-    if (bot.computer === "browser") {
-      setPhase("browser");
+    const selectionPhase = decideSelectionPhase(bot.computer);
+    if (selectionPhase) {
+      setPhase(selectionPhase);
       return;
     }
     if (bot.computer === "local") {
-      if (!providerSupportsLocal) {
-        setError(new LocalizedPanelError("computer.err.localEngine"));
-      }
-      setPhase(capabilitiesReady && localAvailable && providerSupportsLocal ? "local" : "local-unavailable");
+      const local = decideLocalPhase({ capabilitiesReady, localAvailable, providerSupportsLocal });
+      setError(phaseErrorToPanelError(local.error));
+      setPhase(local.phase);
       setResolvedComputerSelection({ botId: bot.id, threadId: bot.threadId, computer: bot.computer, cloudBackend });
       return;
     }
     if (bot.computer === "vm") {
       if (!vmSupported) {
-        setError(new LocalizedPanelError("computer.err.vmEngine"));
-        setPhase("vm-unavailable");
+        const unsupported = decideVmPhase({ vmSupported, status: null });
+        setError(phaseErrorToPanelError(unsupported.error));
+        setPhase(unsupported.phase);
         return;
       }
       let retryTimer: number | undefined;
@@ -523,40 +491,22 @@ export function ComputerPanel({
           // parse at the boundary: our own status endpoint sends a string or nothing
           const viewerUrl = String(status.viewer_url ?? "");
           if (viewerUrl.startsWith("http")) setVmViewerUrl(viewerUrl);
-          if (status.ready) {
-            vmReadinessAttempts.current = 0;
-            setPhase("vm");
-          } else if (
-            status.container === "running" &&
-            status.imageMatches &&
-            status.managed &&
-            status.network === "loopback" &&
-            status.security === "hardened" &&
-            status.persistence === "durable" &&
-            !status.desktopReady &&
-            vmReadinessAttempts.current < 15
-          ) {
+          if (isVmAwaitingDesktop(status, vmReadinessAttempts.current)) {
             vmReadinessAttempts.current += 1;
             setError(null);
             setPhase("checking");
             retryTimer = window.setTimeout(() => setRetry((n) => n + 1), 2000);
+            return;
           }
-          else {
-            const canCreateHere =
-              status.mode === "per-bot" &&
-              status.container === "missing" &&
-              status.image &&
-              status.create_supported;
-            setError(canCreateHere ? null : new LocalizedPanelError(
-              "computer.err.vmOpenSettings", status.problem, "computer.err.vmNotReady",
-            ));
-            setPhase("vm-unavailable");
-          }
+          const vm = decideVmPhase({ vmSupported: true, status });
+          if (vm.phase === "vm") vmReadinessAttempts.current = 0;
+          setError(phaseErrorToPanelError(vm.error));
+          setPhase(vm.phase);
         })
         .catch((e) => {
           if (!alive) return;
           setError(e.message);
-          setPhase("vm-unavailable");
+          setPhase(decideVmPhase({ vmSupported: true, status: null }).phase);
         });
       return () => {
         alive = false;
@@ -586,52 +536,31 @@ export function ComputerPanel({
             computer: bot.computer,
             cloudBackend,
           });
-          if (!status.configured) {
-            setError(new LocalizedPanelError("computer.err.vpsAlias"));
-            setPhase("vps-unconfigured");
-            return;
-          }
-          if (status.ready) {
-            setBoxState(status.container ?? null);
-            setPhase("ready");
-            return;
-          }
-          // App updates can bump IMAGE_LAYER_VERSION while this bot still has
-          // a managed container from the previous release. Provision refuses
-          // to overwrite it by design, so surface the explicit replacement
-          // path instead of automatically issuing a request that can only 409.
-          if (status.managed && status.container !== "missing" && !status.imageMatches) {
-            setError(status.problem);
-            setPhase("vps-incompatible");
-            return;
-          }
-          if (canManageCloud) {
+          const vps = decideVpsPhase({ status, canManageCloud, autoStartVps: bot.autoStartVps });
+          if (vps.phase === "provision") {
             setPhase("starting");
             return api(`/api/bots/${bot.id}/computer/provision`, { method: "POST" }).then((result) => {
               if (!alive) return;
               setBoxState(result.container ?? null);
-              if (result.ready) {
+              const provisioned = decideVpsProvisionPhase(result);
+              if (provisioned.phase === "ready") {
                 setResolvedComputerSelection({
                   botId: bot.id,
                   threadId: bot.threadId,
                   computer: bot.computer,
                   cloudBackend,
                 });
-                setPhase("ready");
               }
-              else {
-                setError(result.problem ?? new LocalizedPanelError("computer.err.vpsNotReady"));
-                setPhase("error");
-              }
+              setError(phaseErrorToPanelError(provisioned.error));
+              setPhase(provisioned.phase);
             });
           }
-          setBoxState(status.container ?? null);
-          setError(
-            bot.autoStartVps
-              ? new LocalizedPanelError("computer.err.vpsAuto", status.problem, "computer.err.vpsNoContainer")
-              : new LocalizedPanelError("computer.err.vpsManual", status.problem, "computer.err.vpsNoContainer"),
-          );
-          setPhase(status.container === "stopped" ? "vps-stopped" : "vps-unconfigured");
+          if (vps.phase === "ready" || vps.phase === "vps-stopped"
+            || (vps.phase === "vps-unconfigured" && status.configured)) {
+            setBoxState(status.container ?? null);
+          }
+          setError(phaseErrorToPanelError(vps.error));
+          setPhase(vps.phase);
         })
         .catch((e) => {
           if (!alive) return;
@@ -648,14 +577,12 @@ export function ComputerPanel({
     api(threadPath("computer"))
       .then((status) => {
         if (!alive) return;
-        const action = resolveBoxPanelAction({
-          computer: canManageCloud ? "cloud" : undefined,
-          configured: Boolean(status.configured),
-          boxState: typeof status.box?.state === "string" ? status.box.state : null,
+        const box = decideBoxPhase({
+          computer: bot.computer,
+          canManageCloud,
           canUseCloud: cloudSupported,
-          autoLocal: false,
-          teamComputer: typeof status.teamComputer?.id === "string" && typeof status.teamComputer?.name === "string",
           busy: profileBot.busy,
+          status,
         });
         setResolvedComputerSelection({
           botId: bot.id,
@@ -663,59 +590,55 @@ export function ComputerPanel({
           computer: bot.computer,
           cloudBackend,
         });
-        if (!status.configured && bot.computer === "cloud" && !status.teamComputer) {
-          setPhase("unconfigured");
-          return;
-        }
-        if (action === "team-box") {
+        if (box.phase === "team-box") {
           setTeamComputer({ id: status.teamComputer.id, name: status.teamComputer.name,
             botId: bot.id, section: bot.section?.trim() ?? "" });
           setBoxState(typeof status.box?.state === "string" ? status.box.state : status.configured ? "missing" : "unavailable");
-          setError(typeof status.problem === "string" ? status.problem : null);
-          setPhase("team-box");
+          setError(phaseErrorToPanelError(box.error));
+          setPhase(box.phase);
           return;
         }
-        if (action === "attach-ready-box" || (bot.computer === "cloud" && action === "show-ready-box")) {
+        if (box.phase === "ready") {
           // The turn owns a ready box; provisioning would be refused (409)
           // and is not needed. Going straight to ready lets the turn's live
           // frames and the screenshot poll show what the bot is doing.
           setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
-          setPhase("ready");
+          setPhase(box.phase);
           return;
         }
-        if (action !== "ensure-box") {
-          if (action === "show-ready-box" || action === "show-sleeping-box" || action === "show-pending-box") {
-            setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
-          }
-          setPhase(action);
-          return;
-        }
-        setPhase("starting");
-        return api(`/api/bots/${bot.id}/computer/provision`, { method: "POST" }).then((r) => {
-          if (!alive) return;
-          setBoxState(r.state ?? null);
-          setResolvedComputerSelection({
-            botId: bot.id,
-            threadId: bot.threadId,
-            computer: bot.computer,
-            cloudBackend,
+        if (box.phase === "ensure-box") {
+          setPhase("starting");
+          return api(`/api/bots/${bot.id}/computer/provision`, { method: "POST" }).then((r) => {
+            if (!alive) return;
+            setBoxState(r.state ?? null);
+            setResolvedComputerSelection({
+              botId: bot.id,
+              threadId: bot.threadId,
+              computer: bot.computer,
+              cloudBackend,
+            });
+            setPhase("ready");
           });
-          setPhase("ready");
-        });
+        }
+        if (box.phase === "show-ready-box" || box.phase === "show-sleeping-box" || box.phase === "show-pending-box") {
+          setBoxState(typeof status.box?.state === "string" ? status.box.state : null);
+        }
+        setPhase(box.phase);
       })
       .catch((e) => {
         if (!alive) return;
+        const outcome = decideBoxErrorPhase(e);
         // A turn that started while provision was in flight: not a fault,
         // the panel waits for the turn (bot.busy re-runs this effect).
-        if (isActiveTurnRefusal(e)) {
-          setPhase("busy-box");
+        if (outcome.phase === "busy-box") {
+          setPhase(outcome.phase);
           return;
         }
         // The panel's own screenshot poll holds this box's lifecycle claim
         // while it captures, so a provision landing mid-capture is refused
         // with a *different* 409. It is a wait too: re-resolve shortly
         // instead of showing the fault this panel exists to stop showing.
-        if (isRemoteScreenshotContention({ status: Number((e as { status?: unknown })?.status ?? 0), message: String(e?.message ?? "") })) {
+        if (outcome.phase === "checking") {
           setError(null);
           setPhase("checking");
           boxRetryTimer = window.setTimeout(() => setRetry((n) => n + 1), 2000);
@@ -1180,11 +1103,11 @@ export function ComputerPanel({
 
   const openVmSettings = () => {
     window.sessionStorage.setItem("openmausbot.settings.section", "computer");
-    dispatch({ type: "toggleAppSettings", open: true });
+    dispatch({ type: "openOverlay", kind: "appSettings", open: true });
   };
 
   const openConnectionSettings = () => {
-    dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
+    dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: "connections" });
   };
 
   const emptyState = {
@@ -1237,8 +1160,8 @@ export function ComputerPanel({
             // removes the still-mounted Computer panel from the settings
             // dialog's focus path, and dismissing Settings returns directly
             // to the conversation that opened it.
-            dispatch({ type: "toggleComputer", open: false });
-            dispatch({ type: "toggleSettings", open: true, section: "access" });
+            dispatch({ type: "closeOverlay", kind: "computer" });
+            dispatch({ type: "openOverlay", kind: "settings", open: true, section: "access" });
           }}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           title={t("computer.botSettings")}
@@ -1296,7 +1219,7 @@ export function ComputerPanel({
           </div>
         )}
         <button
-          onClick={() => dispatch({ type: "toggleComputer", open: false })}
+        onClick={() => dispatch({ type: "closeOverlay", kind: "computer" })}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
         >
           <X size={18} />
