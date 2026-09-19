@@ -2,12 +2,86 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FILE_MAX_BYTES } from "@/lib/composer-attachments";
-import { AttachmentGallery, collectMessageFiles, isVideoAttachment, loadMessageVideo } from "./AttachmentGallery";
+import { AttachmentGallery, collectMessageFiles, isAudioAttachment, isVideoAttachment, loadMessageAudio, loadMessageVideo, MessageAttachmentGallery, splitMessageAttachments } from "./AttachmentGallery";
 
 const message = { threadId: "thread/one", messageId: "message two" };
 const file = { path: "/workspace/demo.mp4", name: "demo.mp4", linked: true };
 const image = { path: "/store/123e4567-e89b-42d3-a456-426614174000.png", name: "Overview.png", private: true };
 afterEach(() => vi.unstubAllGlobals());
+
+describe("bot-attached files", () => {
+  const attachments = [
+    { kind: "image" as const, path: "/store/aaaa.png", mime: "image/png" },
+    { kind: "file" as const, path: "/store/bbbb.mp3", mime: "audio/mpeg", name: "song.mp3" },
+    { kind: "file" as const, path: "/store/cccc.pptx", mime: "application/vnd.openxmlformats-officedocument.presentationml.presentation", name: "deck.pptx" },
+  ];
+
+  it("splits a message's attachments into images and private files, keeping display names", () => {
+    expect(splitMessageAttachments(attachments)).toEqual({
+      images: ["/store/aaaa.png"],
+      files: [
+        { path: "/store/bbbb.mp3", name: "song.mp3", private: true },
+        { path: "/store/cccc.pptx", name: "deck.pptx", private: true },
+      ],
+    });
+    expect(splitMessageAttachments(undefined)).toEqual({ images: [], files: [] });
+  });
+
+  it("shows an attached clip as a play button and a deck as a save chip, without repeating a linked one", () => {
+    const render = (text: string) => renderToStaticMarkup(createElement(MessageAttachmentGallery, { text, attachments, message }));
+    const html = render("");
+    expect(html).toContain("song.mp3");
+    expect(html).toContain("deck.pptx");
+    expect(html).toContain("Play song.mp3");
+    // A link to a file that is already attached adds no second card.
+    expect(render("Done: [the deck](/store/cccc.pptx)")).toBe(html);
+  });
+
+  it("does not turn an unattached audio path into a player", () => {
+    const html = renderToStaticMarkup(createElement(AttachmentGallery, { files: [{ path: "/store/x.mp3", name: "x.mp3" }], message }));
+    expect(html).not.toContain("Play x.mp3");
+  });
+});
+
+describe("audio attachments", () => {
+  const clip = { path: "/store/song.mp3", name: "song.mp3", private: true };
+
+  it("recognizes audio by suffix only", () => {
+    for (const name of ["a.mp3", "a.M4A", "a.wav", "a.ogg", "a.opus", "a.flac", "a.aac"]) expect(isAudioAttachment(`/store/${name}`)).toBe(true);
+    expect(isAudioAttachment("/store/a.mp3.exe")).toBe(false);
+    expect(isAudioAttachment("/store/a.mp4")).toBe(false);
+  });
+
+  it("loads audio through the message-scoped file endpoint and keeps the server's MIME type", async () => {
+    const fetcher = vi.fn(async () => new Response("audio bytes", { headers: { "content-type": "audio/mpeg" } }));
+    vi.stubGlobal("fetch", fetcher);
+    const signal = new AbortController().signal;
+    const blob = await loadMessageAudio(clip, message, signal);
+    expect(fetcher).toHaveBeenCalledWith("/api/threads/thread%2Fone/messages/message%20two/file", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: clip.path }), signal,
+    });
+    expect(blob.type).toBe("audio/mpeg");
+    expect(await blob.text()).toBe("audio bytes");
+  });
+
+  it("refuses anything the server does not call audio, and keeps authorization failures", async () => {
+    for (const mime of ["text/html", "application/octet-stream", "video/mp4", "image/svg+xml"]) {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("not audio", { headers: { "content-type": mime } })));
+      await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "outside this conversation" }), { status: 403 })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("outside this conversation");
+  });
+
+  it("enforces the size limit with and without Content-Length", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("audio", {
+      headers: { "content-type": "audio/mpeg", "content-length": String(FILE_MAX_BYTES + 1) },
+    })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("25 MB");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array(FILE_MAX_BYTES + 1), { headers: { "content-type": "audio/mpeg" } })));
+    await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("25 MB");
+  });
+});
 
 describe("message gallery", () => {
   it("collects only rendered local file links, including references, with generated files deduplicated", () => {

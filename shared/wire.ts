@@ -269,8 +269,13 @@ export interface WireMessage {
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
   text?: string;
   /** Durable provider output stored by the harness; renderers receive only
-   * the allowlisted /api/attachments URL. */
-  attachments?: Array<{ kind: "image"; path: string; mime: string }>;
+   * the allowlisted /api/attachments URL. `file` entries are documents, audio
+   * and video a bot attached with attach_file; they are opened through the
+   * message-scoped file route, never by path. */
+  attachments?: Array<
+    | { kind: "image"; path: string; mime: string }
+    | { kind: "file"; path: string; mime: string; name: string }
+  >;
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;

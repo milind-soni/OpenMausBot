@@ -21,6 +21,12 @@ let lastCoordinateBody: any = null;
 let coordinateResponse: unknown = { ok: true };
 let lastRoomsQuery = "";
 let lastPostBody: any = null;
+let lastExecBody: any = null;
+let execStatus = 200;
+let execResponse: unknown = { exitCode: 0, stdout: "PDF_OK\n", stderr: "", timedOut: false };
+let lastAttachBody: any = null;
+let attachStatus = 200;
+let attachResponse: unknown = { ok: true, name: "report.pdf", bytes: 48639 };
 let postCalls = 0;
 let postResponse: unknown = { ok: true, messageId: "msg-1", roomName: "Launch" };
 const DEFAULT_AGENTS = { bots: [{ id: "bot-helper", name: "Helper", model: "fake-model", busy: false }] };
@@ -167,6 +173,26 @@ beforeAll(async () => {
       lastRoomsQuery = req.url;
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify(roomsResponse));
+    }
+    if (req.method === "POST" && req.url === "/api/internal/vm-exec") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastExecBody = JSON.parse(data);
+        res.writeHead(execStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(execResponse));
+      });
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/internal/attach-file") {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastAttachBody = JSON.parse(data);
+        res.writeHead(attachStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify(attachResponse));
+      });
+      return;
     }
     if (req.method === "POST" && req.url === "/api/internal/post-to-room") {
       let data = "";
@@ -504,6 +530,8 @@ describe("agents-proxy MCP surface", () => {
       "list_threads",
       "close_thread",
       "start_thread",
+      "vm_exec",
+      "attach_file",
       "post_to_room",
       "create_bot",
       "list_team_setup",
@@ -734,6 +762,54 @@ describe("agents-proxy MCP surface", () => {
       groupId: "room-launch",
       message: "shipping at 4",
     });
+  });
+
+  it("vm_exec returns the exit code and output as text, and marks a failure as an error", async () => {
+    const ok = await callTool("vm_exec", { command: "python3 make.py && ls -l report.pdf", timeout_seconds: 120 });
+    expect(ok.result.isError).toBeFalsy();
+    expect(ok.result.content[0].text).toBe("exit code 0\n--- stdout ---\nPDF_OK");
+    expect(lastExecBody).toEqual({ command: "python3 make.py && ls -l report.pdf", timeout_seconds: 120 });
+
+    execResponse = { exitCode: 1, stdout: "", stderr: "ModuleNotFoundError: No module named 'reportlab'\n", timedOut: false };
+    const failed = await callTool("vm_exec", { command: "python3 make.py" });
+    expect(failed.result.isError).toBe(true);
+    expect(failed.result.content[0].text).toBe("exit code 1\n--- stderr ---\nModuleNotFoundError: No module named 'reportlab'");
+    expect(lastExecBody).toEqual({ command: "python3 make.py" });
+
+    execResponse = { exitCode: 124, stdout: "partial", stderr: "", timedOut: true };
+    const slow = await callTool("vm_exec", { command: "sleep 999" });
+    expect(slow.result.isError).toBe(true);
+    expect(slow.result.content[0].text).toContain("ran past its time limit");
+    expect(slow.result.content[0].text).toContain("partial");
+
+    execStatus = 409;
+    execResponse = { error: "You have no Local VM desktop in this turn, so there is nowhere to run a command." };
+    const none = await callTool("vm_exec", { command: "ls" });
+    expect(none.result.isError).toBe(true);
+    expect(none.result.content[0].text).toContain("no Local VM desktop");
+    execStatus = 200;
+    execResponse = { exitCode: 0, stdout: "PDF_OK\n", stderr: "", timedOut: false };
+  });
+
+  it("attach_file sends only the path and name, and tells the model the file is in the chat", async () => {
+    const res = await callTool("attach_file", { path: "/home/cua/workspace/report.pdf", name: "Q3 report.pdf" });
+    expect(res.result.isError).toBeFalsy();
+    expect(res.result.content[0].text).toContain("Attached report.pdf");
+    expect(res.result.content[0].text).toContain("48639 bytes");
+    // who is attaching comes from the harness capability, never from arguments
+    expect(lastAttachBody).toEqual({ path: "/home/cua/workspace/report.pdf", name: "Q3 report.pdf" });
+    await callTool("attach_file", { path: "clip.mp4" });
+    expect(lastAttachBody).toEqual({ path: "clip.mp4" });
+  });
+
+  it("attach_file hands a refusal to the model so it can fix the file and retry", async () => {
+    attachStatus = 415;
+    attachResponse = { error: "logo.svg is not a supported attachment type. Supported: images (png, jpg, gif, webp)." };
+    const res = await callTool("attach_file", { path: "logo.svg" });
+    expect(res.result.isError).toBe(true);
+    expect(res.result.content[0].text).toContain("Supported: images");
+    attachStatus = 200;
+    attachResponse = { ok: true, name: "report.pdf", bytes: 48639 };
   });
 
   it("hands a harness refusal to the model verbatim", async () => {

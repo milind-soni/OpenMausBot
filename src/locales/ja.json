@@ -377,6 +377,8 @@
   "attach.externalHidden": "プライバシー保護のため外部画像を非表示にしています",
   "attach.savedTo": "{path} に保存しました",
   "attach.saveAria": "{name} のコピーを保存",
+  "attach.previewAudio": "{name} を再生",
+  "attach.audioUnavailable": "ここでは再生できない音声です。コピーを保存できます。",
   "attach.retrySaveAria": "{name} を再保存",
   "attach.downloading": "ダウンロード中…",
   "attach.downloaded": "ダウンロード済み",

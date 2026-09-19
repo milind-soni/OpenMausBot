@@ -22,6 +22,8 @@
   "attach.videoHint": "Loads on request · up to 25 MB",
   "attach.videoLoading": "Loading video…",
   "attach.videoUnavailable": "This video cannot be played here. You can still save a copy.",
+  "attach.previewAudio": "Play {name}",
+  "attach.audioUnavailable": "This audio cannot be played here. You can still save a copy.",
   "attach.fileTooLarge": "Preview is limited to 25 MB.",
   "teamImport.backupCopies": "Imported bots and teams are added as new copies; duplicate names get numbered.",
   "teamImport.newSection": "Adds a new team for {name}. Existing teams stay unchanged; duplicate names get numbered.",

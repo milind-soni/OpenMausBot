@@ -535,9 +535,15 @@ export function AttachmentThumbnail({
   // then be put back into a permanent loading state.
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [attempt, setAttempt] = useState(0);
+  // Until the pixels are known the tile is 4:3; then it takes the picture's own
+  // shape (within sane bounds) so a wide image has no empty band beneath it.
+  const [ratio, setRatio] = useState<number | null>(null);
 
   return (
-    <span className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}>
+    <span
+      style={ratio ? { aspectRatio: String(ratio) } : undefined}
+      className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
+    >
       {state === "loading" && (
         <span className="absolute inset-0 flex animate-pulse items-center justify-center bg-raised/65" role="status">
           <LoaderCircle size={17} className="animate-spin text-ink-secondary/65" />
@@ -596,7 +602,11 @@ export function AttachmentThumbnail({
             alt={image.name}
             loading={eager ? "eager" : "lazy"}
             fetchPriority={eager ? "high" : undefined}
-            onLoad={() => setState("ready")}
+            onLoad={(event) => {
+              const { naturalWidth, naturalHeight } = event.currentTarget;
+              if (naturalWidth > 0 && naturalHeight > 0) setRatio(Math.min(Math.max(naturalWidth / naturalHeight, 0.6), 2.4));
+              setState("ready");
+            }}
             onError={() => setState("failed")}
             className={cn(
               "block size-full object-cover transition duration-200 group-hover/image:scale-[1.015]",

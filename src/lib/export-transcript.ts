@@ -103,7 +103,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     }
     if (message.attachments && message.attachments.length > 0) {
       for (const att of message.attachments) {
-        messageLines.push(`📎 _Attachment:_ ${inlineCode(att.path)}`);
+        messageLines.push(`📎 _Attachment:_ ${inlineCode(att.kind === "file" ? att.name : att.path)}`);
       }
     }
 

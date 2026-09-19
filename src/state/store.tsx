@@ -136,8 +136,12 @@ export interface Message {
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
   text?: string;
-  /** Provider-generated files attached to this assistant response. */
-  attachments?: Array<{ kind: "image"; path: string; mime: string }>;
+  /** Files attached to this assistant response: provider-generated images, and
+   * documents, audio and video a bot attached with attach_file. */
+  attachments?: Array<
+    | { kind: "image"; path: string; mime: string }
+    | { kind: "file"; path: string; mime: string; name: string }
+  >;
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;

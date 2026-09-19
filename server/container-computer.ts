@@ -1128,6 +1128,83 @@ const screenshotStatusCache = new Map<
 
 const containerMcpPath = SPAWNED_PROXIES.containerMcp;
 
+export interface ContainerExecResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+type ContainerExecRunner = (
+  command: string,
+  args: string[],
+  options: { timeout: number },
+) => Promise<{ stdout: string; stderr: string; code: number }>;
+
+const EXEC_DEFAULT_SECONDS = 60;
+const EXEC_MAX_SECONDS = 300;
+const EXEC_OUTPUT_LIMIT = 20_000;
+
+/** Keep the start and the end: a failure message is nearly always at the end. */
+export function clipExecOutput(text: string, limit = EXEC_OUTPUT_LIMIT): string {
+  if (text.length <= limit) return text;
+  const head = Math.floor(limit / 5);
+  return `${text.slice(0, head)}\n… ${text.length - limit} characters omitted …\n${text.slice(text.length - (limit - head))}`;
+}
+
+const defaultExecRunner: ContainerExecRunner = async (command, args, options) => {
+  const resolved = resolveCliSpawn(command, args);
+  try {
+    const { stdout, stderr } = await run(resolved.command, resolved.args, {
+      timeout: options.timeout,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, PATH: augmentedPath() },
+    });
+    return { stdout, stderr, code: 0 };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string; code?: unknown; killed?: boolean; message?: string };
+    // A non-zero exit still carries the output; anything else (runtime missing,
+    // client killed) is a real failure to run at all.
+    if (typeof failure.code === "number") {
+      return { stdout: failure.stdout ?? "", stderr: failure.stderr ?? "", code: failure.code };
+    }
+    throw Object.assign(new Error(failure.killed ? "the command client timed out" : failure.message ?? "could not run the command"), { status: 502 });
+  }
+};
+
+/** Run one shell command inside a Local VM as the desktop user, in its durable
+ * workspace, and return the exit code and text output. Bots use this instead of
+ * typing into a terminal window and reading screenshots. The limit is enforced
+ * inside the container so a runaway process is really stopped. */
+export async function containerExec(
+  target: LocalVmTarget,
+  command: string,
+  options: { timeoutSeconds?: number; runtime?: Runtime; exec?: ContainerExecRunner } = {},
+): Promise<ContainerExecResult> {
+  if (!command.trim()) throw Object.assign(new Error("command is required"), { status: 400 });
+  if (command.length > 20_000) throw Object.assign(new Error("command is too long"), { status: 400 });
+  const runtime = options.runtime ?? (await containerRuntimeStatus()).runtime;
+  if (!runtime) throw Object.assign(new Error("No container runtime is available for the Local VM"), { status: 409 });
+  const seconds = Math.min(Math.max(Math.floor(options.timeoutSeconds ?? EXEC_DEFAULT_SECONDS), 1), EXEC_MAX_SECONDS);
+  const result = await (options.exec ?? defaultExecRunner)(
+    runtime,
+    [
+      "exec",
+      "-u", "cua",
+      "-w", VM_WORKSPACE_GUEST,
+      "-e", "HOME=/home/cua",
+      "-e", `DISPLAY=${DISPLAY}`,
+      target.containerName,
+      "timeout", "-k", "5", String(seconds),
+      "sh", "-lc", command,
+    ],
+    { timeout: (seconds + 20) * 1000 },
+  );
+  const timedOut = result.code === 124 || result.code === 137;
+  return { exitCode: result.code, stdout: clipExecOutput(result.stdout), stderr: clipExecOutput(result.stderr), timedOut };
+}
+
 /** Spawn contract handed directly to agent runtimes. The tiny host wrapper
  * only preserves stdio through the container CLI; Cua Driver owns the MCP
  * protocol and every computer tool. */

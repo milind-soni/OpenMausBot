@@ -522,6 +522,34 @@ const TOOLS = [
     },
   },
   {
+    name: "vm_exec",
+    description:
+      "Run a shell command inside your own Local VM (as the desktop user, starting in /home/cua/workspace) and get its exit code, stdout and stderr back as text. Use this for all command-line work in the VM: pip install --user, running a script, generating or converting a file, checking that a file exists. Do not type commands into a terminal window and read screenshots: that is slow and unreliable. GUI programs you start appear on the VM desktop. For a long job raise timeout_seconds (default 60, at most 300). Only available while you have a Local VM desktop.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        command: { type: "string", description: "The shell command to run, for example: python3 make_report.py && ls -l report.pdf" },
+        timeout_seconds: { type: "integer", minimum: 1, maximum: 300, description: "How long it may run before it is stopped. Default 60." },
+      },
+      required: ["command"],
+    },
+  },
+  {
+    name: "attach_file",
+    description:
+      "Attach a finished file to the chat so the user can preview and download it: an image, video, audio clip, PDF, spreadsheet, slide deck or other document you made. Pass its path: a path inside your computer's /home/cua/workspace (for example /home/cua/workspace/report.pdf), or a file in your working folder. Do this instead of pasting a VM path as a link; a path inside a VM cannot be opened from chat. Supported: images (png, jpg, gif, webp), video (mp4, webm, mov), audio (mp3, m4a, aac, wav, ogg, opus, flac), pdf, Word/Excel/PowerPoint and OpenDocument files, and csv, tsv, txt, md, json, rtf. Up to 25 MB (images 10 MB). Finish writing the file first, then call this directly: it reports an error if the file is missing, so you do not need to list or open the folder to check.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string", description: "The file's path, for example /home/cua/workspace/report.pdf." },
+        name: { type: "string", description: "Optional file name to show the user. Defaults to the file's own name." },
+      },
+      required: ["path"],
+    },
+  },
+  {
     name: "post_to_room",
     description:
       "Put one message into a shared room you belong to, for example when the user asks you to tell the team something. Get group_id from list_rooms. This posts and returns: no room member's turn starts, nobody replies, and nothing comes back except confirmation — so never use it to ask a question or hand out work (use ask_bot or delegate_bot for those). Post once, say it in full, and tell the user what you posted. If a post is refused, do not retry it: say what you wanted to post in your reply instead.",
@@ -1014,6 +1042,29 @@ function recallSpeaker(hit: Json): string {
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "vm_exec") {
+    const { ok, body } = await apiResponse("/api/internal/vm-exec", {
+      method: "POST",
+      body: JSON.stringify({ command: args.command, ...(typeof args.timeout_seconds === "number" ? { timeout_seconds: args.timeout_seconds } : {}) }),
+    });
+    if (!ok) return { text: String(body.error ?? "Could not run that command."), isError: true };
+    const exitCode = Number(body.exitCode ?? 0);
+    const stdout = String(body.stdout ?? "");
+    const stderr = String(body.stderr ?? "");
+    const lines = [body.timedOut ? "The command was stopped: it ran past its time limit." : `exit code ${exitCode}`];
+    if (stdout) lines.push("--- stdout ---", stdout.replace(/\s+$/, ""));
+    if (stderr) lines.push("--- stderr ---", stderr.replace(/\s+$/, ""));
+    if (!stdout && !stderr && !body.timedOut) lines.push("(no output)");
+    return { text: lines.join("\n"), ...(exitCode !== 0 || body.timedOut ? { isError: true } : {}) };
+  }
+  if (name === "attach_file") {
+    const { ok, body } = await apiResponse("/api/internal/attach-file", {
+      method: "POST",
+      body: JSON.stringify({ path: args.path, ...(typeof args.name === "string" ? { name: args.name } : {}) }),
+    });
+    if (!ok) return { text: String(body.error ?? "Could not attach that file."), isError: true };
+    return { text: `Attached ${String(body.name ?? "the file")} (${Number(body.bytes ?? 0)} bytes). It now appears in the chat with a preview.` };
+  }
   if (name === "list_room_targets") {
     const r = await api("/api/internal/room-targets");
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };

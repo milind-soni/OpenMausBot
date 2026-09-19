@@ -103,14 +103,17 @@ import {
   containerComputerMcp,
   containerComputerScreenshot,
   containerComputerStatus,
+  containerExec,
   containerRuntimeStatus,
   localVmRecreatableOnDemand,
   perBotLocalVmTarget,
   SHARED_LOCAL_VM_TARGET,
   setupCommands,
+  VM_WORKSPACE_GUEST,
   type LocalVmTarget,
   type Runtime,
 } from "./container-computer.ts";
+import { attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
 import {
   ensureDirs,
   instanceConfigs,
@@ -737,7 +740,10 @@ type InternalCapability = {
   roomHandoffId?: string;
   roomCoordination?: boolean;
   ownThreadCreation?: boolean;
+  /** attach_file calls this turn has made, capped so one turn cannot flood the chat. */
+  attachedFiles?: number;
 };
+const MAX_ATTACHED_FILES_PER_TURN = 10;
 // A capability lives for the exact provider-turn generation, including while
 // that turn is parked on a human approval. The long ceiling is only an orphan
 // backstop for an impossible-to-settle adapter; normal terminal paths revoke
@@ -9266,6 +9272,30 @@ const pendingConnectorResumes = new Map<
   { botId: string; threadId: string; resumeKey: string; labels: string[] }
 >();
 
+/** The host folders a bot's own files may be read from in one conversation:
+ * the conversation's pinned or configured working folder, the bot's own
+ * workspace, and the private attachment store. */
+function messageFileRootsForThread(senderId: string, threadId: string): string[] {
+  const directBot = store.botByThread(threadId);
+  const group = directBot ? undefined : store.groupByThread(threadId);
+  let pinnedCwd: string | null | undefined;
+  let configuredCwd: string | undefined;
+  if (directBot) {
+    pinnedCwd = store.taskByThread(directBot.id, threadId)?.cwd;
+    configuredCwd = directBot.cwd;
+  } else if (group) {
+    const task = store.groupTaskByThread(group.id, threadId);
+    pinnedCwd = task ? task.pinnedCwd : group.threadId === threadId ? group.pinnedCwd : undefined;
+    configuredCwd = group.cwd;
+  }
+  return messageFileRoots({
+    senderWorkspace: workspaceDir(senderId),
+    attachments: ATTACHMENTS_DIR,
+    pinnedCwd,
+    configuredCwd,
+  });
+}
+
 function connectorThread(botId: string, threadId: string) {
   const bot = store.bot(botId);
   if (!bot) return null;
@@ -11251,6 +11281,82 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         store.setTaskClosedBy(owner.id, threadId, { botId: from.id, name: from.name, at: Date.now() });
         return json(res, 200, { closed: true, threadId, title: task.title, botName: owner.name });
       }
+      if (method === "POST" && path === "/api/internal/attach-file") {
+        const from = internalSender;
+        const threadId = internalCapability.threadId;
+        const source = connectorThread(from.id, threadId);
+        if (!source) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const body = await readInternalBody();
+        const requestedPath = typeof body.path === "string" ? body.path : "";
+        const requestedName = typeof body.name === "string" ? body.name : undefined;
+        try {
+          const outcome = await attachForTurn(internalCapability, MAX_ATTACHED_FILES_PER_TURN, {
+            save: () => {
+              // The agents capability carries no VM; the thread's claimed desktop does.
+              const vm = localVmThreadTargets.get(threadId);
+              return saveBotAttachment({
+                path: requestedPath,
+                name: requestedName,
+                // The attachment store is not a source: only the bot's own files are.
+                roots: messageFileRootsForThread(from.id, threadId).filter((root) => root !== ATTACHMENTS_DIR),
+                ...(vm ? { guest: { root: VM_WORKSPACE_GUEST, host: vm.workspaceDir } } : {}),
+              });
+            },
+            // The copy is awaited: the turn may have been stopped, replaced or
+            // deleted, or the bot removed from the room, before it finished.
+            stillLive: () => internalCapabilityIsActive(internalCapability) && connectorThread(from.id, threadId) !== null,
+            publish: (saved) => {
+              store.appendMessage(threadId, {
+                role: "bot",
+                kind: "text",
+                text: "",
+                attachments: [saved.attachment],
+                ...(source.group ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
+              });
+            },
+            // Each save gets its own stored file, so an unpublished one is ours to remove.
+            discard: (saved) => deleteAttachment(saved.attachment.path),
+          });
+          if (outcome.status === "limit") {
+            return json(res, 429, { error: `You already attached ${MAX_ATTACHED_FILES_PER_TURN} files this turn. Put the rest in one document or archive summary instead.` });
+          }
+          if (outcome.status === "ended") {
+            return json(res, 409, { error: "This turn ended before the file could be attached, so nothing was posted." });
+          }
+          const { saved } = outcome;
+          const label = saved.attachment.kind === "file"
+            ? saved.attachment.name
+            : (requestedName?.trim() || requestedPath.split(/[\\/]/).at(-1) || "image");
+          return json(res, 200, { ok: true, name: label, bytes: saved.bytes });
+        } catch (error) {
+          const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+          const message = status === 404
+            ? `No file was found at ${requestedPath}. Save it under /home/cua/workspace (or your working folder) and pass its exact path.`
+            : error instanceof Error ? error.message : "could not attach that file";
+          return json(res, status, { error: message });
+        }
+      }
+      if (method === "POST" && path === "/api/internal/vm-exec") {
+        const threadId = internalCapability.threadId;
+        if (!connectorThread(internalSender.id, threadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const body = await readInternalBody();
+        // Only the desktop this thread has claimed for the running turn; a bot
+        // without one has nothing to run a command in.
+        const vm = localVmThreadTargets.get(threadId);
+        if (!vm) return json(res, 409, { error: "You have no Local VM desktop in this turn, so there is nowhere to run a command." });
+        try {
+          const result = await containerExec(vm, typeof body.command === "string" ? body.command : "", {
+            timeoutSeconds: typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined,
+          });
+          localVmIdleFor(vm).touch();
+          return json(res, 200, result);
+        } catch (error) {
+          const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+          return json(res, status, { error: error instanceof Error ? error.message : "could not run the command" });
+        }
+      }
       if (method === "GET" && path === "/api/internal/rooms") {
         const from = internalSender;
         const fromThreadId = internalCapability.threadId;
@@ -13098,9 +13204,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
       const message = store.messagesFor(threadId).find((candidate) => candidate.id === m![2]);
       if (!message) return json(res, 404, { error: "no such message" });
-      if (message.kind !== "text" || !message.text) {
+      if (message.kind !== "text" || (!message.text && !message.attachments?.length)) {
         return json(res, 403, { error: "that message does not share this file" });
       }
+      const messageText = message.text ?? "";
       const body = method === "POST" ? await readBody(req) : null;
       const rawReference = streamsMessageImage ? url.searchParams.get("ref") : null;
       if (streamsMessageImage && (!rawReference || !/^\d+$/.test(rawReference))) {
@@ -13108,19 +13215,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       const href = method === "POST"
         ? (typeof body.path === "string" ? body.path : "")
-        : messageImageTargetAt(message.text, Number(rawReference));
+        : messageImageTargetAt(messageText, Number(rawReference));
       if (!href) return json(res, 400, { error: "path is required" });
 
       let roots: string[];
       let downloadName: string | undefined;
+      // A file the bot attached with attach_file lives in the private
+      // attachment store; the message itself is the grant, exactly as a
+      // user's attachment tag is for their own uploads.
+      const botAttachment = message.role === "bot"
+        ? message.attachments?.find((attachment) => attachment.path === href)
+        : undefined;
       if (message.role === "user") {
-        downloadName = messageAttachmentName(message.text, href) ?? undefined;
+        downloadName = messageAttachmentName(messageText, href) ?? undefined;
         if (!downloadName) {
           return json(res, 403, { error: "that message does not share this file" });
         }
         roots = [ATTACHMENTS_DIR];
+      } else if (botAttachment) {
+        // Files and images alike: the stored message is the grant, so the
+        // mobile clients can fetch an attached image through this route too.
+        downloadName = botAttachment.kind === "file" ? botAttachment.name : undefined;
+        roots = [ATTACHMENTS_DIR];
       } else {
-        if (!messageReferencesFile(message.text, href)) {
+        if (!messageReferencesFile(messageText, href)) {
           return json(res, 403, { error: "that bot message does not link to this file" });
         }
         const senderId = directBot?.id ?? message.from?.botId;
@@ -13130,27 +13248,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!senderId) {
           return json(res, 403, { error: "the file's bot author could not be verified" });
         }
-        let pinnedCwd: string | null | undefined;
-        let configuredCwd: string | undefined;
-        if (directBot) {
-          pinnedCwd = store.taskByThread(directBot.id, threadId)?.cwd;
-          configuredCwd = directBot.cwd;
-        } else if (group) {
-          const task = store.groupTaskByThread(group.id, threadId);
-          pinnedCwd = task ? task.pinnedCwd : group.threadId === threadId ? group.pinnedCwd : undefined;
-          configuredCwd = group.cwd;
-        }
-
-        roots = messageFileRoots({
-          senderWorkspace: workspaceDir(senderId),
-          attachments: ATTACHMENTS_DIR,
-          pinnedCwd,
-          configuredCwd,
-        });
+        roots = messageFileRootsForThread(senderId, threadId);
       }
 
       const file = await openMessageFile(href, roots);
-      if (streamsMessageImage && !file.mime.startsWith("image/")) {
+      if ((streamsMessageImage || botAttachment?.kind === "image") && !file.mime.startsWith("image/")) {
         await file.handle.close();
         return json(res, 415, { error: "only images can be previewed here" });
       }
