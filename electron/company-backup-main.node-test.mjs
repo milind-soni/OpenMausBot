@@ -12,15 +12,17 @@ import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 // importing Electron main (which would start the app). All IO, connection state,
 // and transfer results are synthetic; these tests do not prove archive transport,
 // OS keychain storage, or a renderer workflow.
-const mainSource = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
-function section(start, end) {
-  const from = mainSource.indexOf(start);
-  const to = mainSource.indexOf(end, from + start.length);
+// A Windows checkout under core.autocrlf hands us CRLF, and the section anchors
+// below slice on literal "\n" boundaries, so normalise the source first.
+const moduleSource = readFileSync(new URL("./main/company-backup.mjs", import.meta.url), "utf8").replaceAll("\r\n", "\n");
+function section(start, end, includeEnd = false) {
+  const from = moduleSource.indexOf(start);
+  const to = moduleSource.indexOf(end, from + start.length);
   assert.ok(from >= 0 && to > from, `Main-process test section moved: ${start}`);
-  return mainSource.slice(from, to);
+  return moduleSource.slice(from, includeEnd ? to + end.length : to);
 }
 const functions = section("function ensureManagedDesktop()", "function syncDesktopMutationToken(");
-const registrations = section("const workspaceOnly =", "const savedWorkspace =");
+const registrations = section("const workspaceOnly =", "  } finally { companyRestoreCommitting = false; }\n}));", true);
 const ORIGIN = "http://127.0.0.1:48799";
 const STAGE = "11111111-1111-4111-8111-111111111111";
 const DEVICE = "22222222-2222-4222-8222-222222222222";
