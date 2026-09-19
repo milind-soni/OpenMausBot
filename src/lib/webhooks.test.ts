@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { webhookActivationDefaults } from "./webhooks.js";
+import { webhookActivationDefaults } from "../components/WebhooksPanel";
 
 describe("webhookActivationDefaults", () => {
   it("makes a newly created local webhook executable on its first request", () => {
