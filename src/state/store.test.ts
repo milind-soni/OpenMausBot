@@ -1664,6 +1664,7 @@ describe("scrollback pages", () => {
     const next = reducer(loading, {
       type: "olderMessages",
       threadId: "thread-1",
+      generation: loading.transcriptGeneration["thread-1"] ?? 0,
       // m3 overlaps the page this client already holds
       messages: [message("m1", 1), message("m2", 2), message("m3", 3)],
       hasMore: false,
@@ -1671,6 +1672,46 @@ describe("scrollback pages", () => {
     expect(next.bots[0].messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4"]);
     expect(next.bots[0].hasMore).toBe(false);
     expect(next.loadingOlder).toEqual({});
+  });
+
+  it("drops a page that was in flight across a rewind, and stops the spinner", () => {
+    const withLeaf = { ...bot, activeLeafId: "m4" } as never as Bot;
+    const loading = reducer({ ...initialState, bots: [withLeaf] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+
+    // an edit rewinds the visible branch while the page is on the wire
+    const rewound = reducer(loading, { type: "threadActive", threadId: "thread-1", activeLeafId: "m3" });
+    expect(rewound.transcriptGeneration["thread-1"]).not.toBe(generation);
+
+    const landed = reducer(rewound, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("abandoned", 1)],
+      hasMore: false,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(landed.bots[0].hasMore).toBe(true);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("still lands a page over messages that arrived while it was on the wire", () => {
+    const loading = reducer({ ...initialState, bots: [bot] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+    const appended = reducer(loading, {
+      type: "messageAdded",
+      threadId: "thread-1",
+      message: message("m5", 5) as never as Message,
+    });
+    const landed = reducer(appended, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("m2", 2)],
+      hasMore: true,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m2", "m3", "m4", "m5"]);
+    expect(landed.loadingOlder).toEqual({});
   });
 
   it("answers the scrollback question from a payload that carries a transcript", () => {
