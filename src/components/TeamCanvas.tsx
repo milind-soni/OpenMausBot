@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, BookOpen, Crown, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, overlayOpen, useStore, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
@@ -34,7 +34,7 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   return <article className={cn("relative h-[126px] w-[236px] shrink-0 rounded-xl border bg-card shadow-sm transition-colors",
     selected ? "border-accent/60 ring-1 ring-accent/15" : connected ? "border-accent/40" : "border-hairline/50 hover:border-ink-secondary/40", moving && "opacity-35")}>
     <button data-bot-id={bot.id} aria-label={t("canvas.editBot", { name: bot.name })}
-      onClick={() => dispatch({ type: "toggleSettings", botId: bot.id, section: "identity", open: true })}
+      onClick={() => dispatch({ type: "openOverlay", kind: "settings", botId: bot.id, section: "identity", open: true })}
       title={onArrange ? t("canvas.reorderHint") : undefined}
       onKeyDown={(event) => {
         if (!onArrange || !event.altKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
@@ -59,7 +59,7 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
       {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: bot.name })} title={t("computer.tab.computer")}
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
       <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
-        onClick={() => dispatch({ type: "toggleSettings", botId: bot.id, section: "model", open: true })}
+        onClick={() => dispatch({ type: "openOverlay", kind: "settings", botId: bot.id, section: "model", open: true })}
         className="ml-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
         <span className="flex size-3.5 shrink-0 items-center justify-center">{instance
           ? <InstanceProviderMark instance={instance} size={13} />
@@ -102,8 +102,13 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onEdit
   const [layoutLoaded, setLayoutLoaded] = useState(false);
   const [menuAbove, setMenuAbove] = useState<string | null>(null);
   const tiles = useMemo(() => layoutTeams(sections, positions), [sections, positions]);
-  const current = useRef({ view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen });
-  current.current = { view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen };
+  const settingsOpen = overlayOpen(state, "settings");
+  const current = useRef({ view, positions, tiles, selectedId: state.selectedId, settingsOpen });
+  // Keep the gesture/observer mirror in step with committed state only: a
+  // render that React discards must never move the canvas under the pointer.
+  useLayoutEffect(() => {
+    current.current = { view, positions, tiles, selectedId: state.selectedId, settingsOpen };
+  }, [view, positions, tiles, state.selectedId, settingsOpen]);
 
   // Layout is personal presentation, not team configuration. Key it to the
   // workspace's identity so switching hosted workspaces never shares a layout.
@@ -361,7 +366,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onEdit
         const computer = Object.hasOwn(teamComputers, section.key) ? teamComputers[section.key] : undefined;
         const renderBot = (bot: Bot) => <div key={bot.id} className="relative">
           {insertion?.botId === bot.id && <div className={cn("pointer-events-none absolute inset-x-1 h-0.5 rounded bg-accent", insertion.after ? "-bottom-[9px]" : "-top-[9px]")} />}
-          <BotCard bot={bot} selected={state.selectedId === bot.id && state.settingsOpen} moving={dragged?.bot.id === bot.id || moving === bot.id}
+          <BotCard bot={bot} selected={state.selectedId === bot.id && overlayOpen(state, "settings")} moving={dragged?.bot.id === bot.id || moving === bot.id}
             connected={connectedBotIds.includes(bot.id)} onComputer={onComputer} onArrange={layoutLoaded ? arrangeBot : undefined} />
         </div>;
         return <section key={section.key} data-team-key={section.key} aria-label={t("canvas.teamRegion", { name: section.name })}

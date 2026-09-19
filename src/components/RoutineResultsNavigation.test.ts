@@ -2,7 +2,7 @@ import { Children, createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot, Group } from "@/state/store";
-import type { Routine, RoutineRun } from "@/lib/routines";
+import type { Routine, RoutineRun } from "../../shared/routines";
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
