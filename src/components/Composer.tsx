@@ -506,9 +506,9 @@ export function Composer({
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
+      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, at: Date.now(), ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, ...retry });
+      dispatch({ type: "send", botId: bot.id, at: Date.now(), ...retry });
     }
   };
   const send = () => {
@@ -542,6 +542,7 @@ export function Composer({
         type: "sendGroup",
         groupId: group.id,
         text: body,
+        at: Date.now(),
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
@@ -554,6 +555,7 @@ export function Composer({
         type: "send",
         botId: bot.id,
         text: body,
+        at: Date.now(),
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
