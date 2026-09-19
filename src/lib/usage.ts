@@ -91,6 +91,17 @@ export function freshTokens(u: TaskUsage): number {
   return Math.max(0, u.input - cachedInput(u)) + u.output;
 }
 
+/** The headline token figure for any usage surface: what the person
+ * actually bought. `input` INCLUDES the provider's cache reads, so summing
+ * it per turn counts the same system prompt and conversation once per
+ * message — a five-message thread reads as ~228k "used" when barely any of
+ * it was new text, which reads as a bug to everyone who sees it (#527).
+ * Where the engine never reported a cached share there is nothing to
+ * subtract, and the raw total is the only honest answer. */
+export function headlineTokens(u: TaskUsage): number {
+  return cachedKnown(u) ? freshTokens(u) : u.input + u.output;
+}
+
 /** Whether the engine ever told us the cached share. Without it the raw
  * total is the only honest headline. */
 export function cachedKnown(u: TaskUsage): boolean {

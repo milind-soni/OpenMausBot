@@ -23,7 +23,7 @@ import { WorkingDots } from "@/components/WorkingIndicator";
 import { MessageActions, messageActionClass } from "@/components/MessageActions";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { cachedInput, cachedKnown, contextChip, contextDetail, contextShare, costCaption, formatTokens, formatUsd, freshTokens, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
+import { cachedInput, cachedKnown, contextChip, contextDetail, contextShare, costCaption, formatTokens, formatUsd, headlineTokens, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
   api,
   currentTaskBot,
@@ -1471,7 +1471,7 @@ function UsageChip({ bot }: { bot: Bot }) {
     .filter(Boolean)
     .join("\n");
   // folded: one figure — cost when the engine reports one, else new tokens
-  const short = hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : formatTokens(cachedKnown(usage) ? freshTokens(usage) : usage.input + usage.output);
+  const short = hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : formatTokens(headlineTokens(usage));
   const ctx = contextChip(usage);
   return (
     <button
