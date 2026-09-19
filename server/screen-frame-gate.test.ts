@@ -3,9 +3,12 @@
 // tool that must NOT count — is pinned down here.
 import { createHash } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
+import { store } from "./runtime.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
+import { createScreenPollers } from "./screen-pollers.ts";
+import { claimTurnResource, turnComputerResources, turnResourceOwners } from "./turn-admission.ts";
 
 describe("screenTouchingTool", () => {
   it("strips the Claude driver's mcp__<server>__ prefix", () => {
@@ -168,5 +171,40 @@ describe("screenSurfaceForTool", () => {
     // The case that made this necessary: a bot holding both surfaces, whose
     // turn was entirely web work, settled with a picture of its Local VM.
     expect(screenSurfaceForTool("agent_browser_open")).not.toBe(screenSurfaceForTool("launch_app"));
+  });
+});
+
+describe("createScreenPollers settled hash scope", () => {
+  afterEach(() => {
+    turnResourceOwners.clear();
+    turnComputerResources.clear();
+  });
+
+  it("settles an unchanged frame once per bot across two threads", async () => {
+    const botId = store.createBot().id;
+    const frame = { png: "c2NyZWVuLWZyYW1l", format: "image/png" };
+    const pollers = createScreenPollers({
+      lateBound: { broadcast: () => () => {}, computerControlRevision: () => new Map() },
+      helpers: { currentBrowserSession: () => "", botComputerControlSnapshot: () => ({ held: false }) },
+    });
+    const settle = async () => {
+      const task = store.createTask(botId, "screen settle", false);
+      if (!task) throw new Error("test did not create a task");
+      const owner = { threadId: task.threadId, generation: `gen-${task.threadId}` };
+      claimTurnResource(owner, `computer:${task.threadId}`);
+      turnComputerResources.set(task.threadId, { owner, resource: `computer:${task.threadId}` });
+      pollers.startScreenPoller(botId, task.threadId, { computer: async () => frame }, { screenIsTheWork: true });
+      try {
+        return await pollers.finalScreenFrame(botId, task.threadId);
+      } finally {
+        pollers.stopScreenPoller(botId, task.threadId);
+      }
+    };
+
+    const first = await settle();
+    const second = await settle();
+
+    expect(first?.png).toBe(frame.png);
+    expect(second).toBeNull();
   });
 });
