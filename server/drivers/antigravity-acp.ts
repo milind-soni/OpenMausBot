@@ -10,6 +10,7 @@ import { killCliTree, spawnCli } from "../procs.ts";
 import type { ModelCatalog } from "../contracts.ts";
 import type { ChildProcess } from "node:child_process";
 import type { AntigravityRuntime } from "./antigravity-runtime.ts";
+import { AcpConnection, takeLines } from "./acp/protocol.ts";
 
 // Printed on stderr by Google's server, not stdout.
 export const ANTIGRAVITY_AUTH_PREFIX = "Open the following link to authenticate the ACP server: ";
@@ -56,13 +57,6 @@ const browserHelperSource =
 
 function quoteBrowserArgument(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-/** Complete lines in a stream buffer, plus the unterminated tail to keep. */
-function takeLines(buffer: string): { lines: string[]; rest: string } {
-  const parts = buffer.split("\n");
-  const rest = parts.pop() ?? "";
-  return { lines: parts.map((line) => line.replace(/\r$/u, "")), rest };
 }
 
 /** Only fixed, allowlisted startup hints leave stderr. Native output can
@@ -162,25 +156,17 @@ export async function antigravityProfileAuthenticated(profile: AntigravityProfil
   }
 }
 
-interface PendingRpc {
-  resolve(value: any): void;
-  reject(error: Error): void;
-  timer?: ReturnType<typeof setTimeout>;
-}
-
 /** Tiny dependency-free ACP client for setup/model probes. Actual chat turns
- * continue to use the shared provider-neutral ACP runtime. */
+ * continue to use the shared provider-neutral ACP runtime; the wire protocol
+ * itself is the shared AcpConnection. */
 export class AntigravityAcpClient {
   readonly child: ChildProcess;
-  private nextId = 1;
-  private pending = new Map<number, PendingRpc>();
-  private buffer = "";
+  private readonly connection: AcpConnection;
   private diagnosticBuffer = "";
   private initializationComplete = false;
   private startupOutputBytes = 0;
   private startupDiagnosticBytes = 0;
   private nativeStartupHint?: string;
-  private closed = false;
   private stopping?: Promise<boolean>;
   private readonly onAuthorizationUrl?: (url: string) => void;
   /** Settles once the runtime process is gone. On Windows a running
@@ -200,56 +186,55 @@ export class AntigravityAcpClient {
       process.platform === "linux" ? ["--uid="] : [],
       { cwd, env: profile.environment, stdio: ["pipe", "pipe", "pipe"] },
     );
-    this.child.stdout!.setEncoding("utf8");
-    this.child.stdout!.on("data", (chunk: string) => this.consume(chunk));
+    this.connection = new AcpConnection({
+      stdout: this.child.stdout!,
+      write: (line) => this.child.stdin!.write(line),
+      onData: (chunk) => {
+        if (!this.initializationComplete) this.startupOutputBytes += Buffer.byteLength(chunk);
+      },
+      onLine: (line) => this.announceAuthorizationUrl(line),
+      maxLineBytes: MAX_PROTOCOL_LINE_BYTES,
+      oversizedLineMessage: "Antigravity sent a protocol line that is too large.",
+      closedErrorMessage: "Antigravity ACP is closed.",
+      closeErrorMessage: "Antigravity ACP was closed.",
+      errorFallbackMessage: "Antigravity ACP request failed.",
+      timeoutMessage: (method, timeoutMs) => {
+        if (method !== "initialize") return `${method} timed out.`;
+        this.noteStartupDiagnostic(this.diagnosticBuffer);
+        return `Antigravity initialization timed out after ${Math.ceil(timeoutMs / 1_000)} seconds (${process.platform}-${process.arch}). ` +
+          "The executable was found, but did not finish starting. " +
+          (this.nativeStartupHint ? `${this.nativeStartupHint} ` : "") +
+          `Startup output: ${this.startupOutputBytes} bytes; diagnostic output: ${this.startupDiagnosticBytes} bytes. ` +
+          "Retry setup. If it still fails, share this error and your OpenMausBot version; do not paste Google sign-in links or tokens.";
+      },
+      onClose: () => {
+        this.stopping = killCliTree(this.child);
+      },
+    });
     // Keep only sign-in announcements and fixed startup failure categories;
     // never surface raw stderr, which can contain authorization codes.
     this.child.stderr!.setEncoding("utf8");
     this.child.stderr!.on("data", (chunk: string) => this.consumeDiagnostics(chunk));
-    this.child.once("error", (error) => this.failAll(error));
+    this.child.once("error", (error) => this.connection.failAll(error));
+    this.child.stdin!.on("error", (error) => {
+      this.connection.failAll(error);
+      this.connection.close();
+    });
     this.exited = new Promise((resolve) => {
       this.child.once("close", (code, signal) => {
         this.noteStartupDiagnostic(this.diagnosticBuffer);
         this.diagnosticBuffer = "";
-        if (!this.closed) this.failAll(new Error(
-          `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
-        ));
+        if (!this.connection.isClosed) {
+          this.connection.failAll(new Error(
+            `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
+          ));
+          this.connection.close();
+        }
         resolve();
       });
       // Failed spawns also emit `close`. An `error` alone can instead mean
       // a failed kill, and is not evidence that the runtime stopped.
     });
-  }
-
-  private consume(chunk: string) {
-    if (!this.initializationComplete) this.startupOutputBytes += Buffer.byteLength(chunk);
-    this.buffer += chunk;
-    if (Buffer.byteLength(this.buffer) > MAX_PROTOCOL_LINE_BYTES) {
-      this.failAll(new Error("Antigravity sent a protocol line that is too large."));
-      this.close();
-      return;
-    }
-    const { lines, rest } = takeLines(this.buffer);
-    this.buffer = rest;
-    for (const line of lines) {
-      if (this.announceAuthorizationUrl(line)) continue;
-      let message: any;
-      try {
-        message = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (typeof message?.id !== "number") continue;
-      const pending = this.pending.get(message.id);
-      if (!pending) continue;
-      this.pending.delete(message.id);
-      if (pending.timer) clearTimeout(pending.timer);
-      if (message.error) {
-        const error = new Error(message.error.message ?? "Antigravity ACP request failed.");
-        Object.assign(error, { code: message.error.code, data: message.error.data });
-        pending.reject(error);
-      } else pending.resolve(message.result);
-    }
   }
 
   /** Report a sign-in link if this line carries one. Returns whether the line
@@ -260,7 +245,7 @@ export class AntigravityAcpClient {
     try {
       this.onAuthorizationUrl?.(parseAntigravityAuthorizationUrl(raw).authorizationUrl);
     } catch (error) {
-      this.failAll(error instanceof Error ? error : new Error(String(error)));
+      this.connection.failAll(error instanceof Error ? error : new Error(String(error)));
     }
     return true;
   }
@@ -282,35 +267,8 @@ export class AntigravityAcpClient {
     if (!this.initializationComplete) this.nativeStartupHint ??= startupHint(line);
   }
 
-  private failAll(error: Error) {
-    for (const pending of this.pending.values()) {
-      if (pending.timer) clearTimeout(pending.timer);
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-
   request(method: string, params: unknown, timeoutMs = 30_000): Promise<any> {
-    if (this.closed) return Promise.reject(new Error("Antigravity ACP is closed."));
-    const id = this.nextId++;
-    return new Promise((resolveRequest, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        if (method === "initialize") {
-          this.noteStartupDiagnostic(this.diagnosticBuffer);
-          reject(new Error(
-            `Antigravity initialization timed out after ${Math.ceil(timeoutMs / 1_000)} seconds (${process.platform}-${process.arch}). ` +
-            "The executable was found, but did not finish starting. " +
-            (this.nativeStartupHint ? `${this.nativeStartupHint} ` : "") +
-            `Startup output: ${this.startupOutputBytes} bytes; diagnostic output: ${this.startupDiagnosticBytes} bytes. ` +
-            "Retry setup. If it still fails, share this error and your OpenMausBot version; do not paste Google sign-in links or tokens.",
-          ));
-        } else reject(new Error(`${method} timed out.`));
-      }, timeoutMs);
-      timer.unref?.();
-      this.pending.set(id, { resolve: resolveRequest, reject, timer });
-      this.child.stdin!.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
-    });
+    return this.connection.request(method, params, timeoutMs);
   }
 
   async initialize(timeoutMs = STARTUP_TIMEOUT_MS): Promise<any> {
@@ -325,10 +283,7 @@ export class AntigravityAcpClient {
   }
 
   close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.failAll(new Error("Antigravity ACP was closed."));
-    this.stopping = killCliTree(this.child);
+    this.connection.close();
   }
 
   /** Allow the shared 5s TERM grace and 1s force-stop verification to finish. */

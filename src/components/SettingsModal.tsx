@@ -211,7 +211,7 @@ function ReplayAppTourButton() {
           })
             .then((config) => {
               dispatch({ type: "configStatus", config });
-              dispatch({ type: "toggleTour", open: true });
+              dispatch({ type: "openOverlay", kind: "tour", open: true });
             })
             .catch(() => setFailed(true))
             .finally(() => setSaving(false));
@@ -232,7 +232,7 @@ function ReplayTourRow() {
       <div className="flex flex-wrap gap-2">
         <ReplayAppTourButton />
         <button
-          onClick={() => dispatch({ type: "toggleWelcome", open: true })}
+          onClick={() => dispatch({ type: "openOverlay", kind: "welcome", open: true })}
           className="ui-button"
         >
           {t("settings.welcome.replay")}
@@ -470,9 +470,9 @@ export function SettingsModal() {
   const { state, dispatch } = useStore();
   const remoteActive = window.ogb?.remoteClient?.active === true;
   const section: AppSettingsSection =
-    (remoteActive && !["appearance", "desktopWorkspaces"].includes(state.appSettingsSection)) || state.appSettingsSection === "remote"
+    (remoteActive && !["appearance", "desktopWorkspaces"].includes(state.overlays.appSettingsSection)) || state.overlays.appSettingsSection === "remote"
       ? "companion"
-      : state.appSettingsSection;
+      : state.overlays.appSettingsSection;
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   useEffect(() => window.ogb?.environments?.onOpenSettings?.(() => setQuery("")), []);
@@ -491,7 +491,7 @@ export function SettingsModal() {
   useEffect(() => {
     // Translated matches can change without the query changing. Follow the
     // rendered results instead of a second filter with stale effect inputs.
-    if (nextVisibleSection) dispatch({ type: "toggleAppSettings", open: true, section: nextVisibleSection });
+    if (nextVisibleSection) dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: nextVisibleSection });
   }, [dispatch, nextVisibleSection]);
 
   useEffect(() => {
@@ -504,7 +504,7 @@ export function SettingsModal() {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        dispatch({ type: "toggleAppSettings", open: false });
+        dispatch({ type: "closeOverlay", kind: "appSettings" });
         return;
       }
       if (event.key !== "Tab" || !dialog) return;
@@ -542,7 +542,7 @@ export function SettingsModal() {
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 sm:p-6"
-      onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
+      onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "closeOverlay", kind: "appSettings" })}
     >
       <div
         ref={dialogRef}
@@ -568,7 +568,7 @@ export function SettingsModal() {
                 if (e.key !== "Escape") return;
                 e.stopPropagation();
                 if (query) setQuery("");
-                else dispatch({ type: "toggleAppSettings", open: false });
+                else dispatch({ type: "closeOverlay", kind: "appSettings" });
               }}
               placeholder={t("settings.search")}
               aria-label={t("settings.searchAria")}
@@ -583,7 +583,7 @@ export function SettingsModal() {
           {visibleSections.map(({ id, labelKey, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: id })}
+              onClick={() => dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: id })}
               aria-current={section === id ? "page" : undefined}
               className={cn(
                 "flex min-h-9 items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors motion-reduce:transition-none",
@@ -603,7 +603,7 @@ export function SettingsModal() {
               value={section}
               onChange={(event) => {
                 setQuery("");
-                dispatch({ type: "toggleAppSettings", open: true, section: event.target.value as AppSettingsSection });
+                dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: event.target.value as AppSettingsSection });
               }}
               className="min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
             >
@@ -615,7 +615,7 @@ export function SettingsModal() {
               {sectionLabelKey ? t(sectionLabelKey) : null}
             </span>
             <button
-              onClick={() => dispatch({ type: "toggleAppSettings", open: false })}
+              onClick={() => dispatch({ type: "closeOverlay", kind: "appSettings" })}
               aria-label={t("settings.close")}
               title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
               className="ui-icon-button shrink-0"
