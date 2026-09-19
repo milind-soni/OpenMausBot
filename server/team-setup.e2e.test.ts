@@ -32,6 +32,9 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const state = async () => (await api("GET", "/api/bots")).bots;
+    // The fixture seeds one randomly named bot at boot; capture pre-existing ids so a
+    // seeded "Mira"/"Patch"/"Quill" cannot trip the name-only leftover filter.
+    const preexistingIds = new Set((await state()).map((bot: any) => bot.id));
     let previousPid: number | undefined;
     const start = async (text: string) => {
       if (existsSync(gate)) unlinkSync(gate);
@@ -86,7 +89,13 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     await api("POST", "/api/internal/team-setup-requests", { plan: { ...plan, operations: [build("Bad", "Research", { instanceId: "codex", model: "invented-model" })] } }, 400, token);
     await api("POST", "/api/internal/team-setup-requests", { fromBotId: "foreign", plan }, 403, token);
     const denied = await api("POST", "/api/internal/team-setup-requests", { plan }, 201, token);
-    expect((await state()).filter((bot: any) => ["Mira", "Patch", "Quill"].includes(bot.name))).toHaveLength(0);
+    // A pending setup must never materialize its candidate bots; poll so a
+    // late settle cannot flake, excluding the seeded bot, and diagnose leftovers.
+    await expect.poll(async () => {
+      const bots = await state();
+      const leftover = bots.filter((bot: any) => ["Mira", "Patch", "Quill"].includes(bot.name) && !preexistingIds.has(bot.id));
+      return leftover.length ? { leftover: leftover.map((bot: any) => bot.name), bots } : [];
+    }, { timeout: 10_000 }).toEqual([]);
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: denied.requestId, behavior: "deny" });
     await finish(); await continueOnce(denied.requestId);
     expect((await state()).find((bot: any) => bot.id === chief.id).managedSections).toBeUndefined();

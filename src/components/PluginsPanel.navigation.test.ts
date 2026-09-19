@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fixture = vi.hoisted(() => ({ surface: "apps" as "apps" | "mcp", dispatch: vi.fn() }));
 vi.mock("@/state/store", () => ({
   api: vi.fn(),
-  useStore: () => ({ state: { pluginsSurface: fixture.surface }, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { overlays: { pluginsSurface: fixture.surface } }, dispatch: fixture.dispatch }),
 }));
 vi.mock("./McpServersPanel", () => ({ McpServersPanel: () => createElement("div", null, "MCP inventory") }));
 import { PluginsPanel } from "./PluginsPanel";
@@ -33,13 +33,13 @@ describe("Plugins surface navigation", () => {
     const apps = initial.nodes.find((node) => node.props.role === "tab" && node.props.children === "Connected apps")!;
     expect(apps.props["aria-selected"]).toBe(false);
     apps.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "openOverlay", kind: "plugins", open: true, section: "apps" });
     fixture.surface = "apps";
     const reopened = render();
     expect(reopened.html).not.toContain("MCP inventory");
     const mcp = reopened.nodes.find((node) => node.props.role === "tab" && node.props.children === "MCP servers")!;
     mcp.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "togglePlugins", open: true, surface: "mcp" });
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "openOverlay", kind: "plugins", open: true, section: "mcp" });
     fixture.surface = "mcp";
     expect(render().html).toContain("MCP inventory");
   });
