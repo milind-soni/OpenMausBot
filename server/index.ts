@@ -2700,6 +2700,21 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       });
     }
     markInternalTurn(node.threadId);
+    // The settle itself is quiet by design: both the delegated turn and
+    // this resume are internal, so turn.completed raises neither the unread
+    // flag nor a done frame. One chip plus one notification per settle
+    // covers the gap; steers land inside the running turn and never add
+    // more. Group settles already speak through the room's own flow.
+    if (resumed && !group) {
+      const settledFrom = [...new Set(roomHandoffs.children(node.id)
+        .map(child => store.bot(child.botId)?.name ?? "Teammate"))];
+      const who = settledFrom.length ? settledFrom.join(", ") : "delegated work";
+      store.appendMessage(node.threadId, {
+        role: "bot", kind: "activity",
+        tool: { name: `Resumed with ${who} results, reviewing`, ok: true },
+      });
+      notify(buildNotification("delegation-settled", bot, node.threadId, `Results in from ${who}`, { avatarUrl: bot.avatarUrl }));
+    }
     if (sender && parent && isUnattended(sender.id, parent.threadId)) markUnattended(bot.id, node.threadId);
     if (!group) return new Promise<{ ok: boolean; text: string }>(resolve => {
       let done = false;
