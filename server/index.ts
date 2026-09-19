@@ -22,7 +22,7 @@ import {
   isApprovalMode,
   type ApprovalMode,
 } from "../shared/approval-mode.ts";
-import { escapeAttribute } from "../src/lib/composer-attachments.ts";
+import { escapeAttribute } from "../shared/attachments.ts";
 import {
   CREDENTIAL_TARGETS,
   credentialResumeOutcome,
@@ -82,6 +82,7 @@ import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as box from "./box.ts";
+import { computerBackendFor } from "./computer-backend.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
 import { isEffortLevel, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
@@ -412,6 +413,9 @@ import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceC
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
+import { json, readBody, stderrOf } from "./http.ts";
+import { createEventsRoutes } from "./routes/events.ts";
+import { createRoutinesRoutes } from "./routes/routines.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
@@ -432,7 +436,6 @@ import {
 } from "./request-auth.ts";
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
-import { deliverSseFrame } from "./sse-fanout.ts";
 import {
   PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretBridge,
@@ -1723,7 +1726,7 @@ function previewSystemPrompt(bot: BotRecord) {
     previewComputer === "vm"
       ? caps?.computerMcp ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null
       : previewComputer === "cloud"
-        ? instance?.driverKind === "boxAgent" ? "box-agent" : caps?.computerMcp ? bot.cloudBackend === "vps" ? "vps" : "box" : null
+        ? instance?.driverKind === "boxAgent" ? "box-agent" : caps?.computerMcp ? computerBackendFor(bot).kind : null
         : previewComputer === "local"
           ? caps?.localComputerMcp ? "local" : null
           : null;
@@ -3190,100 +3193,22 @@ function messageWindow(threadId: string, messageId: string, limit: number) {
 }
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
-/** One connected client, and what it asked to be sent. */
-interface SseClient {
-  res: ServerResponse;
-  admin: boolean;
-  /** Live screen frames carry a base64 desktop capture every few seconds
-   * while a bot works. A client that isn't showing the computer panel —
-   * a phone on cellular, most of all — should not pay for them. */
-  screens: boolean;
-  /** The paired session behind this stream, when there is one: revoking or
-   * expiring it must end the stream, not just future requests. */
-  sessionId?: string;
-  /** Set once this client's socket has signalled it can't keep up (write()
-   * returned false); cleared implicitly once it's disconnected. See
-   * ./sse-fanout.ts for what this does to fan-out. */
-  backpressured: boolean;
-}
-const sseClients = new Set<SseClient>();
-function closeSessionStreams(sessionId: string): void {
-  browserLive.closeForOwner(sessionId);
-  for (const client of sseClients) {
-    if (client.sessionId !== sessionId) continue;
-    sseClients.delete(client);
-    try {
-      client.res.end();
-    } catch {
-      /* already gone */
-    }
-  }
-}
+// The fan-out machinery — client set, replay buffer, heartbeat, cursor
+// math, and the /api/events endpoint — lives in ./routes/events.ts. index
+// keeps the wiring to its own singletons, registered in the same order the
+// inline code registered it.
+const eventsRoutes = createEventsRoutes({
+  closeForOwner: (sessionId) => browserLive.closeForOwner(sessionId),
+  revalidateEmailSessions: () => sessions.revalidateEmailSessions(),
+  isLive: (sessionId) => sessions.isLive(sessionId),
+  configForAccess: (status, admin) => configForAccess(status as ReturnType<typeof configStatus>, admin),
+});
+const broadcast = eventsRoutes.broadcast;
+const closeSessionStreams = eventsRoutes.closeSessionStreams;
 sessions.onSessionRevoked((sessionId) => {
   providerAuthSessions.revokeOwner(sessionId);
   closeSessionStreams(sessionId);
 });
-
-/** Every frame is numbered, and the last few hundred are kept, so a client
- * whose connection dropped can ask for what it missed instead of
- * re-downloading every transcript. The desktop reconnects in milliseconds
- * and barely needs this; a phone reconnects every time it unlocks.
- *
- * The stream id makes the cursor safe across restarts: sequence numbers
- * begin again at 1 on boot, so a cursor from a previous run must be
- * rejected rather than used to replay a different run's frames. It rides
- * inside the SSE `id:` field, which means a browser EventSource resumes
- * correctly through its own Last-Event-ID with no client code at all. */
-const STREAM_ID = randomUUID().slice(0, 8);
-const REPLAY_MAX = 500;
-const configuredSseHeartbeatMs = Number(process.env.OMB_SSE_HEARTBEAT_MS);
-const SSE_HEARTBEAT_MS =
-  Number.isFinite(configuredSseHeartbeatMs) && configuredSseHeartbeatMs > 0
-    ? configuredSseHeartbeatMs
-    : 15_000;
-let lastSeq = 0;
-const replayBuffer: Array<{ seq: number; kind: string; frame: string | null; clientFrame: string | null }> = [];
-
-/** Screen frames are the only kind a client can decline. */
-const wants = (client: SseClient, kind: string) => kind !== "screen" || client.screens;
-
-/** `<streamId>:<seq>` — opaque to clients, and the only thing they need to
- * remember to resume. Returns null when it belongs to another run. */
-function cursorSeq(raw: string | string[] | undefined): number | null {
-  const value = Array.isArray(raw) ? raw[0] : raw;
-  if (!value) return null;
-  const [stream, seq] = value.split(":");
-  if (stream !== STREAM_ID) return null;
-  const parsed = Number(seq);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function broadcast(payload: Record<string, unknown>) {
-  // Membership may also change through fleet/CLI config writes. Close stale
-  // email streams before any further workspace data is delivered.
-  sessions.revalidateEmailSessions();
-  const seq = ++lastSeq;
-  const kind = String(payload.kind ?? "");
-  const frame = `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...payload, seq })}\n\n`;
-  // Store both projections as immutable frames: live and reconnecting clients
-  // must receive the same filtered config without changing the admin event.
-  const clientFrame = kind === "config"
-    ? `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...configForAccess(payload as ReturnType<typeof configStatus>, false), seq })}\n\n`
-    : frame;
-  // Live desktop captures can each be hundreds of kilobytes and become stale
-  // as soon as the next one arrives. Keep their sequence slots so resume-gap
-  // detection stays honest, but never retain their base64 payloads.
-  replayBuffer.push({ seq, kind, frame: kind === "screen" ? null : frame, clientFrame: kind === "screen" ? null : clientFrame });
-  if (replayBuffer.length > REPLAY_MAX) replayBuffer.shift();
-  for (const client of Array.from(sseClients)) {
-    if (!wants(client, kind)) continue;
-    // Screen frames are replaceable and durable events are not: see
-    // ./sse-fanout.ts for the backpressure/bound decision this makes.
-    if (deliverSseFrame(client, kind, client.admin ? frame : clientFrame) === "disconnected") {
-      sseClients.delete(client);
-    }
-  }
-}
 onSteeredQueueChange(() => broadcast({ kind: "bot.queued", queues: publicBotQueuedMessages() }));
 
 // ── server-side event folding (upstream's ingestion worker, miniature) ──
@@ -3917,7 +3842,7 @@ function turnProvider(bot: BotRecord, runOn?: RoutineRunOn, threadId?: string): 
   const wants = turnSurfacePlan(bot, runOn, threadId).computer;
   if (wants !== undefined && wants !== "cloud") return null;
   if (registry.get(bot.modelSelection.instanceId)?.driverKind === "boxAgent") return "box";
-  return bot.cloudBackend === "vps" ? "vps" : wants === "cloud" ? "box" : null;
+  return computerBackendFor(bot).kind === "vps" ? "vps" : wants === "cloud" ? "box" : null;
 }
 
 /** A turn on the cloud computer runs ON the cloud computer: the Box runs the
@@ -3946,8 +3871,9 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   if (plan.computer !== undefined) return plan.computer === "off" && plan.browser ? "browser" : plan.computer;
   const instance = registry.get(bot.modelSelection.instanceId);
   if (instance?.driverKind === "boxAgent") return "cloud";
-  if (bot.cloudBackend === "vps") {
-    const remote = await vps.vpsComputerStatus(cfg, bot.id);
+  const computerBackend = computerBackendFor(bot);
+  if (computerBackend.kind === "vps") {
+    const remote = await computerBackend.status(cfg, bot.id);
     if (remote.ready) return "cloud";
   }
   const target = localVmTargetForBot(bot.id);
@@ -3957,7 +3883,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
   }
   if (shouldMountLocalComputer({ requested: undefined, hostPlatform: process.platform,
     providerSupportsLocal: instance?.adapter.capabilities.localComputerMcp === true }) && readCuaConnection()) return "local";
-  if (bot.cloudBackend === "vps") return "cloud"; // show its unavailable reason
+  if (computerBackend.kind === "vps") return "cloud"; // show its unavailable reason
   return plan.browser ? "browser" : "off";
 }
 
@@ -3965,6 +3891,7 @@ async function computerPreviewSurface(bot: BotRecord, threadId?: string) {
  * deferred until a chat tool selects it and the old turn releases its tools. */
 async function selectableComputers(bot: BotRecord) {
   const caps = registry.get(bot.modelSelection.instanceId)?.adapter.capabilities;
+  const computerBackend = computerBackendFor(bot);
   const off = bot.computer === "off";
   const localEngine = registry.get(bot.modelSelection.instanceId)?.driverKind !== "boxAgent";
   return Promise.all((["cloud", "vm", "local", "browser"] as const).map(async surface => {
@@ -3975,15 +3902,15 @@ async function selectableComputers(bot: BotRecord) {
     try {
       if (off) reason = "Computer access is Off in this bot's settings.";
       else if (surface === "cloud") {
-        if (bot.cloudBackend === "vps") {
-          const status = localEngine && caps?.computerMcp ? await vps.vpsComputerStatus(cfg, bot.id) : null;
+        if (computerBackend.kind === "vps") {
+          const status = localEngine && caps?.computerMcp ? await computerBackend.status(cfg, bot.id) : null;
           ready = status?.ready === true;
           canStart = Boolean(status?.daemonUp && status.managed && status.container === "stopped" &&
             status.image && status.imageMatches && status.network === "private" && status.mounts === "none" && status.security === "hardened");
           canCreate = Boolean(status?.configured && status.daemonUp && status.container === "missing");
           reason = status?.problem ?? reason;
         } else if (box.boxConfigured(cfg) && registry.instances().some(instance => instance.driverKind === "boxAgent")) {
-          const status = await box.boxStatus(cfg, bot.id);
+          const status = await computerBackend.status(cfg, bot.id);
           const lifecycle = box.boxTurnLifecycleAction({ explicitCloud: true, canMount: true, state: status.box?.state ?? null });
           ready = lifecycle === "attach";
           canStart = lifecycle === "wake";
@@ -6067,7 +5994,8 @@ async function startTurn(
       // Cloud routines always use Box/BoxAgent. The per-bot backend applies
       // only to ordinary turns that mount a computer into the local agent.
       const teamComputer = inheritedTeamComputer(bot);
-      const cloudBackend = teamComputer || opts?.runOn === "cloud" || bot.cloudBackend !== "vps" ? "box" : "vps";
+      const computerBackend = computerBackendFor(bot);
+      const cloudBackend = teamComputer || opts?.runOn === "cloud" || computerBackend.kind !== "vps" ? "box" : "vps";
       const mountsComputerMcp = instance.adapter.capabilities.computerMcp === true;
       // Box's native runner owns its computer tools. Local drivers mount
       // Local VM/VPS tools, but have no Box relay to execute this descriptor.
@@ -6282,7 +6210,7 @@ async function startTurn(
       // A VPS is a local-agent computer mount, never a remote agent runner.
       // Explicit Cloud may prepare/start it. Auto remains read-only unless
       // the person explicitly opted this bot into remote lifecycle actions.
-      if ((wants === "cloud" || wants === undefined) && cloudBackend === "vps") {
+      if (computerBackend.kind === "vps" && !teamComputer && opts?.runOn !== "cloud" && (wants === "cloud" || wants === undefined)) {
         const unsupported = vps.vpsDriverError(instance.driverKind, mountsComputerMcp);
         if (unsupported && wants === "cloud") throw new Error(unsupported);
         if (unsupported && wants === undefined) autoVpsProblem = unsupported;
@@ -6300,11 +6228,11 @@ async function startTurn(
           vpsThreadStarted(bot.id, threadId);
           let remote;
           remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
-            ? await vps.vpsComputerAction("provision", cfg, bot.id)
-            : await vps.inspectVpsForAuto(cfg, bot.id);
+            ? await computerBackend.action(cfg, bot.id, "provision")
+            : await computerBackend.inspectForAuto(cfg, bot.id);
           if (remote?.ready && remote.sshAlias) {
             const targetCfg = { ...cfg, vps: { sshAlias: remote.sshAlias } };
-            const vpsMcp = vps.vpsComputerMcp(targetCfg, bot.id, remote.container_id ?? undefined);
+            const vpsMcp = computerBackend.mcp(targetCfg, bot.id, remote.container_id ?? undefined);
             const vpsControl = controlIntegration(bot.id, threadId, dispatchClaimId);
             integrations.localComputer = {
               ...vpsMcp,
@@ -6315,7 +6243,7 @@ async function startTurn(
             // a desktop another turn is driving would publish that turn's
             // screen as this one's. The claim restarts the poller with the
             // capture, the way the Local VM's lazy claim does.
-            const vpsCapture = () => vps.vpsComputerScreenshot(targetCfg, bot.id);
+            const vpsCapture = () => computerBackend.screenshot(targetCfg, bot.id);
             autoVmClaims.set(threadId, {
               owner: resourceOwner,
               lazy: true,
@@ -10103,12 +10031,6 @@ function cliProbeEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
-/** execFile's error carries the child's stderr in .stderr. */
-function stderrOf(err: unknown): string {
-  const s = (err as { stderr?: unknown }).stderr;
-  return typeof s === "string" ? s : Buffer.isBuffer(s) ? s.toString("utf8") : "";
-}
-
 async function localVmPayload(target: LocalVmTarget) {
   const status = await containerComputerStatus(undefined, undefined, target);
   return {
@@ -10528,12 +10450,6 @@ function serveStatic(res: ServerResponse, path: string): boolean {
   }
 }
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  const data = JSON.stringify(body);
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(data);
-}
-
 /** A store refusal is a client error with a status of its own (400 path,
  * 409 conflict, 413 too large); a 409 also carries what is on disk now so
  * the editor can show the bot's version instead of guessing. Anything else
@@ -10553,43 +10469,6 @@ function journalEntryForClient(botId: string, entry: MemoryJournalEntry) {
   const { before: _before, ...visible } = entry;
   const threadTitle = entry.threadId ? store.taskByThread(botId, entry.threadId)?.title : undefined;
   return threadTitle ? { ...visible, threadTitle } : visible;
-}
-
-function readBody(req: IncomingMessage, limit = 1_000_000): Promise<any> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    let bytes = 0;
-    let done = false;
-    const fail = (status: number, msg: string) => {
-      if (done) return;
-      done = true;
-      const err = Object.assign(new Error(msg), { status });
-      reject(err);
-    };
-    req.on("data", (c) => {
-      if (done) return;
-      bytes += typeof c === "string" ? Buffer.byteLength(c) : c.length;
-      if (bytes > limit) {
-        // Keep draining the socket, but stop retaining attacker-controlled
-        // bytes. Destroying the request here prevents the caller from
-        // receiving the useful 413 response.
-        return fail(413, "body too large");
-      }
-      data += c;
-    });
-    req.on("end", () => {
-      if (done) return;
-      let body: any;
-      try {
-        body = data ? JSON.parse(data) : {};
-      } catch {
-        return fail(400, "invalid JSON body");
-      }
-      done = true;
-      resolve(body);
-    });
-    req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
-  });
 }
 
 // Loopback-only enforcement: the harness runs on 127.0.0.1 but accepts
@@ -10638,6 +10517,8 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
     },
   }, keepLocked),
 });
+
+const routinesRoutes = createRoutinesRoutes({ routines: () => routines! });
 
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   let url: URL;
@@ -12787,46 +12668,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── routines calendar ────────────────────────────────────────────────
-    if (path === "/api/routines" && method === "GET") {
-      const fromParam = url.searchParams.get("from");
-      const toParam = url.searchParams.get("to");
-      const from = fromParam == null ? undefined : Number(fromParam);
-      const to = toParam == null ? undefined : Number(toParam);
-      return json(res, 200, {
-        routines: routines!.listRoutines(),
-        runs: routines!.listRuns(from != null && Number.isFinite(from) ? from : undefined, to != null && Number.isFinite(to) ? to : undefined),
-      });
-    }
-    if (path === "/api/routines" && method === "POST") {
-      return json(res, 201, { routine: routines!.create(await readBody(req)) });
-    }
-    // The desktop shell polls this to decide whether to hold the computer
-    // awake: a run in flight, or a routine due within the hour.
-    if (path === "/api/routines/wake" && method === "GET") {
-      return json(res, 200, routines!.wakeHold());
-    }
-    let routineMatch = path.match(/^\/api\/routines\/([\w-]+)\/run$/);
-    if (routineMatch && method === "POST") {
-      const run = routines!.runNow(routineMatch[1]);
-      return run ? json(res, 201, { run }) : json(res, 404, { error: "no such routine" });
-    }
-    routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
-    if (routineMatch && method === "PATCH") {
-      const routine = routines!.update(routineMatch[1], await readBody(req));
-      return routine ? json(res, 200, { routine }) : json(res, 404, { error: "no such routine" });
-    }
-    if (routineMatch && method === "DELETE") {
-      return routines!.remove(routineMatch[1])
-        ? json(res, 200, { ok: true })
-        : json(res, 404, { error: "no such routine" });
-    }
-    const runMatch = path.match(/^\/api\/routine-runs\/([\w-]+)\/(cancel|seen)$/);
-    if (runMatch && method === "POST") {
-      const run = runMatch[2] === "cancel"
-        ? await routines!.cancelRun(runMatch[1])
-        : routines!.markSeen(runMatch[1]);
-      return run ? json(res, 200, { run }) : json(res, 404, { error: "no such active run" });
-    }
+    if (await routinesRoutes(req, res, path, method, url)) return;
 
     // ── scheduled room sessions ────────────────────────────────────────
     if (path === "/api/calendar-calls" && method === "GET") {
@@ -12951,80 +12793,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       return json(res, 405, { error: "method not allowed" });
     }
-    if (method === "GET" && path === "/api/events") {
-      const client: SseClient = {
-        res,
-        admin: auth.scopes.includes("admin"),
-        screens: url.searchParams.get("screens") !== "off",
-        backpressured: false,
-      };
-      if (auth.kind === "session") client.sessionId = auth.session.id;
-      res.writeHead(200, {
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-        connection: "keep-alive",
-        // Honoured by nginx-compatible reverse proxies; harmless elsewhere.
-        // Remote clients need each frame now, not when a proxy buffer fills.
-        "x-accel-buffering": "no",
-      });
-
-      // Resume, if the client offered a cursor we can honour. `?since=` is
-      // for clients that read the stream by hand; Last-Event-ID is what a
-      // browser EventSource sends by itself.
-      // Once EventSource has received a numbered frame, its automatic
-      // reconnect carries a newer Last-Event-ID even though the original
-      // URL may still contain an older manual `since` cursor. Prefer the
-      // valid browser cursor or the stale query would replay forever.
-      const since =
-        cursorSeq(req.headers["last-event-id"]) ??
-        cursorSeq(url.searchParams.get("since") ?? undefined);
-      // The buffer only reaches so far back. If the client's cursor fell off
-      // the end, saying so is the only honest answer — a partial replay
-      // would leave a permanent hole in its state.
-      const resumed =
-        since !== null &&
-        since <= lastSeq &&
-        (replayBuffer.length === 0 ? since === lastSeq : replayBuffer[0].seq <= since + 1);
-      res.write(
-        `data: ${JSON.stringify({
-          kind: "hello",
-          cursor: `${STREAM_ID}:${lastSeq}`,
-          // false means "I could not give you what you missed — hydrate".
-          // A client that offered no cursor gets false too, which is exactly
-          // what a cold start should do.
-          resumed,
-        })}\n\n`,
-      );
-      if (resumed) {
-        for (const buffered of replayBuffer) {
-          const frame = client.admin ? buffered.frame : buffered.clientFrame;
-          if (buffered.seq > since && frame && wants(client, buffered.kind)) res.write(frame);
-        }
-      }
-
-      sseClients.add(client);
-      // Keep this long-lived response out of socket idle-timeout handling
-      // without weakening timeouts for every other API request.
-      req.socket.setTimeout(0);
-      // A comment keeps intermediaries from idling the connection, while a
-      // data frame is visible to EventSource clients and resets their own
-      // liveness watchdog. Heartbeats carry no id and never advance replay.
-      const keepalive = setInterval(() => {
-        // an expired session's stream ends at the next heartbeat
-        if (client.sessionId && !sessions.isLive(client.sessionId)) {
-          res.end();
-          return;
-        }
-        try {
-          res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
-        } catch {}
-      }, SSE_HEARTBEAT_MS);
-      req.on("close", () => {
-        clearInterval(keepalive);
-        sseClients.delete(client);
-      });
-      return;
-    }
+    if (eventsRoutes.handle(req, res, path, method, url, auth)) return;
 
     // ── bots ──
     // Paired sessions are authenticated above. The companion marker may
@@ -17582,12 +17351,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const bot = computerPreviewBot(m[1], url);
       if (!bot) return json(res, 404, { error: "no such bot" });
       const surface = url.searchParams.has("threadId") ? await computerPreviewSurface(bot, bot.threadId) : "cloud";
-      if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: bot.cloudBackend === "vps" ? "vps" : "box" });
+      const computerBackend = computerBackendFor(bot);
+      if (surface !== "cloud") return json(res, 200, { surface, configured: false, backend: computerBackend.kind });
       const teamComputer = inheritedTeamComputer(bot);
       if (teamComputer) return json(res, 200, { surface, backend: "box", teamComputer: { id: teamComputer.id, name: teamComputer.name }, ...(await box.boxStatus(cfg, teamComputerOwner(teamComputer.id))) });
-      return bot.cloudBackend === "vps"
-        ? json(res, 200, { surface, backend: "vps", ...(await vps.vpsComputerStatus(cfg, bot.id)) })
-        : json(res, 200, { surface, backend: "box", ...(await box.boxStatus(cfg, bot.id)) });
+      return json(res, 200, { surface, backend: computerBackend.kind, ...(await computerBackend.status(cfg, bot.id)) });
     }
     // Who is driving this bot's computer. GET is the panel's initial read;
     // POST take/release/dismiss-help are the person's three moves. The bot
@@ -17647,7 +17415,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      return json(res, 200, bot.cloudBackend === "vps" ? vps.closeVpsDesktopTunnel(bot.id) : { closed: false });
+      return json(res, 200, computerBackendFor(bot).closeViewer(bot.id));
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/computer\/(provision|join|sleep|exec|screenshot|remove)$/);
     if (m && method === "POST") {
@@ -17667,7 +17435,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
         return json(res, 415, { error: "content-type must be application/json" });
       }
-      const remoteProvider: RemoteComputerProvider = bot.cloudBackend === "vps" ? "vps" : "box";
+      const computerBackend = computerBackendFor(bot);
+      const remoteProvider: RemoteComputerProvider = computerBackend.kind;
       if (computerProviderConfigTransitions.has(remoteProvider)) {
         return json(res, 409, { error: providerTransitionMessage(remoteProvider) });
       }
@@ -17691,11 +17460,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 200, await box.sleepBox(cfg, key));
         } finally { release(); }
       }
-      if (bot.cloudBackend === "vps") {
+      if (computerBackend.kind === "vps") {
         if (m[2] === "screenshot") {
           let preview = vpsPreviewRequests.get(botId);
           if (!preview) {
-            preview = vps.vpsComputerScreenshot(cfg, botId).finally(() => {
+            preview = computerBackend.screenshot(cfg, botId).finally(() => {
               vpsPreviewRequests.delete(botId);
             });
             vpsPreviewRequests.set(botId, preview);
@@ -17717,10 +17486,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             return json(res, 409, { error: "the VPS computer is being used by this bot — interrupt the turn first" });
           }
           if (m[2] === "join") {
-            return json(res, 200, await vps.vpsComputerJoin(cfg, botId));
+            return json(res, 200, await computerBackend.join(cfg, botId));
           }
           const action = m[2] === "provision" ? "provision" : m[2] === "remove" ? "remove" : "stop";
-          return json(res, 200, await vps.vpsComputerAction(action, cfg, botId));
+          return json(res, 200, await computerBackend.action(cfg, botId, action));
         } finally {
           releaseComputerLifecycle();
         }
@@ -17757,16 +17526,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       try {
         switch (m[2]) {
           case "provision":
-            return json(res, 200, await box.provisionBox(cfg, botId, bot.name));
+            return json(res, 200, await computerBackend.action(cfg, botId, "provision", { botName: bot.name }));
           case "join":
-            return json(res, 200, await (activeBoxTurn || threadPreview ? box.joinReadyBox(cfg, botId) : box.joinBox(cfg, botId)));
+            return json(res, 200, await computerBackend.join(cfg, botId, activeBoxTurn || threadPreview ? "ready" : "wake"));
           case "sleep":
-            return json(res, 200, await box.sleepBox(cfg, botId));
+            return json(res, 200, await computerBackend.action(cfg, botId, "sleep"));
           case "exec":
-            return json(res, 200, await box.execOnBox(cfg, botId, boxCommand ?? ""));
+            return json(res, 200, await computerBackend.action(cfg, botId, "exec", { command: boxCommand ?? "" }));
           case "screenshot":
             res.setHeader("cache-control", "private, no-store");
-            return json(res, 200, await box.screenshotBox(cfg, botId));
+            return json(res, 200, await computerBackend.screenshot(cfg, botId));
         }
       } finally {
         releaseComputerLifecycle();

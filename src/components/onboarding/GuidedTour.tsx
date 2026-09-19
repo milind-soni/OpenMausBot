@@ -5,7 +5,7 @@
 // Clicking the pointed-at control counts as Next too. Every advance is
 // written to the server's hint list first, so a reload lands on the same
 // step.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
@@ -53,7 +53,12 @@ export function GuidedTour() {
   const saving = useRef(false);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   const latestRecord = useRef(record);
-  latestRecord.current = record;
+  // Keep the tour's record mirror in step with committed state only: a
+  // render that React discards must never publish an onboarding record the
+  // tour did not use.
+  useLayoutEffect(() => {
+    latestRecord.current = record;
+  }, [record]);
   const closed = useRef(false);
   const [dismissed, setDismissed] = useState(false);
   const [failed, setFailed] = useState(false);

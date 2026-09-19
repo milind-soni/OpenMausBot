@@ -11,7 +11,7 @@ import {
   isLongPaste,
   pasteAttachment,
   pasteSummary,
-} from "../src/lib/composer-attachments.ts";
+} from "./composer-attachments";
 
 describe("composer paste attachments", () => {
   it("classifies long character and line pastes without changing short text", () => {
