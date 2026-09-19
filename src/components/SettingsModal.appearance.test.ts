@@ -18,7 +18,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: fixture.api,
-  useStore: () => ({ state: { appSettingsSection: fixture.section }, dispatch: fixture.dispatch }),
+  useStore: () => ({ state: { overlays: { appSettingsSection: fixture.section } }, dispatch: fixture.dispatch }),
 }));
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
