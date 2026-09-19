@@ -22,7 +22,7 @@ import {
   isApprovalMode,
   type ApprovalMode,
 } from "../shared/approval-mode.ts";
-import { escapeAttribute } from "../src/lib/composer-attachments.ts";
+import { escapeAttribute } from "../shared/attachments.ts";
 import {
   CREDENTIAL_TARGETS,
   credentialResumeOutcome,
