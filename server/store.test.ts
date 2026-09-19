@@ -14,7 +14,7 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { canAccessTeam } from "./peer-roster.ts";
-import { Store, type BotRecord } from "./store.ts";
+import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE } from "./section-context.ts";
 
@@ -23,6 +23,25 @@ const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-
 describe("Store", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("persists compaction records but keeps session bookkeeping off the wire", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const user = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Original history" });
+    const key = "sk-ant-" + "a".repeat(90);
+    const record = store.appendMessage(bot.threadId, { role: "bot", kind: "compaction", compaction: {
+      summary: `Historical data -5 != 5; ${key}`, firstKeptId: "", foldedThroughId: user.id, tokensBefore: 100, by: "person",
+    } });
+    const patch = { appliedCompactionId: record.id, contextFloor: 500, lastContextModel: "claude:fixture" };
+    store.patchTask(bot.id, bot.threadId, patch);
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)).toMatchObject(patch);
+    expect(reloaded.messagesFor(bot.threadId)).toHaveLength(2);
+    expect(reloaded.messagesFor(bot.threadId)[1].compaction?.summary).toContain("-5 != 5");
+    expect(JSON.stringify(reloaded.messagesFor(bot.threadId))).not.toContain(key);
+    const wire = toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!);
+    for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
   it("commits receipt-backed transcript changes before publishing and replays without duplicates", () => {

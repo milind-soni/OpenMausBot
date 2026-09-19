@@ -22,7 +22,7 @@ import { ToolActivity } from "./ToolActivity";
 import { ThreadRefText } from "./ThreadRefs";
 import { TurnPresence } from "./TurnPresence";
 import { showToolCallsEnabled } from "@/lib/feature-flags";
-import { DigestChip } from "./DigestChip";
+import { CompactionChip, DigestChip } from "./DigestChip";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
@@ -277,6 +277,8 @@ const Transcript = memo(function Transcript({
             roomActivityVisible(m, showToolCalls) ? (
               <RoomToolChip message={m} roomId={group.id} />
             ) : null
+          ) : m.kind === "compaction" ? (
+            <CompactionChip message={m} />
           ) : m.kind === "digest" ? (
             showToolCalls ? <DigestChip message={m} /> : null
           ) : m.kind === "text" && (m.text || m.attachments?.length) ? (

@@ -41,6 +41,18 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("validates context budgets and keeps changes independent of provider reload", () => {
+    const context = { autoCompact: false, compactAt: 0.7, rebuildBytes: 32_000 };
+    expect(parseStoredConfig({ context })).toEqual({ context });
+    expect(parseConfigPatch({ context })).toEqual({ context });
+    expect(providerReloadKeys({ context })).toEqual([]);
+    for (const value of [0, -1, "10", null, Infinity]) {
+      expect(() => parseConfigPatch({ context: { compactAt: value } })).toThrow();
+    }
+    for (const value of [512, 1_024.1, 1_000_001]) {
+      expect(() => parseConfigPatch({ context: { rebuildBytes: value } })).toThrow();
+    }
+  });
   it("keeps Fish Audio and ElevenLabs voice credentials separate", () => {
     const parsed = parseConfigPatch({
       tts: { provider: "fish", key: "eleven-key", fishKey: "fish-key", voice: "fish-voice" },
@@ -931,6 +943,12 @@ describe("credential env preference", () => {
     });
     expect(() => parseConfigPatch({ onboarding: { hintsSeen: ["x".repeat(61)] } })).toThrow();
     expect(() => parseConfigPatch({ onboarding: { unknown: true } })).toThrow();
+  });
+
+  it("persists a context change without losing the other context preferences", () => {
+    saveConfig({ context: { rebuildBytes: 32_000, autoCompact: false } });
+    saveConfig({ context: { compactAt: 0.75 } });
+    expect(loadConfig().context).toEqual({ rebuildBytes: 32_000, autoCompact: false, compactAt: 0.75 });
   });
 
   it("falls back to the config file when the env var is unset (dev mode)", () => {

@@ -9,6 +9,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join } from "node:path";
 
 import { z } from "zod";
+import { selectReplay, DEFAULT_REBUILD_BYTES, MAX_SUMMARY_BYTES } from "./context-rebuild.ts";
+import { draftSummary, foldPoint } from "./compaction-summary.ts";
+import { compactBudget, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { RoomHandoffs, type RoomHandoff } from "./room-handoffs.ts";
@@ -1215,12 +1218,16 @@ function clearDirectTurnDispatch(threadId: string, claimId: string): void {
   if (directTurnDispatchClaims.get(threadId)?.id === claimId) directTurnDispatchClaims.delete(threadId);
 }
 
+const compactionControllers = new Map<string, { generation: string; controller: AbortController }>();
+
 function cancelDirectTurnDispatch(botId: string, expectedThreadId?: string): DirectTurnDispatchClaim | null {
   const threadId = expectedThreadId ?? store.bot(botId)?.threadId;
   if (!threadId) return null;
   cancelTeamSetupResumesForThread(threadId);
   const claim = directTurnDispatchClaims.get(threadId);
   if (!claim || claim.botId !== botId) return null;
+  const compacting = compactionControllers.get(threadId);
+  if (compacting?.generation === claim.id) compacting.controller.abort(new DirectTurnSetupCancelled("context summarization stopped"));
   directTurnDispatchClaims.delete(threadId);
   if (directTurnGenerationByThread.get(threadId) === claim.id) clearTurnDigestState(threadId);
   // Setup has not called the adapter yet, so there is no provider handshake
@@ -4857,6 +4864,11 @@ bus.subscribe((event: RuntimeEvent) => {
         // the task and answers "what did we spend, by whom" for a period
         const settledTask = store.taskByThread(bot.id, event.threadId);
         const selection = settledTask?.modelSelection ?? bot.modelSelection;
+        // A provider that omitted a context measurement must not reuse a
+        // stale reading from a different model or a pre-compaction session.
+        const measuredSelection = directTurnBots.get(event.threadId)?.modelSelection ?? selection;
+        store.patchTask(bot.id, event.threadId, { lastContextModel: Number.isFinite(lastContext?.tokens) && (lastContext?.tokens ?? 0) > 0
+          ? `${measuredSelection.instanceId}:${measuredSelection.model}` : undefined });
         appendUsage(DATA_DIR, {
           botId: bot.id,
           botName: bot.name,
@@ -5219,7 +5231,88 @@ function markTaskContextExternallyUpdated(bot: BotRecord, threadId: string): voi
 
 /** Active-branch messages a provider reads as conversation context. */
 function isContextMessage(m: Message): boolean {
-  return Boolean((m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.roomRequest?.phase === "result");
+  return Boolean((m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.kind === "compaction" || m.roomRequest?.phase === "result");
+}
+
+function latestCompaction(messages: readonly Message[]) {
+  const record = messages.findLast(message => message.kind === "compaction" && message.compaction);
+  return record?.compaction ? { ...record.compaction, id: record.id } : undefined;
+}
+
+function directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[] {
+  const messagesById = new Map(store.messagesFor(threadId).map(message => [message.id, message]));
+  return messages.filter(isContextMessage).map(m => ({
+    id: m.id, role: m.role === "user" ? "user" : "assistant",
+    text: m.kind === "compaction" ? ""
+      : m.roomRequest?.phase === "result" ? teammateReportContext(m.roomRequest.id, bot.id)
+        : m.kind === "digest" && m.digest ? digestPromptLine(m.digest, m.from?.name ?? bot.name)
+          : m.peerAsk ? peerMessageText(m.peerAsk.name, m.text ?? "")
+            : m.role !== "user" && m.from ? peerMessageText(m.from.name, transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"))
+              : transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
+    keep: m.roomRequest?.phase === "result" || Boolean(m.peerAsk) || (m.role !== "user" && Boolean(m.from)),
+    ...(m.steered ? { steered: true } : {}),
+  }));
+}
+
+/** The existing direct-turn claim owns summarization, including Stop and
+ * thread deletion. A durable record is committed only to its original branch. */
+async function compactConversation(input: {
+  bot: BotRecord; threadId: string; generation: string;
+  instance: NonNullable<ReturnType<typeof turnInstance>>; model: string;
+  excludedIds: ReadonlySet<string>; manual: boolean;
+}): Promise<void> {
+  const { bot, threadId, generation, instance, model, excludedIds, manual } = input;
+  const task = store.taskByThread(bot.id, threadId);
+  if (!task || (!manual && cfg.context?.autoCompact === false)) return;
+  const messages = store.activePath(threadId);
+  const context = directContext(bot, threadId, messages);
+  const record = latestCompaction(messages);
+  // A retry must apply the existing record before considering another fold.
+  if (!manual && record && record.id !== task.appliedCompactionId) return;
+  if (manual && record?.id === messages.at(-1)?.id && !record?.firstKeptId) return;
+  const selected = selectReplay(context, {
+    budgetBytes: Math.max(1_024, context.reduce((n, entry) => n + Buffer.byteLength(entry.text) + 16, 0) + 4 * MAX_SUMMARY_BYTES + 1_024),
+    maxMessages: Number.MAX_SAFE_INTEGER, excludedIds, compaction: record,
+  });
+  const history = selected.transcript.filter(entry => entry.id);
+  if (!history.length) return;
+  const measurement = task.lastContextModel === `${instance.instanceId}:${model}` && !task.rewound ? task.usage?.context : undefined;
+  const window = contextWindowFor(model, instance.models, measurement?.window);
+  const bytes = history.reduce((n, entry) => n + Buffer.byteLength(entry.text), 0);
+  let floor = task.contextFloor;
+  if (record && record.id === task.appliedCompactionId && floor === undefined && measurement?.tokens) {
+    floor = measurement.tokens;
+    store.patchTask(bot.id, threadId, { contextFloor: floor });
+  }
+  if (!manual && !shouldCompact({ contextTokens: measurement?.tokens, estimatedBytes: bytes,
+    budget: compactBudget(window, cfg.context?.compactAt), floor, window })) return;
+  const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
+  if (!fold) return;
+  const foldedThroughId = manual
+    ? context.findLast(entry => !excludedIds.has(entry.id))?.id
+    : fold.folded.at(-1)?.id;
+  if (!foldedThroughId) return;
+  const prefix = JSON.stringify(messages);
+  const controller = new AbortController();
+  compactionControllers.set(threadId, { generation, controller });
+  try {
+    const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: instance.generateText?.bind(instance) });
+    if (!directTurnClaimIsCurrent(bot.id, generation, threadId)) throw new DirectTurnSetupCancelled("context summarization stopped");
+    controller.signal.throwIfAborted();
+    // Appended teammate results remain after the fold. A changed prefix is
+    // never summarized using stale input, even if the branch tip still exists.
+    if (prefix !== JSON.stringify(store.activePath(threadId).slice(0, messages.length))) {
+      if (manual) throw new Error("the conversation changed during summarization — please retry");
+      return;
+    }
+    store.appendMessage(threadId, {
+      role: "bot", kind: "compaction",
+      compaction: { summary, firstKeptId: fold.firstKeptId, foldedThroughId,
+        tokensBefore: measurement?.tokens ?? Math.ceil(bytes / 4), by: manual ? "person" : "harness" },
+    }, { kind: "compaction.append", key: `${threadId}:${messages.at(-1)?.id}:${fold.firstKeptId}` });
+  } finally {
+    if (compactionControllers.get(threadId)?.generation === generation) compactionControllers.delete(threadId);
+  }
 }
 
 const handoffs = new Handoffs({
@@ -5853,6 +5946,8 @@ async function startTurn(
      * dispatch the same user action twice. */
     sendId?: string;
     onDispatchError?: (message: string) => void;
+    /** Summarize this conversation without asking the agent to do more work. */
+    compactOnly?: boolean;
     /** Queue receipts outlive the dispatch acknowledgment until this exact turn settles. */
     onTurnSettled?: () => void;
     coordination?: { id: string; resumed: boolean; settle: (outcome: { ok: boolean; text: string }) => void };
@@ -6023,155 +6118,7 @@ async function startTurn(
     }
   }
 
-  // transcript for API-backed drivers: settled text turns on the ACTIVE
-  // branch only — abandoned forks never reach the model
-  const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
-  const activeMessages = store.activePath(threadId);
-  // This turn's own text carries the addressed request and, when resuming,
-  // every child result as JSON: neither is repeated from the transcript.
-  const coordinationChildren = opts?.coordination?.resumed
-    ? new Set(roomHandoffs.children(opts.coordination.id).map((child) => child.id)) : undefined;
-  for (const m of activeMessages) {
-    if (!opts?.coordination || !m.roomRequest) continue;
-    if ((m.roomRequest.phase === "request" && m.roomRequest.id === opts.coordination.id) ||
-      (m.roomRequest.phase === "result" && coordinationChildren?.has(m.roomRequest.id))) skipTranscript.add(m.id);
-  }
-  // A flat reply may deliberately point across a fork in the same thread.
-  // Resolve its quote from full storage, while the replay itself remains
-  // strictly limited to the selected branch below.
-  const messagesById = new Map(store.messagesFor(threadId).map((message) => [message.id, message]));
-  const context: ContextMessage[] = activeMessages.filter(isContextMessage).map((m) => ({
-    id: m.id,
-    role: m.role === "user" ? ("user" as const) : ("assistant" as const),
-    text: m.roomRequest?.phase === "result" ? teammateReportContext(m.roomRequest.id, bot.id)
-      : m.kind === "digest" && m.digest ? digestPromptLine(m.digest, m.from?.name ?? bot.name)
-      : m.role !== "user" && m.from ? peerMessageText(m.from.name, transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"))
-      : transcriptText(m, messagesById, cfg.profile?.name?.trim() || "User"),
-    keep: m.roomRequest?.phase === "result" || (m.role !== "user" && Boolean(m.from)),
-    ...(m.steered ? { steered: true } : {}),
-  }));
-  const contextOrder = context.map((m) => m.id);
-  const replayable = context.filter((m) => !skipTranscript.has(m.id));
-  const transcript = replayable.slice(-40).map((m) => ({ role: m.role, text: m.text }));
-
-  // After a rewind (edit / branch switch) the provider's native session
-  // still contains the abandoned branch: start a fresh session instead of
-  // resuming, and for cursor-resuming drivers replay the surviving path
-  // inline (transcript-replay drivers get it via transcript). The flag is
-  // cleared only once the turn is actually dispatched — clearing it here
-  // would cost the next attempt its history if this dispatch fails.
-  const rewound = Boolean(task.rewound);
-  // A fresh engine — the user switched this bot's model mid-thread — has no
-  // current session here either, so it gets the same replay. Distinct from
-  // rewound: the OTHER instances' cursors are left alone (a rewind wipes
-  // them all), and "fresh" is decided by who ran the last turn, not by
-  // whether we hold a cursor — see engineIsFresh.
-  const externalContextMarker = isExternalContextMarker(task.lastInstanceId)
-    ? task.lastInstanceId
-    : undefined;
-  const fresh =
-    !rewound &&
-    !externalContextMarker &&
-    engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript });
-  // An engine that records what its session was handed resumes it with only
-  // the context messages outside that record. A record of another session
-  // (the one it replaced) or one that no longer lines up with the branch is
-  // not trusted: the session is rebuilt by the same replay as any other.
-  const strictResume = instance.adapter.capabilities.strictResume === true;
-  const cursor = task.resumeCursors[instanceId];
-  const handed = strictResume && !rewound && !fresh && !externalContextMarker && cursor !== undefined
-    ? task.handedMessages?.[instanceId] : undefined;
-  const unseen = handed && handedStateUsable(handed, cursor, contextOrder) ? unseenMessages(replayable, contextOrder, handed) : undefined;
-  // A teammate's result or reply: without records this turn would replay.
-  const externalUpdate = Boolean(opts?.coordination?.resumed || unseen?.some((m) => m.keep));
-  // What a resumed session keeps from its launch: the standing instructions
-  // (tools, servers and — for Claude — the model are passed on every launch),
-  // plus whatever this engine can only set when a session starts. Codex's
-  // thread/resume sends no model selection, and an effort it is not sent stays
-  // at the thread's last value, so both belong to the session there. An
-  // external update that finds any of it changed since the session started
-  // gets the fresh session and replay it always got, rather than a resume.
-  const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section),
-    ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
-  const sessionConfig = (soul: string | undefined) =>
-    createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
-  const plannedConfig = sessionConfig(bot.soul);
-  // Agent-tool gate shared by skill authoring, the /setup turn-text rewrite,
-  // the setup prompt block, and the peer-comms integration below: a driver
-  // that never mounts agent tools (or a turn already at the comms-depth cap)
-  // must not be steered into — or told about — tools it cannot call.
   const agentsMounted = (commsDepth < MAX_COMMS_DEPTH || Boolean(opts?.coordination)) && instance.adapter.capabilities.agentsMcp === true;
-  const skillAuthoring = skillAuthoringEnabled(cfg) && agentsMounted;
-  // Setup mode's turn-text rewrite (parseSetupCommand/expandSetupTurnText)
-  // must not run ahead of a system prompt that can't explain it: a driver
-  // without agent tools sees the user's literal "/setup ..." message. The
-  // gate on whether the coaching block itself is active — setupModeActive,
-  // which also depends on the bot's soul/description — is decided below,
-  // from the same bot snapshot the prompt's soul is built from.
-  const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
-  const userTurnText = promptWithReply(
-    skillAuthoring ? expandLearnTurnText(setupText) : setupText,
-    opts?.replyTo,
-    cfg.profile?.name?.trim() || "User",
-  );
-  // Decided again at dispatch when setup outlasted a soul edit (config).
-  const decideContext = (config: string) => {
-    const handedStale = Boolean(handed && (!unseen || (externalUpdate && handed.config !== config)));
-    const { block: unseenBlock, placed } = unseen && !handedStale ? renderUnseen(unseen) : { block: "", placed: [] };
-    const { turnText: contextTurnText, resume } = buildTurnContext({
-      text: userTurnText,
-      transcript,
-      rewound,
-      fresh,
-      externallyUpdated: Boolean(externalContextMarker) || handedStale,
-      replaysNatively: instance.driverKind === "grok",
-    });
-    // Snapshot the cursor alongside the context decision. An external result
-    // can arrive during async computer/setup work and clear the task cursor;
-    // this already-built turn must either keep its old session or replay on the
-    // following turn, never start a blank session with no transcript.
-    const resumeCursor = resume ? task.resumeCursors[instanceId] : undefined;
-    // A cursor the provider no longer honours must not brick the thread: the
-    // driver may fall back to ONE fresh session, and this is what it sends
-    // there, so the new session is not blank (server/resume-recovery.ts). A
-    // turn carrying an external update gets the replay it would have had.
-    const recoveryIsReplay = resumeCursor !== undefined && externalUpdate && transcript.length > 0;
-    const recoveryText = resumeCursor === undefined ? undefined : recoveryIsReplay
-      ? buildTurnContext({ text: userTurnText, transcript, rewound: false, fresh: false, externallyUpdated: true, replaysNatively: false }).turnText
-      : buildRecoveryText({ text: userTurnText, transcript });
-    // What this turn puts in front of the provider, for each session it can end
-    // up in (server/delta-context.ts). buildTurnContext prepends a replay only
-    // when it replays, so a changed text means the transcript was sent.
-    const carried = [...skipTranscript];
-    const windowIds = replayable.slice(-40).map((m) => m.id);
-    return {
-      turnText: withUnseenMessages(unseenBlock, contextTurnText),
-      resumeCursor, recoveryText, recoveryIsReplay,
-      handoff: strictResume ? {
-        botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
-        started: sessionStart(contextOrder, contextTurnText !== userTurnText ? windowIds : [], carried),
-        recovery: sessionStart(contextOrder, recoveryText !== undefined ? windowIds : [], carried),
-        resumed: sessionStart(contextOrder, [], [...placed, ...carried]),
-        placed, carried, own: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],
-      } : undefined,
-    };
-  };
-  let dispatchContext = decideContext(plannedConfig);
-
-  const persona = [
-    `You are ${bot.name}, a personal bot in OpenMausBot.`,
-    bot.title && `Role: ${bot.title}.`,
-    bot.description && `About: ${bot.description}`,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  // The SOUL.md mirror is checked here, at dispatch, and only reported:
-  // the prompt below reads bot.soul, never the file.
-  {
-    const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
-    if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
-  }
 
   // busy flips immediately so the composer locks; the dispatch itself runs
   // in the background — box provisioning can take ~90s and must never
@@ -6185,7 +6132,6 @@ async function startTurn(
   // follow-ups: any normal turn may ask teammates to coordinate work.
   directFollowupSettlers.set(dispatchClaimId, { threadId, settle: opts?.onTurnSettled });
   directTurnDispatchClaims.set(threadId, { id: dispatchClaimId, botId, threadId, phase: "setup" });
-  if (dispatchContext.handoff) handoffs.begin(threadId, dispatchClaimId, dispatchContext.handoff);
   directTurnBots.set(threadId, bot);
   beginInternalCapabilityGeneration(threadId, dispatchClaimId);
   if (!opts?.computerSelectionContinuation && !opts?.cardContinuation && !opts?.automationSource && !opts?.unattended &&
@@ -6208,6 +6154,165 @@ async function startTurn(
 
   void (async () => {
     try {
+      await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
+        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
+      if (opts?.compactOnly) {
+        clearDirectTurnDispatch(threadId, dispatchClaimId);
+        revokeInternalCapabilityGeneration(threadId, dispatchClaimId);
+        settleDirectFollowup(dispatchClaimId);
+        releaseTurnResources(resourceOwner);
+        store.setTaskActivity(bot.id, threadId, "idle");
+        directTurnBots.delete(threadId);
+        retryDelegationsWaitingOn(bot.id);
+        drainQueuedSends();
+        drainConnectorResumes();
+        drainSecretResumes();
+        drainTeamSetupResumes();
+        drainDelegationWakes();
+        return;
+      }
+      // Keep the full branch order for delivery bookkeeping, but select actual
+      // replay entries by bytes. A compacted prefix is represented by its record.
+      const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
+      const activeMessages = store.activePath(threadId);
+      const coordinationChildren = opts?.coordination?.resumed
+        ? new Set(roomHandoffs.children(opts.coordination.id).map((child) => child.id)) : undefined;
+      for (const m of activeMessages) {
+        if (!opts?.coordination || !m.roomRequest) continue;
+        if ((m.roomRequest.phase === "request" && m.roomRequest.id === opts.coordination.id) ||
+          (m.roomRequest.phase === "result" && coordinationChildren?.has(m.roomRequest.id))) skipTranscript.add(m.id);
+      }
+      const context = directContext(bot, threadId, activeMessages);
+      const contextOrder = context.map(m => m.id);
+      const replayable = context.filter(m => !skipTranscript.has(m.id));
+      const record = latestCompaction(activeMessages);
+      const selection = selectReplay(context, { budgetBytes: cfg.context?.rebuildBytes ?? DEFAULT_REBUILD_BYTES, excludedIds: skipTranscript, compaction: record });
+      const transcript = selection.transcript.map(({ role, text }) => ({ role, text }));
+      const contextReset = selection.compacted > 0 && record?.id !== task.appliedCompactionId;
+      // The record is durable even if a crash occurs before this bookkeeping.
+      // A retry then sees the unapplied record again and rebuilds safely.
+      if (contextReset) store.patchTask(bot.id, threadId, { resumeCursors: {} });
+
+      // After a rewind (edit / branch switch) the provider's native session
+      // still contains the abandoned branch: start a fresh session instead of
+      // resuming, and for cursor-resuming drivers replay the surviving path
+      // inline (transcript-replay drivers get it via transcript). The flag is
+      // cleared only once the turn is actually dispatched — clearing it here
+      // would cost the next attempt its history if this dispatch fails.
+      const rewound = Boolean(task.rewound);
+      // A fresh engine — the user switched this bot's model mid-thread — has no
+      // current session here either, so it gets the same replay. Distinct from
+      // rewound: the OTHER instances' cursors are left alone (a rewind wipes
+      // them all), and "fresh" is decided by who ran the last turn, not by
+      // whether we hold a cursor — see engineIsFresh.
+      const externalContextMarker = isExternalContextMarker(task.lastInstanceId)
+        ? task.lastInstanceId
+        : undefined;
+      const fresh =
+        !rewound &&
+        !externalContextMarker &&
+        engineIsFresh({ instanceId, lastInstanceId: task.lastInstanceId, resumeCursors: task.resumeCursors, transcript: replayable });
+      // An engine that records what its session was handed resumes it with only
+      // the context messages outside that record. A record of another session
+      // (the one it replaced) or one that no longer lines up with the branch is
+      // not trusted: the session is rebuilt by the same replay as any other.
+      const strictResume = instance.adapter.capabilities.strictResume === true;
+      const cursor = task.resumeCursors[instanceId];
+      const handed = strictResume && !rewound && !contextReset && !fresh && !externalContextMarker && cursor !== undefined
+        ? task.handedMessages?.[instanceId] : undefined;
+      const unseen = handed && handedStateUsable(handed, cursor, contextOrder) ? unseenMessages(replayable, contextOrder, handed) : undefined;
+      // A teammate's result or reply: without records this turn would replay.
+      const externalUpdate = Boolean(opts?.coordination?.resumed || unseen?.some((m) => m.keep));
+      // What a resumed session keeps from its launch: the standing instructions
+      // (tools, servers and — for Claude — the model are passed on every launch),
+      // plus whatever this engine can only set when a session starts. Codex's
+      // thread/resume sends no model selection, and an effort it is not sent stays
+      // at the thread's last value, so both belong to the session there. An
+      // external update that finds any of it changed since the session started
+      // gets the fresh session and replay it always got, rather than a resume.
+      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section),
+        ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
+      const sessionConfig = (soul: string | undefined) =>
+        createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
+      const plannedConfig = sessionConfig(bot.soul);
+      // Agent-tool gate shared by skill authoring, the /setup turn-text rewrite,
+      // the setup prompt block, and the peer-comms integration below: a driver
+      // that never mounts agent tools (or a turn already at the comms-depth cap)
+      // must not be steered into — or told about — tools it cannot call.
+      const skillAuthoring = skillAuthoringEnabled(cfg) && agentsMounted;
+      // Setup mode's turn-text rewrite (parseSetupCommand/expandSetupTurnText)
+      // must not run ahead of a system prompt that can't explain it: a driver
+      // without agent tools sees the user's literal "/setup ..." message. The
+      // gate on whether the coaching block itself is active — setupModeActive,
+      // which also depends on the bot's soul/description — is decided below,
+      // from the same bot snapshot the prompt's soul is built from.
+      const setupText = agentsMounted ? expandSetupTurnText(providerText) : providerText;
+      const userTurnText = promptWithReply(
+        skillAuthoring ? expandLearnTurnText(setupText) : setupText,
+        opts?.replyTo,
+        cfg.profile?.name?.trim() || "User",
+      );
+      // Decided again at dispatch when setup outlasted a soul edit (config).
+      const decideContext = (config: string) => {
+        const handedStale = Boolean(handed && (!unseen || (externalUpdate && handed.config !== config)));
+        const { block: unseenBlock, placed } = unseen && !handedStale ? renderUnseen(unseen) : { block: "", placed: [] };
+        const { turnText: contextTurnText, resume } = buildTurnContext({
+          text: userTurnText,
+          transcript,
+          rewound,
+          fresh: fresh || contextReset,
+          externallyUpdated: Boolean(externalContextMarker) || handedStale,
+          replaysNatively: instance.driverKind === "grok",
+        });
+        // Snapshot the cursor alongside the context decision. An external result
+        // can arrive during async computer/setup work and clear the task cursor;
+        // this already-built turn must either keep its old session or replay on the
+        // following turn, never start a blank session with no transcript.
+        const resumeCursor = resume ? task.resumeCursors[instanceId] : undefined;
+        // A cursor the provider no longer honours must not brick the thread: the
+        // driver may fall back to ONE fresh session, and this is what it sends
+        // there, so the new session is not blank (server/resume-recovery.ts). A
+        // turn carrying an external update gets the replay it would have had.
+        const recoveryIsReplay = resumeCursor !== undefined && externalUpdate && transcript.length > 0;
+        const recoveryText = resumeCursor === undefined ? undefined : recoveryIsReplay
+          ? buildTurnContext({ text: userTurnText, transcript, rewound: false, fresh: false, externallyUpdated: true, replaysNatively: false }).turnText
+          : buildRecoveryText({ text: userTurnText, transcript });
+        // What this turn puts in front of the provider, for each session it can end
+        // up in (server/delta-context.ts). buildTurnContext prepends a replay only
+        // when it replays, so a changed text means the transcript was sent.
+        const carried = [...skipTranscript];
+        const windowIds = selection.representedIds;
+        return {
+          turnText: withUnseenMessages(unseenBlock, contextTurnText),
+          resumeCursor, sessionReset: !resume, recoveryText, recoveryIsReplay,
+          handoff: strictResume ? {
+            botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
+            started: sessionStart(contextOrder, contextTurnText !== userTurnText ? windowIds : [], carried),
+            recovery: sessionStart(contextOrder, recoveryText !== undefined ? windowIds : [], carried),
+            resumed: sessionStart(contextOrder, [], [...placed, ...carried]),
+            placed, carried, own: [userMessage.id, ...(opts?.excludeMessageIds ?? [])],
+          } : undefined,
+        };
+      };
+      let dispatchContext = decideContext(plannedConfig);
+
+      const persona = [
+        `You are ${bot.name}, a personal bot in OpenMausBot.`,
+        bot.title && `Role: ${bot.title}.`,
+        bot.description && `About: ${bot.description}`,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      // The SOUL.md mirror is checked here, at dispatch, and only reported:
+      // the prompt below reads bot.soul, never the file.
+      {
+        const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
+        if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
+      }
+      if (dispatchContext.handoff) handoffs.begin(threadId, dispatchClaimId, dispatchContext.handoff);
+
       const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
       let browser: Awaited<ReturnType<typeof browserIntegration>> = null;
       const selectedSkills = selectBundledSkills(
@@ -6865,6 +6970,7 @@ async function startTurn(
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
         resumeCursor: dispatchContext.resumeCursor,
+        sessionReset: dispatchContext.sessionReset,
         ...(dispatchContext.recoveryText !== undefined ? { recoveryText: dispatchContext.recoveryText } : {}),
         ...(dispatchContext.recoveryIsReplay ? { recoveryIsReplay: true } : {}),
         transcript,
@@ -6893,6 +6999,7 @@ async function startTurn(
       clearDirectTurnDispatch(threadId, dispatchClaimId);
       // dispatched: the rewind is spent, and the old cursors are dead
       if (rewound) store.patchTask(bot.id, threadId, { rewound: false, resumeCursors: {} });
+      if (contextReset && record) store.patchTask(bot.id, threadId, { appliedCompactionId: record.id, contextFloor: undefined });
       // and this engine now owns the thread's most recent turn
       // Consume exactly the external-update generation this turn replayed.
       // If a newer delegated result landed during setup, its unique marker
@@ -15782,6 +15889,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // is now drainable must not strand behind a missed settle.
       if (current && !current.busy) drainQueuedSends();
       return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
+    }
+
+    // Compaction shares normal turn admission and Stop, but never executes
+    // an agent turn or provisions a computer. It preserves the full history.
+    m = path.match(/^\/api\/bots\/([\w-]+)\/compact$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      noteTurnTrigger(bot.threadId, auth);
+      await startTurn(bot.id, "Summarize conversation context", {
+        threadId: bot.threadId, compactOnly: true, cardContinuation: true,
+      });
+      return json(res, 202, { ok: true, threadId: bot.threadId });
     }
 
     // edit a user message → fork the conversation there and rerun the turn.

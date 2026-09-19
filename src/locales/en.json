@@ -478,6 +478,8 @@
   "chat.digestChip": "Did {tools} tool calls · {files} files changed",
   "chat.digestChipNoFiles": "Did {tools} tool calls",
   "chat.digestTitle": "What this turn did",
+  "chat.compactionTitle": "Earlier context summarized",
+  "chat.compactionHint": "Your full conversation is still here. The agent uses this summary and recent messages when continuing.",
   "chat.emptyPrompt": "Send a message to start the conversation.",
   "chat.chiefOfStaff": "Chief of Staff",
   "chat.openProfile": "Open agent profile",

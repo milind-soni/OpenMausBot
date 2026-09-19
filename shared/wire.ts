@@ -267,9 +267,16 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
   text?: string;
   digest?: TurnDigest;
+  compaction?: {
+    summary: string;
+    firstKeptId: string;
+    foldedThroughId: string;
+    tokensBefore: number;
+    by: "person" | "harness";
+  };
   /** Durable provider output stored by the harness; renderers receive only
    * the allowlisted /api/attachments URL. */
   attachments?: Array<{ kind: "image"; path: string; mime: string }>;

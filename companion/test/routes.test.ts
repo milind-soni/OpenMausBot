@@ -55,6 +55,7 @@ describe("what the app may do", () => {
     ["POST", "/api/bots/bot_123/messages/msg_2/edit"],
     ["GET", "/api/bots/bot_123/overview"],
     ["POST", "/api/bots/bot_123/active-branch"],
+    ["POST", "/api/bots/bot_123/compact"],
     ["POST", "/api/bots/bot_123/tasks"],
     ["POST", "/api/bots/bot_123/tasks/th_1"],
     ["PATCH", "/api/bots/bot_123/tasks/th_1"],
