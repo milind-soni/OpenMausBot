@@ -11,10 +11,16 @@ describe("package export", () => {
       name: "Monthly team", authorName: "Tester", groups: [],
       bots: [{ id: "b1", threadId: "t1", name: "Lead", color: "green", createdAt: 1 } as BotRecord],
       routines: [{ id: "r1", name: "Close the month", prompt: "Prepare a report", target: "bot", botId: "b1",
-        runOn: "maus", enabled: true, schedule, durationMinutes: 30, nextRunAt: 1, createdAt: 1, updatedAt: 1 }],
+        runOn: "maus", enabled: true, schedule, durationMinutes: 30, nextRunAt: 1, createdAt: 1, updatedAt: 1,
+        overlap: "queue", skippedRuns: 4, lastSkippedAt: 1, failureStreak: 2 }],
     });
     expect(exported.package.routines?.[0]).toMatchObject({ schedule, enabledAfterInstall: false });
     expect(parseBotPackage(renderBotPackageMarkdown(exported)).package.routines?.[0]?.schedule).toEqual(schedule);
+    const imported = parseBotPackage(renderBotPackageMarkdown(exported)).package.routines?.[0];
+    expect(imported?.overlap).toBe("queue");
+    expect(imported).not.toHaveProperty("skippedRuns");
+    expect(imported).not.toHaveProperty("lastSkippedAt");
+    expect(imported).not.toHaveProperty("failureStreak");
   });
 
   it("keeps collaboration structure while excluding runtime authority and state", () => {

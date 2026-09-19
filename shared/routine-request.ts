@@ -58,6 +58,8 @@ export interface RoutineRequestDefinition {
   timeoutMinutes?: number;
   /** Carry the previous run's report into the next run. */
   continuity?: boolean;
+  /** Skip by default, or keep at most one scheduled run waiting. */
+  overlap?: "skip" | "queue";
 }
 
 export type RoutineRequestChanges =

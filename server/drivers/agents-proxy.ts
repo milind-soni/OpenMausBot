@@ -379,6 +379,11 @@ const ROUTINE_FIELDS_SCHEMA = {
     type: "boolean",
     description: "Opt in to using the latest completed run's bounded report as historical context. Defaults to false; set false in an update to start fresh again. Included in the applied result or pending confirmation.",
   },
+  overlap: {
+    type: "string",
+    enum: ["skip", "queue"],
+    description: "While this routine is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog. Manual and webhook requests are separate.",
+  },
 } as const;
 
 const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
@@ -957,6 +962,9 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (args.continuity != null && typeof args.continuity !== "boolean") {
     return { fields, error: "continuity must be true or false." };
   }
+  if (args.overlap !== undefined && args.overlap !== "skip" && args.overlap !== "queue") {
+    return { fields, error: "overlap must be skip or queue." };
+  }
   if (args.clear_timeout != null && typeof args.clear_timeout !== "boolean") {
     return { fields, error: "clear_timeout must be true or false." };
   }
@@ -974,6 +982,7 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   if (args.clear_timeout === true) fields.timeoutMinutes = null;
   else if (timeoutMinutes != null) fields.timeoutMinutes = timeoutMinutes;
   if (typeof args.continuity === "boolean") fields.continuity = args.continuity;
+  if (args.overlap !== undefined) fields.overlap = args.overlap;
   return { fields };
 }
 

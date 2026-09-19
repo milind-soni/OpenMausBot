@@ -218,6 +218,9 @@ describe("routine delegation through the isolated harness", () => {
     // provider fleet; it makes no credential probe or external request.
     await api("PUT", "/api/config", { composio: { apiKey: "" } });
     await expect.poll(async () => (await runState(run.id))?.status).toBe("failed");
+    const health = (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === run.routineId);
+    expect(health.failureStreak).toBe(1);
+    evidence.push({ failedRunHealth: health });
     expect(JSON.parse(readFileSync(pendingFile, "utf8"))[run.threadId]).toBeUndefined();
     unlinkSync(file(run.threadId, "json"));
     await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "New unrelated work after the failed routine." });

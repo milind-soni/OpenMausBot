@@ -109,6 +109,144 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
+describe("bounded scheduled overlap and run health", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z");
+  const input = () => ({ name: "Health check", prompt: "Check the fixture", botId: "maus-1",
+    schedule: { type: "interval" as const, everyMinutes: 5, anchorAt: start } });
+  const finish = (h: ReturnType<typeof harness>, threadId: string, ok: boolean) => h.manager.handleRuntimeEvent({
+    eventId: "done", provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok,
+  });
+
+  it.each<RoutineSchedule>([
+    input().schedule,
+    { type: "cron", expression: "*/5 * * * *", timeZone: "UTC" },
+    { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+  ])("persists skipped occurrences once without changing the definition revision: %j", async schedule => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), schedule });
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    const skippedAt = h.manager.listRoutines()[0].nextRunAt!;
+    h.setNow(skippedAt); await h.manager.tick(); await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    const saved = h.manager.listRoutines()[0];
+    expect(saved).toMatchObject({ skippedRuns: 1, lastSkippedAt: skippedAt, updatedAt: routine.updatedAt });
+    expect(h.emitted.filter(event => event.kind === "routine").at(-1)?.routine).toMatchObject({ skippedRuns: 1 });
+    expect(new RoutineManager(h.options).listRoutines()[0]).toMatchObject({ skippedRuns: 1, lastSkippedAt: skippedAt, nextRunAt: saved.nextRunAt });
+  });
+
+  it("keeps one queued schedule behind delegated work even when the bot has spare capacity", async () => {
+    const h = harness(start);
+    let pending = true;
+    h.options.hasPendingDelegations = () => pending;
+    h.manager.create({ ...input(), overlap: "queue" });
+    h.setNow(start + 5 * 60_000); await h.manager.tick();
+    finish(h, "thread-1", true);
+    expect(h.manager.listRuns()[0].status).toBe("waiting");
+    h.setNow(start + 10 * 60_000); await h.manager.tick();
+    h.setNow(start + 15 * 60_000); await h.manager.tick();
+    expect(h.started).toHaveLength(1);
+    expect(h.manager.listRuns().map(run => run.status).sort()).toEqual(["queued", "waiting"]);
+    expect(h.manager.listRoutines()[0].skippedRuns).toBe(1);
+    pending = false; finish(h, "thread-1", true); await h.manager.tick();
+    await expect.poll(() => h.started.length).toBe(2);
+    expect(h.manager.listRuns().filter(run => run.status === "running")).toHaveLength(1);
+    expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(0);
+  });
+
+  it("does not let queue mode accumulate work when the bot is busy before its first run", async () => {
+    const h = harness(start); h.setBot("busy");
+    const routine = h.manager.create({ ...input(), overlap: "queue" });
+    for (let minute = 5; minute <= 50; minute += 5) {
+      h.setNow(start + minute * 60_000); await h.manager.tick();
+    }
+    expect(h.manager.listRuns()).toHaveLength(1);
+    expect(h.manager.listRoutines()[0]).toMatchObject({ skippedRuns: 9, overlap: "queue" });
+    expect(new RoutineManager(h.options).listRoutines()[0]).toMatchObject({ skippedRuns: 9, overlap: "queue" });
+    expect(h.manager.update(routine.id, { name: "Renamed" })?.overlap).toBe("queue");
+    expect(h.manager.update(routine.id, { overlap: "skip" })?.overlap).toBeUndefined();
+    expect(new RoutineManager(h.options).listRoutines()[0].overlap).toBeUndefined();
+  });
+
+  it("leaves explicit manual requests independent of the scheduled queue", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), overlap: "queue" });
+    h.setNow(start + 5 * 60_000); await h.manager.tick();
+    h.manager.runNow(routine.id); await h.manager.tick();
+    expect(h.started).toHaveLength(2);
+    expect(h.manager.listRuns().map(run => run.triggerSource).sort()).toEqual(["manual", "schedule"]);
+  });
+
+  it("rolls the skip counter and scheduler cursor back together on a failed write", async () => {
+    const h = harness(start);
+    h.manager.create(input());
+    h.setNow(start + 5 * 60_000); await h.manager.tick();
+    const before = h.manager.listRoutines()[0];
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save").mockImplementationOnce(() => { throw new Error("fixture disk full"); });
+    h.setNow(start + 10 * 60_000);
+    await expect(h.manager.tick()).rejects.toThrow("fixture disk full");
+    expect(h.manager.listRoutines()[0]).toEqual(before);
+    save.mockRestore(); await h.manager.tick();
+    expect(h.manager.listRoutines()[0].skippedRuns).toBe(1);
+  });
+
+  it("lets different scheduled routines on the same bot run independently", async () => {
+    const h = harness(start);
+    h.manager.create(input());
+    h.manager.create({ ...input(), name: "Second routine", overlap: "queue" });
+    h.setNow(start + 5 * 60_000); await h.manager.tick();
+    expect(h.started).toHaveLength(2);
+    expect(h.manager.listRuns().every(run => run.status === "running")).toBe(true);
+  });
+
+  it("does not treat cancellation or a missed occurrence as a successful or failed attempt", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    h.manager.runNow(routine.id); await h.manager.tick();
+    finish(h, "thread-1", false);
+    const cancelled = h.manager.runNow(routine.id)!; await h.manager.cancelRun(cancelled.id);
+    h.setNow(start + 24 * 3_600_000); await h.manager.tick();
+    expect(h.manager.listRuns().some(run => run.status === "missed")).toBe(true);
+    expect(h.manager.listRoutines()[0].failureStreak).toBe(1);
+  });
+
+  it("derives failures from completed receipts, ignoring repeated events and intermediate successful turns", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), enabled: false });
+    h.manager.runNow(routine.id); await h.manager.tick();
+    finish(h, "thread-1", false); finish(h, "thread-1", false);
+    expect(h.manager.listRoutines()[0].failureStreak).toBe(1);
+    h.manager.runNow(routine.id); await h.manager.tick();
+    finish(h, "thread-2", false);
+    expect(h.manager.update(routine.id, { name: "Renamed" })?.failureStreak).toBe(2);
+    let pending = true; h.options.hasPendingDelegations = () => pending;
+    h.manager.runNow(routine.id); await h.manager.tick();
+    finish(h, "thread-3", true);
+    expect(h.manager.listRoutines()[0].failureStreak).toBe(2);
+    pending = false; finish(h, "thread-3", true);
+    expect(h.manager.listRoutines()[0].failureStreak).toBeUndefined();
+    expect(h.emitted.filter(event => event.kind === "routine").at(-1)?.routine.failureStreak).toBeUndefined();
+    const disk = JSON.parse(readFileSync(h.options.file!, "utf8"));
+    expect(disk.routines[0]).not.toHaveProperty("failureStreak");
+    expect(new RoutineManager(h.options).listRoutines()[0].failureStreak).toBeUndefined();
+    await h.manager.tick();
+  });
+
+  it("counts restart recovery only once and sanitizes obsolete or invalid health metadata", async () => {
+    const h = harness(start);
+    const routine = h.manager.create({ ...input(), enabled: false });
+    h.manager.runNow(routine.id); await h.manager.tick();
+    const disk = JSON.parse(readFileSync(h.options.file!, "utf8"));
+    Object.assign(disk.routines[0], { failureStreak: 99, skippedRuns: -1, lastSkippedAt: 9e15, overlap: "invalid" });
+    writeFileSync(h.options.file!, JSON.stringify(disk));
+    for (let i = 0; i < 2; i++) {
+      const saved = new RoutineManager(h.options).listRoutines()[0];
+      expect(saved.failureStreak).toBe(1);
+      expect(saved.skippedRuns).toBeUndefined(); expect(saved.lastSkippedAt).toBeUndefined(); expect(saved.overlap).toBeUndefined();
+    }
+    expect(() => h.manager.update(routine.id, { overlap: "invalid" as "queue" })).toThrow("skip or queue");
+  });
+});
+
 describe("cron routines use the existing persistent scheduler", () => {
   const start = Date.parse("2026-09-13T08:00:00Z");
   const monthly = { type: "cron" as const, expression: "0 9 1 * *", timeZone: "UTC" };

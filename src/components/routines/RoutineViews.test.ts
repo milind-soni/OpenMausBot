@@ -22,6 +22,14 @@ function logs(props: Partial<Parameters<typeof RoutineLogs>[0]> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe("routine list", () => {
+  it("shows saved skips and recent failure streaks without claiming all offline occurrences were counted", () => {
+    const markup = list({ routines: [{ ...routine, skippedRuns: 3, lastSkippedAt: 100, failureStreak: 2 }] });
+    expect(markup).toContain("Scheduled occurrences skipped while busy: 3");
+    expect(markup).toContain("Recent consecutive failures: 2");
+    expect(markup).toContain("Last:");
+    expect(list()).not.toContain("Recent consecutive failures:");
+    expect(list()).not.toContain("Scheduled occurrences skipped while busy:");
+  });
   it("retains visible records and latest results during a failed refresh", () => {
     const markup = list({ error: true });
     expect(markup).toContain('role="alert"');

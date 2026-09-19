@@ -84,6 +84,10 @@ export interface Routine {
   durationMinutes: number;
   /** Optional wall-clock safety limit. Missing means the run is unlimited. */
   timeoutMinutes?: number;
+  overlap?: "skip" | "queue";
+  skippedRuns?: number;
+  lastSkippedAt?: number;
+  failureStreak?: number;
   attachments?: RoutineContextAttachment[];
   sourceThreadId?: string;
   resultsThreadId?: string;
@@ -140,8 +144,8 @@ export interface RoutineInput {
   durationMinutes?: number;
   /** `null` explicitly removes the limit; omission preserves it on updates. */
   timeoutMinutes?: number | null;
+  overlap?: "skip" | "queue";
   attachments?: RoutineContextAttachment[];
   /** Omission preserves routing; null creates a new dedicated results task. */
   resultsThreadId?: string | null;
 }
-
