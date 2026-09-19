@@ -5,13 +5,13 @@
 // Clicking the pointed-at control counts as Next too. Every advance is
 // written to the server's hint list first, so a reload lands on the same
 // step.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
 import { hintSeenPatch } from "@/lib/onboarding";
 import type { LocaleKey } from "@/locales";
-import { api, useStore } from "@/state/store";
+import { api, overlayOpen, useStore } from "@/state/store";
 import { Spotlight } from "./Spotlight";
 
 const MASCOT: Record<TourStep["id"], MausState> = {
@@ -53,7 +53,12 @@ export function GuidedTour() {
   const saving = useRef(false);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   const latestRecord = useRef(record);
-  latestRecord.current = record;
+  // Keep the tour's record mirror in step with committed state only: a
+  // render that React discards must never publish an onboarding record the
+  // tour did not use.
+  useLayoutEffect(() => {
+    latestRecord.current = record;
+  }, [record]);
   const closed = useRef(false);
   const [dismissed, setDismissed] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -61,20 +66,20 @@ export function GuidedTour() {
   const [fallback, setFallback] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!state.tourOpen) return;
+    if (!overlayOpen(state, "tour")) return;
     closed.current = false;
     setDismissed(false);
     setFailed(false);
-  }, [state.tourOpen]);
+  }, [overlayOpen(state, "tour")]);
 
   const run = useCallback(
     (effect: TourEffect | undefined) => {
       switch (effect) {
         case "openComputer":
-          if (!state.computerOpen) dispatch({ type: "toggleComputer", open: true });
+          if (!overlayOpen(state, "computer")) dispatch({ type: "openOverlay", kind: "computer", open: true });
           return;
         case "closeComputer":
-          dispatch({ type: "toggleComputer", open: false });
+          dispatch({ type: "closeOverlay", kind: "computer" });
           return;
         case "openTools": {
           // the menu is a toggle: only press it when it is closed
@@ -83,10 +88,10 @@ export function GuidedTour() {
           return;
         }
         case "openApps":
-          if (!press("nav-apps")) dispatch({ type: "togglePlugins", open: true });
+          if (!press("nav-apps")) dispatch({ type: "openOverlay", kind: "plugins", open: true, section: "apps" });
           return;
         case "closeApps":
-          dispatch({ type: "togglePlugins", open: false });
+          dispatch({ type: "closeOverlay", kind: "plugins" });
           return;
         case "openAutomations":
           if (!press("nav-automations")) dispatch({ type: "showRoutines" });
@@ -98,7 +103,7 @@ export function GuidedTour() {
           return;
       }
     },
-    [dispatch, state.computerOpen],
+    [dispatch, overlayOpen(state, "computer")],
   );
 
   const save = useCallback(
@@ -138,14 +143,14 @@ export function GuidedTour() {
     closed.current = true;
     setDismissed(true);
     // leave nothing open behind: the panel, the menu, the Automations page
-    if (state.computerOpen) run("closeComputer");
-    if (state.pluginsOpen) run("closeApps");
+    if (overlayOpen(state, "computer")) run("closeComputer");
+    if (overlayOpen(state, "plugins")) run("closeApps");
     run("backToChat");
     void save(true).catch(() => {});
-    dispatch({ type: "toggleTour", open: false });
-  }, [state.computerOpen, state.pluginsOpen, run, save, dispatch]);
+    dispatch({ type: "closeOverlay", kind: "tour" });
+  }, [overlayOpen(state, "computer"), overlayOpen(state, "plugins"), run, save, dispatch]);
 
-  const active = !dismissed && Boolean(record?.completedAt) && !state.welcomeOpen && step !== null;
+  const active = overlayOpen(state, "tour") && !dismissed && Boolean(record?.completedAt) && !overlayOpen(state, "welcome") && step !== null;
 
   // entering a step runs its effect once per step
   useEffect(() => {
