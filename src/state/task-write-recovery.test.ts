@@ -30,7 +30,7 @@ function mount(request: typeof fetch) {
     profile: () => dispatch({ type: "updateBot", botId: "bot", patch: { title: "Updated" } }),
     update: () => dispatch({ type: "updateTask", botId: "bot", threadId: "thread", patch: { approvalMode: "auto" } }),
     move: () => dispatch({ type: "updateTask", botId: "bot", threadId: "thread", patch: { projectId: null } }),
-    send: () => dispatch({ type: "send", botId: "bot", threadId: "thread", text: "Continue" }),
+    send: () => dispatch({ type: "send", botId: "bot", threadId: "thread", text: "Continue", at: 1_700_000_000_000 }),
   };
 }
 afterEach(() => { initialState.bots = []; vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -42,6 +42,7 @@ describe("thread setting save recovery", () => {
     let writes = 0;
     const requests = vi.fn<typeof fetch>(async (path) => {
       if (path === "/api/bots/bot/tasks/thread") return ++writes === 1 ? firstWrite.promise : secondWrite.promise;
+      if (path === "/api/bots") return response({ bots: [bot] });
       return response({});
     });
     const controls = mount(requests);
@@ -89,7 +90,7 @@ describe("thread setting save recovery", () => {
     const reconcile = deferred();
     const requests = vi.fn<typeof fetch>(async (path) => {
       if (path === "/api/bots/bot/tasks/thread") return response({ error: "Save failed" }, 500);
-      if (path === "/api/bots") return reconcile.promise;
+      if (path === "/api/bots") return reconcile.promise.then(() => response({ bots: [bot] }));
       return response({});
     });
     const controls = mount(requests);
@@ -123,7 +124,7 @@ describe("thread setting save recovery", () => {
     const nextWrite = deferred();
     let writes = 0;
     const requests = vi.fn<typeof fetch>(async (path) => {
-      if (path === "/api/bots") return reconcile.promise;
+      if (path === "/api/bots") return reconcile.promise.then(() => response({ bots: [bot] }));
       if (path === "/api/bots/bot/tasks/thread") return ++writes === 1
         ? response({ error: "Save failed" }, 500) : nextWrite.promise;
       return response({});
@@ -133,9 +134,9 @@ describe("thread setting save recovery", () => {
     await flush();
     controls.update();
     await flush();
-    reconcile.resolve(response({ bots: [bot] }));
-    await flush();
     controls.send();
+    await flush();
+    reconcile.resolve(response({ bots: [bot] }));
     await flush();
     expect(requests.mock.calls.some(([path]) => path === "/api/bots/bot/messages")).toBe(false);
     nextWrite.resolve(response({ bot }));
