@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Routine, RoutineRun } from "./routines";
+import type { Routine, RoutineRun } from "../../shared/routines";
 import {
   atLocalTime,
   formatGmtOffset,
