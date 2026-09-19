@@ -88,6 +88,7 @@ const { createDisplayMediaGuard, invokeDisplayMediaCallback, selectCaptureSource
 );
 const { STAGE_PREFIX: APPIMAGE_CUA_STAGE_PREFIX } = require("./cua-linux-bundle.cjs");
 const { desktopViewerUrl, sameDesktopViewerOrigin } = require("./desktop-viewer.cjs");
+const { drivingBeamStylesheet } = require("./desktop-viewer-beam.cjs");
 const { createDesktopWorkspaceManager } = require("./desktop-workspace.cjs");
 const { createTrustedApprovalModeCoordinator } = require("./approval-trusted-mode.cjs");
 const { DESKTOP_MUTATION_HEADER, desktopServerHeaders } = require("./desktop-server-auth.cjs");
@@ -101,6 +102,14 @@ const DEFAULT_COMPOSIO_BROKER_URL = "https://astra-composio.milindsoni201.worker
 let SERVER_PORT = 8799;
 const APP_ICON = path.join(__dirname, "resources/app-icon.png");
 let desktopViewerWindow = null;
+// The driving beam injected into the live-desktop viewer while the owning bot
+// controls the computer. `key` is the insertCSS handle, `wanted` survives page
+// navigations so the beam re-applies when the viewer finishes loading, and the
+// generation guards the async insert/remove pair against rapid toggles.
+let desktopViewerBeamKey = null;
+let desktopViewerBeamWanted = false;
+let desktopViewerBeamPending = false;
+let desktopViewerBeamGen = 0;
 let desktopViewerOwner = null;
 let desktopViewerContextId = null;
 let desktopWorkspaceManager = null;
@@ -1176,6 +1185,34 @@ function notifyDesktopViewer(open) {
   }
 }
 
+/** Light or dim the driving beam on the open live-desktop window. The beam is
+ *  plain CSS (`desktop-viewer-beam.cjs`): a rotating conic ring riding the
+ *  viewport edge, pointer-events:none so the VNC canvas stays fully clickable,
+ *  with a static frame under reduced motion. */
+function setDesktopViewerBeam(on) {
+  desktopViewerBeamWanted = on === true;
+  const viewer = desktopViewerWindow;
+  if (!viewer || viewer.isDestroyed()) return;
+  const web = viewer.webContents;
+  if (!on) {
+    desktopViewerBeamGen += 1;
+    desktopViewerBeamPending = false;
+    const key = desktopViewerBeamKey;
+    desktopViewerBeamKey = null;
+    if (key !== null) web.removeInsertedCSS(key).catch(() => {});
+    return;
+  }
+  if (desktopViewerBeamKey !== null || desktopViewerBeamPending) return;
+  desktopViewerBeamPending = true;
+  const gen = ++desktopViewerBeamGen;
+  web.insertCSS(drivingBeamStylesheet(), { cssOrigin: "user" }).then((key) => {
+    if (gen !== desktopViewerBeamGen) return; // toggled off while inserting
+    desktopViewerBeamKey = key;
+  }).catch(() => {}).finally(() => {
+    if (gen === desktopViewerBeamGen) desktopViewerBeamPending = false;
+  });
+}
+
 function desktopViewerErrorPage(message, retryUrl) {
   const escape = (value) =>
     String(value)
@@ -1269,9 +1306,19 @@ function openDesktopViewer(owner, rawUrl, rawTitle, contextId) {
     viewer.focus();
     viewer.webContents.focus();
   });
+  // insertCSS applies to the committed page, so a beam requested mid-load is
+  // re-applied once the viewer document is really there.
+  viewer.webContents.on("did-finish-load", () => {
+    if (desktopViewerBeamWanted) setDesktopViewerBeam(true);
+  });
   viewer.on("closed", () => {
     if (desktopViewerWindow !== viewer) return;
     desktopViewerWindow = null;
+    // The beam's stylesheet dies with the window; only the bookkeeping resets.
+    desktopViewerBeamKey = null;
+    desktopViewerBeamWanted = false;
+    desktopViewerBeamPending = false;
+    desktopViewerBeamGen += 1;
     // The panel drops its "viewer open" state and releases control on this.
     notifyDesktopViewer(false);
     desktopViewerOwner = null;
@@ -1905,6 +1952,17 @@ ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async
 // The Box VNC viewer must be a top-level page for its token exchange. A
 // sandboxed modal BrowserWindow satisfies that requirement while keeping the
 // live desktop inside Astra instead of sending the person to a browser.
+ipcMain.handle("desktop-viewer:driving", localOnly("desktop-viewer:driving", (_event, contextId, driving) => {
+  // Only the bot that owns the open viewer may light or dim the beam.
+  const requested = Object.prototype.toString.call(contextId) === "[object String]" ? contextId : null;
+  if (
+    desktopViewerWindow && !desktopViewerWindow.isDestroyed() &&
+    desktopViewerContextId && requested === desktopViewerContextId
+  ) {
+    setDesktopViewerBeam(driving === true);
+  }
+  return true;
+}));
 ipcMain.handle("desktop-viewer:open", localOnly("desktop-viewer:open", (event, rawUrl, title, contextId) => {
   const owner = BrowserWindow.fromWebContents(event.sender);
   return openDesktopViewer(owner, rawUrl, title, contextId);

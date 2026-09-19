@@ -168,6 +168,8 @@ const __APP_VERSION__: string;
         open(url: string, title: string, contextId: string): Promise<boolean>;
         /** Closes the live-desktop window, but only when it belongs to this bot. */
         close(contextId: string): Promise<boolean>;
+        /** Lights the driving beam on the open viewer while this bot drives. */
+        setDriving(contextId: string, driving: boolean): Promise<boolean>;
         /** The current viewer state, for a panel to initialize from on mount. */
         currentState(): Promise<{ open: boolean; contextId: string | null }>;
         onState(cb: (state: { open: boolean; contextId: string | null }) => void): () => void;

@@ -608,6 +608,18 @@ export function ComputerPanel({
   // wheel and nothing has taken it back — a bot that is merely selected, or a
   // person driving, gets no beam.
   const driving = astraDriving({ held: control.held === true, busy: bot.busy === true });
+  // Mirror the who-is-driving state onto the live-desktop window: main injects
+  // the beam stylesheet into the viewer while this bot holds the computer, so
+  // the full-screen view glows exactly while Astra drives it.
+  useEffect(() => {
+    const bridge = window.ogb?.desktopViewer;
+    if (!bridge?.setDriving) return;
+    void bridge.setDriving(bot.id, driving).catch(() => {});
+    return () => {
+      // unmount / bot switch: make sure the beam never outlives its owner
+      void bridge.setDriving(bot.id, false).catch(() => {});
+    };
+  }, [bot.id, driving]);
   const [reducedMotion, setReducedMotion] = useState(false);
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");

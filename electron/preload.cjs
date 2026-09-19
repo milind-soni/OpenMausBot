@@ -137,6 +137,8 @@ const bridge = {
   desktopViewer: {
     open: (url, title, contextId) => ipcRenderer.invoke("desktop-viewer:open", url, title, contextId),
     close: (contextId) => ipcRenderer.invoke("desktop-viewer:close", contextId),
+    /** Lights the driving beam on the open viewer while this bot controls the computer. */
+    setDriving: (contextId, driving) => ipcRenderer.invoke("desktop-viewer:driving", contextId, driving),
     currentState: () => ipcRenderer.invoke("desktop-viewer:state-now"),
     onState: (cb) => {
       const handler = (_event, state) => cb(state);
