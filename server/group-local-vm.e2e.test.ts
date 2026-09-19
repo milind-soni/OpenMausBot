@@ -17,6 +17,7 @@ let base = "";
 let stateFile = "";
 let dumpFile = "";
 let finishFile = "";
+let cuaDescriptor = "";
 let stderr = "";
 let boxServer: Server;
 let boxRow: { id: string; name: string; state: string } | null = null;
@@ -57,6 +58,7 @@ beforeAll(async () => {
   stateFile = join(fixtureHome, "vm.json");
   dumpFile = join(fixtureHome, "dump.json");
   finishFile = join(fixtureHome, "finish");
+  cuaDescriptor = join(fixtureHome, "user-data", "cua-connection.json");
   vmState();
   const data = join(fixtureHome, "data");
   const ui = join(fixtureHome, "static");
@@ -105,6 +107,7 @@ beforeAll(async () => {
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
       OMB_BOX_API: `http://127.0.0.1:${boxPort}`,
+      OMB_USER_DATA: join(fixtureHome, "user-data"),
     }, stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout!.on("data", () => {});
@@ -299,13 +302,67 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("reports unsupported channel destinations instead of dispatching without the promised tools", async () => {
+  // Linux accepts only its own validated runtime descriptor, which a fixture
+  // cannot forge; the macOS and Windows descriptor is a plain file.
+  it.skipIf(process.platform === "linux")("mounts a channel speaker's own This computer destination behind the control gate", async () => {
+    const { bots, group } = await room();
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({ mode: "bundled", mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"] }));
+    try {
+      await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
+      await send(group.id);
+      const sent = await dump() as { systemPrompt: string };
+      const c = computer(sent);
+      expect(c).toBeTruthy();
+      expect(c.env.OMB_CUA_COMMAND).toBe("/fixture/cua-driver");
+      expect(c.args.some((arg: string) => arg.includes("container-mcp"))).toBe(false);
+      expect(sent.systemPrompt).toContain("You can act on the user's computer");
+      expect(sent.systemPrompt).toContain("tell them it is on this computer");
+      expect((await gate(c)).status).toBe(200);
+      writeFileSync(finishFile, "finish");
+      await idle(bots[0].id);
+      expect((await gate(c)).status).toBe(401);
+      expect(JSON.stringify(await api("GET", "/api/bots?messages=30"))).not.toContain("not available in channels yet");
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
+  });
+
+  it("says why This computer cannot mount in a channel instead of dispatching without the promised tools", async () => {
     const { bots, group } = await room();
     await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
     await send(group.id);
-    await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("not available in channels yet"));
+    await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("CUA Driver is not ready for this computer"));
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
+  });
+
+  it("runs a channel speaker's own Cloud destination on its Box, waking it first", async () => {
+    const { bots, group } = await room();
+    try {
+      await api("PUT", "/api/config", { box: { token: "box_fixture" } });
+      await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "cloud" });
+      const environmentId = readFileSync(join(fixtureHome, "data", "environment-id"), "utf8").trim();
+      const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
+      const prefix = bots[0].id.slice(0, 8).replace(/[^a-z0-9]/g, "");
+      const suffix = createHash("sha256").update(bots[0].id).digest("hex").slice(0, 6);
+      boxRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "archived" };
+      boxCalls.length = 0; boxPrompts.length = 0;
+      await send(group.id);
+      await until(async () => boxPrompts.length === 1 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
+      expect(boxCalls.some(call => call.path.endsWith("/resume"))).toBe(true);
+      expect(boxCalls.filter(call => call.method === "POST" && call.path === "/boxes")).toHaveLength(0);
+      expect(JSON.stringify(await api("GET", "/api/bots?messages=30"))).not.toContain("not available in channels yet");
+      // The Box is given back: the same speaker can take the room again.
+      await send(group.id);
+      await until(async () => boxPrompts.length === 2 && !(await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bots[0].id).busy, Boolean);
+    } finally {
+      boxRow = null;
+      await stop(group.id);
+      await idle(bots[0].id);
+      await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "vm" });
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
   });
 
   it("releases a failed readiness claim so the bot and room can run again", async () => {
