@@ -225,6 +225,10 @@ export interface WireBot {
   voice?: string;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
+  /** Per-bot override of the global threads.autoArchiveDays window (#1280):
+   * absent inherits the global setting, 0 disables auto-archive for this
+   * bot alone. Auto-archive itself stays off unless configured somewhere. */
+  autoArchiveDays?: number;
   /** true after an edit/branch-switch rewound the visible conversation. */
   rewound?: boolean;
   pinned?: boolean;

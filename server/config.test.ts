@@ -22,6 +22,7 @@ import { customMcpServers,
   maxConcurrentBotThreads,
   threadEventLogMaxBytes,
   threadEventLogRetentionDays,
+  threadAutoArchiveDays,
   showToolCallsEnabled,
   saveConfig,
   skillAuthoringEnabled,
@@ -80,6 +81,16 @@ describe("configuration boundaries", () => {
     expect(threadEventLogRetentionDays(configured)).toBe(30);
     for (const value of [0, -1, 1.5, "30", null, 3660]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
+    }
+  });
+
+  it("keeps auto-archive off unless a window is configured", () => {
+    expect(threadAutoArchiveDays({})).toBeNull();
+    expect(threadAutoArchiveDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
+    const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, autoArchiveDays: 30 } });
+    expect(threadAutoArchiveDays(configured)).toBe(30);
+    for (const value of [0, -1, 1.5, "30", null, 3660]) {
+      expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, autoArchiveDays: value } })).toThrow("threads.autoArchiveDays");
     }
   });
 

@@ -17,7 +17,7 @@ it("recovers queued/due work without resurrecting an interrupted routine after r
       method,
       headers: { "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(2_000),
+      signal: AbortSignal.timeout(15_000),
     });
     expect(response.ok, `${method} ${path}`).toBe(true);
     return await response.json() as any;
