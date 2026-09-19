@@ -113,10 +113,11 @@ export function deriveSidebarPhoneStatus(
   };
 }
 
-type ToggleAppSettingsAction = Extract<Action, { type: "toggleAppSettings" }>;
+type OpenAppSettingsOverlayAction = Extract<Action, { type: "openOverlay" }>;
 
-export const phoneSettingsAction = (): ToggleAppSettingsAction => ({
-  type: "toggleAppSettings",
+export const phoneSettingsAction = (): OpenAppSettingsOverlayAction => ({
+  type: "openOverlay",
+  kind: "appSettings",
   open: true,
   section: "companion",
 });

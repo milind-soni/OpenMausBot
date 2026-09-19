@@ -772,10 +772,14 @@ function migrateLegacyFeatureFlags(): void {
 
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
-  try {
-    cfg = parseStoredConfig(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8")));
-  } catch {
-    /* first run — env fallbacks below */
+  const stored = readStoredConfigJson();
+  if (stored !== undefined) {
+    try {
+      cfg = parseStoredConfig(stored);
+    } catch {
+      /* a parseable file of the wrong shape keeps its schema-lenient read:
+         only unreadable or unparseable files are fatal */
+    }
   }
   // Env wins over the file for every credential. The desktop shell keeps
   // these secrets OS-encrypted and hands them to this process as env at
@@ -818,6 +822,30 @@ export function loadConfig(): AppConfig {
     if (process.env.OMB_SIGNIN_MEMBER_EMAILS !== undefined) cfg.signIn.members = splitEmails(process.env.OMB_SIGNIN_MEMBER_EMAILS);
   }
   return cfg;
+}
+
+/** config.json's parsed contents, or undefined when the file does not yet
+ * exist (first run). A file that exists but cannot be read (EACCES, EISDIR)
+ * or does not parse as JSON is a broken install, not a fresh one: silently
+ * booting into defaults would mask it, and a save that ignored it would
+ * clobber the operator's real config. Both loadConfig and saveConfig fail
+ * loudly here instead. */
+function readStoredConfigJson(): JsonValue | undefined {
+  const p = join(DATA_DIR, "config.json");
+  const unreadable = (cause: unknown): Error =>
+    new Error(`${p} exists but could not be read: ${cause instanceof Error ? cause.message : String(cause)}`);
+  let raw: string;
+  try {
+    raw = readFileSync(p, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw unreadable(error);
+  }
+  try {
+    return parseJson(raw);
+  } catch (error) {
+    throw unreadable(error);
+  }
 }
 
 /** After saveConfig() writes a credential, the running process's env must
@@ -915,11 +943,10 @@ export const PROVIDER_CREDENTIAL_ENV = [
 export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstances?: boolean } = {}): void {
   const p = join(DATA_DIR, "config.json");
   let disk: JsonObject = {};
-  try {
-    const parsed = jsonObjectSchema.safeParse(parseJson(readFileSync(p, "utf8")));
+  const stored = readStoredConfigJson();
+  if (stored !== undefined) {
+    const parsed = jsonObjectSchema.safeParse(stored);
     if (parsed.success) disk = parsed.data;
-  } catch {
-    /* first write */
   }
   const checkedPatch = appConfigSchema.partial().parse(patch);
   // A write is the durable migration point. Preserve every other raw key in

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Bot } from "@/state/store";
-import type { Routine, RoutineRun } from "@/lib/routines";
+import type { Routine, RoutineRun } from "../../../shared/routines";
 
 // RoutinesSection mounts RoutineEditor from RoutineCalendarPage.tsx (only
 // when "New schedule" is clicked, which these tests never do) but that
