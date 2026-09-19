@@ -117,6 +117,7 @@ jobs:
     name: Windows CUA host smoke
     runs-on: windows-latest
     timeout-minutes: 10
+>>>>>>> origin/main
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10

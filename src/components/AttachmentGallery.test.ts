@@ -57,15 +57,17 @@ describe("message gallery", () => {
     expect(isVideoAttachment("file:///work/demo%23one.mp4")).toBe(true);
   });
 
-  it("shows one compact collection, keeps file actions explicit, and never eagerly loads videos", () => {
+  it("shows one compact collection with preview actions and no autoplay", () => {
     const markup = renderToStaticMarkup(createElement(AttachmentGallery, {
       images: [image], files: [file, { path: "/workspace/report.pdf", name: "report.pdf", linked: true }], message,
     }));
     expect(markup).toContain("3 attachments");
     expect(markup).toContain("Overview.png");
-    expect(markup).toContain("Load video");
-    expect(markup).toContain("Save a copy of demo.mp4");
-    expect(markup).toContain("Save a copy of report.pdf");
+    expect(markup).toContain("Play demo.mp4 in chat");
+    expect(markup).toContain("Preview demo.mp4");
+    expect(markup).toContain("Preview report.pdf");
+    expect(markup).toContain(">MP4</span>");
+    expect(markup).toContain(">PDF</span>");
     expect(markup).toContain("loading=\"lazy\"");
     expect(markup).not.toContain("<video");
     expect(markup).not.toContain("src=\"/workspace/");

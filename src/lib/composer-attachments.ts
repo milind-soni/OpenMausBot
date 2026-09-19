@@ -114,6 +114,9 @@ export const IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 export const FILE_MAX_BYTES = 25 * 1024 * 1024;
 
 const DOCUMENT_MIMES: Readonly<Record<string, string>> = {
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mov: "video/quicktime",
   txt: "text/plain",
   md: "text/markdown",
   markdown: "text/markdown",

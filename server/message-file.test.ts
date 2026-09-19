@@ -30,6 +30,12 @@ beforeEach(() => {
 afterAll(() => rmSync(suite, { recursive: true, force: true }));
 
 describe("message-linked files", () => {
+  it.each([['mp4', 'video/mp4'], ['webm', 'video/webm'], ['mov', 'video/quicktime'], ['avif', 'image/avif'], ['bmp', 'image/bmp']])('serves %s downloads with their browser media type', async (extension, mime) => {
+    const path = join(workspace, `sample.${extension}`);
+    writeFileSync(path, 'fixture media');
+    const file = await openMessageFile(path, [workspace]);
+    try { expect(file.mime).toBe(mime); } finally { await file.handle.close(); }
+  });
   it("resolves a Markdown image from an opaque source offset", () => {
     const markdown = [
       "See this:",

@@ -1,0 +1,31 @@
+{
+  "base": "32fa0d070832f4706e051da889561b13813ced54",
+  "implementation": "19b0dcde26c57af9634bd0d90b571fa87bde4db4",
+  "platform": "Windows, Japanese locale",
+  "baseline": {
+    "passed": 4297,
+    "failed": 90,
+    "skipped": 130,
+    "todo": 1,
+    "unhandledErrors": 1
+  },
+  "implementationRun": {
+    "passed": 4347,
+    "failed": 81,
+    "skipped": 130,
+    "todo": 1
+  },
+  "newFailureNames": [],
+  "baselineOnlyFailureNames": [
+    "server/index.test.ts > harness HTTP API > keeps a bot when its hidden Box exists or the provider cannot prove it absent",
+    "src/components/AttachmentPreview.test.ts > attachment preview surfaces > keeps a stable loading tile and the original image name",
+    "src/components/AttachmentPreview.test.ts > attachment preview surfaces > keeps remote Markdown images private until explicitly loaded",
+    "src/components/AttachmentPreview.test.ts > attachment preview surfaces > does not need an outer link to hide a remote Markdown image",
+    "src/components/AttachmentPreview.test.ts > attachment preview surfaces > keeps legacy transcript file chips visible but inert",
+    "src/components/AttachmentPreview.test.ts > attachment preview surfaces > makes message-authorized transcript files explicit save actions",
+    "src/components/ChatMarkdown.test.ts > ChatMarkdown attachments > requires consent before loading a remote image",
+    "src/components/ChatMarkdown.test.ts > ChatMarkdown attachments > requires consent for a protocol-relative image even inside a local link",
+    "server/drivers/codex-device-auth.test.ts > Codex server-owned device authentication > expires and reaps an unattended flow"
+  ],
+  "commonFailureCount": 81
+}

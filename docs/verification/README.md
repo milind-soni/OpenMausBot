@@ -16,6 +16,13 @@ node --experimental-strip-types scripts/control-omb.ts launch
 Run the foreground launcher directly rather than through `pnpm`; this ensures
 it receives Ctrl-C and can stop its child before removing the temporary data.
 
+Automated parents can spawn `launch` or `ui launch` with a Node IPC channel
+(`stdio: ["ignore", "pipe", "pipe", "ipc"]`) and send `"control-omb:stop"`.
+That requests the same cleanup on every OS, including Windows where
+`child.kill("SIGINT")` forcibly terminates the launcher. Disconnecting the
+parent's IPC channel also requests cleanup. Wait for the launcher's exit
+before checking that its temporary data has been removed.
+
 It gives the child a temporary data directory and home, chooses a free
 harness/webhook port pair, installs only the repository's fake engine, prints
 the URL, PID, data directory, and persistent log path, then stays attached to
@@ -55,6 +62,7 @@ Use only mapped, tested commands:
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Coordination regression coverage and migration](coordination-test-migration.md)
 - [Teams and shared instructions](teams.md)
 - [Full workspace backups](workspace-backups.md)
 - [Optional company cloud backups](company-backups.md)
@@ -88,6 +96,9 @@ and HTTP tailnet endpoint refresh without touching a real Tailscale installation
 
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
+
+The [file preview fixture](file-preview.md) checks Web PDF, video, workbook, and
+slide previews against message-authorized downloads on an isolated fake engine.
 
 The [live browser fixture](browser-live.md) mounts the real Browser panel with
 an explicitly selected native engine and Chrome in a disposable home, covering

@@ -25,14 +25,14 @@ describe("bot setup and tools in the real renderer", () => {
   let child: ChildProcess | undefined;
   let info: FixtureInfo;
   afterAll(async () => {
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
   });
 
   (enabled ? it : it.skip)("creates roles, configures per-bot MCP access, and recovers a rejected preset", async () => {
     let stdout = "";
     let stderr = "";
     child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "scripts/control-omb.ts"), "ui", "launch"], {
-      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+      cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
     });
     child.stdout!.on("data", (chunk: Buffer) => { stdout += String(chunk); });
     child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
@@ -210,7 +210,7 @@ describe("bot setup and tools in the real renderer", () => {
     expect(await dialogCount()).toBe(0);
     const logs = await ui("console");
     expect((logs.messages as Array<{ type: string; text: string }>).filter((entry) => entry.type === "error")).toEqual([]);
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
     expect(child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
     expect(existsSync(info.logPath)).toBe(true);

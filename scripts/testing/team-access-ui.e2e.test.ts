@@ -12,7 +12,7 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
 
 (enabled ? it : it.skip)("lets an owner select and revoke exactly the Chief's additional teams in the real settings UI", async () => {
   const child = spawn(process.execPath, ["--experimental-strip-types", "scripts/control-omb.ts", "ui", "launch"], {
-    cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"],
+    cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   let output = "";
   let error = "";
@@ -93,6 +93,6 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     writeFileSync(info.logPath + ".team-access.json", JSON.stringify(receipts, null, 2));
     console.log("Team access evidence:", info.logPath + ".team-access.json");
   } finally {
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
   }
 }, 240_000);

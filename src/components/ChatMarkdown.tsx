@@ -33,6 +33,8 @@ import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
+import { filePreviewKind } from "@/lib/file-preview";
+import { PreviewableFile } from "./FilePreview";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
 // blocks; keys are content-hashed and capped. Streamed partials may land here
@@ -378,8 +380,11 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
 // and an <a href="file://…"> would still reach setWindowOpenHandler on a
 // middle or modifier click, which calls shell.openExternal without the main
 // process' containment check.
-function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+function LocalFileLink({ filePath, children, message, preview = true }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext; preview?: boolean }) {
   const save = useLocalFileSave(filePath, undefined, message);
+  if (preview && message && filePreviewKind(filePath)) {
+    return <PreviewableFile path={filePath} message={message} compact>{children}</PreviewableFile>;
+  }
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
   }
@@ -494,9 +499,11 @@ const NO_MENTION_PEERS: readonly MentionPeer[] = [];
 // holding one must reach the parser byte-for-byte as written.
 const MARKDOWN_IMAGE = "![";
 
-function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
+function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false, filePreviews = true }: {
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
+  /** Disable duplicate inline cards when the message already has an attachment gallery. */
+  filePreviews?: boolean;
 }) {
   // "#Title" mentions link to the threads the person can see (ThreadRefs);
   // @mentions were already decorated by remarkMentions, which runs first.
@@ -570,7 +577,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
             if (ref) return <ThreadLink target={ref} ambiguous={ref.ambiguous}>{children}</ThreadLink>;
             if (address || (href && looksLikeThreadRefUrl(href))) return <span className="break-words">{children}</span>;
             const localPath = localFilePath(href);
-            if (localPath) return <LocalFileLink filePath={localPath} message={message}>{children}</LocalFileLink>;
+            if (localPath) return <LocalFileLink filePath={localPath} message={message} preview={filePreviews}>{children}</LocalFileLink>;
             return (
               <a
                 href={href}
@@ -662,6 +669,7 @@ export function samePeers(previous: readonly MentionPeer[], next: readonly Menti
 export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   previous.text === next.text
   && samePeers(previous.mentionPeers ?? NO_MENTION_PEERS, next.mentionPeers ?? NO_MENTION_PEERS)
+  && previous.filePreviews === next.filePreviews
   && previous.everyone === next.everyone
   && Boolean(previous.streaming) === Boolean(next.streaming)
   && previous.message?.threadId === next.message?.threadId

@@ -381,6 +381,10 @@ describe("readAttachment name lock", () => {
 });
 
 describe("shared files", () => {
+  it.each([['video/mp4', '.mp4'], ['video/webm', '.webm'], ['video/quicktime', '.mov']])('accepts %s with a canonical video filename', (mime, extension) => {
+    expect(extensionForFileMime(mime)).toBe(extension);
+    expect(sanitizeSharedFileName('video.exe', mime)).toBe(`video${extension}`);
+  });
   beforeEach(() => {
     resetDir();
   });

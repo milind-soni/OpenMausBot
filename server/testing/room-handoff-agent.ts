@@ -79,6 +79,11 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
         evidence.push({ step, response });
         if (Boolean(response.error || response.result?.isError) !== Boolean(step.expectError)) throw new Error(`Unexpected tool outcome: ${JSON.stringify(response)}`);
       }
+      // A test releases this gate after observing the intended concurrent state.
+      // The existing run deadline still bounds a gate that is never released.
+      while (plan.waitForFile && !existsSync(plan.waitForFile)) {
+        await new Promise(resolve => { delayTimer = setTimeout(resolve, 25); });
+      }
       if (typeof plan.progress === "string") progress?.(plan.progress);
       // Let a race fixture release this exact turn after its settings mutation,
       // independent of machine load. The run timeout also bounds this wait.
