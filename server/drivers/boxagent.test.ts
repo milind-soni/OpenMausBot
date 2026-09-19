@@ -201,4 +201,30 @@ describe("BoxAgentDriver turns (fake API)", () => {
       .map((e) => (e as { text: string }).text);
     expect(texts).toEqual(["half"]);
   });
+
+  it("interrupts the box when the prompt dispatch fails", async () => {
+    const calls: string[] = [];
+    const previous = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && /\/boxes\/[^/]+\/prompt$/.test(url)) throw new Error("dispatch down");
+      if (method === "POST" && url.includes("/interrupt")) {
+        calls.push("interrupt");
+        return json({ ok: true });
+      }
+      if (url.endsWith("/me")) return json({ ok: true });
+      return json({ error: `unexpected ${method} ${url}` }, 404);
+    }) as typeof fetch;
+    restoreFetch = () => {
+      globalThis.fetch = previous;
+    };
+    await create();
+    await expect(
+      instance.adapter.sendTurn({ threadId: "t-dispatch", text: "go", integrations: { computer } }),
+    ).rejects.toThrow("dispatch down");
+    // The interrupt is fire-and-forget; give the microtask queue a beat.
+    await new Promise((done) => setTimeout(done, 20));
+    expect(calls).toContain("interrupt");
+  });
 });

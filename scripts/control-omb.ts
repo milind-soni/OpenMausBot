@@ -8,8 +8,9 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
-import { handleToolCall, request, validateBaseUrl } from "./mcp-server.ts";
+import { handleToolCall, request } from "./mcp-server.ts";
 import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
+import { configuredServerUrl, validateBaseUrl } from "../shared/server-endpoint.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
@@ -123,7 +124,7 @@ function positiveInteger(value: unknown, name: string, fallback: number, maximum
 function configuredUrl(raw: unknown, env: NodeJS.ProcessEnv, requiredForMutation: boolean): string | undefined {
   const explicit = typeof raw === "string" && raw.trim()
     ? raw.trim()
-    : env.OPENMAUSBOT_URL?.trim() || (env.OMB_PORT ? `http://127.0.0.1:${env.OMB_PORT}` : "");
+    : configuredServerUrl(env) ?? "";
   if (!explicit) {
     if (requiredForMutation) {
       throw new ControlOmbError(
