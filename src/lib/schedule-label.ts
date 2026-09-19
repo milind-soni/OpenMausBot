@@ -1,5 +1,5 @@
 import { atLocalTime } from "@/lib/routine-calendar";
-import type { RoutineSchedule } from "@/lib/routines";
+import type { RoutineSchedule } from "../../shared/routines";
 import { cronScheduleLabel } from "../../shared/cron-label";
 
 export const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
