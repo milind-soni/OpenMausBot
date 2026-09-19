@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Clock3, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import type { BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -8,7 +8,7 @@ import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt"> & { queued?: boolean };
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "waitingOnTeammate"> & { queued?: boolean };
 
 /** "opened by Scout" for a thread a bot started, null for the person's own.
  * Shared by the sidebar row and the All-threads picker so both say it the
@@ -37,10 +37,17 @@ export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.arch
  * all ask the same question. */
 const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
 
+/** Waiting on a dispatched teammate: the wire paints the handoff busy so
+ * wait clients keep blocking, and this flag says which busy is really a
+ * wait. The flag outranks the paint, keeping the wait a quiet label
+ * instead of the work spinner (#1223). */
+const isWaitingOnTeammate = (task: Pick<Task, "waitingOnTeammate">): boolean =>
+  task.waitingOnTeammate === true;
+
 /** Whether a row must stay on screen regardless of age or closed state:
  * the person is looking at it, it needs them, or it has something new. */
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
-  task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || Boolean(task.queued) || Boolean(task.unread);
+  task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || isWaitingOnTeammate(task) || Boolean(task.queued) || Boolean(task.unread);
 
 /** The default list is the six most recent OPEN threads plus anything that
  * demands attention. A thread a bot closed is folded away — a PM bot that
@@ -62,16 +69,18 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 }
 
 /** Attention outranks recency within a bot: waiting-on-you needs the person
- * most, then working/busy, then queued, then unread. The thread being looked
- * at rides just above the idle tail; idle threads keep stored order. Pure and
- * shared so the tree, the collapsed escape hatch, and the pickers agree. */
+ * most, then working/busy, then a teammate wait (its busy is the wait
+ * paint), then queued, then unread. The thread being looked at rides just
+ * above the idle tail; idle threads keep stored order. Pure and shared so
+ * the tree, the collapsed escape hatch, and the pickers agree. */
 const attentionRank = (task: ThreadRowTask, activeId: string): number => {
   if (task.activity === "waiting-on-you") return 0;
+  if (isWaitingOnTeammate(task)) return 2;
   if (task.busy || task.activity === "working") return 1;
-  if (task.queued) return 2;
-  if (task.unread) return 3;
-  if (task.threadId === activeId) return 4;
-  return 5;
+  if (task.queued) return 3;
+  if (task.unread) return 4;
+  if (task.threadId === activeId) return 5;
+  return 6;
 };
 
 /** Order, never filter: whatever the caller passes stays visible, only the
@@ -85,13 +94,15 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive }: {
+export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, activityLabel }: {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
   current: boolean;
   compact?: boolean;
   folders?: BotProject[];
+  /** Live verb the chat pane already derives ("Reading a file"); shown only while the row is working. */
+  activityLabel?: string;
   onSelect: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
@@ -105,7 +116,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
-  const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWorking(task) ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
+  const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
@@ -149,7 +160,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
           <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived) && !current && "text-ink-secondary/70")}>{task.title}</span>
           {byline && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{byline}</span>}
         </span>
-        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
+        {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
       </button>}
       <button ref={actionRef} type="button" aria-label={t("task.actions", { title: task.title })} aria-expanded={Boolean(menu)}

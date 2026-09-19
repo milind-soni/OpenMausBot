@@ -1260,6 +1260,41 @@ describe("computer destination announcements", () => {
   });
 });
 
+describe("teammate wait announcements", () => {
+  const waiting: Bot = {
+    id: "wait-bot", threadId: "wait-thread", name: "Scooter", title: "", description: "",
+    notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "codex", model: "default" }, busy: true, activity: "working", waitingOnTeammate: true,
+    messages: [{ id: "message", role: "user", kind: "text", at: 1, text: "Keep this conversation" }],
+  };
+  // #1223 maintainer follow-up: complete wire frames omit waitingOnTeammate
+  // once the teammate settles, so the merge must clear it like every other
+  // omitted key instead of keeping the quiet wait painted forever.
+  it.each(["botPatched", "taskSwitched", "botPatchedSwitch"] as const)("clears the wait when a working frame omits it via %s", (kind) => {
+    const { waitingOnTeammate: _oldWait, ...announcement } = waiting;
+    const next = reducer({ ...initialState, bots: [waiting] }, {
+      type: kind === "taskSwitched" ? "taskSwitched" : "botPatched",
+      bot: { ...announcement, threadId: kind === "botPatchedSwitch" ? "replacement-thread" : waiting.threadId },
+    });
+    expect(next.bots[0]?.waitingOnTeammate).toBeUndefined();
+    expect(next.bots[0]?.messages).toEqual(waiting.messages);
+  });
+
+  it("clears the wait on an idle frame too, not only a working one", () => {
+    const { waitingOnTeammate: _oldWait, ...announcement } = waiting;
+    const next = reducer({ ...initialState, bots: [waiting] }, { type: "botPatched", bot: { ...announcement, busy: false, activity: "idle" } });
+    expect(next.bots[0]?.waitingOnTeammate).toBeUndefined();
+    expect(next.bots[0]?.busy).toBe(false);
+  });
+
+  it("keeps the wait painted while the frame still carries it", () => {
+    const { messages, ...rest } = waiting;
+    const next = reducer({ ...initialState, bots: [waiting] }, { type: "botPatched", bot: rest });
+    expect(next.bots[0]?.waitingOnTeammate).toBe(true);
+    expect(next.bots[0]?.messages).toBe(messages);
+  });
+});
+
 describe("browser profile announcements", () => {
   it.each([undefined, null, "guest", "another-profile"])("replaces an old shared profile with %s without losing chat", (profile) => {
     const bot: Bot = {
