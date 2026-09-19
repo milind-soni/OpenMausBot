@@ -58,7 +58,7 @@ data class QuickReply(
     }
 }
 
-/** A transcript item, either one message or a folded consecutive activity run. */
+/** A transcript item: one message, consecutive activity, or completed narration. */
 sealed interface TranscriptRow {
     val head: Message
     val id: String
@@ -67,6 +67,13 @@ sealed interface TranscriptRow {
     val role: Message.Role get() = head.role
     val kind: Message.Kind get() = head.kind
     val senderName: String? get() = head.from?.name
+
+    /** Search and pagination anchors can land inside a folded row. */
+    fun containsMessage(messageId: String): Boolean = when (this) {
+        is Single -> message.id == messageId
+        is ActivityRun -> items.any { it.id == messageId }
+        is AssistantTurn -> items.any { it.id == messageId }
+    }
 
     data class Single(val message: Message) : TranscriptRow {
         override val head: Message get() = message
@@ -84,6 +91,23 @@ sealed interface TranscriptRow {
         override val endAt: Double get() = items.last().at
         val running: Boolean get() = items.any { it.tool?.ok == null }
     }
+
+    data class AssistantTurn(val turnId: String, val items: List<Message>, val elapsed: Double) : TranscriptRow {
+        init {
+            require(items.isNotEmpty()) { "A turn fold must contain narration." }
+        }
+
+        override val head: Message get() = items.first()
+        override val id: String get() = "turn.$turnId"
+        override val endAt: Double get() = items.last().at
+        val label: String get() {
+            if (elapsed < 1_000) return "Worked"
+            val seconds = (elapsed / 1_000).toLong()
+            val duration = if (seconds < 60) "${seconds}s"
+                else "${seconds / 60}m ${(seconds % 60).toString().padStart(2, '0')}s"
+            return "Worked for $duration"
+        }
+    }
 }
 
 /**
@@ -100,11 +124,12 @@ fun rosterPreview(messages: List<Message>, detail: ActivityDetail): String =
         is TranscriptRow.Single -> previewText(last.message)
         is TranscriptRow.ActivityRun ->
             "${if (last.running) "Running" else "Ran"} ${last.items.size} steps"
+        is TranscriptRow.AssistantTurn -> last.label
     }
 
 /** What a single message reads as in a roster row. */
 internal fun previewText(message: Message): String = when (message.kind) {
-    Message.Kind.TEXT -> message.text.orEmpty()
+    Message.Kind.TEXT -> message.webhookContent?.task ?: message.text.orEmpty()
     // a pending card's question is the preview; the roster row already says
     // "waiting on you" beside it
     Message.Kind.OPTIONS -> {
@@ -124,10 +149,30 @@ internal fun previewText(message: Message): String = when (message.kind) {
  * Fold a transcript to the selected activity detail. Failed steps are never folded in reduced
  * mode; hidden mode intentionally removes all activity, including failures.
  */
-fun transcriptRows(messages: List<Message>, detail: ActivityDetail): List<TranscriptRow> = when (detail) {
-    ActivityDetail.FULL -> messages.map(TranscriptRow::Single)
-    ActivityDetail.HIDDEN -> messages.filterNot { it.kind == Message.Kind.ACTIVITY }.map(TranscriptRow::Single)
-    ActivityDetail.REDUCED -> buildList {
+fun transcriptRows(messages: List<Message>, detail: ActivityDetail): List<TranscriptRow> {
+    // Only a server completion marker makes narration foldable. Legacy and
+    // unfinished turns stay visible, matching desktop and iOS.
+    val narration = mutableMapOf<String, MutableList<Message>>()
+    val startedAt = mutableMapOf<String, Double>()
+    var lastUserAt: Double? = null
+    val folds = mutableMapOf<String, TranscriptRow.AssistantTurn>()
+    val hiddenIds = mutableSetOf<String>()
+    for (message in messages) {
+        if (message.role == Message.Role.USER) lastUserAt = message.at
+        val turnId = message.turnId?.takeIf { it.isNotEmpty() } ?: continue
+        if (message.role != Message.Role.BOT || message.kind != Message.Kind.TEXT) continue
+        if (message.turnTerminal == true) {
+            val items = narration.remove(turnId)?.takeIf { it.isNotEmpty() } ?: continue
+            folds[items.first().id] = TranscriptRow.AssistantTurn(
+                turnId, items.toList(), (message.at - (startedAt[turnId] ?: items.first().at)).coerceAtLeast(0.0),
+            )
+            hiddenIds.addAll(items.map { it.id })
+        } else {
+            if (turnId !in narration) startedAt[turnId] = lastUserAt ?: message.at
+            narration.getOrPut(turnId) { mutableListOf() }.add(message)
+        }
+    }
+    return buildList {
         val run = mutableListOf<Message>()
         fun flush() {
             when (run.size) {
@@ -139,7 +184,13 @@ fun transcriptRows(messages: List<Message>, detail: ActivityDetail): List<Transc
         }
 
         messages.forEach { message ->
-            if (message.kind != Message.Kind.ACTIVITY) {
+            val turn = folds[message.id]
+            if (turn != null) {
+                flush()
+                add(turn)
+            } else if (message.id in hiddenIds || (detail == ActivityDetail.HIDDEN && message.kind == Message.Kind.ACTIVITY)) {
+                // The reversible turn fold owns narration; Hidden owns tools.
+            } else if (detail != ActivityDetail.REDUCED || message.kind != Message.Kind.ACTIVITY) {
                 flush()
                 add(TranscriptRow.Single(message))
             } else if (message.tool?.ok == false) {

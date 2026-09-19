@@ -200,6 +200,9 @@ data class Message(
      * finally lands.
      */
     val queueId: String? = null,
+    /** Completed provider turns can fold narration without guessing which reply is final. */
+    val turnId: String? = null,
+    val turnTerminal: Boolean? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
     enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, UNKNOWN }

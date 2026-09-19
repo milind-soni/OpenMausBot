@@ -198,6 +198,8 @@ struct ChatView: View {
                                     )
                                 case let .activityRun(items):
                                     ActivityRunChip(items: items, openThread: openThread)
+                                case let .assistantTurn(turn):
+                                    AssistantTurnChip(turn: turn, chat: current, openLink: openLink, openThread: openThread)
                                 }
                             }
                             .id(row.id)
@@ -211,7 +213,8 @@ struct ChatView: View {
                         if let live = session.state.streaming[threadId], !live.isEmpty {
                             StreamingBubble(text: live, reasoning: nil, color: current.color)
                                 .id(Self.liveBubbleId)
-                        } else if let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
+                        } else if activityDetail != ActivityDetail.hidden.rawValue,
+                                  let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
                             // Only while there is no answer yet. Once tokens
                             // of the reply exist, the reasoning is behind us
                             // and showing both is just noise.
@@ -1376,7 +1379,7 @@ struct MessageRow: View {
                     Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
                 }
             }
-            let visibleText = attachedContent.text
+            let visibleText = message.webhookContent?.task ?? attachedContent.text
             if !visibleText.isEmpty {
                 Divider()
                 Button("Copy", systemImage: "doc.on.doc") {
@@ -1395,6 +1398,7 @@ struct MessageRow: View {
             // sending its computer-local transport path back as prose.
             if message.role == .user,
                message.kind == .text,
+               message.webhookContent == nil,
                attachedContent.attachments.isEmpty,
                case let .bot(bot) = chat {
                 Divider()
@@ -1589,6 +1593,8 @@ struct TextBubble: View {
                     GitPRDiffCardView(filename: diff.filename, diffText: diff.diff)
                 } else if let table = parsedTable {
                     SQLResultTableView(columns: table.headers, rows: table.rows)
+                } else if let webhook = message.webhookContent {
+                    WebhookMessageBody(content: webhook)
                 } else if mine {
                     let shared = attachedContent
                     ForEach(Array(shared.attachments.enumerated()), id: \.offset) { _, attachment in
