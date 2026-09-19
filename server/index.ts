@@ -5,6 +5,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { extname, join } from "node:path";
 
 import { z } from "zod";
@@ -10605,6 +10606,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
   }, keepLocked),
 });
 
+const toolResults = new ToolResults();
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   let url: URL;
   try {
@@ -11091,6 +11093,23 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { status: "pending", surface: option.surface,
           message: `End this turn now without using the previous computer tools. OpenMausBot will continue the original request on ${option.label} with a fresh tool connection.` });
+      }
+      if (method === "POST" && path === "/api/internal/tool-result") {
+        const body = await readInternalBody();
+        if (!body || typeof body.text !== "string" || !body.text || body.text.length > TOOL_RESULT_MAX_CHARS ||
+          (body.truncated !== undefined && typeof body.truncated !== "boolean")) {
+          return json(res, 400, { error: "Expected bounded text and an optional truncated boolean." });
+        }
+        return json(res, 201, toolResults.save(internalCapability, body.text, body.truncated));
+      }
+      if (method === "GET" && path === "/api/internal/tool-result") {
+        const id = url.searchParams.get("id") ?? "";
+        const offset = Number(url.searchParams.get("offset") ?? "0");
+        if (!/^r-[0-9a-f-]{36}$/.test(id) || !Number.isSafeInteger(offset) || offset < 0) {
+          return json(res, 400, { error: "Expected a saved result id and a non-negative integer offset." });
+        }
+        const result = toolResults.read(internalCapability, id, offset);
+        return result ? json(res, 200, result) : json(res, 404, { error: "Saved result unavailable in this bot's conversation, expired, or offset out of range. Do not repeat an action to retrieve its output." });
       }
       if (method === "POST" && path === "/api/internal/memory") {
         const body = await readInternalBody();

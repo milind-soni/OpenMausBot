@@ -40,6 +40,7 @@ import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
 import { peerName } from "../peer-roster.ts";
+import { boundedAgentResult } from "./agents-result.ts";
 
 const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
 const BOT_ID = process.env.OMB_BOT_ID ?? "";
@@ -384,6 +385,18 @@ const ROUTINE_FIELDS_SCHEMA = {
 const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.";
 
 const TOOLS = [
+  {
+    name: "tool_result_read",
+    description: "Read a missing portion of an oversized agents-tool result using the saved id and next offset from its notice. Returns at most 16,000 characters, only from this bot in this conversation. Use only when the preview is insufficient; do not load every page by default. Results expire after one hour, on app restart, or under cache pressure. This never reruns the original action.",
+    inputSchema: {
+      type: "object", additionalProperties: false,
+      properties: {
+        id: { type: "string", description: "Saved result id copied from the truncation notice." },
+        offset: { type: "integer", minimum: 0, description: "Character offset copied from the previous result's notice. Defaults to 0." },
+      },
+      required: ["id"],
+    },
+  },
   {
     name: "list_shared_computers",
     description: "List online desktop computers explicitly shared with this workspace, and their allowed folders/capabilities. These are the user's computers, not this server. An offline or unshared computer cannot be accessed. Folder paths use opaque folder IDs and relative paths.",
@@ -904,6 +917,10 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
   return body;
 }
 
+const capResult = (text: string) => boundedAgentResult(text, (retained, truncated) =>
+  api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
+    body: JSON.stringify({ text: retained, truncated }) }));
+
 /** Like api, but a refusal comes back as its body instead of an Error —
  * for the tools whose refusals carry more than a sentence. */
 async function apiResponse(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: Json }> {
@@ -1014,6 +1031,17 @@ function recallSpeaker(hit: Json): string {
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean }> {
+  if (name === "tool_result_read") {
+    if (typeof args.id !== "string" || !/^r-[0-9a-f-]{36}$/.test(args.id) ||
+      (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0))) {
+      return { text: "Use the saved result id and a non-negative integer offset from its notice.", isError: true };
+    }
+    const r = await api(`/api/internal/tool-result?id=${encodeURIComponent(args.id)}&offset=${args.offset ?? 0}`, { signal: AbortSignal.timeout(3_000) });
+    const text = String(r.text ?? "");
+    return { text: `${text}\n\n[${Number(r.nextOffset) < Number(r.length)
+      ? `Read more with tool_result_read id "${args.id}" and offset ${r.nextOffset}.`
+      : `End of retained result.${r.truncated ? " The original tail exceeded the storage limit and was omitted." : ""}`}]` };
+  }
   if (name === "list_room_targets") {
     const r = await api("/api/internal/room-targets");
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
@@ -1742,20 +1770,20 @@ async function handle(msg: Json) {
           return;
         }
         if (name === "list_shared_computers") {
-          textResult(id, JSON.stringify(await api("/api/internal/shared-computers")));
+          textResult(id, await capResult(JSON.stringify(await api("/api/internal/shared-computers"))));
           return;
         }
         if (name === "shared_computer") {
           const response = await api("/api/internal/shared-computers", { method: "POST", body: JSON.stringify(params.arguments ?? {}) });
           const result = response.result as Json;
           if (Array.isArray(result?.content)) ok(id, result);
-          else textResult(id, JSON.stringify(result));
+          else textResult(id, await capResult(JSON.stringify(result)));
           return;
         }
         const { text, isError } = await callTool(name, (params.arguments ?? {}) as Json);
-        textResult(id, text, isError);
+        textResult(id, name === "tool_result_read" ? text : await capResult(text), isError);
       } catch (e) {
-        textResult(id, (e as Error).message, true);
+        textResult(id, await capResult((e as Error).message), true);
       }
       return;
     }
