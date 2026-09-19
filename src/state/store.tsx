@@ -232,6 +232,9 @@ export interface Group {
    * thread and omit this collection. */
   tasks?: GroupTask[];
   messages: Message[];
+  /** The server answered a bounded page and older messages remain in storage.
+   * Absent on an unpaged response, which always carries the whole thread. */
+  hasMore?: boolean;
 }
 
 /** One of a channel's independent conversations. The channel's threadId
@@ -402,6 +405,9 @@ export interface Bot {
    * bot's own session (null is how a clear travels over PATCH). */
   browserProfile?: string | null;
   messages: Message[];
+  /** The server answered a bounded page and older messages remain in storage.
+   * Absent on an unpaged response, which always carries the whole thread. */
+  hasMore?: boolean;
   /** Renderer-only: a deleted selection moved to a thread whose full
    * transcript has not arrived yet. Never carry the deleted chat into it. */
   awaitingThreadSnapshot?: boolean;
@@ -778,6 +784,16 @@ export interface AppState {
   /** Frames arriving outside the visible thread, including the small gap
    * between a switch snapshot and its HTTP response. */
   backgroundThreadEvents: Record<string, Array<Extract<Action, { type: "messageAdded" | "messagePatched" | "threadActive" | "optimisticMessageRemoved" }>>>;
+  /** Threads with a scrollback page in flight, so one click cannot ask the
+   * server for the same page twice. */
+  loadingOlder: Record<string, true>;
+  /** Bumped whenever a thread's transcript is replaced or its visible branch
+   * moves. A scrollback page carries the value it was asked under, so a page
+   * that was in flight across an edit, a branch switch or a thread swap is
+   * discarded instead of prepending rows from the branch it left behind.
+   * Ordinary appends do not bump it: a page must still land over new
+   * messages arriving while it was on the wire. */
+  transcriptGeneration: Record<string, number>;
 }
 
 const MAX_CONSUMED_QUEUE_IDS = 64;
@@ -928,6 +944,9 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
+  // scrollback: ask the server for the page before the oldest message held
+  | { type: "loadOlderMessages"; threadId: string }
+  | { type: "olderMessages"; threadId: string; generation: number; messages: Message[]; hasMore: boolean }
   // `threadId` is the thread the card was shown in; `groupId` when the card
   // is in a room: the message lives on the room's list, and the answer goes
   // to the room's thread
@@ -1109,6 +1128,19 @@ export function openThread(
   return false;
 }
 
+/** Retire the scrollback pages a thread has in flight: whatever they return
+ * describes a transcript this client no longer holds. */
+function bumpTranscriptGeneration(state: AppState, threadId: string | undefined | null): AppState {
+  if (!threadId) return state;
+  return {
+    ...state,
+    transcriptGeneration: {
+      ...state.transcriptGeneration,
+      [threadId]: (state.transcriptGeneration[threadId] ?? 0) + 1,
+    },
+  };
+}
+
 function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppState {
   return { ...state, bots: state.bots.map((b) => (b.id === botId ? fn(b) : b)) };
 }
@@ -1203,12 +1235,44 @@ export function reducer(state: AppState, action: Action): AppState {
         computerControl: action.computerControl,
         selectedId,
         backgroundThreadEvents: {},
+        loadingOlder: {},
+        transcriptGeneration: {},
         modelVariantSessions: {},
       };
       return reconcileSnapshotQueues(
         action.botQueuedMessages ? replaceBotQueues(hydrated, action.botQueuedMessages) : hydrated,
         [...action.bots, ...action.groups],
       );
+    }
+    case "loadOlderMessages":
+      return state.loadingOlder[action.threadId]
+        ? state
+        : { ...state, loadingOlder: { ...state.loadingOlder, [action.threadId]: true } };
+    case "olderMessages": {
+      const { [action.threadId]: _done, ...loadingOlder } = state.loadingOlder;
+      // The page describes the transcript as it was when it was asked for.
+      // If that transcript has since been replaced or rewound, the rows it
+      // carries may belong to an abandoned branch — drop them, but never
+      // leave the pill spinning.
+      if ((state.transcriptGeneration[action.threadId] ?? 0) !== action.generation) {
+        return { ...state, loadingOlder };
+      }
+      const prepend = <T extends { messages: Message[]; threadId: string; hasMore?: boolean }>(owner: T): T => {
+        const held = new Set(owner.messages.map((message) => message.id));
+        return {
+          ...owner,
+          // A page that raced an edit or a branch switch can overlap what is
+          // already held; the held copy is the newer one.
+          messages: [...action.messages.filter((message) => !held.has(message.id)), ...owner.messages],
+          hasMore: action.hasMore,
+        };
+      };
+      return {
+        ...state,
+        loadingOlder,
+        bots: state.bots.map((bot) => (bot.threadId === action.threadId ? prepend(bot) : bot)),
+        groups: state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group)),
+      };
     }
     case "sections":
       return { ...state, sections: action.sections };
@@ -1286,15 +1350,22 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, webhookAttempts: attempts.slice(-2_000) };
     }
     case "groupPatched": {
-      const exists = state.groups.some((g) => g.id === action.group.id);
+      // A payload carrying a transcript replaces what this client holds, so
+      // pages asked for under the old one no longer describe it.
+      const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
+      const exists = fenced.groups.some((g) => g.id === action.group.id);
       const groups = exists
-        ? state.groups.map((g) => (g.id === action.group.id ? {
+        ? fenced.groups.map((g) => (g.id === action.group.id ? {
             ...g, ...action.group,
             section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
             messages: action.group.messages ?? g.messages,
+            // A payload that carries a transcript answers the scrollback
+            // question with it: a bounded page says so, and a frame sent
+            // without that marker is the whole thread.
+            hasMore: action.group.messages ? Boolean(action.group.hasMore) : g.hasMore,
           } : g))
-        : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...state.groups];
-      return { ...state, groups };
+        : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...fenced.groups];
+      return { ...fenced, groups };
     }
     case "groupDeleted": {
       const groups = state.groups.filter((g) => g.id !== action.groupId);
@@ -1795,7 +1866,8 @@ export function reducer(state: AppState, action: Action): AppState {
     case "threadActive": {
       const bot = state.bots.find((b) => b.threadId === action.threadId);
       if (!bot) return state;
-      return updateBot(state, bot.id, (b) => ({
+      // The visible branch moved (an edit, a rewind, another client's switch).
+      return updateBot(bumpTranscriptGeneration(state, action.threadId), bot.id, (b) => ({
         ...b,
         activeLeafId: action.activeLeafId,
       }));
@@ -1810,7 +1882,7 @@ export function reducer(state: AppState, action: Action): AppState {
         if (!children.length) break;
         cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
       }
-      return updateBot(state, action.botId, (b) => ({ ...b, activeLeafId: cur }));
+      return updateBot(bumpTranscriptGeneration(state, bot.threadId), action.botId, (b) => ({ ...b, activeLeafId: cur }));
     }
     // optimistic room edits; the server's group frame confirms them later
     case "patchGroup":
@@ -1934,11 +2006,14 @@ export function reducer(state: AppState, action: Action): AppState {
         ),
       };
     case "taskSwitched": {
-      let switched = updateBot(state, action.bot.id, (bot) => ({
+      let switched = updateBot(bumpTranscriptGeneration(state, action.bot.threadId), action.bot.id, (bot) => ({
         ...bot,
         ...action.bot,
         computer: action.bot.computer,
         messages: action.bot.messages ?? [],
+        // The snapshot decides whether this thread has scrollback. Merging
+        // would carry the previous thread's answer onto a new one.
+        hasMore: action.bot.hasMore,
         awaitingThreadSnapshot: false,
       }));
       for (const frame of state.backgroundThreadEvents[action.bot.threadId] ?? []) switched = reducer(switched, frame);
@@ -1993,6 +2068,8 @@ const MAX_KEPT_SCREEN_FRAMES = 8;
 export const initialState: AppState = {
   modelVariantSessions: {},
   backgroundThreadEvents: {},
+  loadingOlder: {},
+  transcriptGeneration: {},
   bots: [],
   groups: [],
   sections: [],
@@ -2061,6 +2138,17 @@ export async function createBotWithRole(role?: BotRole, request: typeof api = ap
     return { bot, profileError: error instanceof Error ? error.message : String(error) };
   }
 }
+
+/** Messages per thread in a snapshot, and per scrollback page.
+ *
+ * An unbounded `/api/bots` serialises every message of every thread: a
+ * long-running room reaches tens of megabytes, which a remote companion
+ * cannot buffer and a phone should never be sent. The server has answered
+ * bounded pages since the `?messages=` parameter was added; this client now
+ * asks for one and pages back through `/api/threads/:id/messages?before=`.
+ * Kept at the server's own page maximum so one page fills more than the
+ * transcript window mounts. */
+export const MESSAGE_PAGE_SIZE = 200;
 
 export async function api<T = any>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
   // timeoutMs races the fetch against AbortSignal.timeout, combined with any
@@ -2388,7 +2476,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         send: (botId, patch, signal, currentBot) =>
           persistBotUpdate(botId, patch, signal, api, window.ogb?.approvals, currentBot),
         reconcile: async (botId, signal) => {
-          const result: { bots: BotAnnouncement[] } = await api("/api/bots", { signal });
+          const result: { bots: BotAnnouncement[] } = await api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`, { signal });
           return result.bots.find((candidate) => candidate.id === botId) ?? null;
         },
         onAuthoritative: (bot, optimisticOverlay) => {
@@ -2411,6 +2499,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const dispatch = useMemo(() => {
     const navigation = new Map<string, number>();
+    const olderPagesInFlight = new Set<string>();
     let creatingBot = false;
     const showError = (e: unknown) => {
       rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) });
@@ -2492,7 +2581,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // write supersedes it: those settings are still unconfirmed.
         if (taskWrites.get(threadId) === pending) {
           pending.patch = {};
-          void api("/api/bots").then(({ bots }) => {
+          void api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots }) => {
             if (taskWrites.get(threadId) !== pending) return;
             const bot = bots.find((candidate: Bot) => candidate.id === botId);
             if (bot) {
@@ -2587,6 +2676,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         action.type !== "deleteBot"
       ) rawDispatch(action);
       switch (action.type) {
+        case "loadOlderMessages": {
+          // The reducer's flag is for the UI; this set is the guard, because
+          // `stateRef` still holds the state from before this dispatch.
+          if (olderPagesInFlight.has(action.threadId)) break;
+          olderPagesInFlight.add(action.threadId);
+          const current = stateRef.current;
+          const owner = [...current.bots, ...current.groups].find((candidate) => candidate.threadId === action.threadId);
+          const before = owner?.messages[0]?.id;
+          // The transcript this page is being asked about. `loadOlderMessages`
+          // does not move it, so the value here is the one the reducer will
+          // compare against when the answer lands.
+          const generation = current.transcriptGeneration[action.threadId] ?? 0;
+          // Nothing to page back from: the reducer's loading flag would never
+          // be cleared by a response that is not coming.
+          if (!before) {
+            olderPagesInFlight.delete(action.threadId);
+            rawDispatch({ type: "olderMessages", threadId: action.threadId, generation, messages: [], hasMore: false });
+            break;
+          }
+          api<{ messages: Message[]; hasMore?: boolean }>(
+            `/api/threads/${action.threadId}/messages?limit=${MESSAGE_PAGE_SIZE}&before=${encodeURIComponent(before)}`,
+          )
+            .finally(() => olderPagesInFlight.delete(action.threadId))
+            .then((page) => rawDispatch({
+              type: "olderMessages",
+              threadId: action.threadId,
+              generation,
+              messages: page.messages ?? [],
+              hasMore: Boolean(page.hasMore),
+            }))
+            .catch((error) => {
+              // Clear the flag on the way out, or the pill stays disabled for
+              // the rest of the session after one failed page.
+              rawDispatch({ type: "olderMessages", threadId: action.threadId, generation, messages: [], hasMore: true });
+              showError(error);
+            });
+          break;
+        }
         case "notice":
           if (action.notice) setTimeout(() => rawDispatch({ type: "notice", notice: null }), 6000);
           break;
@@ -3036,7 +3163,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           const ready = action.type === "newTask"
             ? botPatchQueue.flush(action.botId)
             : Promise.resolve();
-          void ready.then(() => api<{ bot: Bot }>(action.type === "newTask" ? `/api/bots/${action.botId}/tasks` : `/api/bots/${action.botId}/tasks/${action.threadId}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId } : {}) }))
+          // A new task's thread is empty, so only the switch needs a page.
+          void ready.then(() => api<{ bot: Bot }>(action.type === "newTask"
+            ? `/api/bots/${action.botId}/tasks`
+            : `/api/bots/${action.botId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId } : {}) }))
             .then((r) => {
               if (!r?.bot || navigation.get(action.botId) !== revision) return;
               dispatch({ type: "taskSwitched", bot: r.bot });
@@ -3063,7 +3193,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "switchGroupTask":
-          api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}`, { method: "POST" })
+          api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}?messages=${MESSAGE_PAGE_SIZE}`, { method: "POST" })
             .then((r) => r?.group && dispatch({ type: "groupPatched", group: r.group }))
             .catch(showError);
           break;
@@ -3202,7 +3332,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     const loadAll = async (): Promise<boolean> => {
       const chat = () =>
-        api("/api/bots").then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
+        api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;
           rawDispatch({
             type: "hydrate",

@@ -9758,6 +9758,91 @@ describe("message pages", () => {
     expect((await api("GET", `/api/threads/${full.threadId}/messages?limit=1.5`)).status).toBe(400);
   });
 
+  it("bounds a channel task switch the same way as a snapshot", async () => {
+    const full = await seedRoom(6);
+    const created = await api("POST", `/api/groups/${full.id}/tasks`, { title: "Second" });
+    expect(created.status).toBe(201);
+
+    // switching back with a page bounds the transcript it answers with
+    const paged = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=2`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.group.threadId).toBe(full.threadId);
+    expect(paged.body.group.messages).toHaveLength(2);
+    expect(paged.body.group.hasMore).toBe(true);
+    expect(paged.body.group.tasks).toHaveLength(2);
+
+    // "0" predates paging: settings only, no transcript key at all
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const settings = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=0`);
+    expect(settings.status).toBe(200);
+    expect(settings.body.group).not.toHaveProperty("messages");
+
+    // and no parameter still answers with the whole thread
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const whole = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}`);
+    expect(whole.body.group.messages).toHaveLength(6);
+    expect(whole.body.group).not.toHaveProperty("hasMore");
+
+    // A rejected parameter must not move the channel first: park it on the
+    // other thread and ask for this one with a value the server refuses.
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const parked = (await api("GET", "/api/bots?messages=0")).body.groups.find((g: { id: string }) => g.id === full.id).threadId;
+    expect(parked).toBe(created.body.task.threadId);
+    expect((await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=lots`)).status).toBe(400);
+    expect((await api("GET", "/api/bots?messages=0")).body.groups.find((g: { id: string }) => g.id === full.id).threadId).toBe(parked);
+    await api("DELETE", `/api/groups/${full.id}`);
+  });
+
+  it("bounds a bot thread switch the same way as a snapshot", async () => {
+    const { body } = await api("GET", "/api/bots?messages=0");
+    const bot = body.bots[0];
+    const created = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Second" });
+    expect(created.status).toBe(201);
+
+    const paged = await api("POST", `/api/bots/${bot.id}/tasks/${bot.threadId}?messages=1`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.bot.threadId).toBe(bot.threadId);
+    expect(paged.body.bot.messages.length).toBeLessThanOrEqual(1);
+    expect(paged.body.bot).toHaveProperty("hasMore");
+
+    await api("POST", `/api/bots/${bot.id}/tasks/${created.body.task.threadId}`);
+    const settings = await api("POST", `/api/bots/${bot.id}/tasks/${bot.threadId}?messages=0`);
+    expect(settings.body.bot).not.toHaveProperty("messages");
+
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${created.body.task.threadId}`);
+  });
+
+  it("keeps the switch frame bounded, so a paged switch never emits the whole thread", async () => {
+    // Longer than one default page: a frame carrying the lot would be exactly
+    // the payload the bounded HTTP page exists to avoid.
+    const full = await seedRoom(60);
+    const created = await api("POST", `/api/groups/${full.id}/tasks`, { title: "Second" });
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+
+    const stream = await openSse(`${BASE}/api/events`);
+    try {
+      const paged = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=5`);
+      expect(paged.status).toBe(200);
+      expect(paged.body.group.messages).toHaveLength(5);
+
+      // The switch emits a settings-only frame too; this is the one that
+      // carries a transcript, and it is the one that has to stay bounded.
+      const frame = await stream.until((f) => f.kind === "group"
+        && f.group?.id === full.id
+        && f.group?.threadId === full.threadId
+        && Array.isArray(f.group?.messages));
+      expect(frame.group.messages.length).toBeLessThanOrEqual(50);
+      expect(frame.group.messages.length).toBeLessThan(full.messages.length);
+      expect(frame.group.hasMore).toBe(true);
+      // the newest page, so a client that only folds frames stays current
+      expect(frame.group.messages.at(-1).id).toBe(full.messages.at(-1).id);
+      expect(stream.frames.every((f: any) => (f.group?.messages?.length ?? 0) < full.messages.length)).toBe(true);
+    } finally {
+      stream.close();
+      await api("DELETE", `/api/groups/${full.id}`);
+    }
+  });
+
   it("404s an image on a message that has none", async () => {
     const full = await seedRoom(1);
     const res = await fetch(`${BASE}/api/threads/${full.threadId}/messages/${full.messages[0].id}/image`);

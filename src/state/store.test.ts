@@ -1642,6 +1642,104 @@ describe("pending queued chip", () => {
   });
 });
 
+describe("scrollback pages", () => {
+  const message = (id: string, at: number) =>
+    ({ id, at, role: "user", kind: "text", text: id }) as never as Message;
+  const bot = {
+    id: "bot-1",
+    threadId: "thread-1",
+    messages: [message("m3", 3), message("m4", 4)],
+    hasMore: true,
+  } as never as Bot;
+  const state = { ...initialState, bots: [bot] };
+
+  it("marks the thread loading so one click cannot ask twice", () => {
+    const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
+    expect(loading.loadingOlder["thread-1"]).toBe(true);
+    expect(reducer(loading, { type: "loadOlderMessages", threadId: "thread-1" })).toBe(loading);
+  });
+
+  it("prepends a page, keeps held copies, and clears the flag", () => {
+    const loading = reducer(state, { type: "loadOlderMessages", threadId: "thread-1" });
+    const next = reducer(loading, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation: loading.transcriptGeneration["thread-1"] ?? 0,
+      // m3 overlaps the page this client already holds
+      messages: [message("m1", 1), message("m2", 2), message("m3", 3)],
+      hasMore: false,
+    });
+    expect(next.bots[0].messages.map((m) => m.id)).toEqual(["m1", "m2", "m3", "m4"]);
+    expect(next.bots[0].hasMore).toBe(false);
+    expect(next.loadingOlder).toEqual({});
+  });
+
+  it("drops a page that was in flight across a rewind, and stops the spinner", () => {
+    const withLeaf = { ...bot, activeLeafId: "m4" } as never as Bot;
+    const loading = reducer({ ...initialState, bots: [withLeaf] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+
+    // an edit rewinds the visible branch while the page is on the wire
+    const rewound = reducer(loading, { type: "threadActive", threadId: "thread-1", activeLeafId: "m3" });
+    expect(rewound.transcriptGeneration["thread-1"]).not.toBe(generation);
+
+    const landed = reducer(rewound, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("abandoned", 1)],
+      hasMore: false,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m3", "m4"]);
+    expect(landed.bots[0].hasMore).toBe(true);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("still lands a page over messages that arrived while it was on the wire", () => {
+    const loading = reducer({ ...initialState, bots: [bot] }, { type: "loadOlderMessages", threadId: "thread-1" });
+    const generation = loading.transcriptGeneration["thread-1"] ?? 0;
+    const appended = reducer(loading, {
+      type: "messageAdded",
+      threadId: "thread-1",
+      message: message("m5", 5) as never as Message,
+    });
+    const landed = reducer(appended, {
+      type: "olderMessages",
+      threadId: "thread-1",
+      generation,
+      messages: [message("m2", 2)],
+      hasMore: true,
+    });
+    expect(landed.bots[0].messages.map((m) => m.id)).toEqual(["m2", "m3", "m4", "m5"]);
+    expect(landed.loadingOlder).toEqual({});
+  });
+
+  it("answers the scrollback question from a payload that carries a transcript", () => {
+    const group = {
+      id: "room",
+      threadId: "room-thread",
+      name: "Room",
+      memberIds: [],
+      defaultResponder: { kind: "mentions" },
+      createdAt: 1,
+      bulletin: "",
+      unread: false,
+      messages: [message("m9", 9)],
+      hasMore: true,
+    } as never as Group;
+    const withRoom = { ...initialState, groups: [group] };
+    // a frame that carries the whole thread and no page marker IS the thread
+    const complete = reducer(withRoom, {
+      type: "groupPatched",
+      group: { id: "room", threadId: "room-thread", messages: [message("m8", 8), message("m9", 9)] } as never as Group,
+    });
+    expect(complete.groups[0].hasMore).toBe(false);
+    // a patch with no transcript leaves the answer alone
+    const renamed = reducer(withRoom, { type: "groupPatched", group: { id: "room", name: "Renamed" } });
+    expect(renamed.groups[0].hasMore).toBe(true);
+  });
+});
+
 describe("messageAdded leaf adoption", () => {
   const baseBot = {
     id: "bot-1",

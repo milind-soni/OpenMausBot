@@ -488,6 +488,8 @@
   "chat.inspectorHint": "Inspector — runtime events and raw protocol for this thread",
   "chat.conversationWith": "Conversation with {name}",
   "chat.showEarlier": "Show earlier messages ({count} more)",
+  "chat.loadEarlier": "Load earlier messages",
+  "chat.loadingEarlier": "Loading earlier messages…",
   "chat.showLater": "Show later messages ({count} more)",
   "chat.provisioning": "Setting up this bot's computer…",
   "chat.jumpToLatest": "Jump to latest",

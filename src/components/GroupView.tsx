@@ -1045,9 +1045,12 @@ export function GroupView({ group }: { group: Group }) {
   // Expanding prepends rows: capture the height first, then after the commit
   // shift scrollTop by the growth so the message under the cursor stays put
   // (browser scroll anchoring is disabled on this container).
-  const preExpandHeight = useRef<number | null>(null);
+  // The captured height belongs to the thread it was taken in: a switch
+  // between the capture and the commit would otherwise shift the new
+  // thread's viewport by the old one's growth.
+  const preExpandHeight = useRef<{ key: string; height: number } | null>(null);
   const showEarlier = () => {
-    preExpandHeight.current = scrollRef.current?.scrollHeight ?? null;
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
     // expanding means reading scrollback — never let a mid-expand stream
     // event pin the viewport back to the bottom
     setBottomFollow(false);
@@ -1056,19 +1059,45 @@ export function GroupView({ group }: { group: Group }) {
   };
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (preExpandHeight.current === null || !el) return;
-    el.scrollTop += el.scrollHeight - preExpandHeight.current;
+    const captured = preExpandHeight.current;
+    if (!captured || !el) return;
     preExpandHeight.current = null;
+    if (captured.key !== transcriptKey) return;
+    el.scrollTop += el.scrollHeight - captured.height;
     // keep the resume-follow heuristic from reading the restore as a
     // downward user scroll
     previousScrollTop.current = el.scrollTop;
-  }, [transcriptWindow.start]);
+    // transcriptKey is a dependency so a switch runs this and drops a capture
+    // that belongs to the thread being left.
+  }, [transcriptWindow.start, transcriptKey]);
 
   const showLater = () => {
     setBottomFollow(false);
     const nextEnd = Math.min(group.messages.length, endIndex + TRANSCRIPT_WINDOW_SIZE);
     setTranscriptWindow((w) => ({ ...w, end: nextEnd >= group.messages.length ? null : nextEnd }));
   };
+
+  // Scrollback across the network: the snapshot holds a bounded page, and
+  // everything before it is still on the server. Asking for it prepends rows
+  // exactly like expanding the local window, so the same height capture keeps
+  // the viewport still — here it is applied when the transcript grows at the
+  // front rather than when the boundary moves.
+  const olderPending = Boolean(state.loadingOlder[group.threadId]);
+  const loadOlder = () => {
+    preExpandHeight.current = scrollRef.current ? { key: transcriptKey, height: scrollRef.current.scrollHeight } : null;
+    setBottomFollow(false);
+    dispatch({ type: "loadOlderMessages", threadId: group.threadId });
+  };
+  const oldestId = group.messages[0]?.id;
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const captured = preExpandHeight.current;
+    if (!captured || !el) return;
+    preExpandHeight.current = null;
+    if (captured.key !== transcriptKey) return;
+    el.scrollTop += el.scrollHeight - captured.height;
+    previousScrollTop.current = el.scrollTop;
+  }, [oldestId, transcriptKey]);
 
   const atEnd = () => {
     const el = scrollRef.current;
@@ -1311,7 +1340,7 @@ export function GroupView({ group }: { group: Group }) {
               </div>
             </div>
           )}
-          {hiddenCount > 0 && (
+          {hiddenCount > 0 ? (
             <div className="flex justify-center pt-2">
               <button
                 onClick={showEarlier}
@@ -1320,7 +1349,17 @@ export function GroupView({ group }: { group: Group }) {
                 {t("chat.showEarlier", { count: hiddenCount })}
               </button>
             </div>
-          )}
+          ) : group.hasMore ? (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={loadOlder}
+                disabled={olderPending}
+                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[12.5px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-60"
+              >
+                {olderPending ? t("chat.loadingEarlier") : t("chat.loadEarlier")}
+              </button>
+            </div>
+          ) : null}
           <Transcript
             group={group}
             members={members}

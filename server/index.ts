@@ -13843,13 +13843,33 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (channelTaskSwitchBlocked(group, m[2])) {
         return json(res, 409, { error: "this channel is working or waiting on you in another task" });
       }
+      // Parsed before the switch: a rejected parameter must not leave the
+      // channel pointing at another thread.
+      const requestedMessages = url.searchParams.get("messages");
+      const switchLimit = pageSize(requestedMessages);
+      if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
-      const fresh = groupWithThread(switched);
-      broadcast({ kind: "group", group: fresh });
-      const responseGroup = url.searchParams.get("messages") === "0"
-        ? { ...publicGroupState(switched), tasks: store.groupTasks(switched.id) }
-        : fresh;
+      const switchedSettings = { ...publicGroupState(switched), tasks: store.groupTasks(switched.id) };
+      // The frame says the channel moved; it is not a transcript delivery.
+      // A long room's whole history over SSE is the payload `?messages=`
+      // exists to avoid, and it would also overwrite a bounded snapshot on
+      // every other client. One default page is enough to render the switch;
+      // anything earlier pages back through /api/threads/:id/messages.
+      broadcast({
+        kind: "group",
+        group: { ...switchedSettings, ...messagePage(switched.threadId, DEFAULT_PAGE) },
+      });
+      // "0" predates paging and means settings only — no `messages` key at
+      // all, which clients tell apart from an empty page. A positive page is
+      // the transcript a client can actually hold; omitting the parameter
+      // keeps the whole transcript, as it always did — and only that branch
+      // materialises it.
+      const responseGroup = requestedMessages === "0"
+        ? switchedSettings
+        : switchLimit === undefined
+          ? groupWithThread(switched)
+          : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
       return json(res, 200, { group: responseGroup });
     }
     if (m && method === "PATCH") {
@@ -15911,13 +15931,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 409, { error: "this bot is securely saving a credential — try again when it finishes" });
       }
       // Navigation only: execution owns its thread, never this selected id.
+      const requestedMessages = url.searchParams.get("messages");
+      const switchLimit = pageSize(requestedMessages);
+      if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchTask(bot.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such task" });
-      const fresh = botWithThread(switched);
-      broadcast({ kind: "bot", bot: fresh });
-      const responseBot = url.searchParams.get("messages") === "0"
-        ? { ...wireBot(switched), tasks: store.tasks(switched.id).map(wireTask) }
-        : fresh;
+      const switchedSettings = { ...wireBot(switched), tasks: store.tasks(switched.id).map(wireTask) };
+      // Bounded for the same reason as the channel switch above.
+      broadcast({
+        kind: "bot",
+        bot: { ...switchedSettings, ...messagePage(switched.threadId, DEFAULT_PAGE) },
+      });
+      // "0" is settings only, a positive page is a bounded transcript, and no
+      // parameter is the whole thread — the one branch that materialises it.
+      const responseBot = requestedMessages === "0"
+        ? switchedSettings
+        : switchLimit === undefined
+          ? botWithThread(switched)
+          : { ...switchedSettings, ...messagePage(switched.threadId, switchLimit) };
       return json(res, 200, { bot: responseBot });
     }
     if (m && method === "PATCH") {
