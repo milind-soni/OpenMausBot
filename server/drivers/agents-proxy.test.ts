@@ -8,6 +8,7 @@ import { createServer, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { createTurnScopedCounter } from "./agents-proxy/context.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -376,6 +377,7 @@ beforeAll(async () => {
       OMB_THREAD_ID: "thread-asker-routine",
       OMB_COMMS_TOKEN: TOKEN,
       OMB_TURN_DEPTH: "0",
+      OMB_TURN_GENERATION: "turn-1",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
     },
@@ -1769,6 +1771,7 @@ describe("with computer sharing off (the default)", () => {
         OMB_THREAD_ID: "thread-asker-routine",
         OMB_COMMS_TOKEN: TOKEN,
         OMB_TURN_DEPTH: "0",
+      OMB_TURN_GENERATION: "turn-1",
         OMB_SKILL_AUTHORING_ENABLED: "1",
         // deliberately no OMB_SHARED_COMPUTERS_ENABLED
       },
@@ -1837,6 +1840,7 @@ describe("coordinate_bots arguments (room turn)", () => {
         OMB_THREAD_ID: "thread-asker-routine",
         OMB_COMMS_TOKEN: TOKEN,
         OMB_TURN_DEPTH: "0",
+      OMB_TURN_GENERATION: "turn-1",
         OMB_ROOM_TURN: "1",
       },
       stdio: ["pipe", "pipe", "inherit"],
@@ -1896,5 +1900,18 @@ describe("coordinate_bots arguments (room turn)", () => {
     expect(text).toContain("botIds");
     expect(text).toContain("message");
     expect(lastCoordinateBody).toBeNull();
+  });
+});
+
+describe("createTurnScopedCounter", () => {
+  it("counts each turn generation independently", () => {
+    const count = createTurnScopedCounter();
+    expect(count("turn-1")).toBe(0);
+    expect(count("turn-2")).toBe(0);
+    count("turn-1", 1);
+    count("turn-1", 1);
+    count("turn-2", 1);
+    expect(count("turn-1")).toBe(2);
+    expect(count("turn-2")).toBe(1);
   });
 });

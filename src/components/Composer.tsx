@@ -1,5 +1,5 @@
 import { track } from "@/lib/analytics";
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
 import { useStore, visibleMessages, currentTaskBot, type Bot, type Group, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -50,35 +50,11 @@ import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
 import { useThreadRefs } from "./ThreadRefs";
-import {
-  QueuedComposerMessages,
-  composerCanSteerQueuedMessages,
-  doubleEnterSteerWindowExpiresAt,
-  doubleEnterSteersQueue,
-} from "./ComposerQueuedMessages";
-import { skillAuthoringEnabled } from "@/lib/feature-flags";
-import { mentionChoicesForQuery } from "@/lib/mentions";
+import { QueuedComposerMessages, doubleEnterSteersQueue } from "./ComposerQueuedMessages";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
-import {
-  composerSlashTrigger,
-  goalTextFromComposer,
-  replaceComposerSlashTrigger,
-  type ComposerSlashCommand,
-} from "@/lib/composer-commands";
-
-/** The active @mention query at the caret: the text between an `@` that
- * starts a word and the caret. null = no mention being typed. */
-function mentionQueryAt(text: string, caret: number): { start: number; query: string } | null {
-  const upto = text.slice(0, caret);
-  const at = upto.lastIndexOf("@");
-  if (at === -1) return null;
-  if (at > 0 && !/\s/.test(upto[at - 1])) return null; // user@host, not a tag
-  const query = upto.slice(at + 1);
-  if (query.length > 24 || query.includes("@") || query.includes("\n")) return null;
-  return { start: at, query };
-}
-
-type MentionChoice = { id: string; name: string; bot?: Bot };
+import { goalTextFromComposer } from "@/lib/composer-commands";
+import { useComposerPickers } from "./composer/use-composer-pickers";
+import { useComposerSteer } from "./composer/use-composer-steer";
 
 interface ComposerDraftSnapshot extends ComposerSendSnapshot {
   reply: Message | null;
@@ -242,177 +218,54 @@ export function Composer({
   const engineSupportsImages = imageTargetsSupport(effectiveText, effectiveChannelMode);
 
   // ── Slash commands and @mentions ─────────────────────────────────────
-  const slash = composerSlashTrigger(text, caret);
-  const locale = activeLocale();
-  const commandCandidates = useMemo(() => {
-    if (!slash || slash.start === dismissedSlashAt) return [];
-    const supportsAgents = (candidate?: Bot) =>
-      Boolean(
-        candidate &&
-          state.instances.find(
-            (instance) => instance.instanceId === candidate.modelSelection.instanceId,
-          )?.capabilities?.agentsMcp,
-      );
-    const available: ComposerSlashCommand[] = [];
-    if (group && !group.dm) available.push({
-      id: "goal",
-      label: "/goal",
-      description: t("composer.command.goalDesc"),
-    });
-    if (
-      skillAuthoringEnabled(state.config) &&
-      (group ? (members ?? []).some(supportsAgents) : supportsAgents(bot))
-    ) {
-      available.push({
-        id: "learn",
-        label: "/learn",
-        description: t("composer.command.learnDesc"),
-      });
-    }
-    // Setup mode needs the agents tools (propose_profile and friends) and a
-    // single bot: a room cannot set itself up.
-    if (!group && supportsAgents(bot)) available.push({
-      id: "setup",
-      label: "/setup",
-      description: t("composer.command.setupDesc"),
-    });
-    const query = slash.query.toLowerCase();
-    return available.filter(
-      (command) =>
-        !query ||
-        command.id.startsWith(query) ||
-        command.description.toLowerCase().includes(query),
-    );
-  }, [slash, dismissedSlashAt, group, members, bot, state.config, state.instances, locale]);
-  const commandPickerOpen = commandCandidates.length > 0;
+  const {
+    slash,
+    mention,
+    commandCandidates,
+    commandPickerOpen,
+    candidates,
+    mentionPickerOpen,
+    pickMention,
+    pickCommand,
+  } = useComposerPickers({
+    state,
+    bot,
+    group,
+    members,
+    text,
+    caret,
+    highlight,
+    setHighlight,
+    dismissedAt,
+    setDismissedAt,
+    dismissedSlashAt,
+    setDismissedSlashAt,
+    setCaret,
+    setChannelMode,
+    editText,
+    inputRef,
+    mentionListRef,
+  });
 
-  // Tag another bot; the agent reaches it via ask_bot.
-  const mention = mentionQueryAt(text, caret);
-  const candidates = useMemo(() => {
-    if (!mention || mention.start === dismissedAt) return [];
-    const pool: MentionChoice[] = group
-      ? [
-          ...(!group.dm ? [{ id: "__everyone__", name: "everyone" }] : []),
-          ...(members ?? []).map((member) => ({ id: member.id, name: member.name, bot: member })),
-        ]
-      : state.bots
-          .filter((member) => member.id !== bot?.id && !member.hidden)
-          .map((member) => ({ id: member.id, name: member.name, bot: member }));
-    return mentionChoicesForQuery(pool, mention.query);
-  }, [mention, dismissedAt, state.bots, bot?.id, group, members]);
-  const mentionPickerOpen = candidates.length > 0;
-
-  useEffect(
-    () => setHighlight(0),
-    [mention?.start, mention?.query, slash?.start, slash?.query],
-  );
-
-  useEffect(() => {
-    if (!mentionPickerOpen) return;
-    mentionListRef.current
-      ?.querySelector<HTMLElement>(`[data-mention-index="${highlight}"]`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [highlight, mentionPickerOpen]);
-
-  const pickMention = (peer: MentionChoice) => {
-    if (!mention) return;
-    const after = text.slice(caret);
-    const next = `${text.slice(0, mention.start)}@${peer.name} ${after}`;
-    editText(next);
-    const newCaret = mention.start + peer.name.length + 2;
-    setCaret(newCaret);
-    // picking completes this tag — close the popup so the next Enter sends
-    setDismissedAt(mention.start);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(newCaret, newCaret);
-    });
-  };
-
-  const pickCommand = (command: ComposerSlashCommand) => {
-    if (!slash) return;
-    const replacement = command.id === "learn" ? "/learn " : command.id === "setup" ? "/setup " : "";
-    const next = replaceComposerSlashTrigger(text, slash, replacement);
-    editText(next.text);
-    setCaret(next.caret);
-    setDismissedSlashAt(slash.start);
-    setChannelMode(command.id === "goal" ? "goal" : "chat");
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(next.caret, next.caret);
-    });
-  };
-
-  // Busy sends are owned by the harness immediately for both channels and
-  // 1:1 chats. Keeping a channel follow-up in this component used to lose its
-  // auto-send intent whenever navigation unmounted the composer.
-  const pendingCount = (state.pendingQueued[threadId] ?? []).length;
-  const queuedMessages = state.pendingQueued[threadId] ?? [];
-  const canSteerQueued = composerCanSteerQueuedMessages(
+  const {
+    pendingCount,
+    queuedMessages,
+    canSteerQueued,
+    steering,
+    interruptTurn,
+    steerQueued,
+    steerAgainUntilRef,
+  } = useComposerSteer({
+    state,
+    dispatch,
+    bot,
+    group,
+    threadId,
     busy,
     locked,
-    pendingCount,
-    Boolean(approval),
-  );
-  const [steering, setSteering] = useState(false);
-  const interruptTurn = () => {
-    if (group) dispatch({ type: "interruptGroup", groupId: group.id, threadId });
-    else if (bot) dispatch({ type: "interrupt", botId: bot.id, threadId });
-  };
-  const queueHeadId = queuedMessages[0]?.queueId;
-  const steerQueued = () => {
-    if (!queueHeadId) return;
-    setSteering(true);
-    const settle = () => setSteering(false);
-    if (group && canSteer) {
-      // A steer-capable room folds the queued head into the running turn
-      // through the server; it never interrupts the turn to do it.
-      dispatch({ type: "steerGroupQueued", groupId: group.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
-    } else if (group) {
-      // A room whose running engine cannot steer keeps the old behavior:
-      // Steer ends the running turn so the next queued message starts.
-      dispatch({ type: "interruptGroup", groupId: group.id, threadId, onError: settle });
-    } else if (bot && canSteer) {
-      // A steer-capable engine folds the queued words into the running turn
-      // through the server; it never interrupts the turn to do it.
-      dispatch({ type: "steerQueued", botId: bot.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
-    } else if (bot) {
-    // Unlike the general Stop control, Steer belongs to this exact queue.
-    // Scoping prevents a 1:1 queue from interrupting the same bot in a room
-    // (or a routine) whose work is unrelated to the words shown here.
-      dispatch({ type: "interrupt", botId: bot.id, threadId, onError: settle });
-    }
-  };
-  useEffect(() => setSteering(false), [threadId, queueHeadId]);
-  // Double-Enter gesture: when a send lands as a queued chip on a busy
-  // steer-capable thread (live steer lost its race, an attachment, an
-  // older CLI), a second Enter within a short window pulls that queue into
-  // the running turn. Plain sends never consult the window, so they keep
-  // their normal latency.
-  const steerAgainUntilRef = useRef(0);
-  const prevPendingCountRef = useRef(pendingCount);
-  useEffect(() => {
-    const expiresAt = doubleEnterSteerWindowExpiresAt(
-      prevPendingCountRef.current,
-      pendingCount,
-      busy,
-      canSteer,
-    );
-    if (expiresAt !== null) steerAgainUntilRef.current = expiresAt;
-    prevPendingCountRef.current = pendingCount;
-  }, [pendingCount, busy, canSteer]);
-  // Most engines acknowledge interruption quickly, but a lost response must
-  // not leave a control claiming to steer forever. Queue drain or turn end
-  // clears it immediately; twenty seconds is the final recovery floor.
-  useEffect(() => {
-    if (!busy || pendingCount === 0) {
-      setSteering(false);
-      return;
-    }
-    if (!steering) return;
-    const timeout = window.setTimeout(() => setSteering(false), 20_000);
-    return () => window.clearTimeout(timeout);
-  }, [busy, pendingCount, steering]);
+    canSteer,
+    approval,
+  });
   const fileInput = useRef<HTMLInputElement>(null);
   const [approvalWarning, setApprovalWarning] = useState<{
     mode: "auto" | "full";
@@ -506,9 +359,9 @@ export function Composer({
       },
     };
     if (group) {
-      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
+      dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, at: Date.now(), ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, ...retry });
+      dispatch({ type: "send", botId: bot.id, at: Date.now(), ...retry });
     }
   };
   const send = () => {
@@ -542,6 +395,7 @@ export function Composer({
         type: "sendGroup",
         groupId: group.id,
         text: body,
+        at: Date.now(),
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
@@ -554,6 +408,7 @@ export function Composer({
         type: "send",
         botId: bot.id,
         text: body,
+        at: Date.now(),
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
