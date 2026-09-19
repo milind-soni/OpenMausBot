@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
+import { buildTurnContext, NATIVELY_REPLAYING_DRIVER_KINDS } from "../turn-context.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 describe("OpenAICompatDriver", () => {
@@ -346,6 +347,60 @@ describe("OpenAICompatDriver", () => {
 
     expect(sentBody?.stream).toBe(true);
     expect(sentBody?.stream_options).toEqual({ include_usage: true });
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("does not double the transcript when the thread was rewound", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"ok"}}]}\n' +
+            'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const transcript = [
+      { role: "user" as const, text: "u25-sentinel-first-message" },
+      { role: "assistant" as const, text: "u25-sentinel-first-reply" },
+    ];
+    // Mirrors server/index.ts's real call: buildTurnContext only inlines the
+    // transcript into turnText when the driver is NOT in
+    // NATIVELY_REPLAYING_DRIVER_KINDS. openai-compat's runtime already
+    // replays via SendTurnInput.transcript (messagesFor() in
+    // openai-chat.ts), so both must not fire for the same turn.
+    const { turnText } = buildTurnContext({
+      text: "second message",
+      transcript,
+      rewound: true,
+      fresh: false,
+      externallyUpdated: false,
+      replaysNatively: NATIVELY_REPLAYING_DRIVER_KINDS.includes("openai-compat"),
+    });
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-u25",
+      displayName: "U25",
+      enabled: true,
+      config: { url: "http://host.lima.internal:9090/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    // index.ts ALSO passes the raw transcript on SendTurnInput, which
+    // messagesFor() in openai-chat.ts turns into its own chat messages. Both
+    // would land in the same outgoing request if replaysNatively were wrong.
+    await inst.adapter.sendTurn({ threadId: "thread-u25", text: turnText, transcript });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const serialized = JSON.stringify(sentBody?.messages);
+    const occurrences = serialized.split("u25-sentinel-first-message").length - 1;
+    expect(occurrences).toBe(1);
     recorder.stop();
     await inst.dispose();
   });

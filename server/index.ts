@@ -254,7 +254,7 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import { narrateTool, toUtterances } from "./tts/speech-text.ts";
-import { buildRecoveryText, buildTurnContext, engineIsFresh, peerMessageText } from "./turn-context.ts";
+import { buildRecoveryText, buildTurnContext, engineIsFresh, NATIVELY_REPLAYING_DRIVER_KINDS, peerMessageText } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
@@ -5911,7 +5911,7 @@ async function startTurn(
       rewound,
       fresh,
       externallyUpdated: Boolean(externalContextMarker) || handedStale,
-      replaysNatively: instance.driverKind === "grok",
+      replaysNatively: NATIVELY_REPLAYING_DRIVER_KINDS.includes(instance.driverKind),
     });
     // Snapshot the cursor alongside the context decision. An external result
     // can arrive during async computer/setup work and clear the task cursor;
