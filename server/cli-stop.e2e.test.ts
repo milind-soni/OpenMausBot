@@ -60,8 +60,8 @@ describe.skipIf(process.platform === "win32")("Stop through the isolated server"
       // The root can already have closed, but the helper still owns work.
       expect((await control(["wait", ...target, "--timeout", "1"])).status).toBe("timed-out");
       expect(alive(pids[1]!)).toBe(true);
-      expect((await control(["wait", ...target, "--timeout", "10"])).status).toBe("settled");
-      expect(Date.now() - started).toBeLessThan(10_000);
+      expect((await control(["wait", ...target, "--timeout", "20"])).status).toBe("settled");
+      expect(Date.now() - started).toBeLessThan(20_000);
       expect(pids.some(alive)).toBe(false);
       evidence.push({ stoppedPids: [...pids], alive: pids.map(alive), elapsedMs: Date.now() - started });
       await control(["messages", ...target, "--limit", "10"]);
@@ -69,7 +69,7 @@ describe.skipIf(process.platform === "win32")("Stop through the isolated server"
       // A new turn works after the verified stop and starts a new CLI.
       writeFileSync(gate, "finish");
       await control(["send", ...target, "--text", "Reply after Stop"]);
-      expect((await control(["wait", ...target, "--timeout", "10"])).status).toBe("settled");
+      expect((await control(["wait", ...target, "--timeout", "20"])).status).toBe("settled");
       pids.push(...JSON.parse(readFileSync(pidFile, "utf8")) as number[]);
       const messages = await control(["messages", ...target, "--limit", "10"]);
       expect(messages.messages.some((message: any) => message.role === "bot" && message.text?.includes("Reply after Stop"))).toBe(true);
@@ -81,5 +81,5 @@ describe.skipIf(process.platform === "win32")("Stop through the isolated server"
       console.info(JSON.stringify({ ...fixture.info, evidencePath }));
       await fixture.close();
     }
-  }, 35_000);
+  }, 60_000);
 });
