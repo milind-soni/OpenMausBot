@@ -524,3 +524,127 @@ class SpeechDictationTest {
         }
     }
 }
+
+/**
+ * Call mode — `listenForTurn` on the call-mode branch of
+ * `ios/App/SpeechDictation.swift`: the turn ends a gap after the transcript
+ * last changed, or on the recognizer's final; an empty turn never ends on the
+ * timer; stopping any other way ends it without a callback.
+ */
+class SpeechDictationTurnTest {
+    private var now = 0L
+    private val scheduled = ArrayDeque<() -> Unit>()
+
+    private fun newDictation(fake: TurnFakeFactory): SpeechDictation = SpeechDictation(
+        engineFactory = fake,
+        hasRecordAudio = { true },
+        requestRecordAudio = { it(true) },
+        focus = object : DictationAudioFocus {
+            override fun request(onInterrupted: () -> Unit): Boolean = true
+            override fun abandon() = Unit
+        },
+        preferredLanguages = { listOf("en-US") },
+        currentLocale = { Locale.US },
+        postMain = { it() },
+        postDelayed = { _, block -> scheduled.addLast(block) },
+        clock = { now },
+    )
+
+    /** Advance the clock and run every endpoint check that was queued. */
+    private fun tick(millis: Long) {
+        now += millis
+        val due = scheduled.toList()
+        scheduled.clear()
+        due.forEach { it() }
+    }
+
+    @Test
+    fun theTurnEndsAGapAfterTheTranscriptLastChanged() {
+        val fake = TurnFakeFactory()
+        val dictation = newDictation(fake)
+        val turns = mutableListOf<String>()
+        dictation.listenForTurn(850) { turns += it }
+        assertTrue(dictation.isListening.value)
+
+        fake.listener!!.onPartial("read the")
+        tick(500)
+        fake.listener!!.onPartial("read the logs")
+        tick(500)
+        // 500 ms since the last change: not yet.
+        assertTrue(turns.isEmpty())
+        // The recognizer re-emits the same partial; that is not a change.
+        fake.listener!!.onPartial("read the logs")
+        tick(400)
+        assertEquals(listOf("read the logs"), turns)
+        assertFalse(dictation.isListening.value)
+    }
+
+    @Test
+    fun anEmptyTurnNeverEndsOnTheTimer() {
+        val fake = TurnFakeFactory()
+        val dictation = newDictation(fake)
+        val turns = mutableListOf<String>()
+        dictation.listenForTurn(850) { turns += it }
+        tick(5_000)
+        tick(5_000)
+        assertTrue(turns.isEmpty())
+        assertTrue(dictation.isListening.value)
+    }
+
+    @Test
+    fun theRecognizersFinalEndsTheTurnAtOnce() {
+        val fake = TurnFakeFactory()
+        val dictation = newDictation(fake)
+        val turns = mutableListOf<String>()
+        dictation.listenForTurn(850) { turns += it }
+        fake.listener!!.onPartial("hello")
+        fake.listener!!.onFinal("hello there")
+        assertEquals(listOf("hello there"), turns)
+        assertFalse(dictation.isListening.value)
+    }
+
+    @Test
+    fun silenceTheRecognizerGaveUpOnIsAnEmptyTurnNotAFailure() {
+        val fake = TurnFakeFactory()
+        val dictation = newDictation(fake)
+        val turns = mutableListOf<String>()
+        dictation.listenForTurn(850) { turns += it }
+        fake.listener!!.onError(SpeechEngine.ErrorKind.FAILED)
+        assertEquals(listOf(""), turns)
+        assertNull(dictation.error.value)
+    }
+
+    @Test
+    fun stoppingAnyOtherWayEndsTheTurnWithoutACallback() {
+        val fake = TurnFakeFactory()
+        val dictation = newDictation(fake)
+        val turns = mutableListOf<String>()
+        dictation.listenForTurn(850) { turns += it }
+        fake.listener!!.onPartial("hello")
+        dictation.stop()
+        tick(2_000)
+        assertTrue(turns.isEmpty())
+        // A later composer session is not a call: no endpointer applies.
+        dictation.toggle(capturing = "")
+        fake.listener!!.onPartial("typed")
+        tick(2_000)
+        assertTrue(turns.isEmpty())
+        assertTrue(dictation.isListening.value)
+    }
+
+    private class TurnFakeFactory : SpeechEngineFactory {
+        var listener: SpeechEngine.Listener? = null
+        override fun openers(): List<EngineOpener> = listOf(
+            EngineOpener(isOnDevice = false) {
+                object : SpeechEngine {
+                    override val isOnDevice: Boolean = false
+                    override fun start(request: RecognitionRequest, listener: SpeechEngine.Listener) {
+                        this@TurnFakeFactory.listener = listener
+                    }
+                    override fun cancel() = Unit
+                    override fun destroy() = Unit
+                }
+            },
+        )
+    }
+}
