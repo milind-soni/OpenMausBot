@@ -8,8 +8,9 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
-import { handleToolCall, request, validateBaseUrl } from "./mcp-server.ts";
+import { handleToolCall, request } from "./mcp-server.ts";
 import { launchUi, runControlOmbUi } from "./testing/control-omb-ui.ts";
+import { configuredServerUrl, validateBaseUrl } from "../shared/server-endpoint.ts";
 import { removeTempDir, waitForExit } from "../server/testing/cleanup.ts";
 import { freePortBlock } from "../server/testing/ports.ts";
 
@@ -123,7 +124,7 @@ function positiveInteger(value: unknown, name: string, fallback: number, maximum
 function configuredUrl(raw: unknown, env: NodeJS.ProcessEnv, requiredForMutation: boolean): string | undefined {
   const explicit = typeof raw === "string" && raw.trim()
     ? raw.trim()
-    : env.OPENMAUSBOT_URL?.trim() || (env.OMB_PORT ? `http://127.0.0.1:${env.OMB_PORT}` : "");
+    : configuredServerUrl(env) ?? "";
   if (!explicit) {
     if (requiredForMutation) {
       throw new ControlOmbError(
@@ -133,7 +134,7 @@ function configuredUrl(raw: unknown, env: NodeJS.ProcessEnv, requiredForMutation
     }
     return undefined;
   }
-  return validateBaseUrl(explicit);
+  return validateBaseUrl(explicit, env);
 }
 
 function target(values: Record<string, unknown>): { type: "bot" | "channel"; id: string } {
@@ -442,7 +443,11 @@ export async function launchVerificationServer(
     OMB_AGENT_BROWSER_PATH: browser.binaryPath,
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
-  if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
+  if (boxFixtureApi) {
+    childEnv.OMB_BOX_API = boxFixtureApi;
+    // The verification fixture's desktop URLs live on desktop.invalid.
+    childEnv.OMB_BOX_DESKTOP_HOSTS = "desktop.invalid";
+  }
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
     cwd: ROOT,
     env: childEnv,

@@ -51,6 +51,7 @@ describe("Box trial provisioning", () => {
     // SAFETY: the test server was bound as TCP above, not to a Unix socket.
     const port = (api.address() as AddressInfo).port;
     vi.stubEnv("OMB_BOX_API", `http://127.0.0.1:${port}/api/box/v1`);
+    vi.stubEnv("OMB_BOX_DESKTOP_HOSTS", "desktop.example");
     vi.resetModules();
     ({ provisionBox } = await import("./box.ts"));
   });
