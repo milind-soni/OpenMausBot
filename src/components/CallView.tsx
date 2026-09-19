@@ -192,7 +192,7 @@ export function CallTargetButton({
               onClick={() => {
                 setHelpOpen(false);
                 if (setupBotId && setupBotId !== targetId) dispatch({ type: "select", id: setupBotId });
-                dispatch({ type: "toggleSettings", open: true, section: "voice" });
+                dispatch({ type: "openOverlay", kind: "settings", open: true, section: "voice" });
               }}
               className="mt-2.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110"
             >
@@ -395,7 +395,7 @@ function Call({ bot }: { bot: Bot }) {
       }
 
       move("sending");
-      dispatch({ type: "send", botId: bot.id, text: said, threadId: bot.threadId });
+      dispatch({ type: "send", botId: bot.id, text: said, at: Date.now(), threadId: bot.threadId });
     });
     const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
       if (!alive.current || currentCall() !== bot.id) return;
