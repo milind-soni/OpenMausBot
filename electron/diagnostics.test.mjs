@@ -18,12 +18,13 @@ const {
 } = require("./diagnostics.mjs");
 
 // The desktop shell cannot import TypeScript, so its credential list is a
-// hand copy of server/config.ts WORKSPACE_CREDENTIAL_ENV. This test is the
+// hand copy of WORKSPACE_CREDENTIAL_ENV (server/config/credentials.ts).
+// This test is the
 // drift alarm: a name added server-side without updating the copy here would
 // otherwise ship an unredacted export path.
-describe("credential env parity with server/config.ts", () => {
+describe("credential env parity with server/config/credentials.ts", () => {
   it("matches WORKSPACE_CREDENTIAL_ENV exactly", () => {
-    const config = readFileSync(new URL("../server/config.ts", import.meta.url), "utf8");
+    const config = readFileSync(new URL("../server/config/credentials.ts", import.meta.url), "utf8");
     const match = config.match(/WORKSPACE_CREDENTIAL_ENV = \[([\s\S]*?)\] as const/);
     expect(match).not.toBeNull();
     const names = [...match[1].matchAll(/"([A-Z0-9_]+)"/g)].map((m) => m[1]);
