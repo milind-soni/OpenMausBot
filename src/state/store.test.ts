@@ -24,7 +24,7 @@ import {
 } from "./store";
 import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } from "../lib/live-events";
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
-import type { RoutineRun } from "../lib/routines";
+import type { RoutineRun } from "../../shared/routines";
 
 describe("screen frame ownership", () => {
   it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {

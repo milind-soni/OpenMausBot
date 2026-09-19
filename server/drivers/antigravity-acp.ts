@@ -211,9 +211,12 @@ export class AntigravityAcpClient {
       this.child.once("close", (code, signal) => {
         this.noteStartupDiagnostic(this.diagnosticBuffer);
         this.diagnosticBuffer = "";
-        if (!this.closed) this.failAll(new Error(
-          `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
-        ));
+        if (!this.closed) {
+          this.failAll(new Error(
+            `Antigravity ACP exited ${code ?? signal ?? "unexpectedly"}.${this.nativeStartupHint ? ` ${this.nativeStartupHint}` : ""}`,
+          ));
+          this.close();
+        }
         resolve();
       });
       // Failed spawns also emit `close`. An `error` alone can instead mean
