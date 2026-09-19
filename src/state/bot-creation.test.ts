@@ -2,7 +2,7 @@ import { createElement, type Dispatch } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { botRole, roleProfilePatch } from "@/lib/bot-roles";
-import { createBotWithRole, initialState, reducer, StoreProvider, useStore, type Action } from "./store";
+import { createBotWithRole, initialState, overlayOpen, reducer, StoreProvider, useStore, type Action, type OverlayKind } from "./store";
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const deferred = () => {
@@ -66,8 +66,8 @@ describe("shared bot creation guard", () => {
     const onCreated = vi.fn();
     const onError = vi.fn();
     dispatch({ type: "newBot", role: botRole("research"), onCreated, onError });
-    dispatch({ type: "toggleNewBot", open: false });
-    dispatch({ type: "toggleNewBot", open: true });
+    dispatch({ type: "closeOverlay", kind: "newBot" });
+    dispatch({ type: "openOverlay", kind: "newBot", open: true });
     dispatch({ type: "newBot" });
     expect(request).toHaveBeenCalledTimes(1);
     post.resolve(response({ bot }));
@@ -105,23 +105,40 @@ describe("shared bot creation guard", () => {
 describe("setup navigation", () => {
   it("keeps creation pending through close/reopen until the request settles", () => {
     const pending = reducer(initialState, { type: "botCreationPending", on: true });
-    const closed = reducer(pending, { type: "toggleNewBot", open: false });
-    const reopened = reducer(closed, { type: "toggleNewBot", open: true });
-    expect(reopened).toMatchObject({ newBotOpen: true, botCreationPending: true });
-    expect(reducer(reopened, { type: "botCreationPending", on: false })).toMatchObject({ newBotOpen: true, botCreationPending: false });
+    const closed = reducer(pending, { type: "closeOverlay", kind: "newBot" });
+    const reopened = reducer(closed, { type: "openOverlay", kind: "newBot", open: true });
+    expect(overlayOpen(reopened, "newBot")).toBe(true);
+    expect(reopened).toMatchObject({ botCreationPending: true });
+    expect(overlayOpen(reducer(reopened, { type: "botCreationPending", on: false }), "newBot")).toBe(true);
+    expect(reducer(reopened, { type: "botCreationPending", on: false })).toMatchObject({ botCreationPending: false });
   });
 
   it("opens one modal with exclusive keyboard ownership", () => {
-    const start = { ...initialState, settingsOpen: true, appSettingsOpen: true, pluginsOpen: true, shortcutsOpen: true, computerOpen: true };
-    const next = reducer(start, { type: "toggleNewBot", open: true });
-    expect(next).toMatchObject({ newBotOpen: true, settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false, computerOpen: true });
-    expect(reducer(next, { type: "toggleNewBot", open: false })).toMatchObject({ settingsOpen: false, pluginsOpen: false });
+    const start = {
+      ...initialState,
+      overlays: { ...initialState.overlays, open: ["settings", "appSettings", "plugins", "shortcuts", "computer"] as OverlayKind[] },
+    };
+    const next = reducer(start, { type: "openOverlay", kind: "newBot", open: true });
+    expect(overlayOpen(next, "newBot")).toBe(true);
+    expect(overlayOpen(next, "settings")).toBe(false);
+    expect(overlayOpen(next, "appSettings")).toBe(false);
+    expect(overlayOpen(next, "plugins")).toBe(false);
+    expect(overlayOpen(next, "shortcuts")).toBe(false);
+    expect(overlayOpen(next, "computer")).toBe(true);
+    const closed = reducer(next, { type: "closeOverlay", kind: "newBot" });
+    expect(overlayOpen(closed, "settings")).toBe(false);
+    expect(overlayOpen(closed, "plugins")).toBe(false);
   });
 
   it("opens the requested Plugins surface and remembers it on reopen", () => {
-    const next = reducer({ ...initialState, settingsOpen: true }, { type: "togglePlugins", open: true, surface: "mcp" });
-    expect(next).toMatchObject({ pluginsOpen: true, pluginsSurface: "mcp", settingsOpen: false });
-    const closed = reducer(next, { type: "togglePlugins", open: false });
-    expect(reducer(closed, { type: "togglePlugins", open: true })).toMatchObject({ pluginsSurface: "mcp" });
+    const next = reducer(
+      { ...initialState, overlays: { ...initialState.overlays, open: ["settings"] } },
+      { type: "openOverlay", kind: "plugins", open: true, section: "mcp" },
+    );
+    expect(overlayOpen(next, "plugins")).toBe(true);
+    expect(next.overlays.pluginsSurface).toBe("mcp");
+    expect(overlayOpen(next, "settings")).toBe(false);
+    const closed = reducer(next, { type: "closeOverlay", kind: "plugins" });
+    expect(reducer(closed, { type: "openOverlay", kind: "plugins", open: true }).overlays.pluginsSurface).toBe("mcp");
   });
 });
