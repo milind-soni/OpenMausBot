@@ -29,8 +29,8 @@ import {
   skillRequestBehavior,
   type SkillRequestCardData,
 } from "../../shared/skill-request";
-import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
-import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
+import type { Routine, RoutineInput, RoutineRun } from "../../shared/routines";
+import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "../../shared/webhooks";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
@@ -693,6 +693,36 @@ export type BotSettingsSection =
   | "history"
   | "usage";
 
+/** Every modal/panel surface the shell tracks. Several can be open at once —
+ *  bot settings deliberately keeps the computer and inspector panels up, and
+ *  the shortcuts sheet stacks over anything — so the slice keeps an ordered
+ *  list rather than a single value. */
+export type OverlayKind =
+  | "settings"
+  | "plugins"
+  | "newBot"
+  | "computer"
+  | "inspector"
+  | "appSettings"
+  | "shortcuts"
+  | "welcome"
+  | "tour";
+
+/** The section (or plugins surface) an openOverlay action names. */
+export type OverlaySection = AppSettingsSection | BotSettingsSection | "apps" | "mcp";
+
+export interface OverlaysState {
+  /** Open overlays in open order, most recent last. */
+  open: OverlayKind[];
+  /** Which tab the Plugins panel opens on; "mcp" when a bot's tools
+   *  sent the user there to add a server. Remembered across close/reopen. */
+  pluginsSurface: "apps" | "mcp";
+  appSettingsSection: AppSettingsSection;
+  botSettingsSection: BotSettingsSection;
+  /** True only when the open action named a section — accordion expands that row. */
+  botSettingsExpandAccordion: boolean;
+}
+
 export interface ModelVariantSession {
   instanceId: string;
   model: string;
@@ -721,28 +751,11 @@ export interface AppState {
   webhooks: WebhookTrigger[];
   webhookAttempts: WebhookAttempt[];
   webhookIngress: WebhookIngressStatus | null;
-  settingsOpen: boolean;
-  pluginsOpen: boolean;
-  /** Which tab the Plugins panel opens on; "mcp" when a bot's tools
-   * sent the user there to add a server. */
-  pluginsSurface: "apps" | "mcp";
-  /** The "New bot" role picker. */
-  newBotOpen: boolean;
+  /** The modal/panel family: what is open (ordered) plus each overlay's
+   *  remembered section. See OverlaysState. */
+  overlays: OverlaysState;
   /** Creation continues even when the role picker is dismissed. */
   botCreationPending: boolean;
-  computerOpen: boolean;
-  /** the per-thread event inspector (runtime stream + native protocol tee) */
-  inspectorOpen: boolean;
-  appSettingsOpen: boolean;
-  appSettingsSection: AppSettingsSection;
-  shortcutsOpen: boolean;
-  /** the first-run welcome tour, also replayable from Settings → General */
-  welcomeOpen: boolean;
-  /** the guided tour on the live interface that follows the welcome flow */
-  tourOpen: boolean;
-  botSettingsSection: BotSettingsSection;
-  /** True only when the open action named a section — accordion expands that row. */
-  botSettingsExpandAccordion: boolean;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string; threadId?: string }>;
   /** bots whose cloud computer is being provisioned */
@@ -981,17 +994,11 @@ export type Action =
   | { type: "error"; message: string | null }
   | { type: "notice"; notice: AppState["notice"] }
   | { type: "revealThread"; threadId: string }
-  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
-  | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
-  | { type: "toggleNewBot"; open?: boolean }
-  | { type: "toggleComputer"; open?: boolean }
-  | { type: "toggleInspector"; open?: boolean }
+  | { type: "openOverlay"; kind: OverlayKind; open?: boolean; section?: OverlaySection; botId?: string }
+  | { type: "closeOverlay"; kind: OverlayKind }
+  | { type: "closeAllOverlays" }
   | { type: "focusMessage"; threadId: string; messageId: string }
   | { type: "focusMessageConsumed"; nonce: number }
-  | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
-  | { type: "toggleShortcuts"; open?: boolean }
-  | { type: "toggleWelcome"; open?: boolean }
-  | { type: "toggleTour"; open?: boolean }
   | {
       type: "updateBot";
       botId: string;
@@ -1180,6 +1187,35 @@ function optimisticUserMessage(
   };
 }
 
+/** Whether an overlay is currently open. */
+export function overlayOpen(state: AppState, kind: OverlayKind): boolean {
+  return state.overlays.open.includes(kind);
+}
+
+/** Overlays each kind closes when it opens — exactly the exclusivity the old
+ *  per-flag toggles enforced. Bot settings deliberately leaves the computer
+ *  and inspector panels open (their own controls open bot settings); the
+ *  shortcuts sheet closes nothing and only welcome/plugins/newBot dismiss it. */
+const OVERLAY_EXCLUDES: Record<OverlayKind, readonly OverlayKind[]> = {
+  settings: ["appSettings"],
+  plugins: ["settings", "appSettings", "newBot", "shortcuts"],
+  newBot: ["settings", "appSettings", "plugins", "shortcuts"],
+  computer: ["settings", "inspector", "appSettings"],
+  inspector: ["settings", "computer", "appSettings"],
+  appSettings: ["settings", "computer", "inspector", "plugins"],
+  shortcuts: [],
+  tour: ["appSettings"],
+  welcome: ["appSettings", "shortcuts"],
+};
+
+/** showRoutines/showTeamMap replace the chat surface, so the panels living in
+ *  it close; the modals (new bot, shortcuts, welcome, tour) do not. */
+const VIEW_SWITCH_OVERLAYS: readonly OverlayKind[] = ["settings", "computer", "inspector", "appSettings", "plugins"];
+
+function withoutOverlays(overlays: OverlaysState, kinds: readonly OverlayKind[]): OverlaysState {
+  return { ...overlays, open: overlays.open.filter((kind) => !kinds.includes(kind)) };
+}
+
 export function reducer(state: AppState, action: Action): AppState {
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
     const owner = state.bots.find((bot) => (bot.threadId !== action.threadId || bot.awaitingThreadSnapshot) && bot.tasks?.some((task) => task.threadId === action.threadId));
@@ -1219,11 +1255,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         activeView: "routines",
         routinesFocus: { section: action.section, view: action.view, botId: action.botId, routineId: action.routineId, nonce: state.routinesFocus.nonce + 1 },
-        settingsOpen: false,
-        computerOpen: false,
-        inspectorOpen: false,
-        appSettingsOpen: false,
-        pluginsOpen: false,
+        overlays: withoutOverlays(state.overlays, VIEW_SWITCH_OVERLAYS),
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
@@ -1231,11 +1263,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeView: "team-map",
-        settingsOpen: false,
-        computerOpen: false,
-        inspectorOpen: false,
-        appSettingsOpen: false,
-        pluginsOpen: false,
+        overlays: withoutOverlays(state.overlays, VIEW_SWITCH_OVERLAYS),
       };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routinesLoadState: "ready" };
@@ -1311,7 +1339,10 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state,
           activeView: "chat",
           selectedId: action.id,
-          botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
+          overlays: {
+            ...state.overlays,
+            botSettingsSection: action.id !== state.selectedId ? "overview" : state.overlays.botSettingsSection,
+          },
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
         };
       }
@@ -1321,7 +1352,10 @@ export function reducer(state: AppState, action: Action): AppState {
             ...state,
             activeView: "chat",
             selectedId: action.id,
-            botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
+            overlays: {
+              ...state.overlays,
+              botSettingsSection: action.id !== state.selectedId ? "overview" : state.overlays.botSettingsSection,
+            },
           },
           action.id,
           "switch",
@@ -1651,44 +1685,84 @@ export function reducer(state: AppState, action: Action): AppState {
           : state),
         error: action.message,
       };
-    // bot settings, the computer panel, and app settings share the right slot
-    case "toggleSettings": {
-      if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
-      const selectedId = action.botId ?? state.selectedId;
-      // A targeted settings link opens that bot without navigating to chat
-      // or marking its conversations read, even when another panel is open.
-      const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
+    case "openOverlay": {
+      if (action.kind === "settings") {
+        // A targeted settings link opens that bot without navigating to chat
+        // or marking its conversations read, even when another panel is open.
+        if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
+        const selectedId = action.botId ?? state.selectedId;
+        const open = action.open ?? (action.botId !== undefined || !overlayOpen(state, "settings"));
+        if (!open) {
+          // Closing only folds the accordion; the remembered section and the
+          // computer/inspector panels stay as they are.
+          return {
+            ...state,
+            selectedId,
+            overlays: {
+              ...state.overlays,
+              open: state.overlays.open.filter((kind) => kind !== "settings"),
+              botSettingsSection:
+                (action.section as BotSettingsSection | undefined) ??
+                (selectedId !== state.selectedId ? "overview" : state.overlays.botSettingsSection),
+              botSettingsExpandAccordion: false,
+            },
+          };
+        }
+        return {
+          ...state,
+          selectedId,
+          overlays: {
+            ...state.overlays,
+            // Preserve the computer and inspector surfaces; their own controls
+            // can open bot settings. App settings are mutually exclusive.
+            open: [...state.overlays.open.filter((kind) => kind !== "settings" && kind !== "appSettings"), "settings"],
+            botSettingsSection:
+              (action.section as BotSettingsSection | undefined) ??
+              (selectedId !== state.selectedId ? "overview" : state.overlays.botSettingsSection),
+            // Mascot / bare open omits `section` → accordion stays fully collapsed.
+            // Deep links expand that row even when the panel is already open.
+            botSettingsExpandAccordion: action.section !== undefined,
+          },
+        };
+      }
+      const open = action.open ?? !overlayOpen(state, action.kind);
+      if (!open) {
+        return {
+          ...state,
+          overlays: { ...state.overlays, open: state.overlays.open.filter((kind) => kind !== action.kind) },
+        };
+      }
+      const excluded = OVERLAY_EXCLUDES[action.kind];
+      const openList = state.overlays.open.filter((kind) => !excluded.includes(kind));
       return {
         ...state,
-        selectedId,
-        settingsOpen: open,
-        botSettingsSection: action.section ?? (selectedId !== state.selectedId ? "overview" : state.botSettingsSection),
-        // Mascot / bare open omits `section` → accordion stays fully collapsed.
-        // Deep links expand that row even when the panel is already open.
-        botSettingsExpandAccordion: open ? action.section !== undefined : false,
-        // Preserve the computer and inspector surfaces; their own controls
-        // can open bot settings. App settings are mutually exclusive.
-        appSettingsOpen: open ? false : state.appSettingsOpen,
+        overlays: {
+          ...state.overlays,
+          open: openList.includes(action.kind) ? openList : [...openList, action.kind],
+          ...(action.kind === "plugins" && action.section !== undefined
+            ? { pluginsSurface: action.section as "apps" | "mcp" }
+            : {}),
+          ...(action.kind === "appSettings" && action.section !== undefined
+            ? { appSettingsSection: action.section as AppSettingsSection }
+            : {}),
+        },
       };
     }
-    case "togglePlugins": {
-      const open = action.open ?? !state.pluginsOpen;
+    case "closeOverlay": {
       return {
         ...state,
-        pluginsOpen: open,
-        pluginsSurface: action.surface ?? state.pluginsSurface,
-        ...(open ? { settingsOpen: false, appSettingsOpen: false, newBotOpen: false, shortcutsOpen: false } : {}),
+        overlays: {
+          ...state.overlays,
+          open: state.overlays.open.filter((kind) => kind !== action.kind),
+          // Only the settings accordion has close-time side effects.
+          ...(action.kind === "settings" ? { botSettingsExpandAccordion: false } : {}),
+        },
       };
     }
+    case "closeAllOverlays":
+      return { ...state, overlays: { ...state.overlays, open: [] } };
     case "botCreationPending":
       return { ...state, botCreationPending: action.on };
-    case "toggleNewBot": {
-      const open = action.open ?? !state.newBotOpen;
-      return {
-        ...state, newBotOpen: open,
-        ...(open ? { settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false } : {}),
-      };
-    }
     case "notice":
       return { ...state, notice: action.notice };
     case "revealThread":
@@ -1706,60 +1780,6 @@ export function reducer(state: AppState, action: Action): AppState {
     case "focusMessageConsumed":
       if (!state.focusMessage || state.focusMessage.nonce !== action.nonce) return state;
       return { ...state, focusMessage: { ...state.focusMessage, consumed: true } };
-    case "toggleComputer": {
-      const open = action.open ?? !state.computerOpen;
-      return {
-        ...state,
-        computerOpen: open,
-        settingsOpen: open ? false : state.settingsOpen,
-        inspectorOpen: open ? false : state.inspectorOpen,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-      };
-    }
-    case "toggleInspector": {
-      const open = action.open ?? !state.inspectorOpen;
-      return {
-        ...state,
-        inspectorOpen: open,
-        settingsOpen: open ? false : state.settingsOpen,
-        computerOpen: open ? false : state.computerOpen,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-      };
-    }
-    case "toggleAppSettings": {
-      const open = action.open ?? !state.appSettingsOpen;
-      return {
-        ...state,
-        appSettingsOpen: open,
-        appSettingsSection: action.section ?? state.appSettingsSection,
-        settingsOpen: open ? false : state.settingsOpen,
-        computerOpen: open ? false : state.computerOpen,
-        inspectorOpen: open ? false : state.inspectorOpen,
-        pluginsOpen: open ? false : state.pluginsOpen,
-      };
-    }
-    case "toggleShortcuts": {
-      const open = action.open ?? !state.shortcutsOpen;
-      return {
-        ...state,
-        shortcutsOpen: open,
-      };
-    }
-    case "toggleTour": {
-      const open = action.open ?? !state.tourOpen;
-      return { ...state, tourOpen: open, appSettingsOpen: open ? false : state.appSettingsOpen };
-    }
-    case "toggleWelcome": {
-      const open = action.open ?? !state.welcomeOpen;
-      // The tour is a full-screen surface; nothing else should stay open
-      // underneath it, and Settings closes so the replay lands on the tour.
-      return {
-        ...state,
-        welcomeOpen: open,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-        shortcutsOpen: open ? false : state.shortcutsOpen,
-      };
-    }
     case "updateBot": {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
@@ -2007,20 +2027,14 @@ export const initialState: AppState = {
   webhooks: [],
   webhookAttempts: [],
   webhookIngress: null,
-  settingsOpen: false,
-  pluginsOpen: false,
-  pluginsSurface: "apps",
-  newBotOpen: false,
+  overlays: {
+    open: [],
+    pluginsSurface: "apps",
+    appSettingsSection: "general",
+    botSettingsSection: "overview",
+    botSettingsExpandAccordion: false,
+  },
   botCreationPending: false,
-  computerOpen: false,
-  inspectorOpen: false,
-  appSettingsOpen: false,
-  appSettingsSection: "general",
-  shortcutsOpen: false,
-  welcomeOpen: false,
-  tourOpen: false,
-  botSettingsSection: "overview",
-  botSettingsExpandAccordion: false,
   screens: {},
   provisioning: {},
   deletingBots: {},
@@ -2826,7 +2840,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               action.onCreated?.();
               if (profileError) {
                 showError(t("newBot.profileFailed", { error: profileError }));
-                rawDispatch({ type: "toggleSettings", open: true, section: "soul" });
+                rawDispatch({ type: "openOverlay", kind: "settings", open: true, section: "soul" });
               }
             })
             .catch((error) => {

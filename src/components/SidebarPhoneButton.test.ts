@@ -103,7 +103,8 @@ describe("sidebar phone status", () => {
 
   it("opens Settings directly on the internal Remote access section", () => {
     expect(phoneSettingsAction()).toEqual({
-      type: "toggleAppSettings",
+      type: "openOverlay",
+      kind: "appSettings",
       open: true,
       section: "companion",
     });

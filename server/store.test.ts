@@ -1286,6 +1286,56 @@ describe("Store change stream", () => {
     expect(events.at(-1)).toEqual({ type: "group.deleted", groupId: g.id });
   });
 
+  it("deleteGroup is retryable when thread deletion or the save fails partway", () => {
+    const store = new Store(selection);
+    const a = store.createBot();
+    const b = store.createBot();
+    const g = store.createGroup("ops", [a.id, b.id]);
+    const realDeleteThreadRecord = store.deleteThreadRecord.bind(store);
+    store.deleteThreadRecord = () => {
+      throw new Error("thread deletion failed");
+    };
+    expect(() => store.deleteGroup(g.id)).toThrow("thread deletion failed");
+    store.deleteThreadRecord = realDeleteThreadRecord;
+    expect(store.group(g.id)?.id).toBe(g.id);
+    expect(store.deleteGroup(g.id)).toBe(true);
+
+    const g3 = store.createGroup("ops-3", [a.id, b.id]);
+    const channel = store.createGroupTask(g3.id, "channel", false)!;
+    store.appendMessage(g3.threadId, { role: "user", kind: "text", text: "main room" });
+    store.appendMessage(channel.threadId, { role: "user", kind: "text", text: "side channel" });
+    const realTwoPhaseDelete = store.deleteThreadRecord.bind(store);
+    let deletions = 0;
+    store.deleteThreadRecord = (threadId: string) => {
+      deletions += 1;
+      if (deletions === 2) throw new Error("second thread deletion failed");
+      realTwoPhaseDelete(threadId);
+    };
+    expect(() => store.deleteGroup(g3.id)).toThrow("second thread deletion failed");
+    store.deleteThreadRecord = realTwoPhaseDelete;
+    expect(store.group(g3.id)?.id).toBe(g3.id);
+    expect(store.messagesFor(g3.threadId)).toHaveLength(1);
+    expect(store.messagesFor(channel.threadId)).toHaveLength(1);
+    expect(store.deleteGroup(g3.id)).toBe(true);
+    expect(store.messagesFor(g3.threadId)).toHaveLength(0);
+    expect(store.messagesFor(channel.threadId)).toHaveLength(0);
+    const g2 = store.createGroup("ops-2", [a.id, b.id]);
+    const persistable = store as unknown as { saveGroups: () => void };
+    const realSaveGroups = persistable.saveGroups.bind(store);
+    let saveFailed = false;
+    persistable.saveGroups = () => {
+      if (!saveFailed) {
+        saveFailed = true;
+        throw new Error("disk full");
+      }
+      realSaveGroups();
+    };
+    expect(() => store.deleteGroup(g2.id)).toThrow("disk full");
+    expect(store.group(g2.id)?.id).toBe(g2.id);
+    persistable.saveGroups = realSaveGroups;
+    expect(store.deleteGroup(g2.id)).toBe(true);
+  });
+
   it("delivers each change to the listener snapshot captured before emission", () => {
     const store = new Store(selection);
     const bot = store.createBot();
