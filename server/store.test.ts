@@ -13,6 +13,7 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { canAccessTeam } from "./peer-roster.ts";
+import { pendingThreadDeletions } from "./store/messages.ts";
 import { Store, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE } from "./section-context.ts";
@@ -942,6 +943,30 @@ describe("Store", () => {
     expect(existsSync(skillState)).toBe(false);
     expect(store.deleteBot(bot.id)).toBe(false);
   });
+  it("deleteBot retries pending thread deletions from a durable tombstone", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const second = store.createTask(bot.id, "second", false)!;
+    store.appendMessage(second.threadId, { role: "user", kind: "text", text: "second transcript" });
+
+    const realPendingDelete = store.deleteThreadRecord.bind(store);
+    let unlinkFailed = false;
+    store.deleteThreadRecord = (threadId: string) => {
+      if (!unlinkFailed) {
+        unlinkFailed = true;
+        throw new Error("transcript unlink failed");
+      }
+      realPendingDelete(threadId);
+    };
+    expect(() => store.deleteBot(bot.id)).toThrow("transcript unlink failed");
+    store.deleteThreadRecord = realPendingDelete;
+
+    expect(pendingThreadDeletions()[bot.id]).toEqual([bot.threadId, second.threadId]);
+    expect(store.deleteBot(bot.id)).toBe(false);
+    expect(pendingThreadDeletions()[bot.id]).toBeUndefined();
+    expect(new Store(selection).messagesFor(bot.threadId)).toHaveLength(0);
+    expect(new Store(selection).messagesFor(second.threadId)).toHaveLength(0);
+  });
   it("migrates a pre-branching flat transcript file", () => {
     const store = new Store(selection);
     // seedMessages:false — a legacy-era thread has its history ONLY in the
@@ -1284,6 +1309,63 @@ describe("Store change stream", () => {
     store.deleteGroup(g.id);
     expect(events).toContainEqual({ type: "thread.deleted", threadId: g.threadId });
     expect(events.at(-1)).toEqual({ type: "group.deleted", groupId: g.id });
+  });
+
+  it("deleteGroup is retryable when thread deletion or the save fails partway", () => {
+    const store = new Store(selection);
+    const a = store.createBot();
+    const b = store.createBot();
+    const g = store.createGroup("ops", [a.id, b.id]);
+    const realDeleteThreadRecord = store.deleteThreadRecord.bind(store);
+    store.deleteThreadRecord = () => {
+      throw new Error("thread deletion failed");
+    };
+    expect(() => store.deleteGroup(g.id)).toThrow("thread deletion failed");
+    store.deleteThreadRecord = realDeleteThreadRecord;
+    expect(store.group(g.id)?.id).toBe(g.id);
+    expect(store.deleteGroup(g.id)).toBe(true);
+
+    const g3 = store.createGroup("ops-3", [a.id, b.id]);
+    const channel = store.createGroupTask(g3.id, "channel", false)!;
+    store.appendMessage(g3.threadId, { role: "user", kind: "text", text: "main room" });
+    store.appendMessage(channel.threadId, { role: "user", kind: "text", text: "side channel" });
+    const realTwoPhaseDelete = store.deleteThreadRecord.bind(store);
+    let deletions = 0;
+    store.deleteThreadRecord = (threadId: string) => {
+      deletions += 1;
+      if (deletions === 2) throw new Error("second thread deletion failed");
+      realTwoPhaseDelete(threadId);
+    };
+    expect(() => store.deleteGroup(g3.id)).toThrow("second thread deletion failed");
+    store.deleteThreadRecord = realTwoPhaseDelete;
+    expect(pendingThreadDeletions()[g3.id]).toEqual([g3.threadId, channel.threadId]);
+    expect(store.group(g3.id)?.id).toBe(g3.id);
+    expect(store.messagesFor(g3.threadId)).toHaveLength(1);
+    expect(store.messagesFor(channel.threadId)).toHaveLength(1);
+    // durable staging — the transcript SQLite already dropped before the later
+    // failure stays deleted in a fresh Store; only the channel is still retryable
+    const reloaded = new Store(selection);
+    expect(reloaded.messagesFor(g3.threadId)).toHaveLength(0);
+    expect(reloaded.messagesFor(channel.threadId)).toHaveLength(1);
+    expect(store.deleteGroup(g3.id)).toBe(true);
+    expect(store.messagesFor(g3.threadId)).toHaveLength(0);
+    expect(store.messagesFor(channel.threadId)).toHaveLength(0);
+    expect(pendingThreadDeletions()[g3.id]).toBeUndefined();
+    const g2 = store.createGroup("ops-2", [a.id, b.id]);
+    const persistable = store as unknown as { saveGroups: () => void };
+    const realSaveGroups = persistable.saveGroups.bind(store);
+    let saveFailed = false;
+    persistable.saveGroups = () => {
+      if (!saveFailed) {
+        saveFailed = true;
+        throw new Error("disk full");
+      }
+      realSaveGroups();
+    };
+    expect(() => store.deleteGroup(g2.id)).toThrow("disk full");
+    expect(store.group(g2.id)?.id).toBe(g2.id);
+    persistable.saveGroups = realSaveGroups;
+    expect(store.deleteGroup(g2.id)).toBe(true);
   });
 
   it("delivers each change to the listener snapshot captured before emission", () => {
