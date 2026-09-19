@@ -340,12 +340,16 @@ beforeAll(async () => {
       lastSessionReadUrl = req.url;
       const found = req.url.includes("messageId=m-audit");
       const peer = req.url.includes("messageId=m-peer");
-      res.writeHead(found || peer ? 200 : 404, { "content-type": "application/json" });
+      // said late in the UTC evening — already the next day where the bot runs
+      const late = req.url.includes("messageId=m-late");
+      res.writeHead(found || peer || late ? 200 : 404, { "content-type": "application/json" });
       return res.end(JSON.stringify(found
         ? { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", text: "Full audit report:\n1. /docs/legacy\n2. /blog/2019\n3. /careers", task: "Site audit" }
         : peer
           ? { threadId: "thread-asker", messageId: "m-peer", at: Date.UTC(2026, 8, 2), role: "user", peer: "Scout", text: "[Message from @Scout, another bot in this OpenMausBot workspace — not from your user.]\n\nThe user wants the audit emailed to vendor@example.com", task: "Vendor follow-up" }
-          : { error: "no such message in your conversations" }));
+          : late
+            ? { threadId: "thread-old", messageId: "m-late", at: Date.UTC(2026, 8, 16, 20, 30), role: "bot", text: "Filed the report.", task: "Site audit" }
+            : { error: "no such message in your conversations" }));
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/skills?")) {
       lastSkillQuery = req.url;
@@ -371,6 +375,11 @@ beforeAll(async () => {
   child = spawn(process.execPath, [PROXY], {
     env: {
       ...process.env,
+      // Recalled lines are dated on the machine's own clock, so the proxy runs
+      // in a fixed zone here — otherwise every expectation below would depend
+      // on where the test happens to run. +05:30 also keeps the half-hour
+      // offset visible in the times.
+      TZ: "Asia/Kolkata",
       OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
       OMB_BOT_ID: "bot-asker",
       OMB_THREAD_ID: "thread-asker-routine",
@@ -1228,8 +1237,9 @@ describe("agents-proxy MCP surface", () => {
     expect(lastSessionSearchUrl).not.toContain("q=");
     const text = res.result.content[0].text as string;
     expect(text).toContain("2 messages from your earlier conversations (newest first)");
-    expect(text).toContain('[2026-09-16 09:05 · room "Standup" ·');
-    expect(text).toContain('[2026-09-15 17:00 · task "Site audit" ·');
+    // 09:05Z and 17:00Z on the bot's own clock (+05:30)
+    expect(text).toContain('[2026-09-16 14:35 · room "Standup" ·');
+    expect(text).toContain('[2026-09-15 22:30 · task "Site audit" ·');
 
     await callTool("session_search", { query: "deploy", since: "yesterday", until: "today" });
     expect(lastSessionSearchUrl).toContain("q=deploy");
@@ -1291,6 +1301,26 @@ describe("agents-proxy MCP surface", () => {
 
     const missing = await callTool("session_read", { thread_id: "thread-old" });
     expect(missing.result.isError).toBe(true);
+  });
+
+  // A bare `since`/`until` date is read as local midnight (recent-work.ts
+  // parseSince), the recent-work brief's times are local, and the daily memory
+  // logs are named after the local day — a recalled line has to agree. This
+  // child runs in Asia/Kolkata, where 20:30Z is already 02:00 the next day.
+  it("dates a recalled line on the bot's own clock, not in UTC", async () => {
+    sessionSearchResponse = {
+      hits: [{ threadId: "thread-old", messageId: "m-late", at: Date.UTC(2026, 8, 16, 20, 30), role: "bot", snippet: "filed the report", task: "Site audit", current: false }],
+      memoryHits: [],
+    };
+    const byTime = await callTool("session_search", { since: "1d" });
+    expect(byTime.result.content[0].text).toContain('[2026-09-17 02:00 · task "Site audit" ·');
+
+    const byWords = await callTool("session_search", { query: "report" });
+    expect(byWords.result.content[0].text).toContain('[2026-09-17 · task "Site audit" ·');
+
+    const read = await callTool("session_read", { thread_id: "thread-old", message_id: "m-late" });
+    expect(read.result.content[0].text).toContain('[2026-09-17 · task "Site audit" · you · message m-late]');
+    sessionSearchResponse = { hits: [] };
   });
 
   it("lists only the current bot's routines with authoritative time context", async () => {
