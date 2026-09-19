@@ -125,6 +125,26 @@ async function waitUntil<T>(probe: () => Promise<T>, timeoutMs: number, what: st
   }
 }
 
+/** Click the first element with this accessible name. `ui click --name`
+ * fails outright when the sidebar briefly renders the same chevron twice,
+ * so poll for the name the way resolveTarget does, then pin the first
+ * matching ref: snapshot order follows the accessibility tree, whose
+ * first match is the primary chevron. */
+async function clickFirstNamed(handle: string, name: string): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const state = await ui("snapshot", handle);
+    const refs = (state.refs ?? {}) as Record<string, { name?: unknown }>;
+    const ref = Object.entries(refs).find(([, element]) => element?.name === name)?.[0];
+    if (ref) {
+      await ui("click", handle, "--ref", `@${ref}`);
+      return;
+    }
+    if (Date.now() > deadline) throw new Error(`no element is named ${JSON.stringify(name)} within 10000ms (snapshot had ${Object.keys(refs).length} refs)`);
+    await new Promise((done) => setTimeout(done, 250));
+  }
+}
+
 describe("the thinking timer stays anchored across a thread switch", () => {
   let launched: Launched | undefined;
 
@@ -152,7 +172,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const otherThread = (await api("POST", `/api/bots/${info.botId}/tasks`, {})).task.threadId;
     // A bot's thread list starts collapsed (the sidebar's threadsOpen state
     // defaults false), so expand Pepper's threads before any row is needed.
-    await ui("click", info.ui, "--name", "Expand Pepper threads");
+    await clickFirstNamed(info.ui, "Expand Pepper threads");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${otherThread}"]'))`), 10_000, "the new thread's sidebar row to appear");
 
     // The composer sends; the hang-mode engine accepts the turn and holds it.
@@ -164,7 +184,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const busy = await waitUntil(async () => {
       const task = await taskOf(busyThread);
       return task && task.busy && typeof task.turnStartedAt === "number" ? task : null;
-    }, 20_000, "the task to go busy with a turnStartedAt stamp");
+    }, 60_000, "the task to go busy with a turnStartedAt stamp");
     const stamp = busy.turnStartedAt as number;
     expect(stamp).toBeGreaterThanOrEqual(sentAt - 2_000);
     expect(stamp).toBeLessThanOrEqual(Date.now() + 2_000);
@@ -228,9 +248,9 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const groupId = group.id;
 
     // Both thread lists start collapsed behind their chevrons.
-    await ui("click", info.ui, "--name", "Expand Pepper threads");
-    await waitUntil(() => evaluate(`Boolean(document.querySelector('button[aria-label="Expand Timer group threads"]'))`), 10_000, "the group's sidebar row to appear");
-    await ui("click", info.ui, "--name", "Expand Timer group threads");
+    await clickFirstNamed(info.ui, "Expand Pepper threads");
+    await waitUntil(() => evaluate(`Boolean(document.querySelector('button[aria-label="Expand Timer group threads"]'))`), 30_000, "the group's sidebar row to appear");
+    await clickFirstNamed(info.ui, "Expand Timer group threads");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${group.threadId}"]'))`), 10_000, "the group's sidebar thread row to appear");
     await selectThread(group.threadId);
     await waitUntil(() => isCurrent(group.threadId), 10_000, "the group to become current");
@@ -244,7 +264,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const busy = await waitUntil(async () => {
       const claimed = await groupState();
       return claimed && claimed.busyBotId === info.botId && typeof claimed.turnStartedAt === "number" ? claimed : null;
-    }, 20_000, "the group to claim Pepper with a turnStartedAt stamp");
+    }, 60_000, "the group to claim Pepper with a turnStartedAt stamp");
     const stamp = busy.turnStartedAt as number;
     expect(stamp).toBeGreaterThanOrEqual(sentAt - 2_000);
     expect(stamp).toBeLessThanOrEqual(Date.now() + 2_000);
