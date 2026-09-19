@@ -15,7 +15,7 @@ const fixture = vi.hoisted(() => ({ section: "companion" as AppSettingsSection }
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: vi.fn(),
-  useStore: () => ({ state: { appSettingsSection: fixture.section }, dispatch: vi.fn() }),
+  useStore: () => ({ state: { overlays: { appSettingsSection: fixture.section } }, dispatch: vi.fn() }),
 }));
 vi.mock("./RemoteComputerSection", () => ({ RemoteComputerSection: () => null }));
 vi.mock("./CustomDomainSettings", () => ({ CustomDomainSettings: () => null }));
