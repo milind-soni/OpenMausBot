@@ -1353,6 +1353,27 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.isError).toBeFalsy();
   });
 
+  it.each(["box", "cloud"])("maps %s execution to the explicit Box runner without changing stored wire values", async (run_on) => {
+    const res = await callTool("propose_routine", {
+      name: "Box check", instructions: "Check explicitly on Box.",
+      schedule: { type: "daily", time: "09:00" }, run_on,
+    });
+    expect(res.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.routine.runOn).toBe("cloud");
+    const update = await callTool("propose_routine_action", {
+      action: "update", routine_id: "routine-morning", changes: { run_on, runOn: "cloud" },
+    });
+    expect(update.result.isError).toBeFalsy();
+    expect(lastRoutineRequestBody.changes.runOn).toBe("cloud");
+  });
+
+  it("advertises VPS-compatible default execution separately from the Box runner", async () => {
+    const list = await rpc("tools/list");
+    const routine = list.result.tools.find((entry: { name: string }) => entry.name === "propose_routine");
+    expect(routine.inputSchema.properties.run_on.enum).toEqual(["maus", "box"]);
+    expect(routine.inputSchema.properties.run_on.description).toContain("INCLUDING a self-hosted VPS");
+  });
+
   it("preserves execution settings copied from list_routines", async () => {
     const res = await callTool("propose_routine", {
       name: "Cloud check",

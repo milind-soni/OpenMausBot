@@ -31,6 +31,7 @@ import {
 } from "./container-computer.ts";
 import { VPS_CONTAINER_LABEL, VPS_IMAGE, VPS_MANAGED_LABEL, VPS_VIEWER_LABEL, vpsContainerName } from "./vps-computer.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import type { RoutineSchedule } from "../shared/routines.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
@@ -148,7 +149,7 @@ posixOnly("VPS turn routing e2e (fake ACP fleet + fake docker over SSH)", () => 
   let acpDump: string;
   let dockerLog: string;
 
-  type ApiBody = Record<string, string | boolean | null | { instanceId: string; model: string } | { sshAlias: string }>;
+  type ApiBody = Record<string, string | boolean | null | RoutineSchedule | { instanceId: string; model: string } | { sshAlias: string }>;
 
   const api = async (method: string, path: string, body?: ApiBody): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -429,6 +430,8 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       const echo = snapshot.messages.find((m: any) => m.kind === "text" && m.text?.startsWith("echo: ")).text;
       // the VPS clause, including the disposable-filesystem warning
       expect(echo).toContain("self-hosted remote Linux computer");
+      expect(echo).toContain("This is a VPS, not Box");
+      expect(echo).toContain("using it does not require a Box API key");
       expect(echo).toContain("wiped whenever its container is recreated");
 
       // the official Cua MCP server was mounted through the VPS bridge
@@ -475,6 +478,27 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
       expect(explicitTools.find((tool: { name: string }) => tool.name === "computer")?.args).toContain("production-vps");
       const threadPreview = await api("GET", `/api/bots/${bot.id}/computer?threadId=${explicitThread}`);
       expect(threadPreview.body).toMatchObject({ surface: "cloud", backend: "vps", ready: true });
+
+      // Scheduling on the bot's setup must retain its ACP model + VPS tools,
+      // without requiring credentials for the unrelated Box-hosted runner.
+      const created = await api("POST", "/api/routines", {
+        botId: bot.id, name: "VPS scheduled check", prompt: "Check the existing VPS.", enabled: false,
+        schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+      });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      expect(created.body.routine.runOn).toBe("maus");
+      rmSync(`${acpDump}.mcp.json`, { force: true });
+      const started = await api("POST", `/api/routines/${created.body.routine.id}/run`);
+      expect(started.status, JSON.stringify(started.body)).toBe(201);
+      let completed: any;
+      await until(async () => {
+        completed = (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === started.body.run.id);
+        return completed?.status === "completed";
+      }, "the routine on the existing VPS");
+      const routineTools = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8"));
+      expect(routineTools.find((tool: { name: string }) => tool.name === "computer")?.args).toContain("production-vps");
+      const routineMessages = (await api("GET", `/api/threads/${completed.threadId}/messages?limit=100`)).body.messages;
+      expect(routineMessages.some((message: any) => message.text?.includes("This is a VPS, not Box"))).toBe(true);
 
       // The turn claim is gone, but its durable container remains on the old
       // host. Keep that resource visible until the user removes it.

@@ -9,6 +9,8 @@ import { createBrowserInputQueue } from "@/lib/browser-input-queue";
 interface BrowserTab { tabId: string; title: string; url: string; active: boolean }
 type ViewerFrame = BrowserFrame & { viewerId: string; generation: number };
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
+const RECONNECT_DELAYS = [1_000, 2_000, 4_000, 8_000, 15_000];
+const RECONNECT_MESSAGE = "Connection interrupted. Reconnecting the browser view…";
 
 /** Closing a panel releases its lease. A new connection never silently
  * restores permission to type, and never replays old browser frames. */
@@ -33,7 +35,10 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
   const profilesDialog = useRef<HTMLDialogElement>(null);
   const typingDialog = useRef<HTMLDialogElement>(null);
   const inputQueue = useRef<ReturnType<typeof createBrowserInputQueue> | null>(null);
+  const haltMessage = useRef("");
   const urlEditing = useRef(false);
+  const reconnectCount = useRef(0);
+  const connectionProfile = useRef("");
   const profileName = bot.browserProfile === "guest" ? "Temporary browser"
     : state.config?.browserProfiles?.find((profile) => profile.id === bot.browserProfile)?.name ?? `${bot.name}’s own browser`;
   useEffect(() => { if (showProfiles) profilesDialog.current?.showModal(); else profilesDialog.current?.close(); }, [showProfiles]);
@@ -41,7 +46,11 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
 
   const action = useCallback(async (body: Record<string, unknown>, expected = viewer.current) => {
     if (!expected) throw new Error("Open the browser connection first.");
-    return api(`/api/bots/${bot.id}/browser/action`, { method: "POST", body: JSON.stringify({ ...body, viewerId: expected }) });
+    // 120s matches the server's browser requestTimeoutMs: restart replies can
+    // be legitimately slow (see the reconnect note in the stream error
+    // handler), but a wedged request must surface an error instead of
+    // leaving the panel pending forever.
+    return api(`/api/bots/${encodeURIComponent(bot.id)}/browser/action`, { method: "POST", body: JSON.stringify({ ...body, viewerId: expected }), timeoutMs: 120_000 });
   }, [bot.id]);
   const input = useCallback((body: Record<string, unknown>) => {
     inputQueue.current?.enqueue(body);
@@ -50,6 +59,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
     // Invalidate synchronously: an old request may finish before React runs
     // the effect cleanup for this reconnect.
     generation.current++;
+    reconnectCount.current = 0;
     viewer.current = "";
     inputQueue.current?.clear(); inputQueue.current = null;
     pendingOperation.current = null;
@@ -59,30 +69,46 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
   useEffect(() => {
     const current = ++generation.current;
     const ownsConnection = () => generation.current === current;
+    const profile = JSON.stringify([bot.id, bot.browserProfile]);
+    if (connectionProfile.current !== profile) {
+      connectionProfile.current = profile;
+      reconnectCount.current = 0;
+    }
     let stopped = false;
-    viewer.current = ""; pendingOperation.current = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    viewer.current = ""; pendingOperation.current = null; haltMessage.current = "";
+    urlEditing.current = false;
     setFrame(null); setTabs([]); setAddress(""); setConnected(false); setError("");
     setControl({ held: false, controlling: false, owned: false }); setPending(false);
-    const source = new EventSource(`/api/bots/${bot.id}/browser/live`);
+    const source = new EventSource(`/api/bots/${encodeURIComponent(bot.id)}/browser/live`);
     const listen = (name: string, handler: (data: any) => void) => source.addEventListener(name, (event) => {
       if (stopped || !ownsConnection()) return;
       try { handler(JSON.parse((event as MessageEvent).data)); } catch { /* Malformed events are not rendered. */ }
     });
     listen("ready", (data) => {
-      const expected = String(data.viewerId);
+      if (typeof data.viewerId !== "string" || !data.viewerId) return;
+      const expected = data.viewerId;
       viewer.current = expected;
       inputQueue.current = createBrowserInputQueue(async (body) => {
         if (ownsConnection() && viewer.current === expected) await action(body, expected);
-      }, (cause) => { if (ownsConnection() && viewer.current === expected) setError(cause instanceof Error ? cause.message : String(cause)); });
+      }, (cause) => {
+        if (!ownsConnection() || viewer.current !== expected) return;
+        haltMessage.current = cause instanceof Error ? cause.message : String(cause);
+        setError(haltMessage.current);
+      });
       setConnected(true);
     });
+    // A ready event alone is not recovery: a flapping stream can open and
+    // fail immediately. Reset the retry budget only after a live heartbeat.
+    listen("heartbeat", () => { reconnectCount.current = 0; });
     listen("frame", (data) => { if (viewer.current) setFrame({ ...data, viewerId: viewer.current, generation: current }); });
     listen("tabs", (data) => {
+      if (!Array.isArray(data.tabs)) return;
       setTabs(data.tabs);
       const active = data.tabs.find((tab: BrowserTab) => tab.active);
       if (active && !urlEditing.current) setAddress(active.url === "about:blank" ? "" : active.url);
     });
-    listen("url", (data) => { if (!urlEditing.current) setAddress(data.url === "about:blank" ? "" : data.url); });
+    listen("url", (data) => { if (typeof data.url === "string" && !urlEditing.current) setAddress(data.url === "about:blank" ? "" : data.url); });
     listen("status", (data) => {
       if (data.viewportWidth > 0 && data.viewportHeight > 0) setViewport({ width: data.viewportWidth, height: data.viewportHeight });
     });
@@ -96,7 +122,25 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
       if (stopped || !ownsConnection()) return;
       stopped = true;
       let message = "Browser connection ended. Reconnect to continue watching.";
-      if (event instanceof MessageEvent) { try { message = JSON.parse(event.data).message || message; } catch { /* Network error fallback. */ } }
+      let retryable = !(event instanceof MessageEvent);
+      if (event instanceof MessageEvent) {
+        try {
+          const data = JSON.parse(event.data);
+          message = data.message || message;
+          retryable = data.retryable === true;
+        } catch { /* Malformed server errors require explicit reconnect. */ }
+      }
+      const delay = retryable ? RECONNECT_DELAYS[reconnectCount.current] : undefined;
+      if (delay !== undefined) {
+        reconnectCount.current++;
+        message = RECONNECT_MESSAGE;
+        reconnectTimer = setTimeout(() => {
+          if (!ownsConnection()) return;
+          // Reopen observation only, not browser commands or a human lease.
+          generation.current++;
+          setAttempt((value) => value + 1);
+        }, delay);
+      }
       setError(message); setConnected(false); setFrame(null); setControl({ held: false, controlling: false, owned: false });
       // Keep this generation alive: a successful restart closes its stream
       // before the action reply arrives, and must still reconnect afterward.
@@ -104,6 +148,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
     });
     return () => {
       stopped = true;
+      clearTimeout(reconnectTimer);
       if (ownsConnection()) {
         generation.current++; viewer.current = ""; pendingOperation.current = null;
         inputQueue.current?.clear(); inputQueue.current = null;
@@ -123,6 +168,9 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
       await queue?.drain();
       if (generation.current !== current || viewer.current !== expected) return;
       await action(body, expected);
+      // A halted queue silently drops input; restore the banner the
+      // setError("") above cleared so the view does not look interactive.
+      if (inputQueue.current?.stopped() && generation.current === current) setError(haltMessage.current);
       if (generation.current === current && body.type === "restart") reconnect();
     }
     catch (cause) { if (generation.current === current) setError(cause instanceof Error ? cause.message : String(cause)); }
@@ -133,6 +181,7 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
     }
   };
   const driving = control.controlling && connected && !pending;
+  const reconnecting = error === RECONNECT_MESSAGE;
   return <div ref={panel} className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink">
     <div className="flex min-h-12 items-center gap-1 px-2 pt-1.5">
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -170,13 +219,13 @@ export function LiveBrowser({ bot }: { bot: Bot }) {
         </div>
       </details>
     </form>
-    {error && <div role="alert" className="flex items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>Reconnect</button>}</div>}
+    {error && <div role={reconnecting ? "status" : "alert"} className={`flex items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] ${reconnecting ? "text-ink-secondary" : "text-danger"}`}><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>Reconnect</button>}</div>}
     <div className="min-h-0 flex-1 overflow-hidden bg-inset/40">
       {frame ? <BrowserViewport frame={frame} {...viewport} driving={driving} input={input}
         onReturnToToolbar={() => addressInput.current?.focus()}
         acknowledge={(seq) => { if (generation.current === frame.generation && viewer.current === frame.viewerId) void action({ type: "ack", seq }, frame.viewerId).catch(() => {}); }}
         onDecodeError={() => { if (generation.current === frame.generation && viewer.current === frame.viewerId) setError("A browser frame could not be decoded. Close and reopen the panel to reconnect."); }} />
-        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && control.held ? <Hand size={24} /> : error ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{control.held ? "Live view paused for human control" : error ? "Browser disconnected" : "Opening the live browser…"}</span></div>}
+        : <div className="flex min-h-64 flex-col items-center justify-center gap-3 p-6 text-center text-[13px] text-ink-secondary">{connected && control.held ? <Hand size={24} /> : error && !reconnecting ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}<span>{control.held ? "Live view paused for human control" : reconnecting ? "Reconnecting…" : error ? "Browser disconnected" : "Opening the live browser…"}</span></div>}
     </div>
     <dialog ref={profilesDialog} onClose={() => setShowProfiles(false)} onClick={(e) => { if (e.target === e.currentTarget) setShowProfiles(false); }} className="m-auto w-[min(420px,calc(100%-32px))] max-h-[80vh] overflow-auto rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
       <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">Browser profiles</h2><button className={button} aria-label="Close browser profiles" onClick={() => setShowProfiles(false)}><X size={16} /></button></div>

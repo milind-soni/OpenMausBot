@@ -124,23 +124,28 @@ function desktopCapabilities({
     enabled: connectionEnabled(hostPlatform, localConnection),
     status: localAvailable ? "ready" : localConnection?.status ?? "unavailable",
   };
-  if (typeof localConnection?.message === "string") {
-    localComputer.message = localConnection.message;
-  }
-  if (typeof localConnection?.driver?.path === "string") {
-    localComputer.driverPath = localConnection.driver.path;
-  }
-  if (typeof localConnection?.driver?.version === "string") {
-    localComputer.driverVersion = localConnection.driver.version;
-  }
-  if (typeof localConnection?.driver?.source === "string") {
-    localComputer.driverSource = localConnection.driver.source;
-  }
-  if (typeof localConnection?.session === "string") {
-    localComputer.session = localConnection.session;
-  }
-  if (typeof localConnection?.compositor === "string") {
-    localComputer.compositor = localConnection.compositor;
+  // These fields expose local-machine detail (installed driver, seat,
+  // diagnostics), so populate them only when no remote override replaces
+  // localComputer below; a remote page must never receive local values.
+  if (!remote) {
+    if (typeof localConnection?.message === "string") {
+      localComputer.message = localConnection.message;
+    }
+    if (typeof localConnection?.driver?.path === "string") {
+      localComputer.driverPath = localConnection.driver.path;
+    }
+    if (typeof localConnection?.driver?.version === "string") {
+      localComputer.driverVersion = localConnection.driver.version;
+    }
+    if (typeof localConnection?.driver?.source === "string") {
+      localComputer.driverSource = localConnection.driver.source;
+    }
+    if (typeof localConnection?.session === "string") {
+      localComputer.session = localConnection.session;
+    }
+    if (typeof localConnection?.compositor === "string") {
+      localComputer.compositor = localConnection.compositor;
+    }
   }
   if (!localAvailable) {
     localComputer.reasonCode =
@@ -152,7 +157,18 @@ function desktopCapabilities({
     const unavailable = { reasonCode: "remote-server" };
     Object.assign(screenPreview, { available: false, interaction: "none" }, unavailable);
     Object.assign(dictation, { available: false, engine: "none", onDevice: false }, unavailable);
-    Object.assign(localComputer, { available: false, support: "unsupported", enabled: false, status: "unavailable" }, unavailable);
+    Object.assign(localComputer, {
+      available: false,
+      support: "unsupported",
+      enabled: false,
+      status: "unavailable",
+      driverPath: "",
+      driverVersion: "",
+      driverSource: "",
+      session: "",
+      compositor: "",
+      message: "",
+    }, unavailable);
   }
 
   return {

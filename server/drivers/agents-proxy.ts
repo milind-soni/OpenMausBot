@@ -361,8 +361,8 @@ const ROUTINE_FIELDS_SCHEMA = {
   schedule: ROUTINE_SCHEDULE_SCHEMA,
   run_on: {
     type: "string",
-    enum: ["maus", "cloud"],
-    description: "Where the routine runs. Defaults to maus (this OpenMausBot setup).",
+    enum: ["maus", "box"],
+    description: "Default maus keeps the bot's selected model and configured computer, INCLUDING a self-hosted VPS. Omit this field for normal schedules. box explicitly switches the agent to the Box-hosted runner; it requires Box setup and is not the generic cloud/VPS option. Legacy cloud values from list_routines mean box, not VPS.",
   },
   timeout_minutes: {
     type: "integer",
@@ -937,16 +937,17 @@ function routineFields(args: Json): { fields: Json; error?: string } {
   const fields: Json = {};
   // list_routines returns the harness names. Accept those when a model
   // copies back a definition, as we already do for interval fields.
-  if (args.run_on != null && args.runOn != null && args.run_on !== args.runOn) {
+  const destination = (value: unknown) => value === "box" ? "cloud" : value;
+  if (args.run_on != null && args.runOn != null && destination(args.run_on) !== destination(args.runOn)) {
     return { fields, error: "Choose one run_on destination; run_on and runOn disagree." };
   }
   if (args.timeout_minutes != null && args.timeoutMinutes != null && args.timeout_minutes !== args.timeoutMinutes) {
     return { fields, error: "Choose one timeout_minutes limit; timeout_minutes and timeoutMinutes disagree." };
   }
-  const runOn = args.run_on ?? args.runOn;
+  const runOn = destination(args.run_on ?? args.runOn);
   const timeoutMinutes = args.timeout_minutes ?? args.timeoutMinutes;
   if (runOn != null && runOn !== "maus" && runOn !== "cloud") {
-    return { fields, error: 'run_on must be "maus" or "cloud".' };
+    return { fields, error: 'Use run_on="maus" for the bot’s current model and configured computer (including VPS), or run_on="box" only for the Box-hosted agent. Legacy "cloud" also means Box.' };
   }
   if (timeoutMinutes != null && (
     typeof timeoutMinutes !== "number" || !Number.isInteger(timeoutMinutes) || timeoutMinutes < 5 || timeoutMinutes > 240

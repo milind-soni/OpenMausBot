@@ -106,9 +106,14 @@ export function verifyBrowserBundle(directory, target) {
 export async function releaseBytes(asset, cacheDirectory) {
   const cached = cacheDirectory && join(cacheDirectory, asset.asset);
   if (cached && existsSync(cached)) {
-    const bytes = readFileSync(cached);
-    verifyAssetBytes(bytes, asset);
-    return bytes;
+    try {
+      const bytes = readFileSync(cached);
+      verifyAssetBytes(bytes, asset);
+      return bytes;
+    } catch {
+      // A cache entry that fails verification is a miss, never a dead end.
+      rmSync(cached, { force: true });
+    }
   }
   const response = await fetch(asset.url, { signal: AbortSignal.timeout(600_000), redirect: "follow" });
   if (!response.ok) throw new Error(`Could not download ${asset.asset}: HTTP ${response.status}`);
@@ -123,7 +128,16 @@ export async function releaseBytes(asset, cacheDirectory) {
   verifyAssetBytes(bytes, asset);
   if (cached) {
     mkdirSync(cacheDirectory, { recursive: true });
-    writeFileSync(cached, bytes);
+    // Publish the cache entry atomically: a partial write must never be
+    // mistaken for a complete archive.
+    const temporary = join(cacheDirectory, `.${asset.asset}.${process.pid}.tmp`);
+    try {
+      writeFileSync(temporary, bytes);
+      renameSync(temporary, cached);
+    } catch (error) {
+      rmSync(temporary, { force: true });
+      throw error;
+    }
   }
   return bytes;
 }

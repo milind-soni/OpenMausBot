@@ -51,6 +51,12 @@ use an appropriate event/webhook workflow instead of a fake weekly schedule.
 - Daylight-saving gaps move the chosen wall-clock time forward through the
   gap. During a repeated hour, a matching clock time runs once, at its first
   occurrence. The preview uses the same calculation as execution.
+- Routine execution defaults to **Bot’s current setup**: its selected model and
+  configured computer, including a self-hosted VPS. No Box key is needed for
+  that VPS. **Box-hosted agent** is a separate, explicit choice that switches
+  to the Box runner. The agent tools call these `run_on: "maus"` and
+  `run_on: "box"`; legacy stored `runOn: "cloud"` still means Box and is not
+  migrated to a different runner.
 - OpenMausBot must be running to dispatch routines, including cloud-targeted
   routines. There is no external always-on scheduling service: the schedule
   runs inside the app on your computer — it is not Grok's or anyone's cloud —

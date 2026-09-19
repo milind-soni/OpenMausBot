@@ -189,19 +189,16 @@ describe("server-owned browser MCP runtime", () => {
     await value.take("s", "owner");
     expect(value.canControl("s", "owner")).toBe(true);
   });
-  it("recovers by itself after a request timeout kills the browser, without a human takeover", async () => {
-    // Reported from the field: a fill mid-MFA timed out, and from then on every
-    // call on that session answered "A browser action was interrupted", through
-    // reconnects, deleting and recreating the browser in Settings, remounting
-    // the conversation's tools, and restarting the app. Nothing an agent can
-    // call clears it, because every tool call passes the same gate.
+  it("does not assume an MCP timeout stopped an accepted daemon action", async () => {
     const value = runtime({ requestTimeoutMs: 60 });
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "hang" })).rejects.toThrow(/timed out/);
-    // The timeout stopped the transport, which SIGKILLs the child, so nothing
-    // is left running and the next call must be allowed to start a browser.
+    // The real daemon detaches from its MCP parent. Transport exit is not
+    // proof that a navigation or submission stopped; do not replay it.
+    await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo" })).rejects.toThrow(/Restart/);
+    await expect(value.take("s", "owner")).rejects.toThrow(/Restart/);
+    await value.restart("s", "owner", async () => {});
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "echo", arguments: { text: "back" } }))
       .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
-    // and a person can still take control afterwards
     await value.take("s", "owner");
     expect(value.canControl("s", "owner")).toBe(true);
   });
@@ -274,6 +271,37 @@ describe("server-owned browser MCP runtime", () => {
     expect(value.heldBy("s")).toBe("owner");
     const after = await value.agentRpc("s", spec(), "tools/list", {}) as { pid: number };
     expect(after.pid).not.toBe(before.pid);
+  });
+
+  it.each([false, true])("retires an idle MCP client without killing its browser descendant (ignores EOF: %s)", async (ignoresEof) => {
+    // Windows taskkill /T includes even a daemon with its own process group.
+    // This inert descendant models that ownership boundary on every platform.
+    // unref alone does not detach a Windows child from its parent's console.
+    // Keep the POSIX group shared so an accidental group kill still fails here.
+    const fake = `
+      const browser = require('node:child_process').spawn(process.execPath,
+        ['-e', 'setInterval(() => {}, 1000)'],
+        { stdio: 'ignore', detached: process.platform === 'win32', windowsHide: true });
+      browser.unref();
+      ${ignoresEof ? "setInterval(() => {}, 1000);" : ""}
+      require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
+        const m = JSON.parse(line);
+        if (!m.id) return;
+        const result = m.method === 'initialize' ? { protocolVersion: '2024-11-05' }
+          : { tools: [], browserPid: browser.pid, transportPid: process.pid };
+        process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');
+      });
+    `;
+    const value = runtime({ idleMs: 40 });
+    const launch = { command: process.execPath, args: ["-e", fake], env: {} };
+    const first = await value.agentRpc("idle", launch, "tools/list", {}) as { browserPid: number; transportPid: number };
+    try {
+      expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+      await vi.waitFor(() => expect(() => process.kill(first.transportPid, 0)).toThrow(), { timeout: 2_000, interval: 30 });
+      expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+    } finally {
+      try { process.kill(first.browserPid, "SIGKILL"); } catch { /* fixture exited */ }
+    }
   });
 });
 

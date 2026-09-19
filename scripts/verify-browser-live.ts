@@ -27,7 +27,12 @@ try {
     }],
   });
   console.log(JSON.stringify({ ...fixture.info, botId: bots[0].id, previewUrl: ui.previewUrl, testPage: new URL("/__browser-test-page", ui.previewUrl).href }, null, 2));
-  await parkUntilSignal();
+  if (process.argv.includes("--recovery")) {
+    const { verifyBrowserRecovery } = await import("./testing/browser-recovery-smoke.ts");
+    await verifyBrowserRecovery({ binaryPath, executablePath, dataDir: fixture.info.dataDir,
+      previewUrl: ui.previewUrl, testPage: new URL("/__browser-test-page", ui.previewUrl).href,
+      screenshotPath: fixture.info.logPath.replace(/\.log$/, "-browser.png") });
+  } else await parkUntilSignal();
 } finally {
   await ui?.close();
   // close --all is scoped to this fixture's HOME, never the operator's.

@@ -269,6 +269,23 @@ function LocalVmPane({
   });
   const [error, setError] = useState<string | null>(null);
 
+  // The open flow below reads status once per selection, but a ready desktop
+  // can still be stopped or reaped server-side; every later re-check writes
+  // through this same sanitized setStatus path.
+  const refreshStatus = useCallback(async (signal?: AbortSignal) => {
+    if (!botId) return;
+    try {
+      const raw = await api(`/api/bots/${botId}/local-computer`, { signal });
+      if (!signal?.aborted) setStatus(sanitizeLocalVmWorkspaceStatus(raw));
+    } catch {
+      /* transient read; the slow interval or Retry re-checks */
+    }
+  }, [botId]);
+  const refreshStatusRef = useRef(refreshStatus);
+  useEffect(() => {
+    refreshStatusRef.current = refreshStatus;
+  }, [refreshStatus]);
+
   useEffect(() => {
     obscuredRef.current = obscured;
   }, [obscured]);
@@ -276,7 +293,10 @@ function LocalVmPane({
   useEffect(() => {
     const bridge = window.ogb?.desktopWorkspace;
     return bridge?.onState((next) => {
-      if (next.contextId === contextId) setNativeState(next);
+      if (next.contextId !== contextId) return;
+      setNativeState(next);
+      // A dead native view may mean the VM itself went away; re-read it.
+      if (next.status === "error" || next.status === "closed") void refreshStatusRef.current();
     });
   }, [contextId]);
 
@@ -359,6 +379,16 @@ function LocalVmPane({
       }
     };
   }, [botId, botName, contextId, retry]);
+
+  useEffect(() => {
+    if (!botId) return;
+    const controller = new AbortController();
+    const timer = window.setInterval(() => void refreshStatus(controller.signal), 30_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [botId, refreshStatus]);
 
   const updateLayout = useCallback(() => {
     const bridge = window.ogb?.desktopWorkspace;
@@ -711,7 +741,7 @@ export function LocalVmWorkspace({
   const selectSlot = useCallback(
     async (index: 0 | 1, botId: string | null) => {
       if (controlBusyRef.current) return;
-      const current = slots[index];
+      const current = slotsRef.current[index];
       if (current === botId) return;
       if (current && controlledBotIdRef.current === current) {
         const released = await handBack();
@@ -719,7 +749,7 @@ export function LocalVmWorkspace({
       }
       setSlots((existing) => selectLocalVmWorkspaceSlot(existing, index, botId));
     },
-    [handBack, slots],
+    [handBack],
   );
 
   const closeWorkspace = useCallback(async () => {

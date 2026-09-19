@@ -234,6 +234,31 @@ const api = async (method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, body: await res.json() };
 };
 
+/** Pair a device the way a phone or a second person does, and act as them. */
+const asPairedPerson = async (label: string) => {
+  const opened = await api("POST", "/api/auth/pairing", {});
+  expect(opened.status).toBe(200);
+  const paired = await fetch(`${BASE}/api/auth/pair`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "user-agent": label },
+    body: JSON.stringify({ code: opened.body.code }),
+  });
+  const body = await paired.json() as any;
+  expect(paired.status).toBe(200);
+  return {
+    token: body.token as string,
+    label: body.session.label as string,
+    call: async (method: string, path: string, payload?: unknown) => {
+      const res = await fetch(`${BASE}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${body.token}`, ...(payload ? { "content-type": "application/json" } : {}) },
+        body: payload ? JSON.stringify(payload) : undefined,
+      });
+      return { status: res.status, body: await res.json() as any };
+    },
+  };
+};
+
 const chiefRoomRequest = async (baseUrl: string, token: string, route: "create-room" | "manage-room", body: unknown) => {
   const response = await fetch(`${baseUrl}/api/internal/${route}`, {
     method: "POST",
@@ -1030,6 +1055,67 @@ describe("harness HTTP API", () => {
         finishedAt: 6,
       },
     });
+  });
+
+  it("attributes a paired person's message to them, and leaves the owner's own sends unstamped", async () => {
+    // The server authenticates per person but used to label every user turn
+    // with the one Settings profile name, so on a shared or paired workspace
+    // every human collapsed into whoever that named: bots addressed the wrong
+    // person, and relayed their questions under someone else's name.
+    const created = await api("POST", "/api/bots", {
+      name: "Attribution",
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const person = await asPairedPerson("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Safari/605.1");
+    expect(person.label).toBe("Safari on Mac");
+    const cleanup: string[] = [bot.id];
+    try {
+
+    const theirs = await person.call("POST", `/api/bots/${bot.id}/messages`, { text: "from the paired person" });
+    expect(theirs.status).toBe(202);
+    expect(theirs.body.message).toMatchObject({ role: "user", sender: { name: "Safari on Mac" } });
+
+    // Steering into that still-running turn is the same person, still named.
+    const steered = await person.call("POST", `/api/bots/${bot.id}/messages`, { text: "and one more" });
+    expect(steered.status).toBe(202);
+    expect(steered.body.message).toMatchObject({ steered: true, sender: { name: "Safari on Mac" } });
+
+    // Loopback is the desktop owner by design: unstamped, so it still reads
+    // as the profile name everywhere and nothing changes for one person. Use
+    // a second bot so this send cannot be folded into the turn above — an
+    // owner message that merely got steered would pass whatever we assert.
+    const second = await api("POST", "/api/bots", {
+      name: "Attribution owner",
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(second.status).toBe(201);
+    cleanup.push(second.body.bot.id);
+    const mine = await api("POST", `/api/bots/${second.body.bot.id}/messages`, { text: "from the owner" });
+    expect(mine.status).toBe(202);
+    expect(mine.body.message.role).toBe("user");
+    expect(mine.body.message.steered).toBeUndefined();
+    expect(mine.body.message.sender).toBeUndefined();
+
+    const bots = (await api("GET", "/api/bots?messages=30")).body.bots;
+    const theirMessages = bots.find((b: any) => b.id === bot.id)?.messages ?? [];
+    const myMessages = bots.find((b: any) => b.id === second.body.bot.id)?.messages ?? [];
+    expect(theirMessages.find((m: any) => m.text === "from the paired person")?.sender).toEqual({ name: "Safari on Mac" });
+    expect(theirMessages.find((m: any) => m.text === "and one more")?.sender).toEqual({ name: "Safari on Mac" });
+    expect(myMessages.find((m: any) => m.text === "from the owner")?.sender).toBeUndefined();
+    } finally {
+      // Stop the fixture turns and take the bots and the paired session back
+      // out: this suite shares one isolated server, so anything left running
+      // here shows up as somebody else's failure much later.
+      for (const id of cleanup) {
+        await api("POST", `/api/bots/${id}/interrupt`).catch(() => undefined);
+        await api("DELETE", `/api/bots/${id}`).catch(() => undefined);
+      }
+      await person.call("DELETE", "/api/auth/session").catch(() => undefined);
+    }
   });
 
   it("rejects non-loopback authorities while accepting IPv4 and IPv6 loopback forms", async () => {

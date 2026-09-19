@@ -2150,10 +2150,18 @@ export async function createBotWithRole(role?: BotRole, request: typeof api = ap
  * transcript window mounts. */
 export const MESSAGE_PAGE_SIZE = 200;
 
-export async function api<T = any>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T = any>(path: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  // timeoutMs races the fetch against AbortSignal.timeout, combined with any
+  // caller signal so either can cancel. Omitted means no behavior change.
+  const { timeoutMs, signal, ...rest } = init ?? {};
   const res = await fetch(path, {
     headers: { "content-type": "application/json" },
-    ...init,
+    ...rest,
+    signal: timeoutMs === undefined
+      ? signal
+      : signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new ApiError(body.error ?? `${res.status} ${res.statusText}`, res.status);

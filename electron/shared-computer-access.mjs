@@ -56,7 +56,17 @@ async function assertOutsideProtected(identities, target) {
 }
 
 const text = value => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }] });
-export const sharedComputerError = error => ({ ...text(error?.message ?? "Computer action failed"), isError: true });
+
+/** Job error text crosses to a remote workspace, so absolute paths collapse
+ * to their basename. The original is warned first so debugging information is
+ * preserved on this machine. */
+const basenameMessage = message => {
+  const original = String(message);
+  if (!original.match(/(?:\/[^/\s]+)+/g)) return original;
+  console.warn("Shared computer error before path sanitization:", original);
+  return original.replace(/(?:\/[^/\s]+)+/g, matched => matched.slice(matched.lastIndexOf("/") + 1));
+};
+export const sharedComputerError = error => ({ ...text(basenameMessage(error?.message ?? "Computer action failed")), isError: true });
 
 export async function sharedPath(folder, relative = "") {
   if (typeof relative !== "string" || relative.length > 2048 || /[\\:\0]/.test(relative) || path.isAbsolute(relative) || relative.split("/").some(part => part === "..")) throw new Error("Use a relative path inside the shared folder");

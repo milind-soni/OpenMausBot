@@ -80,5 +80,10 @@
       ]
     }
   ],
-  "groups": []
+  "groups": [],
+  "botQueuedMessages": {
+    "preview-weekend": [
+      { "queueId": "preview-weekend-queued", "text": "Draft the weekend plan", "reason": "capacity" }
+    ]
+  }
 }

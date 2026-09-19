@@ -32,7 +32,7 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     const proposal = async (tool: string, args: unknown, text: string, expectError = false) => {
       const previousTurns = providerEvidence().length;
       writeFileSync(planPath, JSON.stringify({ [bot.id]: {
-        expectSystemIncludes: ["five-field cron expression", "Never replace a calendar rule with daily AI date checking"],
+        expectSystemIncludes: ["five-field cron expression", "Never replace a calendar rule with daily AI date checking", "including its VPS"],
         steps: [{ tool: "list_routines", arguments: {} }, { tool, arguments: args, expectError }],
         reply: expectError ? "That invalid schedule was refused." : "Please review the routine confirmation.",
       } }));
@@ -63,7 +63,7 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     expect(create.subtitle).toContain("Cron: 0 9 1 * *");
     const { resultId: routineId } = await confirm(create);
     const current = async () => (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
-    expect(await current()).toMatchObject({ schedule, enabled: true });
+    expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "maus" });
     expect((await current()).nextRunAt).toBe(nextCronRuns(schedule, create.routineRequest.createdAt, 1)[0]);
 
     const lastDay = { ...schedule, expression: "0 9 L * *" };
@@ -86,6 +86,12 @@ it("takes cron through the real routine tools and confirmation, preserving its z
     expect(await current()).toMatchObject({ enabled: true, schedule: lastDay });
 
     await proposal("propose_routine", { name: "Impossible date", instructions: "Must not run.", schedule: { ...schedule, expression: "0 9 31 2 *" } }, "Try an invalid calendar rule.", true);
+    await proposal("propose_routine", {
+      name: "Explicit Box", instructions: "Run on the Box-hosted agent.", schedule, run_on: "box",
+    }, "Try the separate Box runner without a Box account.", true);
+    const boxResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "propose_routine").response;
+    expect(boxResponse.result.content[0].text).toContain('run_on="maus"');
+    expect(boxResponse.result.content[0].text).toContain("self-hosted VPS");
     const before = await current();
     for (const invalid of [
       { type: "cron", expression: "0 9 1 * *" },

@@ -66,16 +66,23 @@ describe("pinned desktop browser preparation", () => {
     expect(browserExtractionCommand("a.zip", "out", { platform: "darwin" })).toEqual({ file: "unzip", args: ["-q", "a.zip", "-d", "out"] });
   });
 
-  it("rechecks cached bytes and fails closed on same-size tampering", async () => {
+  it("repairs a tampered cache by re-downloading and fails closed on a bad download", async () => {
     const root = fixture();
     const bytes = Buffer.from("reviewed fixture");
     const asset = { asset: "fixture.zip", url: "https://invalid.example/fixture", bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
     writeFileSync(join(root, asset.asset), bytes);
-    const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+    const fetch = vi.fn(async () => new Response(bytes)); vi.stubGlobal("fetch", fetch);
     await expect(releaseBytes(asset, root)).resolves.toEqual(bytes);
-    writeFileSync(join(root, asset.asset), Buffer.alloc(bytes.length));
-    await expect(releaseBytes(asset, root)).rejects.toThrow(/SHA-256/);
     expect(fetch).not.toHaveBeenCalled();
+    writeFileSync(join(root, asset.asset), Buffer.alloc(bytes.length));
+    // Same-size tampering is a cache miss, never a dead end: the pinned
+    // download repairs the entry.
+    await expect(releaseBytes(asset, root)).resolves.toEqual(bytes);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(readFileSync(join(root, asset.asset))).toEqual(bytes);
+    writeFileSync(join(root, asset.asset), Buffer.alloc(bytes.length));
+    fetch.mockResolvedValueOnce(new Response(Buffer.alloc(bytes.length)));
+    await expect(releaseBytes(asset, root)).rejects.toThrow(/SHA-256/);
     expect(() => verifyAssetBytes(bytes.subarray(1), asset)).toThrow(/size/);
   });
 
@@ -120,6 +127,9 @@ describe("pinned desktop browser preparation", () => {
     const spec = browserBundleSpec("linux-x64");
     writeFileSync(join(cache, spec.engine.asset), "bad");
     writeFileSync(join(cache, spec.chrome.asset), "bad");
+    // Invalid cache entries are deleted and re-downloaded; a download that
+    // also fails verification keeps the failure local to this run.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("bad")));
     await expect(stageBrowserTarget(root, "linux-x64", { cacheDirectory: cache })).rejects.toThrow(/verification/);
     expect(readFileSync(join(destination, "existing"), "utf8")).toBe("previous complete bundle");
   });
