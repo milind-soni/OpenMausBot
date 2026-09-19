@@ -262,6 +262,65 @@ describe("ACP turns (fake CLI)", () => {
     expect(error?.message).not.toContain("managed-alias");
   });
 
+  it("does not spawn when a teardown cancels the claim during command resolution", async () => {
+    let releaseResolve: (launch: { command: string; args?: string[]; env?: Record<string, string | undefined> }) => void = () => {};
+    const driver = createAcpDriver({
+      ...SELECT_MODEL_SUPPORT,
+      selectModel: undefined,
+      resolveCommand: () =>
+        new Promise<{ command: string; args?: string[]; env?: Record<string, string | undefined> }>((resolve) => {
+          releaseResolve = resolve;
+        }),
+    });
+    instance = await driver.create({
+      instanceId: "claim-canceled-spawn",
+      displayName: "Claim canceled spawn",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+
+    const sent = instance.adapter.sendTurn({ threadId: "t-claim-canceled", text: "go" });
+    await instance.adapter.stopAll();
+    releaseResolve({ command: FAKE_CLI });
+    const { turnId } = await sent;
+    const done = await recorder.until((event) => event.type === "turn.completed");
+
+    expect(done).toMatchObject({ turnId, ok: false, stopReason: "interrupted" });
+    expect(recorder.events.some((event) => event.type === "session.started")).toBe(false);
+    expect(instance.adapter.hasSession("t-claim-canceled")).toBe(false);
+  });
+
+  it("does not emit setup_required when a teardown cancels the claim during a failing command resolution", async () => {
+    let rejectResolve: (error: Error) => void = () => {};
+    const driver = createAcpDriver({
+      ...SELECT_MODEL_SUPPORT,
+      selectModel: undefined,
+      resolveCommand: () =>
+        new Promise<{ command: string; args?: string[]; env?: Record<string, string | undefined> }>((_, reject) => {
+          rejectResolve = reject;
+        }),
+    });
+    instance = await driver.create({
+      instanceId: "claim-canceled-setup-failure",
+      displayName: "Claim canceled setup failure",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    recorder = recordEvents(instance.adapter);
+    const sent = instance.adapter.sendTurn({ threadId: "t-claim-canceled-setup", text: "go" });
+    await instance.adapter.stopAll();
+    rejectResolve(new Error("managed runtime missing"));
+    const { turnId } = await sent;
+    const done = await recorder.until((event) => event.type === "turn.completed");
+    expect(done).toMatchObject({ turnId, ok: false, stopReason: "interrupted" });
+    expect(recorder.events.some((event) => event.type === "runtime.error")).toBe(false);
+    expect(recorder.events.some((event) => event.type === "session.started")).toBe(false);
+    expect(instance.adapter.hasSession("t-claim-canceled-setup")).toBe(false);
+  });
+
   it("normalizes a full turn into the canonical event sequence", async () => {
     await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "grok-4.5" });

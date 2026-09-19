@@ -37,13 +37,11 @@ import type {
   ProviderDriver,
   ProviderInstance,
   ProviderSnapshot,
-  RuntimeEvent,
-  RuntimeEventListener,
   SendTurnInput,
   TurnImageInput,
 } from "../contracts.ts";
 import { EFFORT_LEVELS } from "../../shared/wire.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { newId } from "../contracts.ts";
 import {
   decodeInjectId,
   encodeInjectId,
@@ -51,6 +49,7 @@ import {
   localHost,
   mergeLocalInject,
 } from "./local-inject.ts";
+import { createDriverSessionRuntime } from "./driver-runtime.ts";
 import { appendNative } from "./native.ts";
 
 const DRIVER_KIND = "piAgent";
@@ -478,30 +477,39 @@ export const PiDriver: ProviderDriver<PiConfig> = {
     // pi's model-catalog network boundary.
     await readModels();
 
-    const listeners = new Set<RuntimeEventListener>();
-    // one active turn per thread
-    const active = new Map<string, {
+    interface Turn {
       stop: () => void;
       turnId: string;
       pending: Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>;
       child?: { stdin: { write: (s: string) => void } };
-    }>();
-
-    const emit = (event: RuntimeEvent) => {
-      for (const l of Array.from(listeners)) l(event);
-    };
-    const base = (threadId: string, turnId: string) => ({
-      eventId: newEventId(),
-      provider: DRIVER_KIND,
+    }
+    // one active turn per thread
+    const runtime = createDriverSessionRuntime<Turn>({
+      driverKind: DRIVER_KIND,
       providerInstanceId: instanceId,
-      threadId,
-      turnId,
-      createdAt: new Date().toISOString(),
+      stopTurn: (turn) => turn.stop(),
     });
+    const { emit, base } = runtime;
 
     const sendTurn = async (turn: SendTurnInput) => {
       const { threadId } = turn;
-      if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+      const turnId = newId();
+      runtime.claimTurn(threadId, turnId);
+      try {
+        return await runClaimedTurn(turn, threadId, turnId);
+      } catch (error) {
+        // setTurn consumes the claim; a setup path that throws before it
+        // would leave the reservation behind and the thread busy forever.
+        runtime.endTurn(threadId, turnId);
+        throw error;
+      }
+    };
+
+    const runClaimedTurn = async (
+      turn: SendTurnInput,
+      threadId: string,
+      turnId: string,
+    ) => {
       // Per-bot Ask/Auto is authoritative for harness turns. Preserve the
       // legacy instance flag only for direct adapter callers that omit it.
       const fullAuto = turn.approvalMode === undefined ? config.fullAuto : false;
@@ -512,7 +520,6 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       if (controlsHost && fullAuto) {
         throw new Error("local computer control requires the interactive approval broker");
       }
-      const turnId = newId();
       const pending = new Map<string, (decision: { behavior: "allow" | "deny" | "answer"; message?: string }) => void>();
       let settled = false;
       // pi's RPC surface accepts image content directly. Read before spawning
@@ -636,7 +643,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
             /* best effort */
           }
         }
-        active.delete(threadId);
+        runtime.endTurn(threadId, turnId);
       };
 
       const stop = () => {
@@ -652,7 +659,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
         settle(true, "cancelled");
       };
-      active.set(threadId, { stop, turnId, pending, child });
+      runtime.setTurn(threadId, { stop, turnId, pending, child });
 
       const onEvent = (evt: PiEvent) => {
         appendNative(threadId, { dir: "in", source: "pi.rpc", msg: evt });
@@ -908,9 +915,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           effortLevels: EFFORT_LEVELS,
         },
         sendTurn,
-        interruptTurn: async (threadId) => active.get(threadId)?.stop(),
+        interruptTurn: async (threadId) => runtime.turn(threadId)?.stop(),
         respondToRequest: async (threadId, requestId, decision) => {
-          const entry = active.get(threadId);
+          const entry = runtime.turn(threadId);
           const answer = entry?.pending.get(requestId);
           if (!entry || !answer) return "unavailable";
           entry.pending.delete(requestId);
@@ -924,19 +931,11 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           });
           return decision.behavior === "allow" ? "allowed-once" : decision.behavior === "answer" ? "answered" : "rejected";
         },
-        hasSession: (threadId) => active.has(threadId),
-        stopAll: async () => {
-          for (const { stop } of active.values()) stop();
-        },
-        onEvent: (listener) => {
-          listeners.add(listener);
-          return () => listeners.delete(listener);
-        },
+        hasSession: (threadId) => runtime.hasSession(threadId),
+        stopAll: () => runtime.stopAll(),
+        onEvent: runtime.onEvent,
       },
-      dispose: async () => {
-        for (const { stop } of active.values()) stop();
-        listeners.clear();
-      },
+      dispose: () => runtime.dispose(),
     };
   },
 };
