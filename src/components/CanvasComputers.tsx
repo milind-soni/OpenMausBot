@@ -175,7 +175,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   };
   const cancelAssignment = useCallback(() => setAssignment(null), []);
   const post = (id: string, action: string, body = {}) => api(`/api/team-computers/${encodeURIComponent(id)}/${action}`, { method: "POST", body: JSON.stringify(body) });
-  const settings = () => { onClose(); dispatch({ type: "toggleAppSettings", open: true, section: "computer" }); };
+  const settings = () => { onClose(); dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: "computer" }); };
 
   return <>
     {open && <aside ref={shelf} aria-label="Team computers" onKeyDown={(event) => { if (event.key === "Escape" && !assignment) { event.stopPropagation(); if (pointer.current) clearDrag(); else onClose(); } }} className="flex w-[300px] max-w-[90vw] shrink-0 flex-col border-l border-hairline/50 bg-panel max-sm:absolute max-sm:inset-y-0 max-sm:right-0 max-sm:z-30 max-sm:shadow-xl">
