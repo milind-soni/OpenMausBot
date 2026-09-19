@@ -1643,6 +1643,17 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription; return false }
     }
 
+    /// Snooze or wake a bot thread. Desktop parity: bots only — group
+    /// threads have no snooze on the wire either.
+    func snoozeTask(_ task: BotTask, for bot: Bot, snoozedUntil: Double?) async -> Bool {
+        guard let client else { return false }
+        do {
+            try await client.snoozeTask(botId: bot.id, threadId: task.threadId, snoozedUntil: snoozedUntil)
+            await refresh()
+            return true
+        } catch { actionError = error.localizedDescription; return false }
+    }
+
     @discardableResult
     func setTaskArchived(_ task: BotTask, for bot: Bot, archivedAt: Double?) async -> Bool {
         guard let client else { return false }

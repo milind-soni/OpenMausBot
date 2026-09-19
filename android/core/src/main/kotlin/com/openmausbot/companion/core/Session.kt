@@ -1740,6 +1740,24 @@ class Session(
         }
     }
 
+    /**
+     * Snooze or wake one thread. The PATCH's bot frame also lands on the
+     * stream; the refresh keeps the sheet from waiting for it, exactly as
+     * rename does.
+     */
+    suspend fun snoozeTask(task: BotTask, forBot: Bot, snoozedUntil: Long?): Boolean {
+        val activeClient = client ?: return false
+        return try {
+            activeClient.snoozeTask(forBot.id, task.threadId, snoozedUntil)
+            refresh()
+            true
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            _actionError.value = error.message
+            false
+        }
+    }
+
     suspend fun createTask(forRoom: Room, title: String?): Room? = mutateTask(null) { client ->
         client.createRoomTask(forRoom.id, title).also { updated ->
             _state.update { it.apply(Frame.Room(updated)) }

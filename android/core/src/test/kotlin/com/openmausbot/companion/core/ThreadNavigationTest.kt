@@ -64,6 +64,35 @@ class ThreadNavigationTest {
     }
 
     @Test
+    fun snoozedThreadsFoldAwayUntilTheirClockRunsOutOrTheyNeedThePerson() {
+        val snoozed = listOf("asleep", "timed", "expired", "unread", "working").map {
+            task(it).copy(
+                snoozedUntil = when (it) { "timed" -> 900.0; "expired" -> 100.0; else -> 0.0 },
+                unread = it == "unread",
+                activity = if (it == "working") "working" else "idle",
+            )
+        }
+        val grouped = bot.copy(tasks = snoozed + task("current").copy(snoozedUntil = 0.0))
+        // the sentinel and a live clock both fold; the current thread and one
+        // that needs the person stay, as does a timestamp already past
+        assertEquals(listOf("working", "unread", "current", "expired"),
+            grouped.threadGroups(now = 500L).single().tasks.map { it.threadId })
+        assertEquals(6, grouped.threadGroups(includingClosed = true, now = 500L).single().tasks.size)
+    }
+
+    @Test
+    fun theNextWakeTickIgnoresSentinelsAndExpiredSnoozes() {
+        val tasks = listOf(
+            task("asleep").copy(snoozedUntil = 0.0),
+            task("past").copy(snoozedUntil = 100.0),
+            task("soon").copy(snoozedUntil = 900.0),
+            task("later").copy(snoozedUntil = 1200.0),
+        )
+        assertEquals(900L, nextSnoozeExpiry(tasks, now = 500L))
+        assertNull(nextSnoozeExpiry(listOf(tasks[0], tasks[1]), now = 500L))
+    }
+
+    @Test
     fun waitingOnATeammateIsAWaitNotWorkAndKeepsTheThreadVisible() {
         val wait = task("dispatch").copy(busy = false, activity = "idle", waitingOnTeammate = true)
         assertTrue(wait.isWaitingOnTeammate)

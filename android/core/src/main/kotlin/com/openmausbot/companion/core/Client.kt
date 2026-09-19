@@ -600,6 +600,20 @@ class CompanionClient(
         ))
     }
 
+    /**
+     * 0 sleeps until new activity, a timestamp until it passes, and null — a
+     * real JSON null, not an omitted field — wakes the thread now. Long
+     * milliseconds, never Double: the stamp must not travel in scientific
+     * notation, and an omitted field would leave the snooze untouched.
+     */
+    suspend fun snoozeTask(botId: String, threadId: String, snoozedUntil: Long?) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject { put("snoozedUntil", JsonPrimitive(snoozedUntil)) },
+        ))
+    }
+
     /** The unarchive PATCH carries an explicit null, so jsonBody's skip-nulls
      * rule cannot be used here. Stamps are whole milliseconds: a Double would
      * serialize large ones in scientific notation. */

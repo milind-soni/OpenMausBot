@@ -150,6 +150,92 @@ final class ThreadNavigationTests: XCTestCase {
         XCTAssertTrue(bot.threadGroups().isEmpty)
     }
 
+    func testSnoozedThreadsFoldUntilTheyWakeOrNeedAttention() {
+        let nowMs = Date().timeIntervalSince1970 * 1_000
+        var sentinel = task("sentinel")
+        sentinel.snoozedUntil = 0
+        var timed = task("timed")
+        timed.snoozedUntil = nowMs + 3_600_000
+        var expired = task("expired")
+        expired.snoozedUntil = nowMs - 1
+        var unreadSleep = task("unread-sleep")
+        unreadSleep.snoozedUntil = 0
+        unreadSleep.unread = true
+        var openHere = task("current")
+        openHere.snoozedUntil = 0
+        let bot = makeBot(tasks: [sentinel, timed, expired, unreadSleep, openHere])
+
+        // The sentinel and a still-running clock fold away; an expired
+        // timestamp, something unread, and the thread open here do not, and
+        // what survives is listed in attention order: unread beats the
+        // thread open here, which beats a plain expired sleeper.
+        XCTAssertEqual(
+            bot.threadGroups().flatMap(\.tasks).map(\.threadId),
+            ["unread-sleep", "current", "expired"]
+        )
+        // Nothing is gone: the manage sheet and search still list sleepers.
+        XCTAssertEqual(
+            Set(bot.threadGroups(includingClosed: true).flatMap(\.tasks).map(\.threadId)),
+            ["sentinel", "timed", "expired", "unread-sleep", "current"]
+        )
+        XCTAssertEqual(bot.threadGroups(matching: "timed").first?.tasks.map(\.threadId), ["timed"])
+    }
+
+    func testSnoozedThreadsSaySoInTheBylineOnlyWhileAsleep() {
+        var sentinel = task("sentinel")
+        sentinel.snoozedUntil = 0
+        XCTAssertEqual(sentinel.bylineLabel, "Snoozed")
+
+        var timed = task("timed")
+        timed.snoozedUntil = Date().timeIntervalSince1970 * 1_000 + 3_600_000
+        XCTAssertEqual(timed.bylineLabel, "Snoozed")
+
+        // The server heals expired snoozes on read, but a live snapshot may
+        // still carry one; the byline must not call it snoozed.
+        var expired = task("expired")
+        expired.snoozedUntil = 1
+        XCTAssertNil(expired.bylineLabel)
+
+        var closed = task("closed")
+        closed.snoozedUntil = 0
+        closed.closedBy = ThreadCloser(botId: "bot", name: "Scout", at: 1)
+        XCTAssertEqual(closed.bylineLabel, "closed by Scout")
+    }
+
+    func testNextSnoozeExpiryIgnoresSentinelsAndThePast() {
+        let now = Date()
+        let nowMs = now.timeIntervalSince1970 * 1_000
+        func asleep(_ id: String, _ until: Double?) -> BotTask {
+            var sleeping = task(id)
+            sleeping.snoozedUntil = until
+            return sleeping
+        }
+
+        let mixed = [
+            asleep("sentinel", 0), asleep("past", nowMs - 1),
+            asleep("soon", nowMs + 60_000), asleep("later", nowMs + 3_600_000),
+            asleep("awake", nil),
+        ]
+        XCTAssertEqual(mixed.nextSnoozeExpiry(now: now), nowMs + 60_000)
+        XCTAssertNil([asleep("sentinel", 0), asleep("past", nowMs - 1)].nextSnoozeExpiry(now: now))
+    }
+
+    func testSnoozePresetsFollowThePersonsLocalClock() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Toronto")!
+        func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int) -> Date {
+            calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+        }
+        func ms(_ date: Date) -> Double { date.timeIntervalSince1970 * 1_000 }
+
+        // 5 PM today → "tonight" is 6 PM today; 7 PM rolls to tomorrow evening.
+        XCTAssertEqual(ThreadSnoozePreset.tonight(now: at(2026, 9, 14, 17), calendar: calendar), ms(at(2026, 9, 14, 18)))
+        XCTAssertEqual(ThreadSnoozePreset.tonight(now: at(2026, 9, 14, 19), calendar: calendar), ms(at(2026, 9, 15, 18)))
+        // Tomorrow morning is 9 AM the next day whenever "now" is.
+        XCTAssertEqual(ThreadSnoozePreset.tomorrowMorning(now: at(2026, 9, 14, 17), calendar: calendar), ms(at(2026, 9, 15, 9)))
+        XCTAssertEqual(ThreadSnoozePreset.tomorrowMorning(now: at(2026, 9, 14, 23), calendar: calendar), ms(at(2026, 9, 15, 9)))
+    }
+
     func testLegacyFallbackKeepsCurrentConversationAndRuntimeSettings() throws {
         var bot = makeBot()
         bot.busy = true

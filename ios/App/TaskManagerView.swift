@@ -312,6 +312,27 @@ struct TaskManagerView: View {
                 Button("Rename", systemImage: "pencil") { beginRename(task) }
                     .disabled(isMutating)
                 if current.isBot {
+                    Menu {
+                        Button("Until new activity") { perform { await snooze(task, until: 0) } }
+                            .disabled(taskIsWorking(task))
+                        Button("Until 6 PM") {
+                            perform { await snooze(task, until: ThreadSnoozePreset.tonight()) }
+                        }
+                        .disabled(taskIsWorking(task))
+                        Button("Until 9 AM tomorrow") {
+                            perform { await snooze(task, until: ThreadSnoozePreset.tomorrowMorning()) }
+                        }
+                        .disabled(taskIsWorking(task))
+                    } label: {
+                        Label("Snooze", systemImage: "moon.zzz")
+                    }
+                    .disabled(isMutating || taskIsWorking(task))
+                    if task.isSnoozed() {
+                        Button("Stop snoozing", systemImage: "bell") {
+                            perform { await snooze(task, until: nil) }
+                        }
+                        .disabled(isMutating)
+                    }
                     Button {
                         toggleArchive(task)
                     } label: {
@@ -357,6 +378,13 @@ struct TaskManagerView: View {
 
     private func canDelete(_ task: BotTask) -> Bool {
         !isMutating && tasks.count > 1 && (current.isBot ? !task.isWorking : !current.busy)
+    }
+
+    /// The desktop disables thread actions while a reply is in flight; the
+    /// wire can carry the flag or the activity alone. Stop-snoozing stays
+    /// available, exactly as there.
+    private func taskIsWorking(_ task: BotTask) -> Bool {
+        task.busy == true || task.activity == "working"
     }
 
     private func beginRename(_ task: BotTask) {
@@ -456,6 +484,14 @@ struct TaskManagerView: View {
         }
         taskToRename = nil
         renameFocused = false
+    }
+
+    private func snooze(_ task: BotTask, until snoozedUntil: Double?) async {
+        guard case let .bot(bot) = current else { return }
+        guard await session.snoozeTask(task, for: bot, snoozedUntil: snoozedUntil) else {
+            showError("Couldn't change the snooze. Try again.")
+            return
+        }
     }
 
     private func delete(_ task: BotTask) async {

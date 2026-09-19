@@ -29,6 +29,17 @@ fun BotTask.demandsAttention(queued: Boolean = false): Boolean =
     isWaitingOnTeammate || isWorking || busy == true || unread == true || queued ||
         activity in setOf("waiting-on-you", "waiting", "queued")
 
+/** The soonest still-future timed snooze in a list, or null when nothing is
+ * scheduled to wake: the 0 sentinel sleeps until activity and never ticks,
+ * and a timestamp already in the past has nothing left to wait for
+ * (`nextSnoozeExpiry` in `SidebarThreadRow.tsx`). */
+fun nextSnoozeExpiry(tasks: List<BotTask>, now: Long = System.currentTimeMillis()): Long? =
+    tasks.asSequence()
+        .mapNotNull { it.snoozedUntil }
+        .filter { it > 0 && it > now }
+        .minOrNull()
+        ?.toLong()
+
 /**
  * Attention outranks recency within a bot: waiting-on-you needs the person
  * most, then working/busy, then queued, then unread. A held send is client
@@ -67,6 +78,7 @@ val Bot.visibleTasks: List<BotTask>
 fun Bot.threadGroups(
     matching: String = "",
     includingClosed: Boolean = false,
+    now: Long = System.currentTimeMillis(),
     /** Threads holding a queued send. A closed thread with a held send stays
      * in the list the way a running one does (Sidebar.tsx 865). */
     queuedThreadIds: Set<String> = emptySet(),
@@ -80,11 +92,13 @@ fun Bot.threadGroups(
             approvalMode = approvalMode, autoApprove = autoApprove, alwaysAllow = alwaysAllow,
         ))
         includingClosed || search.isNotEmpty() -> visibleTasks
-        // Closed and archived threads fold away with the same override: one
-        // that starts working, waits on the person, turns unread, or is
-        // holding a queued send is back.
+        // Closed, archived, and snoozed threads fold away with the same
+        // override: one that starts working, waits on the person, or turns
+        // unread is back; a snooze's sentinel sleeps only until activity and
+        // its clock only while it still runs (`visibleSidebarThreads` in
+        // `SidebarThreadRow.tsx`). A held queued send also brings it back.
         else -> visibleTasks.filter {
-            (!it.isClosed && !it.isArchived) ||
+            (!it.isClosed && !it.isArchived && !it.isSnoozed(now)) ||
                 it.demandsAttention(queued = queuedThreadIds.contains(it.threadId)) ||
                 it.threadId == threadId
         }

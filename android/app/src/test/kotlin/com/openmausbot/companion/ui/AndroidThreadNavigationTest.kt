@@ -35,6 +35,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flow
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -271,16 +274,60 @@ class AndroidThreadNavigationTest {
         assertEquals(2, requests.count { it.method == "DELETE" && it.path == "/api/bots/${fixture.id}/tasks/first" })
     }
 
-    private fun mount(bot: Bot = fixture, content: @Composable () -> Unit) {
-        scene = WiringScene(
-            connection = Connection(id = "thread-fixture", name = "Offline fixture", host = "127.0.0.1", port = server.port),
-            fleet = Fleet(listOf(bot), emptyList()),
-        ) {
+    @Test
+    fun `a task that starts working under an open snooze dialog loses its presets`() {
+        // The tapped snapshot was idle; the SSE frame lands afterwards, and
+        // the dialog must follow the live task rather than that snapshot.
+        val frames = MutableSharedFlow<StreamFrame>(extraBufferCapacity = 8)
+        mount(events = {
+            flow {
+                emit(StreamFrame(Frame.Hello(cursor = "fixture:1", resumed = false), seq = 1))
+                emitAll(frames)
+            }
+        }) {
+            TaskSheet(Chat.BotChat(fixture), onDismiss = {}, onSelectTask = {})
+        }
+
+        compose.onNodeWithContentDescription("Snooze First thread").performClick()
+        compose.onNodeWithText("Until new activity").assertIsDisplayed()
+
+        val working = fixture.copy(tasks = fixture.tasks!!.map {
+            if (it.threadId == "first") it.copy(busy = true, activity = "working") else it
+        })
+        compose.waitUntil(5_000) { frames.subscriptionCount.value > 0 }
+        compose.runOnIdle { frames.tryEmit(StreamFrame(Frame.Bot(working), seq = 2)) }
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Stop this thread before snoozing it.").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(compose.onAllNodesWithText("Until new activity").fetchSemanticsNodes().isEmpty())
+        assertTrue(compose.onAllNodesWithText("Until 6 PM").fetchSemanticsNodes().isEmpty())
+        assertTrue(requests.none { it.method == "PATCH" })
+    }
+
+    @Test
+    fun `the snooze target resolves the live task, never a routine run or a deleted thread`() {
+        val routine = BotTask(threadId = "run", title = "Run", createdAt = 0.0, routineRunId = "internal")
+        val bot = fixture.copy(tasks = fixture.tasks!! + routine)
+        assertEquals("first", snoozeTarget(bot, "first")?.threadId)
+        assertNull(snoozeTarget(bot, "run"), "routine executions were never rows")
+        assertNull(snoozeTarget(fixture.copy(tasks = listOf(fixture.tasks!![1])), "first"))
+    }
+
+    private fun mount(
+        bot: Bot = fixture,
+        events: (Int) -> Flow<StreamFrame> = {
             flow {
                 emit(StreamFrame(Frame.Hello(cursor = "fixture:1", resumed = false), seq = 1))
                 awaitCancellation()
             }
-        }
+        },
+        content: @Composable () -> Unit,
+    ) {
+        scene = WiringScene(
+            connection = Connection(id = "thread-fixture", name = "Offline fixture", host = "127.0.0.1", port = server.port),
+            fleet = Fleet(listOf(bot), emptyList()),
+            events = events,
+        )
         compose.setContent {
             CompositionLocalProvider(LocalCompanion provides scene.environment) {
                 CompanionTheme(darkTheme = false) {

@@ -62,6 +62,13 @@ object TaskRules {
     fun demandsAttention(task: BotTask, queued: Boolean = false): Boolean =
         task.demandsAttention(queued)
 
+    /**
+     * Working is activity or flag: the wire can carry either alone, so the
+     * snooze presets ask the same question the desktop's disabled snooze
+     * buttons ask (`isWorking` in `SidebarThreadRow.tsx`).
+     */
+    fun isWorking(task: BotTask): Boolean = task.activity == "working" || task.busy == true
+
     fun tasks(chat: Chat): List<BotTask> = when (chat) {
         is Chat.BotChat -> tasks(chat.bot)
         is Chat.RoomChat -> chat.room.tasks.orEmpty()
