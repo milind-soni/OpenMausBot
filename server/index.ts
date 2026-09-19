@@ -2,10 +2,10 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { extname, join } from "node:path";
+import { join } from "node:path";
 
 import { z } from "zod";
 import { SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
@@ -201,6 +201,7 @@ import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, inci
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
+import { createRunDelegatedTurn } from "./turn-dispatch.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
@@ -341,8 +342,8 @@ import { readCuaConnection, gatedLocalComputer } from "./local-computer.ts";
 import {
   discoverExistingPerBotLocalVms,
   localVmInventoryEntry,
-  shouldArmLocalVmIdle,
 } from "./local-vm-inventory.ts";
+import { armExistingLocalVms } from "./boot-sequence.ts";
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { RepeatDetector, callKey } from "./repeat-detector.ts";
@@ -412,6 +413,7 @@ import { createWorkspaceAccess, describeEdition, editionStatus, hostedWorkspaceC
 import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./environment.ts";
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
+import { createServeStatic } from "./http.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
@@ -433,11 +435,11 @@ import {
 import { cookieMaxAgeSeconds, formatPairingCode, SessionRegistry, type Scope } from "./sessions.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
 import { deliverSseFrame } from "./sse-fanout.ts";
+import { createTurnSecrets } from "./turn-secrets.ts";
 import {
   PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretBridge,
   PhoneSecretError,
-  PhoneSecretSubmissionRegistry,
   assertPhoneSecretRequestMatches,
   phoneSecretOperationId,
   type PhoneSecretContext,
@@ -448,16 +450,6 @@ const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
 // Behind a proxy or tunnel, the base URL senders should use (docs/self-hosting.md).
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
-const MIME: Record<string, string> = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".css": "text/css",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-  ".json": "application/json",
-  ".woff2": "font/woff2",
-};
 
 ensureDirs();
 // The desktop parent owns the primary lease and delegates one private child
@@ -4156,31 +4148,7 @@ function releaseLocalVmThread(threadId: string): void {
   localVmThreadTargets.delete(threadId);
 }
 
-// A running VM may have survived an app/server restart. Start its idle
-// backstop even if nobody opens Settings or begins a turn this session. The
-// bot's current destination is intentionally ignored: moving a bot to Cloud,
-// Browser, This computer, Auto, or Off does not delete its old Local VM.
-void (async () => {
-  if (localVmMode(cfg) !== "per-bot") {
-    const status = await containerComputerStatus(undefined, undefined, SHARED_LOCAL_VM_TARGET).catch(() => null);
-    noteLocalVmSeen(SHARED_LOCAL_VM_TARGET, status);
-    if (shouldArmLocalVmIdle(status)) localVmIdleFor(SHARED_LOCAL_VM_TARGET).touch();
-    return;
-  }
-  const runtime = await containerRuntimeStatus().catch(() => null);
-  if (!runtime?.runtime || !runtime.daemonUp) return;
-  const existing = await discoverExistingPerBotLocalVms(store.bots, runtime.runtime).catch(() => []);
-  const statuses = await Promise.all(existing.map(({ target }) =>
-    containerComputerStatus(undefined, undefined, target).catch(() => null),
-  ));
-  existing.forEach(({ target }, index) => {
-    noteLocalVmSeen(target, statuses[index]);
-    if (shouldArmLocalVmIdle(statuses[index])) localVmIdleFor(target).touch();
-  });
-})().catch(() => {
-  // Startup inspection is a backstop, not a reason to keep the app offline.
-  // The Settings inventory remains available for a later explicit retry.
-});
+armExistingLocalVms({ cfg, store, noteLocalVmSeen, localVmIdleFor });
 
 async function localVmInventoryPayload() {
   const runtime = await containerRuntimeStatus();
@@ -5182,84 +5150,10 @@ bus.subscribe((event: RuntimeEvent) => {
   });
 });
 
-// Drain queued delegations for a source thread after its turn settles.
-// Run as a separate subscriber so the drain logic stays out of the main
-// fold (which has its own switch/case noise) and its approval + startTurn
-// calls never have to share locals with the fold's state machine.
-/** How a drained delegation becomes a real turn on the target. Shared by
- * the settle-time drain and the boot-time drain of what a previous process
- * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId) => {
-    // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
-    // unavailable provider. Unhandled, that rejection is fatal to the
-    // harness (Node's default), which in the packaged app kills the server
-    // child. Every delegation failure has to land as a chip instead.
-    // A fresh-thread handoff runs in the thread the opener created — the
-    // drain already dropped it if that thread is gone — never in whatever
-    // the person is looking at.
-    const targetThreadId = openedThreadId ?? store.bot(toBotId)?.threadId;
-    const target = store.bot(toBotId);
-    const opener = store.bot(sourceBotId);
-    const unattended = isUnattended(sourceBotId, sourceThreadId);
-    // The inbound line is another bot's words whichever way it arrived: an
-    // opened thread's first line carries the shared provenance note, a
-    // classic handoff the "[Delegated by @X" prefix from the drain. Both
-    // record the author structurally (peerAsk) as well as in the text, so
-    // a renderer never has to take the line for the person's own message.
-    const peerAsk: Message["peerAsk"] | undefined = opener
-      ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
-      : undefined;
-    const text = openedThreadId && opener
-      ? withPeerProvenance(rawText, { botName: opener.name, delivery: "start_thread", unattended })
-      : rawText;
-    if (targetThreadId) {
-      delegationWatch.set(targetThreadId, {
-        channelId: channel?.id,
-        toBotId,
-        toBotName: target?.name,
-        taskId,
-        sourceThreadId,
-        sourceBotId,
-        routineRunId: activeRoutineRunForThread(sourceThreadId)?.id,
-        startedAtMs: Date.now(),
-      });
-    }
-    let failureReported = false;
-    const reportStartFailure = (error: unknown) => {
-      if (failureReported) return;
-      failureReported = true;
-      const bot = store.bot(toBotId);
-      const why = error instanceof Error ? error.message : String(error);
-      if (targetThreadId) {
-        const finalized = finalizeDelegationWatch(
-          targetThreadId,
-          false,
-          "",
-          `Delegated turn could not start — ${why.slice(0, 120)}`,
-        );
-        if (finalized) return;
-      }
-      const source = store.botByThread(sourceThreadId);
-      if (!source) return;
-      store.appendMessage(sourceThreadId, {
-        role: "bot",
-        kind: "activity",
-        tool: { name: `error: delegation to @${bot?.name ?? toBotId} could not start — ${why.slice(0, 120)}`, ok: false },
-      });
-    };
-    return startTurn(toBotId, text, {
-      threadId: targetThreadId,
-      commsDepth,
-      unattended,
-      peerAsk,
-      // startTurn schedules provider/integration setup after marking the bot
-      // busy. Those asynchronous setup failures do not emit turn.completed,
-      // so clear the watch and report them through this callback too.
-      onDispatchError: reportStartFailure,
-    }).then(() => undefined).catch((err) => {
-      reportStartFailure(err);
-    });
-};
+const runDelegatedTurn = createRunDelegatedTurn({
+  helpers: { store, isUnattended, delegationWatch, activeRoutineRunForThread, finalizeDelegationWatch },
+  lateBound: { startTurn: (botId, text, opts) => startTurn(botId, text, opts) },
+});
 
 function drainThreadDelegations(threadId: string): void {
   const routineRunId = activeRoutineRunForThread(threadId)?.id;
@@ -9786,35 +9680,14 @@ type SecretResumeEntry = {
   outcome: "provided" | "dismissed";
 };
 const pendingSecretResumes = new Map<string, SecretResumeEntry>();
-const phoneSecretSubmissions = new PhoneSecretSubmissionRegistry();
-
-function claimPhoneSecretBotDeletion(botId: string): (() => void) | null {
-  const scopes = [
-    { botId },
-    ...store.groups
-      .filter((group) => group.memberIds.includes(botId))
-      .map((group) => ({ groupId: group.id })),
-  ];
-  const releases: Array<() => void> = [];
-  for (const scope of scopes) {
-    const release = phoneSecretSubmissions.claimMutation(scope);
-    if (!release) {
-      for (const undo of releases.reverse()) undo();
-      return null;
-    }
-    releases.push(release);
-  }
-  return () => {
-    for (const release of releases.reverse()) release();
-  };
-}
+// The phone-secret submission registry and its guards live in
+// ./turn-secrets.ts: the registry with its bot-deletion mutation claim and
+// the desktop handoff prompt. Wired at their original site; every caller
+// is a route below.
+const { phoneSecretSubmissions, claimPhoneSecretBotDeletion, credentialDesktopHandoff } = createTurnSecrets({ store });
 
 function phoneSecretSubmissionKey(threadId: string, messageId: string, requestKey: string): string {
   return `${threadId}:${messageId}:${requestKey}`;
-}
-
-function credentialDesktopHandoff(label: string): string {
-  return `Securely provide the ${label} from OpenMausBot on your phone or computer. It is never added to chat.`;
 }
 
 function secretMessage(botId: string, threadId: string, messageId: string): Message | null {
@@ -10512,27 +10385,7 @@ const claudeUpdatesInFlight = new Set<string>();
  * bundle anyone can download, holds no secrets, and a remote browser must be
  * able to load /pair before it has a session. Returns false when there is
  * nothing to serve so the caller can answer 404. */
-function serveStatic(res: ServerResponse, path: string): boolean {
-  if (!STATIC_DIR) return false;
-  const safe = path === "/" ? "/index.html" : path.replace(/\.\./g, "");
-  const file = join(STATIC_DIR, safe);
-  try {
-    const data = readFileSync(file);
-    res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
-    res.end(data);
-    return true;
-  } catch {
-    // SPA fallback
-    try {
-      const data = readFileSync(join(STATIC_DIR, "index.html"));
-      res.writeHead(200, { "content-type": "text/html" });
-      res.end(data);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
+const serveStatic = createServeStatic(STATIC_DIR);
 
 function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
