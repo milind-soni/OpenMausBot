@@ -8324,6 +8324,9 @@ function configStatus() {
     // Which browser this server can give bots: the desktop app's surface,
     // the agent-browser engine, or nothing yet (with the reason).
     browserEngine: browserEngineSummary(),
+    // the configured Chrome path is a setting, not a secret — Settings
+    // shows it so it can be edited or cleared
+    browser: { chromePath: cfg.browser?.chromePath ?? "" },
     // partitionId is non-secret routing metadata. The renderer needs it to
     // show the same durable session as an agent, but config PATCH validation
     // keeps it read-only and rejects callers that try to choose it.
