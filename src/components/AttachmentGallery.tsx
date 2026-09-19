@@ -8,7 +8,9 @@ import { attachmentBasename, FILE_MAX_BYTES, type TranscriptFileAttachment, type
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { isPreviewableDocument } from "../../shared/markdown-file-links";
 import { localFilePath } from "./ChatMarkdown";
+import { FilePreviewDialog } from "./FilePreviewDialog";
 import {
   AttachedFileChip,
   AttachmentPreviewDialog,
@@ -59,7 +61,7 @@ export function collectMessageFiles(text: string, existingPaths: readonly string
     if (node.children) pending.push(...[...node.children].reverse());
   }
   const seen = new Set(existingPaths.map(fileIdentity));
-  return links.flatMap((node) => {
+  const result: GalleryFile[] = links.flatMap((node) => {
     const href = node.url ?? (node.identifier ? definitions.get(node.identifier) : undefined);
     const path = localFilePath(href);
     if (!path || !href) return [];
@@ -70,6 +72,22 @@ export function collectMessageFiles(text: string, existingPaths: readonly string
     // owns the one decode at its authorization/file-opening boundary.
     return [{ path: href, name: safeDownloadFilename(attachmentBasename(identity)), linked: true }];
   });
+
+  const tagRegex = /<attached-file[\t ]+path="([^"\r\n]*)"(?:[\t ]+name="([^"\r\n]*)")?[\t ]*\/>/g;
+  let match: RegExpExecArray | null;
+  while ((match = tagRegex.exec(text)) !== null) {
+    const rawPath = match[1]!;
+    const rawName = match[2];
+    const path = localFilePath(rawPath);
+    if (!path) continue;
+    const identity = fileIdentity(rawPath);
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    const name = rawName ? safeDownloadFilename(rawName) : safeDownloadFilename(attachmentBasename(identity));
+    result.push({ path: rawPath, name, linked: true });
+  }
+
+  return result;
 }
 
 export function isVideoAttachment(path: string): boolean {
@@ -227,6 +245,7 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
 }) {
   const [expanded, setExpanded] = useState(false);
   const [selected, setSelected] = useState<PreviewImage | null>(null);
+  const [previewFile, setPreviewFile] = useState<GalleryFile | null>(null);
   const items = useMemo(() => {
     const seen = new Set<string>();
     const result: GalleryItem[] = [];
@@ -277,7 +296,16 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
       )}
       {documents.length > 0 && (
         <div className="space-y-1 px-2 pb-2">
-          {documents.map((item) => item.kind === "file" && <AttachedFileChip key={item.key} file={item.file} linked={item.file.linked} message={message} className="max-w-none rounded-lg border-hairline/25 bg-transparent" />)}
+          {documents.map((item) => item.kind === "file" && (
+            <AttachedFileChip
+              key={item.key}
+              file={item.file}
+              linked={item.file.linked}
+              message={message}
+              onPreview={message && (isPreviewableDocument(item.file.path) || isPreviewableDocument(item.file.name)) ? () => setPreviewFile(item.file) : undefined}
+              className="max-w-none rounded-lg border-hairline/25 bg-transparent"
+            />
+          ))}
         </div>
       )}
       {items.length > 4 && (
@@ -288,6 +316,13 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
       )}
       {selected && previews.some((image) => image.src === selected.src) && (
         <AttachmentPreviewDialog image={selected} images={previews} initialIndex={previews.findIndex((image) => image.src === selected.src)} onClose={() => setSelected(null)} />
+      )}
+      {previewFile && message && (
+        <FilePreviewDialog
+          file={previewFile}
+          message={message}
+          onClose={() => setPreviewFile(null)}
+        />
       )}
     </section>
   );

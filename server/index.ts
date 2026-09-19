@@ -13120,9 +13120,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         roots = [ATTACHMENTS_DIR];
       } else {
-        if (!messageReferencesFile(message.text, href)) {
+        const attachedName = messageAttachmentName(message.text, href);
+        if (!attachedName && !messageReferencesFile(message.text, href)) {
           return json(res, 403, { error: "that bot message does not link to this file" });
         }
+        downloadName = attachedName ?? undefined;
         const senderId = directBot?.id ?? message.from?.botId;
         // The persisted bot-role message is the author record. Membership is
         // intentionally not consulted: removing a bot must not break files it

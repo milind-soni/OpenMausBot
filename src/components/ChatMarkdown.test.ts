@@ -296,6 +296,28 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain("type=\"button\"");
   });
 
+  it("autolinks local file paths mentioned in prose and offers both preview and save buttons", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "I saved the results to /workspace/analysis.md and also C:\\Users\\Maus\\output.txt for review.",
+      message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(html).toContain("Preview analysis.md");
+    expect(html).toContain("Save a copy of analysis.md");
+    expect(html).toContain("Preview output.txt");
+    expect(html).toContain("Save a copy of output.txt");
+    expect(html).not.toContain("<a href=\"/workspace/analysis.md\"");
+  });
+
+  it("does not autolink dotfiles or code blocks in prose", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "Do not link `.env` or `/workspace/.env` or `cat /workspace/report.md`.\n\n```sh\n/workspace/test.txt\n```",
+      message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(html).not.toContain("Preview .env");
+    expect(html).not.toContain("Save a copy of .env");
+    expect(html).not.toContain("Preview test.txt");
+  });
+
   it("does not nest a preview button in an anchor or block in a paragraph", () => {
     const standalone = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "![Launch art](https://assets.example/hero.png)",

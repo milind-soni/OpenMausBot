@@ -28,10 +28,14 @@ import {
   getLanguageDisplayName,
   getSnippetFileName,
 } from "../lib/code-block";
+import { attachmentBasename } from "@/lib/composer-attachments";
+import { t } from "@/lib/i18n";
+import { isPreviewableDocument, remarkLocalFileLinks } from "../../shared/markdown-file-links";
+import { FilePreviewDialog } from "./FilePreviewDialog";
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
-import { MarkdownImagePreview, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
+import { MarkdownImagePreview, safeDownloadFilename, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
 
 // tiny highlight cache so revisiting a thread doesn't re-tokenize settled
@@ -379,6 +383,7 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
 // middle or modifier click, which calls shell.openExternal without the main
 // process' containment check.
 function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const save = useLocalFileSave(filePath, undefined, message);
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
@@ -391,26 +396,67 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
         ? "Retry"
         : null;
 
+  const fileName = safeDownloadFilename(attachmentBasename(filePath));
+  const previewable = isPreviewableDocument(filePath) || isPreviewableDocument(fileName);
+
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <button
-        type="button"
-        onClick={() => void save.save()}
-        disabled={save.state === "saving"}
-        title="Save a copy"
-        className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
-      >
-        {children}
-        {save.state === "saving" ? (
-          <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
-        ) : save.state === "saved" ? (
-          <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
-        ) : save.state === "failed" ? (
-          <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
-        ) : (
-          <Download size={12} className="shrink-0" aria-hidden="true" />
-        )}
-      </button>
+      {previewable ? (
+        <>
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            title={t("attach.previewAria", { name: fileName }) ?? `Preview ${fileName}`}
+            className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent"
+          >
+            {children}
+          </button>
+          <button
+            type="button"
+            onClick={() => void save.save()}
+            disabled={save.state === "saving"}
+            title="Save a copy"
+            aria-label={`Save a copy of ${fileName}`}
+            className="inline-flex items-center text-ink-secondary hover:text-ink disabled:cursor-wait"
+          >
+            {save.state === "saving" ? (
+              <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+            ) : save.state === "saved" ? (
+              <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
+            ) : save.state === "failed" ? (
+              <RotateCcw size={12} className="shrink-0 text-danger" aria-hidden="true" />
+            ) : (
+              <Download size={12} className="shrink-0" aria-hidden="true" />
+            )}
+          </button>
+          {previewOpen && (
+            <FilePreviewDialog
+              file={{ path: filePath, name: fileName }}
+              message={message}
+              onClose={() => setPreviewOpen(false)}
+            />
+          )}
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void save.save()}
+          disabled={save.state === "saving"}
+          title="Save a copy"
+          className="inline-flex items-center gap-1 break-words text-start text-accent underline decoration-accent/40 hover:decoration-accent disabled:cursor-wait"
+        >
+          {children}
+          {save.state === "saving" ? (
+            <LoaderCircle size={12} className="shrink-0 animate-spin" aria-hidden="true" />
+          ) : save.state === "saved" ? (
+            <Check size={12} className="shrink-0 text-success" aria-hidden="true" />
+          ) : save.state === "failed" ? (
+            <RotateCcw size={12} className="shrink-0" aria-hidden="true" />
+          ) : (
+            <Download size={12} className="shrink-0" aria-hidden="true" />
+          )}
+        </button>
+      )}
       {label && (
         <span
           role={save.state === "failed" ? "alert" : "status"}
@@ -508,7 +554,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        remarkPlugins={[remarkGfm, remarkWindowsPathDestinations, remarkLocalFileLinks, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
         urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {

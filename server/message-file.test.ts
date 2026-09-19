@@ -94,6 +94,12 @@ describe("message-linked files", () => {
     )).toBe(true);
     expect(messageReferencesFile("<file:///Users/milind/report.md>", "/Users/milind/report.md"))
       .toBe(true);
+    expect(messageReferencesFile("Saved the report to /Users/milind/report.md for you.", "/Users/milind/report.md"))
+      .toBe(true);
+    expect(messageReferencesFile("Check file:///Users/milind/report.md!", "/Users/milind/report.md"))
+      .toBe(true);
+    expect(messageReferencesFile("Output at C:\\Users\\Maus\\report.md.", "C:\\Users\\Maus\\report.md"))
+      .toBe(true);
 
     // Equivalent separators and dot segments are normalised within a path
     // flavour, but distinct path flavours and casing remain distinct.

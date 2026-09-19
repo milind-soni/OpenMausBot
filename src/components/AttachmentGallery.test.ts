@@ -93,6 +93,23 @@ describe("message gallery", () => {
     expect(markup).not.toContain("<button");
     expect(markup).not.toContain("<img");
   });
+
+  it("collects attached-file tags from message text", () => {
+    const text = 'Here is the file:\n<attached-file path="/workspace/results.md" name="Results.md" />';
+    expect(collectMessageFiles(text)).toEqual([
+      { path: "/workspace/results.md", name: "Results.md", linked: true },
+    ]);
+  });
+
+  it("renders a preview action on previewable document chips", () => {
+    const docFile = { path: "/workspace/notes.md", name: "notes.md", linked: true };
+    const markup = renderToStaticMarkup(createElement(AttachmentGallery, {
+      files: [docFile],
+      message,
+    }));
+    expect(markup).toContain("Preview notes.md");
+    expect(markup).toContain("notes.md");
+  });
 });
 
 describe("explicit local video preview", () => {

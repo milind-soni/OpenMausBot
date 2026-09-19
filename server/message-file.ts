@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 import { windowsPathDestinations } from "../shared/markdown-windows-paths.ts";
+import { transformLocalFileLinks } from "../shared/markdown-file-links.ts";
 
 export const MESSAGE_FILE_MAX_BYTES = 25 * 1024 * 1024;
 
@@ -162,7 +163,10 @@ function renderedMarkdownTargets(markdown: string): string[] {
   const links: string[] = [];
   const references: string[] = [];
 
-  walkMarkdown(fromMarkdown(markdown, { mdastExtensions: [windowsPathDestinations] }), (node) => {
+  const tree = fromMarkdown(markdown, { mdastExtensions: [windowsPathDestinations] });
+  transformLocalFileLinks(tree);
+
+  walkMarkdown(tree, (node) => {
     if (node.type === "definition" && node.identifier && node.url) {
       if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url);
     } else if ((node.type === "link" || node.type === "image") && node.url) {
