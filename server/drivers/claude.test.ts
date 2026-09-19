@@ -21,6 +21,7 @@ import {
   brokerSocketCandidates,
   claudeCliSupports,
   claudeCliUpdate,
+  claudeHookSettings,
   ClaudeDriver,
   createPermissionBroker,
   parseClaudeCliVersion,
@@ -84,6 +85,16 @@ function answerQueue(conn: ReturnType<typeof connect>) {
 }
 
 describe("ClaudeDriver.decodeConfig", () => {
+  it("quotes hook paths as shell data rather than JSON strings", () => {
+    const settings = claudeHookSettings("/tmp/it's $OMB_HOOK_TEST `literal`/helper.ts") as { PostToolUse: Array<{ hooks: Array<{ command: string }> }> };
+    const command = settings.PostToolUse[0]!.hooks[0]!.command;
+    if (process.platform === "win32") {
+      expect(command).toBe('"%OMB_HOOK_NODE%" "%OMB_HOOK_HELPER%"');
+    } else {
+      expect(command).toContain("'/tmp/it'\\''s $OMB_HOOK_TEST `literal`/helper.ts'");
+    }
+  });
+
   it("defaults to the claude binary with acceptEdits", () => {
     expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
     expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "acceptEdits" });

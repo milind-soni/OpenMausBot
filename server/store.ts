@@ -13,6 +13,7 @@ import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
+import { runCommand, type Command } from "./commands.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
@@ -48,7 +49,6 @@ export type GroupRecord = Omit<WireGroup, "working">;
 export type GroupWireProjection = GroupRecord & { working: boolean };
 export type GroupWireProjectionIsExact = AssertExact<WireGroup, GroupWireProjection> & AssertSameKeys<WireGroup, GroupWireProjection>;
 export const groupWireProjectionIsExact: GroupWireProjectionIsExact = true;
-
 
 // Unicode's complete emoji sequences include flags, skin tones and ZWJ
 // combinations. Also allow unqualified single symbols (e.g. ♥), but not
@@ -1165,12 +1165,16 @@ export class Store {
     return null;
   }
 
-  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
+  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }, command?: Command): Message {
     const t = this.thread(threadId);
     const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
+    const persist = () => { mdb.appendMessage(threadId, full); return full; };
+    const committed = command ? runCommand(command, persist) : persist();
+    if (committed.id !== full.id) return committed;
+    // Only publish the committed write. A failed receipt must leave both
+    // the in-memory branch and subscribers unchanged, just like SQLite.
     t.messages.push(full);
     t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);
@@ -1290,7 +1294,7 @@ export class Store {
     return cur;
   }
 
-  patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null {
+  patchMessage(threadId: string, messageId: string, patch: Partial<Message>, command?: Command): Message | null {
     const t = this.thread(threadId);
     const idx = t.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return null;
@@ -1298,7 +1302,10 @@ export class Store {
     // SQLite is the durable source of truth. Persist before changing memory so
     // a failed write cannot make this process believe a card was answered
     // while a restart would still show it as pending.
-    mdb.updateMessage(threadId, next);
+    let applied = false;
+    const persist = () => { mdb.updateMessage(threadId, next); applied = true; return next; };
+    const committed = command ? runCommand(command, persist) : persist();
+    if (!applied) return committed;
     t.messages[idx] = next;
     this.emit({ type: "message.patch", threadId, message: next });
     return next;

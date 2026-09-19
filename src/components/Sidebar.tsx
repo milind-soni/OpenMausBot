@@ -37,6 +37,7 @@ import { peerLine } from "@/lib/peer-message";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -114,8 +115,9 @@ function preview(bot: Bot): string {
   if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
   if (bot.busy) return t("sidebar.preview.working");
   // the visible branch's tail — bot.messages holds every fork, so its last
-  // entry can belong to a version the user switched away from
-  const last = visibleMessages(bot).at(-1);
+  // entry can belong to a version the user switched away from — read past
+  // the harness's receipts (digest, compaction) to the reply a person reads
+  const last = lastNonReceipt(visibleMessages(bot));
   if (!last) return "";
   if (last.kind === "options" && last.card) return last.card.title;
   if (last.kind === "activity" && last.tool) return last.tool.name;
@@ -138,7 +140,7 @@ function groupPreview(group: Group, bots: Bot[]): string {
     });
   }
   if (group.working) return t("sidebar.preview.teamWorking");
-  const last = group.messages.at(-1);
+  const last = lastNonReceipt(group.messages);
   if (!last) return t("sidebar.preview.noMessages");
   const text = last.kind === "activity" && last.tool
     ? last.tool.name

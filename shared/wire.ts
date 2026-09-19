@@ -9,6 +9,7 @@
  * fails compilation until it is either declared here or explicitly listed
  * as server-private. */
 import type { ApprovalMode } from "./approval-mode.ts";
+import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { MascotBodyId } from "./mascot-bodies.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
@@ -266,8 +267,9 @@ export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest";
   text?: string;
+  digest?: TurnDigest;
   /** Durable provider output stored by the harness; renderers receive only
    * the allowlisted /api/attachments URL. */
   attachments?: Array<{ kind: "image"; path: string; mime: string }>;
@@ -279,7 +281,14 @@ export interface WireMessage {
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
   /** activity messages: tool name + outcome. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string };
+  tool?: {
+    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
+    /** Provider item identity, scoped to the owning turn. */
+    itemId?: string;
+    /** Whether the harness captured the full redacted result. Private
+     * server-local spill paths are not exposed to clients. */
+    fullResult?: boolean;
+  };
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
   /** A user-role message that arrived through the server's HTTP API. */

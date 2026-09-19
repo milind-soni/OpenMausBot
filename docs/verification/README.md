@@ -38,6 +38,7 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)

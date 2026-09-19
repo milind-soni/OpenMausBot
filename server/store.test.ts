@@ -2,6 +2,7 @@
 // the durable record — everything here must survive a process restart
 // except `busy`, which never does (no turn survives one either).
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -22,6 +23,42 @@ const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-
 describe("Store", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("commits receipt-backed transcript changes before publishing and replays without duplicates", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const threadId = bot.threadId;
+    const before = structuredClone(store.messagesFor(threadId));
+    const changes = vi.fn();
+    store.onChange(changes);
+    const database = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    const failReceipts = () => database.exec("CREATE TRIGGER reject_test_receipt BEFORE INSERT ON command_receipts BEGIN SELECT RAISE(ABORT, 'fixture receipt failure'); END");
+    const allowReceipts = () => database.exec("DROP TRIGGER reject_test_receipt");
+    const append = () => store.appendMessage(threadId, { role: "bot", kind: "text", text: "Recorded work" }, { kind: "test.append", key: threadId });
+    try {
+      failReceipts();
+      expect(append).toThrow("fixture receipt failure");
+      expect(store.messagesFor(threadId)).toEqual(before);
+      expect(mdb.readThread(threadId, "/nonexistent").messages).toEqual(before);
+      expect(changes).not.toHaveBeenCalled();
+      allowReceipts();
+      const message = append();
+      expect(append()).toEqual(message);
+      expect(store.messagesFor(threadId)).toHaveLength(before.length + 1);
+      expect(changes).toHaveBeenCalledTimes(1);
+      changes.mockClear();
+      const patch = () => store.patchMessage(threadId, message.id, { text: "Updated evidence" }, { kind: "test.patch", key: message.id });
+      failReceipts();
+      expect(patch).toThrow("fixture receipt failure");
+      expect(store.messagesFor(threadId).at(-1)?.text).toBe("Recorded work");
+      expect(mdb.readThread(threadId, "/nonexistent").messages.at(-1)?.text).toBe("Recorded work");
+      expect(changes).not.toHaveBeenCalled();
+      allowReceipts();
+      expect(patch()?.text).toBe("Updated evidence");
+      expect(patch()?.text).toBe("Updated evidence");
+      expect(changes).toHaveBeenCalledTimes(1);
+    } finally { database.close(); }
   });
 
   it("commits a confirmed model switch once, preserving siblings and rolling back failed writes", () => {

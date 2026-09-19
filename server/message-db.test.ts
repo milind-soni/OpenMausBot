@@ -384,3 +384,20 @@ describe("describeMissingFts5", () => {
     expect(describeMissingFts5("disk I/O error")).toBeNull();
   });
 });
+
+describe("recall of digest rows", () => {
+  beforeEach(() => {
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it("finds a digest by its text but ranks it after an ordinary text hit", () => {
+    insertMessage("t1", msg("m1", "we raised the retry limit to five", { role: "bot" }));
+    insertMessage("t1", { ...msg("d1", "[digest] tools: Edit ×1 · files: changed src/retry.ts · reply: retry limit raised"), kind: "digest", role: "bot" });
+    insertMessage("t1", msg("m2", "unrelated chatter about lunch"));
+    const hits = recallMessages("retry limit", ["t1"]);
+    expect(hits.map((h) => h.messageId)).toEqual(["m1", "d1"]);
+    expect(hits[1]?.kind).toBe("digest");
+  });
+});
