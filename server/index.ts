@@ -3841,6 +3841,112 @@ async function attachTeamBox(computer: TeamComputerRecord, botId: string, owner:
   };
 }
 
+/** "Works on: This computer", strict. One mount for a bot thread and a group
+ * chat, so the two cannot drift on what they check or how they fail. */
+async function mountHostComputer(owner: TurnOwner, botId: string, providerSupportsLocal: boolean) {
+  if (!shouldMountLocalComputer({ requested: "local", hostPlatform: process.platform, providerSupportsLocal })) {
+    // Name the condition that actually failed: a person told "choose an
+    // ACP engine" while already on one has nowhere to go.
+    throw new Error(providerSupportsLocal
+      ? `local computer control is not available on ${process.platform} — select another destination`
+      : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
+  }
+  const cua = readCuaConnection();
+  if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
+  await bindTurnComputer(owner, "computer:host");
+  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation));
+}
+
+/** The bot's own VPS desktop, mounted into the local agent. The desktop lease
+ * is claimed on the first computer call, through the computer-control gate
+ * (the Local VM's seam, #1361), never at mount: turns that never touch the
+ * computer tools run side by side. `start` may provision or start the
+ * container; without it the VPS is only inspected. The caller has already
+ * recorded the thread with vpsThreadStarted and ends it on a problem. */
+async function mountBotVps(
+  bot: BotRecord,
+  owner: TurnOwner,
+  opts: { start: boolean; onClaimed: (capture: () => Promise<{ png: string; format: string }>) => void },
+) {
+  const vpsResource = `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`;
+  const remote = opts.start
+    ? await vps.vpsComputerAction("provision", cfg, bot.id)
+    : await vps.inspectVpsForAuto(cfg, bot.id);
+  if (!remote?.ready || !remote.sshAlias) return { problem: remote?.problem ?? null };
+  const targetCfg = { ...cfg, vps: { sshAlias: remote.sshAlias } };
+  const vpsMcp = vps.vpsComputerMcp(targetCfg, bot.id, remote.container_id ?? undefined);
+  const vpsControl = controlIntegration(bot.id, owner.threadId, owner.generation);
+  // Live frames only once this turn holds the desktop: a poller on a desktop
+  // another turn is driving would publish that turn's screen as this one's.
+  const vpsCapture = () => vps.vpsComputerScreenshot(targetCfg, bot.id);
+  autoVmClaims.set(owner.threadId, {
+    owner,
+    lazy: true,
+    label: "the VPS computer",
+    claim: async () => {
+      await bindTurnComputer(owner, vpsResource, true);
+      opts.onClaimed(vpsCapture);
+    },
+  });
+  return {
+    integration: {
+      ...vpsMcp,
+      env: { ...vpsMcp.env, OMB_CONTROL_URL: vpsControl.url, OMB_CONTROL_TOKEN: vpsControl.token },
+    },
+  };
+}
+
+/** The bot's own Box. Explicit Cloud is the consent boundary: it may create a
+ * missing machine and wake an archived one (~8s, and it un-pauses billing);
+ * Auto only attaches a machine that is already running. */
+async function attachBotBox(
+  bot: BotRecord,
+  owner: TurnOwner,
+  opts: { explicitCloud: boolean; canMount: boolean; remoteAgent: boolean },
+) {
+  // Explicit cloud turns can provision/wake the same bot's Box. Claim before
+  // any network await so setup itself cannot race another turn.
+  if (opts.explicitCloud) await bindTurnComputer(owner, `computer:box-bot:${bot.id}`, true);
+  let b: Awaited<ReturnType<typeof box.findBox>> | null;
+  try {
+    b = await box.findBox(cfg, bot.id);
+  } catch (error) {
+    // Auto may fall through when an optional provider is offline, but a
+    // durable deletion fence must never be mistaken for "no computer".
+    if (opts.explicitCloud || (error as { status?: number })?.status === 409) throw error;
+    b = null;
+  }
+  const lifecycleOf = (explicitCloud: boolean) => box.boxTurnLifecycleAction({
+    explicitCloud,
+    canMount: opts.canMount,
+    state: typeof b?.state === "string" ? b.state : null,
+  });
+  let lifecycle = lifecycleOf(opts.explicitCloud);
+  if (lifecycle === "provision") {
+    broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
+    await box.provisionBox(cfg, bot.id, bot.name);
+    b = await box.findBox(cfg, bot.id);
+    lifecycle = lifecycleOf(true);
+  }
+  // an archived box answers every action with an error until it resumes —
+  // wake it here, once, instead of letting the agent discover it one failed
+  // tool call at a time.
+  if (lifecycle === "wake") {
+    broadcast({ kind: "computer", botId: bot.id, state: "waking" });
+    b = (await box.readyBox(cfg, bot.id)) ?? b;
+    lifecycle = lifecycleOf(true);
+  }
+  if (!b || lifecycle !== "attach") return null;
+  const machine = b;
+  await bindTurnComputer(owner, `computer:box:${machine.id}`, opts.remoteAgent);
+  return {
+    capture: () => box.screenshotBox(cfg, bot.id, machine.id),
+    integration: opts.canMount
+      ? { kind: "box" as const, boxId: machine.id, token: cfg.box!.token!, control: controlIntegration(bot.id, owner.threadId, owner.generation) }
+      : null,
+  };
+}
+
 function managedBoxOwners(): box.ManagedBoxOwner[] {
   return [...store.bots.map((bot) => ({
     botId: bot.id,
@@ -6252,21 +6358,7 @@ async function startTurn(
       if (wants === "vm") {
         if (await attachLocalVm(true)) computerKind = "vm";
       } else if (wants === "local") {
-        if (!shouldMountLocalComputer({
-          requested: "local",
-          hostPlatform: process.platform,
-          providerSupportsLocal: mountsLocalComputer,
-        })) {
-          // Name the condition that actually failed: a person told "choose an
-          // ACP engine" while already on one has nowhere to go.
-          throw new Error(mountsLocalComputer
-            ? `local computer control is not available on ${process.platform} — select another destination`
-            : "this model engine cannot control this computer — choose Claude or an ACP engine, or select another destination");
-        }
-        const cua = readCuaConnection();
-        if (!cua) throw new Error("CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
-        await bindTurnComputer(resourceOwner, "computer:host");
-        integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
+        integrations.localComputer = await mountHostComputer(resourceOwner, bot.id, mountsLocalComputer);
         computerKind = "local";
       }
 
@@ -6287,51 +6379,34 @@ async function startTurn(
           // — or fails after 30 minutes behind — its own long-running task.
           // Container lifecycle (provision, start) is serialized by the
           // runner's per-container lock, not by this turn.
-          const vpsResource = `computer:vps:${vpsSshAlias(cfg)}:${bot.id}`;
           vpsThreadStarted(bot.id, threadId);
-          let remote;
-          remote = vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource })
-            ? await vps.vpsComputerAction("provision", cfg, bot.id)
-            : await vps.inspectVpsForAuto(cfg, bot.id);
-          if (remote?.ready && remote.sshAlias) {
-            const targetCfg = { ...cfg, vps: { sshAlias: remote.sshAlias } };
-            const vpsMcp = vps.vpsComputerMcp(targetCfg, bot.id, remote.container_id ?? undefined);
-            const vpsControl = controlIntegration(bot.id, threadId, dispatchClaimId);
-            integrations.localComputer = {
-              ...vpsMcp,
-              env: { ...vpsMcp.env, OMB_CONTROL_URL: vpsControl.url, OMB_CONTROL_TOKEN: vpsControl.token },
-            };
+          const mounted = await mountBotVps(bot, resourceOwner, {
+            start: vps.vpsStartsForTurn({ wants, autoStartVps: bot.autoStartVps, automationSource: opts?.automationSource }),
+            // The claim restarts the poller with the capture, the way the
+            // Local VM's lazy claim does.
+            onClaimed: (vpsCapture) => {
+              previewCapture = vpsCapture;
+              if (threadBusy(bot.id, threadId)) {
+                const touched = screenPollers.get(threadId)?.touched ?? false;
+                stopScreenPoller(bot.id, threadId);
+                startScreenPoller(
+                  bot.id,
+                  threadId,
+                  { computer: vpsCapture, ...(browserCapture ? { browser: browserCapture } : {}) },
+                  { screenIsTheWork: touched },
+                );
+              }
+            },
+          });
+          if ("integration" in mounted) {
+            integrations.localComputer = mounted.integration;
             computerKind = "vps";
-            // Live frames only once this turn holds the desktop: a poller on
-            // a desktop another turn is driving would publish that turn's
-            // screen as this one's. The claim restarts the poller with the
-            // capture, the way the Local VM's lazy claim does.
-            const vpsCapture = () => vps.vpsComputerScreenshot(targetCfg, bot.id);
-            autoVmClaims.set(threadId, {
-              owner: resourceOwner,
-              lazy: true,
-              label: "the VPS computer",
-              claim: async () => {
-                await bindTurnComputer(resourceOwner, vpsResource, true);
-                previewCapture = vpsCapture;
-                if (threadBusy(bot.id, threadId)) {
-                  const touched = screenPollers.get(threadId)?.touched ?? false;
-                  stopScreenPoller(bot.id, threadId);
-                  startScreenPoller(
-                    bot.id,
-                    threadId,
-                    { computer: vpsCapture, ...(browserCapture ? { browser: browserCapture } : {}) },
-                    { screenIsTheWork: touched },
-                  );
-                }
-              },
-            });
           } else {
             vpsThreadEnded(bot.id, threadId);
             if (wants === "cloud") {
-              throw new Error(remote?.problem ?? "the VPS computer could not be created or reached");
+              throw new Error(mounted.problem ?? "the VPS computer could not be created or reached");
             }
-            autoVpsProblem = remote?.problem ?? "the VPS computer could not be reached";
+            autoVpsProblem = mounted.problem ?? "the VPS computer could not be reached";
           }
         }
       }
@@ -6345,59 +6420,15 @@ async function startTurn(
         computerKind = "box";
       }
       if (!teamComputer && mountsCloudComputer && (wants === "cloud" || wants === undefined) && cloudBackend === "box" && box.boxConfigured(cfg)) {
-        // Explicit cloud turns can provision/wake the same bot's Box. Claim
-        // before any network await so setup itself cannot race another turn.
-        if (wants === "cloud") await bindTurnComputer(resourceOwner, `computer:box-bot:${bot.id}`, true);
-        if (!mountsCloudComputer && wants === "cloud") {
-          throw new Error("this model engine cannot use computer tools — choose Claude, an ACP engine, or the Computer engine");
-        }
-        let b;
-        try {
-          b = await box.findBox(cfg, bot.id);
-        } catch (error) {
-          // Auto may fall through when an optional provider is offline, but a
-          // durable deletion fence must never be mistaken for "no computer".
-          if (wants === "cloud" || (error as { status?: number })?.status === 409) throw error;
-          b = null;
-        }
-        let lifecycle = box.boxTurnLifecycleAction({
+        const attached = await attachBotBox(bot, resourceOwner, {
           explicitCloud: wants === "cloud",
           canMount: mountsCloudComputer,
-          state: typeof b?.state === "string" ? b.state : null,
+          remoteAgent: instance.driverKind === "boxAgent",
         });
-        if (lifecycle === "provision") {
-          broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-          await box.provisionBox(cfg, bot.id, bot.name);
-          b = await box.findBox(cfg, bot.id);
-          lifecycle = box.boxTurnLifecycleAction({
-            explicitCloud: true,
-            canMount: mountsCloudComputer,
-            state: typeof b?.state === "string" ? b.state : null,
-          });
-        }
-        // an archived box answers every action with an error until it
-        // resumes — wake it here, once, instead of letting the agent
-        // discover it one failed tool call at a time. Explicit Cloud is the
-        // consent boundary for the resume (~8s, and it un-pauses billing).
-        if (lifecycle === "wake") {
-          broadcast({ kind: "computer", botId: bot.id, state: "waking" });
-          b = (await box.readyBox(cfg, bot.id)) ?? b;
-          lifecycle = box.boxTurnLifecycleAction({
-            explicitCloud: true,
-            canMount: mountsCloudComputer,
-            state: typeof b?.state === "string" ? b.state : null,
-          });
-        }
-        if (b && lifecycle === "attach") {
-          await bindTurnComputer(resourceOwner, `computer:box:${b.id}`, instance.driverKind === "boxAgent");
-          previewCapture = () => box.screenshotBox(cfg, bot.id, b!.id);
-          if (mountsCloudComputer) {
-            integrations.computer = {
-              kind: "box",
-              boxId: b.id,
-              token: cfg.box!.token!,
-              control: controlIntegration(bot.id, threadId, dispatchClaimId),
-            };
+        if (attached) {
+          previewCapture = attached.capture;
+          if (attached.integration) {
+            integrations.computer = attached.integration;
             computerKind = "box";
           }
         }
@@ -7894,9 +7925,22 @@ async function runGroupMemberTurn(
   let retainRoomVmLease = false;
   let roomSpeaker: { botId: string; name: string; color: string } | undefined;
   let providerDispatched = false;
+  // The speaker's own This computer / Cloud mount, and what it must give back.
+  let roomComputerKind: "local" | "vps" | "box" | null = null;
+  let roomVpsBotId: string | null = null;
+  let roomScreenBotId: string | null = null;
   const releaseRoomVmLease = () => {
     if (roomVmTarget && localVmThreadTargets.get(threadId) === roomVmTarget) releaseLocalVmThread(threadId);
     roomVmTarget = null;
+    // Only while this turn still owns the thread: a replacement speaker's
+    // poller and VPS record are its own to end.
+    const currentOwner = turnResourceOwners.get(threadId);
+    if (!currentOwner || currentOwner.generation === resourceOwner.generation) {
+      if (roomScreenBotId) stopScreenPoller(roomScreenBotId, threadId);
+      if (roomVpsBotId) vpsThreadEnded(roomVpsBotId, threadId);
+    }
+    roomScreenBotId = null;
+    roomVpsBotId = null;
     releaseTurnResources(resourceOwner);
   };
   let roomHandoffSourceSucceeded = false;
@@ -8097,11 +8141,10 @@ async function runGroupMemberTurn(
       readyBot.browser !== false &&
       instance.adapter.capabilities.browserMcp === true,
   });
-  // Channels currently mount a team Box or a Local VM. Do not let an
-  // explicitly selected, unsupported destination become a tool-free turn
-  // that can claim to have acted on that screen.
-  if (!roomTeamComputer && (roomPlan.computer === "cloud" || roomPlan.computer === "local")) {
-    throw new Error("This computer destination is not available in channels yet — open a bot thread to work on it, or use a Local VM, team computer, or Browser here");
+  // The Computer engine runs on the Box; this computer has no tools it can
+  // reach, exactly as a bot thread refuses it.
+  if (roomPlan.computer === "local" && instance.driverKind === "boxAgent") {
+    throw new Error("the Computer engine works on the cloud computer — set Works on to Cloud, or choose another engine");
   }
   // One place per room turn as well: a team computer reached on Auto means
   // no separate built-in browser.
@@ -8127,6 +8170,50 @@ async function runGroupMemberTurn(
         activeInternalGenerationByThread.get(threadId) !== internalGeneration) return false;
     integrations.computer = attached.integration;
     startScreenPoller(readyBot.id, threadId, { computer: attached.capture }, { screenIsTheWork: instance.driverKind === "boxAgent" });
+  }
+
+  // The speaker's own explicit place, mounted exactly as its bot thread
+  // mounts it. A channel has no conversation pin and no Auto fallback here:
+  // only a destination the person chose reaches a desktop.
+  const roomSetupIsCurrent = () => !isCancelled?.() &&
+    groupSpeakers.get(threadId) === roomSpeaker &&
+    activeInternalGenerationByThread.get(threadId) === internalGeneration;
+  if (!roomTeamComputer && roomPlan.computer === "local") {
+    integrations.localComputer = await mountHostComputer(
+      resourceOwner, readyBot.id, instance.adapter.capabilities.localComputerMcp === true);
+    if (!roomSetupIsCurrent()) return false;
+    roomComputerKind = "local";
+  }
+  if (!roomTeamComputer && roomPlan.computer === "cloud") {
+    if (turnProvider(readyBot) === "vps") {
+      const unsupported = vps.vpsDriverError(instance.driverKind, instance.adapter.capabilities.computerMcp === true);
+      if (unsupported) throw new Error(unsupported);
+      vpsThreadStarted(readyBot.id, threadId);
+      roomVpsBotId = readyBot.id;
+      const mounted = await mountBotVps(readyBot, resourceOwner, {
+        start: true,
+        onClaimed: (capture) => {
+          if (roomSetupIsCurrent() && store.group(readyGroup.id)?.busyBotId === readyBot.id) {
+            roomScreenBotId = readyBot.id;
+            startScreenPoller(readyBot.id, threadId, { computer: capture });
+          }
+        },
+      });
+      if (!roomSetupIsCurrent()) return false;
+      if (!("integration" in mounted)) throw new Error(mounted.problem ?? "the VPS computer could not be created or reached");
+      integrations.localComputer = mounted.integration;
+      roomComputerKind = "vps";
+    } else {
+      if (!box.boxConfigured(cfg)) throw new Error("Cloud box is not configured — add a Box API key or choose Local VM");
+      const remoteAgent = instance.driverKind === "boxAgent";
+      const attached = await attachBotBox(readyBot, resourceOwner, { explicitCloud: true, canMount: remoteAgent, remoteAgent });
+      if (!roomSetupIsCurrent()) return false;
+      if (!attached?.integration) throw new Error("the cloud computer could not be created or reached");
+      integrations.computer = attached.integration;
+      roomScreenBotId = readyBot.id;
+      startScreenPoller(readyBot.id, threadId, { computer: attached.capture }, { screenIsTheWork: remoteAgent });
+      roomComputerKind = "box";
+    }
   }
 
   // Room and Goal turns use the speaker's desktop, never the coordinator's.
@@ -8260,9 +8347,9 @@ async function runGroupMemberTurn(
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
-    { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer ? instance.driverKind === "boxAgent" ? "box-agent" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : null) },
+    { id: "computer", label: "Computer", text: computerPrompt(roomTeamComputer || roomComputerKind === "box" ? instance.driverKind === "boxAgent" ? "box-agent" : "box" : roomVmTarget ? localVmMode(cfg) === "per-bot" ? "vm-private" : "vm-shared" : roomComputerKind) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
-    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : null, browser: Boolean(integrations.browser) }, { note: roomPlan.note }) },
+    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note }) },
     { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "recall", label: "Recall", text: integrations.agents ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },

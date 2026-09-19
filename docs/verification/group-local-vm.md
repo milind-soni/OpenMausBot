@@ -60,10 +60,15 @@ targeted.
 Direct-turn regressions additionally send two different requests through a
 Local VM-pinned conversation while the bot default is Cloud, checking the
 actual MCP descriptor, prompt, matching preview surface, and capability expiry.
-Explicit Cloud/VPS and host-computer destinations are not yet supported for
-ordinary channel members; these now report that limitation rather than
-dispatching a turn without the promised computer. Team computers and Local VM
-channel work remain supported.
+A channel member's explicit This computer and Cloud (Box or VPS) destinations
+mount exactly as its bot thread mounts them: the same checks, the same
+control gate, and the same consent boundary for waking or creating a cloud
+computer. The fixture proves the host descriptor reaches the speaker behind a
+working gate that closes when the turn settles, that a missing CUA driver is
+reported instead of dispatching without the promised tools, and that a Cloud
+speaker wakes its own archived Box, runs there, and gives it back for the next
+turn. The VPS mount shares the bot-thread code path but has no channel fixture
+yet. Channels still have no conversation pin and no Auto fallback to the host.
 
 The same isolated server now covers chat-driven computer selection: the agents
 tool discovers ready, startable, and provisionable destinations without mutating
