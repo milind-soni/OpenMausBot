@@ -7,9 +7,9 @@ import {
   request,
   resolveBaseUrl,
   TOOLS,
-  validateBaseUrl,
   validateToolArguments,
 } from "../scripts/mcp-server.ts";
+import { validateBaseUrl } from "../shared/server-endpoint.ts";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
