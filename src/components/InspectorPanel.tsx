@@ -195,7 +195,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
           <Bug size={16} className="text-ink-secondary" /> Inspector
         </span>
         <button
-          onClick={() => dispatch({ type: "toggleInspector", open: false })}
+          onClick={() => dispatch({ type: "closeOverlay", kind: "inspector" })}
           aria-label="Close the Inspector"
           title="Close the Inspector"
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
