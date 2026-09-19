@@ -7230,6 +7230,12 @@ describe("harness HTTP API", () => {
           OMB_PORT: String(isolatedPort),
           OMB_WEBHOOK_PORT: String(isolatedPort + 1),
           OMB_STATIC_DIR: isolatedStatic,
+          // A real agent-browser picked up from PATH cannot even name its
+          // daemon socket under this long fixture HOME (macOS caps socket
+          // paths at 103 bytes); its erasure can never be confirmed, so the
+          // committed entry must keep retrying rather than ACK. No engine
+          // means no saved state to erase, and replay takes the no-engine ACK.
+          OMB_AGENT_BROWSER_PATH: join(isolatedHome, "missing-agent-browser"),
           FAKE_CLAUDE_MODE: "hang",
           FAKE_CLAUDE_DUMP: join(isolatedHome, "fake-claude-dump.json"),
         },
