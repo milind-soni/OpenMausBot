@@ -47,10 +47,19 @@ describe("independent bot tasks through the isolated control surface", () => {
   };
   const botState = async (botId: string) => (await tool("list_bots", {})).bots.find((bot: any) => bot.id === botId);
   const modelFile = (model: string, extension: string) => join(session.info.dataDir, `${model.replace(/[^\w-]/g, "_")}.${extension}`);
-  const dump = async (model: string) => {
-    await expect.poll(() => existsSync(modelFile(model, "json")), { timeout: 15_000 }).toBe(true);
-    return JSON.parse(readFileSync(modelFile(model, "json"), "utf8"));
+  const readJsonFileWhenReady = async <T = unknown>(file: string, timeout = 5_000): Promise<T> => {
+    let parsed: unknown;
+    await expect.poll(() => {
+      try {
+        parsed = JSON.parse(readFileSync(file, "utf8"));
+        return true;
+      } catch {
+        return false;
+      }
+    }, { timeout }).toBe(true);
+    return parsed as T;
   };
+  const dump = async (model: string) => readJsonFileWhenReady<any>(modelFile(model, "json"), 15_000);
   const permission = async (model: string, id: string) => {
     const launched = await dump(model);
     const socketPath = launched.mcpConfig.mcpServers.ogb.args.at(-1);

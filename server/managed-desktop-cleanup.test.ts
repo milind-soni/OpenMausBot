@@ -1,37 +1,10 @@
-import { readFileSync } from "node:fs";
-import vm from "node:vm";
-import ts from "typescript";
 import { expect, it } from "vitest";
+import { createProviderFleet } from "./provider-fleet.ts";
+import { createTurnCleanup } from "./turn-cleanup.ts";
 
-// Execute the actual cleanup functions without importing index.ts, which would
-// start a server. State and adapters are synthetic; this is an ownership-race
-// regression, not proof of a real provider or conversation workflow.
-const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
-function section(start: string, end: string) {
-  // Anchor both markers to the start of a line. `function bindTurnComputer(`
-  // also matches INSIDE `async function bindTurnComputer(`, which silently cut
-  // the slice after the `async ` and left it dangling — the extracted code then
-  // died with `ReferenceError: async is not defined` instead of failing here
-  // with a readable "section moved". Anchoring makes drift loud again.
-  const lineStart = (marker: string, from: number) => {
-    if (from === 0 && source.startsWith(marker)) return 0;
-    const at = source.indexOf(`\n${marker}`, from);
-    return at < 0 ? -1 : at + 1;
-  };
-  const from = lineStart(start, 0), to = from < 0 ? -1 : lineStart(end, from + start.length);
-  if (from < 0 || to <= from) throw new Error(`Cleanup test section moved: ${start}`);
-  return source.slice(from, to);
-}
-const code = ts.transpileModule([
-  section("async function interruptDirectThread(", "/** Stop left teammates"),
-  section("function releaseTurnResources(", "async function bindTurnComputer("),
-  section("async function stopCompanyInstances(", "async function persistProviderInstance("),
-].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
-const reloadProvidersCode = ts.transpileModule(
-  section("async function reloadProviders()", "// Config writes rebuild the whole provider registry."),
-  { compilerOptions: { target: ts.ScriptTarget.ESNext } },
-).outputText;
-
+// Construct the real cleanup and provider-fleet factories with synthetic
+// state and adapters; this is an ownership-race regression, not proof of a
+// real provider or conversation workflow.
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>(yes => { resolve = yes; });
@@ -41,66 +14,116 @@ type Owner = { threadId: string; generation: string };
 type Bot = { id: string; busy: boolean; modelSelection: { instanceId: string } };
 type Speaker = { botId: string; name: string };
 function fixture(kind: "direct" | "group", threadIds = ["first"]) {
-  const bots = new Map<string, Bot>(), tasks = new Map<string, { threadId: string; busy: boolean }>();
+  const bots = new Map<string, Bot>(), tasks = new Map<string, { threadId: string; busy: boolean; title: string }>();
   const groups = new Map<string, { id: string; busyBotId: string | null }>();
   const owners = new Map<string, Owner>(), generations = new Map<string, string>();
   const directBots = new Map<string, Bot>(), speakers = new Map<string, Speaker>();
   const vmLeases = new Map<string, object>(), approvals = new Set<string>(), screens = new Set<string>(), watched = new Set<string>();
-  const autoVmClaims = new Map<string, { owner: { threadId: string; generation: string } }>();
   const started = new Map<string, ReturnType<typeof deferred>>(), interrupted = new Map<string, ReturnType<typeof deferred>>();
   const interruptCalls: string[] = [], cancelled: string[] = [], revoked: string[] = [], messages: string[] = [], settled: string[] = [], detached: string[] = [];
+  let companyShutdown = false;
   for (const threadId of threadIds) {
     const bot = { id: threadId, busy: true, modelSelection: { instanceId: "company" } };
-    bots.set(threadId, bot); tasks.set(threadId, { threadId, busy: true });
+    bots.set(threadId, bot); tasks.set(threadId, { threadId, busy: true, title: "Work" });
     owners.set(threadId, { threadId, generation: `company-${threadId}` });
     generations.set(threadId, `company-${threadId}`);
     if (kind === "direct") directBots.set(threadId, bot);
     else { speakers.set(threadId, { botId: threadId, name: "Company turn" }); groups.set(threadId, { id: threadId, busyBotId: threadId }); }
     vmLeases.set(threadId, {}); approvals.add(threadId); screens.add(threadId); watched.add(threadId);
-    autoVmClaims.set(threadId, { owner: { threadId, generation: `company-${threadId}` } });
     started.set(threadId, deferred()); interrupted.set(threadId, deferred());
   }
-  const context = vm.createContext({
-    providerFleetReloading: false, companyShutdown: false, providerInstancesChanging: new Set(),
-    providerAuthSessions: { clearInstance() {} }, bus: { detach: (id: string) => detached.push(id) },
-    store: {
-      get bots() { return [...bots.values()]; },
-      tasks: (botId: string) => kind === "direct" ? [tasks.get(botId)] : [],
-      bot: (botId: string) => bots.get(botId), groupByThread: (threadId: string) => groups.get(threadId),
-      taskByThread: (_botId: string, threadId: string) => tasks.get(threadId),
-      appendMessage: (threadId: string) => messages.push(threadId),
-      setTaskActivity: (_botId: string, threadId: string) => { tasks.get(threadId)!.busy = false; },
-      patchGroup: (groupId: string, patch: object) => Object.assign(groups.get(groupId)!, patch),
-      setActivity: (botId: string) => { bots.get(botId)!.busy = false; },
+  const instances: Array<{ instanceId: string; adapter: { interruptTurn(threadId: string): Promise<void> } }> = [
+    {
+      instanceId: "company",
+      adapter: {
+        interruptTurn(threadId: string) {
+          interruptCalls.push(threadId); started.get(threadId)!.resolve(); return interrupted.get(threadId)!.promise;
+        },
+      },
     },
-    threadBusy: (_botId: string, threadId: string) => tasks.get(threadId)?.busy,
+  ];
+  const store = {
+    get bots() { return [...bots.values()]; },
+    tasks: (botId: string) => kind === "direct" ? [tasks.get(botId)!] : [],
+    bot: (botId: string) => bots.get(botId), groupByThread: (threadId: string) => groups.get(threadId),
+    taskByThread: (_botId: string, threadId: string) => tasks.get(threadId),
+    appendMessage: (threadId: string) => { messages.push(threadId); },
+    setTaskActivity: (_botId: string, threadId: string) => { tasks.get(threadId)!.busy = false; },
+    patchGroup: (groupId: string, patch: { busyBotId?: string | null }) => Object.assign(groups.get(groupId)!, patch),
+    setActivity: (botId: string) => { bots.get(botId)!.busy = false; },
+  };
+  const stopScreenPoller = (_botId: string, threadId?: string) => { if (threadId) screens.delete(threadId); };
+  const cancelDirectTurnDispatch = (_botId: string, threadId?: string) => { if (threadId) cancelled.push(threadId); };
+  const cancelGroupTurnOperations = (_groupId: string, threadId?: string) => { if (threadId) cancelled.push(threadId); };
+  const revokeInternalCapabilitiesForThread = (threadId: string) => revoked.push(threadId);
+  const closeOpenApprovals = (threadId: string) => approvals.delete(threadId);
+  const runningTurnInstance = (bot: Bot) => instances.find(instance => instance.instanceId === bot.modelSelection.instanceId) ?? null;
+  const cleanup = createTurnCleanup({
+    store,
+    turnResources: { release() {} },
+    turnResourceOwners: owners,
+    turnComputerResources: new Map(),
+    teamComputerTurns: new Map(),
+    directTurnGenerationByThread: generations,
+    stopScreenPoller,
+    roomHandoffs: () => ({ stopAwaitingDirect: () => [] }),
     botForThread: (botId: string, threadId: string) => directBots.get(threadId) ?? bots.get(botId),
-    registry: { get: () => ({ adapter: { interruptTurn: (threadId: string) => {
-      interruptCalls.push(threadId); started.get(threadId)!.resolve(); return interrupted.get(threadId)!.promise;
-    } } }) },
-    turnResourceOwners: owners, directTurnGenerationByThread: generations, directTurnBots: directBots, groupSpeakers: speakers,
-    autoVmClaims,
-    turnResources: { release() {} }, settlingResourceOwners: new Map(), turnComputerResources: new Map(), teamComputerTurns: new Map(),
-    roomHandoffs: { stopAwaitingDirect() {} }, noteTeammatesLeftRunning() {},
-    cancelDirectTurnDispatch: (_botId: string, threadId: string) => cancelled.push(threadId),
-    cancelGroupTurnOperations: (_groupId: string, threadId: string) => cancelled.push(threadId),
-    revokeInternalCapabilitiesForThread: (threadId: string) => revoked.push(threadId),
-    releaseLocalVmThread: (threadId: string) => vmLeases.delete(threadId),
-    stopScreenPoller: (_botId: string, threadId: string) => screens.delete(threadId),
-    watchdog: { settle: (threadId: string) => watched.delete(threadId) },
-    closeOpenApprovals: (threadId: string) => approvals.delete(threadId),
-    finalizeDelegationWatch() {}, routines: { failThread() {} },
-    settleDirectFollowup: (generation: string) => settled.push(generation),
+    cancelDirectTurnDispatch,
+    revokeInternalCapabilitiesForThread,
+    runningTurnInstance,
+    closeOpenApprovals,
   });
-  context.runningTurnInstance = (bot: Bot) => context.registry.get(bot.modelSelection.instanceId);
-  vm.runInContext(code, context, { filename: "index.ts (Company cleanup ownership fixture)" });
+  const fleet = createProviderFleet({
+    store,
+    cfg: {},
+    registry: {
+      load: async () => {},
+      get: (id: string) => instances.find(instance => instance.instanceId === id) ?? null,
+      instances: () => instances,
+      dispose: async () => {},
+      disposeAll: async () => {},
+    },
+    bus: { attach() {}, detach: (id: string) => detached.push(id), detachAll() {} },
+    sessions: { clear() {}, clearInstance() {} },
+    watchdog: { settle: (threadId: string) => { watched.delete(threadId); } },
+    routines: () => null,
+    desktop: { restore: async () => {} },
+    turns: cleanup,
+    companyShutdown: () => companyShutdown,
+    admission: {
+      threadBusy: (_botId: string, threadId: string) => Boolean(tasks.get(threadId)?.busy),
+      botForThread: (botId: string, threadId: string) => directBots.get(threadId) ?? bots.get(botId) ?? null,
+      turnResourceOwners: owners,
+      directTurnGenerationByThread: generations,
+      directTurnBots: directBots,
+    },
+    cleanup: {
+      stopScreenPoller,
+      releaseLocalVmThread: (threadId: string) => { vmLeases.delete(threadId); },
+      closeOpenApprovals,
+      revokeInternalCapabilitiesForThread,
+      revokeAllInternalCapabilities() {},
+      runningTurnInstance,
+      settleDirectFollowup: (generation?: string) => { if (generation) settled.push(generation); },
+      finalizeDelegationWatch() { return false; },
+      cancelGroupTurnOperations,
+      cancelDirectTurnDispatch,
+    },
+    speakers: { groupSpeakers: speakers },
+    vps: { vpsThreadEnded() {} },
+    persistence: { saveConfig() {}, instanceConfigs: () => ({}), resetPathCache() {} },
+    drains: { drainQueuedSends() {}, drainConnectorResumes() {}, drainSecretResumes() {}, drainTeamSetupResumes() {}, retryDelegationsWaitingOn() {} },
+  });
+  for (const threadId of threadIds) {
+    cleanup.autoVmClaims.set(threadId, { owner: { threadId, generation: `company-${threadId}` }, claim: () => Promise.resolve() });
+  }
   return {
     bots, tasks, groups, owners, directBots, speakers, vmLeases, approvals, screens, watched,
-    autoVmClaims,
+    autoVmClaims: cleanup.autoVmClaims,
     interruptCalls, cancelled, revoked, messages, settled, detached,
-    context,
-    stop: () => context.stopCompanyInstances(["company"]) as Promise<void>,
-    interrupt: (threadId: string) => context.interruptDirectThread(threadId, threadId) as Promise<void>,
+    stop: () => fleet.stopCompanyInstances(["company"]),
+    interrupt: (threadId: string) => cleanup.interruptDirectThread(threadId, threadId),
+    setCompanyShutdown: (value: boolean) => { companyShutdown = value; },
     started: (threadId: string) => started.get(threadId)!.promise,
     finish: (threadId: string) => interrupted.get(threadId)!.resolve(),
     replace: (threadId: string, replaceSpeaker = true) => {
@@ -111,7 +134,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
       if (kind === "direct") directBots.set(threadId, bot);
       else if (replaceSpeaker) speakers.set(threadId, { botId: threadId, name: "Personal turn" });
       vmLeases.set(threadId, {}); approvals.add(threadId); screens.add(threadId); watched.add(threadId);
-      autoVmClaims.set(threadId, { owner: { threadId, generation: `personal-${threadId}` } });
+      cleanup.autoVmClaims.set(threadId, { owner: { threadId, generation: `personal-${threadId}` }, claim: () => Promise.resolve() });
     },
   };
 }
@@ -204,7 +227,7 @@ for (const kind of ["direct", "group"] as const) {
 
 it("quitting disposes Company instances without interrupting turns or writing connection-changed cards", async () => {
   const f = fixture("direct");
-  f.context.companyShutdown = true;
+  f.setCompanyShutdown(true);
   await f.stop();
   expect(f.interruptCalls).toEqual([]);
   expect(f.messages).toEqual([]);
@@ -215,29 +238,74 @@ it("quitting disposes Company instances without interrupting turns or writing co
 it("reattaches rebuilt personal providers before a Company restore failure", async () => {
   const order: string[] = [];
   const personal = { instanceId: "personal" };
-  const context = vm.createContext({
-    providerFleetReloading: false,
-    providerAuthSessions: { clear: () => order.push("clear-auth") },
-    revokeAllInternalCapabilities: () => order.push("revoke-capabilities"),
-    store: { bots: [] },
-    groupSpeakers: new Map(),
-    bus: {
-      detachAll: () => order.push("detach"),
-      attach: (instances: Array<{ instanceId: string }>) => order.push(`attach:${instances.map(instance => instance.instanceId).join(",")}`),
-    },
-    registry: {
-      disposeAll: async () => { order.push("dispose"); },
-      load: async () => { order.push("load-personal"); },
-      instances: () => [personal],
-    },
-    instanceConfigs: () => ({ personal: { driver: "fake" } }), cfg: {},
-    managedDesktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
+  const cleanup = createTurnCleanup({
+    store: { taskByThread: () => undefined, bot: () => undefined, appendMessage() {} },
+    turnResources: { release() {} },
+    turnResourceOwners: new Map(),
+    turnComputerResources: new Map(),
+    teamComputerTurns: new Map(),
+    directTurnGenerationByThread: new Map(),
+    stopScreenPoller() {},
+    roomHandoffs: () => ({ stopAwaitingDirect: () => [] }),
+    botForThread: () => null,
+    cancelDirectTurnDispatch() {},
+    revokeInternalCapabilitiesForThread() {},
+    runningTurnInstance: () => null,
+    closeOpenApprovals() {},
   });
-  vm.runInContext(reloadProvidersCode, context, { filename: "index.ts (provider reload fixture)" });
+  const fleet = createProviderFleet({
+    store: {
+      bots: [],
+      tasks: () => [],
+      bot: () => undefined,
+      groupByThread: () => undefined,
+      taskByThread: () => undefined,
+      appendMessage() {},
+      setTaskActivity() {},
+      patchGroup() {},
+      setActivity() {},
+    },
+    cfg: {},
+    registry: {
+      load: async () => { order.push("load-personal"); },
+      get: () => null,
+      instances: () => [personal],
+      dispose: async () => {},
+      disposeAll: async () => { order.push("dispose"); },
+    },
+    bus: {
+      detachAll: () => { order.push("detach"); },
+      attach: (instances: Array<{ instanceId: string }>) => { order.push(`attach:${instances.map(instance => instance.instanceId).join(",")}`); },
+      detach() {},
+    },
+    sessions: { clear: () => { order.push("clear-auth"); }, clearInstance() {} },
+    watchdog: { settle() {} },
+    routines: () => null,
+    desktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
+    turns: cleanup,
+    companyShutdown: () => false,
+    admission: { threadBusy: () => false, botForThread: () => null, turnResourceOwners: new Map(), directTurnGenerationByThread: new Map(), directTurnBots: new Map() },
+    cleanup: {
+      stopScreenPoller() {},
+      releaseLocalVmThread() {},
+      closeOpenApprovals() {},
+      revokeInternalCapabilitiesForThread() {},
+      revokeAllInternalCapabilities: () => { order.push("revoke-capabilities"); },
+      runningTurnInstance: () => null,
+      settleDirectFollowup() {},
+      finalizeDelegationWatch() { return false; },
+      cancelGroupTurnOperations() {},
+      cancelDirectTurnDispatch() {},
+    },
+    speakers: { groupSpeakers: new Map() },
+    vps: { vpsThreadEnded() {} },
+    persistence: { saveConfig() {}, instanceConfigs: () => ({}), resetPathCache() {} },
+    drains: { drainQueuedSends() {}, drainConnectorResumes() {}, drainSecretResumes() {}, drainTeamSetupResumes() {}, retryDelegationsWaitingOn() {} },
+  });
 
-  await expect(context.reloadProviders()).rejects.toThrow("Fixture Company restore failure");
+  await expect(fleet.reloadProviders()).rejects.toThrow("Fixture Company restore failure");
   expect(order).toEqual([
     "clear-auth", "revoke-capabilities", "detach", "dispose", "load-personal", "attach:personal", "restore-company",
   ]);
-  expect(context.providerFleetReloading).toBe(false);
+  expect(fleet.providerFleetReloading).toBe(false);
 });
