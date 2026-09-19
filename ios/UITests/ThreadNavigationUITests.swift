@@ -155,8 +155,12 @@ final class ThreadNavigationUITests: XCTestCase {
     func testBulkDeletionKeepsCurrentAndWorkingThread() {
         let app = launchPreview(extraArguments: ["-threads-preview-deletion"])
         openGmail(in: app)
-        app.buttons["thread-switcher"].tap()
-        app.buttons["select-threads"].tap()
+        let switcher = app.buttons["thread-switcher"]
+        XCTAssertTrue(switcher.waitForExistence(timeout: 5))
+        switcher.tap()
+        let selectThreads = app.buttons["select-threads"]
+        XCTAssertTrue(selectThreads.waitForExistence(timeout: 5))
+        selectThreads.tap()
 
         XCTAssertFalse(app.buttons["select-thread-preview-gmail"].isEnabled)
         XCTAssertFalse(app.buttons["select-thread-preview-routine"].exists)
@@ -184,8 +188,12 @@ final class ThreadNavigationUITests: XCTestCase {
             "-threads-preview-deletion", "-threads-preview-deletion-fails-weekend"
         ])
         openGmail(in: app)
-        app.buttons["thread-switcher"].tap()
-        app.buttons["select-threads"].tap()
+        let switcher = app.buttons["thread-switcher"]
+        XCTAssertTrue(switcher.waitForExistence(timeout: 5))
+        switcher.tap()
+        let selectThreads = app.buttons["select-threads"]
+        XCTAssertTrue(selectThreads.waitForExistence(timeout: 5))
+        selectThreads.tap()
         app.buttons["select-all-threads"].tap()
         app.buttons["delete-selected-threads"].tap()
         let confirmation = app.buttons["Delete 2 threads"]
@@ -211,6 +219,15 @@ final class ThreadNavigationUITests: XCTestCase {
         // Xcode may prelaunch the app after installing an updated build.
         // Restart it so Session initializes with the offline fixture flags.
         app.terminate()
+        // The simulator can still be reaping the previous instance when the
+        // next test launches; racing that teardown wedges launch() itself
+        // (launch-progress timeouts and stale-pid background assertion
+        // failures on the first tests of a fresh simulator).
+        let termination = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "state == %@", NSNumber(value: XCUIApplication.State.notRunning.rawValue)),
+            object: app
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [termination], timeout: 10), .completed)
         app.launchArguments = [
             "-store-preview", "-threads-preview",
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",

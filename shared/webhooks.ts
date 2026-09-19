@@ -1,7 +1,5 @@
 /** Webhook wire shapes — triggers and delivery attempts as they ride the
- * REST snapshot and the `webhook` / `webhook.attempt` live frames. Moved
- * verbatim from the client's mirrors (src/lib/webhooks.ts); the client file
- * re-exports these under the same names. */
+ * REST snapshot and the `webhook` / `webhook.attempt` live frames. */
 import type { RoutineRunOn } from "./routines.ts";
 
 export interface WebhookTrigger {
@@ -60,4 +58,3 @@ export interface WebhookIngressStatus {
   baseUrl: string;
   error?: string;
 }
-
