@@ -89,7 +89,7 @@ import type {
   RoutineSchedule,
   RoutineScheduleInput,
   RoutineTarget,
-} from "@/lib/routines";
+} from "../../shared/routines";
 import { api, openNotificationTarget, useStore, type Bot, type Group } from "@/state/store";
 
 const HOUR_HEIGHT = 64;

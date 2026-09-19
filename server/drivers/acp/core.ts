@@ -918,6 +918,17 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           emit({ ...base(threadId, turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
           settle(false, "spawn_error");
         });
+        // Stream write errors (e.g. EPIPE when the child dies mid-write) never
+        // reach child.on("error"); without this listener they crash the server.
+        child.stdin.on("error", (e) => {
+          if (state.settled) return;
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: `${DRIVER_KIND} stdin write failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          settle(false, "host_write_error");
+        });
         child.on("close", (code) => {
           if (!state.settled) {
             emit({
