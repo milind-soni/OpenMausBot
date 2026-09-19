@@ -228,6 +228,13 @@ export interface SendTurnInput {
   model?: string;
   effort?: EffortLevel;
   resumeCursor?: unknown;
+  /** The harness wants a NEW native session for this turn even if one is
+   * alive for the thread: after a rewind (the live session holds the
+   * abandoned branch) or a harness compaction (it holds the whole thread the
+   * record just folded). The turn text carries the replay. A driver that
+   * keeps one process per thread closes it first; a driver that starts a
+   * session per turn ignores this. */
+  sessionReset?: boolean;
   /** The turn with the conversation so far replayed inline, attached only
    * alongside resumeCursor. A cursor-resuming driver sends it once, on a
    * fresh session, when the provider refuses the cursor before reading the
@@ -533,7 +540,9 @@ export interface ProviderInstance {
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */
-  generateText?(prompt: string): Promise<string>;
+  /** `cwd`: where the one-shot call runs, so an engine whose own prompt
+   * names its working directory names the task's, not the server's. */
+  generateText?(prompt: string, opts?: { cwd?: string }): Promise<string>;
   /** Isolated, tool-free permission review on this same provider. Kept
    * separate from generateText so the UI never infers a security capability
    * from a generic helper that may expose prompts in argv or lack approvals. */

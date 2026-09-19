@@ -64,7 +64,7 @@ describe("summarizeMetrics", () => {
   const rows = [
     row({ botId: "dev", threadId: "t1", input: 2_000, output: 200, cachedInput: 1_800, hookCoverage: "full", promptShape: { stableBytes: 5_000, volatileBytes: 1_000, totalBytes: 6_000, replayed: false, replayBytes: 0, stableChanged: [] } }),
     row({ botId: "dev", threadId: "t1", input: 3_000, output: 300, cachedInput: 600, hookCoverage: "preview", promptShape: { stableBytes: 5_500, volatileBytes: 1_000, totalBytes: 6_500, replayed: true, replayBytes: 4_000, stableChanged: ["skill-instructions"] } }),
-    row({ botId: "dev", threadId: "t2", input: 1_000, output: 100, hookCoverage: "preview", filteredCommands: 2 }),
+    row({ botId: "dev", threadId: "t2", input: 1_000, output: 100, hookCoverage: "preview", filteredCommands: 2, compacted: true }),
     row({ botId: "scout", driverKind: "openai-compat", threadId: "t3", input: 500, output: 50, hookCoverage: "none", trigger: { kind: "routine" } }),
   ];
 
@@ -85,6 +85,7 @@ describe("summarizeMetrics", () => {
       coverage: { full: 1, preview: 2, none: 0 },
       promptBytes: { stable: 5_250, volatile: 1_000, turns: 2 },
       filteredCommands: 2,
+      compactions: 1,
     });
     const scout = summary.bots.find((b) => b.botId === "scout")!;
     expect(scout.cacheHitShare).toEqual({ share: null, reported: 0, turns: 1 });

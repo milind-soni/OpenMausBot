@@ -38,9 +38,23 @@ export interface ReplaySelection {
 
 export const DEFAULT_REBUILD_BYTES = 24_000;
 
+/** The historical window, kept BESIDE the byte budget so this selection can
+ * only ever be smaller than "the last 40 messages", never larger.
+ *
+ * Bytes are the right unit for overflow — forty pasted logs is a context
+ * window — but they are not the only constraint. server/delta-context.ts
+ * routes a message the provider session cannot hold (a teammate's result, a
+ * peer bot's message) by whether it fell OUTSIDE this window: inside, the
+ * replay carries it; outside, the unseen mechanism hands it over separately,
+ * exactly once. That bookkeeping is calibrated to this count. A bytes-only
+ * window holds far more than 40 short messages, which would put such a
+ * result back inside the replay while the ledger still called it undelivered
+ * — delivering it twice. Whichever bound is stricter wins. */
+export const DEFAULT_REBUILD_MESSAGES = 40;
+
 export function selectReplay(
   history: readonly ReplayEntry[],
-  opts: { budgetBytes: number; compaction?: CompactionRecord },
+  opts: { budgetBytes: number; maxMessages: number; compaction?: CompactionRecord },
 ): ReplaySelection {
   let entries = [...history];
   let summary: string | undefined;
@@ -56,6 +70,7 @@ export function selectReplay(
   const kept: ReplayEntry[] = [];
   let used = 0;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
+    if (kept.length >= opts.maxMessages) break;
     const size = Buffer.byteLength(entries[i]!.text, "utf8") + 16;
     if (kept.length > 0 && used + size > opts.budgetBytes) break;
     kept.unshift(entries[i]!);

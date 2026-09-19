@@ -357,7 +357,13 @@ const appConfigSchema = z.object({
   rooms: roomConfigSchema.optional(),
   threads: z.object({ maxConcurrentPerBot: z.number().int().min(1).max(MAX_CONCURRENT_BOT_THREADS) }).strict().optional(),
   /** Context rebuilds (item 0.7): the byte budget a replayed history may use. */
-  context: z.object({ rebuildBytes: z.number().int().min(2_000).max(400_000).optional() }).strict().optional(),
+  context: z.object({
+    rebuildBytes: z.number().int().min(2_000).max(400_000).optional(),
+    /** Phase 1: compact a thread whose last turn carried this much context —
+     * a share of the model's window when below 1, absolute tokens otherwise. */
+    compactAt: z.number().positive().refine((v) => v < 1 || v >= 1_000, "compactAt is a share below 1 or at least 1000 tokens").optional(),
+    autoCompact: z.boolean().optional(),
+  }).strict().optional(),
   /** The global launch budget (docs/plans/2026-09-14-phase-0-foundation.md, 0.4). */
   launches: z.object({
     maxConcurrent: z.number().int().min(1).max(64).optional(),
@@ -409,7 +415,7 @@ export interface AppConfig {
   rooms?: { turnTimeoutMinutes: number };
   threads?: { maxConcurrentPerBot: number };
   launches?: { maxConcurrent?: number; maxPerHour?: number; maxPerDay?: number };
-  context?: { rebuildBytes?: number };
+  context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
@@ -536,6 +542,16 @@ export function roomTurnTimeoutMinutes(cfg: AppConfig): number {
 
 export function contextRebuildBytes(cfg: AppConfig): number {
   return cfg.context?.rebuildBytes ?? DEFAULT_REBUILD_BYTES;
+}
+
+/** Phase 1: the compaction threshold (share of the window below 1, absolute
+ * tokens otherwise); undefined means the default share (context-budget.ts). */
+export function contextCompactAt(cfg: AppConfig): number | undefined {
+  return cfg.context?.compactAt;
+}
+
+export function contextAutoCompact(cfg: AppConfig): boolean {
+  return cfg.context?.autoCompact !== false;
 }
 
 export function launchLimits(cfg: AppConfig): LaunchLimits {

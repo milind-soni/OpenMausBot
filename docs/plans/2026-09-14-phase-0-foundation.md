@@ -401,6 +401,15 @@ baseline run in step 10 is executed for at least Claude, Codex and one ACP engin
   once step 10's baseline exists; until then the default stays off. Codex, pi and the ACP family
   have no pre-tool hook; the flag is a Claude-driver flag and the other drivers ignore it.
 
+- **Carried open (not built in Phase 0; gap analysis §17, re-read Sep 15):** the policy chain
+  on the harness side of the capability token (redaction, egress allowlist, destructive-command
+  class, per-bot deny list, connector permission verbs, per-tool MCP policy with an execution
+  log), the hard per-task budget in tokens and money, and the in-memory sandbox backend were
+  specified for this phase and are not on the built branches. Where they land now:
+  `2026-09-15-phase-1.md` (part 2's fingerprint rule is the first piece of the budget seam) and
+  `2026-09-15-harness-roadmap.md` (the chain with Phase 2's tool work unless pulled forward).
+  F3 and F5 above are Phase 1 part 3; F4 is Phase 2.
+
 ## Steps (each one PR-sized, in order)
 
 Status, Sep 15: all ten steps are built and tested on `phase-0/foundation`. Deviations from

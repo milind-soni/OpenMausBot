@@ -43,7 +43,11 @@ import {
 } from "./browser-lifecycle-cleanup.ts";
 import * as checkpoints from "./checkpoints.ts";
 import { runCommand } from "./commands.ts";
-import { selectReplay, type ReplayEntry } from "./context-rebuild.ts";
+import { DEFAULT_REBUILD_MESSAGES, selectReplay, type ReplayEntry } from "./context-rebuild.ts";
+import { compactBudget, contextWindowFor, estimateTokens, shouldCompact } from "./context-budget.ts";
+import { autoCompactWindow, DRIVER_KIND as CLAUDE_DRIVER_KIND } from "./drivers/claude.ts";
+import type { ModelCatalog } from "./contracts.ts";
+import { composeSummary, deterministicSummary, foldPoint, MODEL_SUMMARY_PROMPT } from "./compaction-summary.ts";
 import { promptShape, stableSectionChanges, summarizeMetrics, type PromptShape } from "./metrics.ts";
 import { writeTurnToken } from "./turn-token.ts";
 import { LaunchBudget, type LaunchKind, type LaunchTicket } from "./launch-budget.ts";
@@ -127,6 +131,8 @@ import {
   maxConcurrentBotThreads,
   launchLimits,
   contextRebuildBytes,
+  contextCompactAt,
+  contextAutoCompact,
   saveConfig,
   showToolCallsEnabled,
   skillAuthoringEnabled,
@@ -3490,6 +3496,109 @@ const filteredCommandsByThread = new Map<string, number>();
 const TOOL_RESULTS_DIR = join(DATA_DIR, "tool-results");
 const TOOL_RESULT_SPILL_MAX = 512 * 1024;
 
+// ── Compaction (Phase 0 item 0.7 record; Phase 1 automatic) ─────────────
+/** Append the compaction record for a thread. `firstKeptId` empty means
+ * "everything before this record" (the manual route); the automatic path
+ * names the first message it kept verbatim. The receipt key is the last
+ * message the record folds, so a retried dispatch cannot write two. */
+function appendCompactionRecord(threadId: string, input: { summary: string; by: "person" | "harness"; firstKeptId?: string; tokensBefore: number; foldedThroughId: string }): string {
+  return runCommand({ kind: "compaction.append", key: `${threadId}:${input.foldedThroughId}` }, () => {
+    const appended = store.appendMessage(threadId, {
+      role: "bot",
+      kind: "compaction",
+      text: `[compaction] ${input.summary}`,
+      compaction: { summary: input.summary, firstKeptId: input.firstKeptId ?? "", tokensBefore: input.tokensBefore, by: input.by },
+    });
+    // the record stops before itself unless the caller kept something older
+    if (!input.firstKeptId) {
+      store.patchMessage(threadId, appended.id, { compaction: { summary: input.summary, firstKeptId: appended.id, tokensBefore: input.tokensBefore, by: input.by } });
+    }
+    return appended.id;
+  });
+}
+
+// Threads whose next usage row should say the turn followed a compaction.
+const compactedThreads = new Set<string>();
+
+/** Phase 1: when the last settled turn carried more context than the
+ * budget, fold the older part of the thread into a record and mark the
+ * task to start a fresh session. Runs between turns, never mid-turn; a
+ * failure here never fails the turn (it runs on the old session instead).
+ * The deterministic summary exists on every engine; a model summary is
+ * added where the engine can draft one, bounded by a timeout. */
+interface CompactionPlan {
+  bot: BotRecord;
+  task: TaskRecord;
+  generateText?: (prompt: string, opts?: { cwd?: string }) => Promise<string>;
+  fold: ReturnType<typeof foldPoint> & object;
+  tokensBefore: number;
+  budget: number;
+  contextWindow: number;
+}
+
+/** Decide synchronously — the common case is "nothing to do" and must not
+ * yield the event loop, because startTurn's ordering up to dispatch is what
+ * thread capacity and queued threads rely on. */
+/** Where the ENGINE compacts its own session, in tokens, when it does and
+ * when the harness can know the number. Claude is handed a fixed
+ * `--autocompact` window; "auto" hands the decision to the CLI (which uses
+ * the model's own window, always above our share) and "off" passes nothing,
+ * so neither constrains us. Every other driver compacts nothing of its own. */
+function nativeCompactAt(driverKind: string | undefined): number | undefined {
+  if (driverKind !== CLAUDE_DRIVER_KIND) return undefined;
+  const window = autoCompactWindow(process.env);
+  const tokens = window && window !== "auto" ? Number(window) : 0;
+  return Number.isFinite(tokens) && tokens > 0 ? tokens : undefined;
+}
+
+function planCompaction(bot: BotRecord, task: TaskRecord, instance: { models: ModelCatalog; driverKind?: string; generateText?: (prompt: string, opts?: { cwd?: string }) => Promise<string> }): CompactionPlan | null {
+  if (!contextAutoCompact(cfg)) return null;
+  const selection = task.modelSelection ?? bot.modelSelection;
+  const { contextWindow } = contextWindowFor(selection.model, instance.models, task.usage?.context?.window);
+  const budget = compactBudget(contextCompactAt(cfg), contextWindow, nativeCompactAt(instance.driverKind));
+  const messages = store.activePath(task.threadId);
+  const record = [...messages].reverse().find((m) => m.kind === "compaction" && m.compaction)?.compaction;
+  const keptFrom = record ? messages.findIndex((m) => m.id === record.firstKeptId) : -1;
+  const since = keptFrom >= 0 ? messages.slice(keptFrom) : messages;
+  const estimated = estimateTokens(since.reduce((n, m) => n + Buffer.byteLength(m.text ?? "", "utf8"), 0));
+  // the size is what filled the window on the last model call (main's
+  // usage.context), not the turn's summed input: a tool-using turn makes
+  // several calls and its sum overstates the window by that factor
+  const contextTokens = task.usage?.context?.tokens;
+  const lastTurnInput = task.usage?.lastTurn?.input;
+  if (!shouldCompact({ contextTokens, lastTurnInput, estimatedTokens: estimated, budget, floor: task.contextFloor })) return null;
+  // the message that starts THIS turn is already in the transcript; it is
+  // not an exchange to keep, so fold the history before it
+  const history = since.at(-1)?.role === "user" ? since.slice(0, -1) : since;
+  const fold = foldPoint(history);
+  if (!fold) return null;
+  return { bot, task, generateText: instance.generateText?.bind(instance), fold, tokensBefore: contextTokens || lastTurnInput || estimated, budget, contextWindow };
+}
+
+/** Write the record and mark the task; the only awaited part is the
+ * optional model summary, bounded by a timeout. */
+async function performCompaction(plan: CompactionPlan): Promise<void> {
+  const { bot, task, fold } = plan;
+  const deterministic = deterministicSummary(fold.folded, bot.name);
+  let model: string | undefined;
+  if (plan.generateText) {
+    model = await Promise.race([
+      plan.generateText(MODEL_SUMMARY_PROMPT(fold.folded, bot.name), task.cwd ? { cwd: task.cwd } : {}).then((text: string) => text.trim() || undefined),
+      new Promise<undefined>((resolve) => { const t = setTimeout(() => resolve(undefined), 20_000); t.unref?.(); }),
+    ]).catch(() => undefined);
+  }
+  appendCompactionRecord(task.threadId, {
+    summary: composeSummary(model, deterministic),
+    by: "harness",
+    firstKeptId: fold.firstKeptId,
+    tokensBefore: plan.tokensBefore,
+    foldedThroughId: fold.folded.at(-1)!.id,
+  });
+  store.patchTask(bot.id, task.threadId, { contextReset: true });
+  compactedThreads.add(task.threadId);
+  console.error(`[omb-compaction] bot=${bot.id} thread=${task.threadId} folded=${fold.folded.length} tokensBefore=${plan.tokensBefore} budget=${plan.budget} window=${plan.contextWindow}${model ? " model-summary" : ""}`);
+}
+
 // ── Bench runs (item 0.8) ────────────────────────────────────────────────
 // One detached, unattended turn per run. The ordinary fold does the work;
 // this only watches the budget from the side and records the outcome, so
@@ -4572,9 +4681,17 @@ bus.subscribe((event: RuntimeEvent) => {
         const settledDriverKind = registry.get(selection.instanceId)?.driverKind;
         const filteredCommands = filteredCommandsByThread.get(event.threadId) ?? 0;
         filteredCommandsByThread.delete(event.threadId);
+        const compacted = compactedThreads.delete(event.threadId);
+        // the first reading after a compaction is the thread's floor: the
+        // next compaction waits for the context to regrow past it
+        if (compacted) {
+          const floor = lastContext?.tokens || tokens?.input;
+          if (floor) store.patchTask(bot.id, event.threadId, { contextFloor: floor });
+        }
         appendUsage(DATA_DIR, {
           ...(completedTurnId ? { turnId: completedTurnId } : {}),
           ...(filteredCommands ? { filteredCommands } : {}),
+          ...(compacted ? { compacted: true } : {}),
           ...(startedAt ? { durationMs: Math.max(0, Date.now() - startedAt) } : {}),
           ...(completedTurnId ? { hookCoverage: coverageForDriver(settledDriverKind, toolEvidence(store.messagesFor(event.threadId), completedTurnId)) } : {}),
           ...(shape ? { promptShape: { stableBytes: shape.stableBytes, volatileBytes: shape.volatileBytes, totalBytes: shape.totalBytes, replayed: shape.replayed, replayBytes: shape.replayBytes, ...(shape.stableChanged?.length ? { stableChanged: shape.stableChanged } : {}) } } : {}),
@@ -5567,6 +5684,17 @@ async function startTurn(
   // transcript for API-backed drivers: settled text turns on the ACTIVE
   // branch only — abandoned forks never reach the model
   const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
+  // Phase 1: fold the older part of an over-budget thread first, so the
+  // replay below is built from the record. Never fails the turn.
+  const compactionPlan = planCompaction(bot, task, instance);
+  if (compactionPlan) {
+    try {
+      await performCompaction(compactionPlan);
+    } catch (error) {
+      console.error(`[omb-compaction] skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const contextReset = Boolean(store.taskByThread(bot.id, threadId)?.contextReset);
   const activeMessages = store.activePath(threadId);
   // A flat reply may deliberately point across a fork in the same thread.
   // Resolve its quote from full storage, while the replay itself remains
@@ -5588,6 +5716,7 @@ async function startTurn(
   const compactionRecord = [...activeMessages].reverse().find((m) => m.kind === "compaction" && m.compaction)?.compaction;
   const replay = selectReplay(replayEntries, {
     budgetBytes: contextRebuildBytes(cfg),
+    maxMessages: DEFAULT_REBUILD_MESSAGES,
     ...(compactionRecord ? { compaction: { firstKeptId: compactionRecord.firstKeptId, summary: compactionRecord.summary } } : {}),
   });
   const transcript = [...replay.lead, ...replay.transcript.filter((e) => e.text)].map(({ role, text }) => ({ role, text }));
@@ -5634,7 +5763,8 @@ async function startTurn(
     ),
     transcript,
     rewound,
-    fresh,
+    // a compacted thread starts a fresh session on the replay (Phase 1)
+    fresh: fresh || contextReset,
     externallyUpdated: Boolean(externalContextMarker),
     replaysNatively: instance.driverKind === "grok",
   });
@@ -6198,6 +6328,9 @@ async function startTurn(
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
         resumeCursor,
+        // a rewind or a harness compaction: the driver must not keep the
+        // live session, whose context the replay below replaces
+        ...(rewound || contextReset ? { sessionReset: true } : {}),
         ...(recoveryText !== undefined ? { recoveryText } : {}),
         transcript,
         system: prompt.text,
@@ -6222,7 +6355,7 @@ async function startTurn(
       }
       clearDirectTurnDispatch(threadId, dispatchClaimId);
       // dispatched: the rewind is spent, and the old cursors are dead
-      if (rewound) store.patchTask(bot.id, threadId, { rewound: false, resumeCursors: {} });
+      if (rewound || contextReset) store.patchTask(bot.id, threadId, { rewound: false, contextReset: false, resumeCursors: {} });
       // and this engine now owns the thread's most recent turn
       // Consume exactly the external-update generation this turn replayed.
       // If a newer delegated result landed during setup, its unique marker
@@ -7275,6 +7408,7 @@ function serializeRoomContext(
     .map((m) => ({ id: m.id, role: m.role === "user" ? "user" : "assistant", text: m.kind === "compaction" ? "" : renderRoomLine(m) }));
   const selection = selectReplay(entries, {
     budgetBytes: contextRebuildBytes(cfg),
+    maxMessages: DEFAULT_REBUILD_MESSAGES,
     ...(compactionRecord ? { compaction: { firstKeptId: compactionRecord.firstKeptId, summary: compactionRecord.summary } } : {}),
   });
   return [...selection.lead.map((l) => l.text), ...selection.transcript.filter((e) => e.text).map((e) => e.text)].join("\n");
@@ -14989,13 +15123,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         by = "harness";
         if (!summary) return json(res, 502, { error: "the engine returned an empty summary" });
       }
-      const tokensBefore = Math.ceil(history.reduce((n, msg) => n + Buffer.byteLength(msg.text ?? "", "utf8"), 0) / 4);
-      const message = runCommand({ kind: "compaction.append", key: `${task.threadId}:${history.at(-1)!.id}` }, () => {
-        const appended = store.appendMessage(task.threadId, { role: "bot", kind: "compaction", text: `[compaction] ${summary}`, compaction: { summary, firstKeptId: "", tokensBefore, by } });
-        // the record stops before itself: everything after it is kept
-        store.patchMessage(task.threadId, appended.id, { compaction: { summary, firstKeptId: appended.id, tokensBefore, by } });
-        return appended.id;
-      });
+      const tokensBefore = task.usage?.context?.tokens || task.usage?.lastTurn?.input || Math.ceil(history.reduce((n, msg) => n + Buffer.byteLength(msg.text ?? "", "utf8"), 0) / 4);
+      const message = appendCompactionRecord(task.threadId, { summary, by, tokensBefore, foldedThroughId: history.at(-1)!.id });
+      // the next turn starts a fresh session on the record (Phase 1)
+      store.patchTask(bot.id, task.threadId, { contextReset: true });
+      compactedThreads.add(task.threadId);
       const fresh = botWithThread(store.bot(bot.id)!);
       broadcast({ kind: "bot", bot: fresh });
       return json(res, 201, { compaction: { messageId: message, summary, tokensBefore, by } });

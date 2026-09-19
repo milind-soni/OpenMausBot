@@ -1692,6 +1692,23 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(completed.map((e) => e.cost)).toEqual([0.01, 0.01]);
   });
 
+  it("starts a new process when the harness asks for a session reset, even with a live one idle", async () => {
+    await create();
+    const dump = join(scratch, "dump-reset.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-reset", text: "one" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const firstPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+    // a compaction (or a rewind) replays the history inline and must not
+    // land on the process that still holds the whole thread
+    const second = await instance.adapter.sendTurn({ threadId: "t-reset", text: "[Summary…] two", sessionReset: true });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const next = JSON.parse(readFileSync(dump, "utf8"));
+    expect(next.pid).not.toBe(firstPid);
+    expect(JSON.stringify(next.prompt)).toContain("[Summary…] two");
+    expect(next.argv).not.toContain("--resume");
+  });
+
   it("denies late broker asks between retained turns without opening a zombie card", async () => {
     await create();
     await instance.adapter.sendTurn({ threadId: "t-retained-late", text: "one" });

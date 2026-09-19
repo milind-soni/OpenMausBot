@@ -64,6 +64,21 @@ Correct when the reply says `alpha`. This is the "done when" of Phase 0: the
 new engine is told what the old one *did* (the digest), not only what it
 said.
 
+**T5 — a long thread (ten turns, one thread).** New bot. Send ten times,
+waiting for each reply:
+> Append 100 lines of the form 'entry N' (N continuing from where the file
+> ends, starting at 1 if it does not exist) to log.txt with one shell loop,
+> then print the whole file with cat, then reply with only the total number
+> of lines in the file.
+
+Correct when turn *n* replies 100 × *n*. Write down "in" for every turn and
+the total. This is where context growth shows: without compaction, "in"
+climbs every turn as the printed file and the earlier turns pile up; with
+harness compaction (Phase 1) a "context compacted" chip appears once the
+budget is crossed and "in" drops back on the next turn. The two numbers to
+compare between builds are **input at turn 10** and **total tokens over the
+ten turns**. The script prints both.
+
 ## Doing it unattended
 
 The script runs exactly the four tasks above and prints the same table:

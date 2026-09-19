@@ -423,7 +423,10 @@ const playTurn = (prompt: JsonValue) => {
     const context = runHooks("SessionStart", { source: "compact" });
     if (context.trim()) replyParts = [`${context.trim()}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
   }
-  const usage = { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 };
+  // FAKE_CLAUDE_INPUT_TOKENS: report this many input tokens per turn, so a
+  // test can push a thread over the harness's compaction budget
+  const inputTokens = Number(process.env.FAKE_CLAUDE_INPUT_TOKENS) || 10;
+  const usage = { input_tokens: inputTokens, cache_read_input_tokens: 2, output_tokens: 5 };
   if (scriptedToolCalls) {
     // scripted calls come first, each settled before the reply text
     for (const call of scriptedToolCalls) {
@@ -459,7 +462,7 @@ const playTurn = (prompt: JsonValue) => {
     runHooks("Stop", { stop_hook_active: false });
     // like the real CLI: total_cost_usd is the session's running total
     sessionCostUsd = Math.round((sessionCostUsd + 0.01) * 100) / 100;
-    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: sessionCostUsd, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: sessionCostUsd, usage: { input_tokens: inputTokens, cache_read_input_tokens: 2, output_tokens: 5 } });
     turnRunning = false;
     finishIfDone();
   };

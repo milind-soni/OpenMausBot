@@ -103,6 +103,8 @@ export interface MetricsGroup {
   durationMs: { average: number; turns: number };
   /** Shell commands the PreToolUse filter rewrote (item 0.2, step 9). */
   filteredCommands: number;
+  /** Turns that followed a harness compaction of their thread (Phase 1). */
+  compactions: number;
 }
 
 export interface MetricsSummary {
@@ -125,8 +127,10 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
   let duration = 0;
   let timed = 0;
   let filteredCommands = 0;
+  let compactions = 0;
   for (const row of rows) {
     filteredCommands += row.filteredCommands ?? 0;
+    if (row.compacted) compactions += 1;
     threads.add(row.threadId);
     input += row.input;
     output += row.output;
@@ -158,6 +162,7 @@ function group(rows: readonly UsageRow[]): MetricsGroup {
     promptBytes: { stable: shaped ? Math.round(stableBytes / shaped) : 0, volatile: shaped ? Math.round(volatileBytes / shaped) : 0, turns: shaped },
     durationMs: { average: timed ? Math.round(duration / timed) : 0, turns: timed },
     filteredCommands,
+    compactions,
   };
 }
 

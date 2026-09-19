@@ -135,10 +135,12 @@ const finishTurn = () => {
   // FAKE_CODEX_RESTORED_USAGE the process already carried 100/50/10 before
   // turn/start (a resumed thread restoring earlier usage), so the driver's
   // per-turn figure must still come out as 7/4/3.
+  // FAKE_CODEX_INPUT_TOKENS: report this many input tokens per turn instead.
+  const inputTokens = Number(process.env.FAKE_CODEX_INPUT_TOKENS) || 7;
   const carried = process.env.FAKE_CODEX_RESTORED_USAGE ? { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } : { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   notify("thread/tokenUsage/updated", { tokenUsage: {
-    total: { inputTokens: carried.inputTokens + 7, cachedInputTokens: carried.cachedInputTokens + 4, outputTokens: carried.outputTokens + 3 },
-    last: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 },
+    total: { inputTokens: carried.inputTokens + inputTokens, cachedInputTokens: carried.cachedInputTokens + 4, outputTokens: carried.outputTokens + 3 },
+    last: { inputTokens, cachedInputTokens: 4, outputTokens: 3 },
     modelContextWindow: 272000,
   } });
   dump();
