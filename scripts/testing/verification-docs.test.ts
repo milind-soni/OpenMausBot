@@ -27,7 +27,15 @@ const target = (hit: string) => hit.slice(hit.indexOf(": ") + 2);
 const helpVerbs = new Set([...HELP.matchAll(/^ {2}([a-z][\w-]*)(?= |$)/gm)].map((match) => match[1]!).filter((verb) => verb !== "node"));
 helpVerbs.add("help");
 
-const serverSource = readFileSync(join(ROOT, "server", "index.ts"), "utf8");
+const serverModules = [
+  join(ROOT, "server", "index.ts"),
+  join(ROOT, "server", "request-handler.ts"),
+  join(ROOT, "server", "route-wiring.ts"),
+  ...readdirSync(join(ROOT, "server", "routes"), { recursive: true })
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => join(ROOT, "server", "routes", name)),
+];
+const serverSource = serverModules.map((path) => readFileSync(path, "utf8")).join("\n");
 const hooksSource = readFileSync(join(ROOT, "server", "webhook-ingress.ts"), "utf8");
 const hostedSource = readFileSync(join(ROOT, "enterprise", "server", "workspace-access.ts"), "utf8");
 // Only constants named in the public handler's accepted-path guard are routes.
@@ -35,7 +43,7 @@ const hostedSource = readFileSync(join(ROOT, "enterprise", "server", "workspace-
 const hostedConstants = new Map([...hostedSource.matchAll(/const ([A-Z_]+) = "(\/api\/[^"\n]+)";/g)].map(match => [match[1]!, match[2]!]));
 const hostedPublicRoutes = new Set((hostedSource.match(/!\[([^\]]+)\]\.includes\(path\)/)?.[1] ?? "")
   .split(",").map(name => hostedConstants.get(name.trim())).filter((path): path is string => path !== undefined));
-// server/index.ts matches routes two ways: `path === "/api/x"` and
+// The server modules match routes two ways: `path === "/api/x"` and
 // `path.match(/^\/api\/x\/(a|b)$/)`. Collect the regex form too.
 const routePatterns = [...serverSource.matchAll(/\/(\^\\\/api\\\/(?:\[(?:[^\]\\]|\\.)*\]|[^/\\\n[]|\\.)*)\/[a-z]*/g)].map((match) => new RegExp(match[1]!));
 const PLACEHOLDER = /^(ID|:[\w-]+|<[^>]+>|\{[^}]+\})$/;
