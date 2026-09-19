@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
 
+/** Exercise the real coordination proxy in disposable rooms with a scripted provider. */
 async function withRooms(test: (f: any) => Promise<void>) {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
@@ -32,6 +33,71 @@ async function withRooms(test: (f: any) => Promise<void>) {
     await test({ session, api, cli, tool, sender, target, source, destination, plan, savePlan, nodes, messages, start, wait, provider });
   } finally { await session.close(); }
 }
+
+/** Grant a Chief supervision of team A and seat it beside both fixture peers. */
+async function addSupervisingChief(f: any, section = "") {
+  const chief = (await f.cli("new-bot", "--name", "Supervisor")).bot;
+  await f.api(`/api/bots/${chief.id}`, { section, chiefOfStaff: true, managedSections: ["A"], acknowledgePeerScope: true }, "PATCH");
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id] });
+  f.plan[chief.id] = { reply: "Supervisor checked the work" };
+  return chief;
+}
+
+it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and same-section peer in the same room (Chief section %j)", section => withRooms(async f => {
+  const chief = await addSupervisingChief(f, section);
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], request_key: "same-room", message: "Review the work here" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.find((room: any) => room.id === f.source.id).members.map((bot: any) => bot.id)).toEqual(expect.arrayContaining([chief.id, f.target.id]));
+  const children = f.nodes().filter((node: any) => node.parentId);
+  expect(children.map((node: any) => node.botId).sort()).toEqual([chief.id, f.target.id].sort());
+  expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id && node.threadId === f.source.activeTaskId)).toBe(true);
+}), 45_000);
+
+it.each(["unmanaged", "outsider", "disallowed-peer"])("refuses supervisor room coordination with %s", reason => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  if (reason === "unmanaged") await f.api(`/api/bots/${chief.id}`, { managedSections: [] }, "PATCH");
+  if (reason === "outsider") {
+    const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Finance")).bot;
+    await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id, outsider.id] });
+  }
+  if (reason === "disallowed-peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], request_key: "refused", message: "Do not bypass the room boundary" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const turn = f.provider().find((entry: any) => entry.botId === f.sender.id);
+  expect(turn.evidence.find((entry: any) => entry.step).response.result.isError).toBe(true);
+  if (reason === "disallowed-peer") expect(JSON.parse(turn.evidence[1].result.content[0].text).rooms).toEqual([]);
+  else expect(turn.evidence[1].result.isError).toBe(true);
+}), 45_000);
+
+it("does not extend supervisor access to a different room", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [chief.id] });
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [chief.id], request_key: "other-room", message: "Keep supervisor access in the shared conversation" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.some((room: any) => room.id === f.destination.id)).toBe(false);
+}), 45_000);
+
+it("refuses queued same-room supervisor work when the owner revokes supervision", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  const gateFile = join(f.session.info.dataDir, "supervisor-result.gate");
+  f.plan[chief.id] = { reply: "PRIVATE_SUPERVISOR_RESULT" };
+  f.plan[f.sender.id].gateFile = gateFile;
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id], request_key: "supervisor", message: "Review this work" } }];
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15000 }).toBe("queued");
+  await request(`/api/bots/${chief.id}`, { method: "PATCH", headers: { Origin: f.session.info.url }, body: JSON.stringify({ managedSections: [] }) }, f.session.info.url);
+  writeFileSync(gateFile, "release");
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().find((node: any) => node.parentId).status).toBe("failed");
+  expect(f.provider().some((turn: any) => turn.botId === chief.id)).toBe(false);
+  expect(JSON.stringify(await f.messages(f.source.activeTaskId))).not.toContain("PRIVATE_SUPERVISOR_RESULT");
+  expect((await f.messages(f.source.activeTaskId)).some((message: any) => message.tool?.name.includes("Result withheld"))).toBe(true);
+}), 45_000);
 
 it("refuses a disallowed peer without starting the recipient", () => withRooms(async f => {
   await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");

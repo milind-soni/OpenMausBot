@@ -154,6 +154,27 @@ const makeBot = async (
   return { id, threadId: str(field(created.body, "bot", "threadId")) };
 };
 
+/** A Chief of Staff coordinator with managed sections. */
+const makeCoordinator = async (
+  name: string,
+  section: string,
+  managedSections: string[],
+  instanceId = "claude",
+): Promise<{ id: string; threadId: string }> => {
+  const created = await api("POST", "/api/bots");
+  const id = str(field(created.body, "bot", "id"));
+  const patched = await api("PATCH", `/api/bots/${id}`, {
+    name,
+    section,
+    chiefOfStaff: true,
+    managedSections,
+    acknowledgePeerScope: true,
+    modelSelection: { instanceId, model: "claude-sonnet-5" },
+  });
+  expect(patched.status).toBe(200);
+  return { id, threadId: str(field(created.body, "bot", "threadId")) };
+};
+
 const makeRoom = async (
   name: string,
   memberIds: string[],
@@ -546,6 +567,52 @@ describe("post_to_room", () => {
     const refused = await post(inside.id, inside.threadId, mixed.id, "hello other section");
     expect(refused.status).toBe(403);
     expect(str(refused.body.error)).toContain("outside your section");
+    expect(await messagesOf(mixed.threadId)).toHaveLength(0);
+  }, 40_000);
+
+  it.each(["Coordinators", ""])("allows a section bot to post to and list a room holding its supervising coordinator in section %j", async (section) => {
+    const member = await makeBot("Build Member", "Build");
+    const coordinator = await makeCoordinator("Build Chief", section, ["Build"]);
+    const room = await makeRoom("Build Room", [member.id, coordinator.id], "Build");
+
+    const listed = await internal("GET", `/api/internal/rooms?fromBotId=${member.id}&fromThreadId=${member.threadId}`);
+    expect(listed.status).toBe(200);
+    const rooms = Array.isArray(listed.body.rooms) ? listed.body.rooms : [];
+    expect(rooms.some((r) => field(r as Record<string, unknown>, "id") === room.id)).toBe(true);
+
+    const posted = await post(member.id, member.threadId, room.id, "ready for review");
+    expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+    const roomMessages = await messagesOf(room.threadId);
+    expect(roomMessages.some((m) => m.text === "ready for review" && m.from?.botId === member.id)).toBe(true);
+  }, 40_000);
+
+  it("refuses a section bot if the room includes a coordinator who does not manage its section", async () => {
+    await makeBot("Finance Bot", "Finance");
+    const member = await makeBot("Build Worker", "Build");
+    const coordinator = await makeCoordinator("Finance Chief", "Coordinators", ["Finance"]);
+    const room = await makeRoom("Unsupervised Room", [member.id, coordinator.id], "Build");
+
+    const listed = await internal("GET", `/api/internal/rooms?fromBotId=${member.id}&fromThreadId=${member.threadId}`);
+    expect(listed.status).toBe(200);
+    const rooms = Array.isArray(listed.body.rooms) ? listed.body.rooms : [];
+    expect(rooms.some((r) => field(r as Record<string, unknown>, "id") === room.id)).toBe(false);
+
+    const refused = await post(member.id, member.threadId, room.id, "hello");
+    expect(refused.status).toBe(403);
+    expect(str(refused.body.error)).toContain("outside your section");
+    expect(await messagesOf(room.threadId)).toHaveLength(0);
+  }, 40_000);
+
+  it("still refuses a room holding both a supervising coordinator and an outside bot", async () => {
+    const member = await makeBot("Team Member", "Build");
+    const coordinator = await makeCoordinator("Team Chief", "Coordinators", ["Build"]);
+    const stranger = await makeBot("Finance Stranger", "Finance");
+    const mixed = await makeRoom("Mixed Room", [member.id, coordinator.id, stranger.id], "Build");
+
+    const refused = await post(member.id, member.threadId, mixed.id, "hello everyone");
+    expect(refused.status).toBe(403);
+    expect(str(refused.body.error)).toContain("outside your section");
+    expect(str(refused.body.error)).toContain("@Finance Stranger");
     expect(await messagesOf(mixed.threadId)).toHaveLength(0);
   }, 40_000);
 
