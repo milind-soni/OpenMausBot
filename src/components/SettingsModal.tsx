@@ -2,11 +2,9 @@
 // Per-bot settings (persona, model, computer) live in BotSettingsDialog — this
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Archive, Coins, FlaskConical, KeyRound, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Archive, Coins, FlaskConical, KeyRound, Mic, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
-import { handyModel, handyPath, setHandyModel, setHandyPath } from "@/lib/handy";
-import { HandyEngineReadout } from "./HandyEngineReadout";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
@@ -23,6 +21,7 @@ import { PeopleSection } from "./PeopleSection";
 import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
+import { VoiceHandySection } from "./VoiceHandySection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
@@ -48,6 +47,7 @@ const SECTIONS: Array<{
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
+  { id: "voice", labelKey: "settings.section.voice", icon: Mic, keywords: ["voice", "speech", "text to speech", "tts", "dictation", "transcription", "handy", "wake word", "microphone", "audio", "read aloud"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
@@ -342,100 +342,8 @@ function ToolCallsRow() {
   );
 }
 
-/** The desktop shell's read-only view of the user's Handy install. Derived
- * from the bridge declaration rather than re-declared, so this panel and the
- * preload cannot drift apart. `ogb` itself is optional (the renderer also
- * runs in a plain browser). */
-type HandyEngine = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["handyModels"]>>>;
-
-function WakeWordSection() {
-  const { state, dispatch } = useStore();
-  const enabled = state.config?.features?.wakeWord === true;
-  const [path, setPath] = useState(handyPath());
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [engine, setEngine] = useState<HandyEngine | null>(null);
-  const [pinned, setPinned] = useState(handyModel());
-
-  // Read-only: which model Handy would transcribe with, what is on disk, and
-  // what this machine can carry. Re-read on mount and when the path is edited,
-  // so the panel never describes an engine the user has pointed elsewhere.
-  const refreshEngine = useCallback((candidate: string) => {
-    const bridge = window.ogb;
-    if (!bridge?.handyModels) return;
-    void bridge
-      .handyModels(candidate)
-      .then((status) => setEngine(status))
-      .catch(() => setEngine(null));
-  }, []);
-
-  useEffect(() => {
-    refreshEngine(handyPath());
-  }, [refreshEngine]);
-
-  const toggle = async () => {
-    if (saving) return;
-    setSaving(true);
-    setError("");
-    try {
-      const config: ConfigStatus = await api("/api/config", {
-        method: "PATCH",
-        body: JSON.stringify({ features: { wakeWord: !enabled } }),
-      });
-      dispatch({ type: "configStatus", config });
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("settings.wakeWord.error"));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Card title={t("settings.wakeWord.title")} subtitle={t("settings.wakeWord.subtitle")}>
-      <div className="flex flex-col gap-3">
-        <ApiKeyRow section="wakeWord" />
-        <div>
-          <div className="mb-1.5 text-[13px] text-ink-secondary">{t("settings.wakeWord.handyPath")}</div>
-          <input
-            aria-label={t("settings.wakeWord.handyPath")}
-            type="text"
-            value={path}
-            onChange={(e) => {
-              setPath(e.target.value);
-              setHandyPath(e.target.value);
-            }}
-            onBlur={() => refreshEngine(path)}
-            placeholder="%LOCALAPPDATA%\Handy\handy.exe"
-            spellCheck={false}
-            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
-          />
-          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-secondary">{t("settings.wakeWord.handyPathHint")}</p>
-        </div>
-        {engine ? (
-          <HandyEngineReadout
-            status={engine}
-            pinned={pinned}
-            onPin={(model) => {
-              setPinned(model);
-              setHandyModel(model);
-            }}
-          />
-        ) : null}
-        <div className="flex items-center justify-between gap-4">
-          <div className="text-[14px] font-medium text-ink">{t("settings.wakeWord.enable")}</div>
-          <Switch
-            checked={enabled}
-            aria-label={t("settings.wakeWord.enable")}
-            disabled={saving}
-            onClick={() => void toggle()}
-            className="disabled:cursor-wait disabled:opacity-50"
-          />
-        </div>
-        {error ? <p role="alert" className="text-[12px] text-danger">{error}</p> : null}
-      </div>
-    </Card>
-  );
-}
+// The wake word's key row, the Handy engine readout, and the dictation-model
+// pin moved to Settings → Voice & Handy, next to the voice they feed.
 
 function ExperimentalFeaturesRow() {
   const { state, dispatch } = useStore();
@@ -767,7 +675,6 @@ export function SettingsModal() {
                   <OpenAiCompatUrl />
                   <ApiKeyRow section="vision" />
                   <VisionUrl />
-                  <WakeWordSection />
                   <ApiKeyRow section="xai" testProvider="xai" />
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
@@ -786,6 +693,8 @@ export function SettingsModal() {
             {section === "engines" && (
               <EnginesSettings />
             )}
+
+            {section === "voice" && <VoiceHandySection />}
 
             {section === "backups" && <WorkspaceBackupSettings />}
 

@@ -108,7 +108,7 @@ export function CallTargetButton({
   const reason = !capabilitiesReady
     ? "Checking whether this device can make calls."
     : !supported
-      ? "Offline calls need Handy. Set its path in Settings → Wake word."
+      ? "Offline calls need Handy. Set its path in Settings → Voice & Handy."
         : !configured
           ? "Choose an offline Piper voice, a built-in Mac voice, or configure ElevenLabs for call playback."
           : !voiceReady

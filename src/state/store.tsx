@@ -589,6 +589,7 @@ export type AppSettingsSection =
   | "experimental"
   | "connections"
   | "engines"
+  | "voice"
   | "companion"
   | "remote"
   | "computer"

@@ -72,10 +72,11 @@ These checks do not verify the renderer, OS keychain or audio capture.
 ## What it does not prove
 
 Renderer-only behavior — the wake-word detector arming in the pill, listening/decoding
-status, the Settings → Wake word toggle markup — is not driven
+status, the Settings → Voice & Handy toggle markup — is not driven
 by this recipe; the harness cannot click the real Settings modal. Those
 surfaces are covered by unit tests (`src/lib/voice-dictation.test.ts`,
-`src/lib/wake-word.test.ts`, `src/lib/local-voice.test.ts`), and the
+`src/lib/wake-word.test.ts`, `src/lib/local-voice.test.ts`), the settings
+section's own markup by `src/components/SettingsModal.voice.test.ts`, and the
 speech-engine behavior itself by `server/tts/windows-voices.test.ts` and
 `server/tts/tts.test.ts`.
 
@@ -124,7 +125,7 @@ executable resolution plus three channels:
 dictation and call turns capture in the renderer and post a finished WAV, so they
 never toggle or cancel Handy's recording.
 
-`--model` is Astra's own pin (Settings → Wake word), not a change to Handy:
+`--model` is Astra's own pin (Settings → Voice & Handy), not a change to Handy:
 Handy owns its settings file and rewrites it on exit, so switching the engine
 there would change dictation in every app on the machine. `handy:models` is
 read-only for the same reason, and reports Handy's `selected_model` separately

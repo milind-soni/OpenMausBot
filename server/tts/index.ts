@@ -127,7 +127,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     if (!voice) {
       throw new NoVoiceConfigured(
         "voice",
-        "Pick a Piper voice in Settings → Voice.",
+        "Pick a Piper voice in Settings → Voice & Handy.",
       );
     }
     return piper.synthesizePiper(text, voice);
