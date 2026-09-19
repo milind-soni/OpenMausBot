@@ -92,6 +92,10 @@ const RESERVED_MCP_NAMES = new Set([
   "dweb",
   "openmausbot_connectors",
   "openmausbot_phone",
+  // App-server-native names the Codex driver trusts for automatic
+  // approvals in Full access; a custom server must not squat them.
+  "codex_apps",
+  "computer-use",
 ]);
 
 const stdioEntrySchema = z.object({
