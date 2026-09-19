@@ -3,25 +3,18 @@ import { z } from "zod";
 
 import { parseJson, type JsonValue } from "./schema.ts";
 import type { WebhookManager } from "./webhooks.ts";
+import { json } from "./http.ts";
 
 export const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 const statusErrorSchema = z.object({ status: z.number().int().optional() });
 const serverAddressSchema = z.object({ port: z.number().int().min(1).max(65_535) });
+const WEBHOOK_RESPONSE_HEADERS = { "cache-control": "no-store", "x-content-type-options": "nosniff" } as const;
 
 export interface WebhookIngress {
   server: Server;
   host: string;
   port: number;
   baseUrl: string;
-}
-
-function json(res: ServerResponse, status: number, body: JsonValue): void {
-  res.writeHead(status, {
-    "content-type": "application/json",
-    "cache-control": "no-store",
-    "x-content-type-options": "nosniff",
-  });
-  res.end(JSON.stringify(body));
 }
 
 async function readRawBody(req: IncomingMessage): Promise<string> {
@@ -92,11 +85,11 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
   return async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { app: "openmausbot-webhooks", ready: true });
+      return json(res, 200, { app: "openmausbot-webhooks", ready: true }, WEBHOOK_RESPONSE_HEADERS);
     }
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
-    if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
-    if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
+    if (!match) return json(res, 404, { error: "Unknown webhook endpoint" }, WEBHOOK_RESPONSE_HEADERS);
+    if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" }, WEBHOOK_RESPONSE_HEADERS);
 
     let release: (() => void) | undefined;
     try {
@@ -110,7 +103,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
           eventName: eventName(req),
           deliveryId: deliveryId(req),
         });
-        return json(res, 401, { error: "Invalid webhook URL or secret" });
+        return json(res, 401, { error: "Invalid webhook URL or secret" }, WEBHOOK_RESPONSE_HEADERS);
       }
       const raw = await readRawBody(req);
       const contentType = header(req, "content-type")?.split(";")[0]?.trim().toLowerCase() ?? "text/plain";
@@ -122,7 +115,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
         userAgent: header(req, "user-agent"),
         deliveryId: deliveryId(req),
       });
-      return json(res, 202, { accepted: true, ...result });
+      return json(res, 202, { accepted: true, ...result }, WEBHOOK_RESPONSE_HEADERS);
     } catch (error) {
       const parsedError = statusErrorSchema.safeParse(error);
       const status = parsedError.success ? parsedError.data.status ?? 500 : 500;
@@ -137,7 +130,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
           deliveryId: deliveryId(req),
         });
       }
-      return json(res, status, { error: message });
+      return json(res, status, { error: message }, WEBHOOK_RESPONSE_HEADERS);
     } finally {
       release?.();
     }

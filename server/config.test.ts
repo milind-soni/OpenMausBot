@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -851,6 +851,78 @@ describe("legacy feature flag migration", () => {
     writeFileSync(path, "{not json");
     expect(() => ensureDirs()).not.toThrow();
     expect(readFileSync(path, "utf8")).toBe("{not json");
+  });
+});
+
+describe("config.json read failures", () => {
+  const path = join(DATA_DIR, "config.json");
+  // mode bits stop reads only for unprivileged processes on POSIX; root and
+  // Windows get the same policy through config.json-as-a-directory (EISDIR).
+  const chmodBlocksReads = process.platform !== "win32" && process.getuid?.() !== 0;
+
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+  });
+  afterEach(() => {
+    rmSync(path, { force: true, recursive: true });
+  });
+
+  it("treats a missing config.json as a first run with env fallback", () => {
+    const saved = process.env.XAI_API_KEY;
+    try {
+      delete process.env.XAI_API_KEY;
+      expect(loadConfig().xai).toEqual({});
+      process.env.XAI_API_KEY = "env-first-run";
+      expect(loadConfig().xai?.key).toBe("env-first-run");
+    } finally {
+      if (saved === undefined) delete process.env.XAI_API_KEY;
+      else process.env.XAI_API_KEY = saved;
+    }
+  });
+
+  it("fails fast at boot when an existing config.json cannot be read", () => {
+    if (chmodBlocksReads) {
+      writeFileSync(path, JSON.stringify({ profile: { name: "Ada" } }));
+      chmodSync(path, 0o000);
+      try {
+        expect(() => loadConfig()).toThrow(/config\.json exists but could not be read/);
+      } finally {
+        chmodSync(path, 0o600);
+      }
+    } else {
+      mkdirSync(path);
+      expect(() => loadConfig()).toThrow(/config\.json exists but could not be read/);
+    }
+  });
+
+  it("fails fast at boot when an existing config.json is not valid JSON", () => {
+    writeFileSync(path, "{not json");
+    expect(() => loadConfig()).toThrow(/config\.json exists but could not be read/);
+  });
+
+  it("refuses to save over a config.json it could not read, leaving the file untouched", () => {
+    if (chmodBlocksReads) {
+      const original = JSON.stringify({ profile: { name: "Ada" }, xai: { key: "file-key" } });
+      writeFileSync(path, original);
+      chmodSync(path, 0o000);
+      try {
+        expect(() => saveConfig({ profile: { email: "ada@example.test" } })).toThrow(/config\.json exists but could not be read/);
+      } finally {
+        chmodSync(path, 0o600);
+      }
+      expect(readFileSync(path, "utf8")).toBe(original);
+    } else {
+      mkdirSync(path);
+      expect(() => saveConfig({ profile: { name: "Ada" } })).toThrow(/config\.json exists but could not be read/);
+      expect(statSync(path).isDirectory()).toBe(true);
+    }
+  });
+
+  it("creates config.json on a first save from a missing file", () => {
+    saveConfig({ profile: { name: "Ada" } });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ profile: { name: "Ada" } });
+    if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });
 
