@@ -7,9 +7,10 @@ import {
   request,
   resolveBaseUrl,
   TOOLS,
-  validateBaseUrl,
   validateToolArguments,
 } from "../scripts/mcp-server.ts";
+import { parsePositiveLimit, ToolInputError } from "../scripts/mcp-server/context.ts";
+import { validateBaseUrl } from "../shared/server-endpoint.ts";
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
@@ -98,6 +99,16 @@ describe("MCP JSON-RPC protocol", () => {
         jsonrpc: "2.0", id: 4, method: "tools/call", params,
       })))!);
       expect(response.error.code).toBe(-32602);
+    }
+  });
+
+  it("parses limit arguments with the fallback only when absent", () => {
+    expect(parsePositiveLimit(undefined)).toBe(30);
+    expect(parsePositiveLimit(50)).toBe(50);
+    expect(parsePositiveLimit(7.9)).toBe(7);
+    expect(parsePositiveLimit(999)).toBe(200);
+    for (const invalid of ["50", true, 0, -3, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => parsePositiveLimit(invalid)).toThrow(ToolInputError);
     }
   });
 
@@ -383,7 +394,7 @@ describe("MCP tool execution", () => {
     const fetcher = vi.fn();
     await expect(handleToolCall("edit_bot_message", {
       bot_id: "bot-1", message_id: "m-9", text: "   ",
-    }, fetcher as never)).rejects.toThrow("text is required");
+    }, fetcher as never)).rejects.toThrow("text must not be empty");
     expect(fetcher).not.toHaveBeenCalled();
   });
 

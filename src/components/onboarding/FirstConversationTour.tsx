@@ -11,7 +11,7 @@ import { currentStep } from "@/lib/guided-tour";
 import { anchorFor, nextSpotlight, placementFor, tourComplete, type ChatObservation, type SpotlightId } from "@/lib/first-conversation";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
-import { api, useStore, useStreaming } from "@/state/store";
+import { api, overlayOpen, useStore, useStreaming } from "@/state/store";
 import { Spotlight } from "./Spotlight";
 
 const COPY: Record<SpotlightId, { key: "onboarding.spot.composer" | "onboarding.spot.model" | "onboarding.spot.approval" | "onboarding.spot.connector"; mascot: MausState }> = {
@@ -45,7 +45,7 @@ export function FirstConversationTour() {
 
   const eligible =
     !remoteClient &&
-    !state.welcomeOpen &&
+    !overlayOpen(state, "welcome") &&
     Boolean(record?.completedAt) &&
     currentStep(record) === null &&
     !welcomeDue(state.config, { remoteClient, legacyDone: emailGateDone() }) &&
