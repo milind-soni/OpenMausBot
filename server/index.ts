@@ -6163,6 +6163,29 @@ async function startTurn(
         return { target: localVmTarget, runtime: localVm.runtime };
       };
 
+      // Issue #1369: a lazy claim that rejects must not leave its turn busy
+      // behind a gate that can only refuse. Surface the terminal
+      // computer-unavailable error, then end the turn. Fenced to this
+      // dispatch generation and a still-busy thread, so a rejection landing
+      // after settle — or after a newer turn owns the thread — never touches
+      // the newer turn. The gate's refusals stay fail-closed for any screen
+      // call racing this teardown; the turn-failed buzz and incident follow
+      // the dispatch-failure rules (person-started turns only).
+      const surfaceLazyClaimRejection = (label: string) => (failure: string) => {
+        if (activeInternalGenerationByThread.get(threadId) !== resourceOwner.generation || !threadBusy(bot.id, threadId)) return;
+        const message = `computer unavailable — ${label} could not be claimed for this turn (${failure})`;
+        store.appendMessage(threadId, {
+          role: "bot",
+          kind: "activity",
+          tool: { name: `error: ${message.slice(0, 160)}`, ok: false },
+        });
+        if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
+          notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
+          reportIncident({ kind: "failed", bot, threadId, detail: message });
+        }
+        void interruptDirectThread(bot.id, threadId).catch(() => {});
+      };
+
       // Explicit destinations are strict. In particular, Local VM must never
       // fall through to host CUA and accidentally click on the user's Mac.
       // The Local VM attach, shared by explicit "Local VM" and by Auto. Explicit
@@ -6204,6 +6227,7 @@ async function startTurn(
               owner: resourceOwner,
               lazy: true,
               label: "the Local VM",
+              onRejected: surfaceLazyClaimRejection("the Local VM"),
               claim: async () => {
                 await claimAutoLocalVm(threadId, localVmTarget);
                 // The dispatch-site poller start saw a null previewCapture
@@ -6311,6 +6335,7 @@ async function startTurn(
               owner: resourceOwner,
               lazy: true,
               label: "the VPS computer",
+              onRejected: surfaceLazyClaimRejection("the VPS computer"),
               claim: async () => {
                 await bindTurnComputer(resourceOwner, vpsResource, true);
                 previewCapture = vpsCapture;

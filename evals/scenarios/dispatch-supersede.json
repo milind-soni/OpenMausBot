@@ -1,0 +1,157 @@
+{
+  "id": "dispatch-supersede",
+  "title": "A message sent while a teammate works runs now and keeps the outstanding assignment",
+  "behavior": "A new user message in a conversation with outstanding coordinated work is not held behind that work: it runs immediately as its own turn, the assignment stays attached (not cancelled), and that turn's system prompt names the outstanding assignment so the model does not resend its fan-out.",
+  "issue": 1503,
+  "world": "coordination",
+  "gates": [
+    "leadWork"
+  ],
+  "bots": [
+    {
+      "key": "chief",
+      "name": "Clive",
+      "section": "Leadership",
+      "chiefOfStaff": true,
+      "managedSections": [
+        "Engineering"
+      ],
+      "acknowledgePeerScope": true,
+      "turns": [
+        {
+          "steps": [
+            {
+              "arguments": {
+                "bot_ids": [
+                  "@lead"
+                ],
+                "request_key": "build",
+                "message": "Implement the CSV export"
+              }
+            }
+          ],
+          "reply": "Assigned to Engineering"
+        },
+        {
+          "reply": "Noted; Engineering is still working on it"
+        },
+        {
+          "reply": "The requested CSV export is implemented and verified"
+        }
+      ]
+    },
+    {
+      "key": "lead",
+      "name": "Engineering lead",
+      "section": "Engineering",
+      "turns": [
+        {
+          "gate": "leadWork",
+          "reply": "CSV export implemented"
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "chief",
+      "text": "Please have Engineering build the CSV export. Own the result."
+    },
+    {
+      "kind": "waitForNodeStatus",
+      "bot": "lead",
+      "status": "running",
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "send",
+      "bot": "chief",
+      "text": "Also make sure the export is UTF-8."
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "chief",
+      "count": 2,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "writeGate",
+      "gate": "leadWork"
+    },
+    {
+      "kind": "waitForNodeStatus",
+      "bot": "lead",
+      "status": "completed",
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "chief",
+      "count": 3,
+      "timeoutMs": 20000
+    },
+    {
+      "kind": "waitForNodeStatus",
+      "bot": "chief",
+      "status": "completed",
+      "timeoutMs": 20000
+    }
+  ],
+  "assertions": [
+    {
+      "kind": "sendNotQueued",
+      "bot": "chief"
+    },
+    {
+      "kind": "toolCalls",
+      "bot": "chief",
+      "equals": [
+        {
+          "arguments": {
+            "bot_ids": [
+              "@lead"
+            ],
+            "request_key": "build",
+            "message": "Implement the CSV export"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "turnOrder",
+      "bots": [
+        "chief",
+        "chief",
+        "lead",
+        "chief"
+      ]
+    },
+    {
+      "kind": "systemPromptIncludes",
+      "bot": "chief",
+      "turn": 1,
+      "includes": "Assignments you already sent are still outstanding"
+    },
+    {
+      "kind": "handoffTree",
+      "equals": [
+        {
+          "bot": "chief",
+          "status": "completed"
+        },
+        {
+          "bot": "lead",
+          "status": "completed",
+          "hasParent": true
+        }
+      ]
+    },
+    {
+      "kind": "transcriptIncludes",
+      "bot": "chief",
+      "thread": "active",
+      "text": "The requested CSV export is implemented and verified"
+    }
+  ]
+}
