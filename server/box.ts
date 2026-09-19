@@ -34,6 +34,7 @@ import {
   retireBoxDeletion,
   type BoxDeletionRecord,
 } from "./box-delete-journal.ts";
+import type { BoxComputerBackend, ComputerScreenshotFrame } from "./computer-backend.ts";
 
 const shellQuote = (value: string): string => `'${value.replace(/'/g, "'\\''")}'`;
 
@@ -452,12 +453,13 @@ async function mintDesktopUrl(cfg: AppConfig, boxId: string, { vncBudgetMs = 60_
     assertBoxNotDeleting(boxId);
     const { body } = await boxJson(cfg, `/boxes/${boxId}/desktop?vnc=1`, { method: "POST" });
     const url = body?.desktopUrl ?? body?.url;
-    if (url) return url;
+    if (typeof url === "string" && url) return url;
     if (!body?.provisioning) break;
     await new Promise((r) => setTimeout(r, 3000));
   }
   const { body } = await boxJson(cfg, `/boxes/${boxId}/desktop`, { method: "POST" });
-  return body?.desktopUrl ?? body?.url ?? null;
+  const url = body?.desktopUrl ?? body?.url;
+  return typeof url === "string" && url ? url : null;
 }
 
 async function waitReady(cfg: AppConfig, boxId: string, budgetMs = 90_000) {
@@ -1198,7 +1200,12 @@ async function finishPriorDeletionBeforeProvision(cfg: AppConfig, botId: string)
 }
 
 /** Box state for the Computer panel. */
-export async function boxStatus(cfg: AppConfig, botId: string) {
+export interface BoxComputerStatus {
+  configured: boolean;
+  box: { boxId: string; state: string; desktopAvailable: boolean | null } | null;
+}
+
+export async function boxStatus(cfg: AppConfig, botId: string): Promise<BoxComputerStatus> {
   cfg = snapshotBoxConfig(cfg);
   if (!boxConfigured(cfg)) return { configured: false, box: null };
   const box = await findBox(cfg, botId);
@@ -1298,7 +1305,9 @@ export async function joinBox(cfg: AppConfig, botId: string) {
   if (!ready) throw new Error("the box did not wake in time — try again");
   // Provider archive/resume preserves disk but not processes; the box brings
   // its own driver daemon back up, so there is nothing to reattach here.
-  return { joinUrl: await mintDesktopUrl(cfg, box.id), state: ready.state ?? null };
+  const joinUrl = await mintDesktopUrl(cfg, box.id);
+  if (!joinUrl) throw new Error("box desktop link could not be created");
+  return { joinUrl, state: ready.state ?? null };
 }
 
 /** Mint a human-control URL without changing provider lifecycle or guest
@@ -1313,7 +1322,9 @@ export async function joinReadyBox(cfg: AppConfig, botId: string) {
       { status: 409 },
     );
   }
-  return { joinUrl: await mintDesktopUrl(cfg, box.id), state: box.state ?? null };
+  const joinUrl = await mintDesktopUrl(cfg, box.id);
+  if (!joinUrl) throw new Error("box desktop link could not be created");
+  return { joinUrl, state: box.state ?? null };
 }
 
 /** Archive the bot's box now (billing pauses, disk survives). */
@@ -1415,7 +1426,11 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
 
 /** `knownBoxId` skips box resolution entirely — the screen poller holds
  * the id for the whole turn and must not re-resolve it every frame. */
-export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: string) {
+export async function screenshotBox(
+  cfg: AppConfig,
+  botId: string,
+  knownBoxId?: string,
+): Promise<ComputerScreenshotFrame> {
   cfg = snapshotBoxConfig(cfg);
   let boxId = knownBoxId;
   if (!boxId) {
@@ -1432,3 +1447,25 @@ export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: 
   if (!data) throw new Error("could not read the frame back from the box");
   return { png: data, format: "jpeg" };
 }
+
+/** The Box arm of the shared ComputerBackend dispatch (computer-backend.ts).
+ * Thin adapters over the module's own functions; Box-specific lifecycle
+ * policy (find/wake gates) stays with its callers. */
+export const boxComputerBackend: BoxComputerBackend = {
+  kind: "box",
+  status: (cfg, botId) => boxStatus(cfg, botId),
+  action: (cfg, botId, action, input = {}) => {
+    if (action === "provision") return provisionBox(cfg, botId, input.botName ?? "");
+    if (action === "sleep") return sleepBox(cfg, botId);
+    if (typeof input.command !== "string" || !input.command.trim()) {
+      throw Object.assign(new Error("command is required"), { status: 400 });
+    }
+    return execOnBox(cfg, botId, input.command);
+  },
+  screenshot: (cfg, botId, knownBoxId) => screenshotBox(cfg, botId, knownBoxId),
+  join: (cfg, botId, mode) => (mode === "ready" ? joinReadyBox(cfg, botId) : joinBox(cfg, botId)),
+  closeViewer: () => ({ closed: false }),
+  inventory: (cfg, owners, options) => listManagedBoxes(cfg, owners, options),
+  removeManaged: (cfg, owners, boxId, confirmName, claim, options) =>
+    deleteManagedBox(cfg, owners, boxId, confirmName, claim, options),
+};

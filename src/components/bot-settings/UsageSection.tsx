@@ -1,6 +1,6 @@
 // Usage: what this bot has spent across its tasks. Moved verbatim from
 // SettingsPanel.tsx's BotUsageCard (~40-77); its "All bots →" button keeps
-// dispatching toggleAppSettings, which closes this dialog — intended, since
+// dispatching openOverlay(appSettings), which closes this dialog — intended, since
 // the destination is the app-wide Usage settings, not a per-bot view.
 //
 // BotUsageCard used to render nothing at all for a bot with no turns yet,
@@ -28,7 +28,7 @@ export function UsageSection({ bot }: { bot: Bot }) {
       <div className="flex items-baseline justify-between">
         <div className="text-[15px] font-medium text-ink">Usage</div>
         <button
-          onClick={() => dispatch({ type: "toggleAppSettings", open: true, section: "usage" })}
+          onClick={() => dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: "usage" })}
           className="text-[12px] text-ink-secondary hover:text-ink"
         >
           All bots →
