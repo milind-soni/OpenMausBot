@@ -88,6 +88,27 @@ type BotRecord = {
       const matrix = new DOMMatrix(getComputedStyle(world).transform);
       return { x: matrix.m41, y: matrix.m42, scale: matrix.m11 };
     })()`);
+    // Opening or closing the settings dialog resizes the canvas viewport and
+    // its ResizeObserver re-centers the world — but that pan can stay dormant
+    // until agent-browser's click pipeline drives a frame, then commit
+    // between the click's geometry read and its pointerdown (captured: the
+    // world translating 150px one millisecond before pointerdown, so
+    // "Edit Ben" landed on Ada's card and opened the wrong bot). No
+    // settle-wait can observe a pan that the click itself wakes. Card
+    // buttons are keyboard-operable, so focus the button and press a trusted
+    // Enter instead: activation targets the element, not its on-screen
+    // position, and runs the same onClick handler a pointer click would.
+    const activate = async (selector: string, label?: string) => {
+      await expect.poll(() => evaluate(`(() => {
+        const elements = document.querySelectorAll(${JSON.stringify(selector)});
+        if (elements.length !== 1) return "count " + elements.length;
+        ${label ? `const actual = elements[0].getAttribute("aria-label");
+        if (actual !== ${JSON.stringify(label)}) return "label " + actual;` : ""}
+        elements[0].focus();
+        return document.activeElement === elements[0] ? "ok" : "unfocusable";
+      })()`), { timeout: 10_000, message: `one activatable element for ${selector}` }).toBe("ok");
+      await ui("press", "--keys", "Enter");
+    };
     const drag = (selector: string, delta: { x: number; y: number }, destination?: string, cancel = false) => evaluate(`(async () => {
       const source = document.querySelector(${JSON.stringify(selector)});
       const canvas = document.querySelector('[data-team-canvas]');
@@ -185,16 +206,16 @@ type BotRecord = {
       card.dispatchEvent(new PointerEvent('pointerout', { ...options, relatedTarget: document.body }));
       return true;
     })()`);
-    await click("Edit Ben");
+    await activate(`[data-bot-id=${JSON.stringify(ben.id)}]`, "Edit Ben");
     await expect.poll(snapshot).toContain('dialog "Ben"');
     expect(await evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(true);
     await expect.poll(() => evaluate("[...document.querySelectorAll('[data-team-canvas] [aria-label^=\"Computer for \"]')].map(button => button.getAttribute('aria-label'))"))
       .toEqual(["Computer for Ben"]);
-    await click("Computer for Ben");
+    await activate('[aria-label="Computer for Ben"]');
     await expect.poll(() => evaluate("document.querySelector('[data-bot-settings-section=access] > button')?.getAttribute('aria-expanded')")).toBe("true");
     await click("Close settings");
     await expect.poll(() => evaluate("document.querySelectorAll('[data-team-canvas] [aria-label^=\"Computer for \"]').length")).toBe(0);
-    await click("Change default model for Ben");
+    await activate('[aria-label="Change default model for Ben"]');
     await expect.poll(() => evaluate("document.querySelector('[data-bot-settings-section=model] > button')?.getAttribute('aria-expanded')")).toBe("true");
     expect(await snapshot()).toContain("Default model");
     expect(await evaluate("Boolean(document.querySelector('[data-team-canvas]'))")).toBe(true);

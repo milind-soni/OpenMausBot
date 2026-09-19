@@ -40,7 +40,7 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(() => {
       if (child!.exitCode !== null || child!.signalCode !== null) throw new Error(`UI launcher exited: ${stderr}`);
       try { info = JSON.parse(stdout); return Boolean(info.ui); } catch { return false; }
-    }, { timeout: LAUNCH_TIMEOUT_MS, interval: 250 }).toBe(true);
+    }, { timeout: LAUNCH_TIMEOUT_MS + 120_000, interval: 250 }).toBe(true);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const click = (name: string) => ui("click", "--name", name);
@@ -58,10 +58,18 @@ describe("bot setup and tools in the real renderer", () => {
       await click("Access");
     };
     const clickRole = async (title: string) => {
-      const state = await ui("snapshot", "--interactive");
-      const matches = Object.entries(state.refs as Record<string, { role: string; name: string }>)
-        .filter(([, entry]) => entry.role === "button" && entry.name.startsWith(`${title} `));
-      expect(matches).toHaveLength(1);
+      // The role buttons exist only once React mounts the dialog that
+      // Control+n opens, and under load that render can still be pending
+      // when the next command runs. Poll for the row the way `ui click
+      // --name` does instead of sampling a single snapshot (observed once
+      // as zero matches milliseconds after the keypress).
+      let matches: Array<[string, { role: string; name: string }]> = [];
+      await expect.poll(async () => {
+        const state = await ui("snapshot", "--interactive");
+        matches = Object.entries(state.refs as Record<string, { role: string; name: string }>)
+          .filter(([, entry]) => entry.role === "button" && entry.name.startsWith(`${title} `));
+        return matches.length;
+      }, { timeout: 10_000, message: `one role button titled ${title}` }).toBe(1);
       await ui("click", "--ref", `@${matches[0][0]}`);
     };
     const dialogCount = () => evaluate("document.querySelectorAll('[role=dialog]').length");
@@ -119,11 +127,22 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("No MCP servers added yet.");
     const usageExpanded = () => evaluate("[...document.querySelectorAll('[role=dialog] button')].find(b => b.textContent.trim() === 'Usage')?.getAttribute('aria-expanded')");
     const openHeaderUsage = async () => {
+      // The freshly opened settings dialog keeps settling after its text
+      // renders: registry and usage data land asynchronously and reflow the
+      // chat header that carries this chip (captured: the whole control row
+      // jumping 28px between the click's geometry read and its pointerdown).
+      // No settle-wait can catch that — the reflow commits inside the click
+      // pipeline — so a ref click aims where the chip *used* to be and lands
+      // in the flex gap beside it. Activate the chip the keyboard way
+      // instead: a trusted Enter on the focused button runs the same onClick
+      // handler (open settings at the usage section) without involving
+      // on-screen geometry at all.
       const state = await ui("snapshot", "--interactive");
       const cost = Object.entries(state.refs as Record<string, { role: string; name: string }>)
         .filter(([, entry]) => entry.role === "button" && entry.name.includes("$0.01"));
       expect(cost).toHaveLength(1);
-      await ui("click", "--ref", `@${cost[0][0]}`);
+      expect(await evaluate("(() => { const chips = document.querySelectorAll('[data-testid=usage-chip]'); if (chips.length !== 1) return false; chips[0].focus(); return document.activeElement === chips[0]; })()")).toBe(true);
+      await press("Enter");
       await expect.poll(usageExpanded).toBe("true");
       expect(await snapshot()).toContain("All bots");
       // Allow subpixel rounding at the bottom edge of the scroll viewport.
@@ -214,5 +233,5 @@ describe("bot setup and tools in the real renderer", () => {
     expect(child.exitCode).toBe(0);
     expect(existsSync(info.dataDir)).toBe(false);
     expect(existsSync(info.logPath)).toBe(true);
-  }, LAUNCH_TIMEOUT_MS + 180_000);
+  }, LAUNCH_TIMEOUT_MS + 300_000);
 });

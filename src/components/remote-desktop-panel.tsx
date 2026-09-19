@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
 import { isRemoteScreenshotContention, remoteScreenshotSource } from "@/lib/remote-desktop";
-import type { Routine } from "@/lib/routines";
+import type { Routine } from "../../shared/routines";
 import { scheduleLabel } from "@/lib/schedule-label";
 import { api, ApiError, useStore, type Bot } from "@/state/store";
 import { RoutineEditor } from "./RoutinesPage";
@@ -206,7 +206,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         </div>
         <button
           type="button"
-          onClick={() => dispatch({ type: "toggleComputer", open: false })}
+          onClick={() => dispatch({ type: "closeOverlay", kind: "computer" })}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           aria-label="Close computer panel"
         >

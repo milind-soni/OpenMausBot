@@ -10,11 +10,12 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { freePortBlock } from "./testing/ports.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
-const PORT = 18800 + Math.floor(Math.random() * 10_000);
-const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
+let port: number;
+let webhookPort: number;
 
 let home: string;
 let child: ChildProcess;
@@ -31,6 +32,8 @@ beforeAll(async () => {
     instances: { fixture: { driver: "migration-test-shadow" } },
   }));
   writeFileSync(join(legacy, "keep-me.txt"), "carried over");
+  port = await freePortBlock([0]);
+  webhookPort = await freePortBlock([0]);
   child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
@@ -38,8 +41,8 @@ beforeAll(async () => {
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
       HOME: home,
       USERPROFILE: home,
-      OMB_PORT: String(PORT),
-      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
+      OMB_PORT: String(port),
+      OMB_WEBHOOK_PORT: String(webhookPort),
       OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -48,7 +51,7 @@ beforeAll(async () => {
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
+      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
       if (res.ok) return;
     } catch {
       /* not up yet */
