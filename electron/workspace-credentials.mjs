@@ -57,7 +57,70 @@ export function migrateWorkspaceCredentials(config, credentials) {
     delete home[field];
     configChanged = true;
   }
+  // Explicit authentication owns its credential. Legacy instances can still
+  // inherit a global URL/key, so leave them intact until a connection edit.
+  for (const [instanceId, instance] of Object.entries(nextConfig.instances ?? {})) {
+    if (instance?.driver !== "openai-compat" || !instance.config || typeof instance.config !== "object") continue;
+    if (instance.config.auth === "none") {
+      const keys = openAIConnectionKeys(nextCredentials);
+      if (Object.hasOwn(keys, instanceId)) {
+        delete keys[instanceId];
+        nextCredentials.openaiConnectionKeys = keys;
+        credentialsChanged = true;
+      }
+      if (typeof instance.config.key === "string") {
+        delete instance.config.key;
+        configChanged = true;
+      }
+      continue;
+    }
+    if (instance.config.auth !== "bearer") continue;
+    const value = instance.config.key;
+    if (typeof value !== "string") continue;
+    const secret = value.trim();
+    if (secret) {
+      const url = normalizeOpenAIConnectionUrl(instance.config.url);
+      if (!url) continue;
+      const keys = openAIConnectionKeys(nextCredentials);
+      if (keys[instanceId]?.key !== secret || keys[instanceId]?.url !== url) {
+        nextCredentials.openaiConnectionKeys = { ...keys, [instanceId]: { key: secret, url } };
+        credentialsChanged = true;
+      }
+      instance.config.secretStorage = "external";
+    }
+    if (instance.config.secretStorage === "external") {
+      delete instance.config.key;
+      configChanged = true;
+    }
+  }
   return { config: nextConfig, credentials: nextCredentials, configChanged, credentialsChanged };
+}
+
+export function openAIConnectionKeys(credentials) {
+  const keys = credentials?.openaiConnectionKeys;
+  if (!keys || typeof keys !== "object" || Array.isArray(keys)) return {};
+  return Object.fromEntries(Object.entries(keys).flatMap(([id, value]) => {
+    const url = normalizeOpenAIConnectionUrl(value?.url);
+    return typeof value?.key === "string" && value.key && url ? [[id, { key: value.key, url }]] : [];
+  }));
+}
+
+export function normalizeOpenAIConnectionUrl(value) {
+  if (typeof value !== "string") return undefined;
+  try { return new URL(value.trim()).href.replace(/\/+$/u, ""); } catch { return undefined; }
+}
+
+/** Undefined preserves a stored credential; an empty value explicitly clears it. */
+export function withOpenAIConnectionKey(credentials, instanceId, key, url) {
+  const keys = openAIConnectionKeys(credentials);
+  if (key === undefined) return { ...credentials };
+  if (key) {
+    const endpoint = normalizeOpenAIConnectionUrl(url);
+    if (!endpoint) throw new Error("A valid API URL is required to store this credential");
+    keys[instanceId] = { key, url: endpoint };
+  }
+  else delete keys[instanceId];
+  return { ...credentials, openaiConnectionKeys: keys };
 }
 
 /** Env for the spawned server: one var per stored secret, nothing else.
@@ -68,5 +131,7 @@ export function workspaceCredentialEnv(credentials) {
     const value = credentials?.[name];
     if (typeof value === "string" && value) env[envName] = value;
   }
+  const keys = openAIConnectionKeys(credentials);
+  if (Object.keys(keys).length) env.OPENMAUS_OPENAI_CONNECTION_KEYS = JSON.stringify(keys);
   return env;
 }

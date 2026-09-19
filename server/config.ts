@@ -8,6 +8,7 @@ import { z } from "zod";
 import { normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
 import { writeFileAtomic } from "./atomic.ts";
+import { readOpenAIConnectionKey } from "./openai-connection-secrets.ts";
 import { EFFORT_LEVELS } from "../shared/wire.ts";
 import { isModelVariant, type InstanceConfigMap, type ModelSelection } from "./contracts.ts";
 import { PROVIDER_ICON_PRESETS, providerIconError } from "../shared/provider-icon.ts";
@@ -870,6 +871,7 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "OMB_ANTHROPIC_API_KEY",
   "OMB_ANTHROPIC_API_URL",
   "OPENAI_COMPAT_API_KEY",
+  "OPENMAUS_OPENAI_CONNECTION_KEYS",
   "OPENAI_COMPAT_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
@@ -998,6 +1000,7 @@ export function saveConfig(patch: Partial<AppConfig>, options: { replaceInstance
     const config = jsonObjectSchema.safeParse(entry.success ? entry.data.config : undefined);
     const environment = jsonObjectSchema.safeParse(entry.success ? entry.data.environment : undefined);
     if (entry.success && entry.data.driver === "openai-compat" && config.success
+      && config.data.auth === undefined
       && !config.data.key
       && (!config.data.apiKeyEnv || config.data.apiKeyEnv === "OPENAI_COMPAT_API_KEY")
       && !(environment.success && Object.hasOwn(environment.data, "OPENAI_COMPAT_API_KEY"))) {
@@ -1156,14 +1159,23 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
     // would turn the first workspace URL into a stale per-instance override.
     const entry = { ...sourceEntry };
     map[id] = entry;
+    const raw = entry.config;
+    const current = typeof raw === "object" && raw !== null && !Array.isArray(raw)
+      ? raw as Record<string, unknown> : {};
+    const explicitConnection = entry.driver === "openai-compat" && (current.auth === "bearer" || current.auth === "none");
     const environment = { ...entry.environment };
-    for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
+    if (!explicitConnection) {
+      for (const [key, value] of injectedEnvironment(cfg, entry.driver)) environment[key] = value;
+    }
     entry.environment = environment;
+    if (explicitConnection && current.secretStorage === "external") {
+      entry.config = { ...current, key: current.auth === "none" ? "" : readOpenAIConnectionKey(id, current.url) ?? "" };
+    }
     // The driver URL is configuration, not a credential. Environment is
     // intentionally not consulted by ProviderRegistry when it decodes a
     // driver's config, so carry the workspace default into the transient
     // instance map while preserving a per-instance override.
-    if (entry.driver === "openai-compat" && cfg.openaiCompat) {
+    if (entry.driver === "openai-compat" && !explicitConnection && cfg.openaiCompat) {
       const defaults: Record<string, string> = {};
       if (cfg.openaiCompat.url) defaults.url = cfg.openaiCompat.url;
       if (cfg.openaiCompat.model) defaults.model = cfg.openaiCompat.model;

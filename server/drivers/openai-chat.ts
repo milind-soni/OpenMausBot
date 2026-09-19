@@ -75,6 +75,8 @@ interface RuntimeOptions<Config> {
   input: DriverCreateInput<Config>;
   driverKind: string;
   apiKey: string;
+  /** Explicitly configured keyless endpoints, never inferred from an absent key. */
+  allowUnauthenticated?: boolean;
   apiUrl: string;
   models: () => ModelCatalog;
   requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean): Record<string, unknown>;
@@ -151,7 +153,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
       const response = await fetch(`${options.apiUrl}/chat/completions`, {
         method: "POST",
-        headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+        headers: { ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}), "content-type": "application/json" },
+        redirect: "error",
         body: JSON.stringify({
           ...options.requestBody(model, messages, stream),
           ...(tools.length ? { tools } : {}),
@@ -299,7 +302,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   ];
 
   const sendTurn = async (turn: SendTurnInput) => {
-    if (!options.apiKey) throw new Error(options.missingKeyError);
+    if (!options.apiKey && !options.allowUnauthenticated) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
 
     const turnId = newId();
@@ -519,8 +522,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       return options.models();
     },
     ...(options.refreshModels ? { refreshModels: options.refreshModels } : {}),
-    snapshot: async () => options.apiKey
-      ? { state: "available", authenticated: true, version: null, ...(options.billing ? { billing: options.billing } : {}) }
+    snapshot: async () => options.apiKey || options.allowUnauthenticated
+      ? { state: "available", ...(options.allowUnauthenticated ? {} : { authenticated: true }), version: null, ...(options.billing ? { billing: options.billing } : {}) }
       : { state: "unavailable", reason: options.unavailableReason },
     adapter: {
       provider: options.driverKind,
@@ -546,6 +549,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       },
     },
     generateText: async (prompt, { signal } = {}) => {
+      if (!options.apiKey && !options.allowUnauthenticated) throw new Error(options.missingKeyError);
       const model = options.generateModel?.() ?? options.models().default;
       const { text, reasoning, toolCalls } = await complete([{ role: "user", content: prompt }], model, false, signal);
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");

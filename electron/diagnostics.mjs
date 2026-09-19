@@ -16,6 +16,7 @@ export const CREDENTIAL_ENV_NAMES = [
   "OMB_ANTHROPIC_API_KEY",
   "OMB_ANTHROPIC_API_URL",
   "OPENAI_COMPAT_API_KEY",
+  "OPENMAUS_OPENAI_CONNECTION_KEYS",
   "OPENAI_COMPAT_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
@@ -60,8 +61,63 @@ const unquote = (value) => value.replace(/^["']|["']$/g, "");
 // is embedded into the dynamically built env-name regexes below.
 const VALUE_PART = String.raw`("[^"]*"|'[^']*'|[^\s"',;)\]}]+)`;
 
+/** Unlike a scalar token, this credential is a JSON map. Only retain text
+ * after a proven value boundary; incomplete/ambiguous serialization consumes
+ * the remaining bounded log tail instead of exporting credential fragments. */
+function redactConnectionCredentialMap(text) {
+  const names = /\b(OPENMAUS_OPENAI_CONNECTION_KEYS)(?:\\*["'])?\s*[:=]\s*/gi;
+  let result = "", cursor = 0, match;
+  while ((match = names.exec(text))) {
+    const start = names.lastIndex;
+    const first = text[start];
+    let end = text.length;
+    if (first === "{" || first === "[" || first === '"' || first === "'") {
+      const stack = first === "{" ? ["}"] : first === "[" ? ["]"] : [];
+      let quote = stack.length ? null : first;
+      let escaped = false;
+      for (let i = start + 1; i < text.length; i++) {
+        const char = text[i];
+        if (quote) {
+          if (escaped) { escaped = false; continue; }
+          if (char === "\\") { escaped = true; continue; }
+          if (char !== quote) continue;
+          quote = null;
+          if (stack.length) continue;
+        } else {
+          if (char === '"') { quote = char; continue; }
+          if (char === "{" || char === "[") { stack.push(char === "{" ? "}" : "]"); continue; }
+          if (char !== "}" && char !== "]") continue;
+          if (stack.pop() !== char) break;
+          if (stack.length) continue;
+        }
+        try {
+          const raw = text.slice(start, i + 1);
+          let value = first === "'" ? raw.slice(1, -1) : JSON.parse(raw);
+          // Check nested JSON strings too: an early quote in malformed
+          // serialization must not be mistaken for the map's closing quote.
+          for (let depth = 0; typeof value === "string" && /^[[{"']/.test(value.trim()); depth++) {
+            if (depth >= 4) throw new Error("Nested credential serialization");
+            value = JSON.parse(value);
+          }
+          if (text[i + 1] && !/[\s,;)\]}]/.test(text[i + 1])) throw new Error("Unclear credential boundary");
+          end = i + 1;
+        } catch { /* Unproven boundary: suppress the rest of this log tail. */ }
+        break;
+      }
+    } else if (first !== "\\") {
+      // Preserve the established scalar behavior for simple env log lines.
+      const scalar = new RegExp(`^${VALUE_PART}`).exec(text.slice(start));
+      if (scalar) end = start + scalar[0].length;
+    }
+    result += text.slice(cursor, match.index) + `${match[1]}=${mask(unquote(text.slice(start, end)))}`;
+    cursor = end;
+    names.lastIndex = end;
+  }
+  return result + text.slice(cursor);
+}
+
 export function redactSecretsInLine(line) {
-  let out = String(line ?? "");
+  let out = redactConnectionCredentialMap(String(line ?? ""));
   // Updater HTTP errors include signed redirect URLs. Keep the host/path for
   // diagnosis, but never export userinfo or any query/fragment, even when a
   // provider gives its capability an unfamiliar or percent-encoded name.
@@ -73,6 +129,7 @@ export function redactSecretsInLine(line) {
   });
   const alreadyMasked = (value) => String(value).includes("«redacted");
   for (const name of CREDENTIAL_ENV_NAMES) {
+    if (name === "OPENMAUS_OPENAI_CONNECTION_KEYS") continue;
     out = out.replace(
       new RegExp(`\\b(${name})["']?\\s*[:=]\\s*${VALUE_PART}`, "gi"),
       (_match, key, value) => `${key}=${mask(unquote(value))}`,
