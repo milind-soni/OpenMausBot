@@ -2,7 +2,7 @@
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join } from "node:path";
@@ -755,6 +755,71 @@ const computerSelectionTurns = new Map<string, {
   selected?: Surface;
   previousSurface?: Surface;
 }>();
+// A bot can also run outside this server — a Telegram gateway, a Slack bot,
+// any long-lived engine process the harness did not spawn. That process never
+// receives a turn-scoped capability, so it cannot ask or delegate to its peers.
+// `<data dir>/external-runtimes.json` maps bot ids to standing bearer tokens
+// for exactly that case: `{ "<botId>": "<token, 32+ chars>" }`. A matching
+// bearer resolves to an agents capability bound to that bot's main thread only —
+// depth 0, no skill authoring, no room coordination, no bot/room/thread
+// creation. Every other bearer still goes through the per-turn map above. The
+// file is read on demand, so adding or rotating a token needs no restart, and
+// it must not be readable by other users (mode 600).
+const EXTERNAL_RUNTIME_GENERATION = "external-runtime";
+const EXTERNAL_RUNTIMES_FILE = join(DATA_DIR, "external-runtimes.json");
+function externalRuntimeTokens(): Array<{ botId: string; token: string }> {
+  let stat;
+  try {
+    stat = statSync(EXTERNAL_RUNTIMES_FILE);
+  } catch {
+    return [];
+  }
+  if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
+    console.warn(`[comms] ignoring ${EXTERNAL_RUNTIMES_FILE}: it is readable by other users (chmod 600 it)`);
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(EXTERNAL_RUNTIMES_FILE, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
+    return Object.entries(parsed as Record<string, unknown>).flatMap(([botId, token]) =>
+      /^[\w-]{1,128}$/.test(botId) && typeof token === "string" && token.length >= 32 ? [{ botId, token }] : [],
+    );
+  } catch {
+    return [];
+  }
+}
+/** The standing capability is for peer comms only. Everything that creates or
+ * changes state on this server (threads, bots, rooms, skills, memory, …) needs
+ * a real turn, which an external runtime never has here, so the routes are an
+ * allow-list rather than flags on the capability. */
+function externalRuntimeMayCall(method: string, path: string): boolean {
+  if (method === "GET") return path === "/api/internal/agents" || /^\/api\/internal\/delegations\/[\w-]+$/.test(path);
+  return method === "POST" && (path === "/api/internal/ask-bot" || path === "/api/internal/delegate-bot");
+}
+function externalRuntimeCapability(header: string | string[] | undefined): InternalCapability | null {
+  if (Array.isArray(header) || !header) return null;
+  const got = Buffer.from(header);
+  for (const { botId, token } of externalRuntimeTokens()) {
+    const expected = Buffer.from(`Bearer ${token}`);
+    if (got.length !== expected.length || !timingSafeEqual(got, expected)) continue;
+    const bot = store.bot(botId);
+    if (!bot?.threadId) return null;
+    return {
+      botId: bot.id,
+      threadId: bot.threadId,
+      generation: EXTERNAL_RUNTIME_GENERATION,
+      depth: 0,
+      kind: "agents",
+      skillAuthoring: false,
+      createdBots: 0,
+      openedThreads: 0,
+      orphanExpiresAt: Number.MAX_SAFE_INTEGER,
+      roomCoordination: false,
+      ownThreadCreation: false,
+    };
+  }
+  return null;
+}
 
 function beginInternalCapabilityGeneration(threadId: string, generation = randomUUID()): string {
   const previous = activeInternalGenerationByThread.get(threadId);
@@ -832,10 +897,12 @@ function authorizedInternalCapability(header: string | string[] | undefined): In
     const expected = Buffer.from(`Bearer ${token}`);
     if (got.length === expected.length && timingSafeEqual(got, expected)) return capability;
   }
-  return null;
+  return externalRuntimeCapability(header);
 }
 
 function internalCapabilityIsActive(capability: InternalCapability): boolean {
+  // A standing external-runtime capability has no turn to end with.
+  if (capability.generation === EXTERNAL_RUNTIME_GENERATION) return true;
   const switching = computerSelectionTurns.get(capability.threadId);
   if ((capability.kind === "computer" || capability.kind === "browser") &&
       switching?.generation === capability.generation && switching.selected) return false;
@@ -9269,6 +9336,7 @@ const pendingConnectorResumes = new Map<
 function connectorThread(botId: string, threadId: string) {
   const bot = store.bot(botId);
   if (!bot) return null;
+  if (bot.threadId === threadId) return { bot, group: undefined }; // a bot's own main chat
   if (store.taskByThread(botId, threadId)) return { bot, group: undefined };
   const group = store.groupByThread(threadId);
   if (group?.memberIds.includes(botId)) return { bot, group };
@@ -11002,6 +11070,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!internalSender) {
         return json(res, 401, { error: "unauthorized" });
       }
+      if (internalCapability.generation === EXTERNAL_RUNTIME_GENERATION && !externalRuntimeMayCall(method, path)) {
+        return json(res, 403, { error: "an external runtime can only list, ask and delegate to its peers and read its delegations" });
+      }
       const requiredCapabilityKind = path === "/api/internal/browser/mcp"
         ? "browser"
         : path.startsWith("/api/internal/connectors/")
@@ -11954,6 +12025,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
         }
         const targetName = store.bot(toBotId)?.name ?? toBotId;
+        // The queue normally drains when the source thread's turn completes. A
+        // caller this server did not spawn (an external runtime) has no live
+        // turn here, so its handoff would wait for an unrelated turn on that
+        // thread to settle. Nothing in flight on the source thread means there
+        // is nothing to wait for: drain now.
+        if (!threadBusy(from.id, fromThreadId)) {
+          drainDelegations(commsBus, approvalBus, fromThreadId, runDelegatedTurn);
+          return json(res, 200, {
+            queued: true,
+            taskId: queued.id,
+            message: peerReviewRequired(from, fromThreadId)
+              ? `Queued for review — @${targetName} will pick it up once the user approves.`
+              : `Delegated — @${targetName} is picking it up now.`,
+          });
+        }
         return json(res, 200, {
           queued: true,
           taskId: queued.id,

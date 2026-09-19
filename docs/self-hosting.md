@@ -602,6 +602,41 @@ CSV export gain a **billable** column next to the provider's cost. Both are
 plain settings in `config.json` (`budgets`, `billing`) and through
 `PUT /api/config`.
 
+## A bot that also runs outside the server
+
+Some engines have their own long-running front door — a Hermes Agent Telegram
+gateway, a Slack bot, an OpenClaw session. That process is the same bot with
+the same workspace and memory, but the server did not spawn it, so it holds
+none of the turn-scoped capabilities the peer-comms tools need and cannot ask
+or delegate to its teammates.
+
+Give it a standing one with `external-runtimes.json` in the data directory,
+mapping the bot's id to a secret of at least 32 characters:
+
+```sh
+umask 077
+TOKEN=$(openssl rand -hex 32)
+printf '{ "%s": "%s" }\n' "$BOT_ID" "$TOKEN" > ~/.openmausbot/external-runtimes.json
+```
+
+The file must be mode `600`; a file other users can read is ignored with a
+warning. It is read on demand, so adding or rotating a token needs no restart.
+The runtime then runs the bundled MCP bridge with that token:
+
+```sh
+OMB_HARNESS_URL=http://127.0.0.1:8799 OMB_BOT_ID=$BOT_ID OMB_COMMS_TOKEN=$TOKEN \
+  node --experimental-strip-types server/drivers/agents-proxy.ts
+```
+
+Scope is deliberately narrow: the token is an *agents* capability for that
+bot's main thread only, and the server accepts just four calls with it — list
+peers, ask, delegate, and read the status of its own delegations. Opening
+threads, creating bots or rooms, skills, memory and every other internal route
+answer 403. Delegations
+it sends are picked up immediately, because there is no turn on this server
+whose end they could wait for. Everything else the server offers still needs
+the owner's session or a per-turn capability.
+
 ## Updating
 
 For the npm service, [install the chosen new version](deploy-vps.md#update)
