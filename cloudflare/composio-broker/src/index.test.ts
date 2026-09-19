@@ -82,7 +82,7 @@ describe("connected-apps broker boundaries", () => {
   });
 
   it("hashes installation tokens before storage", async () => {
-    await expect(sha256("astra")).resolves.toBe("63c74f70a9d4681c334e84001935955a75245ea5b16b9c37c808e85c69963705");
+    await expect(sha256("astra")).resolves.toBe("693b286515bd1dd00865e7b60e4e53556537bbe4b1cc90ab608d94eb7c56fdc6");
   });
 
   it("creates Sessions with explicit multi-account selection", async () => {

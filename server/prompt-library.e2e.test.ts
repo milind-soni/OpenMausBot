@@ -5,6 +5,7 @@
 import { expect, it } from "vitest";
 import { launchVerificationServer } from "../scripts/control-astra.ts";
 import { request } from "../scripts/mcp-server.ts";
+import { META_SOURCE_PREFIX } from "./prompt-presets.ts";
 
 it("serves the built-in prompt catalog and rejects bad import sources", async () => {
   const fixture = await launchVerificationServer();
@@ -24,7 +25,12 @@ it("serves the built-in prompt catalog and rejects bad import sources", async ()
     expect(catalog.collections.length).toBeGreaterThanOrEqual(8);
     for (const collection of catalog.collections) {
       expect(collection.label).toBeTruthy();
-      expect(collection.source).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/tree\//);
+      // Distilled collections ride the `meta:` prefix; what follows it must
+      // still be a GitHub tree source by the same grammar as a pasted link.
+      const source = collection.source.startsWith(META_SOURCE_PREFIX)
+        ? collection.source.slice(META_SOURCE_PREFIX.length)
+        : collection.source;
+      expect(source).toMatch(/^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/tree\//);
     }
     await expect(request("/api/prompt-library/not%20a%20github%20url", {}, url)).rejects.toThrow();
   } finally {

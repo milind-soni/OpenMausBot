@@ -47,7 +47,7 @@ describe("the managed Caddy", () => {
   });
 
   it("takes a bare public hostname for --domain", () => {
-    expect(normalizeDomainOption(" HTTPS://Astra.Example.com/ ")).toBe("maus.example.com");
+    expect(normalizeDomainOption(" HTTPS://Astra.Example.com/ ")).toBe("astra.example.com");
     expect(normalizeDomainOption("maus.example.com:443")).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(normalizeDomainOption("localhost")).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(normalizeDomainOption("box.internal")).toEqual({ error: expect.stringContaining("public domain") });

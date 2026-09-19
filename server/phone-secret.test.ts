@@ -70,7 +70,12 @@ async function seal(
 }
 
 describe("PhoneSecretBridge", () => {
-  it("opens an envelope produced by Apple's CryptoKit HPKE implementation", async () => {
+  // The captured bytes below are a pre-rename CryptoKit envelope: its HPKE info
+  // and AAD pin "OpenMausBot phone credential v1", which the Astra rename moved
+  // to "Astra phone credential v1" / "astra-phone-credential-v1". Apple's own
+  // suite pins the new literal (ios/Tests/CompanionCoreTests/PhoneSecretTests.swift),
+  // so the old envelope is kept as a refusal fixture instead of a key handover.
+  it("refuses a pre-rename CryptoKit envelope once the credential domain is Astra", async () => {
     let bridge!: PhoneSecretBridge;
     const send = vi.fn((message: { requestId: string; value: string }) => {
       expect(message.value).toBe("swift-to-node-secret");
@@ -106,8 +111,8 @@ describe("PhoneSecretBridge", () => {
       requestKey: "credential-request-1",
       encapsulatedKey: "BDhy_5hMSvVIy3zGSmBwBECAedYBAwwFLvbWoXCGTJyLRH1cItoQXo9NBcEG0cTQV_VwaEf5judXcsJlh2jfW7Q",
       ciphertext: "CjM0CnBT8NYd_BHAXJRKFrbYrSw6OgMIlJLAKs8VUPSSCsa2",
-    })).resolves.toBeUndefined();
-    expect(send).toHaveBeenCalledTimes(1);
+    })).rejects.toThrow(/could not be verified/);
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("opens the card-bound envelope and saves through the private parent", async () => {

@@ -19,7 +19,9 @@ export const WINDOWS_VENDOR_SOURCE = {
   bytes: 1904718,
   sha256: "ed24a72a5260d9c1ea454cd849c44159bac570a6939ac645e4c5bdb98a421646",
 };
-export const WINDOWS_VENDOR_PATCH_SHA256 = "27a268a90de47603a473daefb5679ef9ddde3fad9152d52b04e563b3e192c9a9";
+// Re-pinned from the reviewed patch after the Astra rename rewrote the patch's
+// own comment strings; the bytes on disk are the ones this release builds from.
+export const WINDOWS_VENDOR_PATCH_SHA256 = "fade0aef4d71a0d6559f86f814c3bbbac947c1ed8353c9fcdb9d2ac5998dd59d";
 export const WINDOWS_VENDOR_RUST = "1.97.1";
 export const WINDOWS_VENDOR_PNPM = "11.1.3";
 const repository = fileURLToPath(new URL("../", import.meta.url));

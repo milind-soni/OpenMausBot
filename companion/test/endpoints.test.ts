@@ -8,7 +8,7 @@ import {
 
 describe("hostedCompanionUrl", () => {
   it("normalizes one explicit HTTPS origin", () => {
-    expect(hostedCompanionUrl("  https://Astra.Example/  ")).toBe("https://maus.example");
+    expect(hostedCompanionUrl("  https://Astra.Example/  ")).toBe("https://astra.example");
     expect(hostedCompanionUrl(undefined)).toBeNull();
     expect(hostedCompanionUrl("  ")).toBeNull();
   });
