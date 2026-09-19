@@ -36,6 +36,7 @@ import {
   type Bot,
   type InstanceInfo,
   type Message,
+  overlayOpen,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
@@ -1140,7 +1141,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       >
         <div className="flex min-w-0 items-center gap-2.5 rounded-lg px-1.5 py-1" style={headerNoDragStyle}>
           <button
-            onClick={() => dispatch({ type: "toggleSettings", open: true })}
+            onClick={() => dispatch({ type: "openOverlay", kind: "settings", open: true })}
             className="flex size-10 shrink-0 items-center justify-center rounded-lg hover:bg-raised/50"
             title={t("chat.openProfile")}
             aria-label={t("chat.openProfileAria", { name: bot.name })}
@@ -1164,7 +1165,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
                 dispatch({ type: "updateBot", botId: bot.id, patch: { name } });
               }
             }}
-            onActivate={() => dispatch({ type: "toggleSettings", open: true })}
+            onActivate={() => dispatch({ type: "openOverlay", kind: "settings", open: true })}
             showEditButton
             className="truncate text-[15px] font-semibold text-ink"
             inputClassName="max-w-[220px] rounded bg-inset px-1.5 py-0.5 text-[15px] font-semibold"
@@ -1219,22 +1220,23 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           <CallButton bot={bot} />
           <button
             data-tour="computer"
-            onClick={() => dispatch({ type: "toggleComputer" })}
+            onClick={() => dispatch({ type: "openOverlay", kind: "computer" })}
+            aria-pressed={overlayOpen(state, "computer")}
             className={cn(
               "rounded-md p-1.5 hover:bg-raised",
-              state.computerOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              overlayOpen(state, "computer") ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title={t("chat.computer")}
           >
             <Monitor size={18} />
           </button>
           {!remoteClient && <button
-            onClick={() => dispatch({ type: "toggleInspector" })}
+            onClick={() => dispatch({ type: "openOverlay", kind: "inspector" })}
             aria-label={t("chat.inspector")}
-            aria-pressed={state.inspectorOpen}
+            aria-pressed={overlayOpen(state, "inspector")}
             className={cn(
               "rounded-md p-1.5 hover:bg-raised",
-              state.inspectorOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              overlayOpen(state, "inspector") ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title={t("chat.inspectorHint")}
           >
@@ -1475,7 +1477,7 @@ function UsageChip({ bot }: { bot: Bot }) {
   const ctx = contextChip(usage);
   return (
     <button
-      onClick={() => dispatch({ type: "toggleSettings", open: true, section: "usage" })}
+      onClick={() => dispatch({ type: "openOverlay", kind: "settings", open: true, section: "usage" })}
       className="whitespace-nowrap rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[12px] tabular-nums text-ink-secondary hover:bg-raised hover:text-ink @max-4xl/chathead:px-2"
       title={detail}
       data-testid="usage-chip"
