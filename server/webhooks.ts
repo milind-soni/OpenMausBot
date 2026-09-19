@@ -67,6 +67,8 @@ export interface WebhookManagerOptions {
   }) => { id: string };
   cancelQueued?: (webhookId: string, message: string) => void;
   pendingRuns?: (webhookId: string) => number;
+  /** Sink for delivery:"post" webhooks: the payload text lands in the bot's chat. */
+  post?: (botId: string, text: string) => void;
   /** The execution store commits this identity together with the queued run. */
   findRun?: (webhookId: string, deliveryId: string) => { id: string } | null;
 }
@@ -84,12 +86,14 @@ const RATE_LIMIT = 10;
 const MAX_PENDING_RUNS = 3;
 
 const runOnSchema = z.enum(["maus", "cloud"]);
+const deliverySchema = z.enum(["run", "post"]);
 const eventTypesSchema = z.array(z.string()).max(20).optional();
 const triggerInputSchema = z.object({
   name: z.string(),
   prompt: z.string(),
   botId: z.string(),
   runOn: runOnSchema.optional(),
+  delivery: deliverySchema.optional(),
   enabled: z.boolean().optional(),
   verificationPending: z.boolean().optional(),
   eventTypes: eventTypesSchema,
@@ -108,6 +112,7 @@ const storedWebhookSchema = z.object({
   prompt: z.string(),
   botId: z.string().min(1),
   runOn: runOnSchema,
+  delivery: deliverySchema.optional(),
   enabled: z.boolean(),
   createdAt: z.number().finite().nonnegative(),
   updatedAt: z.number().finite().nonnegative(),
@@ -196,6 +201,7 @@ function cleanInput(input: WebhookTriggerInput): CleanWebhookInput {
     verificationPending: enabled ? false : input.verificationPending === true,
   };
   if (eventTypes.length) clean.eventTypes = eventTypes;
+  if (input.delivery) clean.delivery = input.delivery;
   return clean;
 }
 
@@ -335,6 +341,8 @@ export class WebhookManager {
       prompt: patch.prompt ?? trigger.prompt,
       botId: patch.botId ?? trigger.botId,
       runOn: patch.runOn ?? trigger.runOn,
+
+      delivery: patch.delivery ?? trigger.delivery,
       enabled: patch.enabled ?? trigger.enabled,
       verificationPending: patch.verificationPending ?? trigger.verificationPending,
       eventTypes: patch.eventTypes ?? trigger.eventTypes,
@@ -475,6 +483,27 @@ export class WebhookManager {
     this.rate.set(trigger.endpointId, recent);
 
     const deliveryId = requestedDeliveryId || randomUUID();
+    // delivery:"post": the payload text becomes the bot's own chat message — no task,
+    // no model turn. For notification-style webhooks (a scheduled brief, an alert)
+    // that should read like the bot said it. Dedup/rate/attempt bookkeeping is shared.
+    if (trigger.delivery === "post") {
+      // Never fall through to a task run: a stored post webhook on a server
+      // without a post sink is a configuration error, not a run request.
+      if (!this.options.post) fail(503, "This server cannot post webhook messages to chat");
+      const raw = event.payload as { text?: unknown } | null;
+      const text =
+        raw && typeof raw === "object" && typeof raw.text === "string" && raw.text.trim() ? raw.text : serializePayload(event.payload);
+      this.options.post(trigger.botId, text.slice(0, 20000));
+      this.deliveries.push({ key: `${trigger.endpointId}:${deliveryId}`, runId: "post", at: now });
+      if (this.deliveries.length > MAX_DELIVERIES) this.deliveries.splice(0, this.deliveries.length - MAX_DELIVERIES);
+      trigger.lastReceivedAt = now;
+      trigger.deliveryCount += 1;
+      trigger.updatedAt = now;
+      this.appendAttempt(trigger, event, { outcome: "accepted", statusCode: 202, deliveryId, reason: "Posted to chat (no task run)" });
+      this.save();
+      this.emit(trigger);
+      return { deliveryId, duplicate: false };
+    }
     const run = this.options.enqueue({
       webhookId: trigger.id,
       webhookName: trigger.name,

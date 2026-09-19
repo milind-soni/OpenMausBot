@@ -7673,6 +7673,12 @@ const webhooks = new WebhookManager({
   findRun: (webhookId, deliveryId) => routines!.webhookRunReceipt(webhookId, deliveryId),
   cancelQueued: (webhookId, message) => routines!.cancelQueuedWebhook(webhookId, message),
   pendingRuns: (webhookId) => routines!.activeWebhookRunCount(webhookId),
+  // delivery:"post" webhooks land in the bot's main chat as the bot's own message.
+  post: (botId, text) => {
+    const bot = store.bot(botId);
+    if (!bot) return;
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text });
+  },
 });
 
 let webhookIngress: WebhookIngress | null = null;

@@ -18,6 +18,7 @@ function harness() {
   const queued: Array<Record<string, unknown>> = [];
   const cancelled: Array<{ id: string; message: string }> = [];
   const emitted: unknown[] = [];
+  const posted: Array<{ botId: string; text: string }> = [];
   const options: WebhookManagerOptions = {
     file,
     now: () => now,
@@ -29,6 +30,7 @@ function harness() {
     },
     cancelQueued: (id, message) => cancelled.push({ id, message }),
     pendingRuns: () => pending,
+    post: (botId, text) => posted.push({ botId, text }),
   };
   const manager = new WebhookManager(options);
   return {
@@ -38,6 +40,7 @@ function harness() {
     queued,
     cancelled,
     emitted,
+    posted,
     setNow: (value: number) => (now = value),
     setBot: (value: typeof bot) => (bot = value),
     setPending: (value: number) => (pending = value),
@@ -122,6 +125,34 @@ describe("WebhookManager", () => {
     expect(h.queued[0]?.prompt).toContain("[UNTRUSTED WEBHOOK EVENT DATA]");
     expect(h.queued[0]?.prompt).toContain('"lead": "Ada"');
     expect(h.manager.list()[0]).toMatchObject({ lastRunId: "run-1", deliveryCount: 1 });
+  });
+
+  it("posts the payload text to the bot's chat instead of queuing a task when delivery is \"post\"", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+    const result = h.manager.receive(webhook.endpointId, secret, {
+      payload: { text: "Morning brief: two calls today." },
+      contentType: "application/json",
+      deliveryId: "evt-post-1",
+    });
+
+    expect(result).toEqual({ deliveryId: "evt-post-1", duplicate: false });
+    expect(h.queued).toHaveLength(0);
+    expect(h.posted).toEqual([{ botId: "maus-1", text: "Morning brief: two calls today." }]);
+    expect(h.manager.list()[0]).toMatchObject({ delivery: "post", deliveryCount: 1 });
+    // a repeat of the same delivery id is deduplicated like any other webhook
+    expect(h.manager.receive(webhook.endpointId, secret, { payload: { text: "again" }, deliveryId: "evt-post-1" })).toMatchObject({ duplicate: true });
+    expect(h.posted).toHaveLength(1);
+  });
+
+  it("rejects a post delivery instead of running a task when the server has no post sink", () => {
+    const h = harness();
+    const { webhook, secret } = h.manager.create({ name: "Brief", prompt: "", botId: "maus-1", delivery: "post" });
+    const without = new WebhookManager({ ...h.options, post: undefined });
+    expect(() => without.receive(webhook.endpointId, secret, { payload: { text: "hello" }, deliveryId: "evt-post-2" }))
+      .toThrow("cannot post");
+    expect(h.queued).toHaveLength(0);
+    expect(h.posted).toHaveLength(0);
   });
 
   it("uses an authenticated task from the payload when default instructions are empty", () => {
