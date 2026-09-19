@@ -123,6 +123,9 @@ search and draft isolation using disposable simulators and an offline fixture.
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
 
+The [Android server pairing checks](android-server-pairing.md) cover server QR
+confirmation, manual codes, retries and saved-server identity validation.
+
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.
 
