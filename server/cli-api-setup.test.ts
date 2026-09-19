@@ -41,6 +41,15 @@ describe("API setup endpoint validation", () => {
 });
 
 describe("API setup models", () => {
+  it("requires an explicit keyless mode before omitting Authorization", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation(async () => json({ data: [{ id: "local-model" }] }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(fetchSetupModels("http://localhost:1234/v1", "")).rejects.toThrow(/non-empty API key/u);
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(fetchSetupModels("http://localhost:1234/v1", "ignored-secret", "none")).resolves.toEqual([{ id: "local-model", label: "local-model" }]);
+    expect(fetch.mock.calls[0][1]?.headers).toEqual({});
+  });
+
   it("authenticates only the direct /models GET and parses a live catalog", async () => {
     const fetch = mockFetch(json({ data: [
       { id: "provider/model-b", name: "Model B" },

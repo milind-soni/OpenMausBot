@@ -36,14 +36,14 @@ function httpFailure(status: number, completion: boolean): SetupApiError {
   return new SetupApiError(`${prefix} Check the API URL and provider settings, then try again.`);
 }
 
-async function setupJson(url: string, key: string, body?: Record<string, unknown>): Promise<unknown> {
+async function setupJson(url: string, key: string, body?: Record<string, unknown>, auth: "bearer" | "none" = "bearer"): Promise<unknown> {
   const base = normalizeApiUrl(url);
   // The wizard trims newly pasted keys. Existing credentials must be tested
   // exactly as the runtime will send them, not silently repaired only here.
   const token = key;
   // Header credentials must not contain control characters or whitespace.
   // eslint-disable-next-line no-control-regex
-  if (!token || /[\u0000-\u0020\u007f]/u.test(token)) throw new SetupApiError("Enter a non-empty API key without spaces or line breaks.");
+  if (auth === "bearer" && (!token || /[\u0000-\u0020\u007f]/u.test(token))) throw new SetupApiError("Enter a non-empty API key without spaces or line breaks.");
   const completion = body !== undefined;
   const operation = completion ? "The test reply" : "The model list";
   const timeoutMs = completion ? 30_000 : 8_000;
@@ -55,7 +55,7 @@ async function setupJson(url: string, key: string, body?: Record<string, unknown
       (async () => {
         const response = await fetch(`${base}${completion ? "/chat/completions" : "/models"}`, {
           method: completion ? "POST" : "GET",
-          headers: { authorization: `Bearer ${token}`, ...(completion ? { "content-type": "application/json" } : {}) },
+          headers: { ...(auth === "bearer" ? { authorization: `Bearer ${token}` } : {}), ...(completion ? { "content-type": "application/json" } : {}) },
           ...(completion ? { body: JSON.stringify(body) } : {}),
           signal: abort.signal,
           redirect: "error",
@@ -87,8 +87,8 @@ async function setupJson(url: string, key: string, body?: Record<string, unknown
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 
-export async function fetchSetupModels(url: string, key: string): Promise<Array<{ id: string; label: string }>> {
-  const json = record(await setupJson(url, key));
+export async function fetchSetupModels(url: string, key: string, auth: "bearer" | "none" = "bearer"): Promise<Array<{ id: string; label: string }>> {
+  const json = record(await setupJson(url, key, undefined, auth));
   const models = new Map<string, { id: string; label: string }>();
   for (const entry of Array.isArray(json?.data) ? json.data : []) {
     const item = record(entry);
@@ -105,7 +105,7 @@ export async function fetchSetupModels(url: string, key: string): Promise<Array<
 }
 
 /** Call only after consent, passing the effective instance's provider routing. */
-export async function verifySetupCompletion(url: string, key: string, model: string, provider?: string): Promise<void> {
+export async function verifySetupCompletion(url: string, key: string, model: string, provider?: string, auth: "bearer" | "none" = "bearer"): Promise<void> {
   const id = model.trim();
   // Keep manually entered IDs safe to show in the terminal and saved setup.
   // eslint-disable-next-line no-control-regex
@@ -119,7 +119,7 @@ export async function verifySetupCompletion(url: string, key: string, model: str
     messages: [{ role: "user", content: "Reply with exactly OK." }],
     stream: false,
     ...(pinProvider ? { provider: { order: [provider], allow_fallbacks: false } } : {}),
-  }));
+  }, auth));
   const choice = record(Array.isArray(json?.choices) ? json.choices[0] : undefined);
   const message = record(choice?.message);
   if (message?.role !== "assistant" || typeof message.content !== "string" || !message.content.trim()) {

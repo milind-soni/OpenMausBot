@@ -4,7 +4,77 @@ import {
   migrateWorkspaceCredentials,
   workspaceCredentialEnv,
   WORKSPACE_CREDENTIALS,
+  withOpenAIConnectionKey,
 } from "./workspace-credentials.mjs";
+import { createSecureCredentialState } from "./secure-credential-state.mjs";
+
+const boundKeys = {
+  "api-a": { key: "key-a", url: "https://a.example/v1" },
+  "api-b": { key: "key-b", url: "https://b.example/v1" },
+};
+
+describe("OpenAI-compatible connection secrets", () => {
+  it("migrates each explicit connection without mixing keys or changing the legacy singleton", () => {
+    const config = {
+      openaiCompat: { key: "legacy-key" },
+      instances: {
+        "api-a": { driver: "openai-compat", config: { auth: "bearer", key: "key-a", url: "https://a.example/v1" } },
+        "api-b": { driver: "openai-compat", config: { auth: "bearer", key: "key-b", url: "https://b.example/v1", model: "shared/model" } },
+        legacy: { driver: "openai-compat", config: { key: "legacy-cli-key" } },
+        other: { driver: "claude", config: { key: "unchanged" } },
+      },
+    };
+    const migrated = migrateWorkspaceCredentials(config, { xaiApiKey: "keep" });
+    expect(migrated.credentials.openaiConnectionKeys).toEqual(boundKeys);
+    expect(migrated.config.instances["api-a"].config).toEqual({ auth: "bearer", url: "https://a.example/v1", secretStorage: "external" });
+    expect(migrated.config.instances.legacy).toEqual(config.instances.legacy);
+    expect(migrated.config.openaiCompat).toEqual(config.openaiCompat);
+    expect(migrated.config.instances.other).toEqual(config.instances.other);
+    expect(config.instances["api-a"].config.key).toBe("key-a");
+    const restarted = migrateWorkspaceCredentials(migrated.config, migrated.credentials);
+    expect(restarted.configChanged).toBe(false);
+    expect(restarted.credentialsChanged).toBe(false);
+    expect(JSON.parse(workspaceCredentialEnv(restarted.credentials).OPENMAUS_OPENAI_CONNECTION_KEYS)).toEqual(boundKeys);
+  });
+
+  it("preserves stored keys when editing unrelated settings or sweeping an external tombstone", () => {
+    const credentials = { openaiConnectionKeys: boundKeys };
+    expect(withOpenAIConnectionKey(credentials, "api-a", undefined)).toEqual(credentials);
+    const result = migrateWorkspaceCredentials({ instances: {
+      "api-a": { driver: "openai-compat", config: { auth: "bearer", key: "", secretStorage: "external" } },
+    } }, credentials);
+    expect(result.credentials).toEqual(credentials);
+    expect(result.config.instances["api-a"].config).toEqual({ auth: "bearer", secretStorage: "external" });
+  });
+
+  it("clears obsolete credentials for an explicitly unauthenticated connection", () => {
+    const migrated = migrateWorkspaceCredentials({ instances: {
+      local: { driver: "openai-compat", config: { auth: "none", key: "obsolete" } },
+    } }, { openaiConnectionKeys: { local: { key: "obsolete", url: "http://localhost:1234/v1" }, ...boundKeys } });
+    expect(migrated.credentials.openaiConnectionKeys).toEqual(boundKeys);
+    expect(migrated.config.instances.local.config).toEqual({ auth: "none" });
+  });
+
+  it("restores the encrypted key if a referenced connection cannot be removed", async () => {
+    const initial = { xaiApiKey: "keep", openaiConnectionKeys: boundKeys };
+    const persisted = [];
+    const state = createSecureCredentialState(initial, async value => persisted.push(value));
+    await expect(state.update(
+      credentials => withOpenAIConnectionKey(credentials, "api-a", ""),
+      async () => { throw new Error("Connection is in use"); },
+    )).rejects.toThrow("Connection is in use");
+    expect(persisted[0].openaiConnectionKeys).toEqual({ "api-b": boundKeys["api-b"] });
+    expect(persisted.at(-1)).toEqual(initial);
+    expect(state.read()).toEqual(initial);
+  });
+
+  it("binds a newly stored credential to its canonical endpoint before config is updated", () => {
+    const saved = withOpenAIConnectionKey({ openaiConnectionKeys: boundKeys }, "api-a", "new-key", "https://NEW.example:443/v1/");
+    expect(saved.openaiConnectionKeys["api-a"]).toEqual({ key: "new-key", url: "https://new.example/v1" });
+    expect(() => withOpenAIConnectionKey({}, "api-a", "key-a")).toThrow("valid API URL");
+    expect(workspaceCredentialEnv({ openaiConnectionKeys: { legacyUnbound: "key" } })).toEqual({});
+  });
+});
 
 describe("workspace credential migration", () => {
   it("stores the router key separately while keeping provider settings", () => {

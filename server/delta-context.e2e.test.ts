@@ -16,7 +16,7 @@ const count = (text: string, needle: string) => text.split(needle).length - 1;
 const jsonl = (path: string) => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 
-async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.ProcessEnv; codex?: Record<string, string> } = {}) {
+async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.ProcessEnv; codex?: Record<string, string>; gatePeerReplies?: boolean } = {}) {
   // The fixture's Claude is a CLI new enough to refresh a resumed session's
   // recorded system prompt; a test that wants an older one overrides it.
   const parentEnv = { ...process.env, FAKE_CLAUDE_VERSION: "2.1.270", ...options.env };
@@ -52,6 +52,11 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
         `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
         `else if (argv[0] === "app-server") appendFileSync(${JSON.stringify(codexLaunchesPath)}, JSON.stringify({ botId: process.env.OMB_BOT_ID ?? null }) + "\\n");`,
         `if (after("--resume") && modes.holdresume) { while (!existsSync(${JSON.stringify(join(dataDir, "resume-hold.gate"))})) await new Promise((r) => setTimeout(r, 20)); }`,
+        ...(options.gatePeerReplies && name === "claude" ? [
+          'const system = after("--append-system-prompt-file");',
+          'const peer = system && /^You are (QA|Ops),/.exec(readFileSync(system, "utf8"))?.[1];',
+          `if (peer) { while (!existsSync(${JSON.stringify(dataDir)} + "/" + peer.toLowerCase() + ".gate")) await new Promise((r) => setTimeout(r, 20)); }`,
+        ] : []),
         `await import(${JSON.stringify(pathToFileURL(join(process.cwd(), "server", "testing", fake)).href)});`,
       ].join("\n"), { mode: 0o700 });
       return path;
@@ -939,7 +944,7 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
       { tool: "delegate_bot", arguments: { bot_id: f.qa.id, message: "Check the quality: QA_SOUL_TOKEN" } },
       { tool: "delegate_bot", arguments: { bot_id: f.ops.id, message: "Check operations: OPS_SOUL_TOKEN" } },
     ], reply: "Delegated" },
-    { reply: "First reply folded in", gateFile: f.gate("revival") },
+    { progress: "First revival received its context", reply: "First reply folded in", gateFile: f.gate("revival") },
     { reply: "Second reply folded in" },
   ] };
   f.save();
@@ -950,7 +955,13 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   const run = (await f.api(`/api/routines/${created.routine.id}/run`, {})).run;
   let threadId = "";
   await expect.poll(async () => (threadId = (await f.api("/api/routines")).runs.find((r: any) => r.id === run.id)?.threadId ?? ""), { timeout: 15_000 }).not.toBe("");
-  // The first reply wakes the source; the second lands while that turn holds.
+  await expect.poll(async () => (await f.messages(threadId)).some((m: any) => m.text === "Delegated"), { timeout: 30_000 }).toBe(true);
+  // Depth-capped peers bypass scripted agent plans, so the CLI wrapper gates
+  // their replies. The first wakes the source; the second lands while it holds.
+  // Wait for output from that turn so its prompt cannot consume both replies.
+  f.open(f.gate("qa"));
+  await expect.poll(async () => (await f.messages(threadId)).some((m: any) => m.text === "First revival received its context"), { timeout: 30_000 }).toBe(true);
+  f.open(f.gate("ops"));
   const replies = async () => (await f.messages(threadId)).filter((m: any) => /^@(QA|Ops) replied to the delegated task/.test(m.text ?? "")).length;
   await expect.poll(replies, { timeout: 30_000 }).toBe(2);
   await f.api(`/api/bots/${f.chief.id}`, { soul: "PEER_SOUL_MARK Always answer in German." }, "PATCH");
@@ -958,12 +969,13 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(3);
 
   const [, first, third] = f.turns();
-  const late = count(f.prompt(first), "QA_SOUL_TOKEN") ? "OPS_SOUL_TOKEN" : "QA_SOUL_TOKEN";
+  expect(count(f.prompt(first), "QA_SOUL_TOKEN")).toBe(1);
+  expect(f.prompt(first)).not.toContain("OPS_SOUL_TOKEN");
   expect(third.system).toContain("PEER_SOUL_MARK");
   expect(f.launches().at(-1).resume).toBeNull();
   expect(f.prompt(third)).toContain("received an update outside your provider session");
-  expect(count(f.prompt(third), late)).toBe(1);
-}), 120_000);
+  expect(count(f.prompt(third), "OPS_SOUL_TOKEN")).toBe(1);
+}, { gatePeerReplies: true }), 120_000);
 
 // ── Settings a resumed session cannot take on ──
 

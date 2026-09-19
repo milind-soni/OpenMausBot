@@ -34,6 +34,7 @@ function modelProvider(instance: InstanceInfo | undefined, model: string): strin
 export function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return t("model.setupRequired");
   if (needsSignIn(instance)) return t("model.signInRequired");
+  if (instance.driverKind === "openai-compat") return t("connections.configured");
   return instance.snapshot.version ?? t("model.ready");
 }
 
@@ -268,7 +269,8 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
   const firstClaude = instances.find((instance) => instance.driverKind === "claudeAgent" && instance.claudeAccount?.isDefault)
     ?? instances.find((instance) => instance.driverKind === "claudeAgent");
   const providers = instances.filter((instance) => instance.driverKind !== "claudeAgent" || instance === firstClaude);
-  const { subscription, custom: local } = splitEngineRail(providers);
+  const apiConnections = providers.filter((instance) => instance.driverKind === "openai-compat");
+  const { subscription, custom: local } = splitEngineRail(providers.filter((instance) => instance.driverKind !== "openai-compat"));
   const railButton = (instance: InstanceInfo) => {
     const claude = instance.driverKind === "claudeAgent";
     const target = claude ? claudeInstance ?? instance : instance;
@@ -283,9 +285,10 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
         aria-label={label}
         aria-pressed={selected}
         title={`${label} · ${engineStatus(target)}`}
-        className={cn("relative flex size-9 items-center justify-center rounded-lg", selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60")}
+        className={cn("relative flex items-center justify-center rounded-lg", instance.driverKind === "openai-compat" ? "min-h-12 w-full flex-col gap-1 py-1" : "size-9", selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60")}
       >
         <InstanceProviderMark instance={target} size={18} />
+        {instance.driverKind === "openai-compat" && <span className="line-clamp-2 w-full break-words text-center text-[9px] leading-tight">{instance.displayName}</span>}
         {attention && <span className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-warning ring-2 ring-panel" />}
       </button>
     );
@@ -296,20 +299,23 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
       {subscription.map(railButton)}
       {local.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px]">Local</EngineGroupLabel>}
       {local.map(railButton)}
+      {apiConnections.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px]">API</EngineGroupLabel>}
+      {apiConnections.map(railButton)}
     </div>
   );
 }
 
-export function ClaudeAccountSelect({ accounts, selectedId, onSelect }: {
+export function ClaudeAccountSelect({ accounts, selectedId, onSelect, label = t("model.account") }: {
   accounts: InstanceInfo[];
   selectedId: string;
+  label?: string;
   onSelect: (instance: InstanceInfo) => void;
 }) {
   return (
     <label className="mt-2 flex min-w-0 items-center gap-2 text-[12px] text-ink-secondary">
-      <span>{t("model.account")}:</span>
+      <span>{label}:</span>
       <select
-        aria-label={t("model.account")}
+        aria-label={label}
         value={selectedId}
         onChange={(event) => {
           const account = accounts.find((instance) => instance.instanceId === event.target.value);
@@ -360,7 +366,7 @@ export function ModelPicker({
   );
   const claudeAccounts = state.instances.filter((instance) => instance.driverKind === "claudeAgent");
   const multipleClaudeAccounts = claudeAccounts.length > 1;
-  const showActiveAccount = multipleClaudeAccounts && active?.driverKind === "claudeAgent";
+  const showActiveAccount = (multipleClaudeAccounts && active?.driverKind === "claudeAgent") || active?.driverKind === "openai-compat";
   const claudeRailInstance = claudeAccounts.find((instance) => instance.instanceId === lastClaudeIdRef.current)
     ?? (active?.driverKind === "claudeAgent" ? active : claudeAccounts[0]);
   const railInstance =
@@ -470,6 +476,7 @@ export function ModelPicker({
     setOpen(false);
   };
 
+  const apiConnection = railInstance?.driverKind === "openai-compat";
   const official = railInstance?.models.options.filter((option) => !option.custom) ?? [];
   const custom = railInstance?.models.options.filter((option) => option.custom) ?? [];
   const currentModel = selection.instanceId === railInstance?.instanceId ? selection.model : undefined;
@@ -481,7 +488,7 @@ export function ModelPicker({
   const filteredCustom = filterCustomModels(custom, query);
   const { pinned, rest } = partitionCustomModels(filteredCustom);
   const blocked = railInstance
-    ? pane === "custom"
+    ? pane === "custom" && !apiConnection
       ? needsCli(railInstance)
       : needsCli(railInstance) || needsSignIn(railInstance)
     : false;
@@ -519,7 +526,7 @@ export function ModelPicker({
         // in a narrow chat header fold to a rounded square with just the
         // provider mark; the model name rides the tooltip (a bot with no
         // resolved engine keeps its label — the mark is what would hide it).
-        // Multiple Claude accounts keep their name even in the compact chip.
+        // Named accounts and API connections retain their name in the compact chip.
         !contained && active && !showActiveAccount && COMPACT_SQUARE,
       )}
       title={
@@ -639,12 +646,15 @@ export function ModelPicker({
                           blocked ? "bg-warning/10 text-warning" : "bg-success/10 text-success",
                         )}
                       >
-                        {pane === "custom" && !blocked ? t("model.localModels") : engineStatus(railInstance)}
+                        {pane === "custom" && !blocked && !apiConnection ? t("model.localModels") : engineStatus(railInstance)}
                       </span>
                     </div>
                   </div>
                   {railInstance.driverKind === "claudeAgent" && (
                     <ClaudeAccountSelect accounts={claudeAccounts} selectedId={railInstance.instanceId} onSelect={selectRail} />
+                  )}
+                  {apiConnection && (
+                    <ClaudeAccountSelect accounts={state.instances.filter((instance) => instance.driverKind === "openai-compat")} selectedId={railInstance.instanceId} onSelect={selectRail} label={t("connections.connection")} />
                   )}
                   {railInstance.snapshot.authenticated && railInstance.snapshot.account && (
                     <p className="mt-1 break-words text-[11px] text-ink-secondary">
@@ -652,7 +662,7 @@ export function ModelPicker({
                     </p>
                   )}
                   <div className="mt-0.5 text-[11.5px] text-ink-secondary">
-                    {pane === "custom" ? t("model.localHint") : t(threadId && scope === "thread" ? "model.chooseThreadHint" : "model.chooseHint")}
+                    {apiConnection ? t("connections.chooseModel") : pane === "custom" ? t("model.localHint") : t(threadId && scope === "thread" ? "model.chooseThreadHint" : "model.chooseHint")}
                   </div>
                 </div>
 
@@ -692,7 +702,7 @@ export function ModelPicker({
                       (pane === "custom" && custom.length > COMPACT_MODEL_COUNT)) && (
                       <ModelSearch
                         value={query}
-                        local={pane === "custom"}
+                        local={pane === "custom" && !apiConnection}
                         onChange={(value) => {
                           setQuery(value);
                           if (value) setShowAll(true);
@@ -754,9 +764,9 @@ export function ModelPicker({
                           {rest.map(renderRow)}
                           {custom.length === 0 && (
                             <div className="mx-1 rounded-xl border border-dashed border-hairline/50 px-3 py-5 text-center">
-                              <div className="text-[12.5px] font-medium text-ink">{t("model.noLocal")}</div>
+                              <div className="text-[12.5px] font-medium text-ink">{t(apiConnection ? "connections.noModels" : "model.noLocal")}</div>
                               <div className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">
-                                {t("model.noLocalHint")}
+                                {t(apiConnection ? "connections.noModelsHint" : "model.noLocalHint")}
                               </div>
                             </div>
                           )}
@@ -792,7 +802,9 @@ export function ModelPicker({
                   <button
                     type="button"
                     aria-label={
-                      custom.length > 0
+                      apiConnection
+                        ? t("connections.chooseModel")
+                        : custom.length > 0
                         ? t("model.useLocalCount", { count: custom.length })
                         : t("model.useLocal")
                     }
@@ -803,7 +815,7 @@ export function ModelPicker({
                     }}
                     className="flex w-full shrink-0 items-center justify-between gap-2 border-t border-hairline/40 px-4 py-3 text-left text-[12.5px] font-medium text-ink hover:bg-control/60 disabled:cursor-not-allowed disabled:text-ink-secondary/40 disabled:hover:bg-transparent"
                   >
-                    <span>{t("model.useLocal")}</span>
+                    <span>{t(apiConnection ? "connections.chooseModel" : "model.useLocal")}</span>
                     <span className="flex items-center gap-2">
                       {custom.length > 0 && (
                         <span className="rounded-full bg-inset px-2 py-0.5 text-[10.5px] text-ink-secondary">

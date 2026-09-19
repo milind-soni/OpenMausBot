@@ -281,6 +281,18 @@ const __APP_VERSION__: string;
         name: "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "openaiImageApiKey" | "customImageApiKey",
         value: string,
       ): Promise<ConfigStatus>;
+      /** Connection secrets remain owned by the local desktop's OS-backed store. */
+      saveOpenAIConnection?(input: {
+        instanceId?: string;
+        displayName: string;
+        url: string;
+        auth: "bearer" | "none";
+        key?: string;
+        model?: string;
+        tools?: boolean;
+        provider?: string;
+      }): Promise<unknown>;
+      removeOpenAIConnection?(instanceId: string): Promise<unknown>;
       /** In-app auto-update (packaged app only; dormant in dev). onState
        * fires immediately with the current state, then on transitions. */
       updater?: {

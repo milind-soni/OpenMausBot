@@ -177,6 +177,86 @@ describe("buildDiagnosticsReport", () => {
     expect(redactSecretsInLine(line)).toBe(`spawn env ${name}=«redacted ${value.length} chars» ready`);
   });
 
+  describe("connection credential maps", () => {
+    const name = "OPENMAUS_OPENAI_CONNECTION_KEYS";
+    const keys = {
+      "api-first": { key: "fixture-first-opaque", url: "https://first.example/v1" },
+      "api-second": { key: "fixture-second-opaque", url: "https://second.example/v1" },
+    };
+    const serialized = JSON.stringify(keys);
+    const expectPrivate = (value) => {
+      expect(value).toContain(`${name}=«redacted`);
+      for (const connection of Object.values(keys)) {
+        expect(value).not.toContain(connection.key);
+        expect(value).not.toContain(connection.url);
+      }
+      expect(value).not.toContain("api-first");
+      expect(value).not.toContain("api-second");
+    };
+
+    it.each([
+      serialized,
+      JSON.stringify(keys, null, 2),
+      JSON.stringify(serialized),
+      JSON.stringify(JSON.stringify(serialized)),
+      `'${serialized}'`,
+    ])("removes the entire map and preserves proven surrounding diagnostics (%#)", value => {
+      const redacted = redactSecretsInLine(`starting ${name}=${value} ready\nnext diagnostic`);
+      expectPrivate(redacted);
+      expect(redacted).toMatch(/^starting OPENMAUS_OPENAI_CONNECTION_KEYS=«redacted \d+ chars» ready\nnext diagnostic$/);
+    });
+
+    it("does not mistake braces or escaped quotes inside a credential for its boundary", () => {
+      const value = JSON.stringify({ ...keys, "api-third": { key: 'fixture-quoted-"}-tail', url: "https://third.example/v1" } });
+      const redacted = redactSecretsInLine(`${name}=${value} ready`);
+      expectPrivate(redacted);
+      expect(redacted).not.toContain("fixture-quoted");
+      expect(redacted).not.toContain("-tail");
+      expect(redacted).toMatch(/ chars» ready$/);
+    });
+
+    it("recognizes the credential name inside an escaped JSON log record", () => {
+      const record = JSON.stringify(JSON.stringify({ [name]: serialized }));
+      const redacted = redactSecretsInLine(record);
+      expectPrivate(redacted);
+    });
+
+    it.each([
+      serialized.slice(0, -1),
+      JSON.stringify(serialized).slice(0, -1),
+      JSON.stringify({ [name]: serialized }).replaceAll('"', '\\"'),
+      `${serialized}unfinished`,
+    ])("suppresses the remaining log text when the map boundary is uncertain (%#)", value => {
+      const redacted = redactSecretsInLine(`before ${name}=${value}\nafter uncertain value`);
+      expectPrivate(redacted);
+      expect(redacted).not.toContain("after uncertain value");
+    });
+
+    it("redacts serialized maps in every exported log section", () => {
+      const report = buildDiagnosticsReport({
+        appInfo,
+        desktopLogTail: JSON.stringify({ [name]: serialized, status: "desktop-ready" }),
+        logTail: `${name}=${serialized}\nserver-ready`,
+        updaterLogTail: `${name}=${JSON.stringify(serialized)}\nupdater-ready`,
+      });
+      expectPrivate(report);
+      for (const marker of ["desktop-ready", "server-ready", "updater-ready"]) expect(report).toContain(marker);
+    });
+
+    it("limits conservative suppression to the affected report section", () => {
+      const report = buildDiagnosticsReport({
+        appInfo,
+        desktopLogTail: "desktop-ready",
+        logTail: `${name}=${serialized.slice(0, -1)}\nuncertain server text`,
+        updaterLogTail: "updater-ready",
+      });
+      expectPrivate(report);
+      expect(report).not.toContain("uncertain server text");
+      expect(report).toContain("desktop-ready");
+      expect(report).toContain("updater-ready");
+    });
+  });
+
   it("masks generic key=value secrets and content-shaped tokens in the log tail", () => {
     const report = buildDiagnosticsReport({
       appInfo,

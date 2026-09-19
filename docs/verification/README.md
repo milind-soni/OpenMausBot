@@ -111,6 +111,10 @@ service. It does not drive the People settings UI through `control-omb`.
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.
 
+The [OpenAI connection fixture](openai-connections.md) checks named connection
+management, model selection, separate catalog/response checks, draft preservation,
+and mobile/desktop layouts against a local fake API.
+
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
 

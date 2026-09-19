@@ -233,6 +233,8 @@ const bridge = {
     }),
   /** Store a provider credential with OS-backed encryption. */
   setCredential: (name, value) => ipcRenderer.invoke("credential:set", name, value),
+  saveOpenAIConnection: (input) => ipcRenderer.invoke("openai-connection:save", input),
+  removeOpenAIConnection: (instanceId) => ipcRenderer.invoke("openai-connection:remove", instanceId),
 
   /** In-app auto-update. State object:
    *  { status: "idle"|"checking"|"available"|"downloading"|"downloaded"|"error",

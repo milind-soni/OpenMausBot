@@ -53,6 +53,126 @@ describe("OpenAICompatDriver", () => {
     }
   });
 
+  it("does not inherit environment defaults into explicit connections", () => {
+    const beforeModel = process.env.OPENAI_COMPAT_MODEL;
+    const beforeProvider = process.env.OPENAI_COMPAT_PROVIDER;
+    process.env.OPENAI_COMPAT_URL = "https://global.example/v1";
+    process.env.OPENAI_COMPAT_MODEL = "global/model";
+    process.env.OPENAI_COMPAT_PROVIDER = "global upstream";
+    try {
+      expect(OpenAICompatDriver.decodeConfig({ auth: "bearer", url: "https://own.example/v1" }))
+        .toMatchObject({ auth: "bearer", url: "https://own.example/v1", model: undefined, provider: undefined });
+      expect(() => OpenAICompatDriver.decodeConfig({ auth: "bearer" })).toThrow(/requires an API URL/u);
+    } finally {
+      if (beforeModel === undefined) delete process.env.OPENAI_COMPAT_MODEL;
+      else process.env.OPENAI_COMPAT_MODEL = beforeModel;
+      if (beforeProvider === undefined) delete process.env.OPENAI_COMPAT_PROVIDER;
+      else process.env.OPENAI_COMPAT_PROVIDER = beforeProvider;
+    }
+  });
+
+  it.each(["bearer", "none"])("validates independent %s endpoints when loading saved configuration", (auth) => {
+    expect(() => OpenAICompatDriver.decodeConfig({ auth, url: "http://provider.example/v1" })).toThrow(/HTTPS/);
+    expect(OpenAICompatDriver.decodeConfig({ auth, url: "https://provider.example/v1/" }).url).toBe("https://provider.example/v1");
+    expect(OpenAICompatDriver.decodeConfig({ auth, url: "http://127.0.0.1:1234/v1" }).url).toBe("http://127.0.0.1:1234/v1");
+  });
+
+  it("never uses global credentials when an independent connection has no key", async () => {
+    process.env.OPENAI_COMPAT_API_KEY = "global-secret";
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "missing-key", displayName: "Independent", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ auth: "bearer", url: "https://own.example/v1", model: "own/model" }),
+      environment: { OPENAI_COMPAT_API_KEY: "injected-global-secret" },
+    });
+    expect(await inst.snapshot()).toMatchObject({ state: "unavailable" });
+    await expect(inst.adapter.sendTurn({ threadId: "thread", text: "hello" })).rejects.toThrow(/no API key/u);
+    await expect(inst.generateText?.("hello")).rejects.toThrow(/no API key/u);
+    expect(inst.models).toEqual({ default: "own/model", options: [{ id: "own/model", label: "own/model", custom: true }] });
+    expect(fetch).not.toHaveBeenCalled();
+    await inst.dispose();
+  });
+
+  it("supports explicitly keyless local catalogs and replies without Authorization", async () => {
+    process.env.OPENAI_COMPAT_API_KEY = "global-secret";
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => String(input).endsWith("/models")
+      ? new Response(JSON.stringify({ data: [{ id: "local-model" }] }))
+      : new Response(JSON.stringify({ choices: [{ message: { content: "hello" } }] }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "local", displayName: "Local", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ auth: "none", url: "http://127.0.0.1:1234/v1", key: "ignored-key", tools: false }),
+      environment: { OPENAI_COMPAT_API_KEY: "injected-global-secret" },
+    });
+    await inst.refreshModels?.();
+    expect(await inst.snapshot()).toMatchObject({ state: "available" });
+    // Absence means no authentication is required. False means a sign-in is
+    // required in the model picker and would incorrectly block local servers.
+    expect(await inst.snapshot()).not.toHaveProperty("authenticated");
+    expect(inst.models.default).toBe("local-model");
+    await expect(inst.generateText?.("hello")).resolves.toBe("hello");
+    const recorder = recordEvents(inst.adapter);
+    await inst.adapter.sendTurn({ threadId: "thread", text: "hello" });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    for (const [, init] of fetch.mock.calls) {
+      expect(new Headers(init?.headers).has("authorization")).toBe(false);
+      expect(init?.redirect).toBe("error");
+    }
+    recorder.stop();
+    await inst.dispose();
+  });
+
+  it("keeps identical model IDs on independent endpoints bound to their own keys", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (input) => String(input).endsWith("/models")
+      ? new Response(JSON.stringify({ data: [] }))
+      : new Response(JSON.stringify({ choices: [{ message: { content: "hello" } }] }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch);
+    const instances = await Promise.all(["one", "two"].map((id) => OpenAICompatDriver.create({
+      instanceId: id, displayName: id, enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ auth: "bearer", url: `https://${id}.example/v1`, key: `${id}-key`, model: "shared/model" }),
+      environment: {},
+    })));
+    await Promise.all(instances.map((instance) => instance.generateText?.("hello")));
+    for (const [url, init] of fetch.mock.calls) {
+      const id = String(url).includes("one.example") ? "one" : "two";
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${id}-key`);
+      expect(init?.redirect).toBe("error");
+    }
+    for (const inst of instances) await inst.dispose();
+  });
+
+  it.each(["bearer", "none"])("cancels helper generation on the caller signal for %s connections", async (auth) => {
+    let requestStarted!: (signal: AbortSignal) => void;
+    const started = new Promise<AbortSignal>((resolve) => { requestStarted = resolve; });
+    vi.stubGlobal("fetch", vi.fn<typeof globalThis.fetch>(async (input, init) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }));
+      expect(new Headers(init?.headers).get("authorization")).toBe(auth === "bearer" ? "Bearer own-key" : null);
+      const signal = init?.signal;
+      if (!signal) throw new Error("Helper request must be cancellable");
+      requestStarted(signal);
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "helper", displayName: "Helper", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ auth, url: "https://own.example/v1", key: "own-key", model: "own/model" }),
+      environment: {},
+    });
+    const caller = new AbortController();
+    try {
+      const result = expect(instance.generateText?.("Create a title", { signal: caller.signal })).rejects.toThrow("Helper cancelled");
+      const requestSignal = await started;
+      caller.abort(new Error("Helper cancelled"));
+      await result;
+      expect(requestSignal.aborted).toBe(true);
+    } finally {
+      caller.abort();
+      await instance.dispose();
+    }
+  });
+
   it("reports unavailable without an API key", async () => {
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-1",

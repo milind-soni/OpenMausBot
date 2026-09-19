@@ -151,6 +151,8 @@ import { registerEnginesBinDir } from "./engine-install.ts";
 import { appendUsage, parseUsageRange, readUsage, summarizeUsage, usageCsv, USAGE_GROUPINGS, flushUsageLedger, type UsageGroupBy, type UsageTrigger } from "./usage-ledger.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, type ProviderKeyKind } from "./provider-key-check.ts";
+import { openAIConnectionMetadata, prepareOpenAIConnection, probeOpenAIConnection } from "./openai-connections.ts";
+import { readOpenAIConnectionKey, setOpenAIConnectionKey, removeOpenAIConnectionKey } from "./openai-connection-secrets.ts";
 import { assertWithinBudget, noteSpend, spendState } from "./spend.ts";
 import { fleetAvailable, fleetRequest, fleetSocketPath } from "./fleet-client.ts";
 import { entitled } from "./enterprise.ts";
@@ -10423,6 +10425,26 @@ async function persistProviderInstance(instanceId: string, instances: NonNullabl
   resetPathCache();
 }
 
+function busyProviderSelections() {
+  return store.bots.flatMap((bot) => {
+    const busyTasks = store.tasks(bot.id).filter((task) => threadBusy(bot.id, task.threadId));
+    const selections = busyTasks.map((task) => botForThread(bot.id, task.threadId)!.modelSelection);
+    // Rooms still run from the profile default; a direct thread does not.
+    if (activeGroupTurnForBot(bot.id) || (bot.busy && busyTasks.length === 0)) selections.push(bot.modelSelection);
+    return selections;
+  });
+}
+
+function openAIConnections() {
+  return Object.entries(instanceConfigs(cfg)).filter(([, entry]) => entry.driver === "openai-compat")
+    .map(([instanceId, entry]) => ({
+      ...openAIConnectionMetadata(instanceId, entry),
+      usedBy: store.bots.filter((bot) => bot.modelSelection.instanceId === instanceId ||
+        store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)).map((bot) => bot.name),
+      isDefault: cfg.defaultModelSelection?.instanceId === instanceId,
+    }));
+}
+
 /** Rebuild the provider fleet after a config change so new keys take
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
@@ -16515,6 +16537,96 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);
     if (companyMutation && method !== "GET") return json(res, 403, { error: "Company accounts are read-only here. Manage this connection in desktop Settings." });
 
+    // Named API connections reuse the same instance IDs as bot/thread selection.
+    const apiConnectionsPath = "/api/instances/openai-compatible";
+    if (method === "GET" && path === apiConnectionsPath) {
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { connections: openAIConnections() });
+    }
+    const apiConnectionMatch = /^\/api\/instances\/([\w.-]+)\/openai-compatible$/.exec(path);
+    if ((method === "POST" && (path === apiConnectionsPath || path === `${apiConnectionsPath}/test`)) ||
+      ((method === "PATCH" || method === "DELETE") && apiConnectionMatch)) {
+      res.setHeader("cache-control", "no-store");
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const body = await readBody(req, 16384);
+      const probing = path === `${apiConnectionsPath}/test`;
+      const creating = method === "POST" && !probing;
+      const requestedId = apiConnectionMatch?.[1] ?? body?.instanceId;
+      if (requestedId !== undefined && (typeof requestedId !== "string" || !/^[A-Za-z0-9][\w.-]{0,127}$/.test(requestedId) || requestedId.startsWith("company."))) {
+        return json(res, 400, { error: "Invalid connection identifier." });
+      }
+      const instanceId: string = requestedId ?? `api-${randomUUID()}`;
+      if (creating && !/^api-[a-f0-9-]{8,40}$/.test(instanceId)) {
+        return json(res, 400, { error: "New connection identifiers must be generated API identifiers." });
+      }
+      const instances = persistableInstanceConfigs(cfg);
+      const existing = Object.hasOwn(instances, instanceId) ? instances[instanceId] : undefined;
+      const effective = Object.hasOwn(instanceConfigs(cfg), instanceId) ? instanceConfigs(cfg)[instanceId] : undefined;
+      if (creating && existing) return json(res, 409, { error: "This connection already exists." });
+      if ((!creating && !probing || probing && requestedId !== undefined) && existing?.driver !== "openai-compat") {
+        return json(res, 404, { error: "OpenAI-compatible connection not found." });
+      }
+      try {
+        if (probing) return json(res, 200, await probeOpenAIConnection(body, effective));
+        if (providerConfigBusy || providerFleetReloading) return json(res, 409, { error: "Provider settings are already being updated." });
+        if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+          return json(res, 409, { error: "Wait for bots using this connection to finish before changing it." });
+        }
+        const external = url.searchParams.get("secretStorage") === "external";
+        if (external && auth.kind !== "loopback") return json(res, 403, { error: "External credential storage is managed by the local desktop app." });
+        const previousUrl = (effective?.config as Record<string, unknown> | undefined)?.url;
+        const previousSecret = readOpenAIConnectionKey(instanceId, previousUrl);
+        if (method === "DELETE") {
+          if (instanceId === "openaiCompat") return json(res, 400, { error: "The original connection is kept for compatibility. Edit it or add another connection." });
+          if (cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
+            bot.modelSelection.instanceId === instanceId || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId))) {
+            return json(res, 409, { error: "Choose another connection for the bots, conversations and default model using this connection before removing it." });
+          }
+          delete instances[instanceId];
+        } else {
+          const entry = prepareOpenAIConnection(body, existing, effective);
+          const connection = entry.config as Record<string, unknown>;
+          if (external) {
+            if (connection.auth === "bearer" && previousSecret === undefined && typeof body?.key !== "string") {
+              return json(res, 400, { error: "Enter the API key once to move this connection into the desktop credential store." });
+            }
+            connection.secretStorage = "external";
+          } else if (connection.secretStorage === "external") {
+            // A paired browser cannot commit to the desktop's OS credential store.
+            return json(res, 409, { error: "Edit this connection in the desktop app that stores its credential." });
+          }
+          instances[instanceId] = entry;
+        }
+        if (method === "DELETE" && !external && (existing?.config as Record<string, unknown> | undefined)?.secretStorage === "external") {
+          return json(res, 409, { error: "Remove this connection in the desktop app that stores its credential." });
+        }
+        providerConfigBusy = true;
+        providerInstancesChanging.add(instanceId);
+        try {
+          if (external && method !== "DELETE") {
+            const connection = instances[instanceId].config as Record<string, unknown>;
+            if (connection.auth === "bearer" && typeof connection.key === "string") setOpenAIConnectionKey(instanceId, connection.key, connection.url);
+            else removeOpenAIConnectionKey(instanceId);
+            delete connection.key;
+          } else if (method === "DELETE") removeOpenAIConnectionKey(instanceId);
+          await persistProviderInstance(instanceId, instances);
+        } catch (error) {
+          if (previousSecret === undefined) removeOpenAIConnectionKey(instanceId);
+          else setOpenAIConnectionKey(instanceId, previousSecret, previousUrl);
+          throw error;
+        } finally {
+          providerInstancesChanging.delete(instanceId);
+          providerConfigBusy = false;
+        }
+        broadcast({ kind: "config", ...configStatus() });
+        return json(res, creating ? 201 : 200, { instanceId, connections: openAIConnections(), instances: await describeInstances() });
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : "Could not update this connection." });
+      }
+    }
+
     const instanceIconPatch = /^\/api\/instances\/([\w.-]+)\/icon$/.exec(path);
     if (method === "PATCH" && instanceIconPatch) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
@@ -16654,13 +16766,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // executable already configured for this Claude instance. The JSON gate
     // keeps a hostile page from triggering a local process with a simple
     // cross-origin form request.
-    const busyProviderSelections = () => store.bots.flatMap((bot) => {
-      const busyTasks = store.tasks(bot.id).filter((task) => threadBusy(bot.id, task.threadId));
-      const selections = busyTasks.map((task) => botForThread(bot.id, task.threadId)!.modelSelection);
-      // Rooms still run from the profile default; a direct thread does not.
-      if (activeGroupTurnForBot(bot.id) || (bot.busy && busyTasks.length === 0)) selections.push(bot.modelSelection);
-      return selections;
-    });
     const claudeUpdate = /^\/api\/instances\/([\w.-]+)\/claude-update$/.exec(path);
     if (method === "POST" && claudeUpdate) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {

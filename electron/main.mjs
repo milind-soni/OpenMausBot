@@ -18,7 +18,7 @@ import {
   installDesktopCrashListeners,
   readSafeLogTail,
 } from "./diagnostics.mjs";
-import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
+import { migrateWorkspaceCredentials, withOpenAIConnectionKey, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
@@ -2627,6 +2627,53 @@ async function saveWorkspaceCredential(name, value) {
 
 ipcMain.handle("credential:set", localOnly("credential:set", (_event, name, value) =>
   saveWorkspaceCredential(name, value),
+));
+
+async function mutateOpenAIConnection(input, remove = false) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("Invalid connection");
+  if (desktopRemoteAccess || activeEnvironment(environmentsState)) {
+    throw new Error("Connection credentials belong to the selected workspace server");
+  }
+  const creating = !remove && input.instanceId === undefined;
+  const instanceId = creating ? `api-${randomUUID()}` : input.instanceId;
+  if (typeof instanceId !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(instanceId)) {
+    throw new Error("Invalid connection ID");
+  }
+  if (!remove && input.key !== undefined && typeof input.key !== "string") throw new Error("Invalid credential");
+  if (app.isPackaged && !(await safeStorage.isAsyncEncryptionAvailable())) {
+    throw new Error("The operating-system credential store is unavailable");
+  }
+  const key = remove || input.auth === "none" ? "" : input.key?.trim();
+  const applyToHarness = async () => {
+    if (app.isPackaged && !serverReady) throw new Error("The embedded bot server is unavailable");
+    const route = creating ? "/api/instances/openai-compatible" : `/api/instances/${encodeURIComponent(instanceId)}/openai-compatible`;
+    const secretStorage = app.isPackaged ? "?secretStorage=external" : "";
+    const response = await fetch(`http://127.0.0.1:${SERVER_PORT}${route}${secretStorage}`, {
+      method: remove ? "DELETE" : creating ? "POST" : "PATCH",
+      headers: desktopServerHeaders(
+        { "content-type": "application/json" },
+        { packaged: app.isPackaged, token: desktopMutationToken },
+      ),
+      body: remove ? undefined : JSON.stringify({ ...input, instanceId }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(body?.error || `Could not save connection (HTTP ${response.status})`);
+    return body;
+  };
+  if (!app.isPackaged) return applyToHarness();
+  // A failed server validation restores the encrypted document before the
+  // next credential writer runs, including deletion of an in-use connection.
+  return updateSecureCredentialDocument(
+    credentials => withOpenAIConnectionKey(credentials, instanceId, key, input.url),
+    applyToHarness,
+  );
+}
+
+ipcMain.handle("openai-connection:save", localOnly("openai-connection:save", (_event, input) =>
+  mutateOpenAIConnection(input),
+));
+ipcMain.handle("openai-connection:remove", localOnly("openai-connection:remove", (_event, instanceId) =>
+  mutateOpenAIConnection({ instanceId }, true),
 ));
 
 ipcMain.handle("approvals:set-trusted-mode", localOnly("approvals:set-trusted-mode", (_event, botId, mode, options) => {

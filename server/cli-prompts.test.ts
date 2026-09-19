@@ -217,6 +217,17 @@ describe("Clack setup adapter", () => {
     expect(stripVTControlCharacters(fixture.text())).toContain("Untrusted label");
   });
 
+  it("removes non-printing controls without changing log layout or prompt spacing", async () => {
+    const fixture = terminal(false, { isTTY: false });
+    fixture.io.log("  Pro\u0007vider\tname\n  second line  ");
+    expect(fixture.text()).toBe("  Provider name\n  second line  \n");
+    const answer = fixture.io.ask("Account\nname\u0007: ");
+    expect(fixture.text()).toContain("Account name: ");
+    fixture.input.write("name\r");
+    expect(await answer).toBe("name");
+    expectClean(fixture);
+  });
+
   it("refuses hidden input without a terminal before printing or changing raw mode", () => {
     const fixture = terminal();
     fixture.input.isTTY = false;

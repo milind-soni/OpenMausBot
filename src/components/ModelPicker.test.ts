@@ -1,9 +1,14 @@
-import { Children, createElement, type ChangeEvent, type ReactElement, type ReactNode } from "react";
+import { Children, createElement, useState, type ChangeEvent, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { AppState, Bot, InstanceInfo } from "@/state/store";
 import type { EffortLevel } from "../../shared/wire";
+
+vi.mock("react", async (importOriginal) => {
+  const react = await importOriginal<typeof import("react")>();
+  return { ...react, useState: vi.fn(react.useState) };
+});
 
 // The picker reads the engine catalog off the store, and the store module
 // touches window/localStorage at import time — the same shape
@@ -25,6 +30,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 const { ClaudeAccountSelect, EffortRow, ModelEngineRail, ModelPicker, ModelVariantRow, modelSelectionForPick } = await import("./ModelPicker");
+const { InstanceProviderMark } = await import("./ProviderIcons");
 
 afterAll(() => vi.unstubAllGlobals());
 
@@ -329,5 +335,61 @@ describe("Claude provider and account selection", () => {
     const select = Children.toArray(dropdown.props.children)[1] as ReactElement<{ onChange: (event: ChangeEvent<HTMLSelectElement>) => void }>;
     select.props.onChange({ target: { value: personal.instanceId } } as ChangeEvent<HTMLSelectElement>);
     expect(onSelect).toHaveBeenCalledExactlyOnceWith(personal);
+  });
+});
+
+describe("named OpenAI-compatible connections", () => {
+  const personal: InstanceInfo = { ...engine(), instanceId: "api-personal", driverKind: "openai-compat", displayName: "Personal provider" };
+  const work: InstanceInfo = { ...engine(), instanceId: "api-work", driverKind: "openai-compat", displayName: "Work provider" };
+
+  it("does not call API connection models local in the footer or its accessible name", () => {
+    for (const instance of [work, engine()]) {
+      fixture.instances = [instance];
+      // Open the main pane so the footer remains covered even for catalogs
+      // that mix ordinary and custom models instead of today's custom-only API list.
+      vi.mocked(useState).mockReturnValueOnce([true, vi.fn()]);
+      const markup = renderToStaticMarkup(createElement(ModelPicker, { bot: { ...bot(), modelSelection: { instanceId: instance.instanceId, model: "gpt-5.6" } } }));
+      const label = instance.driverKind === "openai-compat" ? "Choose a model from this connection." : "Use a local model";
+      expect(markup).toContain(`aria-label="${label}"`);
+      expect(markup).toContain(`<span>${label}</span>`);
+      if (instance.driverKind === "openai-compat") expect(markup).not.toContain("Use a local model");
+    }
+  });
+
+  it("keeps each connection's chosen icon in the rail and the selected connection's icon in the header", () => {
+    const personalIcon: InstanceInfo = { ...personal, icon: { kind: "preset", preset: "azure" } };
+    const workIcon: InstanceInfo = { ...work, icon: { kind: "custom", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" } };
+    const instances = [personalIcon, workIcon];
+    const onSelect = vi.fn();
+    const rail = ModelEngineRail({ instances, selectedInstance: workIcon, onSelect });
+    const buttons = Children.toArray(rail.props.children).filter((child) => (child as ReactElement).type === "button") as ReactElement<{ children: ReactNode; onClick: () => void }>[];
+    expect(buttons).toHaveLength(2);
+    for (const [index, button] of buttons.entries()) {
+      const mark = Children.toArray(button.props.children)[0] as ReactElement<{ instance: InstanceInfo }>;
+      expect(mark.type).toBe(InstanceProviderMark);
+      expect(mark.props.instance).toBe(instances[index]);
+      button.props.onClick();
+      expect(onSelect).toHaveBeenLastCalledWith(instances[index]);
+    }
+    fixture.instances = instances;
+    for (const active of instances) {
+      const trigger = renderToStaticMarkup(createElement(ModelPicker, { bot: { ...bot(), modelSelection: { instanceId: active.instanceId, model: "gpt-5.6" } } }));
+      expect(trigger).toContain(renderToStaticMarkup(createElement(InstanceProviderMark, { instance: active, size: 14 })));
+      expect(trigger).toContain(`${active.displayName} · `);
+    }
+  });
+
+  it("visibly distinguishes connections even when they share the same driver and model", () => {
+    const rail = renderToStaticMarkup(createElement(ModelEngineRail, { instances: [personal, work], selectedInstance: work, onSelect: vi.fn() }));
+    expect(rail).toContain('aria-label="Work provider" aria-pressed="true"');
+    expect(rail).toContain(">API<");
+    expect(rail).not.toContain(">Local<");
+    expect(rail).toMatch(/<span[^>]*>Personal provider<\/span>/);
+    expect(rail).toMatch(/<span[^>]*>Work provider<\/span>/);
+    fixture.instances = [personal, work];
+    const trigger = renderToStaticMarkup(createElement(ModelPicker, { bot: { ...bot(), modelSelection: { instanceId: work.instanceId, model: "gpt-5.6" } } }));
+    expect(trigger).toMatch(/<span data-model-account[^>]*>Work provider · <\/span>/);
+    expect(trigger).toContain('data-model-account-compact="true"');
+    expect(trigger).not.toContain("@max-4xl/chathead:size-[30px]");
   });
 });
