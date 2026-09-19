@@ -30,7 +30,7 @@ function mount(request: typeof fetch) {
     profile: () => dispatch({ type: "updateBot", botId: "bot", patch: { title: "Updated" } }),
     update: () => dispatch({ type: "updateTask", botId: "bot", threadId: "thread", patch: { approvalMode: "auto" } }),
     move: () => dispatch({ type: "updateTask", botId: "bot", threadId: "thread", patch: { projectId: null } }),
-    send: () => dispatch({ type: "send", botId: "bot", threadId: "thread", text: "Continue" }),
+    send: () => dispatch({ type: "send", botId: "bot", threadId: "thread", text: "Continue", at: 1_700_000_000_000 }),
   };
 }
 afterEach(() => { initialState.bots = []; vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
