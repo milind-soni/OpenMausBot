@@ -5780,7 +5780,7 @@ async function startTurn(
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
@@ -15557,16 +15557,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const bot = requestedTaskBot(m[1], body.threadId);
       const text = String(body.text ?? "").trim();
       if (!text) return json(res, 400, { error: "text required" });
+      const threadMessages = store.messagesFor(bot.threadId);
+      const source = threadMessages.find((msg) => msg.id === messageId);
+      if (!source || source.role !== "user" || source.kind !== "text") {
+        return json(res, 404, { error: "only user messages can be edited" });
+      }
+      // The client's id for this edit. A retry of an edit the server already
+      // forked answers with that fork instead of forking (and rerunning) again.
+      // Checked before the busy guard: that fork's own turn is what is busy.
+      const sendId = parseSendId(body.sendId);
+      if (sendId) {
+        const accepted = acceptedSendMatch(threadMessages, sendId, text, source.replyToId);
+        if (accepted.kind === "conflict" || (accepted.kind === "match" && (accepted.message.parentId ?? null) !== (source.parentId ?? null))) {
+          return json(res, 409, { error: "sendId already belongs to another message" });
+        }
+        if (accepted.kind === "match") return json(res, 202, { ok: true, message: accepted.message });
+      }
       // everything from here down is synchronous, so two racing edits can
       // never both get past this check: startTurn flips busy before the
       // next request is handled
       if (threadBusy(bot.id, bot.threadId)) return json(res, 409, { error: "the thread is working — stop it before editing" });
       if (phoneSecretSubmissions.hasThread(bot.threadId)) {
         return json(res, 409, { error: "this task is securely saving a credential — try again when it finishes" });
-      }
-      const source = store.messagesFor(bot.threadId).find((msg) => msg.id === messageId);
-      if (!source || source.role !== "user" || source.kind !== "text") {
-        return json(res, 404, { error: "only user messages can be edited" });
       }
       if (!registry.get(bot.modelSelection.instanceId)) {
         return json(res, 409, {
@@ -15576,7 +15588,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // startTurn admits the rerun before branching. A shared-resource or
       // concurrency-limit refusal must leave the original transcript intact.
       const replyTo = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
-      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo });
+      const message = await startTurn(bot.id, text, { threadId: bot.threadId, editedMessageId: messageId, replyTo, sendId });
       return json(res, 202, { ok: true, message });
     }
 

@@ -324,7 +324,8 @@ function Bubble({
   const versions = user ? messageVersions(bot, message) : [message];
   const versionIndex = versions.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
-    if (v && !bot.busy) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
+    // an edit still waiting for its server fork has no branch to switch to yet
+    if (v && !bot.busy && !v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
   };
 
   return (
@@ -335,7 +336,7 @@ function Bubble({
           <MessageActions side="user">
             {/* editing rewinds the thread, so it waits for the turn to end —
                 same rule as the version switcher below */}
-            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && (
+            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && !message.id.startsWith("optimistic-") && (
               <button
                 onClick={onStartEdit}
                 aria-label={t("chat.editMessage")}
@@ -1014,7 +1015,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // regenerate = fork the last user message with the same text — reuses the
   // existing branch machinery, so the old answer stays reachable via ‹ ›
   const regenerate = useCallback(() => {
-    if (lastUserMessage?.text && !bot.busy) {
+    if (lastUserMessage?.text && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")) {
       dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
   }, [lastUserMessage, bot.busy, bot.id, bot.threadId, dispatch]);
@@ -1436,7 +1437,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         onClearReply={clearReply}
         onConsumeReply={consumeReply}
         onRestoreReply={restoreReply}
-        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy
+        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")
           ? () => setEditingId(lastUserMessage.id)
           : undefined}
       />

@@ -566,12 +566,29 @@ class CompanionClient(
             body = jsonBody("emoji" to emoji),
         )).message
 
-    suspend fun edit(botId: String, messageId: String, text: String, threadId: String? = null) {
-        sendUnit(makeRequest(
+    /**
+     * Fork the conversation at a user message. Returns the computer's new
+     * message when the response carries one. [sendId] makes a retry of the same
+     * edit answer with the existing fork instead of forking twice.
+     */
+    suspend fun edit(
+        botId: String,
+        messageId: String,
+        text: String,
+        threadId: String? = null,
+        sendId: String? = null,
+    ): Message? {
+        val raw = perform(makeRequest(
             "POST",
             "/api/bots/${segment(botId)}/messages/${segment(messageId)}/edit",
-            body = jsonBody("text" to text, "threadId" to threadId),
+            body = jsonBody("text" to text, "threadId" to threadId, "sendId" to sendId),
         ))
+        check(raw)
+        // The fork already happened; an unreadable body only costs the early
+        // swap, and the event stream still delivers the same fork.
+        return runCatching {
+            CompanionJson.decodeFromString<EditResponse>(raw.data.toString(Charsets.UTF_8)).message
+        }.getOrNull()
     }
 
     suspend fun setActiveBranch(botId: String, messageId: String, threadId: String? = null): String =

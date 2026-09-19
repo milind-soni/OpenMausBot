@@ -2031,8 +2031,27 @@ class Session(
         }
     }
 
+    /**
+     * Edit and retry. The edited text replaces the old message on screen the
+     * moment it is sent, hiding the old answer, and the computer's fork takes
+     * over as soon as either its response or its stream frames land. A failed
+     * edit simply drops the stand-in, so the old branch returns.
+     */
     suspend fun edit(message: Message, forBot: Bot, text: String) {
-        perform { it.edit(forBot.id, message.id, text, forBot.threadId) }
+        if (client == null) return
+        val threadId = forBot.threadId
+        val pending = PendingEdit(message.id, text)
+        _state.update { it.copy(pendingEdits = it.pendingEdits + (threadId to pending)) }
+        try {
+            perform { activeClient ->
+                val fork = activeClient.edit(forBot.id, message.id, text, threadId, java.util.UUID.randomUUID().toString())
+                if (fork != null) _state.update { it.adoptEdit(fork, threadId) }
+            }
+        } finally {
+            _state.update {
+                if (it.pendingEdits[threadId] == pending) it.copy(pendingEdits = it.pendingEdits - threadId) else it
+            }
+        }
     }
 
     suspend fun switchVersion(to: Message, forBot: Bot) {

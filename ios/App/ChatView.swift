@@ -1319,6 +1319,12 @@ struct MessageRow: View {
         session.state.versions(of: message, inThread: chat.threadId)
     }
 
+    /// The stand-in for an edit the computer has not answered yet. It has no
+    /// server identity, so nothing may react to it or edit it again.
+    private var isPendingEdit: Bool {
+        session.state.pendingEdits[chat.threadId]?.placeholderId == message.id
+    }
+
     /// Transport tags contain paths on the paired computer. They belong in
     /// attachment cards, never on the clipboard or in the text-selection UI.
     private var attachedContent: AttachedMessageContent {
@@ -1370,10 +1376,12 @@ struct MessageRow: View {
             }
         }
         .contextMenu {
-            ForEach(Self.reactionChoices, id: \.self) { emoji in
-                Button(emoji) {
-                    Haptics.selection()
-                    Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
+            if !isPendingEdit {
+                ForEach(Self.reactionChoices, id: \.self) { emoji in
+                    Button(emoji) {
+                        Haptics.selection()
+                        Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
+                    }
                 }
             }
             let visibleText = attachedContent.text
@@ -1396,13 +1404,14 @@ struct MessageRow: View {
             if message.role == .user,
                message.kind == .text,
                attachedContent.attachments.isEmpty,
+               !isPendingEdit,
                case let .bot(bot) = chat {
                 Divider()
                 Button("Edit and retry", systemImage: "pencil") {
                     editingText = message.text ?? ""
                     showingEdit = true
                 }
-                .disabled(bot.busy == true)
+                .disabled(bot.busy == true || session.state.pendingEdits[chat.threadId] != nil)
             }
         }
         .alert("Edit and retry", isPresented: $showingEdit) {

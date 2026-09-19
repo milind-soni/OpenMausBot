@@ -2035,8 +2035,28 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription }
     }
 
+    /// Edit and retry. The edited text replaces the old message on screen
+    /// the moment it is sent, hiding the old answer, and the computer's fork
+    /// takes over as soon as either its response or its stream frames land.
+    /// A failed edit simply drops the stand-in, so the old branch returns.
     func edit(_ message: Message, for bot: Bot, text: String) async {
-        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text, threadId: bot.threadId) }
+        guard client != nil else { return }
+        let threadId = bot.threadId
+        let pending = PendingEdit(sourceId: message.id, text: text)
+        state.pendingEdits[threadId] = pending
+        defer {
+            if state.pendingEdits[threadId] == pending { state.pendingEdits[threadId] = nil }
+        }
+        await perform {
+            let fork = try await $0.edit(
+                botId: bot.id,
+                messageId: message.id,
+                text: text,
+                threadId: threadId,
+                sendId: UUID().uuidString
+            )
+            if let fork { self.state.adoptEdit(fork, inThread: threadId) }
+        }
     }
 
     func switchVersion(to message: Message, for bot: Bot) async {

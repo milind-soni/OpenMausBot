@@ -1546,10 +1546,27 @@ public struct CompanionClient: Sendable {
         ).message
     }
 
-    public func edit(botId: String, messageId: String, text: String, threadId: String? = nil) async throws {
+    /// Fork the conversation at a user message. Returns the computer's new
+    /// message when the response carries one. `sendId` makes a retry of the
+    /// same edit answer with the existing fork instead of forking twice.
+    @discardableResult
+    public func edit(
+        botId: String,
+        messageId: String,
+        text: String,
+        threadId: String? = nil,
+        sendId: String? = nil
+    ) async throws -> Message? {
         var body = ["text": text]
         if let threadId { body["threadId"] = threadId }
-        try await send(try makeRequest("POST", "/api/bots/\(botId)/messages/\(messageId)/edit", body: body))
+        if let sendId { body["sendId"] = sendId }
+        let (data, response) = try await perform(
+            try makeRequest("POST", "/api/bots/\(botId)/messages/\(messageId)/edit", body: body)
+        )
+        try Self.check(response, data)
+        // The fork already happened; an unreadable body only costs the early
+        // swap, and the event stream still delivers the same fork.
+        return (try? JSONDecoder().decode(EditResponse.self, from: data))?.message
     }
 
     public func setActiveBranch(botId: String, messageId: String, threadId: String? = nil) async throws -> String {

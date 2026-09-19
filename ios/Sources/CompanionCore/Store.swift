@@ -19,6 +19,24 @@ public struct SidebarSection: Identifiable, Hashable, Sendable {
     public var id: String { name }
 }
 
+/// An edit the person just submitted, shown in place of the message it
+/// replaces until the computer answers. It is presentation, never folded
+/// into `messages`: the computer's fork is the only real version.
+public struct PendingEdit: Equatable, Sendable {
+    public var sourceId: String
+    public var text: String
+    public var at: Double
+
+    public init(sourceId: String, text: String, at: Double = Date().timeIntervalSince1970 * 1000) {
+        self.sourceId = sourceId
+        self.text = text
+        self.at = at
+    }
+
+    /// The id the stand-in row renders under while the edit is in flight.
+    public var placeholderId: String { "pending-edit-\(sourceId)" }
+}
+
 public struct CompanionState: Sendable {
     public var bots: [Bot] = []
     public var rooms: [Room] = []
@@ -48,6 +66,9 @@ public struct CompanionState: Sendable {
     /// `screens=on`, and only the newest frame is kept — these are hundreds
     /// of kilobytes each and a history of them is worth nothing.
     public var screens: [String: ScreenFrame] = [:]
+    /// Edits in flight, per thread. Not hydrated and not cleared by a
+    /// hydrate: they belong to the request that is still running.
+    public var pendingEdits: [String: PendingEdit] = [:]
     /// Mid-turn sends the harness is holding until the running turn settles,
     /// by thread. They are deliberately NOT in messages: appending one now
     /// would make it the active leaf, and the rest of the running turn would
@@ -82,8 +103,24 @@ public struct CompanionState: Sendable {
     }
 
     /// The active branch of a bot conversation. Rooms and legacy linear
-    /// threads return their full transcript.
+    /// threads return their full transcript. An edit in flight shows in place
+    /// of the message it replaces, and hides everything that followed it,
+    /// so the old question and its old answer leave the screen immediately.
     public func visibleTranscript(forThread threadId: String) -> [Message] {
+        let branch = activeBranch(forThread: threadId)
+        guard let pending = pendingEdits[threadId],
+              let index = branch.firstIndex(where: { $0.id == pending.sourceId }) else {
+            // No edit, or the computer's fork is already the visible branch.
+            return branch
+        }
+        let source = branch[index]
+        var standIn = Message(id: pending.placeholderId, role: .user, kind: .text, at: pending.at)
+        standIn.text = pending.text
+        standIn.parentId = source.parentId
+        return Array(branch[..<index]) + [standIn]
+    }
+
+    private func activeBranch(forThread threadId: String) -> [Message] {
         let all = transcript(forThread: threadId)
         guard let leafId = activeLeafIds[threadId] ?? bot(forThread: threadId)?.activeLeafId else { return all }
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { _, newest in newest })
@@ -278,6 +315,19 @@ public struct CompanionState: Sendable {
         hasMore[threadId] = page.hasMore ?? hasMore[threadId] ?? false
         if let leaf = page.activeLeafId { activeLeafIds[threadId] = leaf }
         reconcileQueued(threadId: threadId)
+    }
+
+    /// Fold the fork an edit request returned. The stream normally delivers
+    /// the same fork and its leaf move first; when the response wins that
+    /// race the fork still becomes visible now. A leaf that already sits on
+    /// or below the fork stays put, so a reply that arrived is never hidden.
+    public mutating func adoptEdit(_ message: Message, inThread threadId: String) {
+        append(message, to: threadId)
+        guard !activeBranch(forThread: threadId).contains(where: { $0.id == message.id }) else { return }
+        activeLeafIds[threadId] = message.id
+        if let index = bots.firstIndex(where: { $0.threadId == threadId }) {
+            bots[index].activeLeafId = message.id
+        }
     }
 
     /// User-message alternatives created by edit-and-retry, oldest first.

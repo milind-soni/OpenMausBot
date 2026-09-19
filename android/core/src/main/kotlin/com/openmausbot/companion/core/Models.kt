@@ -1143,6 +1143,9 @@ internal data class SearchResponse(val hits: List<SearchHit>)
 internal data class MessageResponse(val message: Message)
 
 @Serializable
+internal data class EditResponse(val message: Message? = null)
+
+@Serializable
 internal data class ActiveBranchResponse(val activeLeafId: String)
 
 @Serializable

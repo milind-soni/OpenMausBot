@@ -15,6 +15,20 @@ data class SidebarSection(
     val id: String get() = name
 }
 
+/**
+ * An edit the person just submitted, shown in place of the message it
+ * replaces until the computer answers. Presentation only, never folded into
+ * [CompanionState.messages]: the computer's fork is the only real version.
+ */
+data class PendingEdit(
+    val sourceId: String,
+    val text: String,
+    val at: Double = System.currentTimeMillis().toDouble(),
+) {
+    /** The id the stand-in row renders under while the edit is in flight. */
+    val placeholderId: String get() = "pending-edit-$sourceId"
+}
+
 data class CompanionState(
     val bots: List<Bot> = emptyList(),
     val rooms: List<Room> = emptyList(),
@@ -41,6 +55,8 @@ data class CompanionState(
      * message that is already in the transcript.
      */
     val drainedQueueIds: List<String> = emptyList(),
+    /** Edits in flight, by thread. A hydrate keeps them: the request is still running. */
+    val pendingEdits: Map<String, PendingEdit> = emptyMap(),
 ) {
     /** Threads holding at least one queued send. The row label, the Updates
      * pill, and the closed-thread fold all read this, never task activity. */
@@ -52,7 +68,44 @@ data class CompanionState(
     /** An SSE tail is partial history; only a fetched page establishes its boundary. */
     fun hasLoadedPage(threadId: String): Boolean = hasMore.containsKey(threadId)
 
+    /**
+     * The active branch. An edit in flight shows in place of the message it
+     * replaces and hides everything after it, so the old question and its old
+     * answer leave the screen the moment the edit is sent.
+     */
     fun visibleTranscript(threadId: String): List<Message> {
+        val branch = activeBranch(threadId)
+        val pending = pendingEdits[threadId] ?: return branch
+        // No match means the computer's fork is already the visible branch.
+        val index = branch.indexOfFirst { it.id == pending.sourceId }
+        if (index < 0) return branch
+        val standIn = Message(
+            id = pending.placeholderId,
+            role = Message.Role.USER,
+            kind = Message.Kind.TEXT,
+            at = pending.at,
+            text = pending.text,
+            parentId = branch[index].parentId,
+        )
+        return branch.subList(0, index) + standIn
+    }
+
+    /**
+     * Fold the fork an edit request returned. The stream normally delivers the
+     * same fork and its leaf move first; when the response wins that race the
+     * fork still becomes visible now. A leaf already on or below the fork stays
+     * put, so a reply that arrived is never hidden.
+     */
+    fun adoptEdit(message: Message, threadId: String): CompanionState {
+        val appended = copy(messages = append(messages, threadId, message))
+        if (appended.activeBranch(threadId).any { it.id == message.id }) return appended
+        return appended.copy(
+            activeLeafIds = appended.activeLeafIds + (threadId to message.id),
+            bots = appended.bots.map { if (it.threadId == threadId) it.copy(activeLeafId = message.id) else it },
+        )
+    }
+
+    private fun activeBranch(threadId: String): List<Message> {
         val all = transcript(threadId)
         val leafId = if (activeLeafIds.containsKey(threadId)) activeLeafIds[threadId]
             else botForThread(threadId)?.activeLeafId

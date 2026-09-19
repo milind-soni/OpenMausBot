@@ -128,6 +128,10 @@ fun MessageRow(
     val bot = (chat as? Chat.BotChat)?.bot
     val versions = remember(state, message.id) { state.versions(message, chat.threadId) }
     val versionIndex = versions.indexOfFirst { it.id == message.id }
+    // The stand-in for an edit the computer has not answered yet. It has no
+    // server identity, so nothing may react to it or edit it again.
+    val editPending = state.pendingEdits[chat.threadId]
+    val isPendingEdit = editPending?.placeholderId == message.id
     val mine = message.role == Message.Role.USER
 
     Box(
@@ -241,7 +245,7 @@ fun MessageRow(
         }
 
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+            if (!isPendingEdit) Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 Reactions.CHOICES.forEach { emoji ->
                     Text(
                         text = emoji,
@@ -280,11 +284,11 @@ fun MessageRow(
             // Attachment messages cannot be reconstructed by a text-only edit.
             // The policy also keeps their private transport paths out of the UI.
             val editableText = MessageActions.editableText(message)
-            if (editableText != null && bot != null) {
+            if (editableText != null && bot != null && !isPendingEdit) {
                 HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Edit and retry") },
-                    enabled = bot.busy != true,
+                    enabled = bot.busy != true && editPending == null,
                     onClick = {
                         menuOpen = false
                         editText = editableText
