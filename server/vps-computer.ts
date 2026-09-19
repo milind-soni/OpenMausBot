@@ -23,13 +23,23 @@ import {
   IMAGE_LAYER_VERSION,
   MANAGED_LABEL,
 } from "./container-computer.ts";
+import {
+  computerStatusProblem,
+  probeCuaDesktop,
+  type ComputerProblemLabels,
+  type ComputerStatusCommon,
+  type VpsComputerBackend,
+} from "./computer-backend.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { prepareVpsSsh } from "./vps-ssh.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
-export const VPS_IMAGE = CUA_IMAGE;
+// A re-export, not a copy: this file is loaded from the shared
+// computer-backend cycle, and reading a container-computer binding during
+// module init would deadlock on evaluation order. Bindings forward lazily.
+export { IMAGE as VPS_IMAGE } from "./container-computer.ts";
 export const VPS_MANAGED_LABEL = "com.openmausbot.vps";
 export const VPS_CONTAINER_LABEL = "com.openmausbot.container";
 export const VPS_ENVIRONMENT_LABEL = "com.openmausbot.environment";
@@ -128,27 +138,12 @@ export function vpsStartsForTurn(input: { wants: "cloud" | "vm" | "local" | "off
   return input.autoStartVps === true || Boolean(input.automationSource);
 }
 
-export interface VpsComputerStatus {
+export interface VpsComputerStatus extends ComputerStatusCommon {
   configured: boolean;
   sshAlias: string | null;
-  daemonUp: boolean;
-  image: boolean;
-  imageMatches: boolean;
-  managed: boolean;
-  container: "running" | "stopped" | "missing";
   network: "private" | "unsafe" | "unknown";
   mounts: "none" | "unsafe" | "unknown";
-  security: "hardened" | "unsafe" | "unknown";
-  desktopReady: boolean;
-  desktop_error: string | null;
-  ready: boolean;
-  problem: string | null;
-  image_ref: string;
-  base_image_ref: string;
-  driver_version: string;
-  container_name: string;
   container_id: string | null;
-  image_id: string | null;
 }
 
 export interface ManagedVpsOwner {
@@ -385,7 +380,7 @@ function emptyStatus(botId: string, alias: string | null): VpsComputerStatus {
     desktop_error: null,
     ready: false,
     problem: alias ? "Docker over SSH is not reachable" : "Configure a VPS SSH alias in App Settings → Connections",
-    image_ref: VPS_IMAGE,
+    image_ref: CUA_IMAGE,
     base_image_ref: BASE_IMAGE,
     driver_version: CUA_DRIVER_VERSION,
     container_name: vpsContainerName(botId),
@@ -451,20 +446,28 @@ function hasNoPublishedPorts(config: {
   );
 }
 
+/** The VPS wording for the shared problem ladder (computer-backend.ts).
+ * Built lazily: the module graph is cyclic and the labels interpolate a
+ * container-computer constant. */
+function vpsProblemLabels(): ComputerProblemLabels {
+  return {
+    unconfigured: "Configure a VPS SSH alias in App Settings → Connections",
+    daemonDown: "Docker over SSH could not reach the VPS; check the SSH alias and Docker on the VPS",
+    imageMissing: `Prepare the pinned OpenMausBot Cua image on the VPS (Driver ${CUA_DRIVER_VERSION})`,
+    containerMissing: "No OpenMausBot container exists for this bot on the VPS",
+    imageMismatch: "The VPS container uses an incompatible or untrusted OpenMausBot image",
+    unmanaged: "The VPS container name is occupied by a container OpenMausBot did not create",
+    networkUnsafe: "The VPS container uses an unapproved network or publishes ports; refusing to use it",
+    mountsUnsafe: "The VPS container has host mounts; refusing to use it",
+    securityUnsafe: "The VPS container is missing OpenMausBot safety limits",
+    stopped: "The OpenMausBot VPS container is stopped",
+    desktopFailed: "The VPS Cua desktop failed to start",
+    desktopNotReady: "The VPS container started, but Cua Driver is not ready yet",
+  };
+}
+
 function statusProblem(status: VpsComputerStatus): string | null {
-  if (!status.configured) return "Configure a VPS SSH alias in App Settings → Connections";
-  if (!status.daemonUp) return "Docker over SSH could not reach the VPS; check the SSH alias and Docker on the VPS";
-  if (!status.image) return `Prepare the pinned OpenMausBot Cua image on the VPS (Driver ${CUA_DRIVER_VERSION})`;
-  if (status.container === "missing") return "No OpenMausBot container exists for this bot on the VPS";
-  if (!status.imageMatches) return "The VPS container uses an incompatible or untrusted OpenMausBot image";
-  if (!status.managed) return "The VPS container name is occupied by a container OpenMausBot did not create";
-  if (status.network === "unsafe") return "The VPS container uses an unapproved network or publishes ports; refusing to use it";
-  if (status.mounts === "unsafe") return "The VPS container has host mounts; refusing to use it";
-  if (status.security === "unsafe") return "The VPS container is missing OpenMausBot safety limits";
-  if (status.container === "stopped") return "The OpenMausBot VPS container is stopped";
-  if (status.desktop_error) return `The VPS Cua desktop failed to start: ${status.desktop_error}`;
-  if (!status.desktopReady) return "The VPS container started, but Cua Driver is not ready yet";
-  return null;
+  return computerStatusProblem(status, vpsProblemLabels());
 }
 
 /** The uncached inspection. Lifecycle mutations and their readiness waits
@@ -490,7 +493,7 @@ async function computeVpsComputerStatus(
 
   let inspectedImageId: string | null = null;
   try {
-    const inspected = JSON.parse((await run(["image", "inspect", VPS_IMAGE])).stdout) as Array<{
+    const inspected = JSON.parse((await run(["image", "inspect", CUA_IMAGE])).stdout) as Array<{
       Id?: string;
       id?: string;
       Config?: { Labels?: Record<string, string> };
@@ -539,7 +542,7 @@ async function computeVpsComputerStatus(
     status.imageMatches =
       status.image &&
       Boolean(status.container_id) &&
-      (detail?.Config?.Image === VPS_IMAGE || detail?.Config?.Image === inspectedImageId) &&
+      (detail?.Config?.Image === CUA_IMAGE || detail?.Config?.Image === inspectedImageId) &&
       Boolean(inspectedImageId) &&
       detail?.Image === inspectedImageId &&
       imageLabelsMatch(labels) &&
@@ -577,53 +580,24 @@ async function computeVpsComputerStatus(
       status.mounts === "none" &&
       status.security === "hardened";
     if (canProbe && containerRef) {
-      try {
-        const version = await run(cuaExecArgs(["--version"], { container: containerRef }));
-        if (version.stdout.trim() !== `cua-driver ${CUA_DRIVER_VERSION}`) throw new Error("unexpected Cua Driver version");
-        await run(cuaExecArgs(["status", "--socket", CUA_SOCKET], { container: containerRef }));
-        const health = await run(
-          cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET], { container: containerRef }),
-          15_000,
-        );
-        const report = JSON.parse(health.stdout) as {
-          schema_version?: string;
-          overall?: string;
-          checks?: unknown[];
-        };
-        if (
-          report.schema_version !== "1" ||
-          !Array.isArray(report.checks) ||
-          (report.overall !== "ok" && report.overall !== "degraded")
-        ) {
-          throw new Error(`Cua health report is ${report.overall ?? "invalid"}`);
-        }
-        // The desktop must ANSWER, not render: get_desktop_state succeeding
-        // is the readiness proof. The Local VM also pulls a pixel-validated
-        // readiness screenshot because a local exec is free; over SSH that is
-        // a full-frame base64 transfer on every status poll, so pixel
-        // validation lives solely in vpsComputerScreenshot().
-        await run(
-          cuaExecArgs(["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET], { container: containerRef }),
-          20_000,
-        );
-        status.desktopReady = true;
-      } catch (error) {
-        status.desktopReady = false;
-        status.desktop_error = error instanceof Error ? error.message.slice(0, 320) : null;
-        // Mirror the Local VM's probe: when the desktop fails, the
-        // supervisor's error log says WHY — a bounded tail turns an endless
-        // "not ready yet" into something the user can act on.
-        try {
-          const errorLog = await run(
-            ["exec", containerRef, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"],
-            10_000,
-          );
-          status.desktop_error =
-            errorLog.stdout.replace(/\s+/g, " ").trim().slice(0, 320) || status.desktop_error;
-        } catch {
-          // The log may not exist during the first seconds of container boot.
-        }
-      }
+      // The desktop must ANSWER, not render: get_desktop_state succeeding
+      // is the readiness proof. The Local VM also pulls a pixel-validated
+      // readiness screenshot because a local exec is free; over SSH that is
+      // a full-frame base64 transfer on every status poll, so pixel
+      // validation lives solely in vpsComputerScreenshot().
+      const probed = await probeCuaDesktop({
+        versionMismatchError: "unexpected Cua Driver version",
+        version: () => run(cuaExecArgs(["--version"], { container: containerRef })),
+        status: () => run(cuaExecArgs(["status", "--socket", CUA_SOCKET], { container: containerRef })),
+        healthReport: () =>
+          run(cuaExecArgs(["call", "health_report", "{}", "--socket", CUA_SOCKET], { container: containerRef }), 15_000),
+        desktopState: () =>
+          run(cuaExecArgs(["call", "get_desktop_state", "{}", "--socket", CUA_SOCKET], { container: containerRef }), 20_000),
+        errorLogTail: () =>
+          run(["exec", containerRef, "tail", "-n", "4", "/var/log/supervisor/cua-driver.error.log"], 10_000),
+      });
+      status.desktopReady = probed.desktopReady;
+      status.desktop_error = probed.desktop_error;
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -827,10 +801,10 @@ export async function listManagedVpsComputers(
 
 export function vpsContainerRunArgs(
   containerName: string,
-  imageRef = VPS_IMAGE,
+  imageRef = CUA_IMAGE,
   viewerSecret = randomBytes(18).toString("base64url"),
 ): string[] {
-  if (!CONTAINER_NAME.test(containerName) || (imageRef !== VPS_IMAGE && !IMAGE_ID.test(imageRef))) {
+  if (!CONTAINER_NAME.test(containerName) || (imageRef !== CUA_IMAGE && !IMAGE_ID.test(imageRef))) {
     throw new Error("invalid managed VPS container or image reference");
   }
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(viewerSecret)) throw new Error("invalid managed VPS viewer secret");
@@ -908,7 +882,7 @@ function assertUsableContainer(status: VpsComputerStatus) {
 
 async function prepareVpsImage(alias: string, runner: VpsCommandRunner) {
   await runner(vpsDockerArgs(alias, ["pull", BASE_IMAGE]), { timeoutMs: 10 * 60_000 });
-  await runner(vpsDockerArgs(alias, ["build", "-t", VPS_IMAGE, "-"]), {
+  await runner(vpsDockerArgs(alias, ["build", "-t", CUA_IMAGE, "-"]), {
     input: managedImageDockerfile(),
     timeoutMs: 10 * 60_000,
   });
@@ -1379,3 +1353,20 @@ export async function vpsComputerScreenshot(
   try { return await capture; }
   finally { if (pendingScreenshots.get(key) === capture) pendingScreenshots.delete(key); }
 }
+
+/** The VPS arm of the shared ComputerBackend dispatch (computer-backend.ts).
+ * Thin adapters over the module's own functions; the underlying signatures
+ * stay available for the VPS-specific policy that still lives in index.ts. */
+export const vpsComputerBackend: VpsComputerBackend = {
+  kind: "vps",
+  status: (cfg, botId) => vpsComputerStatus(cfg, botId),
+  action: (cfg, botId, action) => vpsComputerAction(action, cfg, botId),
+  screenshot: (cfg, botId) => vpsComputerScreenshot(cfg, botId),
+  join: (cfg, botId) => vpsComputerJoin(cfg, botId),
+  closeViewer: (botId) => closeVpsDesktopTunnel(botId),
+  inventory: (cfg, owners) => listManagedVpsComputers(cfg, owners),
+  removeManaged: (cfg, owners, containerName, confirmName) =>
+    removeManagedVpsComputer(cfg, owners, containerName, confirmName),
+  mcp: (cfg, botId, containerRef) => vpsComputerMcp(cfg, botId, containerRef),
+  inspectForAuto: (cfg, botId) => inspectVpsForAuto(cfg, botId),
+};

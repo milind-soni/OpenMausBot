@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CircleAlert, FileText, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { RoutineRun } from "@/lib/routines";
+import type { RoutineRun } from "../../../shared/routines";
 import { routineDateTime, routineRunLabel, routineRunTime, routineRunTone } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";
 
