@@ -1,6 +1,7 @@
 import type { ExecFileOptions } from "node:child_process";
 
 import { describeSpawnFailure, execCli } from "./procs.ts";
+import { stderrOf } from "./http.ts";
 
 type ExecCli = (
   cli: string,
@@ -10,15 +11,6 @@ type ExecCli = (
 ) => void;
 
 const FALLBACK = "Run `claude update` in Terminal, then refresh Engines.";
-
-function stderrOf(error: unknown): string {
-  const stderr = (error as { stderr?: unknown }).stderr;
-  return typeof stderr === "string"
-    ? stderr
-    : Buffer.isBuffer(stderr)
-      ? stderr.toString("utf8")
-      : "";
-}
 
 function run(
   execute: ExecCli,

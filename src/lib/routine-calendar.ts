@@ -1,4 +1,4 @@
-import type { Routine, RoutineRun, RoutineSchedule } from "./routines";
+import type { Routine, RoutineRun, RoutineSchedule } from "../../shared/routines";
 import { nextCronRuns } from "../../shared/routine-schedule";
 
 export const CALENDAR_SLOT_MINUTES = 5;

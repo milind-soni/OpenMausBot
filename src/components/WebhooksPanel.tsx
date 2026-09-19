@@ -20,15 +20,27 @@ import {
 
 import { BotAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
-import type { RoutineRun, RoutineRunOn } from "@/lib/routines";
+import type { RoutineRun, RoutineRunOn } from "../../shared/routines";
 import {
   loadWebhookCredentials,
   removeWebhookCredential,
   saveWebhookCredential,
   webhookCredentialStore,
+  type WebhookCredential,
 } from "@/lib/webhook-credentials";
-import { webhookActivationDefaults, type WebhookAttempt, type WebhookCredential, type WebhookTrigger, type WebhookTriggerInput } from "@/lib/webhooks";
+import type { WebhookAttempt, WebhookTrigger, WebhookTriggerInput } from "../../shared/webhooks";
 import { api, useStore, type Bot } from "@/state/store";
+
+/** New local webhooks are ready to execute immediately. Editing an existing
+ * webhook must preserve its current pause/verification state. */
+export function webhookActivationDefaults(
+  webhook?: Pick<WebhookTrigger, "enabled" | "verificationPending">,
+): Pick<WebhookTriggerInput, "enabled" | "verificationPending"> {
+  return {
+    enabled: webhook?.enabled ?? true,
+    verificationPending: webhook?.verificationPending ?? false,
+  };
+}
 
 function relativeTime(at?: number) {
   if (!at) return "Never";
