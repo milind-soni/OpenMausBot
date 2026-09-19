@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
-import type { Routine } from "../../src/lib/routines.ts";
+import type { Routine } from "../../shared/routines.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
