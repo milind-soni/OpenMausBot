@@ -44,8 +44,15 @@ const THREAD_ID = process.env.ASTRA_THREAD_ID ?? "";
 const TOKEN = process.env.ASTRA_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.ASTRA_TURN_DEPTH ?? "0") || 0;
 const SKILL_AUTHORING_ENABLED = process.env.ASTRA_SKILL_AUTHORING_ENABLED === "1";
+const SELF_MODIFY_ENABLED = process.env.ASTRA_SELF_MODIFY_ENABLED === "1";
 const MAX_CREATED_PER_TURN = 4;
 let createdThisTurn = 0;
+// Code edits are heavy: each apply is journaled, preflight-checked, and — for
+// server files — only proven by the next restart. A turn that has applied
+// four has stopped fixing and started churning; it reports what changed and
+// lets the person read the journal instead.
+const MAX_SELF_EDITS_PER_TURN = 4;
+let selfEditsThisTurn = 0;
 // Same spirit as MAX_CREATED_PER_TURN above and MAX_QUEUED_PER_THREAD in
 // delegations.ts: one turn's worth of a good idea is a handful, and a turn
 // that wants more than that has stopped reporting and started broadcasting.
@@ -729,15 +736,61 @@ const TOOLS = [
       required: ["action", "skill_md", "source"],
     },
   },
+  {
+    name: "self_modify",
+    description:
+      "Edit Astra's own source code — the app you are running inside — only when the user asked for a change to the app itself (a bug fix, a feature, a wording change in the product). Every edit is journaled byte-for-byte, preflight-checked, and auto-reverted when a check fails; server/shared changes take effect on the next restart and are rolled back automatically if the app cannot boot. The self-modify machinery, CI config, package.json scripts, and other protected paths are refused by the server. Use action=\"list\" to see the journal and the inbox before proposing or when the user refers to an earlier proposal. After applying, tell the user exactly what changed and that server changes need a restart.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "propose", "apply", "discard"],
+          description: "list = journal + waiting proposals; propose = add an edit to the inbox; apply = apply a waiting proposal; discard = drop one without applying.",
+        },
+        id: {
+          type: "string",
+          description: "The proposal id, from the inbox or the journal. Required for apply and discard; optional for propose.",
+        },
+        reason: {
+          type: "string",
+          description: "Required for propose: why this change is being made. Shown in the journal and on the user's review screen.",
+        },
+        files: {
+          type: "array",
+          description:
+            "Required for propose: the WHOLE new contents of each file, at most 8 files. Only server/, shared/, and src/ paths with .ts/.tsx/.mts/.cts/.css/.json.",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              path: { type: "string", description: "Project-relative path, for example src/components/Thing.tsx." },
+              action: { type: "string", enum: ["edit", "create", "delete"], description: "edit an existing file, create a new one, or delete one." },
+              content: { type: "string", description: "The full new file content for edit and create. Omit for delete." },
+            },
+            required: ["path", "action"],
+          },
+        },
+      },
+      required: ["action"],
+    },
+  },
 ].map((tool) => {
   const annotations = agentToolAnnotations(tool.name);
   return annotations ? { ...tool, annotations } : tool;
 });
 
 const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
-const AVAILABLE_TOOLS = SKILL_AUTHORING_ENABLED
-  ? TOOLS
-  : TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
+const SELF_MODIFY_TOOL_NAMES = new Set(["self_modify"]);
+// Two independent opt-ins, each hiding only its own tools. The harness
+// re-checks both per request, so a stale env can never widen access — it can
+// only narrow what the model is offered.
+const AVAILABLE_TOOLS = TOOLS.filter(
+  (tool) =>
+    (SKILL_AUTHORING_ENABLED || !SKILL_TOOL_NAMES.has(tool.name)) &&
+    (SELF_MODIFY_ENABLED || !SELF_MODIFY_TOOL_NAMES.has(tool.name)),
+);
 
 type Json = Record<string, unknown>;
 type RoutineAction = "update" | "pause" | "resume" | "run_now" | "delete";
@@ -1431,6 +1484,99 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
     return {
       text: `A confirmation card is now visible to the user for ${proposal}.${warningText}\n\n${status} End this turn and wait for the decision.`,
     };
+  }
+  if (name === "self_modify") {
+    const action = args.action;
+    if (action === "list") {
+      const r = await api("/api/internal/self-modify");
+      const journal = Array.isArray(r.journal) ? (r.journal as Json[]) : [];
+      const pending = Array.isArray(r.pending) ? (r.pending as Json[]) : [];
+      const journalText = journal.length
+        ? journal
+            .map((entry) => {
+              const files = Array.isArray(entry.files) ? entry.files.join(", ") : "";
+              const note =
+                entry.status === "reverted" && typeof entry.revertReason === "string" && entry.revertReason
+                  ? ` — ${entry.revertReason}`
+                  : "";
+              return `- ${String(entry.id ?? "")}: ${String(entry.status ?? "")}${note}\n  why: ${String(entry.reason ?? "")}\n  files: ${files}`;
+            })
+            .join("\n")
+        : "(nothing yet)";
+      const pendingText = pending.length
+        ? pending
+            .map((entry) => {
+              const id = String(entry.id ?? entry.file ?? "");
+              const invalid = entry.invalid ? ` — invalid: ${String(entry.invalid)}` : "";
+              return `- ${id}: ${String(entry.reason ?? "(unreadable)")}${invalid}`;
+            })
+            .join("\n")
+        : "(nothing waiting)";
+      return { text: `Journal (newest first):\n${journalText}\n\nWaiting for review:\n${pendingText}` };
+    }
+    if (action === "propose") {
+      const reason = typeof args.reason === "string" ? args.reason.trim() : "";
+      if (!reason) return { text: "self_modify propose needs reason: why this change is being made.", isError: true };
+      const files = Array.isArray(args.files) ? args.files : [];
+      if (!files.length) {
+        return { text: "self_modify propose needs files: the whole new contents of each changed file.", isError: true };
+      }
+      const id = typeof args.id === "string" && args.id.trim() ? args.id.trim() : undefined;
+      const r = await apiResponse("/api/internal/self-modify", {
+        method: "POST",
+        body: JSON.stringify({ id, reason, files }),
+      });
+      if (!r.ok) {
+        const detail = Array.isArray(r.body.errors) ? `\n- ${(r.body.errors as string[]).join("\n- ")}` : "";
+        return { text: `Refused: ${String(r.body.error ?? `HTTP ${r.status}`)}${detail}`, isError: true };
+      }
+      const proposedId = String(r.body.id ?? "");
+      const fileCount = typeof r.body.files === "number" ? r.body.files : 0;
+      return {
+        text: `Proposal ${proposedId} is waiting in the inbox (${fileCount} file${fileCount === 1 ? "" : "s"}). Apply it with self_modify action="apply" and id="${proposedId}", or leave it for the user to review in Settings → Self-modify.`,
+      };
+    }
+    if (action === "apply" || action === "discard") {
+      const id = typeof args.id === "string" ? args.id.trim() : "";
+      if (!id) return { text: `self_modify ${action} needs id: the proposal id from the inbox.`, isError: true };
+      if (action === "apply" && selfEditsThisTurn >= MAX_SELF_EDITS_PER_TURN) {
+        return {
+          text: `This turn has already applied ${MAX_SELF_EDITS_PER_TURN} edits. Report what changed and let the user review the journal before more.`,
+          isError: true,
+        };
+      }
+      const r = await apiResponse(`/api/internal/self-modify/${encodeURIComponent(id)}`, {
+        method: "POST",
+        body: JSON.stringify({ action }),
+      });
+      if (!r.ok) {
+        const detail = Array.isArray(r.body.errors) ? `\n- ${(r.body.errors as string[]).join("\n- ")}` : "";
+        return { text: `Could not ${action} ${id}: ${String(r.body.error ?? `HTTP ${r.status}`)}${detail}`, isError: true };
+      }
+      if (action === "discard") return { text: `Proposal ${id} was discarded; nothing changed.` };
+      selfEditsThisTurn += 1;
+      const entry = (r.body.entry ?? {}) as {
+        proposal?: { files?: Array<{ path?: string; action?: string }> };
+        checks?: Array<{ name?: string; ok?: boolean }>;
+      };
+      const touched = entry.proposal?.files ?? [];
+      const files = touched.map((file) => `${file.action} ${file.path}`);
+      const touchesServer = touched.some(
+        (file) => typeof file.path === "string" && (file.path.startsWith("server/") || file.path.startsWith("shared/")),
+      );
+      const checks = (entry.checks ?? []).filter((check) => check.name);
+      const checkText = checks.length
+        ? `\nChecks: ${checks.map((check) => `${check.name} ${check.ok ? "ok" : "FAILED"}`).join("; ")}`
+        : "";
+      return {
+        text: `Applied ${id}: ${files.join(", ")}.${checkText}\n\n${
+          touchesServer
+            ? "This change touches server code: it takes effect on the next restart, and the app reverts it automatically if it cannot boot. Tell the user a restart is needed."
+            : "The change is on disk now; the journal can restore the previous bytes exactly."
+        } The user can revert it from Settings → Self-modify.`,
+      };
+    }
+    return { text: 'self_modify action must be "list", "propose", "apply", or "discard".', isError: true };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

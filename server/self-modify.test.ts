@@ -36,6 +36,7 @@ const {
   resolveProposalPath,
   revertProposal,
   settleProposal,
+  submitProposal,
   validateProposal,
   verifyBootedProposal,
   writeJournal,
@@ -333,6 +334,74 @@ describe("pending inbox", () => {
     expect(readProposal("p-drop")?.file).toBe("p-drop.json");
     expect(discardPending("p-drop")).toBe(true);
     expect(discardPending("p-drop")).toBe(false);
+  });
+});
+
+describe("submitProposal", () => {
+  const pendingDir = join(MOD_DIR, "pending");
+
+  afterEach(() => {
+    rmSync(pendingDir, { recursive: true, force: true });
+  });
+
+  it("writes a validated proposal into the inbox and refuses a duplicate id", () => {
+    const first = submitProposal(proposalFor({ id: "s-one" }), root);
+    expect(first).toMatchObject({ ok: true, id: "s-one", files: 1 });
+    expect(readProposal("s-one")?.file).toBe("s-one.json");
+    // landing in the inbox changes nothing on disk by itself
+    expect(readFileSync(join(root, "server", "props.ts"), "utf8")).toBe(PROPS_TS);
+
+    const again = submitProposal(proposalFor({ id: "s-one" }), root);
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.error).toMatch(/already waiting/);
+  });
+
+  it("refuses an id a journal entry already applied", () => {
+    expect(applyProposal(proposalFor({ id: "s-applied" }), root).ok).toBe(true);
+    const again = submitProposal(proposalFor({ id: "s-applied" }), root);
+    expect(again.ok).toBe(false);
+    if (!again.ok) expect(again.error).toMatch(/already applied/);
+  });
+
+  it("refuses protected paths and malformed shapes with their reasons", () => {
+    const protectedHit = submitProposal(
+      proposalFor({ id: "s-protected" }, [{ path: "server/self-modify.ts", action: "edit", content: "// x\n" }]),
+      root,
+    );
+    expect(protectedHit.ok).toBe(false);
+    if (!protectedHit.ok) expect(protectedHit.errors?.join("\n")).toMatch(/protected path/);
+
+    const malformed = submitProposal("not json", root);
+    expect(malformed.ok).toBe(false);
+    if (!malformed.ok) expect(malformed.error).toMatch(/not valid JSON/);
+
+    const wrongRoot = submitProposal(
+      proposalFor({ id: "s-root" }, [{ path: "electron/main.mjs", action: "edit", content: "// x\n" }]),
+      root,
+    );
+    expect(wrongRoot.ok).toBe(false);
+
+    // A refusal leaves the inbox exactly as it was.
+    expect(listPending()).toEqual([]);
+  });
+
+  it("refuses a create for a file that already exists", () => {
+    const hit = submitProposal(
+      proposalFor({ id: "s-create" }, [{ path: "server/props.ts", action: "create", content: PROPS_TS }]),
+      root,
+    );
+    expect(hit.ok).toBe(false);
+    if (!hit.ok) expect(hit.errors?.join("\n")).toMatch(/already exists/);
+  });
+
+  it("refuses to grow the inbox past its cap", () => {
+    for (let index = 0; index < 20; index += 1) {
+      expect(submitProposal(proposalFor({ id: `s-cap-${index}` }), root).ok).toBe(true);
+    }
+    const overflow = submitProposal(proposalFor({ id: "s-cap-over" }), root);
+    expect(overflow.ok).toBe(false);
+    if (!overflow.ok) expect(overflow.error).toMatch(/inbox is full/);
+    expect(listPending()).toHaveLength(20);
   });
 });
 

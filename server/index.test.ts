@@ -7200,6 +7200,77 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("gates the agent self-modify door behind the feature and refuses leash edits", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Selfmod" })).body.bot;
+    const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+    const internalHeaders = {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    };
+
+    // Off by default: the door refuses before a proposal is even parsed.
+    const closed = await fetch(`${BASE}/api/internal/self-modify`, { headers: internalHeaders });
+    expect(closed.status).toBe(403);
+
+    expect((await api("PATCH", "/api/config", { features: { selfModify: true } })).status).toBe(200);
+    try {
+      const proposed = await fetch(`${BASE}/api/internal/self-modify`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          reason: "add an empty state to the self-modify inbox",
+          files: [{ path: "src/components/SelfModifyEmptyState.tsx", action: "create", content: "export const x = 1;\n" }],
+        }),
+      });
+      expect(proposed.status).toBe(201);
+      const created = z.object({ id: z.string(), files: z.number() }).parse(await proposed.json());
+      expect(created.id).toMatch(/^edit-/);
+      expect(created.files).toBe(1);
+
+      const listed = await fetch(`${BASE}/api/internal/self-modify`, { headers: internalHeaders });
+      expect(listed.status).toBe(200);
+      const listing = z
+        .object({
+          enabled: z.boolean(),
+          pending: z.array(z.object({ id: z.string().nullable() }).passthrough()),
+        })
+        .passthrough()
+        .parse(await listed.json());
+      expect(listing.enabled).toBe(true);
+      expect(listing.pending.some((row) => row.id === created.id)).toBe(true);
+
+      // The leash: an edit to the self-modify machinery is refused with its reason.
+      const leash = await fetch(`${BASE}/api/internal/self-modify`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({
+          reason: "loosen the guard",
+          files: [{ path: "server/self-modify.ts", action: "edit", content: "// no\n" }],
+        }),
+      });
+      expect(leash.status).toBe(422);
+      const leashBody = z.object({ errors: z.array(z.string()) }).passthrough().parse(await leash.json());
+      expect(leashBody.errors.join("\n")).toMatch(/protected path/);
+
+      // Discard consumes the proposal; an unknown id refuses rather than throws.
+      const discarded = await fetch(`${BASE}/api/internal/self-modify/${created.id}`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ action: "discard" }),
+      });
+      expect(discarded.status).toBe(200);
+      const missing = await fetch(`${BASE}/api/internal/self-modify/nope`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ action: "apply" }),
+      });
+      expect(missing.status).toBe(422);
+    } finally {
+      await api("PATCH", "/api/config", { features: { selfModify: false } });
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("only enables the exact learned-skill proposal a current client reviewed", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     try {

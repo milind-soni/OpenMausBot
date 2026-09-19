@@ -589,6 +589,46 @@ export function discardPending(id: string): boolean {
   }
 }
 
+export type SubmitResult =
+  | { ok: true; id: string; files: number }
+  | { ok: false; error: string; errors?: string[] };
+
+/** The inbox's write door — used by the bot tool that proposes edits and by
+ * any future operator form. Validation is the same one apply runs, so a
+ * proposal that could never apply is refused here instead of waiting in the
+ * inbox as a broken card. The file is written only after every guard passed;
+ * nothing else on disk changes. */
+export function submitProposal(raw: string, root = projectRoot()): SubmitResult {
+  const parsed = parseProposal(raw);
+  if ("error" in parsed) return { ok: false, error: parsed.error };
+  if (readJournal(parsed.id)) {
+    return { ok: false, error: `proposal id "${parsed.id}" was already applied — pick a fresh id` };
+  }
+  if (readProposal(parsed.id)) {
+    return { ok: false, error: `proposal id "${parsed.id}" is already waiting in the inbox` };
+  }
+  const errors = validateProposal(parsed, root);
+  if (errors.length) return { ok: false, error: "validation failed", errors };
+  // listPending() is deliberately capped for display; the refusal has to
+  // count what is really on disk, or the inbox can grow without bound.
+  let waiting = 0;
+  try {
+    waiting = existsSync(PENDING_DIR) ? readdirSync(PENDING_DIR).filter((name) => name.endsWith(".json")).length : 0;
+  } catch {
+    waiting = 0;
+  }
+  if (waiting >= MAX_PENDING_FILES) {
+    return { ok: false, error: `the proposal inbox is full (${waiting}/${MAX_PENDING_FILES}) — apply or discard one first` };
+  }
+  try {
+    mkdirSync(PENDING_DIR, { recursive: true });
+    writeFileSync(join(PENDING_DIR, `${parsed.id}.json`), JSON.stringify(parsed, null, 2), { mode: 0o600 });
+  } catch (error) {
+    return { ok: false, error: `could not write the proposal: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  return { ok: true, id: parsed.id, files: parsed.files.length };
+}
+
 // ── startup reconciliation ──────────────────────────────────────────────
 // Journal entries move through: applied (runtime edit, in force) → verified
 // (its process booted and served a health check) — or → reverted. Exactly

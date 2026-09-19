@@ -296,6 +296,8 @@ import {
   markProposalForBoot,
   reconcileAbandonedProposals,
   revertProposal,
+  settleProposal,
+  submitProposal,
   verifyBootedProposal,
   writeJournal,
   type JournalEntry,
@@ -883,6 +885,7 @@ function agentsIntegration(
       ASTRA_COMMS_TOKEN: token,
       ASTRA_TURN_DEPTH: String(depth),
       ASTRA_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      ASTRA_SELF_MODIFY_ENABLED: selfModifyEnabled(cfg) ? "1" : "0",
     },
   };
 }
@@ -9348,6 +9351,67 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           summary: card.summary,
         });
       }
+      // ── self-modify: the bot's own edit pipeline (feature-gated) ────
+      // The agent-facing door, used by the agents-proxy `self_modify` tool.
+      // The gate is the operator's opt-in, read per request, so turning it
+      // off revokes the tool without a restart. Every path here runs the
+      // same journal-first / preflight / trial-boot pipeline the operator
+      // API uses — this door adds no authority of its own, and the protected
+      // paths and content patterns refuse agent edits exactly as they
+      // refuse anyone else's.
+      if (path === "/api/internal/self-modify" || path.startsWith("/api/internal/self-modify/")) {
+        if (!selfModifyEnabled(cfg)) return json(res, 403, { error: "self-modify is not enabled in Settings" });
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        if (method === "GET" && path === "/api/internal/self-modify") {
+          return json(res, 200, {
+            enabled: true,
+            journal: listJournal().map((entry) => ({
+              id: entry.proposal.id,
+              proposedBy: entry.proposal.proposedBy,
+              reason: entry.proposal.reason,
+              status: entry.status,
+              appliedAt: entry.appliedAt,
+              verifiedAt: entry.verifiedAt ?? null,
+              revertedAt: entry.revertedAt ?? null,
+              revertReason: entry.revertReason ?? null,
+              files: entry.proposal.files.map((file) => `${file.action} ${file.path}`),
+              checks: entry.checks ?? [],
+            })),
+            pending: listPending(),
+          });
+        }
+        if (method === "POST" && path === "/api/internal/self-modify") {
+          const body = await readInternalBody();
+          const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+          if (!reason) return json(res, 400, { error: "reason is required — say why this change is being proposed" });
+          const files = Array.isArray(body.files) ? body.files : [];
+          if (!files.length) {
+            return json(res, 400, { error: "files must be a non-empty array of { path, action, content }" });
+          }
+          const requestedId = typeof body.id === "string" ? body.id.trim() : "";
+          const id = requestedId || `edit-${Date.now().toString(36)}-${randomBytes(2).toString("hex")}`;
+          const result = submitProposal(JSON.stringify({ id, proposedBy: from.name, reason, files }));
+          if (!result.ok) return json(res, 422, result);
+          return json(res, 201, result);
+        }
+        const mInternalSelf = path.match(/^\/api\/internal\/self-modify\/([a-zA-Z0-9._-]{1,64})$/);
+        if (mInternalSelf && method === "POST") {
+          const body = await readInternalBody();
+          const action = body.action === "apply" || body.action === "discard" ? body.action : "";
+          if (!action) return json(res, 400, { error: "action must be apply or discard" });
+          const id = mInternalSelf[1]!;
+          if (action === "discard") {
+            const removed = discardPending(id);
+            return json(res, removed ? 200 : 404, removed ? { ok: true, discarded: id } : { error: "no pending proposal with that id" });
+          }
+          const result = applyPending(id);
+          return json(res, result.ok ? 200 : 422, result);
+        }
+      }
       if (method === "POST" && path === "/api/internal/ask-bot") {
         const body = await readInternalBody();
         const fromBotId = internalSender.id;
@@ -14092,6 +14156,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           pending: listPending(),
           enabled: true,
         });
+      }
+
+      // The emergency brake, one click wide: every proposal the running code
+      // has not yet proven goes back to its journaled bytes. Verified history
+      // is untouched — this only settles entries still at `applied`.
+      if (method === "POST" && path === "/api/self-modify") {
+        const body = await readBody(req);
+        if (body?.action !== "revert-unverified") {
+          return json(res, 400, { error: 'action must be "revert-unverified"' });
+        }
+        const reverted: string[] = [];
+        for (const entry of listJournal()) {
+          if (entry.status !== "applied") continue;
+          if (settleProposal(entry.proposal.id, "reverted", "reverted together by the operator")) {
+            reverted.push(entry.proposal.id);
+          }
+        }
+        return json(res, 200, { reverted });
       }
 
       const mSelf = path.match(/^\/api\/self-modify\/([a-zA-Z0-9._-]{1,64})$/);

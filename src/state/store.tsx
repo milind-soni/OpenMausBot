@@ -464,7 +464,7 @@ export interface ConfigStatus {
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
-  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; wakeWord?: boolean };
+  features?: { skillAuthoring: boolean; showToolCalls?: boolean; browser?: boolean; selfModify?: boolean; wakeWord?: boolean };
   /** First-run progress: whether the welcome tour was finished and which
    * one-time hints were dismissed. Server-owned so it follows the workspace. */
   onboarding?: OnboardingStatus;
@@ -590,6 +590,7 @@ export type AppSettingsSection =
   | "connections"
   | "engines"
   | "voice"
+  | "selfModify"
   | "companion"
   | "remote"
   | "computer"

@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Archive, Coins, FlaskConical, KeyRound, Mic, Monitor, Palette, Search, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
+import { Archive, Coins, FlaskConical, KeyRound, Mic, Monitor, Palette, Search, ShieldCheck, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
@@ -22,6 +22,7 @@ import { CustomDomainSettings } from "./CustomDomainSettings";
 import { BrowserProfilesManager } from "./BrowserProfilesManager";
 import { RemoteComputerSection } from "./RemoteComputerSection";
 import { VoiceHandySection } from "./VoiceHandySection";
+import { SelfModifySection } from "./SelfModifySection";
 import { Card, Switch } from "./SettingsPrimitives";
 import { UsageSection } from "./UsageSection";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
@@ -48,6 +49,7 @@ const SECTIONS: Array<{
   { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "voice", labelKey: "settings.section.voice", icon: Mic, keywords: ["voice", "speech", "text to speech", "tts", "dictation", "transcription", "handy", "wake word", "microphone", "audio", "read aloud"] },
+  { id: "selfModify", labelKey: "settings.section.selfModify", icon: ShieldCheck, keywords: ["self", "modify", "edit", "code", "source", "journal", "rollback", "revert", "failsafe", "repair", "own code"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
   { id: "usage", labelKey: "settings.section.usage", icon: Coins, keywords: ["tokens", "cost", "billing"] },
@@ -695,6 +697,8 @@ export function SettingsModal() {
             )}
 
             {section === "voice" && <VoiceHandySection />}
+
+            {section === "selfModify" && <SelfModifySection />}
 
             {section === "backups" && <WorkspaceBackupSettings />}
 
