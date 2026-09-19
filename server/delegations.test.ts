@@ -31,7 +31,7 @@ import {
   threadsWaitingOn,
   _pendingCount,
 } from "./delegations.ts";
-import { peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
+import { cancelPeerApprovalsForThread, peerAllowKey, resolvePeerComms } from "./peer-approval.ts";
 import { Store, type BotRecord, type GroupRecord } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "fake-model" });
@@ -500,6 +500,46 @@ describe("drainDelegations", () => {
     expect(pendingAtSettle).toEqual([0]);
     expect(settled).toHaveBeenCalledWith(expect.objectContaining({ id: queued.id, status: "denied" }));
     expect(runTarget).not.toHaveBeenCalled();
+  });
+
+  it.each(["deny", "expired", "cancelled"] as const)("records %s approval outcomes without dispatch or a late revival", async (outcome) => {
+    vi.useFakeTimers();
+    try {
+      store.patchBot(from.id, { approvePeerComms: true });
+      const queued = queueDelegation(commsBus, from, { toBotId: target.id, message: "do this", depth: 0 }, 1);
+      const runTarget = vi.fn();
+      const settled = vi.fn();
+      drainDelegations(commsBus, approvalBus, from.threadId, runTarget, settled);
+      await vi.advanceTimersByTimeAsync(0);
+      const card = store.messagesFor(from.threadId).find(m => m.card?.requestId)!;
+      expect(card).toBeDefined();
+      if (outcome === "expired") await vi.advanceTimersByTimeAsync(15 * 60_000);
+      else if (outcome === "cancelled") cancelPeerApprovalsForThread(from.threadId);
+      else resolvePeerComms(approvalBus, card.card!.requestId!, "deny");
+      await vi.advanceTimersByTimeAsync(0);
+      const receipt = findDelegationReceipt(queued.id!)!;
+      expect(receipt).toMatchObject({
+        status: outcome === "deny" ? "denied" : outcome,
+        approvalOutcome: outcome,
+        approvalSource: outcome === "deny" ? "user" : "system",
+      });
+      expect(receipt.result).toBe(outcome === "deny" ? "the user denied this handoff"
+        : outcome === "expired" ? "the approval card expired without an answer" : "the approval was cancelled before a decision");
+      expect(settled).toHaveBeenCalledTimes(1);
+      expect(_pendingCount(from.threadId)).toBe(0);
+      expect(runTarget).not.toHaveBeenCalled();
+      expect(resolvePeerComms(approvalBus, card.card!.requestId!, "allow")).toBe(false);
+      if (outcome !== "deny") {
+        expect(store.messagesFor(from.threadId).some(m => m.tool?.name?.includes("denied by user"))).toBe(false);
+        expect(buildDelegationFailurePrompt(target.name, receipt.result!)).not.toContain("user denied");
+      }
+      _resetPending();
+      _loadPending();
+      expect(findDelegationReceipt(queued.id!)).toEqual(receipt);
+    } finally {
+      cancelPeerApprovalsForThread(from.threadId);
+      vi.useRealTimers();
+    }
   });
 
   it("does not revive discarded work when an already-open approval is allowed", async () => {

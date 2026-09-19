@@ -18,7 +18,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visibility.ts";
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
-import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
+import { peerApprovalFailure, requestPeerApproval, type ApprovalBus, type PeerApprovalFailure } from "./peer-approval.ts";
 import { canAccessTeam, peerAllowed } from "./peer-roster.ts";
 import { type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
 
@@ -67,7 +67,7 @@ interface PendingDelegationItem extends DelegationItem {
 
 /** `busy_gave_up` is only read back from receipts written before handoffs
  * stopped counting busy periods; nothing produces it any more. */
-export type DelegationOutcome = "done" | "failed" | "denied" | "expired" | "busy_gave_up" | "dropped" | "error";
+export type DelegationOutcome = "done" | "failed" | "denied" | "expired" | "cancelled" | "busy_gave_up" | "dropped" | "error";
 
 /** The durable terminal record of one handoff: what the delegating bot reads
  * back with check_delegation / wait_delegation. Bounded and pruned — this is
@@ -78,6 +78,9 @@ export interface DelegationReceipt {
   toBotId: string;
   toBotName: string;
   status: DelegationOutcome;
+  /** Absent on older receipts and outcomes unrelated to peer approval. */
+  approvalOutcome?: PeerApprovalFailure;
+  approvalSource?: "user" | "system";
   /** the peer's reply on success; the failure name otherwise (bounded) */
   result?: string;
   finishedAt: number;
@@ -139,6 +142,10 @@ export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finish
     finishedAt: receipt.finishedAt ?? now,
   };
   if (receipt.result !== undefined) bounded.result = receipt.result.slice(0, RESULT_MAX_CHARS);
+  if (receipt.approvalOutcome !== undefined) {
+    bounded.approvalOutcome = receipt.approvalOutcome;
+    bounded.approvalSource = peerApprovalFailure(receipt.approvalOutcome).approvalSource;
+  }
   receipts = [bounded, ...receipts.filter((existing) => existing.id !== bounded.id)]
     .filter((existing) => now - existing.finishedAt <= RECEIPT_MAX_AGE_MS)
     .slice(0, MAX_RECEIPTS);
@@ -277,6 +284,10 @@ export function _loadPending(): void {
         if (!Number.isFinite(finishedAt) || now - finishedAt! > RECEIPT_MAX_AGE_MS) continue;
         const receipt: DelegationReceipt = { id, sourceThreadId, toBotId, toBotName, status, finishedAt: finishedAt! };
         if (typeof result === "string") receipt.result = result;
+        if (candidate.approvalOutcome === "deny" || candidate.approvalOutcome === "expired" || candidate.approvalOutcome === "cancelled") {
+          receipt.approvalOutcome = candidate.approvalOutcome;
+          receipt.approvalSource = peerApprovalFailure(candidate.approvalOutcome).approvalSource;
+        }
         loaded.push(receipt);
       }
       receipts = loaded.slice(0, MAX_RECEIPTS);
@@ -685,22 +696,26 @@ async function processOne(
         toBotName: target.name,
         status: "dropped",
         result: "the peer or source conversation no longer exists",
+        ...(verdict !== "allow" ? { approvalOutcome: verdict } : {}),
       });
       return "settled";
     }
     if (verdict !== "allow") {
+      const failure = peerApprovalFailure(verdict);
       recordDelegationReceipt({
         id: item.id,
         sourceThreadId,
         toBotId: target.id,
         toBotName: target.name,
-        status: "denied",
-        result: "the user denied this handoff",
+        status: verdict === "deny" ? "denied" : verdict,
+        approvalOutcome: verdict,
+        result: verdict === "deny" ? "the user denied this handoff" : failure.error,
       });
       bus.store.appendMessage(sourceThreadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `Delegation to @${target.name} denied by user`, ok: false },
+        tool: { name: verdict === "deny" ? `Delegation to @${target.name} denied by user`
+          : `Delegation to @${target.name}: ${failure.error}`, ok: false },
       });
       return "settled";
     }
