@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BotSettingsDialog } from "../components/BotSettingsDialog";
-import { StoreProvider, api, useStore, type Bot } from "../state/store";
+import { StoreProvider, api, overlayOpen, useStore, type Bot } from "../state/store";
 import { applySkin } from "../lib/skins";
 import "../styles.css";
 
@@ -62,7 +62,7 @@ function Fixture() {
       </button>)}
     </div>
     {bot && <div className="flex flex-wrap gap-3">
-      <button className="rounded bg-control px-3 py-2" onClick={() => dispatch({ type: "toggleSettings", open: true })}>Open settings</button>
+      <button className="rounded bg-control px-3 py-2" onClick={() => dispatch({ type: "openOverlay", kind: "settings", open: true })}>Open settings</button>
       <button className="rounded bg-control px-3 py-2" onClick={() => dispatch({ type: "duplicateBot", botId: bot.id })}>Duplicate selected bot</button>
       <button className="rounded bg-control px-3 py-2" onClick={() => void api(`/__fixture/drift/${bot.id}`, { method: "POST" })}>Edit SOUL file outside app</button>
       <button className="rounded bg-control px-3 py-2" onClick={() => void readSaved()}>Read saved profiles</button>
@@ -70,7 +70,7 @@ function Fixture() {
     <p className="my-3">Selected: {bot?.name ?? "Loading…"}</p>
     {state.error && <p role="alert" className="text-danger">{state.error}</p>}
     <pre aria-label="Saved profiles" className="my-4 whitespace-pre-wrap">{JSON.stringify(saved.map(({ id, name, description, soul }) => ({ id, name, description, soul })), null, 2)}</pre>
-    {state.settingsOpen && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
+    {overlayOpen(state, "settings") && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
   </main>;
 }
 
