@@ -97,6 +97,25 @@ describe("snapshot", () => {
     // all three saw the same unchanged tree → all landed on one commit
     expect(new Set(hashes).size).toBe(1);
   });
+
+  // One folder, many spellings: Windows accepts a lowercase drive letter, any
+  // case, and an 8.3 alias for the same directory. The shadow repo is keyed by
+  // the folder's path, so every spelling has to reach the same history.
+  it.runIf(process.platform === "win32")("keeps one history however Windows spells the folder", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    const shouted = cwd.toUpperCase();
+    expect(await listCheckpoints(bot, shouted)).toEqual(await listCheckpoints(bot, cwd));
+    // an unchanged folder must not open a second history under the new spelling
+    expect(await snapshot(bot, shouted, "turn 22222222")).toBe(first);
+
+    writeFileSync(join(cwd, "a.txt"), "two");
+    expect(await restore(bot, shouted, first!)).toMatchObject({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
+  });
 });
 
 describe("restore", () => {
