@@ -2,16 +2,15 @@ import type {
   DriverCreateInput,
   ModelCatalog,
   ProviderInstance,
-  RuntimeEvent,
-  RuntimeEventListener,
   SendTurnInput,
 } from "../contracts.ts";
-import { newEventId, newId } from "../contracts.ts";
+import { newId } from "../contracts.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { createChatToolApproval } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, MAX_CHAT_TOOL_CALLS, object, type ChatToolCall } from "./openai-chat-protocol.ts";
+import { createDriverSessionRuntime } from "./driver-runtime.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 
@@ -105,24 +104,20 @@ const asError = (value: unknown): Error =>
 /** Shared runtime for the three providers that speak OpenAI chat completions. */
 export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>): ProviderInstance {
   const { input } = options;
-  const listeners = new Set<RuntimeEventListener>();
-  const active = new Map<string, {
+  interface Turn {
     abort: AbortController;
     turnId: string;
     done: Promise<void>;
     approval: ReturnType<typeof createChatToolApproval>;
-  }>();
-
-  const emit = (event: RuntimeEvent) => {
-    for (const listener of Array.from(listeners)) listener(event);
-  };
-  const base = (threadId: string, turnId: string) => ({
-    eventId: newEventId(),
-    provider: options.driverKind,
-    threadId,
-    turnId,
-    createdAt: new Date().toISOString(),
+  }
+  const runtime = createDriverSessionRuntime<Turn>({
+    driverKind: options.driverKind,
+    stopTurn: (turn) => {
+      turn.abort.abort();
+      return turn.done;
+    },
   });
+  const { emit, base } = runtime;
 
   const complete = async (
     messages: OpenAIChatMessage[],
@@ -300,9 +295,19 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
 
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
-    if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
-
     const turnId = newId();
+    runtime.claimTurn(turn.threadId, turnId);
+    try {
+      return await runClaimedTurn(turn, turnId);
+    } catch (error) {
+      // setTurn consumes the claim; a setup path that throws before it
+      // would leave the reservation behind and the thread busy forever.
+      runtime.endTurn(turn.threadId, turnId);
+      throw error;
+    }
+  };
+
+  const runClaimedTurn = async (turn: SendTurnInput, turnId: string) => {
     const abort = new AbortController();
     const messages = messagesFor(turn);
     const model = turn.model || options.models().default;
@@ -340,7 +345,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     });
     let resolveDone!: () => void;
     const done = new Promise<void>((resolve) => { resolveDone = resolve; });
-    active.set(turn.threadId, { abort, turnId, done, approval });
+    runtime.setTurn(turn.threadId, { abort, turnId, done, approval });
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
     emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
 
@@ -499,7 +504,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (failure && (!abort.signal.aborted || cleanupFailed)) {
           emit({ ...base(turn.threadId, turnId), type: "runtime.error", message: failure, terminal: !abort.signal.aborted });
         }
-        active.delete(turn.threadId);
+        runtime.endTurn(turn.threadId, turnId);
         emit({ ...base(turn.threadId, turnId), type: "turn.completed", ok, stopReason, cost: null,
           ...(hasUsage && (options.includeUsageInCompleted || seenCalls.size) ? { usage } : {}),
           ...(denials.length ? { denials } : {}),
@@ -527,23 +532,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       capabilities: { sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
-        const turn = active.get(threadId);
+        const turn = runtime.turn(threadId);
         if (!turn || (turnId && turn.turnId !== turnId)) return;
         turn.abort.abort();
         await turn.done;
       },
       respondToRequest: async (threadId, requestId, decision) =>
-        active.get(threadId)?.approval.answer(requestId, decision.behavior) ?? "unavailable",
-      hasSession: (threadId) => active.has(threadId),
-      stopAll: async () => {
-        const turns = [...active.values()];
-        for (const turn of turns) turn.abort.abort();
-        await Promise.all(turns.map((turn) => turn.done));
-      },
-      onEvent: (listener) => {
-        listeners.add(listener);
-        return () => listeners.delete(listener);
-      },
+        runtime.turn(threadId)?.approval.answer(requestId, decision.behavior) ?? "unavailable",
+      hasSession: (threadId) => runtime.hasSession(threadId),
+      stopAll: () => runtime.stopAll(),
+      onEvent: runtime.onEvent,
     },
     generateText: async (prompt, { signal } = {}) => {
       const model = options.generateModel?.() ?? options.models().default;
@@ -551,11 +549,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       if (toolCalls.length) throw new ChatProtocolError("provider returned tool calls to a text-only helper");
       return text.trim() ? text : reasoning;
     },
-    dispose: async () => {
-      const turns = [...active.values()];
-      for (const turn of turns) turn.abort.abort();
-      await Promise.all(turns.map((turn) => turn.done));
-      listeners.clear();
-    },
+    dispose: () => runtime.dispose(),
   };
 }
