@@ -1180,11 +1180,11 @@ export function ComputerPanel({
 
   const openVmSettings = () => {
     window.sessionStorage.setItem("openmausbot.settings.section", "computer");
-    dispatch({ type: "toggleAppSettings", open: true });
+    dispatch({ type: "openOverlay", kind: "appSettings", open: true });
   };
 
   const openConnectionSettings = () => {
-    dispatch({ type: "toggleAppSettings", open: true, section: "connections" });
+    dispatch({ type: "openOverlay", kind: "appSettings", open: true, section: "connections" });
   };
 
   const emptyState = {
@@ -1237,8 +1237,8 @@ export function ComputerPanel({
             // removes the still-mounted Computer panel from the settings
             // dialog's focus path, and dismissing Settings returns directly
             // to the conversation that opened it.
-            dispatch({ type: "toggleComputer", open: false });
-            dispatch({ type: "toggleSettings", open: true, section: "access" });
+            dispatch({ type: "closeOverlay", kind: "computer" });
+            dispatch({ type: "openOverlay", kind: "settings", open: true, section: "access" });
           }}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           title={t("computer.botSettings")}
@@ -1296,7 +1296,7 @@ export function ComputerPanel({
           </div>
         )}
         <button
-          onClick={() => dispatch({ type: "toggleComputer", open: false })}
+        onClick={() => dispatch({ type: "closeOverlay", kind: "computer" })}
           className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
         >
           <X size={18} />
