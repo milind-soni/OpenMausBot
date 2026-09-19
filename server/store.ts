@@ -95,7 +95,7 @@ export function toWireTask(task: TaskRecord): WireTask {
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "rewound", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-  "routineRunId", "surface",
+  "routineRunId", "surface", "snoozedUntil",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
@@ -1624,6 +1624,13 @@ export class Store {
     task.busy = busy;
     if (busy && !wasBusy) task.turnStartedAt = Date.now();
     else if (!busy) delete task.turnStartedAt;
+    // Reaching here means the thread just did something — exactly the
+    // "activity" an until-activity snooze waits for, including settling
+    // back to idle after a turn. Persist the wake like any task change.
+    if (task.snoozedUntil === 0) {
+      task.snoozedUntil = undefined;
+      this.saveBots();
+    }
     this.refreshBotActivity(bot);
     this.emit({ type: "bot", botId });
     return bot;
@@ -1905,6 +1912,11 @@ export class Store {
         Object.assign(task, { [key]: structuredClone(patch[key]) });
       }
     }
+    // "Until new activity" ends the moment the thread has something new for
+    // the person, and every unread wake funnels through patchTask — so this
+    // one hook is the whole activity alarm. A time-based snooze is left to
+    // its clock: attention overrides it on screen without clearing it.
+    if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
     bot.unread = bot.tasks!.some((candidate) => candidate.unread);
