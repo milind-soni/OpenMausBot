@@ -1,4 +1,9 @@
-import type { WebhookCredential } from "./webhooks.js";
+export interface WebhookCredential {
+  endpointUrl: string;
+  secret: string;
+  /** Capability URL for senders that cannot configure an Authorization header. */
+  url: string;
+}
 
 const KEY = "omb-webhook-credentials";
 
@@ -7,7 +12,18 @@ type Store = Pick<Storage, "getItem" | "setItem"> | undefined;
 function isCredential(value: unknown): value is WebhookCredential {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
-  return [candidate.endpointUrl, candidate.secret, candidate.url].every(
+  return hasLegacyCredentialParts(value) &&
+    typeof candidate.url === "string" && candidate.url.length > 0;
+}
+
+/** Credentials saved before `url` was required carry only the endpoint and
+ * secret. The capability URL is minted from them in the same deterministic
+ * format the server uses, so those records keep working — and keep being
+ * rewritten on the next save — without a surprise secret rotation. */
+function hasLegacyCredentialParts(value: unknown): value is { endpointUrl: string; secret: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return [candidate.endpointUrl, candidate.secret].every(
     (part) => typeof part === "string" && part.length > 0,
   );
 }
@@ -21,7 +37,13 @@ export function loadWebhookCredentials(store: Store): Record<string, WebhookCred
     const parsed = raw ? JSON.parse(raw) : null;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed).filter((entry): entry is [string, WebhookCredential] => isCredential(entry[1])),
+      Object.entries(parsed).flatMap(([id, value]): [string, WebhookCredential][] => {
+        if (isCredential(value)) return [[id, value]];
+        if (hasLegacyCredentialParts(value)) {
+          return [[id, { ...value, url: `${value.endpointUrl.replace(/\/+$/, "")}/${encodeURIComponent(value.secret)}` }]];
+        }
+        return [];
+      }),
     );
   } catch {
     return {};

@@ -105,6 +105,7 @@ beforeAll(async () => {
       TEMP: fixtureHome, TMP: fixtureHome, TMPDIR: fixtureHome,
       OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_STATIC_DIR: ui, OMB_TEST_VM_STATE: stateFile,
       OMB_BOX_API: `http://127.0.0.1:${boxPort}`,
+      OMB_BOX_DESKTOP_HOSTS: "desktop.fixture.invalid",
     }, stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout!.on("data", () => {});
