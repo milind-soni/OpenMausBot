@@ -1,4 +1,4 @@
-import type { Routine, RoutineRun } from "./routines";
+import type { Routine, RoutineRun } from "../../shared/routines";
 import { activeLocale, t } from "./i18n";
 
 export function routineRunTime(run: RoutineRun): number {
