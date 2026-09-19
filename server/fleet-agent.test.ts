@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -180,6 +180,39 @@ describe.skipIf(process.platform === "win32")("fleet agent over its socket", () 
     expect(await fleetRequest(socketPath, "POST", "/workspaces/beta/resume")).toMatchObject({ status: 400, body: { error: expect.stringContaining("operator recovery") } });
     expect(await fleetRequest(socketPath, "GET", "/workspaces")).toMatchObject({ status: 200, body: { workspaces: [{ slug: "beta", status: "error", live: "error" }] } });
     expect(m.calls).not.toContain("systemctl is-active openmausbot@beta.service");
+  });
+
+  it("answers 400 body must be a JSON object instead of coercing arrays and scalars to {}", async () => {
+    const m = machine(root);
+    m.files.set(fleetLayout(root).registryFile, JSON.stringify(emptyRegistry("example.test")));
+    await boot(m);
+    for (const body of [["acme"], "acme", 42, null, true]) {
+      expect(await fleetRequest(socketPath, "POST", "/workspaces", body)).toMatchObject({
+        status: 400,
+        body: { error: "body must be a JSON object" },
+      });
+    }
+    // nothing reached planning or the audit log: the wire was rejected
+    expect(m.calls).toEqual([]);
+    expect(existsSync(join(root, "audit.jsonl"))).toBe(false);
+  });
+
+  it("still reads an empty body as {} for a route that takes one", async () => {
+    const m = machine(root);
+    const entry = (slug: string, port: number) => ({ slug, host: `${slug}.example.test`, port, webhookPort: port + 1, status: "running", createdAt: "" });
+    m.files.set(fleetLayout(root).registryFile, JSON.stringify({ ...emptyRegistry("example.test"), workspaces: { alpha: entry("alpha", 8810) } }));
+    await boot(m);
+    expect(await fleetRequest(socketPath, "DELETE", "/workspaces/alpha")).toMatchObject({ status: 200, body: { ok: true } });
+  });
+
+  it("destroys the connection on an oversized body instead of buffering it to the end", async () => {
+    const m = machine(root);
+    m.files.set(fleetLayout(root).registryFile, JSON.stringify(emptyRegistry("example.test")));
+    await boot(m);
+    // The 413 tears the socket down before any response bytes are written,
+    // so the client sees the destroyed connection, never a normal reply.
+    await expect(fleetRequest(socketPath, "POST", "/workspaces", "x".repeat(300_000))).rejects.toThrow();
+    expect((await fleetRequest(socketPath, "GET", "/health")).status).toBe(200);
   });
 
   it("serializes complete mutations and exposes the reservation while creation is pending", async () => {
