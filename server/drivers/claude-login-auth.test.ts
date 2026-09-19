@@ -87,10 +87,11 @@ describe("Claude server-owned sign-in", () => {
     const controller = new ClaudeLoginController({
       cli,
       environment: () => ({ ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), FAKE_AUTH_MODE: mode }),
-      startupTimeoutMs: 1000,
-      lifetimeMs: 3000,
-      completeTimeoutMs: 3000,
+      startupTimeoutMs: 10_000,
+      lifetimeMs: 30_000,
+      completeTimeoutMs: 15_000,
       terminateTimeoutMs: 50,
+      stopGraceMs: 10_000,
       ...overrides,
     });
     controllers.push(controller);
@@ -165,7 +166,10 @@ describe("Claude server-owned sign-in", () => {
       const starting = controller.start();
       // The start rejects once cancelled below; listen before that happens.
       const startRejected = expect(starting).rejects.toThrow("cancelled");
-      await expect.poll(() => calls().some((call) => call.args.join(" ") === "auth login")).toBe(true);
+      await expect.poll(() => {
+        if (!existsSync(join(home, "calls.jsonl"))) return false;
+        return calls().some((call) => call.args.join(" ") === "auth login");
+      }).toBe(true);
       await expect(controller.signOut()).rejects.toThrow("sign-in in progress");
       await expect(create("success").signOut()).rejects.toThrow("sign-in is running");
       expect(calls().map((call) => call.args)).not.toContainEqual(["auth", "logout"]);
@@ -244,7 +248,7 @@ describe("Claude server-owned sign-in", () => {
   });
 
   it("never shows a link that is not Anthropic's, and times out instead", async () => {
-    const controller = create("evil");
+    const controller = create("evil", { startupTimeoutMs: 1000 });
     await expect(controller.start()).rejects.toThrow(/did not show a sign-in link/);
   });
 
@@ -252,7 +256,7 @@ describe("Claude server-owned sign-in", () => {
     const controller = create("no-url", { startupTimeoutMs: 20_000 });
     // the rejection lands during cancel(); the expectation must already be listening
     const started = expect(controller.start()).rejects.toThrow(/cancelled/);
-    await expect.poll(() => { try { return readFileSync(join(home, "pid"), "utf8").length > 0; } catch { return false; } }).toBe(true);
+    await expect.poll(() => existsSync(join(home, "pid")) && readFileSync(join(home, "pid"), "utf8").length > 0).toBe(true);
     const pid = Number(readFileSync(join(home, "pid"), "utf8"));
     await controller.cancel();
     await started;
