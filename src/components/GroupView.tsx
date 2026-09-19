@@ -1105,21 +1105,27 @@ export function GroupView({ group }: { group: Group }) {
       {membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
       )}
-      {/* Header: static member avatars; a ring + dot marks the working bot. */}
+      {/* Header: static member avatars; a ring + dot marks the working bot.
+          Same shape as ChatView's header: the container is the outer box and
+          the row inside it wraps below 30rem — name line on top, controls
+          underneath on the right — since a container query never matches
+          the container itself and the control group cannot shrink. */}
       <div
         style={headerDragStyle}
         className={cn(
-          "flex items-center justify-between px-5 py-3",
+          "@container/grouphead px-5 py-3",
           // Room for the drawer button, which overlays this corner below md.
           "pl-11 md:pl-5",
         )}
       >
-        <div className="flex min-w-0 items-center gap-2" style={headerNoDragStyle}>
+        <div data-grouphead-row className="flex items-center justify-between @max-[30rem]/grouphead:flex-wrap @max-[30rem]/grouphead:gap-y-1">
+        <div data-grouphead-identity className="flex min-w-0 items-center gap-2 @max-[30rem]/grouphead:basis-full" style={headerNoDragStyle}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
         </div>
         <div
-          className="flex items-center gap-1.5"
+          data-grouphead-controls
+          className="flex shrink-0 items-center gap-1.5 @max-[30rem]/grouphead:ml-auto"
           // The caption buttons sit over the header's right end; drop this
           // control row 16px (visual only) below the 26px overlay.
           style={controlsShiftStyle}
@@ -1168,6 +1174,7 @@ export function GroupView({ group }: { group: Group }) {
               </span>
             </button>
           )}
+        </div>
         </div>
       </div>
 

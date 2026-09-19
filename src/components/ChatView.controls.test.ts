@@ -84,6 +84,39 @@ describe("thread control placement", () => {
     expect(markup).not.toMatch(/class="[^"]*chat-text[^"\n]*bg-bubble-user/);
   });
 
+  it("wraps the header into a name line and a chip line when the column is narrow", () => {
+    // With a settings or inspector panel open beside the chat the header's
+    // chip group cannot shrink; the wrap keeps the name readable and every
+    // chip in place. The query lives on the container's child row: a
+    // container query never matches the container element itself.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false } }));
+    expect(markup).toContain("@container/chathead");
+    const row = /data-chathead-row="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(row[1].split(" ")).toContain("@max-[30rem]/chathead:flex-wrap");
+    const identity = /data-chathead-identity="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(identity[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "@max-[30rem]/chathead:basis-full"]));
+    const controls = /data-chathead-controls="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(controls[1].split(" ")).toContain("@max-[30rem]/chathead:ml-auto");
+  });
+
+  it("moves the editor onto its own line above the chips when the composer is narrow", () => {
+    // A bot's settings open beside the chat leaves the composer a few hundred
+    // pixels wide; the editor, the only shrinkable child, used to collapse to
+    // a sliver and stack its placeholder one letter per line.
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false } }));
+    const box = markup.indexOf("@container/composer");
+    expect(box).toBeGreaterThan(-1);
+    const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(row[1].split(" ")).toContain("@max-[30rem]/composer:flex-wrap");
+    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!;
+    expect(editor[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
+    const actions = /data-composer-actions="[^"]*" class="([^"]*)"/.exec(markup)!;
+    expect(actions[1].split(" ")).toContain("@max-[30rem]/composer:ml-auto");
+    // the chips group still comes before the editor in source order: the
+    // wrap only reorders visually below the threshold
+    expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("mention-editor"));
+  });
+
   it("keeps the selected thread's model in the header and permissions inside the composer pill", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup.match(/data-test-model-control/g)).toHaveLength(1);

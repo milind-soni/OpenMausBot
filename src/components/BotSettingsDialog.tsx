@@ -30,7 +30,12 @@ function sectionMatches(entry: (typeof BOT_SECTIONS)[number], query: string): bo
   return [entry.label, ...entry.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-export function BotSettingsDialog({ bot }: { bot: Bot }) {
+export function BotSettingsDialog({ bot, overlay = false }: {
+  bot: Bot;
+  /** Float over the chat instead of taking a column: the inspector or
+   * computer panel is open too and the window cannot seat both (App). */
+  overlay?: boolean;
+}) {
   const { state, dispatch, flushBotPatches } = useStore();
   const section = state.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
@@ -302,7 +307,17 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none lg:static lg:z-auto lg:w-[min(420px,42vw)] lg:shrink-0"
+        className={cn(
+          // focus() lands here when the panel opens; the global :focus-visible
+          // ring would frame the whole sheet, so it is off for the container.
+          "animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel outline-none focus-visible:outline-none",
+          overlay
+            // Below md every panel already covers the window; from md up
+            // this one hugs the right edge over the chat, shadowed so it
+            // reads as a sheet on top of the panel that stays beneath it.
+            ? "md:inset-auto md:right-0 md:top-0 md:bottom-0 md:w-[min(420px,42vw)] md:shadow-2xl"
+            : "md:static md:z-auto md:w-[min(420px,42vw)] md:shrink-0",
+        )}
       >
         <div className="flex shrink-0 items-center justify-between px-4 py-3">
           <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
