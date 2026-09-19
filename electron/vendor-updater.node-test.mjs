@@ -242,9 +242,16 @@ test("the running AppImage is never removed before its replacement is in place",
 const xvfb = process.platform === "linux" && !process.env.DISPLAY
   ? spawnSync("which", ["xvfb-run"], { encoding: "utf8" }).stdout?.trim()
   : "";
+const dbusRunSession = process.platform === "linux" && !process.env.DBUS_SESSION_BUS_ADDRESS
+  ? spawnSync("which", ["dbus-run-session"], { encoding: "utf8" }).stdout?.trim()
+  : "";
 
 test("Electron relaunch waits for deferred cleanup and the replacement acquires the same data directory", {
-  skip: process.platform === "win32" || (process.platform === "linux" && !process.env.DISPLAY && !xvfb),
+  skip: process.platform === "win32" || (process.platform === "linux" && !process.env.DISPLAY && !xvfb)
+    ? true
+    : process.platform === "linux" && !process.env.DBUS_SESSION_BUS_ADDRESS && !dbusRunSession
+      ? "no session bus and no dbus-run-session; single-instance lock cannot be tested"
+      : false,
   timeout: 20_000,
 }, async (t) => {
   const workspace = mkdtempSync(join(tmpdir(), "omb-appimage-relaunch-"));
@@ -309,7 +316,9 @@ test("Electron relaunch waits for deferred cleanup and the replacement acquires 
   const args = ["--no-sandbox", fixture];
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(xvfb || electron, xvfb ? ["-a", electron, ...args] : args, { env, stdio: ["ignore", "pipe", "pipe"] });
+  const run = xvfb ? [xvfb, "-a", electron, ...args] : [electron, ...args];
+  const launch = process.env.DBUS_SESSION_BUS_ADDRESS || !dbusRunSession ? run : [dbusRunSession, "--", ...run];
+  const child = spawn(launch[0], launch.slice(1), { env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", chunk => { output += chunk; });
   child.stderr.on("data", chunk => { output += chunk; });
