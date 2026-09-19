@@ -32,13 +32,13 @@ function sectionMatches(entry: (typeof BOT_SECTIONS)[number], query: string): bo
 
 export function BotSettingsDialog({ bot }: { bot: Bot }) {
   const { state, dispatch, flushBotPatches } = useStore();
-  const section = state.botSettingsSection;
+  const section = state.overlays.botSettingsSection;
   const derived = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   // Keep expansion in the store too: header deep links can arrive while
   // this panel is already mounted, including after collapsing the same row.
-  const collapsed = !state.botSettingsExpandAccordion;
+  const collapsed = !state.overlays.botSettingsExpandAccordion;
   const q = query.trim().toLowerCase();
   const visibleSections = BOT_SECTIONS.filter((entry) => sectionMatches(entry, q));
 
@@ -208,7 +208,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
       if (dialog && event.target instanceof Node && !dialog.contains(event.target)) return;
       if (event.key === "Escape") {
         event.preventDefault();
-        dispatch({ type: "toggleSettings", open: false });
+        dispatch({ type: "closeOverlay", kind: "settings" });
       }
     };
 
@@ -235,9 +235,9 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
             refreshError={overview !== null && overviewError}
             prompt={prompt}
             promptError={promptError}
-            onOpen={(target) => dispatch({ type: "toggleSettings", open: true, section: target })}
+            onOpen={(target) => dispatch({ type: "openOverlay", kind: "settings", open: true, section: target })}
             onSetup={derived.canCoordinate && !bot.busy ? () => {
-              dispatch({ type: "toggleSettings", open: false });
+              dispatch({ type: "closeOverlay", kind: "settings" });
               dispatch({ type: "send", botId: bot.id, text: "/setup", threadId: bot.threadId });
             } : undefined}
           />
@@ -310,7 +310,7 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
           </span>
           <button
             type="button"
-            onClick={() => dispatch({ type: "toggleSettings", open: false })}
+            onClick={() => dispatch({ type: "closeOverlay", kind: "settings" })}
             aria-label="Close settings"
             className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
           >
@@ -324,13 +324,13 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
-              dispatch({ type: "toggleSettings", open: true });
+              dispatch({ type: "openOverlay", kind: "settings", open: true });
             }}
             onKeyDown={(e) => {
               if (e.key !== "Escape") return;
               e.stopPropagation();
               if (query) setQuery("");
-              else dispatch({ type: "toggleSettings", open: false });
+              else dispatch({ type: "closeOverlay", kind: "settings" });
             }}
             placeholder="Search"
             aria-label="Search settings"
@@ -363,10 +363,10 @@ export function BotSettingsDialog({ bot }: { bot: Bot }) {
                   type="button"
                   onClick={() => {
                     if (section === id && !collapsed) {
-                      dispatch({ type: "toggleSettings", open: true });
+                      dispatch({ type: "openOverlay", kind: "settings", open: true });
                       return;
                     }
-                    dispatch({ type: "toggleSettings", open: true, section: id });
+                    dispatch({ type: "openOverlay", kind: "settings", open: true, section: id });
                   }}
                   aria-expanded={open}
                   className={cn(
