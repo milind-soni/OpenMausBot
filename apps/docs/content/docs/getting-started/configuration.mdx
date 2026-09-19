@@ -60,6 +60,32 @@ A bot on the Claude engine sees only what its owner gave it: the MCP servers und
 
 `OMB_CLAUDE_INHERIT_USER_CONFIG=1` on the OpenMausBot process turns that isolation off again, for every Claude bot, until the variable is removed. It exists to recover a bot that genuinely depended on a user-scope server, and it is easy to forget: nothing in the chat looks different, only the token usage does. While it is set, **Settings → Engines** shows a warning on the Claude engine and the server logs one line at startup. The supported fix is to add the server the bot needs under **Settings → MCP servers** or to the bot project's `.mcp.json`, then unset the variable and restart.
 
+### ACP session reuse
+
+Every ACP engine (Antigravity, Grok, Gemini CLI, Kimi, Droid, Cursor, OpenCode,
+Qwen, Hermes, custom ACP CLIs) keeps one agent process alive per conversation
+thread and reuses it across turns, so the ACP handshake — which can take tens of
+seconds for a heavy runtime like Antigravity — is paid once per thread instead of
+once per message. The process is closed after 10 minutes of quiet, and sooner on a
+spawn-contract change (different model flags, working directory, or approval
+level), a crash, or app shutdown; the next turn then resumes the
+recorded session over a fresh process. Integration credentials rotate every turn,
+so a follow-up re-establishes the native session over the wire (`session/load`)
+on the same process — the handshake is still paid only once.
+
+An agent that refuses `session/load` for a session already live in its own
+process gets exactly one replacement process for that turn: OpenMausBot closes
+the pooled child, starts a fresh one, pays the handshake again, and resumes the
+recorded session there. The conversation is never traded for a blank
+`session/new`; the one-time handshake cost is the price of continuity. Only if
+the session also fails to load on the replacement process does the turn start a
+genuinely new session.
+
+`OMB_ACP_SESSION_IDLE_MS=600000` on the OpenMausBot process changes that quiet
+timeout, and `OMB_ACP_SESSION_IDLE_MIN_MS` raises the floor the value is clamped
+to (default 10000). A smaller idle timeout saves memory on busy machines at the
+cost of paying the handshake again; the default matches the Claude engine's pool.
+
 <Callout type="warn" title="Do not put secrets in prompts">
   A prompt becomes conversation history and may be sent to an agent provider. Use App Settings or environment configuration for credentials.
 </Callout>

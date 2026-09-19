@@ -13,16 +13,26 @@ prompting; update Qwen Code using its official installer and refresh models.
 Offline verification (no provider login or paid calls):
 
 ```sh
-pnpm exec vitest run server/drivers/acp/qwen-catalog.test.ts server/drivers/local-inject.test.ts server/drivers/local-inject-matrix.test.ts server/drivers/acp/acp.test.ts
+pnpm exec vitest run server/drivers/acp/qwen-catalog.test.ts server/drivers/local-inject.test.ts server/drivers/local-inject-matrix.test.ts server/drivers/acp/acp.test.ts server/drivers/acp/approval-matrix.test.ts server/drivers/acp/opencode-go.test.ts
 node --experimental-strip-types scripts/verify-qwen-models.ts
 ```
 
 The script owns a disposable server through the standard launcher, installs a
 synthetic Qwen CLI only in that temporary home, selects another provider and
 another endpoint, and verifies the ACP calls precede the prompt. An acknowledged
-but unchanged selection must not send a prompt. JSON includes resulting messages
-and the launcher's persistent log path. The server and temporary home are cleaned
-up on completion. This proves OMB's integration contract, not real provider auth
+but unchanged selection must not send a prompt. A second turn on the same
+thread must ride the same agent process — the synthetic CLI reports its pid and
+RPC log, so the check pins one `initialize`, one `session/new`, one
+`session/load` (the harness rotates the agents bearer token every turn, so the
+second turn re-establishes the native session with fresh credentials on the
+same process), and two `session/prompt` calls. When the pooled agent refuses
+`session/load` of its own live session, OMB closes the child and pays the
+handshake once on a fresh process, then loads the conversation there: the pid
+must change, `initialize` is two, `session/new` stays at one (first turn only),
+`session/load` is two (the refused call plus the successful replacement), and
+`session/prompt` remains two. JSON includes resulting messages and the
+launcher's persistent log path. The server and temporary home are cleaned up
+on completion. This proves OMB's integration contract, not real provider auth
 or a paid model response.
 
 Route identity follows Qwen Code's
