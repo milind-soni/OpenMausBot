@@ -193,7 +193,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
 import { readMessageText, recallMessages, recentMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
-import { parseSince, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
+import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
 
 /** A session_read answer competes with the transcript for the context
@@ -11465,7 +11465,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const sinceRaw = url.searchParams.get("since");
         const untilRaw = url.searchParams.get("until");
         const since = sinceRaw ? parseSince(sinceRaw, now) : null;
-        const until = untilRaw ? parseSince(untilRaw, now) : null;
+        const until = untilRaw ? parseUntil(untilRaw, now) : null;
         if (sinceRaw && since === null) return json(res, 400, { error: "since must be a date, or a span like 24h, 3d, today, yesterday" });
         if (untilRaw && until === null) return json(res, 400, { error: "until must be a date, or a span like 24h, 3d, today, yesterday" });
         if (!q && since === null) return json(res, 400, { error: "q or since is required" });

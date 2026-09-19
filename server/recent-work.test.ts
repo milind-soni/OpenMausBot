@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   botThreads,
   parseSince,
+  parseUntil,
   recentWorkLines,
   recentWorkPrompt,
   RECENT_WORK_MAX_CHARS,
@@ -128,5 +129,30 @@ describe("parseSince", () => {
       if (previousTimezone === undefined) delete process.env.TZ;
       else process.env.TZ = previousTimezone;
     }
+  });
+});
+
+describe("parseUntil", () => {
+  // Both ends are built in whatever zone the process is in while the test
+  // runs, so the day boundaries agree wherever the suite runs.
+  const endOf = (year: number, month: number, day: number) => new Date(year, month, day, 23, 59, 59, 999).getTime();
+
+  it("closes a window on the last instant of a named day, so one day is a whole day", () => {
+    const now = new Date(2026, 8, 16, 10, 30).getTime();
+    expect(parseUntil("2026-09-15", now)).toBe(endOf(2026, 8, 15));
+    expect(parseUntil("today", now)).toBe(endOf(2026, 8, 16));
+    expect(parseUntil("Yesterday", now)).toBe(endOf(2026, 8, 15));
+    // the same day at both ends is a day, not an instant
+    expect(parseUntil("2026-09-15", now)).toBeGreaterThan(parseSince("2026-09-15", now)!);
+  });
+
+  it("leaves spans, epochs and explicit clock times as the instant they name", () => {
+    const now = new Date(2026, 8, 16, 10, 30).getTime();
+    expect(parseUntil("24h", now)).toBe(parseSince("24h", now));
+    expect(parseUntil(String(now), now)).toBe(now);
+    expect(parseUntil("2026-09-15 09:00", now)).toBe(new Date(2026, 8, 15, 9).getTime());
+    expect(parseUntil("2026-09-01T00:00:00Z", now)).toBe(Date.UTC(2026, 8, 1));
+    expect(parseUntil("soon", now)).toBeNull();
+    expect(parseUntil("", now)).toBeNull();
   });
 });

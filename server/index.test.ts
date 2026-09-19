@@ -9269,6 +9269,10 @@ describe("bot memory API", () => {
       const future = (await (await search({ since: String(Date.now() + 60_000) })).json()) as { hits: unknown[] };
       expect(future.hits).toEqual([]);
 
+      // one named day at both ends is that whole day, not the instant it starts
+      const oneDay = (await (await search({ since: "today", until: "today" })).json()) as { hits: Array<{ snippet: string }> };
+      expect(oneDay.hits.map((hit) => String(hit.snippet)).some((text) => text.includes("Please reconcile the September invoices"))).toBe(true);
+
       // from inside the room, a 1:1 hit is a crossing; a room hit is not
       const fromRoom = (await (await search({ since: "1d" }, bot.id, roomThreadId)).json()) as { hits: Array<Record<string, unknown>> };
       expect(fromRoom.hits.find((hit) => hit.threadId === bot.threadId)).toMatchObject({ crossed: true });
