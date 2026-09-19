@@ -91,6 +91,7 @@ interface ClaudeLoginOptions {
   lifetimeMs?: number;
   completeTimeoutMs?: number;
   terminateTimeoutMs?: number;
+  stopGraceMs?: number;
 }
 
 const NOT_AVAILABLE = "This sign-in is no longer available. Start sign-in again.";
@@ -431,7 +432,7 @@ export class ClaudeLoginController {
     } else child.kill("SIGKILL");
     await new Promise<void>((resolveStop) => {
       if (child.exitCode !== null || child.signalCode !== null) return resolveStop();
-      const timer = setTimeout(resolveStop, 1500);
+      const timer = setTimeout(resolveStop, this.options.stopGraceMs ?? 1500);
       timer.unref();
       child.once("close", () => {
         clearTimeout(timer);
