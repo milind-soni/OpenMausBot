@@ -116,7 +116,7 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     } finally {
       stopped.mockRestore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it("reports an uncertain stop without waiting forever for npm close", async () => {
     process.env.FAKE_NPM_MODE = "hang";

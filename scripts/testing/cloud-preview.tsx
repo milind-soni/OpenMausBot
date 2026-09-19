@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ComputerPanel } from "../../src/components/ComputerPanel";
 import { BotSettingsDialog } from "../../src/components/BotSettingsDialog";
 import { RemoteDesktopPanel } from "../../src/components/remote-desktop-panel";
-import { StoreProvider, useStore, type Bot } from "../../src/state/store";
+import { StoreProvider, useStore, overlayOpen, type Bot } from "../../src/state/store";
 import { applySkin, readSkin } from "../../src/lib/skins";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../../shared/computer-contention";
 import "../../src/styles.css";
@@ -147,7 +147,7 @@ function Fixture() {
     if (bot) {
       dispatch({ type: "screenFrame", botId: bot.id, png: blank, mime: "image/png" });
       dispatch({ type: "updateBot", botId: bot.id, patch: { computer: "cloud", cloudBackend: "box" } });
-      dispatch({ type: "toggleComputer", open: true });
+      dispatch({ type: "openOverlay", kind: "computer", open: true });
     }
   }, [bot?.id, dispatch]);
   useEffect(() => {
@@ -194,11 +194,11 @@ function Fixture() {
       <button onClick={() => transport.releaseVm()}>Release VM capture</button>
       <button disabled={!bot} onClick={() => dispatch({ type: "screenFrame", botId: bot.id, png: frame("New live frame", "#312e81"), mime: "image/png" })}>Publish live frame</button>
     </div>
-    {state.settingsOpen && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
-    {state.computerOpen && fixtureBot ? panel === "computer"
+    {overlayOpen(state, "settings") && bot && <BotSettingsDialog key={bot.id} bot={bot} />}
+    {overlayOpen(state, "computer") && fixtureBot ? panel === "computer"
       ? <ComputerPanel key={generation} bot={fixtureBot} />
       : <RemoteDesktopPanel key={generation} bot={fixtureBot} />
-      : !state.settingsOpen && <button onClick={() => dispatch({ type: "toggleComputer", open: true })}>Open computer panel</button>}
+      : !overlayOpen(state, "settings") && <button onClick={() => dispatch({ type: "openOverlay", kind: "computer", open: true })}>Open computer panel</button>}
   </div>;
 }
 applySkin(readSkin());
