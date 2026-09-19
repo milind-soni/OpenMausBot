@@ -233,7 +233,7 @@ export function PluginsPanel() {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const dialogRef = useRef<HTMLDivElement>(null);
-  const surface = state.pluginsSurface;
+  const surface = state.overlays.pluginsSurface;
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
   const [configured, setConfigured] = useState(false);
@@ -391,7 +391,7 @@ export function PluginsPanel() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        dispatch({ type: "togglePlugins", open: false });
+        dispatch({ type: "closeOverlay", kind: "plugins" });
         return;
       }
       if (event.key !== "Tab" || !dialog) return;
@@ -509,7 +509,7 @@ export function PluginsPanel() {
   );
   const connectedCount = Object.values(status).filter((service) => service.connected || service.accounts?.length).length;
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
-  const close = () => dispatch({ type: "togglePlugins", open: false });
+  const close = () => dispatch({ type: "closeOverlay", kind: "plugins" });
   // Only worth saying once an app is actually connected and reachable.
   const botsWithoutApps = hasUsableConnectedApps(configured, inventoryPhase, stale, status)
     ? botsMissingConnectedApps(state.bots, state.instances)
@@ -563,7 +563,7 @@ export function PluginsPanel() {
                 type="button"
                 role="tab"
                 aria-selected={surface === item}
-                onClick={() => dispatch({ type: "togglePlugins", open: true, surface: item })}
+                onClick={() => dispatch({ type: "openOverlay", kind: "plugins", open: true, section: item })}
                 className={cn(
                   "border-b-2 px-0.5 pb-3 pt-1 text-[13.5px] font-medium transition-colors",
                   surface === item ? "border-accent text-ink" : "border-transparent text-ink-secondary hover:text-ink",
@@ -635,7 +635,7 @@ export function PluginsPanel() {
               className={cn("font-medium underline underline-offset-2", remoteClient && "hidden")}
               onClick={() => {
                 close();
-                dispatch({ type: "toggleAppSettings", open: true });
+                dispatch({ type: "openOverlay", kind: "appSettings", open: true });
               }}
             >
               {t("connectors.openSettings")}
@@ -667,7 +667,7 @@ export function PluginsPanel() {
               className="underline underline-offset-2 hover:text-ink"
               onClick={() => {
                 close();
-                dispatch({ type: "toggleAppSettings", open: true });
+                dispatch({ type: "openOverlay", kind: "appSettings", open: true });
               }}
             >
               {t("connectors.updateKey")}

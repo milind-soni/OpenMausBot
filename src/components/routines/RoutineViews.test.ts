@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Routine, RoutineRun } from "@/lib/routines";
+import type { Routine, RoutineRun } from "../../../shared/routines";
 import { RoutineList } from "./RoutineList";
 import { RoutineLogs } from "./RoutineLogs";
 import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";

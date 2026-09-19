@@ -739,7 +739,7 @@ export function BotContextMenu({
         }),
         item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
           dispatch({ type: "select", id: bot.id });
-          dispatch({ type: "toggleSettings", open: true });
+          dispatch({ type: "openOverlay", kind: "settings", open: true });
         }),
         item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
           void navigator.clipboard?.writeText(bot.threadId);
@@ -769,7 +769,7 @@ export function BotContextMenu({
         divider("d1"),
         item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
           dispatch({ type: "select", id: bot.id });
-          dispatch({ type: "toggleSettings", open: true, section: "identity" });
+          dispatch({ type: "openOverlay", kind: "settings", open: true, section: "identity" });
         }),
         item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () =>
           dispatch({ type: "duplicateBot", botId: bot.id }),
@@ -1570,6 +1570,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   }, [densityOpen]);
 
   useEffect(() => {
+    if (!plusOpen) return;
+    const closePlusMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPlusOpen(false);
+    };
+    window.addEventListener("keydown", closePlusMenu);
+    return () => window.removeEventListener("keydown", closePlusMenu);
+  }, [plusOpen]);
+
+  useEffect(() => {
+    if (!attentionOpen) return;
+    const closeAttentionMenu = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setAttentionOpen(false);
+    };
+    window.addEventListener("keydown", closeAttentionMenu);
+    return () => window.removeEventListener("keydown", closeAttentionMenu);
+  }, [attentionOpen]);
+
+  useEffect(() => {
     if (remoteClient) return;
     return window.ogb?.onPackageInstall?.((url) => {
       setTeamInstallUrl(url);
@@ -1924,7 +1942,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <button
                   onClick={() => {
                     setPlusOpen(false);
-                    dispatch({ type: "toggleNewBot", open: true });
+                    dispatch({ type: "openOverlay", kind: "newBot", open: true });
                   }}
                   className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
                 >
@@ -2172,7 +2190,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             )}
           </button>
           <button
-            onClick={() => dispatch({ type: "togglePlugins", open: true })}
+            onClick={() => dispatch({ type: "openOverlay", kind: "plugins", open: true })}
             className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
             aria-label={density === "icons" ? t("sidebar.nav.connectedApps") : undefined}
             title={density === "icons" ? t("sidebar.nav.connectedApps") : undefined}
@@ -2215,7 +2233,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 tourId: "nav-apps",
                 label: t("sidebar.nav.connectedApps"),
                 icon: <Puzzle size={18} />,
-                onSelect: () => dispatch({ type: "togglePlugins", open: true }),
+                onSelect: () => dispatch({ type: "openOverlay", kind: "plugins", open: true }),
               },
             ]}
           />
@@ -2223,7 +2241,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {density === "icons" ? (
           <div className="flex items-center justify-center">
             <button
-              onClick={() => dispatch({ type: "toggleAppSettings" })}
+              onClick={() => dispatch({ type: "openOverlay", kind: "appSettings" })}
               className="flex min-w-0 items-center justify-center rounded-xl px-2 py-2 text-left hover:bg-raised/50"
               aria-label={t("sidebar.appSettings")}
               title={state.config?.profile?.name?.trim() || t("sidebar.appSettings")}
