@@ -147,6 +147,15 @@ export const PROMPT_COLLECTIONS: Array<{ label: string; source: string }> = [
   { label: "Kimi", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/Kimi` },
   { label: "DeepSeek", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/DeepSeek` },
   { label: "GLM", source: `${PROMPT_COLLECTION_SOURCE}/tree/main/GLM` },
+  // x1xhlol/system-prompts-and-models-of-ai-tools: leaked tool prompts, one
+  // .txt/.md per tool. Folder names carry spaces; the import grammar handles
+  // them (they are encoded like any other URL path segment).
+  { label: "Cursor · leaks", source: "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/tree/main/Cursor Prompts" },
+  { label: "Devin · leaks", source: "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/tree/main/Devin AI" },
+  { label: "Lovable · leaks", source: "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/tree/main/Lovable" },
+  { label: "v0 · leaks", source: "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/tree/main/v0 Prompts and Tools" },
+  { label: "Windsurf · leaks", source: "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/tree/main/Windsurf" },
+  { label: "Perplexity · leaks", source: "https://github.com/x1xhlol/system-prompts-and-models-of-ai-tools/tree/main/Perplexity" },
   // Distilled variants: each leaked prompt is reduced by an available engine
   // to short vendor-neutral principles, cached by content. Requires at least
   // one connected engine; the verbatim collections above always work.

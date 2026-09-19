@@ -46,8 +46,13 @@ describe("built-in presets", () => {
       const source = collection.source.startsWith("meta:") ? collection.source.slice("meta:".length) : collection.source;
       const parsed = parsePromptSource(source);
       expect(parsed).not.toHaveProperty("error");
-      expect((parsed as { owner: string }).owner).toBe("asgeirtj");
-      expect((parsed as { repo: string }).repo).toBe("system_prompts_leaks");
+      // asgeirtj collections pin their owner; the x1xhlol leak collections
+      // are a second repo and must not be forced into that shape.
+      const expectedOwner = source.includes("x1xhlol") ? "x1xhlol" : "asgeirtj";
+      expect((parsed as { owner: string }).owner).toBe(expectedOwner);
+      expect((parsed as { repo: string }).repo).toBe(source.includes("x1xhlol")
+        ? "system-prompts-and-models-of-ai-tools"
+        : "system_prompts_leaks");
       expect((parsed as { path: string }).path.length).toBeGreaterThan(0);
     }
     // The distilled variants exist and are prefixed.
