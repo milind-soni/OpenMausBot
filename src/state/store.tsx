@@ -29,8 +29,8 @@ import {
   skillRequestBehavior,
   type SkillRequestCardData,
 } from "../../shared/skill-request";
-import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
-import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
+import type { Routine, RoutineInput, RoutineRun } from "../../shared/routines";
+import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "../../shared/webhooks";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
