@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserRuntime, browserRuntimeEnv, type BrowserSpawnSpec } from "./browser-runtime.ts";
+import { BrowserRuntime, TransportError, browserRuntimeEnv, type BrowserSpawnSpec } from "./browser-runtime.ts";
 
 const runtimes: BrowserRuntime[] = [];
 function runtime(options: ConstructorParameters<typeof BrowserRuntime>[0] = {}) {
@@ -160,6 +160,7 @@ lines.on('line', line => {
   else if (m.params.name === 'oversized') { process.stdout.write('x'.repeat(16777217)); return; }
   else if (m.params.name === 'bulky') result = { content:[{type:'text',text:'x'.repeat(50000)},{type:'image',data:'AAAA',mimeType:'image/png'}], structuredContent:{ huge: 'y'.repeat(200000) } };
   else if (m.params.name === 'rpc-error') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'Expected refusal'}})+'\\n'); return; }
+  else if (m.params.name === 'rpc-timeout') { process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,error:{code:-1,message:'request timed out'}})+'\\n'); return; }
   else result = { content:[{type:'text',text:JSON.stringify(m.params)}],pid:process.pid };
   process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');
 });
@@ -190,7 +191,8 @@ describe("server-owned browser MCP runtime", () => {
     expect(value.canControl("s", "owner")).toBe(true);
   });
   it("does not assume an MCP timeout stopped an accepted daemon action", async () => {
-    const value = runtime({ requestTimeoutMs: 60 });
+    // Allow a cold engine spawn on a loaded runner; the hanging action still times out.
+    const value = runtime({ requestTimeoutMs: 2_000 });
     await expect(value.agentRpc("s", spec(), "tools/call", { name: "hang" })).rejects.toThrow(/timed out/);
     // The real daemon detaches from its MCP parent. Transport exit is not
     // proof that a navigation or submission stopped; do not replay it.
@@ -201,6 +203,18 @@ describe("server-owned browser MCP runtime", () => {
       .resolves.toMatchObject({ content: [{ text: expect.stringContaining("back") }] });
     await value.take("s", "owner");
     expect(value.canControl("s", "owner")).toBe(true);
+  });
+
+  it("surfaces an engine-reported JSON-RPC timeout instead of retrying it", async () => {
+    // Only a TransportError timeout may be retried: its timer already killed
+    // that child, so the next attempt starts a fresh transport. This engine
+    // answers "request timed out" over a live transport, which is the engine
+    // refusing rather than the plumbing failing; retrying would re-ask the
+    // same wedged engine for the whole window.
+    const value = runtime();
+    const failure = value.agentRpc("s", spec(), "tools/call", { name: "rpc-timeout" });
+    await expect(failure).rejects.toThrow(/request timed out/);
+    await expect(failure).rejects.not.toBeInstanceOf(TransportError);
   });
 
   it("still refuses an agent after a human's own interrupted command, browser alive", async () => {
