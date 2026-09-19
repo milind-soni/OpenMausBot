@@ -29,8 +29,8 @@ import {
   skillRequestBehavior,
   type SkillRequestCardData,
 } from "../../shared/skill-request";
-import type { Routine, RoutineInput, RoutineRun } from "@/lib/routines";
-import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "@/lib/webhooks";
+import type { Routine, RoutineInput, RoutineRun } from "../../shared/routines";
+import type { WebhookAttempt, WebhookIngressStatus, WebhookTrigger } from "../../shared/webhooks";
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { currentCall } from "@/lib/call";
 import { showNotification, type NotificationTarget } from "@/lib/notify";
@@ -40,6 +40,21 @@ import { t } from "@/lib/i18n";
 import { createBotPatchQueue, type BotUpdatePatch } from "./bot-patch-queue";
 import type { OnboardingStatus } from "@/lib/onboarding";
 import { openLiveEvents } from "@/lib/live-events";
+import {
+  overlaysReducer,
+  VIEW_SWITCH_OVERLAYS,
+  withoutOverlays,
+  type OverlayKind,
+  type OverlaySection,
+  type OverlaysState,
+} from "./overlays";
+import { createStreamDeltaBuffer, EMPTY_STREAM, StreamContext, type StreamState } from "./stream-context";
+
+// Wave 4 split: the overlays slice and the stream context now live in their
+// own modules. Re-exported here so the store's public API stays unchanged.
+export { overlayOpen } from "./overlays";
+export type { OverlayKind, OverlaySection, OverlaysState } from "./overlays";
+export { createStreamDeltaBuffer, useStreaming } from "./stream-context";
 
 const MAX_ROUTINE_RUNS = 2_000;
 const ACTIVE_ROUTINE_RUN_STATUSES = new Set<RoutineRun["status"]>(["queued", "running", "waiting"]);
@@ -721,28 +736,11 @@ export interface AppState {
   webhooks: WebhookTrigger[];
   webhookAttempts: WebhookAttempt[];
   webhookIngress: WebhookIngressStatus | null;
-  settingsOpen: boolean;
-  pluginsOpen: boolean;
-  /** Which tab the Plugins panel opens on; "mcp" when a bot's tools
-   * sent the user there to add a server. */
-  pluginsSurface: "apps" | "mcp";
-  /** The "New bot" role picker. */
-  newBotOpen: boolean;
+  /** The modal/panel family: what is open (ordered) plus each overlay's
+   *  remembered section. See OverlaysState. */
+  overlays: OverlaysState;
   /** Creation continues even when the role picker is dismissed. */
   botCreationPending: boolean;
-  computerOpen: boolean;
-  /** the per-thread event inspector (runtime stream + native protocol tee) */
-  inspectorOpen: boolean;
-  appSettingsOpen: boolean;
-  appSettingsSection: AppSettingsSection;
-  shortcutsOpen: boolean;
-  /** the first-run welcome tour, also replayable from Settings → General */
-  welcomeOpen: boolean;
-  /** the guided tour on the live interface that follows the welcome flow */
-  tourOpen: boolean;
-  botSettingsSection: BotSettingsSection;
-  /** True only when the open action named a section — accordion expands that row. */
-  botSettingsExpandAccordion: boolean;
   /** latest live frame of a bot's computer, per botId */
   screens: Record<string, { png: string; mime: string; threadId?: string }>;
   /** bots whose cloud computer is being provisioned */
@@ -981,17 +979,11 @@ export type Action =
   | { type: "error"; message: string | null }
   | { type: "notice"; notice: AppState["notice"] }
   | { type: "revealThread"; threadId: string }
-  | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection; botId?: string }
-  | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
-  | { type: "toggleNewBot"; open?: boolean }
-  | { type: "toggleComputer"; open?: boolean }
-  | { type: "toggleInspector"; open?: boolean }
+  | { type: "openOverlay"; kind: OverlayKind; open?: boolean; section?: OverlaySection; botId?: string }
+  | { type: "closeOverlay"; kind: OverlayKind }
+  | { type: "closeAllOverlays" }
   | { type: "focusMessage"; threadId: string; messageId: string }
   | { type: "focusMessageConsumed"; nonce: number }
-  | { type: "toggleAppSettings"; open?: boolean; section?: AppSettingsSection }
-  | { type: "toggleShortcuts"; open?: boolean }
-  | { type: "toggleWelcome"; open?: boolean }
-  | { type: "toggleTour"; open?: boolean }
   | {
       type: "updateBot";
       botId: string;
@@ -1219,11 +1211,7 @@ export function reducer(state: AppState, action: Action): AppState {
         ...state,
         activeView: "routines",
         routinesFocus: { section: action.section, view: action.view, botId: action.botId, routineId: action.routineId, nonce: state.routinesFocus.nonce + 1 },
-        settingsOpen: false,
-        computerOpen: false,
-        inspectorOpen: false,
-        appSettingsOpen: false,
-        pluginsOpen: false,
+        overlays: withoutOverlays(state.overlays, VIEW_SWITCH_OVERLAYS),
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
@@ -1231,11 +1219,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         activeView: "team-map",
-        settingsOpen: false,
-        computerOpen: false,
-        inspectorOpen: false,
-        appSettingsOpen: false,
-        pluginsOpen: false,
+        overlays: withoutOverlays(state.overlays, VIEW_SWITCH_OVERLAYS),
       };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routinesLoadState: "ready" };
@@ -1311,7 +1295,10 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state,
           activeView: "chat",
           selectedId: action.id,
-          botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
+          overlays: {
+            ...state.overlays,
+            botSettingsSection: action.id !== state.selectedId ? "overview" : state.overlays.botSettingsSection,
+          },
           groups: state.groups.map((g) => (g.id === action.id ? { ...g, unread: false } : g)),
         };
       }
@@ -1321,7 +1308,10 @@ export function reducer(state: AppState, action: Action): AppState {
             ...state,
             activeView: "chat",
             selectedId: action.id,
-            botSettingsSection: action.id !== state.selectedId ? "overview" : state.botSettingsSection,
+            overlays: {
+              ...state.overlays,
+              botSettingsSection: action.id !== state.selectedId ? "overview" : state.overlays.botSettingsSection,
+            },
           },
           action.id,
           "switch",
@@ -1651,44 +1641,27 @@ export function reducer(state: AppState, action: Action): AppState {
           : state),
         error: action.message,
       };
-    // bot settings, the computer panel, and app settings share the right slot
-    case "toggleSettings": {
-      if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
-      const selectedId = action.botId ?? state.selectedId;
-      // A targeted settings link opens that bot without navigating to chat
-      // or marking its conversations read, even when another panel is open.
-      const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
-      return {
-        ...state,
-        selectedId,
-        settingsOpen: open,
-        botSettingsSection: action.section ?? (selectedId !== state.selectedId ? "overview" : state.botSettingsSection),
-        // Mascot / bare open omits `section` → accordion stays fully collapsed.
-        // Deep links expand that row even when the panel is already open.
-        botSettingsExpandAccordion: open ? action.section !== undefined : false,
-        // Preserve the computer and inspector surfaces; their own controls
-        // can open bot settings. App settings are mutually exclusive.
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-      };
+    case "openOverlay": {
+      if (action.kind === "settings") {
+        // A targeted settings link opens that bot without navigating to chat
+        // or marking its conversations read, even when another panel is open.
+        if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
+        const selectedId = action.botId ?? state.selectedId;
+        return {
+          ...state,
+          selectedId,
+          overlays: overlaysReducer(state.overlays, action, selectedId !== state.selectedId),
+        };
+      }
+      return { ...state, overlays: overlaysReducer(state.overlays, action) };
     }
-    case "togglePlugins": {
-      const open = action.open ?? !state.pluginsOpen;
-      return {
-        ...state,
-        pluginsOpen: open,
-        pluginsSurface: action.surface ?? state.pluginsSurface,
-        ...(open ? { settingsOpen: false, appSettingsOpen: false, newBotOpen: false, shortcutsOpen: false } : {}),
-      };
+    case "closeOverlay": {
+      return { ...state, overlays: overlaysReducer(state.overlays, action) };
     }
+    case "closeAllOverlays":
+      return { ...state, overlays: { ...state.overlays, open: [] } };
     case "botCreationPending":
       return { ...state, botCreationPending: action.on };
-    case "toggleNewBot": {
-      const open = action.open ?? !state.newBotOpen;
-      return {
-        ...state, newBotOpen: open,
-        ...(open ? { settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false } : {}),
-      };
-    }
     case "notice":
       return { ...state, notice: action.notice };
     case "revealThread":
@@ -1706,60 +1679,6 @@ export function reducer(state: AppState, action: Action): AppState {
     case "focusMessageConsumed":
       if (!state.focusMessage || state.focusMessage.nonce !== action.nonce) return state;
       return { ...state, focusMessage: { ...state.focusMessage, consumed: true } };
-    case "toggleComputer": {
-      const open = action.open ?? !state.computerOpen;
-      return {
-        ...state,
-        computerOpen: open,
-        settingsOpen: open ? false : state.settingsOpen,
-        inspectorOpen: open ? false : state.inspectorOpen,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-      };
-    }
-    case "toggleInspector": {
-      const open = action.open ?? !state.inspectorOpen;
-      return {
-        ...state,
-        inspectorOpen: open,
-        settingsOpen: open ? false : state.settingsOpen,
-        computerOpen: open ? false : state.computerOpen,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-      };
-    }
-    case "toggleAppSettings": {
-      const open = action.open ?? !state.appSettingsOpen;
-      return {
-        ...state,
-        appSettingsOpen: open,
-        appSettingsSection: action.section ?? state.appSettingsSection,
-        settingsOpen: open ? false : state.settingsOpen,
-        computerOpen: open ? false : state.computerOpen,
-        inspectorOpen: open ? false : state.inspectorOpen,
-        pluginsOpen: open ? false : state.pluginsOpen,
-      };
-    }
-    case "toggleShortcuts": {
-      const open = action.open ?? !state.shortcutsOpen;
-      return {
-        ...state,
-        shortcutsOpen: open,
-      };
-    }
-    case "toggleTour": {
-      const open = action.open ?? !state.tourOpen;
-      return { ...state, tourOpen: open, appSettingsOpen: open ? false : state.appSettingsOpen };
-    }
-    case "toggleWelcome": {
-      const open = action.open ?? !state.welcomeOpen;
-      // The tour is a full-screen surface; nothing else should stay open
-      // underneath it, and Settings closes so the replay lands on the tour.
-      return {
-        ...state,
-        welcomeOpen: open,
-        appSettingsOpen: open ? false : state.appSettingsOpen,
-        shortcutsOpen: open ? false : state.shortcutsOpen,
-      };
-    }
     case "updateBot": {
       const mascotChanged =
         Object.prototype.hasOwnProperty.call(action.patch, "color") ||
@@ -2007,20 +1926,14 @@ export const initialState: AppState = {
   webhooks: [],
   webhookAttempts: [],
   webhookIngress: null,
-  settingsOpen: false,
-  pluginsOpen: false,
-  pluginsSurface: "apps",
-  newBotOpen: false,
+  overlays: {
+    open: [],
+    pluginsSurface: "apps",
+    appSettingsSection: "general",
+    botSettingsSection: "overview",
+    botSettingsExpandAccordion: false,
+  },
   botCreationPending: false,
-  computerOpen: false,
-  inspectorOpen: false,
-  appSettingsOpen: false,
-  appSettingsSection: "general",
-  shortcutsOpen: false,
-  welcomeOpen: false,
-  tourOpen: false,
-  botSettingsSection: "overview",
-  botSettingsExpandAccordion: false,
   screens: {},
   provisioning: {},
   deletingBots: {},
@@ -2257,76 +2170,6 @@ export async function loadSnapshotBoundary<Key extends string>(
     }
   });
   return chat.status === "fulfilled";
-}
-
-/** Per-frame stream state lives in its OWN context: token frames update only
- * the components that read this hook (the chat's streaming tail), while every
- * useStore consumer — sidebar, mascots, pickers, the settled transcript —
- * keeps its render tree untouched during a stream. */
-interface StreamState {
-  /** in-flight assistant text per threadId */
-  streaming: Record<string, string>;
-  /** in-flight extended thinking per threadId (ephemeral) */
-  reasoning: Record<string, string>;
-}
-const EMPTY_STREAM: StreamState = { streaming: {}, reasoning: {} };
-const StreamContext = createContext<StreamState>(EMPTY_STREAM);
-
-type PendingDelta = { text: string; reasoning: string };
-
-/** Paint once per frame, but keep draining when a hidden tab pauses rAF.
- * Flush pending chunks at 64 Ki UTF-16 characters or a 100ms fallback timer.
- * Accumulated output remains intact and unbounded; this is not a memory cap. */
-export function createStreamDeltaBuffer(onFlush: (entries: Array<[string, PendingDelta]>) => void) {
-  const buffer = new Map<string, PendingDelta>();
-  let frame: number | null = null;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let characters = 0;
-  const cancel = () => {
-    if (frame !== null) cancelAnimationFrame(frame);
-    frame = null;
-    clearTimeout(timer);
-    timer = undefined;
-  };
-  const flush = () => {
-    cancel();
-    if (!buffer.size) return;
-    const entries = [...buffer];
-    buffer.clear();
-    characters = 0;
-    onFlush(entries);
-  };
-  return {
-    push(threadId: string, kind: string, delta: string) {
-      if (kind !== "assistant_text" && kind !== "reasoning_text") return;
-      const entry = buffer.get(threadId) ?? { text: "", reasoning: "" };
-      if (kind === "assistant_text") entry.text += delta;
-      else entry.reasoning += delta;
-      buffer.set(threadId, entry);
-      characters += delta.length;
-      if (characters >= 64 * 1024) flush();
-      else if (frame === null) {
-        frame = requestAnimationFrame(flush);
-        timer = setTimeout(flush, 100);
-      }
-    },
-    clear(threadId: string) {
-      const entry = buffer.get(threadId);
-      if (entry) characters -= entry.text.length + entry.reasoning.length;
-      buffer.delete(threadId);
-      if (!buffer.size) cancel();
-    },
-    flush,
-    dispose() {
-      cancel();
-      buffer.clear();
-      characters = 0;
-    },
-  };
-}
-
-export function useStreaming() {
-  return useContext(StreamContext);
 }
 
 const StoreContext = createContext<{
@@ -2826,7 +2669,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               action.onCreated?.();
               if (profileError) {
                 showError(t("newBot.profileFailed", { error: profileError }));
-                rawDispatch({ type: "toggleSettings", open: true, section: "soul" });
+                rawDispatch({ type: "openOverlay", kind: "settings", open: true, section: "soul" });
               }
             })
             .catch((error) => {

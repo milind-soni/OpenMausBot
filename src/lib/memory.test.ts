@@ -45,7 +45,7 @@ describe("capacityStatus", () => {
   it("always says the plain sentence about what loads", () => {
     const status = capacityStatus(index());
     expect(status.level).toBe("ok");
-    expect(status.sentence).toBe("40 of 200 lines · 2 KB of 23.4 KB — only the first 200 lines load each turn.");
+    expect(status.sentence).toBe("40 of 200 lines · 2.0 KB of 23.4 KB — only the first 200 lines load each turn.");
     expect(status.warning).toBeNull();
     expect(status.lineShare).toBeCloseTo(0.2);
   });
@@ -136,7 +136,7 @@ describe("small helpers", () => {
 
   it("formats bytes the way the rest of settings does", () => {
     expect(formatBytes(120)).toBe("120 B");
-    expect(formatBytes(2_048)).toBe("2 KB");
+    expect(formatBytes(2_048)).toBe("2.0 KB");
   });
 
   it("turns a typed topic name into a file name the server accepts", () => {

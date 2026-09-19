@@ -1,9 +1,10 @@
 // Generic ACP (Agent Client Protocol) driver core — one JSON-RPC-2.0-over-
 // stdio session runtime that every ACP CLI harness (Grok Build, Gemini CLI,
 // …) rides. Modeled on t3code's AcpSessionRuntime + per-agent AcpSupport
-// split: the protocol mechanics live here, the per-harness quirks (spawn
-// argv, auth method, model catalog, sign-in check) live in a small support
-// object. Adding a harness = write server/drivers/acp/<name>.ts.
+// split: the wire protocol lives in acp/protocol.ts, the session runtime
+// here, the per-harness quirks (spawn argv, auth method, model catalog,
+// sign-in check) in a small support object. Adding a harness = write
+// server/drivers/acp/<name>.ts.
 //
 // ACP has no `turn/completed` notification: the `session/prompt` RPC *result*
 // is the completion signal (it carries stopReason + usage). Permission
@@ -39,18 +40,18 @@ import type {
   ProviderSnapshot,
   ModelCatalog,
   ModelVariantOption,
-  RuntimeEvent,
-  RuntimeEventListener,
   SendTurnInput,
   ProviderErrorCode,
   TurnImageInput,
 } from "../../contracts.ts";
-import { newEventId, newId } from "../../contracts.ts";
+import { newId } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
 import { appendNative } from "../native.ts";
+import { createDriverSessionRuntime, createRefreshModels } from "../driver-runtime.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
+import { AcpConnection, type AcpWireMessage } from "./protocol.ts";
 
 export interface AcpConfig {
   cli: string;
@@ -333,25 +334,25 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         support.transformEnv?.(env, activeConfig, instanceId);
         return env;
       };
-      let models = support.models;
-      const refreshModels = async () => {
-        if (!support.resolveModels) return;
-        try {
-          const resolved = await support.resolveModels(childEnv(), config, instanceId);
-          if (resolved.options.length) models = resolved;
-        } catch {
-          // Keep the last usable catalog when an optional discovery source is down.
-        }
-      };
+      const { resolveModels } = support;
+      const catalog = createRefreshModels({
+        initial: support.models,
+        // no resolveModels means no live source; a down discovery source keeps the last usable catalog
+        load: resolveModels ? () => resolveModels(childEnv(), config, instanceId) : undefined,
+      });
+      const refreshModels = catalog.refreshModels;
       if (support.resolveModelsOnCreate !== false) await refreshModels();
-      const listeners = new Set<RuntimeEventListener>();
       interface Turn {
-        stop: () => void;
+        stop: () => Promise<boolean>;
         interrupt: () => void;
         turnId: string;
-        asks: Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>;
+          asks: Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>;
       }
-      const active = new Map<string, Turn>();
+      const runtime = createDriverSessionRuntime<Turn>({
+        driverKind: DRIVER_KIND,
+        stopTurn: (turn) => turn.stop(),
+      });
+      const { emit, base } = runtime;
       // "Always allow this session", remembered by the driver when the agent
       // offered no `allow_always` of its own: the exact operations (kind,
       // title, command, input, locations) a person allowed for the session,
@@ -359,10 +360,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // as the native session lasts. A generic title with no input identifies
       // nothing and is never remembered.
       const sessionAllows = new Map<string, Set<string>>();
-
-      const emit = (event: RuntimeEvent) => {
-        for (const listener of listeners) listener(event);
-      };
 
       // ACP content blocks may carry a complete raster image inline. Keep the
       // bytes on the wire, but never duplicate megabytes of base64 into the
@@ -402,14 +399,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         };
         return support.sanitizeToolPayload ? sanitizeAcpToolMessage(redacted) : redacted;
       };
-      const base = (threadId: string, turnId: string) => ({
-        eventId: newEventId(),
-        provider: DRIVER_KIND,
-        threadId,
-        turnId,
-        createdAt: new Date().toISOString(),
-      });
-
       // ACP session mcpServers: stdio is the baseline every ACP agent
       // supports (mcpCapabilities.http/.sse only add EXTRA transports), so
       // an injected stdio proxy — e.g. the peer-agent comms tool — attaches
@@ -468,7 +457,23 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
       const sendTurn = async (turn: SendTurnInput) => {
         const { threadId } = turn;
-        if (active.has(threadId)) throw new Error("a turn is already running on this thread");
+        const turnId = newId();
+        runtime.claimTurn(threadId, turnId);
+        try {
+          return await runClaimedTurn(turn, threadId, turnId);
+        } catch (error) {
+          // setTurn consumes the claim; a setup path that throws before it
+          // would leave the reservation behind and the thread busy forever.
+          runtime.endTurn(threadId, turnId);
+          throw error;
+        }
+      };
+
+      const runClaimedTurn = async (
+        turn: SendTurnInput,
+        threadId: string,
+        turnId: string,
+      ) => {
         // Provider-instance `fullAuto` predates per-bot approval levels. Every
         // harness turn now carries the bot's mode, so Ask/Auto must explicitly
         // put the native agent back into its interactive mode. Otherwise a
@@ -483,7 +488,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (controlsHost && turnConfig.fullAuto && turn.approvalMode !== "full") {
           throw new Error("local computer control requires interactive provider approvals");
         }
-        const turnId = newId();
         const cwd = turn.cwd ?? turnConfig.workspace ?? homedir();
         const env = childEnv(turnConfig);
         if (
@@ -491,8 +495,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           && !skipSubscriptionAuthForLocalInject(turn.model)
           && !(await support.isAuthenticated(env, turnConfig, instanceId))
         ) {
+          if (runtime.claimCanceled(turnId)) {
+            runtime.endTurn(threadId, turnId);
+            emit({ ...base(threadId, turnId), type: "turn.started" });
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
+            return { turnId };
+          }
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({ ...base(threadId, turnId), type: "runtime.error", message: support.loginNote, setup: true });
+          runtime.endTurn(threadId, turnId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "auth_required", cost: null });
           return { turnId };
         }
@@ -509,6 +520,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             ? await support.resolveCommand(env, turnConfig, instanceId)
             : { command: turnConfig.cli };
         } catch (error) {
+          if (runtime.claimCanceled(turnId)) {
+            runtime.endTurn(threadId, turnId);
+            emit({ ...base(threadId, turnId), type: "turn.started" });
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
+            return { turnId };
+          }
           emit({ ...base(threadId, turnId), type: "turn.started" });
           emit({
             ...base(threadId, turnId),
@@ -516,7 +533,18 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             message: error instanceof Error ? error.message : String(error),
             setup: true,
           });
+          runtime.endTurn(threadId, turnId);
           emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "setup_required", cost: null });
+          return { turnId };
+        }
+
+        // stopAll()/dispose() canceled this claim while auth or command
+        // resolution ran. Release the claim, settle as interrupted, and
+        // spawn nothing.
+        if (runtime.claimCanceled(turnId)) {
+          runtime.endTurn(threadId, turnId);
+          emit({ ...base(threadId, turnId), type: "turn.started" });
+          emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "interrupted", cost: null });
           return { turnId };
         }
 
@@ -528,7 +556,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
         const state = { settled: false, promptSent: false, text: "" };
         const asks = new Map<string, (behavior: string, source?: "user" | "timeout" | "system", message?: string, always?: boolean) => void>();
-        let nextId = 1;
         let sessionId: string | null = null;
         let sessionConfigResult: any = null;
         const modelOf = (result: any): string | null => {
@@ -562,37 +589,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return option;
         };
         let interruptTimer: ReturnType<typeof setTimeout> | null = null;
-        const rpcPending = new Map<
-          number,
-          { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }
-        >();
-
-        const send = (obj: unknown) => {
-          try {
-            child.stdin.write(JSON.stringify(obj) + "\n");
-          } catch {}
-          appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(obj) });
-        };
-        const request = (method: string, params: unknown, timeoutMs?: number, receive?: (result: any) => void) =>
-          new Promise<any>((resolve, reject) => {
-            const id = nextId++;
-            let timer: ReturnType<typeof setTimeout> | null = null;
-            if (timeoutMs) {
-              timer = setTimeout(() => {
-                rpcPending.delete(id);
-                reject(new Error(`${method} timed out`));
-              }, timeoutMs);
-              timer.unref?.();
-            }
-            rpcPending.set(id, {
-              // Consume configuration in wire order: an update following this
-              // response may arrive before the awaiting continuation resumes.
-              resolve: (result) => { receive?.(result); resolve(result); },
-              reject,
-              timer,
-            });
-            send({ jsonrpc: "2.0", id, method, params });
-          });
 
         const stop = () => killCliTree(child);
 
@@ -679,12 +675,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           state.settled = true;
           if (interruptTimer) clearTimeout(interruptTimer);
           for (const finish of asks.values()) finish("cancel", "system");
-          for (const p of rpcPending.values()) {
-            if (p.timer) clearTimeout(p.timer);
-            p.reject(new Error("turn settled"));
-          }
-          rpcPending.clear();
-          active.delete(threadId);
+          acp.failAll(new Error("turn settled"));
+          runtime.endTurn(threadId, turnId);
           flushAssistantText();
           emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null });
           stop(); // the agent process does not exit on its own
@@ -870,44 +862,33 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         };
 
-        let buf = "";
-        // decode as UTF-8 across chunk boundaries — a raw `buf += chunk` splits
-        // multibyte characters that straddle two reads and corrupts the text
-        child.stdout.setEncoding("utf8");
-        child.stdout.on("data", (chunk) => {
-          buf += chunk;
-          let nl;
-          while ((nl = buf.indexOf("\n")) !== -1) {
-            const line = buf.slice(0, nl);
-            buf = buf.slice(nl + 1);
-            if (!line.trim()) continue;
-            let msg: any;
+        const acp = new AcpConnection({
+          stdout: child.stdout,
+          write: (line) => {
             try {
-              msg = JSON.parse(line);
-            } catch {
-              continue;
-            }
-            appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(msg) });
-            if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
-              const pend = rpcPending.get(msg.id);
-              if (pend) {
-                rpcPending.delete(msg.id);
-                if (pend.timer) clearTimeout(pend.timer);
-                if (msg.error) {
-                  const error = new Error(msg.error.message ?? JSON.stringify(msg.error));
-                  Object.assign(error, { code: msg.error.code, data: msg.error.data });
-                  pend.reject(error);
-                } else {
-                  pend.resolve(msg.result);
-                }
-              }
-            } else if (msg.id !== undefined && msg.method) {
-              handleServerRequest(msg);
-            } else if (msg.method) {
-              handleNotification(msg);
-            }
-          }
+              child.stdin.write(line);
+            } catch {}
+          },
+          onSend: (message) => appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(message) }),
+          onMessage: (message) => appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(message) }),
+          onServerRequest: handleServerRequest,
+          onNotification: handleNotification,
+          // A stdout read failure is a host-side transport error, not a
+          // protocol failure: surface it and settle distinctly so it is
+          // never classified as rpc_error.
+          onHostReadError: (error) => {
+            if (state.settled) return;
+            emit({
+              ...base(threadId, turnId),
+              type: "runtime.error",
+              message: `${DRIVER_KIND} stdout read failed: ${error instanceof Error ? error.message : String(error)}`,
+            });
+            settle(false, "host_read_error");
+          },
         });
+        const send = (obj: unknown) => acp.send(obj as AcpWireMessage);
+        const request = (method: string, params: unknown, timeoutMs?: number, receive?: (result: any) => void) =>
+          acp.request(method, params, timeoutMs, receive);
 
         let stderr = "";
         child.stderr.on("data", (c) => {
@@ -917,6 +898,17 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         child.on("error", (e) => {
           emit({ ...base(threadId, turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
           settle(false, "spawn_error");
+        });
+        // Stream write errors (e.g. EPIPE when the child dies mid-write) never
+        // reach child.on("error"); without this listener they crash the server.
+        child.stdin.on("error", (e) => {
+          if (state.settled) return;
+          emit({
+            ...base(threadId, turnId),
+            type: "runtime.error",
+            message: `${DRIVER_KIND} stdin write failed: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          settle(false, "host_write_error");
         });
         child.on("close", (code) => {
           if (!state.settled) {
@@ -936,7 +928,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           interruptTimer = setTimeout(() => settle(true, "cancelled"), 5_000);
           interruptTimer.unref?.();
         };
-        active.set(threadId, { stop, interrupt, turnId, asks });
+        runtime.setTurn(threadId, { stop, interrupt, turnId, asks });
         emit({ ...base(threadId, turnId), type: "turn.started" });
 
         (async () => {
@@ -1170,7 +1162,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         displayName: input.displayName,
         enabled: input.enabled,
         get models() {
-          return models;
+          return catalog.models;
         },
         refreshModels: support.resolveModels ? refreshModels : undefined,
         snapshot,
@@ -1193,9 +1185,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             localComputerMcp: true,
           },
           sendTurn,
-          interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),
+          interruptTurn: async (threadId) => runtime.turn(threadId)?.interrupt(),
           respondToRequest: async (threadId, requestId, decision) => {
-            const turn = active.get(threadId);
+            const turn = runtime.turn(threadId);
             const finish = turn?.asks.get(requestId);
             if (!finish) return "unavailable"; // settled, timed out, or turn gone
             finish(decision.behavior, "user", decision.message, decision.always === true);
@@ -1205,19 +1197,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ? "answered"
                 : "rejected";
           },
-          hasSession: (threadId) => active.has(threadId),
-          stopAll: async () => {
-            for (const { stop } of active.values()) stop();
-          },
-          onEvent: (listener) => {
-            listeners.add(listener);
-            return () => listeners.delete(listener);
-          },
+          hasSession: (threadId) => runtime.hasSession(threadId),
+          stopAll: () => runtime.stopAll(),
+          onEvent: runtime.onEvent,
         },
-        dispose: async () => {
-          for (const { stop } of active.values()) stop();
-          listeners.clear();
-        },
+        dispose: () => runtime.dispose(),
       };
     },
   };

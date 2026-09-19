@@ -27,7 +27,7 @@ export function NewBotDialog() {
   const alive = useRef(true);
   const creating = state.botCreationPending;
   const [error, setError] = useState<string | null>(null);
-  const close = () => dispatch({ type: "toggleNewBot", open: false });
+  const close = () => dispatch({ type: "closeOverlay", kind: "newBot" });
 
   useEffect(() => {
     alive.current = true;
@@ -36,7 +36,7 @@ export function NewBotDialog() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        dispatch({ type: "toggleNewBot", open: false });
+        dispatch({ type: "closeOverlay", kind: "newBot" });
         return;
       }
       if (event.key !== "Tab") return;

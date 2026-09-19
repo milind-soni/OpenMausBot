@@ -38,7 +38,7 @@ describe("new bot role dialog", () => {
     const action = fixture.dispatch.mock.calls[0][0];
     expect(action).toMatchObject({ type: "newBot", onCreated: expect.any(Function), onError: expect.any(Function) });
     action.onCreated();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleNewBot", open: false });
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "closeOverlay", kind: "newBot" });
   });
 
   it("leaves a failed POST open for retry and makes pending controls unavailable", () => {
@@ -60,7 +60,7 @@ describe("new bot role dialog", () => {
     const close = pending.nodes.find((node) => node.type === "button" && node.props["aria-label"] === "Close")!;
     expect(close.props.disabled).not.toBe(true);
     close.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleNewBot", open: false });
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "closeOverlay", kind: "newBot" });
     fixture.creating = false;
     fixture.error = "Creation failed";
     expect(render().html).toContain('role="alert"');
@@ -89,7 +89,7 @@ describe("new bot role dialog", () => {
     const blank = rendered.nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
     blank.props.onClick!();
     keydown({ key: "Escape", preventDefault: vi.fn() } as unknown as KeyboardEvent);
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleNewBot", open: false });
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "closeOverlay", kind: "newBot" });
     cleanup?.();
     expect(doc.activeElement).toBe(opener);
     fixture.dispatch.mock.calls[0][0].onCreated();
