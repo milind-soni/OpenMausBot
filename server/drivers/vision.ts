@@ -22,6 +22,9 @@ const DEFAULT_MODELS: ModelCatalog = {
     { id: "openrouter:google/gemini-2.0-flash", label: "Gemini 2.0 Flash (OpenRouter)", custom: true },
     { id: "openrouter:qwen/qwen-2.5-coder-32b-instruct", label: "Qwen 2.5 Coder 32B (OpenRouter)", custom: true },
     { id: "openrouter:z-ai/glm-4.5-air", label: "GLM 4.5 Air (OpenRouter)", custom: true },
+    // Freebuff's free tier serves OpenRouter-style ids; routing still rides
+    // freellmapi's OpenRouter pool, the same as every other seed here.
+    { id: "openrouter:z-ai/glm-5.3-flash", label: "GLM 5.3 Flash (Freebuff free tier)", custom: true },
     { id: "direct:deepseek-chat", label: "DeepSeek Chat (Direct API)", custom: true },
     { id: "direct:deepseek-coder", label: "DeepSeek Coder (Direct API)", custom: true },
     { id: "rlm:auto", label: "RLM Auto (Harness)", custom: true },

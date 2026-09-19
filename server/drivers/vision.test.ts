@@ -83,6 +83,11 @@ describe("VisionDriver", () => {
     expect(inst.models.options.every((option) => option.custom === true)).toBe(true);
     expect(inst.models.options.some((option) => option.id === "auto")).toBe(true);
     expect(inst.models.options.some((option) => option.id === "rlm:auto")).toBe(true);
+    expect(inst.models.options.find((option) => option.id === "openrouter:z-ai/glm-5.3-flash")).toEqual({
+      id: "openrouter:z-ai/glm-5.3-flash",
+      label: "GLM 5.3 Flash (Freebuff free tier)",
+      custom: true,
+    });
     await inst.dispose();
   });
 
