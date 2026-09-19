@@ -307,6 +307,39 @@ it("keeps provenance and exactly-once delivery across rework rounds to the same 
   }
 }), 90_000);
 
+it("resets Claude's native context on edit, then resumes only the replacement branch", () => fixture(async (f) => {
+  await warmUp(f, "KEEP_CONTEXT: work only in the test workspace.");
+  f.plan[f.chief.id] = { reply: "ABANDONED_REPLY" };
+  await f.send("ABANDONED_REQUEST");
+  await f.wait();
+  const oldSession = f.launches().at(-1).resume ?? f.launches().at(-1).sessionId;
+  const edited = (await f.messages()).findLast((m: any) => m.role === "user");
+  f.plan[f.chief.id] = { reply: "Replacement accepted" };
+  f.save();
+  await f.cli("edit", "--bot", f.chief.id, "--message", edited.id, "--task", f.thread, "--text", "REPLACEMENT_REQUEST");
+  await f.wait();
+  const launch = f.launches().at(-1);
+  expect(launch.resume).toBeNull();
+  expect(launch.sessionId).not.toBe(oldSession);
+  const replay = f.prompt(f.turns().at(-1));
+  expect(replay).toContain("rewound this conversation");
+  expect(count(replay, "KEEP_CONTEXT")).toBe(1);
+  expect(count(replay, "REPLACEMENT_REQUEST")).toBe(1);
+  expect(replay).not.toContain("ABANDONED_");
+  const resets = () => jsonl(join(f.dataDir, "native", `${f.thread}.ndjson`))
+    .filter((entry: any) => entry.source === "claude.session" && entry.msg.close === "context reset");
+  // Proves the explicit reset crosses the real runtime/driver boundary;
+  // merely clearing --resume can accidentally reuse an idle process.
+  expect(resets()).toHaveLength(1);
+
+  f.plan[f.chief.id] = { reply: "Continuing the replacement" };
+  await f.send("Continue");
+  await f.wait();
+  expect(f.launches().at(-1).resume).toBe(launch.sessionId);
+  expect(f.prompt(f.turns().at(-1))).not.toContain("ABANDONED_");
+  expect(resets()).toHaveLength(1);
+}), 60_000);
+
 it("replays a delegated result once after a rewind, and keeps resuming afterwards", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "REWIND_RESULT" };
@@ -953,6 +986,10 @@ it("gives a delegate_bot source today's fresh session and replay when its soul c
   // The first reply wakes the source; the second lands while that turn holds.
   const replies = async () => (await f.messages(threadId)).filter((m: any) => /^@(QA|Ops) replied to the delegated task/.test(m.text ?? "")).length;
   await expect.poll(replies, { timeout: 30_000 }).toBe(2);
+  // Replies can both be recorded before the first resume process starts.
+  // Change the soul only once that gated launch has received the old prompt;
+  // otherwise a later resume legitimately reuses the already refreshed session.
+  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
   await f.api(`/api/bots/${f.chief.id}`, { soul: "PEER_SOUL_MARK Always answer in German." }, "PATCH");
   f.open(f.gate("revival"));
   await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(3);

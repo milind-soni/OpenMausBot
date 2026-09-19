@@ -112,6 +112,10 @@ export interface SendTurnInput {
   effort?: EffortLevel;
   variant?: string;
   resumeCursor?: unknown;
+  /** Start without the previous native context, including any retained idle
+   * process. Takes precedence over resumeCursor. The runtime supplies the
+   * active conversation in text/transcript when rebuilding a session. */
+  sessionReset?: boolean;
   /** The turn with the conversation so far replayed inline, attached only
    * alongside resumeCursor. A cursor-resuming driver sends it once, on a
    * fresh session, when the provider refuses the cursor before reading the

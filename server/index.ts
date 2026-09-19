@@ -5933,7 +5933,7 @@ async function startTurn(
     const windowIds = replayable.slice(-40).map((m) => m.id);
     return {
       turnText: withUnseenMessages(unseenBlock, contextTurnText),
-      resumeCursor, recoveryText, recoveryIsReplay,
+      resumeCursor, sessionReset: !resume, recoveryText, recoveryIsReplay,
       handoff: strictResume ? {
         botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
         started: sessionStart(contextOrder, contextTurnText !== userTurnText ? windowIds : [], carried),
@@ -6642,6 +6642,7 @@ async function startTurn(
         // the active task's own session — another task's cursor would
         // resume the wrong conversation and defeat the context bubble
         resumeCursor: dispatchContext.resumeCursor,
+        sessionReset: dispatchContext.sessionReset,
         ...(dispatchContext.recoveryText !== undefined ? { recoveryText: dispatchContext.recoveryText } : {}),
         ...(dispatchContext.recoveryIsReplay ? { recoveryIsReplay: true } : {}),
         transcript,
