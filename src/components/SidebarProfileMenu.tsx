@@ -212,17 +212,17 @@ export function SidebarProfileMenu() {
       key: "settings",
       label: t("sidebar.menu.settings"),
       icon: <SettingsIcon size={18} />,
-      onSelect: () => dispatch({ type: "toggleAppSettings" }),
+      onSelect: () => dispatch({ type: "openOverlay", kind: "appSettings" }),
     },
     {
       key: "shortcuts",
-      label: "Keyboard shortcuts",
+      label: t("sidebar.menu.shortcuts"),
       icon: <Keyboard size={18} />,
       trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
       onSelect: () => {
         // The menu item unmounts; let the dialog restore the profile button.
         triggerRef.current?.closest("button")?.focus();
-        dispatch({ type: "toggleShortcuts", open: true });
+        dispatch({ type: "openOverlay", kind: "shortcuts", open: true });
       },
     },
     ...(update ? [update.item] : []),
