@@ -35,6 +35,11 @@ export interface ApprovalBus {
   autoApply?: (botId: string, threadId: string) => boolean;
 }
 
+/** A peer request must never gain authority: `"too_many"` is refused the
+ * same as a deny, but reported distinctly so callers never claim the user
+ * denied something the user never saw. */
+export type PeerApprovalVerdict = "allow" | "deny" | "too_many";
+
 interface Pending {
   resolve: (result: "allow" | "deny") => void;
   /** Frees the requestId if the user never answers. */
@@ -78,6 +83,15 @@ function settleCard(pending: Pending, behavior: string, source: "user" | "system
 const pendingComms = new Map<string, Pending>();
 
 const APPROVAL_TIMEOUT_MS = 15 * 60_000;
+
+/** Per-bot ceiling on cards waiting on the user at once. A looping or
+ * unattended bot must not be able to bury the user in its own cards. */
+export const MAX_PENDING_PEER_APPROVALS_PER_BOT = 3;
+
+/** Workspace-wide ceiling across every bot's pending cards, independent of
+ * the per-bot cap — a fleet of distinct bots must not collectively bury
+ * the user either. */
+export const MAX_PENDING_PEER_APPROVALS = 25;
 
 /** The narrow grant "always allow" remembers for a peer comm. Mirrored
  * back into `bot.alwaysAllow` when the user picks "Always allow" on the
@@ -151,9 +165,17 @@ function announceCard(bus: ApprovalBus, from: BotRecord, card: Message, sourceTh
 }
 
 /** Ask the user (in the source task thread) whether `from` may `action` `target`.
- * Resolves with `"allow"` or `"deny"`. If `from.alwaysAllow` already
- * covers the (action, target) pair, returns `"allow"` immediately
- * without a card. */
+ * Resolves with `"allow"`, `"deny"`, or `"too_many"`. If the thread has
+ * server-resolved Full Access (`bus.autoApply`) or `from.alwaysAllow`
+ * already covers the (action, target) pair, returns `"allow"` immediately
+ * without a card — neither standing grant ever asks the user, so neither
+ * counts against either cap.
+ *
+ * Otherwise, before any card is raised, checks the per-bot and workspace
+ * budgets. A peer request must never gain authority, and when we cannot
+ * ask the user (the budget is exhausted) we refuse — `"too_many"` — rather
+ * than fail open. A refusal here raises no card, sends no notification,
+ * and starts no peer turn. */
 export function requestPeerApproval(
   bus: ApprovalBus,
   from: BotRecord,
@@ -161,9 +183,19 @@ export function requestPeerApproval(
   message: string,
   action: PeerAction,
   sourceThreadId = from.threadId,
-): Promise<"allow" | "deny"> {
+): Promise<PeerApprovalVerdict> {
   if (bus.autoApply?.(from.id, sourceThreadId) || allowKeyAllowed(from, peerAllowKey(action, target.id))) {
     return Promise.resolve("allow");
+  }
+  let pendingForBot = 0;
+  for (const pending of pendingComms.values()) {
+    if (pending.fromBotId === from.id) pendingForBot += 1;
+  }
+  if (pendingForBot >= MAX_PENDING_PEER_APPROVALS_PER_BOT) {
+    return Promise.resolve("too_many");
+  }
+  if (pendingComms.size >= MAX_PENDING_PEER_APPROVALS) {
+    return Promise.resolve("too_many");
   }
   return new Promise((resolve) => {
     const requestId = newId();
