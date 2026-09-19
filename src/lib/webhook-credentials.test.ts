@@ -27,6 +27,17 @@ describe("webhook credential storage", () => {
     expect(loadWebhookCredentials(store)).toEqual({ "hook-1": credential });
   });
 
+  it("mints a legacy capability URL without doubling a trailing slash", () => {
+    const store = memoryStore();
+    store.setItem(
+      "omb-webhook-credentials",
+      JSON.stringify({ legacy: { endpointUrl: "http://127.0.0.1:8800/hooks/wh_demo/", secret: "whsec_demo" } }),
+    );
+    expect(loadWebhookCredentials(store)).toEqual({
+      legacy: { endpointUrl: "http://127.0.0.1:8800/hooks/wh_demo/", secret: "whsec_demo", url: "http://127.0.0.1:8800/hooks/wh_demo/whsec_demo" },
+    });
+  });
+
   it("ignores malformed entries and removes deleted webhooks", () => {
     const store = memoryStore();
     store.setItem("omb-webhook-credentials", JSON.stringify({ broken: { url: 3 }, "hook-1": credential }));

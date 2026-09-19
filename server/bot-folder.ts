@@ -79,10 +79,13 @@ export function checkSoulDrift(botId: string, soul: string, hash: string): SoulD
   try { return readSoulDrift(botId, soul, hash); } catch { return { drift: false }; }
 }
 
-export function removeBotFolder(botId: string): void {
+export function removeBotFolder(botId: string): boolean {
   try {
     rmSync(botFolder(botId), { recursive: true, force: true });
-  } catch {}
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** The standing-instructions block of the system prompt. Empty soul,

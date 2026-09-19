@@ -44,6 +44,23 @@ describe("BotListItem", () => {
     expect(markup).toContain('aria-label="Actions for Atlas"');
     expect(markup).toContain('aria-haspopup="menu"');
   });
+  it("marks the actions button expanded only while its own menu is open", () => {
+    const actionsButton = (markup: string) => markup.match(/<button[^>]*aria-label="Actions for Atlas"[^>]*>/)?.[0] ?? "";
+    const renderWithMenu = (menu?: { botId: string; x: number; y: number }) =>
+      renderToStaticMarkup(createElement(
+        StoreProvider,
+        null,
+        createElement(BotListItem, {
+          bot: bot(),
+          density: "comfortable",
+          menu,
+          onMenu: vi.fn(),
+        }),
+      ));
+    expect(actionsButton(renderRow(bot()))).toContain('aria-expanded="false"');
+    expect(actionsButton(renderWithMenu({ botId: "elsewhere", x: 0, y: 0 }))).toContain('aria-expanded="false"');
+    expect(actionsButton(renderWithMenu({ botId: "atlas", x: 0, y: 0 }))).toContain('aria-expanded="true"');
+  });
   it("keeps the native thread toggle beside, not inside, the selectable bot row", () => {
     const markup = renderRow(bot());
     expect(markup).toContain('role="button" tabindex="0"');
