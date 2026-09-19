@@ -27,6 +27,7 @@ import { customMcpServers,
   browserProfilePartitionTarget,
   browserProfileReplacementConflict,
   browserProfileRoutingConflict,
+  botChromeExecutablePath,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
@@ -1151,5 +1152,30 @@ describe("providerReloadKeys", () => {
     expect(providerReloadKeys({ claude: { model: "x" }, profile: { name: "me" } })).toEqual(["claude"]);
     expect(providerReloadKeys({ onboarding: { hintsSeen: ["tour.composer"] } })).toEqual([]);
     expect(providerReloadKeys({ profile: {}, language: "de", tts: {}, features: {} })).toEqual([]);
+  });
+});
+
+describe("botChromeExecutablePath", () => {
+  it("uses the configured Chrome only while the path exists, else the managed one", () => {
+    const configured = { browser: { chromePath: "C:\\Chrome\\chrome.exe" } };
+    expect(botChromeExecutablePath(configured, { exists: () => true })).toEqual({
+      source: "configured",
+      path: "C:\\Chrome\\chrome.exe",
+    });
+    // A vanished path (update, uninstall) fails soft instead of breaking bots.
+    expect(botChromeExecutablePath(configured, { exists: () => false })).toEqual({ source: "managed" });
+    expect(botChromeExecutablePath({}, { exists: () => true })).toEqual({ source: "managed" });
+    expect(botChromeExecutablePath({ browser: {} }, { exists: () => true })).toEqual({ source: "managed" });
+    // Blank strings never count as a configuration.
+    expect(botChromeExecutablePath({ browser: { chromePath: "   " } }, { exists: () => true })).toEqual({
+      source: "managed",
+    });
+  });
+
+  it("accepts a chromePath in a config patch and keeps it trimmed-optional", () => {
+    const patch = parseConfigPatch({ browser: { chromePath: " C:\\Chrome\\chrome.exe " } });
+    expect(patch.browser?.chromePath).toBe(" C:\\Chrome\\chrome.exe ");
+    expect(parseConfigPatch({ browser: {} }).browser).toEqual({});
+    expect(() => parseConfigPatch({ browser: { chromePath: 42 } })).toThrow();
   });
 });

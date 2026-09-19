@@ -327,6 +327,16 @@ const appConfigSchema = z.object({
    * engine: "elevenlabs" (default; needs a key) or "system" (the Mac's
    * built-in voices, no key). */
   tts: z.object({ key: optionalText, voice: optionalText, provider: z.enum(["elevenlabs", "system", "piper"]).optional() }).optional(),
+  browser: z
+    .object({
+      chromePath: z
+        .string()
+        .max(500)
+        .refine((value) => value.trim().length > 0, { message: "chromePath must not be blank" })
+        .optional(),
+    })
+    .strict()
+    .optional(),
   /** The "Astra" wake word: the Picovoice AccessKey for the renderer's
    * on-device Porcupine detector. Stored and reported configured-or-not
    * only; the key never leaves the server except to the user's own
@@ -397,6 +407,9 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" | "piper" };
+  /** The bots' browser. Absent chromePath = Astra's own bundled Chrome;
+   * a path = the user's installed Chrome, in the bot's own profile. */
+  browser?: { chromePath?: string };
   wakeWord?: { accessKey?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
@@ -479,6 +492,20 @@ export interface BrowserProfilePartitionTarget {
   profileId: string;
   /** Exact Electron storage identity: view routing and cleanup use it. */
   partitionId: string;
+}
+
+/** Where the bots' Chrome comes from: the configured installed Chrome if it
+ *  exists, else Astra's own bundled/pinned one. A configured path that has
+ *  vanished (update, uninstall) fails soft to the managed browser — the bot
+ *  keeps working and Settings can say the path is stale. */
+export function botChromeExecutablePath(
+  config: Pick<AppConfig, "browser">,
+  options: { exists?: (path: string) => boolean; home?: string } = {},
+): { source: "configured" | "managed"; path?: string } {
+  const exists = options.exists ?? existsSync;
+  const configured = config.browser?.chromePath?.trim();
+  if (configured && exists(configured)) return { source: "configured", path: configured };
+  return { source: "managed" };
 }
 
 export function browserProfilePartitionTarget(

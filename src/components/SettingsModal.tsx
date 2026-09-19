@@ -3,7 +3,7 @@
 // is the stuff shared by every bot: who you are, your keys, and the
 // machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
-import { Archive, Coins, FlaskConical, KeyRound, Mic, Monitor, Palette, Search, ShieldCheck, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
+import { Archive, Coins, FlaskConical, KeyRound, Loader2, Mic, Monitor, Palette, Search, ShieldCheck, TabletSmartphone, Terminal, User, Users, X, Building2 } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { analyticsEnabled, setAnalyticsEnabled } from "@/lib/analytics";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled, showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags";
@@ -428,6 +428,76 @@ function BrowserProfilesRow() {
   );
 }
 
+const WINDOWS_CHROME_HINT = "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe";
+
+/** Which Chrome the bots' browser launches: Astra's own managed one, or the
+ *  Chrome installed on this machine. A configured path that no longer exists
+ *  stays editable (so it can be fixed) while the server quietly falls back. */
+function ChromeBrowserRow() {
+  const { state, dispatch } = useStore();
+  const configured = state.config?.browser?.chromePath ?? "";
+  const [path, setPath] = useState(configured);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => setPath(configured), [configured]);
+
+  const save = async (next: string) => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ browser: { chromePath: next } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.browser.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card title={t("settings.browser.title")} subtitle={t("settings.browser.subtitle")}>
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={path}
+            onChange={(e) => setPath(e.target.value)}
+            onBlur={() => path.trim() !== configured && void save(path.trim())}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (path.trim() !== configured) void save(path.trim());
+              }
+            }}
+            placeholder={WINDOWS_CHROME_HINT}
+            spellCheck={false}
+            aria-label={t("settings.browser.title")}
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none"
+          />
+          <button
+            type="button"
+            onClick={() => void save(path.trim())}
+            disabled={saving || path.trim() === configured}
+            className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : t("settings.browser.save")}
+          </button>
+        </div>
+        <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.browser.hint")}</p>
+        {error ? (
+          <p role="alert" className="text-[12px] text-danger">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 /** Writes a redacted diagnostics file to a location the user picks. The
  * report holds versions, configured-or-not booleans and the server.log tail —
  * never credential values (the desktop shell does not read secret fields). */
@@ -655,6 +725,7 @@ export function SettingsModal() {
             {section === "experimental" && (
               <>
                 <ExperimentalFeaturesRow />
+                <ChromeBrowserRow />
                 <BrowserProfilesRow />
               </>
             )}

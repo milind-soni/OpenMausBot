@@ -127,6 +127,7 @@ import {
   NATIVE_DIR,
   customMcpServers,
   selfModifyEnabled,
+  botChromeExecutablePath,
 } from "./config.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
@@ -1129,12 +1130,17 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
   const profileTarget = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
   const partitionId = profile === "guest" ? "guest" : (profileTarget?.partitionId ?? "");
   const session = currentBrowserSession(botId, profile);
+  // The user can point every bot's browser at their own installed Chrome
+  // (Settings → Browser). The path is passed per launch; the bot still runs
+  // in its own agent-browser profile, never the user's signed-in one.
+  const chrome = botChromeExecutablePath(cfg);
+  const chromeEnv: Record<string, string> = chrome.source === "configured" ? { AGENT_BROWSER_EXECUTABLE_PATH: chrome.path! } : {};
   const spec = agentBrowserIntegration({
       binaryPath: status.binaryPath,
       session,
       encryptionKey: browserEngineEncryptionKey(),
       persistent: profile !== "guest",
-      env: { ...process.env, PATH: augmentedPath() },
+      env: { ...process.env, PATH: augmentedPath(), ...chromeEnv },
     });
   await prepareBrowserSessionState(status.binaryPath, session, { env: spec.env, persistent: profile !== "guest", isCurrent: () => {
     const current = store.bot(botId);

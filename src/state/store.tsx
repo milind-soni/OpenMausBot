@@ -473,6 +473,8 @@ export interface ConfigStatus {
   browserEngine?: BrowserEngineSummary;
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
+  /** Which Chrome the bots' browser launches; absent = Astra's managed one. */
+  browser?: { chromePath?: string };
 }
 
 export interface BrowserEngineSummary {
