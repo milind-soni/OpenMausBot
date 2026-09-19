@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
+import type { Handoffs } from "./delta-context.ts";
+import { createRoutineWiring } from "./routine-wiring.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -12,6 +14,7 @@ import {
   type RoutineRun,
   type RoutineSchedule,
 } from "./routines.ts";
+import { store } from "./runtime.ts";
 
 const dirs: string[] = [];
 
@@ -2646,5 +2649,55 @@ describe("routine continuity", () => {
       schedule: { type: "once", at: new Date(2026, 7, 17, 9, 0, 0).getTime() },
       continuity: true,
     })).toThrow(/continuity/i);
+  });
+});
+
+describe("routine wiring failure reports", () => {
+  it("redacts a secret-shaped routine name before the incident and notification", async () => {
+    const bot = store.createBot();
+    let dispatchState: "ready" | "busy" | "missing" = "ready";
+    const incidents: Array<{ detail: string }> = [];
+    const notificationBodies: string[] = [];
+    const wiring = createRoutineWiring({
+      events: {
+        broadcast: () => {},
+        notify: (notification) => notificationBodies.push(notification?.body ?? ""),
+      },
+      fold: {
+        routineSourceOwner: () => null,
+        routineSourceThread: () => null,
+      },
+      helpers: {
+        unattendedDispatchState: () => dispatchState,
+        roomSetupPending: () => false,
+        groupIsWorking: () => false,
+        startGroupTurn: () => undefined,
+        cancelGroupTurnOperations: () => undefined,
+        cancelDirectTurnDispatch: () => undefined,
+        runningTurnInstance: () => null,
+        handoffs: { forget: () => {} } as unknown as Handoffs,
+        reportIncident: (input) => incidents.push(input),
+      },
+      state: {
+        groupSpeakers: new Map(),
+        delegationWatch: new Map(),
+        pendingDelegationWakes: new Map(),
+        publicBot: (publicRecord) => ({ id: publicRecord.id, name: publicRecord.name }),
+        startTurn: async () => {},
+      },
+    });
+    wiring.routines.create({
+      name: "Rotate sk-ant-feeddeadbeef1234",
+      prompt: "Rotate the credential",
+      botId: bot.id,
+      schedule: { type: "once", at: Date.now() },
+    });
+    dispatchState = "missing";
+    await wiring.routines.tick();
+
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]!.detail).toContain("«redacted");
+    expect(incidents[0]!.detail).not.toContain("sk-ant-feeddeadbeef1234");
+    expect(notificationBodies.join(" ")).not.toContain("sk-ant-feeddeadbeef1234");
   });
 });

@@ -118,8 +118,8 @@ function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers:
     patch({ mcpServers: next });
   };
   const openPlugins = () => {
-    dispatch({ type: "toggleSettings", open: false });
-    dispatch({ type: "togglePlugins", open: true, surface: "mcp" });
+    dispatch({ type: "closeOverlay", kind: "settings" });
+    dispatch({ type: "openOverlay", kind: "plugins", open: true, section: "mcp" });
   };
 
   return (
@@ -360,8 +360,8 @@ export function AccessSection({
           <button
             type="button"
             onClick={() => {
-              dispatch({ type: "toggleSettings", open: false });
-              dispatch({ type: "togglePlugins", open: true, surface: "apps" });
+              dispatch({ type: "closeOverlay", kind: "settings" });
+              dispatch({ type: "openOverlay", kind: "plugins", open: true, section: "apps" });
             }}
             className="mt-3 flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
           >
