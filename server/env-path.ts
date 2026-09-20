@@ -42,6 +42,7 @@ function knownDirs(): string[] {
     join(home, ".volta", "bin"),
     join(home, ".bun", "bin"),
     join(home, ".asdf", "shims"),
+    join(home, ".local", "share", "mise", "shims"), // mise installer
     join(home, ".deno", "bin"),
     join(home, "bin"),
     ...nvmBinDirs(),
