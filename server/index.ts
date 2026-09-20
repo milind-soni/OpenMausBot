@@ -1715,9 +1715,9 @@ function settleDirectCoordination(generation: string | undefined, outcome: Direc
   directCoordinationSettlers.delete(generation);
   settle?.(outcome);
 }
-function settleDirectFollowup(generation: string | undefined): void {
+function settleDirectFollowup(generation: string | undefined, outcome: DirectTurnOutcome = { ok: false, text: "The coordinated turn was interrupted" }): void {
   if (!generation) return;
-  settleDirectCoordination(generation, { ok: false, text: "The coordinated turn was interrupted" });
+  settleDirectCoordination(generation, outcome);
   const pending = directFollowupSettlers.get(generation);
   if (!pending) return;
   directFollowupSettlers.delete(generation);
@@ -8491,7 +8491,6 @@ async function startTurn(
     } catch (e) {
       handoffs.abandon(threadId, dispatchClaimId);
       if (computerSelectionTurns.get(threadId)?.generation === dispatchClaimId) computerSelectionTurns.delete(threadId);
-      settleDirectFollowup(dispatchClaimId);
       clearCancelledProviderHandshake(threadId, `direct:${dispatchClaimId}`);
       clearDirectTurnDispatch(threadId, dispatchClaimId);
       revokeInternalCapabilityGeneration(threadId, dispatchClaimId);
@@ -8506,6 +8505,7 @@ async function startTurn(
         turnContext.delete(threadId);
       }
       if (e instanceof DirectTurnSetupCancelled) {
+        settleDirectFollowup(dispatchClaimId, { ok: false, text: e.message });
         opts?.onDispatchError?.(e.message);
         if (ownsLatestGeneration && threadBusy(bot.id, threadId)) {
           store.setTaskActivity(bot.id, threadId, "idle");
@@ -8521,8 +8521,12 @@ async function startTurn(
         }
         return;
       }
-      if (!ownsLatestGeneration) return;
+      if (!ownsLatestGeneration) {
+        settleDirectFollowup(dispatchClaimId);
+        return;
+      }
       const message = e instanceof Error ? e.message : String(e);
+settleDirectFollowup(dispatchClaimId, { ok: false, text: message });
       // The wait already wrote its failure resolution; keep all dispatch
       // failure bookkeeping below without adding the same error twice.
       if (!(e instanceof ComputerWaitGaveUp)) store.appendMessage(threadId, {
