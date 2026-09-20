@@ -41,14 +41,11 @@ export function ReplySections({
 
   // no headings: nothing was authored to fold, and splitting a reply the
   // reader never structured would hide a paragraph they did not ask to hide.
-  // It renders `display`, not the raw prop: a tool payload that owned its line
-  // is already gone from it. The voice has never read the leak, and the reader
-  // is the other half of the same reply — showing it here was the one place
-  // the two audiences disagreed.
+  // It renders `display`, not the raw prop, so a payload stripped for the
+  // voice is gone from the reader's half too.
   if (!parts.structured) return markdown(parts.display);
 
   const shown = parts.titles.slice(0, MAX_TITLES).join(" · ");
-  const hidden = parts.titles.length - MAX_TITLES;
   return (
     <div className="flex flex-col gap-1.5">
       {/* a reply that opened with its own heading: the label it chose, kept
@@ -68,7 +65,6 @@ export function ReplySections({
               <span className="truncate">
                 {t(open ? "chat.reply.hideDetail" : "chat.reply.showDetail")}
                 {shown ? ` · ${shown}` : ""}
-                {!open && hidden > 0 ? ` ${t("chat.reply.moreSections", { count: hidden })}` : ""}
               </span>
             </button>
           </div>

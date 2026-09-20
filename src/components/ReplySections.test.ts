@@ -53,12 +53,6 @@ describe("ReplySections", () => {
     expect(html).toContain("action");
   });
 
-  it("leaves an inline payload in the sentence around it", () => {
-    const html = render('The policy uses {"action": "click", "x": 1} by default.');
-    expect(html).toContain("The policy uses");
-    expect(html).toContain("by default.");
-  });
-
   it("keeps the lead's own heading as a label for a reply that opens with one", () => {
     const html = render("## Summary\n\nI fixed the redirect.\n\n## Detail\n\nThe query string.");
     expect(html).toContain("Summary");

@@ -4,7 +4,9 @@
 // the kitchen at 8am.
 import { describe, expect, it } from "vitest";
 
-import { narrateTool, speakable, spokenReply, toUtterances } from "./speech-text.ts";
+import { narrateTool, speakable, toUtterances } from "./speech-text.ts";
+// the function lives in shared/, and this file is where it meets toUtterances
+import { spokenReply } from "../../shared/reply-sections.ts";
 
 describe("speakable", () => {
   it("names a code block instead of reading it", () => {

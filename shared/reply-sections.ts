@@ -1,41 +1,25 @@
 // The shape of a bot reply, decided in one place.
 //
-// A reply has two audiences. Somebody reading it will scroll through a diff,
-// a table, and a list of paths without complaint. Somebody *listening* wants
-// the two sentences that say what happened. `server/tts/speech-text.ts`
-// already rewrites markdown into something a voice can survive, but a filter
-// can only make the wrong text less annoying — it cannot know which half was
-// the answer, and on a long reply it reads the whole thing either way.
+// A reply has two audiences: somebody reading a transcript, and somebody
+// hearing it read aloud. A filter over the finished text cannot tell which
+// half was the answer, so the reply carries the decision itself as a section
+// convention — a lead in plain prose, then detail under markdown headings,
+// opened on purpose. `spokenReply` at the bottom is the half a voice reads.
 //
-// So the reply carries that decision itself, as a section convention: a lead
-// in plain prose a voice can read and a reader takes in at a glance, then
-// detail under markdown headings — the diff, the table, the paths — opened on
-// purpose. These rules find the boundary.
+// Text that never adopted the convention still has to work, because every
+// message already in a transcript is such a text: with no headings the reader
+// keeps the whole reply and the voice gets its first paragraph.
 //
-// They also have to hold up on text that never adopted the convention,
-// because every message already in a transcript is such a text: a reply with
-// no headings keeps its whole body for the reader and gets its first
-// paragraph for the voice, which is the best guess available and much better
-// than reading a file list aloud.
+// Real transcripts also contain a model that wrote its tool call as reply
+// text — `{ "action": "press", "keys": ["win", "r"] }` — and narrated the
+// mechanics. Both belong to the tool channel, so they are stripped before
+// sectioning. A reply that was nothing but leak keeps its raw text for the
+// reader (the only honest thing to show) and is marked so the voice is silent.
 //
-// One more thing arrives in real transcripts: a model that wrote its tool
-// call as reply text — `{ "action": "press", "keys": ["win", "r"] }` — and
-// narrated the mechanics ("We need to output tool use calls."). Both belong
-// to the tool channel and the activity chips; neither is prose. The leak is
-// stripped before sectioning, so neither audience reads it. A reply that is
-// nothing but leak keeps its raw text for the reader (it is the only honest
-// thing to show) and is marked so the voice stays silent.
-//
-// Only a payload that owns its line is taken out. One that shares a line with
-// prose is left exactly as written, because removing it edits the sentence
-// around it: `The policy uses {"action": "click", "x": 1} by default.`
-// reads as "The policy uses by default." — and that is the sentence a voice
-// then says aloud. A guard that keeps the display clean must never damage it,
-// so where a payload cannot be lifted out whole, with its line holding nothing
-// else and its sentence intact, it stays, payload and all.
-//
-// Pure and synchronous, like the spoken register it feeds: it is the piece
-// most likely to need tuning against real transcripts.
+// Only a payload that owns its line is taken out. One sharing a line with
+// prose stays as written, because removing it would edit the sentence around
+// it: a guard that keeps the display clean must never be the thing that
+// damages it.
 
 export interface ReplyParts {
   /** What a voice reads and a reader sees first: the reply's opening — the
@@ -50,10 +34,9 @@ export interface ReplyParts {
    * only a lead. */
   detail: string;
   /** The reply as the reader should see it when nothing is folded: the text
-   * with any leaked tool payload removed — or the raw text for a reply that
-   * was nothing but leak, which is the only honest thing to show. Deriving it
-   * here rather than in the renderer is the point: the reader and the voice
-   * must not disagree about what the reply says. */
+   * with any leaked payload removed, or the raw text for a reply that was
+   * nothing but leak. Derived here so the reader and the voice cannot
+   * disagree about what the reply says. */
   display: string;
   /** The heading titles inside `detail`, in order, for a fold row that has to
    * earn its place with what is behind it. */
@@ -77,51 +60,51 @@ interface Heading {
   title: string;
 }
 
+/** Per-character marks for fenced code: a fence's marker lines and every line
+ * between them. Both readers below need the same rule, and the rule is subtle
+ * — a fence closes only on its own character, so ``` inside a ~~~ block stays
+ * code and never reopens anything. */
+function fenceMask(text: string): Uint8Array {
+  const masked = new Uint8Array(text.length);
+  let fence: string | null = null;
+  let offset = 0;
+  for (const line of text.split("\n")) {
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (marker) {
+      const char = marker[1][0];
+      if (!fence) fence = char;
+      else if (fence === char) fence = null;
+    }
+    if (fence || marker) masked.fill(1, offset, offset + line.length);
+    offset += line.length + 1;
+  }
+  return masked;
+}
+
 /** ATX headings outside fenced code. A `# install deps` line inside a shell
- * snippet is a comment, not a section, so fences are tracked first — one
- * misread fence would fold the reply in the middle of a command. */
+ * snippet is a comment, not a section, so one misread fence would fold the
+ * reply in the middle of a command. */
 function headings(text: string): Heading[] {
   const found: Heading[] = [];
-  let fence: string | null = null;
+  const fenced = fenceMask(text);
   let offset = 0;
   for (const line of text.split("\n")) {
     const start = offset;
     offset += line.length + 1;
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (marker) {
-      const char = marker[1][0];
-      // a fence closes only on its own character, so ``` inside a ~~~ block
-      // stays code and never reopens anything
-      if (!fence) fence = char;
-      else if (fence === char) fence = null;
-      continue;
-    }
-    if (fence) continue;
+    if (fenced[start]) continue;
     const heading = /^ {0,3}#{1,6}[ \t]+(.*?\S)[ \t]*$/.exec(line);
     if (heading) found.push({ start, end: start + line.length, title: heading[1] });
   }
   return found;
 }
 
-/** Keys a computer action payload uses — the vocab of the computer tools'
- * input schemas (click, press_key, computer_batch items, …). A JSON object
- * whose every key is in this set and that carries an `action` is a tool call
- * written as text, never something to read aloud. */
-const ACTION_KEYS = new Set([
-  "action", "keys", "key", "text", "x", "y", "button", "double", "direction",
-  "clicks", "ms", "url", "element", "coordinate", "duration", "app", "window",
-  "observe", "wait", "screenshot",
-]);
-
+/** A JSON object carrying a string `action` is a computer tool call written as
+ * text, never something to read aloud. Bounded, so a large configuration blob
+ * that happens to own an `action` key is left alone. */
 function looksLikeAction(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length === 0 || entries.length > 12) return false;
-  if (!entries.some(([key, value]) => key === "action" && typeof value === "string")) return false;
-  return entries.every(([key, entry]) =>
-    ACTION_KEYS.has(key) &&
-    (typeof entry === "string" || typeof entry === "number" || typeof entry === "boolean" ||
-      (key === "keys" && Array.isArray(entry) && entry.every((item) => typeof item === "string"))));
+  return entries.length <= 12 && entries.some(([key, entry]) => key === "action" && typeof entry === "string");
 }
 
 /** Index of the bracket closing the one opened at `start`, strings aware.
@@ -152,50 +135,19 @@ function balancedEnd(text: string, start: number): number {
 
 /** The mechanics of acting, narrated as if the reader asked for them: a line
  * that says it is emitting tool calls — "We need to output tool use calls."
- * Whole lines matching this are dropped, and a reply that is nothing but such
- * lines is silent.
- *
- * One pattern, deliberately narrow: it names the act of emitting tool calls,
- * which no ordinary sentence does. Two broader ones used to sit beside it —
- * `we need to <verb>` and `now let's <verb>` — and they deleted prose: "We
- * need to send the report to the team before Friday.", "I need to call the
- * vendor about the invoice." and "Then let us call it a day." all matched, so
- * each was removed and, alone in a reply, left the voice with nothing to say.
- * A modal and a verb cannot tell narration from intent — "we need to call the
- * tool library" is a plan, not a leak — so those patterns are gone rather than
- * narrowed. A line that never names tool calls is shown, which is
- * recoverable; deleting a real sentence is not. */
-const NARRATION_LINE = [
-  /\boutput(?:ting)?\s+(?:the\s+)?tool(?:\s*use)?\s+calls?\b/i,
-];
+ * One narrowly-scoped pattern, because it names the act of emitting calls and
+ * no ordinary sentence does. Broader ones — `we need to <verb>`, `now let's
+ * <verb>` — matched prose ("We need to send the report to the team before
+ * Friday.", "Then let us call it a day.") and, alone in a reply, left the
+ * voice with nothing to say: showing a stray mechanics line is recoverable,
+ * deleting a real sentence is not. */
+const TOOL_NARRATION = /\boutput(?:ting)?\s+(?:the\s+)?tool(?:\s*use)?\s+calls?\b/i;
 
 /** Bare (unfenced) JSON tool payloads and narration lines out; fenced code
- * stays — a ```json block is usually a legitimate example, and the reader
- * asked for code there. Returns "" when everything was leak.
- *
- * Removal is line-granular and deliberately conservative: a payload is taken
- * out only when nothing but whitespace shares its line, so the text that
- * survives is exactly the text that was written. A payload inside a sentence
- * is kept — the module header says why showing it beats deleting the words
- * around it. */
-export function stripToolLeak(text: string): string {
-  const lines = text.split("\n");
-  // Per-character fenced marks: the scanner must not eat a payload inside a
-  // code block, and a `# comment` inside one is not a heading either.
-  const fenced = new Uint8Array(text.length);
-  let fence: string | null = null;
-  let offset = 0;
-  for (const line of lines) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (marker) {
-      const char = marker[1][0];
-      if (!fence) fence = char;
-      else if (fence === char) fence = null;
-    }
-    if (fence || marker) fenced.fill(1, offset, offset + line.length);
-    offset += line.length + 1;
-  }
-
+ * stays — a ```json block is a legitimate example, and the reader asked for
+ * code there. Returns "" when everything was leak. */
+function stripToolLeak(text: string): string {
+  const fenced = fenceMask(text);
   let out = "";
   let i = 0;
   while (i < text.length) {
@@ -213,13 +165,8 @@ export function stripToolLeak(text: string): string {
         } catch {
           leak = false;
         }
-        // Line-granular, and the whole point of the guard: a payload is only
-        // removable when its line holds nothing else. Inside a sentence, the
-        // deletion would edit the prose — `The policy uses {...} by default.`
-        // losing its payload reads as "The policy uses by default." — so the
-        // sentence is left intact, payload and all. Where removal cannot be
-        // clean, it is not done: a guard that protects the display must never
-        // be the thing that damages it.
+        // Line-granular: removable only when nothing else shares the line, so
+        // the surviving text is exactly the text that was written.
         const lineStart = text.lastIndexOf("\n", i - 1) + 1;
         const lineEnd = text.indexOf("\n", end + 1);
         const before = text.slice(lineStart, i);
@@ -240,11 +187,8 @@ export function stripToolLeak(text: string): string {
     i++;
   }
 
-  const kept = out
-    .split("\n")
-    .filter((line) => !NARRATION_LINE.some((rule) => rule.test(line)))
-    .join("\n");
-  return kept.replace(/\n{3,}/g, "\n\n").trim();
+  const kept = out.split("\n").filter((line) => !TOOL_NARRATION.test(line));
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 export function splitReply(input: string): ReplyParts {
@@ -296,20 +240,12 @@ export function splitReply(input: string): ReplyParts {
 /**
  * The half of a reply a voice reads.
  *
- * One owner, because this is a decision rather than a detail: the harness route
- * (`/api/tts/prepare`) and the renderer's own speech engine both need the same
- * answer, and they cannot see each other — nothing in `src/` may import
- * `server/`, so the only home they share is here, beside the split that
- * produces it. Two copies of a rule like this drift the moment one is touched,
- * which is exactly what happened when it lived in both shapes at once.
- *
- * A reply written to the section convention says what happened in its lead and
- * keeps the diff, the paths, and the tables under headings for the eye, so the
- * voice gets the lead. A reply that never adopted the convention falls back to
- * its whole text, exactly as it was spoken before a convention existed. A reply
- * that is nothing but a leaked tool payload is not prose at all, so it is
- * silent — the reader still sees it raw, and `toolLeakOnly` is how they know.
- */
+ * One owner: the harness route (`/api/tts/prepare`) and the renderer's own
+ * speech engine both need this answer and cannot see each other — nothing in
+ * `src/` may import `server/` — so it lives beside the split that produces
+ * it. A reply written to the convention gets its lead; one that never adopted
+ * it falls back to its whole text; one that is nothing but a leaked payload is
+ * silent, since there is no prose in it to say. */
 export function spokenReply(input: string): string {
   const parts = splitReply(input);
   return parts.toolLeakOnly ? "" : (parts.lead || input).trim();

@@ -142,11 +142,6 @@ describe("splitReply tool-leak stripping", () => {
     expect(parts.display).not.toContain("action");
   });
 
-  it("leaves an inline payload in what the reader is shown, unedited", () => {
-    const inline = 'The policy uses {"action": "click", "x": 1} by default.';
-    expect(splitReply(inline).display).toBe(inline);
-  });
-
   it("leaves ordinary JSON-looking prose and narration alone", () => {
     const body = "Let me check the screen first. The config accepts {\"retries\": 3} per job.";
     const parts = splitReply(body);
@@ -160,6 +155,7 @@ describe("splitReply tool-leak stripping", () => {
   it("leaves a payload inside a sentence alone rather than editing the sentence", () => {
     const inline = 'The policy uses {"action": "click", "x": 1} by default.';
     expect(splitReply(inline).lead).toBe(inline);
+    expect(splitReply(inline).display).toBe(inline);
     const typed = 'I set {"action":"type","text":"hello"} in the script.';
     expect(splitReply(typed).lead).toBe(typed);
   });

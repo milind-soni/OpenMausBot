@@ -138,16 +138,6 @@ export function speakable(input: string): string {
  * decimal, an ellipsis, or a common abbreviation. */
 const BOUNDARY = /(?<!\b(?:e\.g|i\.e|etc|vs|Dr|Mr|Mrs|Ms|No|approx))(?<![.\d])([.!?])(["')\]]*)\s+/g;
 
-/** The half of a reply a voice reads — re-exported, not implemented.
- *
- * Which half is spoken is a reply-shape decision, and it has one owner:
- * `shared/reply-sections.ts`, beside the split that produces it. It cannot
- * live here, because the renderer's own speech engine asks the same question
- * and nothing in `src/` may import `server/`; a second copy of the rule on
- * that side is what drifted. The name is still exported from this module
- * because this is where the server asks for text a voice can read. */
-export { spokenReply } from "../../shared/reply-sections.ts";
-
 /**
  * Split speakable text into utterances a synthesizer can start on.
  *

@@ -226,7 +226,8 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import * as piperInstall from "./tts/piper-install.ts";
-import { narrateTool, spokenReply, toUtterances } from "./tts/speech-text.ts";
+import { narrateTool, toUtterances } from "./tts/speech-text.ts";
+import { spokenReply } from "../shared/reply-sections.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
