@@ -39,6 +39,7 @@ import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -1116,6 +1117,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                 ok: item.status !== "failed" && item.status !== "declined",
                 output: toolDetailPreview(item.type === "commandExecution" ? { output: item.aggregatedOutput, exitCode: item.exitCode } : item.type === "mcpToolCall" ? item.error ?? item.result : item.type === "fileChange" ? item.changes : item.action),
               });
+              if (item.type === "mcpToolCall") {
+                for (const img of extractMcpImages(item.result)) {
+                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+                }
+              }
             } else if (item.type === "reasoning") {
               emit({ ...base(threadId, turnId), type: "item.updated", itemType: "reasoning", tokens: null });
             }

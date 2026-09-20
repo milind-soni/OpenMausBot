@@ -45,6 +45,7 @@ import {
 } from "./local-inject.ts";
 import { appendNative } from "./native.ts";
 import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts";
 import {
   ASK_USER_QUESTION_TOOL,
   askQuestionSummary,
@@ -1665,6 +1666,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             for (const b of Array.isArray(o.message?.content) ? o.message.content : []) {
               if (b.type === "tool_result") {
                 emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "tool", itemId: b.tool_use_id, ok: !b.is_error, output: toolDetailPreview(b.content) });
+                for (const img of extractMcpImages(b.content)) {
+                  emit({ ...base(threadId, currentTurnId()), type: "item.completed", itemType: "assistant_image", data: img.data });
+                }
               }
             }
             break;

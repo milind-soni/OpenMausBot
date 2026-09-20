@@ -51,6 +51,7 @@ import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 
 import { appendNative } from "../native.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
+import { extractMcpImages } from "../../mcp-tool-images.ts";
 
 export interface AcpConfig {
   cli: string;
@@ -864,6 +865,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   ok: u.status !== "failed",
                   output: toolDetailPreview(u.rawOutput ?? u.content),
                 });
+                for (const img of extractMcpImages(u.content ?? u.rawOutput)) {
+                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+                }
               }
               break;
             }
