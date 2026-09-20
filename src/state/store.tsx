@@ -721,6 +721,8 @@ export interface AppState {
   /** Session discoveries stay with their conversation and never enter persisted settings. */
   modelVariantSessions: Record<string, ModelVariantSession>;
   config: ConfigStatus | null;
+  /** Eligibility of this browser session, never a persisted bot setting. */
+  browserFullAccess?: boolean;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
   activeView: "chat" | "team-map" | "routines";
@@ -929,6 +931,7 @@ export type Action =
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
+  | { type: "browserApprovalCapabilities"; fullAccess: boolean }
   | { type: "select"; id: string }
   | {
       type: "send";
@@ -1380,6 +1383,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, instances: action.instances };
     case "configStatus":
       return { ...state, config: action.config };
+    case "browserApprovalCapabilities":
+      return { ...state, browserFullAccess: action.fullAccess };
     case "select": {
       if (state.groups.some((g) => g.id === action.id)) {
         return {
@@ -2079,6 +2084,7 @@ export const initialState: AppState = {
   sections: [],
   instances: [],
   config: null,
+  browserFullAccess: false,
   selectedId: "",
   activeView: "chat",
   routines: [],
@@ -2180,7 +2186,20 @@ type TrustedApprovalBridge = {
   ): Promise<BotAnnouncement>;
 };
 
-/** Composer changes use the same private bridge as bot settings, but never
+/** The server independently enforces host opt-in and paired admin cookies.
+ * Reuse grant ordering/cancellation without widening the desktop bridge. */
+export function browserApprovalBridge(request: typeof api = api): TrustedApprovalBridge {
+  return { async setMode(botId, mode, options) {
+    if (mode === "custom") throw new Error("Custom approval requires the packaged desktop app");
+    const result = await request<{ bot: BotAnnouncement }>(`/api/bots/${encodeURIComponent(botId)}/browser-approval`, {
+      method: "POST",
+      body: JSON.stringify({ mode, ...options, ...(mode === "full" ? { confirmFullAccess: true } : {}) }),
+    });
+    return result.bot;
+  } };
+}
+
+/** Composer changes use the same approval bridge as bot settings, but never
  * change profile defaults. Confirmation is UI state, never an HTTP credential. */
 export async function persistTaskApproval(
   botId: string, threadId: string, patch: TaskUpdatePatch,
@@ -2199,8 +2218,9 @@ export async function persistTaskApproval(
   return result.bot;
 }
 
-/** Persist one coalesced bot edit without ever putting Full/Custom authority
- * on the bot-accessible HTTP surface. Entering a trusted mode writes ordinary
+/** Persist one coalesced bot edit through the selected approval bridge. The
+ * default desktop path is private; opt-in browser grants use a separate
+ * authenticated route. Entering a trusted mode writes ordinary
  * fields first, then grants authority. Leaving Custom reverses that order so a
  * coalesced provider switch is validated after the bot is back in Ask/Auto.
  * Exported for a small ordering/security contract test. */
@@ -2478,7 +2498,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     () =>
       createBotPatchQueue({
         send: (botId, patch, signal, currentBot) =>
-          persistBotUpdate(botId, patch, signal, api, window.ogb?.approvals, currentBot),
+          persistBotUpdate(botId, patch, signal, api,
+            window.ogb?.approvals ?? (stateRef.current.browserFullAccess ? browserApprovalBridge() : undefined), currentBot),
         reconcile: async (botId, signal) => {
           const result: { bots: BotAnnouncement[] } = await api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`, { signal });
           return result.bots.find((candidate) => candidate.id === botId) ?? null;
@@ -2565,7 +2586,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               threadId, modelSelection: patch.modelSelection, updateBotDefault: Boolean(patch.updateBotDefault),
             });
           }
-          return persistTaskApproval(botId, threadId, patch, window.ogb?.approvals);
+          return persistTaskApproval(botId, threadId, patch,
+            window.ogb?.approvals ?? (stateRef.current.browserFullAccess ? browserApprovalBridge() : undefined));
         });
       // Later edits still get saved after an earlier failure, but a send
       // awaiting this batch must observe every rejected setting in it. A
@@ -3237,7 +3259,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
-    type PeripheralKey = "instances" | "config" | "routines" | "webhooks";
+    type PeripheralKey = "instances" | "config" | "routines" | "webhooks" | "approvals";
     type PeripheralPart = {
       key: PeripheralKey;
       request: () => Promise<() => void>;
@@ -3258,6 +3280,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return current;
     };
     const peripheralParts: PeripheralPart[] = [
+      {
+        key: "approvals",
+        request: async () => {
+          // Older servers have no capability route; stay compatible and closed.
+          const result = await api<{ browserFullAccess: boolean }>("/api/approval-capabilities")
+            .catch(() => ({ browserFullAccess: false }));
+          return () => rawDispatch({ type: "browserApprovalCapabilities", fullAccess: result.browserFullAccess === true });
+        },
+      },
       {
         key: "instances",
         request: async () => {

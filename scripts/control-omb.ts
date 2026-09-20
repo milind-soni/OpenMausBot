@@ -386,6 +386,8 @@ export async function launchVerificationServer(
   extraProviders: Array<"codex"> = [],
   /** Programmatic tests only: an owned loopback Box provider, never a live account. */
   boxFixtureApi?: string,
+  /** Explicit fixture policy; never inherited from the operator's shell. */
+  hostPolicy?: { browserFullAccess: boolean },
 ): Promise<VerificationServer> {
   if (boxFixtureApi) {
     if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
@@ -446,6 +448,7 @@ export async function launchVerificationServer(
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
   if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
+  if (hostPolicy?.browserFullAccess) childEnv.OMB_ALLOW_BROWSER_FULL_ACCESS = "1";
   const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
     cwd: ROOT,
     env: childEnv,

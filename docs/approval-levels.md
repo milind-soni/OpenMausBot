@@ -15,14 +15,45 @@ Access, OMB also applies its own configuration tools without another approval.
 | **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Delegation uses the receiving bot's setting, never the sender's — except from a Chief of Staff with Full access (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
-Full access is an elevated-risk standing approval. Full and Custom can only be
-enabled from a packaged local desktop app, where the choice crosses a private
-process channel rather than the bot-accessible HTTP API. They are hidden in
-development, standalone web, and remote pages. Full access does not bypass operating
+Full access is an elevated-risk standing approval. By default, Full and Custom
+can only be enabled from a packaged local desktop app, where the choice crosses
+a private process channel rather than the bot-accessible HTTP API. Self-hosted
+standalone servers can explicitly enable browser Full access as described below.
+Custom remains desktop-only. Full access does not bypass operating
 system privacy controls, authentication, CAPTCHA or MFA, service permissions,
 or workspace/team ownership and computer-sharing grants. Full Access controls
 approval prompts; it does not sign in for you, enable a feature you disabled,
 or grant another bot access to a different workspace.
+
+### Full access in a self-hosted browser
+
+In the permission menu, this mode appears as **Dangerously approve all**; the
+composer chip reads **Approve all**. It uses the existing Full access behavior.
+
+Set `OMB_ALLOW_BROWSER_FULL_ACCESS=1` in the standalone server's environment
+and restart it. Docker Compose forwards this setting from its environment or
+`.env` file. The default is `0`; packaged desktop hosts and managed portal
+workspaces ignore the setting.
+
+Pair the browser with an **admin** session, then choose **Full access** from
+the conversation's approval menu and confirm. This changes only that thread.
+The bot's **Permissions** settings can also set Full access as its default for
+new conversations; existing threads retain their settings. Choose **Ask for
+approval** to restore prompts.
+
+The dedicated browser grant route requires a live admin session cookie and a
+matching Origin. Loopback trust, client sessions, bearer tokens, and stream
+tickets cannot grant access through it. The normal bot/thread PATCH APIs still
+reject Full-access elevation, and Custom cannot be enabled or changed here.
+The confirmation is consent, not an authentication credential.
+
+This is an explicit change to the host's trust policy. It trusts administrative
+browser sessions instead of requiring the desktop's private process channel.
+It does not protect against processes that can read or modify the server's
+session/configuration data or mint administrative sessions. Deploy the host
+under the account and isolation policy appropriate for the bots you run.
+Turning the setting off prevents new browser grants; it does not revoke saved
+Full-access choices.
 
 The effective setting belongs to the source conversation. An existing Ask
 thread remains Ask even if the bot default is Full; a Full thread works without

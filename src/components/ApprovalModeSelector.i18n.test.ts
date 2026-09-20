@@ -42,7 +42,7 @@ describe("held notes name the buttons the selector shows", () => {
       // new level, not yet drafted: English fallback
       "Auto-accept edits",
       "Aprovar por mim",
-      "Acesso total",
+      "Aprovar tudo (perigoso)",
       "Personalizado (config.toml)",
     ]);
 

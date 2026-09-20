@@ -44,13 +44,14 @@ export function approvalModeOptions(): ApprovalModeOption[] {
   }));
 }
 
-export function approvalModeOptionsFor(driverKind: string, trustedModesAvailable = true) {
+export function approvalModeOptionsFor(driverKind: string, trustedModesAvailable = true, browserFullAccessAvailable = false) {
   return approvalModeOptions()
     .filter((option) => supportsApprovalMode(driverKind, option.mode)
       // Antigravity has no native reviewer. Offer its explicit full-access
       // grant as Auto instead of a second choice that actually behaves as Ask.
       && (driverKind !== "antigravityAgent" || option.mode !== "auto")
-      && (trustedModesAvailable || option.mode === "ask" || option.mode === "edits" || option.mode === "auto"))
+      && (trustedModesAvailable || option.mode === "ask" || option.mode === "edits" || option.mode === "auto"
+        || (option.mode === "full" && browserFullAccessAvailable)))
     .map((option) => {
       if (driverKind === "antigravityAgent" && option.mode === "full") {
         return {
@@ -92,6 +93,7 @@ export function ApprovalModeSelector({
   wide = false,
   disabled = false,
   trustedModesAvailable = true,
+  browserFullAccessAvailable = false,
   trustedModesNotice,
 }: {
   approvalMode?: ApprovalMode;
@@ -104,6 +106,7 @@ export function ApprovalModeSelector({
   wide?: boolean;
   disabled?: boolean;
   trustedModesAvailable?: boolean;
+  browserFullAccessAvailable?: boolean;
   trustedModesNotice?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -116,7 +119,7 @@ export function ApprovalModeSelector({
   const current = approvalModeOptionsFor(driverKind).find((option) => option.mode === mode)
     ?? allOptions.find((option) => option.mode === mode)
     ?? allOptions[0];
-  const visibleOptions = approvalModeOptionsFor(driverKind, trustedModesAvailable);
+  const visibleOptions = approvalModeOptionsFor(driverKind, trustedModesAvailable, browserFullAccessAvailable);
   const requiresLocalDesktop = approvalModeSelectionRequiresLocalDesktop(
     mode,
     trustedModesAvailable,
@@ -227,7 +230,7 @@ export function ApprovalModeSelector({
                 </button>
               );
             })}
-            {!trustedModesAvailable && (trustedModesNotice || driverKind === "codex" || driverKind === "antigravityAgent" || requiresLocalDesktop) && (
+            {!trustedModesAvailable && (!browserFullAccessAvailable || requiresLocalDesktop) && (trustedModesNotice || driverKind === "codex" || driverKind === "antigravityAgent" || requiresLocalDesktop) && (
               <div className="border-t border-hairline/20 px-4 py-2.5 text-[11.5px] leading-snug text-ink-secondary">
                 {trustedModesNotice ?? (requiresLocalDesktop
                   ? t("approvalMode.customLocalOnlyDot")

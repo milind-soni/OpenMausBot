@@ -9,6 +9,7 @@ import {
   openNotificationTarget,
   openThread,
   persistBotUpdate,
+  browserApprovalBridge,
   persistTaskApproval,
   pinBotThreadAction,
   reducer,
@@ -36,6 +37,27 @@ describe("screen frame ownership", () => {
 });
 
 describe("composer thread approval persistence", () => {
+  it("sends confirmed browser Full access only through the dedicated grant route", async () => {
+    const bot = { id: "bot", approvalMode: "ask" } as BotAnnouncement;
+    const request = vi.fn().mockResolvedValue({ bot });
+    const bridge = browserApprovalBridge(request);
+    await expect(persistTaskApproval("bot", "thread", { approvalMode: "full" }, bridge, request)).rejects.toThrow("Confirm Full");
+    expect(request).not.toHaveBeenCalled();
+    await persistTaskApproval("bot", "thread", { approvalMode: "full", confirmFullAccess: true }, bridge, request);
+    expect(request).toHaveBeenCalledExactlyOnceWith("/api/bots/bot/browser-approval", {
+      method: "POST", body: JSON.stringify({ mode: "full", threadId: "thread", threadOnly: true, acknowledgeLocalAuto: false, confirmFullAccess: true }),
+    });
+    await expect(bridge.setMode("bot", "custom")).rejects.toThrow("packaged desktop");
+    expect(request).toHaveBeenCalledOnce();
+  });
+  it("compensates a cancelled browser bot-default grant with Ask", async () => {
+    const bot = { id: "bot", approvalMode: "ask" } as BotAnnouncement;
+    const controller = new AbortController();
+    const request = vi.fn().mockImplementation(async () => { controller.abort(); return { bot }; });
+    await expect(persistBotUpdate("bot", { approvalMode: "full", confirmFullAccess: true }, controller.signal,
+      request, browserApprovalBridge(request), bot)).rejects.toThrow("cancelled");
+    expect(request.mock.calls.map(([, init]) => JSON.parse(init.body).mode)).toEqual(["full", "ask"]);
+  });
   it.each(["ask", "edits", "auto", "full", "custom"] as const)("saves %s through the scoped bridge and returns its committed state", async mode => {
     const bot = { id: "bot", approvalMode: "ask", tasks: [{ threadId: "thread", approvalMode: mode }] } as BotAnnouncement;
     const bridge = { setMode: vi.fn().mockResolvedValue(bot) };

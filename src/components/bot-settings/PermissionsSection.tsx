@@ -134,6 +134,7 @@ export function PermissionsSection({
             wide
             disabled={Boolean(bot.busy)}
             trustedModesAvailable={trustedModesAvailable}
+            browserFullAccessAvailable={derived.browserFullAccessAvailable}
           />
         </div>
       </div>

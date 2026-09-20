@@ -426,6 +426,7 @@ export function Composer({
     ? state.instances.find((instance) => instance.instanceId === modeBot.modelSelection.instanceId)
     : undefined;
   const trustedThreadAccess = Boolean(!remoteClient && window.ogb?.approvals && capabilities.host.packaged);
+  const browserFullAccessAvailable = !remoteClient && state.browserFullAccess === true;
   const uploadImage = useCallback(async (file: File): Promise<Attachment | null> => {
     const optimistic = optimisticImageAttachment(file);
     if (!optimistic) return null;
@@ -468,7 +469,8 @@ export function Composer({
   };
   const setApprovalMode = (mode: ApprovalMode) => {
     if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
-    if ((mode === "full" || mode === "custom") && !trustedThreadAccess) return;
+    if (mode === "custom" && !trustedThreadAccess) return;
+    if (mode === "full" && !trustedThreadAccess && !browserFullAccessAvailable) return;
     if (mode === "full") {
       setApprovalWarning({ mode, botId: modeBot.id, threadId: modeBot.threadId });
       return;
@@ -933,6 +935,7 @@ export function Composer({
                   onSelect={setApprovalMode}
                   disabled={Boolean(modeBot.busy)}
                   trustedModesAvailable={trustedThreadAccess}
+                  browserFullAccessAvailable={browserFullAccessAvailable}
                 />
               )}
               {modeBot && !remoteClient && (
@@ -1126,7 +1129,7 @@ export function Composer({
         onConfirm={() => {
           const target = approvalWarning;
           setApprovalWarning(null);
-          if (target?.mode !== "full" || !trustedThreadAccess) return;
+          if (target?.mode !== "full" || (!trustedThreadAccess && !browserFullAccessAvailable)) return;
           dispatch({ type: "updateTask", botId: target.botId, threadId: target.threadId,
             patch: { approvalMode: "full", confirmFullAccess: true } });
         }}

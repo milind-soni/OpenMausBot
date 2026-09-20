@@ -4,6 +4,11 @@ Run the harness server on an always-on Linux box (a VPS, a home server, a
 Mac mini in a closet) and pair browsers, the desktop app, or phones with it.
 The npm CLI supports a managed public tunnel, Tailscale, or your own proxy.
 
+To allow paired admin browsers to select **Full access**, set
+`OMB_ALLOW_BROWSER_FULL_ACCESS=1` in the server or Compose environment and
+restart it. It is off by default. See [browser Full access](approval-levels.md#full-access-in-a-self-hosted-browser)
+for the authorization policy and conversation/default scope.
+
 > **Security first:** the server deliberately trusts only loopback — any
 > process that can reach `127.0.0.1:8799` has full control, including the
 > shell your bots can use. **Never expose that port directly and never bind

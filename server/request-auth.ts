@@ -185,6 +185,7 @@ export function clearSessionCookie(name: string): string {
 export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp; feature?: "sharedComputers" }> = [
   // own session
   { methods: ["GET"], path: /^\/api\/auth\/session$/ },
+  { methods: ["GET"], path: /^\/api\/approval-capabilities$/ },
   { methods: ["POST"], path: /^\/api\/auth\/stream-ticket$/ },
   { methods: ["POST"], path: /^\/api\/auth\/logout$/ },
   // Own outbound desktop connector, additionally bound to a private secret.

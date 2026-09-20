@@ -80,6 +80,33 @@ describe("Store", () => {
     } finally { database.close(); }
   });
 
+  it("saves approval grants atomically and preserves inherited legacy task modes", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const first = store.activeTask(bot.id)!;
+    const sibling = store.createTask(bot.id)!;
+    delete first.approvalMode;
+    delete first.autoApprove;
+    const save = vi.spyOn(store as unknown as { saveBots(bots: BotRecord[]): void }, "saveBots");
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.setApprovalMode(bot.id, "full")).toThrow("disk full");
+    expect(bot.approvalMode ?? "ask").toBe("ask");
+    expect(first.approvalMode).toBeUndefined();
+    store.setApprovalMode(bot.id, "full");
+    expect(bot.approvalMode).toBe("full");
+    expect(store.projectBotForTask(bot.id, first.threadId)?.approvalMode).toBe("ask");
+    expect(store.projectBotForTask(bot.id, sibling.threadId)?.approvalMode).toBe("ask");
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => store.setApprovalMode(bot.id, "full", first.threadId)).toThrow("disk full");
+    expect(store.projectBotForTask(bot.id, first.threadId)?.approvalMode).toBe("ask");
+    store.setApprovalMode(bot.id, "full", first.threadId);
+    expect(store.setApprovalMode(bot.id, "full", "missing")).toBeNull();
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.approvalMode).toBe("full");
+    expect(reloaded.projectBotForTask(bot.id, first.threadId)?.approvalMode).toBe("full");
+    expect(reloaded.projectBotForTask(bot.id, sibling.threadId)?.approvalMode).toBe("ask");
+  });
+
   it("commits a confirmed model switch once, preserving siblings and rolling back failed writes", () => {
     const store = new Store(selection);
     const bot = store.createBot();

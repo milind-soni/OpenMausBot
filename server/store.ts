@@ -19,7 +19,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile } from "../shared/bot-avatar.ts";
-import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
+import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
@@ -1516,6 +1516,26 @@ export class Store {
       bot.unread = bot.tasks!.some((candidate) => candidate.unread);
     }
     this.saveBots();
+    this.emit({ type: "bot", botId: id });
+    return bot;
+  }
+
+  /** An explicit approval selection must reach disk before it becomes live.
+   * Freeze inherited task modes before changing the default, including old
+   * initial tasks whose approval fields were never materialized. */
+  setApprovalMode(id: string, mode: ApprovalMode, threadId?: string): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot || (threadId && !this.taskByThread(id, threadId))) return null;
+    const tasks = bot.tasks?.map(task => {
+      if (threadId) return task.threadId === threadId
+        ? { ...task, approvalMode: mode, autoApprove: mode === "auto", alwaysAllow: [] }
+        : task;
+      return { ...task, approvalMode: approvalModeFor(this.projectBotForTask(id, task.threadId)!),
+        autoApprove: task.autoApprove ?? bot.autoApprove };
+    });
+    const next = { ...bot, tasks, ...(threadId ? {} : { approvalMode: mode, autoApprove: mode === "auto" }) };
+    this.saveBots(this.bots.map(candidate => candidate.id === id ? next : candidate));
+    Object.assign(bot, next);
     this.emit({ type: "bot", botId: id });
     return bot;
   }

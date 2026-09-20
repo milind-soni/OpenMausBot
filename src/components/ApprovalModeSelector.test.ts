@@ -11,6 +11,12 @@ import {
 } from "./ApprovalModeSelector";
 
 describe("approval mode selector", () => {
+  it("offers browser Full access only when eligible, without exposing Custom", () => {
+    expect(approvalModeOptionsFor("codex", false, true).map(option => option.mode)).toEqual(["ask", "auto", "full"]);
+    expect(approvalModeOptionsFor("codex", false, false).map(option => option.mode)).toEqual(["ask", "auto"]);
+    expect(approvalModeOptionsFor("unsupported", false, true).map(option => option.mode)).not.toContain("full");
+    expect(approvalModeSelectionRequiresLocalDesktop("custom", false)).toBe(true);
+  });
   it("discloses delegated work in the Full access confirmation", () => {
     const html = renderToStaticMarkup(createElement(FullAccessWarning, {
       open: true, onCancel: () => {}, onConfirm: () => {},
@@ -38,8 +44,8 @@ describe("approval mode selector", () => {
       },
       {
         mode: "full",
-        label: "Full access",
-        description: "Full computer access (elevated risk)",
+        label: "Dangerously approve all",
+        description: "Skips permission prompts for tool actions (full access)",
       },
       {
         mode: "custom",

@@ -43,6 +43,7 @@ import { updateClaudeCli } from "./claude-update.ts";
 import { configuredAccountDirectory, assertSeparateClaudeAccount, claudeAccountInfo, createClaudeAccountSchema, instanceSettingsSchema, newClaudeAccount } from "./claude-accounts.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "./provider-icon.ts";
 import { providerIconError } from "../shared/provider-icon.ts";
+import { browserApprovalAccess, browserApprovalSchema, browserFullAccessEnabled } from "./browser-approvals.ts";
 import {
   BrowserCleanupCoordinator,
   finalizeBrowserCleanupMutation,
@@ -518,6 +519,7 @@ const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
+const BROWSER_FULL_ACCESS = !DESKTOP_MANAGED && !HOSTED_WORKSPACE && browserFullAccessEnabled(process.env);
 // Empty is deliberately a deny-all bootstrap state. Only Electron's private
 // utility-process port can replace it with the per-launch owner capability.
 let desktopMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefined;
@@ -14945,6 +14947,45 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const visible = wireBot(updated);
       broadcast({ kind: "bot", bot: visible });
       return json(res, 200, { bot: visible });
+    }
+    if (method === "GET" && path === "/api/approval-capabilities") {
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, { browserFullAccess: browserApprovalAccess(auth, BROWSER_FULL_ACCESS) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/browser-approval$/);
+    if (m && method === "POST") {
+      if (!browserApprovalAccess(auth, BROWSER_FULL_ACCESS) || req.headers.origin !== requestOrigin(req)) {
+        return json(res, 403, { error: "Browser approval changes require host opt-in and a same-origin paired admin browser session" });
+      }
+      const parsed = browserApprovalSchema.safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "Invalid browser approval change" });
+      // Recheck after reading the body: revocation can race a slow upload.
+      if (auth.kind !== "session" || !sessions.isLive(auth.session.id)) return json(res, 401, { error: "This browser session has expired or was revoked" });
+      const { mode, threadId, threadOnly, confirmFullAccess, acknowledgeLocalAuto } = parsed.data;
+      const existing = store.bot(m[1]);
+      const target = threadOnly ? store.projectBotForTask(m[1], threadId!) : existing;
+      if (!existing || !target) return json(res, 404, { error: "No such bot or thread" });
+      if (existing.approvalGrant) return json(res, 409, { error: "Wait for the pending approval change to finish" });
+      if (approvalModeFor(target) === "custom") return json(res, 403, { error: "Custom approval must be changed in the packaged desktop app" });
+      if (mode === "full" && confirmFullAccess !== true) return json(res, 400, { error: "Confirm the Full access warning before enabling it" });
+      if (!supportsApprovalMode(registry.cliTarget(target.modelSelection.instanceId)?.driverKind, mode)) {
+        return json(res, 400, { error: "This provider does not support the selected approval level" });
+      }
+      const busy = threadOnly ? threadBusy(target.id, target.threadId) : existing.busy;
+      // Match the desktop bridge's compensation for a cancelled bot-default
+      // grant. Persist Ask before stopping work that captured its old value.
+      const emergencyDowngrade = !threadOnly && busy && approvalModeFor(target) === "full" && mode === "ask";
+      if (busy && !emergencyDowngrade) return json(res, 409, { error: "Stop this bot or thread before changing its approval level" });
+      if (mode === "auto" && target.computer === "local" && approvalModeFor(target) !== "auto" && acknowledgeLocalAuto !== true) {
+        return json(res, 400, { error: "Auto mode on this computer requires confirming the warning" });
+      }
+      if (emergencyDowngrade) {
+        store.patchBot(target.id, { approvalMode: "ask", autoApprove: false });
+        await stopBotForEmergencyApprovalDowngrade(target.id);
+      } else store.setApprovalMode(target.id, mode, threadOnly ? target.threadId : undefined);
+      const fresh = wireBot(store.bot(target.id)!);
+      broadcast({ kind: "bot", bot: fresh });
+      return json(res, 200, { bot: fresh });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)$/);
     if (m && method === "PATCH") {
