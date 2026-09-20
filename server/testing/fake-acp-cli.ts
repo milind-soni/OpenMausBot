@@ -13,7 +13,7 @@
 //                       real-agent shape that forces the driver's one-shot
 //                       re-spawn fallback. A fresh process holds no live
 //                       session, so its load succeeds.
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | no-auth | auth-required | permission | question
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -33,6 +33,9 @@
 //                     drained turn was sent)
 //                   | safe-agent-reads (simulate a native Auto reviewer around
 //                     the real injected agents MCP; not a real classifier test)
+//                   | stall-after-text (stream one message chunk, then go
+//                     fully silent forever — a wedged agent mid-answer; the
+//                     driver's prompt idle guard must fail the turn on its own)
 //   FAKE_ACP_MCP_TRANSPORTS  comma list of remote MCP transports the agent
 //                       advertises in initialize (mcpCapabilities), e.g. "http,sse"
 //   FAKE_ACP_DUMP   path to write {argv, env} as JSON, so a test can assert
@@ -615,6 +618,16 @@ function handle(msg: any) {
       }
       if (mode === "hang") {
         // never resolve the prompt on our own — lets tests exercise interrupt
+        hangingPromptId = msg.id;
+        hangKeepAlive = setInterval(() => {}, 1_000);
+        return;
+      }
+      if (mode === "stall-after-text") {
+        // Stream a chunk, then go fully silent forever: no updates, no result,
+        // no exit. This is the shape of a wedged OpenCode agent that stopped
+        // mid-answer — the driver's prompt idle guard must fail the turn on
+        // its own, because nothing else will ever arrive.
+        out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "half an answer, then silence" } } } });
         hangingPromptId = msg.id;
         hangKeepAlive = setInterval(() => {}, 1_000);
         return;

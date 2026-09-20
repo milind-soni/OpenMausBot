@@ -102,7 +102,18 @@ interface AcpTurn {
  *  request bookkeeping, UTF-8-safe line framing, and native logging. */
 interface AcpConnection {
   send(obj: unknown): void;
-  request(method: string, params: unknown, timeoutMs?: number, receive?: (result: any) => void): Promise<any>;
+  /** `timeoutMs` is a hard deadline from the request; `idleMs` is the prompt
+   *  only (the one request that legitimately streams for minutes) and restarts
+   *  on every inbound line, so it trips solely on total silence. `idleMessage`
+   *  becomes the rejection error. */
+  request(
+    method: string,
+    params: unknown,
+    timeoutMs?: number,
+    receive?: (result: any) => void,
+    idleMs?: number,
+    idleMessage?: string,
+  ): Promise<any>;
   failAll(error: Error): void;
   /** stop dispatching child output — pending RPCs reject, nothing parses */
   close(): void;
@@ -271,6 +282,19 @@ const INIT_TIMEOUT = envOr("OPENMAUS_ACP_INIT_TIMEOUT_MS", 300_000);
 const SESSION_CONFIG_TIMEOUT = envOr("OPENMAUS_ACP_SESSION_CONFIG_TIMEOUT_MS", 300_000); // configureSession's per-request default
 const NEW_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_NEW_SESSION_TIMEOUT_MS", 300_000);
 const LOAD_SESSION_TIMEOUT = envOr("OPENMAUS_ACP_LOAD_SESSION_TIMEOUT_MS", 120_000); // history replay on a long thread is slow
+// Read lazily (not at import) so a test can shorten the window. Unlike the
+// setup calls above, session/prompt legitimately streams for minutes, so a
+// wall-clock deadline would false-positive: this guard only trips when the
+// child sends nothing at all for the whole window (a wedged OpenCode turn
+// streams thought chunks, then goes silent forever and never resolves). 0
+// disables the guard, restoring the pre-fix "hang until the user cancels"
+// behavior.
+const promptIdleTimeoutMs = (): number => {
+  const raw = process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+  if (raw === undefined) return 180_000;
+  const ms = Number(raw);
+  return Number.isFinite(ms) && ms > 0 ? ms : 0;
+};
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
 function acpVariantOption(result: any): { configId: string; options: ModelVariantOption[]; currentValue?: string } | undefined {
@@ -634,7 +658,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         let nextId = 1;
         const rpcPending = new Map<
           number,
-          { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> | null }
+          {
+            resolve: (v: any) => void;
+            reject: (e: Error) => void;
+            timer: ReturnType<typeof setTimeout> | null;
+            idleTimer: ReturnType<typeof setTimeout> | null;
+            armIdle: () => void;
+          }
         >();
 
         const send = (obj: unknown) => {
@@ -643,7 +673,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           } catch {}
           appendNative(threadId, { dir: "out", source: SOURCE, msg: nativeLogMessage(obj) });
         };
-        const request = (method: string, params: unknown, timeoutMs?: number, receive?: (result: any) => void) =>
+        const request = (
+          method: string,
+          params: unknown,
+          timeoutMs?: number,
+          receive?: (result: any) => void,
+          idleMs?: number,
+          idleMessage?: string,
+        ) =>
           new Promise<any>((resolve, reject) => {
             const id = nextId++;
             let timer: ReturnType<typeof setTimeout> | null = null;
@@ -654,12 +691,31 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               }, timeoutMs);
               timer.unref?.();
             }
+            // Idle watchdog: unlike a wall-clock timeout, the deadline restarts
+            // on every inbound line (see the stdout handler), so a long-lived
+            // streaming agent is never cut off — only one that has gone fully
+            // silent trips it.
+            let idleTimer: ReturnType<typeof setTimeout> | null = null;
+            const armIdle = () => {
+              if (!(idleMs && idleMs > 0)) return;
+              if (idleTimer) clearTimeout(idleTimer);
+              idleTimer = setTimeout(() => {
+                rpcPending.delete(id);
+                const error = new Error(idleMessage ?? `${method} stopped responding`);
+                Object.assign(error, { acpPromptStall: true });
+                reject(error);
+              }, idleMs);
+              idleTimer.unref?.();
+            };
+            armIdle();
             rpcPending.set(id, {
               // Consume configuration in wire order: an update following this
               // response may arrive before the awaiting continuation resumes.
               resolve: (result) => { receive?.(result); resolve(result); },
               reject,
               timer,
+              idleTimer,
+              armIdle,
             });
             send({ jsonrpc: "2.0", id, method, params });
           });
@@ -669,6 +725,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           failAll: (error: Error) => {
             for (const p of rpcPending.values()) {
               if (p.timer) clearTimeout(p.timer);
+              if (p.idleTimer) clearTimeout(p.idleTimer);
               p.reject(error);
             }
             rpcPending.clear();
@@ -969,6 +1026,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               continue;
             }
             appendNative(threadId, { dir: "in", source: SOURCE, msg: nativeLogMessage(msg) });
+            // Inbound traffic proves the child is alive and making progress,
+            // so every idle deadline restarts; only total silence trips it.
+            for (const p of rpcPending.values()) p.armIdle();
             if (msg.id !== undefined && (msg.result !== undefined || msg.error !== undefined)) {
               const pend = rpcPending.get(msg.id);
               if (pend) {
@@ -1127,8 +1187,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // `session` rebinds mid-turn: when the establishment retry below
         // respawns the child, every wire call must reach the live record, so
         // nothing captures the connection off it.
-        const request = (method: string, params: unknown, timeoutMs?: number, receive?: (result: any) => void): Promise<any> =>
-          session.acp.request(method, params, timeoutMs, receive);
+        const request = (
+          method: string,
+          params: unknown,
+          timeoutMs?: number,
+          receive?: (result: any) => void,
+          idleMs?: number,
+          idleMessage?: string,
+        ): Promise<any> =>
+          session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
         const state = { settled: false, promptSent: false, text: "" };
         const asks = new Map<string, AcpAskFinish>();
@@ -1412,10 +1479,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(`${support.displayName} changed variant before the prompt`);
             }
             state.promptSent = true;
-            const result = await request("session/prompt", {
-              sessionId,
-              prompt: [{ type: "text", text }, ...imageBlocks],
-            });
+            const promptIdleMs = promptIdleTimeoutMs();
+            const result = await request(
+              "session/prompt",
+              { sessionId, prompt: [{ type: "text", text }, ...imageBlocks] },
+              undefined,
+              undefined,
+              promptIdleMs,
+              `${DRIVER_KIND} went fully silent ${Math.round(promptIdleMs / 1000)} s after the message and the turn was stopped. ` +
+                "Raise OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS if this model legitimately takes longer to answer.",
+            );
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
             const usage = result?.usage ?? result?._meta ?? {};
@@ -1459,6 +1532,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ...(needsAuth ? { setup: true } : {}),
               });
               settle(threadId, session, false, needsAuth ? "auth_required" : "rpc_error");
+              // A prompt that went idle has a wedged child under the RPC — it
+              // will never answer the next prompt either. Do not leave it
+              // pooled: close it so the next turn spawns a fresh agent.
+              if ((e as any)?.acpPromptStall === true && session.child.exitCode === null && !session.closing) {
+                closeSession(threadId, "prompt-stall");
+              }
             }
           }
         })();

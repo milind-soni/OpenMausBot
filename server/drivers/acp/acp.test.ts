@@ -237,6 +237,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_IMAGE_CAPABILITY;
     delete process.env.FAKE_ACP_GROK_VERSION;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
+    delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
     delete process.env.OMB_ACP_SESSION_IDLE_MS;
     delete process.env.OMB_ACP_SESSION_IDLE_MIN_MS;
     delete process.env.FAKE_ACP_LAUNCH_COUNT_FILE;
@@ -949,6 +950,21 @@ describe("ACP turns (fake CLI)", () => {
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: false });
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
+  });
+
+  it("an agent that goes silent mid-answer is failed and closed by the prompt idle guard", async () => {
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-stall", text: "go" });
+
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "rpc_error" });
+    const err = recorder.events.find((e) => e.type === "runtime.error");
+    expect(err?.message).toMatch(/went fully silent/i);
+    expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    // the streamed chunk reached the UI before the child went silent
+    expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);
+    expect(instance.adapter.hasSession("t-stall")).toBe(false);
   });
 
   it("preserves ACP error codes for provider setup classification", async () => {
