@@ -18,9 +18,6 @@ import { splitReply } from "../../shared/reply-sections";
 import type { MessageAttachmentContext } from "./AttachmentPreview";
 import { ChatMarkdown } from "./ChatMarkdown";
 
-/** A fold row has one line, and a reply can have eight sections. */
-const MAX_TITLES = 3;
-
 export function ReplySections({
   text,
   message,
@@ -45,7 +42,9 @@ export function ReplySections({
   // voice is gone from the reader's half too.
   if (!parts.structured) return markdown(parts.display);
 
-  const shown = parts.titles.slice(0, MAX_TITLES).join(" · ");
+  // every section named: the row truncates on its own, so a cap here would
+  // only hide names from a screen reader
+  const shown = parts.titles.join(" · ");
   return (
     <div className="flex flex-col gap-1.5">
       {/* a reply that opened with its own heading: the label it chose, kept

@@ -134,14 +134,16 @@ function balancedEnd(text: string, start: number): number {
 }
 
 /** The mechanics of acting, narrated as if the reader asked for them: a line
- * that says it is emitting tool calls — "We need to output tool use calls."
- * One narrowly-scoped pattern, because it names the act of emitting calls and
- * no ordinary sentence does. Broader ones — `we need to <verb>`, `now let's
- * <verb>` — matched prose ("We need to send the report to the team before
- * Friday.", "Then let us call it a day.") and, alone in a reply, left the
- * voice with nothing to say: showing a stray mechanics line is recoverable,
- * deleting a real sentence is not. */
-const TOOL_NARRATION = /\boutput(?:ting)?\s+(?:the\s+)?tool(?:\s*use)?\s+calls?\b/i;
+ * that *is* the statement about emitting tool calls, and nothing else.
+ *
+ * Anchored at both ends deliberately. Merely containing the phrase is not
+ * enough: that deleted prose which mentioned it, and deleted lines inside a
+ * code block the reader asked for. Earlier versions matched bare
+ * `we need to <verb>` / `now let's <verb>` and deleted real sentences ("We
+ * need to send the report to the team before Friday.") leaving the voice
+ * nothing to say. Showing a stray mechanics line is recoverable; deleting a
+ * real sentence is not. */
+const TOOL_NARRATION = /^\s*(?:we|i)(?:'ll|'m going to)?(?:\s+(?:need\s+to|must|have\s+to|will|are\s+going\s+to|am\s+going\s+to))?\s+output(?:ting)?\s+(?:the\s+)?tool(?:\s*use)?\s+calls?\b[.!]*\s*$/i;
 
 /** Bare (unfenced) JSON tool payloads and narration lines out; fenced code
  * stays — a ```json block is a legitimate example, and the reader asked for
@@ -179,6 +181,9 @@ function stripToolLeak(text: string): string {
           i = end + 1;
           while (i < text.length && (text[i] === " " || text[i] === "\t")) i++;
           if (text[i] === "\n") i++;
+          // a payload that sat between blank lines takes one of them with it,
+          // so removing it cannot leave a blank run behind
+          if (out.endsWith("\n\n") && text[i] === "\n") i++;
           continue;
         }
       }
@@ -187,8 +192,14 @@ function stripToolLeak(text: string): string {
     i++;
   }
 
-  const kept = out.split("\n").filter((line) => !TOOL_NARRATION.test(line));
-  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  // No blanket pass over the finished text: anything that rewrites the whole
+  // reply also rewrites the fenced code in it, which the header promises to
+  // leave alone. Every edit above is local to the line it removes.
+  return out
+    .split("\n")
+    .filter((line) => !TOOL_NARRATION.test(line))
+    .join("\n")
+    .trim();
 }
 
 export function splitReply(input: string): ReplyParts {

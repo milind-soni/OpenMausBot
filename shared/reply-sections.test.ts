@@ -199,4 +199,24 @@ describe("splitReply tool-leak stripping", () => {
       .toBe("Here is the summary.");
     expect(splitReply("We need to output tool use calls.").toolLeakOnly).toBe(true);
   });
+
+  // The guard edits what it removes and nothing else. It used to rewrite the
+  // whole reply at the end, which rewrote the fenced code inside it — on
+  // replies that had no payload at all.
+  it("leaves a fence exactly as written, blank lines and all", () => {
+    const text = "Here is the config:\n\n```yaml\na: 1\n\n\nb: 2\n```";
+    expect(splitReply(text).display).toBe(text);
+    // and the fence's own blank run is still the only thing between the two
+    // keys, so the detail half carries it unchanged
+    expect(splitReply(text).detail).toBe("```yaml\na: 1\n\n\nb: 2\n```");
+  });
+
+  // The other edge of the narration rule: a line that only *mentions* the
+  // phrase is prose, and matching the phrase anywhere in a line deleted it.
+  it("keeps a line that merely mentions the narration phrase", () => {
+    const quoted = 'The prompt says: never "output tool use calls" in a reply.';
+    expect(splitReply(quoted).display).toBe(quoted);
+    const fenced = "The rule is:\n\n```text\nNever write: output tool use calls\n```";
+    expect(splitReply(fenced).display).toBe(fenced);
+  });
 });
