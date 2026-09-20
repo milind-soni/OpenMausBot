@@ -90,7 +90,7 @@ interface AcpTurn {
   turn: SendTurnInput;
   turnConfig: AcpConfig;
   controlsHost: boolean;
-  state: { settled: boolean; promptSent: boolean; text: string };
+  state: { settled: boolean; promptSent: boolean; text: string; producedItem: boolean };
   asks: Map<string, AcpAskFinish>;
   interruptTimer: ReturnType<typeof setTimeout> | null;
   flushAssistantText: () => void;
@@ -628,7 +628,25 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         session.current = null;
         active.delete(threadId);
         current.flushAssistantText();
-        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok, stopReason, cost: null });
+        // `end_turn` with nothing to show for it — no reply, no image, no
+        // tool result — is a lost turn, not a success. An engine can report
+        // exactly that (a provider may cut a reasoning-only stream and
+        // still answer end_turn), and ok:true would end the thread quietly
+        // while the person's message went unanswered. Keep the completion,
+        // but report it as a failure so terminal chips, incidents and
+        // follow-ups see what happened.
+        let finalOk = ok;
+        let finalStopReason = stopReason;
+        if (finalOk && finalStopReason === null && !current.state.producedItem) {
+          finalOk = false;
+          finalStopReason = "empty_turn";
+          emit({
+            ...base(threadId, current.turnId),
+            type: "runtime.error",
+            message: `${DRIVER_KIND} ended the turn with no reply, image, or tool result`,
+          });
+        }
+        emit({ ...base(threadId, current.turnId), type: "turn.completed", ok: finalOk, stopReason: finalStopReason, cost: null });
         if (session.child.exitCode === null && !session.closing && !session.dead) {
           armIdle(threadId);
         } else if (session.dead && sessions.get(threadId) === session) {
@@ -946,6 +964,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const delta = content?.text;
               if (content?.type === "image" && typeof content.data === "string" && content.data) {
                 current.flushAssistantText();
+                current.state.producedItem = true;
                 emit({
                   ...base(threadId, current.turnId),
                   type: "item.completed",
@@ -981,6 +1000,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             case "tool_call_update": {
               if (u.status === "completed" || u.status === "failed") {
+                current.state.producedItem = true;
                 emit({
                   ...base(threadId, current.turnId),
                   type: "item.completed",
@@ -1205,7 +1225,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state = { settled: false, promptSent: false, text: "" };
+        const state = { settled: false, promptSent: false, text: "", producedItem: false };
         const asks = new Map<string, AcpAskFinish>();
         const modelOf = (result: any): string | null => {
           const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
@@ -1243,6 +1263,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           const text = state.text;
           state.text = "";
           if (!text.trim()) return;
+          state.producedItem = true;
           emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
         };
         const current: AcpTurn = {

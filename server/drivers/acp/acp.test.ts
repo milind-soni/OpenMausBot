@@ -980,6 +980,29 @@ describe("ACP turns (fake CLI)", () => {
     expect(instance.adapter.hasSession("t-stall")).toBe(false);
   });
 
+  it("an end_turn with no reply, image, or tool result becomes runtime.error + failed turn", async () => {
+    await create(GrokAgentDriver, "empty-reply");
+    await instance.adapter.sendTurn({ threadId: "t-empty", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
+      .toMatch(/no reply, image, or tool result/);
+  });
+
+  it("reasoning with no answer is a lost turn, not a success", async () => {
+    // the shape of a provider that never leaves its thinking stream: thought
+    // chunks stream, the engine still answers end_turn, and the turn must be
+    // reported as failed rather than completed-with-nothing
+    await create(GrokAgentDriver, "reasoning-only");
+    await instance.adapter.sendTurn({ threadId: "t-reasoning", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
+    expect(recorder.events.some((e) => e.type === "content.delta" && (e as any).streamKind === "reasoning_text")).toBe(true);
+    expect(recorder.events.some((e) => e.type === "item.completed")).toBe(false);
+    expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
+      .toMatch(/no reply, image, or tool result/);
+  });
+
   it("preserves ACP error codes for provider setup classification", async () => {
     await create(ClassifiedErrorDriver, "auth-required");
     await instance.adapter.sendTurn({ threadId: "t-auth-required", text: "go" });

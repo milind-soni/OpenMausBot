@@ -13,7 +13,7 @@
 //                       real-agent shape that forces the driver's one-shot
 //                       re-spawn fallback. A fresh process holds no live
 //                       session, so its load succeeds.
-//   FAKE_ACP_MODE   happy (default) | image | empty-reply | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
+//   FAKE_ACP_MODE   happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang | hang-initialize | stall-after-text | no-auth | auth-required | permission | question
 //                   | interleave (message → tool → message → tool → message)
 //                   | no-session-config (reject session/set_mode + set_model
 //                     with -32601, i.e. an agent predating those methods)
@@ -390,6 +390,14 @@ function playInterleaveTurn() {
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call", toolCallId: "tc-2", title: "run" } } });
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "tool_call_update", toolCallId: "tc-2", status: "completed" } } });
   out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "after" } } } });
+}
+
+/** Scripted reasoning-only turn: thought chunks and nothing else — the shape
+ * of a provider that never leaves its thinking stream yet still answers
+ * end_turn, which the driver must report as a lost turn, not a success. */
+function playReasoningTurn() {
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { text: "considering the request at length" } } } });
+  out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_thought_chunk", content: { text: " without ever producing an answer" } } } });
 }
 
 let buf = "";
@@ -871,6 +879,7 @@ function handle(msg: any) {
           },
         });
       } else if (mode === "interleave") playInterleaveTurn();
+      else if (mode === "reasoning-only") playReasoningTurn();
       else if (mode !== "empty-reply") playTurn();
       if (mode === "safe-agent-reads" && agentsMcp) {
         const entry = agentsMcp;
@@ -900,9 +909,14 @@ function handle(msg: any) {
         return;
       }
       if (mode === "permission") {
-        // ask the client to approve a tool, then complete once answered
+        // ask the client to approve a tool, then — like a real agent once its
+        // card is answered — close the turn with a visible reply instead of
+        // ending bare (a bare end_turn is the lost-turn failure, not a success)
         pendingPermissionId = 9001;
-        onPermissionAnswered = complete;
+        onPermissionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "handled the permission decision" } } } });
+          complete();
+        };
         out({
           jsonrpc: "2.0",
           id: pendingPermissionId,
@@ -924,7 +938,10 @@ function handle(msg: any) {
       }
       if (mode === "question") {
         pendingPermissionId = 9002;
-        onPermissionAnswered = complete;
+        onPermissionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "answered the question" } } } });
+          complete();
+        };
         out({
           jsonrpc: "2.0",
           id: pendingPermissionId,

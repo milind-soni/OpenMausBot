@@ -239,11 +239,12 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "exit-early" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
-          // a successful peer turn that deliberately emits no assistant
-          // text — the channel still needs a positive terminal record.
-          helperEmpty: {
+          // a successful peer turn that deliberately emits no assistant text,
+          // only an image — the channel still needs a positive terminal
+          // record for output a person can see but not read.
+          helperImage: {
             driver: "grokAgent",
-            environment: { FAKE_ACP_MODE: "empty-reply" },
+            environment: { FAKE_ACP_MODE: "image" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // a turn that remains busy until provider reload disposes it.
@@ -1008,17 +1009,17 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
   // ── delegation terminal-state mirroring ─────────────────────────────
   // A delegated turn is fire-and-forget. Its result is returned to the
   // initiating chat and mirrored into the A⇄B channel. These tests pin a
-  // successful empty reply plus both non-happy terminal states: the
+  // successful reply without text plus both non-happy terminal states: the
   // delegated turn crashed, and the delegated turn never started.
   it(
-    "mirrors a successful delegated turn with no reply as a completed terminal chip",
+    "mirrors a successful delegated turn with no text reply as a completed terminal chip",
     async () => {
       const seeded = (await api("GET", "/api/bots")).body.bots[0];
       await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, {
         name: "Helper",
-        modelSelection: { instanceId: "helperEmpty", model: "fake-model" },
+        modelSelection: { instanceId: "helperImage", model: "fake-model" },
       });
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {
