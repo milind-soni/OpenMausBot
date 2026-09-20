@@ -643,6 +643,34 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(argv).not.toContain('mcp_servers.notes.default_tools_approval_mode');
   });
 
+  it("mounts a custom server under its own name when the user's config.toml already has one by that name", async () => {
+    const codexHome = join(scratch, "collision-codex-home");
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, "config.toml"), '[mcp_servers.fibery]\nurl = "https://mcp-eu-svc.fibery.io/mcp"\n');
+    await create({ environment: { CODEX_HOME: codexHome } });
+    const dump = join(scratch, "collision.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({
+      threadId: "t-collision",
+      text: "go",
+      integrations: {
+        custom: {
+          fibery: { command: "uv", args: ["tool", "run", "fibery-mcp-server"], env: {} },
+          notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: {} },
+        },
+      },
+    });
+    await recorder.until((event) => event.type === "turn.completed");
+    const argv = JSON.parse(readFileSync(dump, "utf8")).argv.join(" ");
+    // the colliding server moves aside; a stdio command over the url entry
+    // would have been "invalid configuration" for the whole app-server
+    expect(argv).toContain("mcp_servers.fibery_openmausbot.command");
+    expect(argv).not.toContain("mcp_servers.fibery.command");
+    // an unrelated name is untouched
+    expect(argv).toContain("mcp_servers.notes.command");
+  });
+
   it("mounts a url server for codex to connect to, header values off argv", async () => {
     await create();
     const dump = join(scratch, "remote-mcp.json");
