@@ -1,4 +1,9 @@
 {
+  "voice.grok.label": "Grok (xAI)",
+  "voice.grok.host": "Host · Grok",
+  "voice.grok.sharedKey": "Grok uses the workspace’s existing xAI key.",
+  "voice.grok.ready": "The xAI key is saved. Grok detects the spoken language from your text.",
+  "voice.grok.missingKey": "Add an xAI API key in Settings → Connections on the host to use Grok voice.",
   "toolDetail.label": "{name} · {status} · Tool details",
   "toolDetail.input": "Input",
   "toolDetail.output": "Result",

@@ -519,7 +519,7 @@ export interface ConfigStatus {
     configured: boolean;
     ready: boolean;
     voice: string;
-    provider?: "elevenlabs" | "fish" | "system" | "chatterbox";
+    provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai";
     baseUrl?: string;
     model?: string;
   };

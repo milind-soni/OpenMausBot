@@ -6008,7 +6008,7 @@ describe("harness HTTP API", () => {
     expect(nothing.status).toBe(400);
   });
 
-  it("clears incompatible default and per-agent voices when the provider changes", async () => {
+  it.each(["fish", "xai"])("clears incompatible default and per-agent voices when switching to %s", async (provider) => {
     let botId = "";
     try {
       expect((await api("PUT", "/api/config", {
@@ -6020,15 +6020,15 @@ describe("harness HTTP API", () => {
         voice: "eleven-agent",
       })).status).toBe(200);
 
-      const changed = await api("PUT", "/api/config", { tts: { provider: "fish" } });
+      const changed = await api("PUT", "/api/config", { tts: { provider } });
       expect(changed.status).toBe(200);
-      expect(changed.body.tts).toMatchObject({ provider: "fish", voice: "", ready: false });
+      expect(changed.body.tts).toMatchObject({ provider, voice: "", ready: false });
       const bot = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === botId,
       );
       expect(bot).not.toHaveProperty("voice");
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-      expect(disk.tts).toMatchObject({ provider: "fish", voice: "" });
+      expect(disk.tts).toMatchObject({ provider, voice: "" });
     } finally {
       if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
       await api("PUT", "/api/config", { tts: { provider: "elevenlabs", voice: "" } }).catch(() => undefined);

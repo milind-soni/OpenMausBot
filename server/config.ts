@@ -379,6 +379,7 @@ const appConfigSchema = z.object({
   /** Voice settings and the selected voice id. `provider` picks the
    * engine: "elevenlabs" (default; needs `key`), "fish" (needs its own
    * `fishKey`), "system" (the Mac's built-in voices, no key), or
+   * "xai" (Grok TTS, reusing `xai.key`), or
    * "chatterbox" (a local OpenAI-compatible Chatterbox server; `baseUrl`
    * and `model` are settings, not secrets). Cloud keys stay separate so
    * switching providers never overwrites or misuses the other key. */
@@ -386,7 +387,7 @@ const appConfigSchema = z.object({
     key: optionalText,
     fishKey: optionalText,
     voice: optionalText,
-    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox"]).optional(),
+    provider: z.enum(["elevenlabs", "fish", "system", "chatterbox", "xai"]).optional(),
     baseUrl: z
       .string()
       .trim()
@@ -473,7 +474,7 @@ export interface AppConfig {
   /** A named host from the user's SSH config. Authentication stays with SSH. */
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
-  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox"; baseUrl?: string; model?: string };
+  tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };

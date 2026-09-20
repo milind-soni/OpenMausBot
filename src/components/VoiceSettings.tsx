@@ -18,6 +18,7 @@ import {
   setRemoteVoiceProvider,
   type RemoteVoiceProvider,
 } from "@/lib/local-voice";
+import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { voiceKeyDraftValue, type VoiceKeyDraft } from "@/lib/voice-key-draft";
 import { Switch } from "./SettingsPrimitives";
@@ -80,7 +81,7 @@ export function VoiceSettings({
       ? "Host · ElevenLabs"
       : provider === "chatterbox"
         ? "Host · Chatterbox"
-        : "Host voice";
+        : provider === "xai" ? t("voice.grok.host") : "Host voice";
   const systemVoicesAvailable = capabilities.host.platform === "darwin";
   const hostConfigured = Boolean(tts?.configured);
   const configured = usesLocalSystem || hostConfigured;
@@ -143,7 +144,7 @@ export function VoiceSettings({
     onPatch({ voice: voiceId });
   };
 
-  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox") => {
+  const setProvider = (next: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai") => {
     if (next === provider || switching || (next === "system" && !systemVoicesAvailable)) return;
     setSwitching(true);
     setKeyDraft({ provider: null, value: "" });
@@ -211,6 +212,8 @@ export function VoiceSettings({
                 ? systemVoicesAvailable
                   ? " the voices are the ones already installed on this Mac."
                   : " built-in Mac voices are unavailable here. Switch to a hosted voice provider to keep using voice."
+                : provider === "xai"
+                  ? ` ${t("voice.grok.sharedKey")}`
                 : provider === "chatterbox"
                   ? " the Chatterbox server address is shared by the workspace."
                   : ` the ${cloudProvider?.name ?? "voice provider"} key is shared by the workspace.`}</>}
@@ -253,6 +256,7 @@ export function VoiceSettings({
               { value: "fish", label: "Fish Audio", available: true },
               { value: "system", label: "Built-in Mac voices", available: systemVoicesAvailable },
               { value: "chatterbox", label: "Chatterbox (local)", available: true },
+              { value: "xai", label: t("voice.grok.label"), available: true },
             ] as const).map((option) => (
               <button
                 key={option.value}
@@ -311,6 +315,12 @@ export function VoiceSettings({
           </a>
         )}
         </div>
+      )}
+
+      {provider === "xai" && (
+        <p className="mt-4 text-[13px] text-ink-secondary">
+          {hostConfigured ? t("voice.grok.ready") : t("voice.grok.missingKey")}
+        </p>
       )}
 
       {!workspaceConfigurationLocked && provider === "chatterbox" && (
