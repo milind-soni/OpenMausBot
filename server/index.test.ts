@@ -26,7 +26,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 import { FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
-import { SIGN_IN_PROMPT } from "./system-prompt.ts";
+import { REPLY_SHAPE_PROMPT, SIGN_IN_PROMPT } from "./system-prompt.ts";
 import {
   PHONE_SECRET_INFO,
   phoneSecretAAD,
@@ -3787,6 +3787,9 @@ describe("harness HTTP API", () => {
       computer: "off",
     });
     const groupsBefore = (await api("GET", "/api/bots")).body.groups.length;
+    // the Chief role is one-per-section, so other sections may legitimately
+    // hold their own: an import must not change who is a Chief anywhere
+    const chiefsBefore = (await api("GET", "/api/bots")).body.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id);
     const room = (await api("POST", "/api/groups", { memberIds: [trusted.id], name: "War Room" })).body.group;
 
     const smuggled = {
@@ -3852,10 +3855,11 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    // the single-Chief invariant survives the manifest's chiefOfStaff claim
-    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id)).toEqual([
-      trusted.id,
-    ]);
+    // the single-Chief invariant survives the manifest's chiefOfStaff claim —
+    // the smuggled role goes nowhere, in this section or any other
+    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id).sort()).toEqual(
+      [...chiefsBefore].sort(),
+    );
 
     // a legacy v1 file carries a room block; import ignores it entirely —
     // it neither creates a room nor touches the existing one sharing its name
@@ -5545,10 +5549,13 @@ describe("harness HTTP API", () => {
       await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
       const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
       const system: string = seen.systemPrompt ?? "";
-      // soul first, setup block right after it
+      // soul first, then the reply-shape rule every turn carries — it is
+      // injected ahead of the caller's parts — and the setup block right after
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
       expect(soulEnd).toBeGreaterThan(0);
-      expect(system.slice(soulEnd).startsWith("\n\nThis bot has not been set up yet")).toBe(true);
+      const afterSoul = system.slice(soulEnd);
+      expect(afterSoul.startsWith(REPLY_SHAPE_PROMPT)).toBe(true);
+      expect(afterSoul.slice(REPLY_SHAPE_PROMPT.length).startsWith("\n\nThis bot has not been set up yet")).toBe(true);
       // the literal /setup never reaches the model — extract the user text the
       // way promptText() in fake-claude-cli.ts does, joining text parts if the
       // content is an array of blocks rather than a plain string

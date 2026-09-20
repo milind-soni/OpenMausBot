@@ -13,6 +13,14 @@ standard isolated fixture (disposable home, fake engine, no user data):
    absent — the fixture home never has one — reporting `provider: "piper"`
    and refusing with Piper-specific advice rather than a silent ElevenLabs
    fallback.
+4. The section convention as the voice sees it: `POST /api/tts/prepare` on a
+   reply with headings returns its lead only, with nothing from the sections
+   under it spoken, and an unheaded reply falls back to its first paragraph.
+5. Tool-leak stripping: a reply that is a bare computer-action payload plus
+   narration (`{ "action": "press", "keys": ["win", "r"] }`, "We need to
+   output tool use calls.") produces no utterances at all, and prose written
+   around such a payload is spoken without it. Fenced JSON examples stay
+   untouched — that is code the reader asked for.
 
 On macOS the engine is `/usr/bin/say`; on Windows it is SAPI driven through
 `System32\WindowsPowerShell\v1.0\powershell.exe` (resolved absolutely, so
@@ -28,6 +36,14 @@ node --experimental-strip-types scripts/verify-voice.ts
 Keep the printed JSON: `findings` is the evidence, and the fixture's
 disposable data directory and log path identify the run. The launcher stops
 its own child and removes only its temporary directory on completion.
+
+Recorded run (Windows, isolated fixture): an 81,486-byte WAV from the platform
+engine; Piper refusing with a 409 that names Piper; `tts prepare` answering
+`The redirect is fixed and the suite passes.` for a headed reply — with
+`query string` and `auth.ts`, both of which are in that reply, absent from the
+utterances — and `Tests pass.` for the unheaded one; a pure-leak reply
+("") silent and `Opening the Run dialog.` surviving with its payload
+dropped.
 
 ## Retired cloud STT credentials
 
@@ -80,6 +96,15 @@ section's own markup by `src/components/SettingsModal.voice.test.ts`, and the
 speech-engine behavior itself by `server/tts/windows-voices.test.ts` and
 `server/tts/tts.test.ts`.
 
+The reader's half of the same convention — that a settled reply renders as its
+lead plus a fold row, and that the detail is not in the DOM until it is
+opened — is not driven here either. The [chat UI recipe](chat-ui.md) is where
+it would belong, and its pinned agent-browser download is not available in
+every environment; it is pinned instead by `src/components/ReplySections.test.ts`
+(the fold) and `src/components/ChatView.replySections.test.ts` (the real
+transcript reaching it), and the split itself by `shared/reply-sections.test.ts`
+and `server/tts/speech-text.test.ts`.
+
 
 ## Offline capture and UI refinement
 
@@ -99,6 +124,8 @@ Focused regression checks:
 
 ```sh
 pnpm exec vitest run src/lib/dictation-capture.test.ts src/lib/voice-dictation.test.ts src/lib/clipboard-dictation.test.ts src/lib/offline-call-stt.test.ts src/lib/offline-call-lifecycle.test.ts src/lib/wake-word.test.ts server/legacy-migration.test.ts server/tts/piper.test.ts
+# what is spoken at all, and what the reader is shown: the section convention
+pnpm exec vitest run shared/reply-sections.test.ts server/tts/speech-text.test.ts server/system-prompt.test.ts src/lib/tts/index.test.ts src/components/ReplySections.test.ts src/components/ChatView.replySections.test.ts
 pnpm typecheck
 pnpm build
 pnpm i18n:check

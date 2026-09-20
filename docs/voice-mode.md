@@ -43,6 +43,28 @@ and the client fetches the next while the current one plays. One request per
 utterance rather than the streaming-input WebSocket: same perceived latency, far
 fewer moving parts, and no socket to leak when a turn is interrupted.
 
+### What is spoken at all
+
+Rewriting the *whole* reply into speech was the first version, and on a real
+transcript it is still four minutes of file paths — no filter can know which
+half was the answer. So the reply carries that decision itself, as a section
+convention: a lead of one to three sentences, then detail under markdown
+headings. `shared/reply-sections.ts` finds the boundary, and
+`spokenReply` in `speech-text.ts` hands the voice the lead — the first
+paragraph when a reply has no headings, and the whole text when there is
+nothing to split on, so a message written before the convention is still
+spoken rather than dropped.
+
+The reader gets the same split rather than a second, cosmetic one: the lead is
+the message and the sections sit behind one row in the transcript
+(`src/components/ReplySections.tsx`). What you hear and what you read first are
+the same words.
+
+Nothing enforces the convention at parse time, because a bot cannot be made to
+write a lead by one. It reaches the model as a prompt section
+(`REPLY_SHAPE_PROMPT`), injected for every turn by `buildSystemPrompt` so the
+1:1 path, a room turn, and the settings preview cannot disagree about it.
+
 ## Call mode
 
 **Half-duplex, on purpose.** The dictation helper is `SFSpeechRecognizer` on raw
@@ -81,6 +103,11 @@ feel conversational is to put the bot you call on a fast model and let it
 delegate real work to specialists over `ask_bot` — no new machinery required.
 
 ## Rejected
+
+Superseded for the offline engines: the platform voice (`system`) and `piper`
+ship as selectable providers today, with Piper provisioned from Settings — see
+the [voice recipe](verification/voice.md). The reasoning below is the argument
+for not building them, kept as written.
 
 | Option | Why not |
 | --- | --- |

@@ -226,7 +226,7 @@ import {
 } from "./store.ts";
 import * as tts from "./tts/index.ts";
 import * as piperInstall from "./tts/piper-install.ts";
-import { narrateTool, toUtterances } from "./tts/speech-text.ts";
+import { narrateTool, spokenReply, toUtterances } from "./tts/speech-text.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh } from "./turn-context.ts";
 import { extractTurnImages } from "./turn-images.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
@@ -14643,12 +14643,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // Splitting text into utterances lives HERE, not in the renderer, for
     // the same reason approvalKey does — it is the piece most likely to be
     // tuned against real transcripts, and it belongs next to the transform
-    // that produced it.
+    // that produced it. So does the choice of which half of a reply is
+    // spoken at all: the lead, per the section convention. A caller asks for
+    // the message to be read; what is worth hearing is not its concern.
     if (method === "POST" && path === "/api/tts/prepare") {
       const body = await readBody(req);
       return json(res, 200, {
         ready: tts.voiceReady(cfg, typeof body.voiceId === "string" ? body.voiceId : undefined),
-        utterances: toUtterances(String(body.text ?? "")),
+        utterances: toUtterances(spokenReply(String(body.text ?? ""))),
       });
     }
     if (method === "GET" && path === "/api/tts/voices") {

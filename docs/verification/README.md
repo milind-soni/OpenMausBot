@@ -86,9 +86,10 @@ The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
 
 The [voice recipe](voice.md) checks the wake-word credential round-trip, the
-built-in zero-key speech engine's real WAV synthesis, and pictures the two voice
-panels the control surface cannot reach — the Handy engine readout and the
-one-click Piper offer — on the standard isolated fixture.
+built-in zero-key speech engine's real WAV synthesis, that `/api/tts/prepare`
+speaks a reply's lead rather than the detail under its headings, and pictures
+the two voice panels the control surface cannot reach — the Handy engine readout
+and the one-click Piper offer — on the standard isolated fixture.
 
 The [app pictures recipe](app-pictures.md) photographs the shipped renderer — the
 whole app, both skins — on that same isolated fixture, with a conversation the

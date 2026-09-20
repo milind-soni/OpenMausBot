@@ -4,7 +4,7 @@
 // the kitchen at 8am.
 import { describe, expect, it } from "vitest";
 
-import { narrateTool, speakable, toUtterances } from "./speech-text.ts";
+import { narrateTool, speakable, spokenReply, toUtterances } from "./speech-text.ts";
 
 describe("speakable", () => {
   it("names a code block instead of reading it", () => {
@@ -112,6 +112,67 @@ describe("toUtterances", () => {
   it("is empty for text that speaks to nothing", () => {
     expect(toUtterances("```\ncode only\n```")).not.toContain("code only");
     expect(toUtterances("")).toEqual([]);
+  });
+});
+
+describe("spokenReply", () => {
+  // What a voice is handed is the lead half of a reply, so a long answer is
+  // read for as long as its summary is — not for as long as its diff is.
+  it("reads the lead of a reply that followed the section convention", () => {
+    const text = "The redirect is fixed and the suite passes.\n\n## What changed\n\nI moved the query string onto the new path.\n\n## Files\n\n- auth.ts";
+    expect(spokenReply(text)).toBe("The redirect is fixed and the suite passes.");
+  });
+
+  it("reads the opening section's body when the reply opens with a heading", () => {
+    expect(spokenReply("## Summary\n\nI fixed the redirect.\n\n## Detail\n\nLong.")).toBe("I fixed the redirect.");
+  });
+
+  it("falls back to the whole reply when there are no headings to split on", () => {
+    const text = "Tests pass.\n\n- one\n- two";
+    expect(spokenReply(text)).toBe("Tests pass.");
+    expect(spokenReply("Just the one sentence.")).toBe("Just the one sentence.");
+  });
+
+  it("reads a heading-only reply verbatim rather than saying nothing", () => {
+    expect(spokenReply("## Notes")).toBe("## Notes");
+    expect(toUtterances(spokenReply("## Notes"))).toEqual(["Notes."]);
+  });
+
+  // A model wrote its computer action as reply text. The reader may see the
+  // raw payload; a voice reading `{ "action": "press", ... }` aloud is the
+  // failure this module exists to prevent, so a pure-leak reply is silent.
+  it("says nothing when the reply is nothing but a leaked tool payload", () => {
+    const text = 'We need to output tool use calls.\n{ "action": "press", "keys": ["win", "r"] }';
+    expect(spokenReply(text)).toBe("");
+    expect(toUtterances(spokenReply(text))).toEqual([]);
+  });
+
+  it("speaks only the prose around a leaked payload, never the payload", () => {
+    const text = 'Opening the Run dialog.\n{ "action": "press", "keys": ["win", "r"] }';
+    expect(spokenReply(text)).toBe("Opening the Run dialog.");
+  });
+
+  // A payload inside a sentence is not a leak to remove: taking it out edits
+  // the words around it, and the edited sentence is what the voice would say.
+  it("speaks a sentence that contains a payload, payload and all", () => {
+    const inline = 'The policy uses {"action": "click", "x": 1} by default.';
+    expect(spokenReply(inline)).toBe(inline);
+    expect(toUtterances(spokenReply(inline))).toEqual([inline]);
+    const typed = 'I set {"action":"type","text":"hello"} in the script.';
+    expect(spokenReply(typed)).toBe(typed);
+  });
+
+  // The mirror of the silence guard: a sentence that merely sounds like tool
+  // narration is prose, so the voice says it rather than dropping it.
+  it("speaks an ordinary sentence that only sounds like tool narration", () => {
+    const sentences = [
+      "We need to send the report to the team before Friday.",
+      "I need to call the vendor about the invoice.",
+      "Then let us call it a day.",
+    ];
+    for (const sentence of sentences) {
+      expect(spokenReply(sentence)).toBe(sentence);
+    }
   });
 });
 

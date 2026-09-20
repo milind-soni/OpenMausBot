@@ -97,4 +97,108 @@ describe("Speaker lifecycle", () => {
     ]);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:voice-test");
   });
+
+  // On a paired desktop the default provider is the device's own engine, and
+  // that path never touches `/api/tts/prepare`. It is the one place the
+  // spoken half has to be decided without the harness.
+  it("gives the device's own engine the reply's lead, not the detail under it", async () => {
+    const spoken: string[] = [];
+    class FakeUtterance {
+      voice: unknown = null;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      constructor(public text: string) {}
+    }
+    vi.stubGlobal("window", {
+      ogb: { platform: "win32", remoteClient: { active: true } },
+      speechSynthesis: {
+        speak: (utterance: FakeUtterance) => {
+          spoken.push(utterance.text);
+          utterance.onend?.();
+        },
+        cancel: vi.fn(),
+      },
+      SpeechSynthesisUtterance: FakeUtterance,
+    });
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("the harness must not be called"); }));
+
+    const speaker = new Speaker();
+    await speaker.speak(
+      "The redirect is fixed.\n\n## What changed\n\nI moved the query string.\n\n## Files\n\n- server/auth.ts",
+      { botId: "bot" },
+    );
+
+    expect(spoken).toEqual(["The redirect is fixed."]);
+  });
+
+  // On a paired desktop the default provider is the device's own engine,
+  // and that path takes the raw reply as-is from the caller — it is the
+  // one place the spoken half has to be decided without the harness. A
+  // reply that is nothing but a leaked tool payload is not prose: the
+  // reader still sees it raw, so the voice stays silent.
+  it("says nothing when a pure-leak reply reaches the device's own engine", async () => {
+    const spoken: string[] = [];
+    class FakeUtterance {
+      voice: unknown = null;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      constructor(public text: string) {}
+    }
+    vi.stubGlobal("window", {
+      ogb: { platform: "win32", remoteClient: { active: true } },
+      speechSynthesis: {
+        speak: (utterance: FakeUtterance) => {
+          spoken.push(utterance.text);
+          utterance.onend?.();
+        },
+        cancel: vi.fn(),
+      },
+      SpeechSynthesisUtterance: FakeUtterance,
+    });
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("the harness must not be called"); }));
+
+    const speaker = new Speaker();
+    await speaker.speak(
+      'We need to output tool use calls.\n{ "action": "press", "keys": ["win", "r"] }',
+      { botId: "bot" },
+    );
+
+    expect(spoken).toEqual([]);
+  });
+
+  it("speaks only the prose around a leaked payload on the device's own engine", async () => {
+    const spoken: string[] = [];
+    class FakeUtterance {
+      voice: unknown = null;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onerror: ((event: { error: string }) => void) | null = null;
+      constructor(public text: string) {}
+    }
+    vi.stubGlobal("window", {
+      ogb: { platform: "win32", remoteClient: { active: true } },
+      speechSynthesis: {
+        speak: (utterance: FakeUtterance) => {
+          spoken.push(utterance.text);
+          utterance.onend?.();
+        },
+        cancel: vi.fn(),
+      },
+      SpeechSynthesisUtterance: FakeUtterance,
+    });
+    vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("the harness must not be called"); }));
+
+    const speaker = new Speaker();
+    await speaker.speak(
+      "Opening the Run dialog.\n{ \"action\": \"press\", \"keys\": [\"win\", \"r\"] }",
+      { botId: "bot" },
+    );
+
+    expect(spoken).toEqual(["Opening the Run dialog."]);
+  });
 });

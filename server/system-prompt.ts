@@ -22,6 +22,19 @@ export type PromptSection = PromptPart & { bytes: number };
  * turn that tagged a bot. */
 const VOLATILE_SECTIONS = new Set(["memory", "mentions"]);
 
+/** How a reply is shaped, which is not a formatting preference but the thing
+ * that lets one message serve two audiences at once: somebody reading the
+ * transcript, and somebody listening to it. The lead is what a voice reads
+ * and what the reader sees first; the sections under it are opened on demand.
+ *
+ * It is injected by the builder rather than handed in at each call site, so
+ * the 1:1 path, a room turn, and the settings preview cannot disagree about
+ * it — and so a bot that has never heard of the convention is told about it
+ * on its next turn. Kept to a few sentences: it is in the stable half of
+ * every prompt, and a long formatting rule is itself a formatting failure. */
+export const REPLY_SHAPE_PROMPT =
+  " Reply shape: open with a lead — one to three sentences of plain prose saying what you did or found, written to be heard. Keep code, file paths, tables, and lists for the sections. When there is detail worth keeping, put it under markdown headings, one topic each: the lead is read first and read aloud, and the sections under it are opened on demand. Do not repeat the lead in them. Tool calls ride the tool channel — never write tool-call JSON in your reply or narrate emitting it; say in prose what you did.";
+
 export function buildSystemPrompt(
   persona: string,
   soul: string,
@@ -30,6 +43,9 @@ export function buildSystemPrompt(
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
+    // ahead of the caller's parts: how to answer is a property of every
+    // reply, not of the tools this particular turn happened to mount
+    { id: "reply-shape", label: "Reply shape", text: REPLY_SHAPE_PROMPT },
     ...parts,
   ];
   const sections = ordered

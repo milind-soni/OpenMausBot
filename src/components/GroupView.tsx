@@ -24,7 +24,7 @@ import { showToolCallsEnabled } from "@/lib/feature-flags";
 import { roomActivityVisible } from "@/lib/room-activity";
 import { normalizeState } from "@/lib/mascot";
 import { effectiveDefaultResponder, groupResponseHint } from "@/lib/group-routing";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ReplySections } from "./ReplySections";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { GroupTaskPicker } from "./TaskPicker";
@@ -321,7 +321,7 @@ const Transcript = memo(function Transcript({
                           eager={m.id === newestMessageId || m.id === newestUserMessageId}
                         />
                       ) : null}
-                      {m.text ? <ChatMarkdown text={m.text} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
+                      {m.text ? <ReplySections text={m.text} mentionPeers={members} everyone={!group.dm} message={{ threadId: group.threadId, messageId: m.id }} /> : null}
                     </>
                   )}
                 </div>

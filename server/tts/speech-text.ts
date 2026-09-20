@@ -11,6 +11,11 @@
 // becomes "a code block" — the user is looking at the screen if they care,
 // and this is the half of the feature that decides whether it is pleasant.
 //
+// None of that decides which half of a reply is read aloud; that is the
+// section convention in `shared/reply-sections.ts`, whose `spokenReply` is
+// re-exported at the foot of this module. This module is the part that makes
+// whatever it is handed bearable.
+//
 // Pure and synchronous on purpose: it is the piece most likely to need
 // tuning against real transcripts, so it stays trivially testable.
 
@@ -132,6 +137,16 @@ export function speakable(input: string): string {
 /** Sentence-ish boundary: `.`/`!`/`?` followed by space, but not inside a
  * decimal, an ellipsis, or a common abbreviation. */
 const BOUNDARY = /(?<!\b(?:e\.g|i\.e|etc|vs|Dr|Mr|Mrs|Ms|No|approx))(?<![.\d])([.!?])(["')\]]*)\s+/g;
+
+/** The half of a reply a voice reads — re-exported, not implemented.
+ *
+ * Which half is spoken is a reply-shape decision, and it has one owner:
+ * `shared/reply-sections.ts`, beside the split that produces it. It cannot
+ * live here, because the renderer's own speech engine asks the same question
+ * and nothing in `src/` may import `server/`; a second copy of the rule on
+ * that side is what drifted. The name is still exported from this module
+ * because this is where the server asks for text a voice can read. */
+export { spokenReply } from "../../shared/reply-sections.ts";
 
 /**
  * Split speakable text into utterances a synthesizer can start on.
