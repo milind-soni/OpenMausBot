@@ -192,14 +192,19 @@ function stripToolLeak(text: string): string {
     i++;
   }
 
-  // No blanket pass over the finished text: anything that rewrites the whole
-  // reply also rewrites the fenced code in it, which the header promises to
-  // leave alone. Every edit above is local to the line it removes.
-  return out
-    .split("\n")
-    .filter((line) => !TOOL_NARRATION.test(line))
-    .join("\n")
-    .trim();
+  // Narration lines, outside fences only: a code sample that quotes the phrase
+  // is code, not the model narrating itself. Nothing here rewrites the reply
+  // wholesale, which would rewrite the fence with it. The mask is recomputed
+  // because whole lines are gone from `out`; fences themselves are untouched.
+  const outFenced = fenceMask(out);
+  let offset = 0;
+  const kept: string[] = [];
+  for (const line of out.split("\n")) {
+    const start = offset;
+    offset += line.length + 1;
+    if (outFenced[start] || !TOOL_NARRATION.test(line)) kept.push(line);
+  }
+  return kept.join("\n").trim();
 }
 
 export function splitReply(input: string): ReplyParts {

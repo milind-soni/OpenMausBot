@@ -211,6 +211,14 @@ describe("splitReply tool-leak stripping", () => {
     expect(splitReply(text).detail).toBe("```yaml\na: 1\n\n\nb: 2\n```");
   });
 
+  // And inside a fence the phrase is code the reader asked for, whatever the
+  // line says — the rule above the fence does not reach into it.
+  it("keeps a narration line that lives inside a fence", () => {
+    const fenced = "```text\nWe need to output tool use calls.\n```";
+    expect(splitReply(fenced).display).toBe(fenced);
+    expect(splitReply(fenced).toolLeakOnly).toBeUndefined();
+  });
+
   // The other edge of the narration rule: a line that only *mentions* the
   // phrase is prose, and matching the phrase anywhere in a line deleted it.
   it("keeps a line that merely mentions the narration phrase", () => {
