@@ -15,7 +15,12 @@ type RemoteProfilePatch = Partial<
   Pick<Bot, "name" | "title" | "description" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies" | "notifications">
 >;
 
-export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
+export function RemoteAgentSettingsPanel({ bot, overlay = false }: {
+  bot: Bot;
+  /** Float over the chat: the remote computer panel is open too and the
+   * window cannot seat both columns (see App). */
+  overlay?: boolean;
+}) {
   const { dispatch } = useStore();
   // Docked flush under the Windows caption corner: drop the header 16px.
   const { padClass } = useCaptionChrome();
@@ -73,7 +78,10 @@ export function RemoteAgentSettingsPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="animate-panel-in relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline/40 bg-panel">
+    <aside className={cn(
+      "animate-panel-in flex h-full w-[400px] flex-col border-l border-hairline/40 bg-panel",
+      overlay ? "absolute inset-y-0 right-0 z-40 shadow-2xl" : "relative z-20 shrink-0",
+    )}>
       <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>
         <button
           onClick={close}

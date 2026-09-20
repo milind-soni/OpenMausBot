@@ -1,10 +1,14 @@
+import { cn } from "@/lib/cn";
 import { useCallback, useLayoutEffect, useRef, type RefObject, type TextareaHTMLAttributes } from "react";
 import { type MentionPeer } from "@/lib/mentions";
 import { MentionText } from "./MentionText";
 
 /** A native textarea retains selection, undo, IME and accessibility. Its
  * aria-hidden mirror paints mentions without changing wrapping or caret offsets. */
-export function MentionTextarea({ inputRef, peers, everyone = false, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+  /** Classes for the flex child around the editor: the composer uses it to
+   * move the editor onto its own line when the row is too narrow. */
+  wrapperClassName?: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   peers: readonly MentionPeer[];
   everyone?: boolean;
@@ -41,7 +45,7 @@ export function MentionTextarea({ inputRef, peers, everyone = false, ...props }:
     if (inputRef.current) observer.observe(inputRef.current);
     return () => observer.disconnect();
   }, [inputRef, resize, sync]);
-  return <div className="mention-editor relative min-w-0 flex-1 self-center">
+  return <div className={cn("mention-editor relative min-w-0 flex-1 self-center", wrapperClassName)}>
     <div ref={mirrorRef} dir={props.dir} aria-hidden="true" className="mention-editor-mirror pointer-events-none absolute inset-0 overflow-hidden">
       <MentionText text={String(props.value ?? "")} peers={peers} everyone={everyone} />{"\n"}
     </div>
