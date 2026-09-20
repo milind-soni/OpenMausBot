@@ -4,6 +4,7 @@ import { Ajv, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import formats from "ajv-formats";
 import type { SendTurnInput } from "../contracts.ts";
+import { augmentedPath } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 
 export interface ChatToolDefinition {
@@ -48,8 +49,11 @@ class ChatMcpClient {
 
   constructor(server: Server) {
     try {
+      // The desktop shell inherits Finder's bare PATH, where `npx`-style
+      // servers cannot find `node` and exit at once. Widen it the way the
+      // Claude and Codex drivers do; a PATH the user set on the server wins.
       this.child = spawnCli(server.command, server.args, {
-        stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...server.env },
+        stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, PATH: augmentedPath(), ...server.env },
       });
     } catch { throw new Error("MCP server could not start; check its command and installation"); }
     this.child.stdout.setEncoding("utf8");
