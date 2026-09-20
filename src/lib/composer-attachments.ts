@@ -815,3 +815,26 @@ export async function intakeFiles<T extends DroppedFile & { type: string }>(
     notice: pathless && failed ? `${pathless} (${failed})` : (pathless ?? failed),
   };
 }
+
+/**
+ * Whether the composer may pull keyboard focus back into its textarea after an
+ * attachment lands. The draft was the writer's place when focus is still there,
+ * has fallen to the page (a disabled element drops it), or sits on a control
+ * inside the composer such as the paperclip button after the file dialog. A
+ * focused control elsewhere — a dialog, the thread list — is left alone.
+ */
+export function composerShouldRefocus(active: FocusNode | null, input: ComposerInputNode): boolean {
+  if (!active || active === input) return true;
+  const root = input.ownerDocument;
+  if (active === root.body || active === root.documentElement) return true;
+  const composer = input.closest("[data-tour=composer]");
+  return Boolean(composer?.contains(active));
+}
+
+// This file is also compiled for the server, which has no DOM types; the rule
+// only needs these members of the real elements.
+type FocusNode = object;
+interface ComposerInputNode {
+  ownerDocument: { body: FocusNode | null; documentElement: FocusNode | null };
+  closest(selector: string): { contains(node: FocusNode | null): boolean } | null;
+}

@@ -35,6 +35,7 @@ import {
   clipboardHasImages,
   clipboardImageFiles,
   composeMessage,
+  composerShouldRefocus,
   imageAttachmentFromFile,
   intakeFiles,
   isLongPaste,
@@ -216,6 +217,19 @@ export function Composer({
   const [dismissedAt, setDismissedAt] = useState<number | null>(null); // Esc'd this @
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // the latest caret, readable from callbacks without re-creating them
+  const caretRef = useRef(0);
+  caretRef.current = caret;
+  /** Returns keyboard focus to the draft, keeping the caret where it was. */
+  const refocusInput = useCallback(() => {
+    requestAnimationFrame(() => {
+      const input = inputRef.current;
+      if (!input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
+      const at = Math.min(caretRef.current, input.value.length);
+      input.focus();
+      input.setSelectionRange(at, at);
+    });
+  }, []);
   const mentionListRef = useRef<HTMLDivElement>(null);
   // what was typed before the mic went on — partials append after it
   const baseText = useRef("");
@@ -465,6 +479,9 @@ export function Composer({
     } finally {
       changeDraftAttachmentPending(draftId, false);
     }
+    // the file dialog leaves focus on the paperclip button; typing should
+    // continue in the draft without another click
+    refocusInput();
   };
   const setApprovalMode = (mode: ApprovalMode) => {
     if (!modeBot || modeBot.busy || mode === approvalModeFor(modeBot)) return;
@@ -1026,7 +1043,11 @@ export function Composer({
             }
             if (e.key === "Escape" && recording) setRecording(false);
           }}
-          disabled={Boolean(approval) || locked || attachmentPending}
+          // an upload in flight must not disable the box: a disabled element
+          // drops keyboard focus and never gets it back, so the writer had to
+          // click the input again after every pasted image (#1014). send()
+          // already refuses while an attachment is pending.
+          disabled={Boolean(approval) || locked}
           aria-busy={bot?.awaitingThreadSnapshot || undefined}
           placeholder={
             setupLocked

@@ -19,6 +19,7 @@ import {
   releaseAttachmentImagePreview,
   splitTranscriptAttachments,
   type ImageAttachment,
+  composerShouldRefocus,
 } from "./composer-attachments";
 
 /** Exercises the spacing and empty-draft cases for pasted text insertion. */
@@ -640,5 +641,52 @@ describe("private image intake", () => {
     } finally {
       fetch.mockRestore();
     }
+  });
+});
+
+describe("composerShouldRefocus", () => {
+  // the test environment has no DOM, so a few plain objects stand in for the
+  // handful of Element members the rule reads
+  type Fake = { name: string; parent?: Fake; closest: (sel: string) => Fake | null; contains: (el: unknown) => boolean };
+  const node = (name: string, parent?: Fake): Fake => {
+    const self: Fake = {
+      name,
+      parent,
+      closest: (sel) => {
+        for (let cur: Fake | undefined = self; cur; cur = cur.parent) {
+          if (sel === "[data-tour=composer]" && cur.name === "composer") return cur;
+        }
+        return null;
+      },
+      contains: (el) => {
+        for (let cur = el as Fake | undefined; cur; cur = cur.parent) if (cur === self) return true;
+        return false;
+      },
+    };
+    return self;
+  };
+  const html = node("html");
+  const body = node("body", html);
+  const composer = node("composer", body);
+  const paperclip = node("paperclip", composer);
+  const sidebar = node("sidebar", body);
+  const input = Object.assign(node("textarea", composer), {
+    ownerDocument: { body, documentElement: html },
+  });
+  const el = (fake: Fake | null) => fake;
+
+  it("refocuses when focus is on the input, gone, or on the page itself", () => {
+    expect(composerShouldRefocus(input, input)).toBe(true);
+    expect(composerShouldRefocus(null, input)).toBe(true);
+    expect(composerShouldRefocus(el(body), input)).toBe(true);
+    expect(composerShouldRefocus(el(html), input)).toBe(true);
+  });
+
+  it("refocuses from a control inside the composer, such as the attach button", () => {
+    expect(composerShouldRefocus(el(paperclip), input)).toBe(true);
+  });
+
+  it("leaves focus alone when the writer moved elsewhere", () => {
+    expect(composerShouldRefocus(el(sidebar), input)).toBe(false);
   });
 });
