@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
+import worker, {
   authorize,
   catalog,
   connectedServices,
@@ -327,5 +327,55 @@ describe("connected-apps broker boundaries", () => {
   it("validates aliases at the broker boundary", () => {
     expect(normalizeAccountAlias("  work gmail  ")).toBe("work gmail");
     expect(() => normalizeAccountAlias("bad\nalias")).toThrow(/printable/i);
+  });
+
+  // Composio prefixes slugs that would otherwise lead with a digit, so
+  // 1Password arrives as `_1password`. The catalog lists those toolkits, so
+  // routing them to the 404 branch stranded every one of them at Connect.
+  it("routes underscore-prefixed toolkit slugs instead of 404ing them", async () => {
+    const token = "a".repeat(64);
+    const fetchCalls: Array<{ url: string; init?: RequestInit }> = [];
+    const { env, ctx } = testEnv(fetchCalls);
+    const dbEnv = {
+      ...env,
+      DB: {
+        prepare(sql: string) {
+          return {
+            bind() {
+              return {
+                run: async () => {},
+                first: async () => (
+                  sql.includes("FROM installations")
+                    ? { id: "install-1", composio_user_id: "omb_user", session_id: "trs_test", disabled_at: null }
+                    : null
+                ),
+              };
+            },
+          };
+        },
+      },
+    };
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      fetchCalls.push({ url, init });
+      if (url.endsWith("/link")) return Response.json({ redirect_url: "https://connect.composio.dev/link/_1password" });
+      if (url.includes("/connected_accounts")) return Response.json({ items: [] });
+      if (url.includes("/toolkits")) return Response.json({ items: [] });
+      return Response.json(session("trs_test", "omb_user"));
+    });
+
+    const response = await worker.fetch(
+      new Request("https://broker.test/v1/connectors/_1password/authorize", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ alias: "work" }),
+      }),
+      dbEnv as never,
+      ctx as never,
+    );
+
+    expect(response.status).not.toBe(404);
+    await expect(response.json()).resolves.not.toEqual({ error: "not found" });
+    expect(fetchCalls.some((call) => call.url.endsWith("/link"))).toBe(true);
   });
 });
