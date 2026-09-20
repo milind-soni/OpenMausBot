@@ -668,6 +668,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         >();
 
         const send = (obj: unknown) => {
+          // A permission/file response resumes an agent that was waiting on us.
+          const message = obj as { id?: unknown; result?: unknown; error?: unknown };
+          if (message.id !== undefined && (message.result !== undefined || message.error !== undefined)) {
+            for (const pending of rpcPending.values()) pending.armIdle();
+          }
           try {
             child.stdin.write(JSON.stringify(obj) + "\n");
           } catch {}
@@ -700,6 +705,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (!(idleMs && idleMs > 0)) return;
               if (idleTimer) clearTimeout(idleTimer);
               idleTimer = setTimeout(() => {
+                // Waiting for a person is not an unresponsive agent.
+                if (session.current?.asks.size) { armIdle(); return; }
                 rpcPending.delete(id);
                 const error = new Error(idleMessage ?? `${method} stopped responding`);
                 Object.assign(error, { acpPromptStall: true });
@@ -714,7 +721,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               resolve: (result) => { receive?.(result); resolve(result); },
               reject,
               timer,
-              idleTimer,
+              get idleTimer() { return idleTimer; },
               armIdle,
             });
             send({ jsonrpc: "2.0", id, method, params });
@@ -1034,6 +1041,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               if (pend) {
                 rpcPending.delete(msg.id);
                 if (pend.timer) clearTimeout(pend.timer);
+                if (pend.idleTimer) clearTimeout(pend.idleTimer);
                 if (msg.error) {
                   const error = new Error(msg.error.message ?? JSON.stringify(msg.error));
                   Object.assign(error, { code: msg.error.code, data: msg.error.data });
@@ -1531,13 +1539,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 message,
                 ...(needsAuth ? { setup: true } : {}),
               });
-              settle(threadId, session, false, needsAuth ? "auth_required" : "rpc_error");
               // A prompt that went idle has a wedged child under the RPC — it
               // will never answer the next prompt either. Do not leave it
               // pooled: close it so the next turn spawns a fresh agent.
               if ((e as any)?.acpPromptStall === true && session.child.exitCode === null && !session.closing) {
                 closeSession(threadId, "prompt-stall");
               }
+              settle(threadId, session, false, needsAuth ? "auth_required" : "rpc_error");
             }
           }
         })();

@@ -952,6 +952,19 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
   });
 
+  it("does not expire an agent while a person is answering an approval", async () => {
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-idle-approval", text: "go", approvalMode: "ask" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    await new Promise(resolve => setTimeout(resolve, 450));
+    expect(recorder.events.some(e => e.type === "turn.completed")).toBe(false);
+    await instance.adapter.respondToRequest("t-idle-approval", (opened as { requestId: string }).requestId, { behavior: "allow" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+  });
+
   it("an agent that goes silent mid-answer is failed and closed by the prompt idle guard", async () => {
     process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
     await create(GrokAgentDriver, "stall-after-text");
