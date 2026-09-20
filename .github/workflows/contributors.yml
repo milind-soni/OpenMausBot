@@ -40,13 +40,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           path-to-signatures: '.github/cla-signatures.json'
-          path-to-document: 'https://github.com/milind-soni/Astra/blob/main/CLA.md'
+          path-to-document: 'https://github.com/milind-soni/OpenMausBot/blob/main/CLA.md'
           branch: 'cla-signatures'
           allowlist: 'milind-soni,dependabot[bot],renovate[bot],github-actions[bot]'
           custom-notsigned-prcomment: >-
             This pull request changes files under `enterprise/`, which is under the
             Astra Enterprise License (see LICENSING.md). Before it can be merged,
-            please sign the [CLA](https://github.com/milind-soni/Astra/blob/main/CLA.md)
+            please sign the [CLA](https://github.com/milind-soni/OpenMausBot/blob/main/CLA.md)
             by commenting exactly: **I have read the CLA Document and I hereby sign the CLA**.
             Changes outside `enterprise/` do not require a CLA or DCO sign-off.
           custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'

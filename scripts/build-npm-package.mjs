@@ -52,8 +52,8 @@ writeFileSync(
       bin: { astra: "cli.js" },
       files: ["cli.js", "dist-server", "dist", "skills", "enterprise", "LICENSE", "README.md"],
       engines: { node: ">=24" },
-      repository: { type: "git", url: "https://github.com/milind-soni/Astra.git" },
-      homepage: "https://github.com/milind-soni/Astra#readme",
+      repository: { type: "git", url: "https://github.com/milind-soni/OpenMausBot.git" },
+      homepage: "https://github.com/milind-soni/OpenMausBot#readme",
       keywords: ["astra", "agents", "self-hosted", "server"],
     },
     null,
@@ -138,8 +138,8 @@ For a service, use \`serve --tunnel\` after \`login\` for managed HTTPS,
 \`login\` command signs in to an Astra account, not an AI provider;
 it does not start the tunnel itself.
 
-[Setup guide](https://github.com/milind-soni/Astra/blob/main/docs/cli-onboarding.md)
-· [Hosting guide](https://github.com/milind-soni/Astra/blob/main/docs/self-hosting.md)
+[Setup guide](https://github.com/milind-soni/OpenMausBot/blob/main/docs/cli-onboarding.md)
+· [Hosting guide](https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md)
 `,
 );
 console.log(`npm package assembled at ${out} (astra@${app.version})`);

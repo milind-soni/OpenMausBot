@@ -68,13 +68,13 @@ describe("chiefOfStaffSystemPrompt", () => {
   });
 
   it("includes trusted Astra status only when the Chief caller supplies it", () => {
-    const status = "TRUSTED OPENMAUSBOT STATUS\nfreshness=fresh; runtime_state=degraded";
+    const status = "TRUSTED ASTRA STATUS\nfreshness=fresh; runtime_state=degraded";
 
     const chiefPrompt = chiefOfStaffSystemPrompt("chief", bots, true, status);
     const ordinaryPrompt = chiefOfStaffSystemPrompt("writer", bots, true);
 
     expect(chiefPrompt).toContain(status);
-    expect(ordinaryPrompt).not.toContain("TRUSTED OPENMAUSBOT STATUS");
+    expect(ordinaryPrompt).not.toContain("TRUSTED ASTRA STATUS");
   });
 
   it("renders the Chief's prompt exactly as it did before ordinary bots got a roster", () => {
@@ -82,7 +82,7 @@ describe("chiefOfStaffSystemPrompt", () => {
     // section-wide staffing legible to the model — so extracting the shared
     // roster renderer must not have moved a single byte of it. This is the
     // pin: a golden prompt, not a set of contains().
-    const prompt = chiefOfStaffSystemPrompt("chief", bots, true, "TRUSTED OPENMAUSBOT STATUS\nfreshness=fresh");
+    const prompt = chiefOfStaffSystemPrompt("chief", bots, true, "TRUSTED ASTRA STATUS\nfreshness=fresh");
 
     expect(prompt).toBe(
       [
@@ -93,7 +93,7 @@ describe("chiefOfStaffSystemPrompt", () => {
         "Current Work section team:",
         "- Quill — Writer: Drafts concise copy (available)",
         "- Patch — Engineer (working right now)",
-        "TRUSTED OPENMAUSBOT STATUS",
+        "TRUSTED ASTRA STATUS",
         "freshness=fresh",
       ].join("\n"),
     );

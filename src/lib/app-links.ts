@@ -2,7 +2,11 @@
 // About dialog. They are collected here so "where does Help go?" has one
 // answer rather than one per call site.
 export const APP_NAME = "Astra";
-export const APP_REPOSITORY = "https://github.com/milind-soni/Astra";
+/** The repository that exists. The Astra rename is staged in the code but not
+ * yet made on GitHub, and every link here (Help, releases, the licence) 404s
+ * against the name that isn't there — so this follows the publish target in
+ * electron-builder.yml and moves with it. */
+export const APP_REPOSITORY = "https://github.com/milind-soni/OpenMausBot";
 /** The docs tree is the help centre, and it is where astra.com sends
  * people too — one destination, not two competing ones. */
 export const DOCS_URL = `${APP_REPOSITORY}/tree/main/docs`;

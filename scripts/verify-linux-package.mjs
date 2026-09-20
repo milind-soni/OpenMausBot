@@ -75,8 +75,8 @@ function requireUpdaterTarget(resources, label) {
   const updateFile = path.join(resources, "app-update.yml");
   requireFile(updateFile);
   const update = readFileSync(updateFile, "utf8");
-  if (!/^owner: milind-soni$/m.test(update) || !/^repo: Astra$/m.test(update)) {
-    fail(`${label} app-update.yml does not point at milind-soni/Astra`);
+  if (!/^owner: milind-soni$/m.test(update) || !/^repo: OpenMausBot$/m.test(update)) {
+    fail(`${label} app-update.yml does not point at milind-soni/OpenMausBot`);
   }
 }
 

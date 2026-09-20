@@ -13,10 +13,17 @@ protocols:
 # --publish never, and must be uploaded to the GitHub release alongside the
 # artifacts — a release missing latest.yml leaves every Windows install
 # stranded on its installed version.
+# The repo named here is the one that actually serves public releases today.
+# The Astra rename is staged throughout this codebase but has NOT been made on
+# GitHub, and `milind-soni/Astra` resolves to nothing: a build published with
+# that target bakes a 404 feed into app-update.yml, so every installed app
+# reports "up to date" forever — including the browser-engine download, which
+# is pinned to the same missing repo. Point this back at `Astra` only in the
+# same change that renames the repository.
 publish:
   - provider: github
     owner: milind-soni
-    repo: Astra
+    repo: OpenMausBot
 
 directories:
   buildResources: build

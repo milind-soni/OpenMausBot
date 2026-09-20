@@ -36,6 +36,26 @@ refreshes it.
 
 ## Updater migration invariant
 
+**Current state, 2026-09-20.** The Astra rename is staged throughout the
+codebase but has not been made on GitHub. `milind-soni/Astra` and
+`milind-soni/astra-releases` both resolve to nothing, so builds that named
+them baked a feed that 404s on every check — the installed app reports
+"up to date" forever and nothing is ever delivered. Until the rename lands,
+the feed target (`electron-builder.yml`), the browser-engine download
+(`server/browser-engine-release.ts`), the in-app links (`src/lib/app-links.ts`)
+and the CI assertions that pin all of them name `milind-soni/OpenMausBot`,
+which is where the releases and the pinned browser assets actually are.
+
+Renaming the repository to `Astra` is the fix that reaches already-installed
+apps — GitHub redirects the old name, so both spellings keep working. Before
+the rename, note that the existing releases there carry the *old* brand, and
+v0.1.84 is newer than the Astra builds installed today: an installed 0.1.75
+would be offered `OpenMausBot-0.1.84-setup.exe`. Cut an Astra-named version
+above 0.1.84 on the renamed repository first. `astra-releases` is missing and
+must be created before the legacy-mirror half of the Release workflow can run.
+
+The invariant itself:
+
 `app-update.yml` is baked into every packaged desktop app. Builds through
 0.1.46 point to `milind-soni/astra-releases`; newer builds point to
 `milind-soni/Astra`. For that reason:

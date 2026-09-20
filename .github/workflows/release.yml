@@ -144,7 +144,7 @@ jobs:
             update="$app/Contents/Resources/app-update.yml"
             test -f "$update" || { echo "::error::missing $update"; exit 1; }
             grep -Eq '^owner: milind-soni$' "$update" || { echo "::error::wrong update owner in $update"; exit 1; }
-            grep -Eq '^repo: Astra$' "$update" || { echo "::error::wrong update repo in $update"; exit 1; }
+            grep -Eq '^repo: OpenMausBot$' "$update" || { echo "::error::wrong update repo in $update"; exit 1; }
           done
 
       - name: "Gate: the signature must verify BEFORE notarization"
@@ -311,7 +311,7 @@ jobs:
             echo "::error::cloudflared has the wrong version"; exit 1; }
           [ -f "$res/app-update.yml" ] || { echo "::error::missing app-update.yml"; exit 1; }
           grep -Eq '^owner: milind-soni$' "$res/app-update.yml" || { echo "::error::wrong update owner"; exit 1; }
-          grep -Eq '^repo: Astra$' "$res/app-update.yml" || { echo "::error::wrong update repo"; exit 1; }
+          grep -Eq '^repo: OpenMausBot$' "$res/app-update.yml" || { echo "::error::wrong update repo"; exit 1; }
           if grep -q "publisherName" "$res/app-update.yml"; then
             echo "::error::publisherName on an unsigned build breaks every update"; exit 1
           fi
@@ -374,7 +374,7 @@ jobs:
           update=release/linux-unpacked/resources/app-update.yml
           test -f "$update" || { echo "::error::missing $update"; exit 1; }
           grep -Eq '^owner: milind-soni$' "$update" || { echo "::error::wrong update owner"; exit 1; }
-          grep -Eq '^repo: Astra$' "$update" || { echo "::error::wrong update repo"; exit 1; }
+          grep -Eq '^repo: OpenMausBot$' "$update" || { echo "::error::wrong update repo"; exit 1; }
       - name: Verify package contents and metadata
         run: node scripts/verify-linux-package.mjs
       - name: Match a normal Ubuntu package parent on the ephemeral runner
