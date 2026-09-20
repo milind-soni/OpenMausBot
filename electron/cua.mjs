@@ -30,6 +30,7 @@ const { localOnly } = localOriginModule;
 
 const require = createRequire(import.meta.url);
 const { createCuaConnectionStore } = require("./cua-connection.cjs");
+const { createCuaWatchdog, socketPathOf } = require("./cua-watchdog.cjs");
 const {
   createLinuxCuaPreferenceStore,
   createLinuxCuaRuntime,
@@ -81,6 +82,23 @@ let stateListener = () => {};
 const connectionStore = createCuaConnectionStore({
   getUserData: () => app.getPath("userData"),
 });
+
+// Lazy: a machine that never turns computer use on never builds a prober. The
+// descriptor this watches is a claim about a process, and the process can die
+// without telling anyone — see the header in electron/cua-watchdog.cjs.
+let cuaWatchdog = null;
+
+function watchdog() {
+  cuaWatchdog ??= createCuaWatchdog({
+    read: () => connectionStore.get(),
+    isAlive: (socketPath) => socketAlive(socketPath),
+    // Revive through startCua itself, so the generation counters and startup
+    // aborts that make a restart safe are not duplicated here.
+    revive: () => startCua(),
+    log: (line) => console.log(line),
+  });
+  return cuaWatchdog;
+}
 
 function ensureLinuxRuntime() {
   if (!linuxRuntime) {
@@ -383,7 +401,12 @@ export async function startCua() {
   }
 
   signal.throwIfAborted();
-  return persistAndNotify(nextConnection);
+  const connection = persistAndNotify(nextConnection);
+  // Only a connection with a socket to probe has anything to watch. A start
+  // that failed persists `unavailable`, so the watchdog stays off rather than
+  // looping on a driver that just refused to come up.
+  if (socketPathOf(connection)) watchdog().start();
+  return connection;
 }
 
 export async function cuaPermissionsStatus() {
@@ -407,6 +430,9 @@ export async function stopCua() {
   lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = null;
+  // Before the host goes down, not after: the watchdog would otherwise read
+  // the socket closing as a crash and restart the daemon we are shutting down.
+  watchdog().stop();
   if (linuxRuntime) {
     await linuxRuntime.shutdown();
     if (linuxBundleStage) {
@@ -431,7 +457,15 @@ export async function stopCua() {
 }
 
 export function registerCuaIpc() {
-  ipcMain.handle("cua:connection", localOnly("cua:connection", () => connectionStore.get()));
+  ipcMain.handle("cua:connection", localOnly("cua:connection", () => {
+    // The panel and the harness both read this to decide whether computer use
+    // is on, and a descriptor whose daemon is gone is worse than none — so the
+    // claim is re-checked rather than replayed. Answering with the stored one
+    // is deliberate: the revive's own persistAndNotify pushes the corrected
+    // state to the renderer when it lands, so this never blocks on a restart.
+    void watchdog().check();
+    return connectionStore.get();
+  }));
   ipcMain.handle("cua:permissions", localOnly("cua:permissions", () => cuaPermissionsStatus()));
   ipcMain.handle("cua:linux-status", localOnly("cua:linux-status", () =>
     process.platform === "linux"

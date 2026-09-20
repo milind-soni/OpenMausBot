@@ -129,6 +129,24 @@ the `ax → ax_fg → cgevent → cgevent_fg → cgevent_hid` delivery ladder
 (background pid-addressed input first — does not steal the user's cursor) are
 handled inside the binary; the host adds nothing.
 
+### The descriptor is re-checked, not trusted
+
+The descriptor names a daemon, and a daemon can be gone by the time anyone
+reads it: an embedded host dies with the parent that owns it, a standalone
+daemon can be stopped by the user or the OS, and a machine that slept can wake
+to a closed pipe. Left alone, the panel keeps rendering the mode it was told
+and every tool call fails inside a turn with a spawn error instead of an
+honest "computer use is not running".
+
+`electron/cua-watchdog.cjs` probes the socket the descriptor names — on an
+interval, and again whenever the renderer asks for the connection — and
+restarts the daemon through `startCua` when it is gone, once per dead socket
+however many checks overlap. A descriptor that names no socket (a start that
+failed, Linux's own runtime) is left alone, so a driver that just refused to
+come up is not restarted in a loop. The restart's own persist pushes the
+corrected state to the renderer, which is why a read returns the stored
+descriptor and never blocks on a launch.
+
 Driver tool surface (per `cua-driver list-tools`): start_session, click,
 double_click, right_click, drag, scroll, type_text, press_key, hotkey,
 move_cursor, get_window_state, get_desktop_state, get_accessibility_tree,
