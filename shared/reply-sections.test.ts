@@ -52,8 +52,8 @@ describe("splitReply", () => {
   });
 
   it("is empty for empty input rather than a lone sentence", () => {
-    expect(splitReply("")).toEqual({ lead: "", detail: "", titles: [], structured: false });
-    expect(splitReply("   \n\n  ")).toEqual({ lead: "", detail: "", titles: [], structured: false });
+    expect(splitReply("")).toEqual({ lead: "", detail: "", display: "", titles: [], structured: false });
+    expect(splitReply("   \n\n  ")).toEqual({ lead: "", detail: "", display: "", titles: [], structured: false });
   });
 
   it("does not read a shell comment as a heading", () => {
@@ -120,9 +120,31 @@ describe("splitReply tool-leak stripping", () => {
   it("marks a reply that is nothing but leak so the voice stays silent", () => {
     const parts = splitReply('We need to output tool use calls.\n{ "action": "press", "keys": ["win", "r"] }');
     expect(parts.toolLeakOnly).toBe(true);
-    // the reader still sees the raw text; the lead is deliberately unspeakable
+    // the reader still sees the raw text; the lead is deliberately unspeakable.
+    // `display` is what an unstructured reply renders, so for this one case it
+    // must be the leak itself — hiding it would leave an empty message.
     expect(parts.lead).toContain('"action": "press"');
+    expect(parts.display).toBe('We need to output tool use calls.\n{ "action": "press", "keys": ["win", "r"] }');
     expect(parts.structured).toBe(false);
+  });
+
+  // The reader's half of the stripping guarantee, and the half that was
+  // missing: a reply with no headings renders `display` wholesale, so a
+  // payload removed from the lead has to be gone from `display` too. What the
+  // reader was shown used to be the raw prop, which still carried it — the
+  // voice stayed silent while the leak sat in the transcript.
+  it("removes a stripped payload from what the reader is shown as well", () => {
+    const parts = splitReply(
+      'Opening the Run dialog for you.\n{ "action": "press", "keys": ["win", "r"] }\n\nFollow-up note.',
+    );
+    expect(parts.structured).toBe(false);
+    expect(parts.display).toBe("Opening the Run dialog for you.\n\nFollow-up note.");
+    expect(parts.display).not.toContain("action");
+  });
+
+  it("leaves an inline payload in what the reader is shown, unedited", () => {
+    const inline = 'The policy uses {"action": "click", "x": 1} by default.';
+    expect(splitReply(inline).display).toBe(inline);
   });
 
   it("leaves ordinary JSON-looking prose and narration alone", () => {
@@ -153,6 +175,7 @@ describe("splitReply tool-leak stripping", () => {
     const parts = splitReply('Done.\n\n  {"action": "click", "x": 1}\n\nNext.');
     expect(parts.lead).toBe("Done.");
     expect(parts.detail).toBe("Next.");
+    expect(parts.display).toBe("Done.\n\nNext.");
   });
 
   // The other direction of the same guard: a line is dropped only when it names

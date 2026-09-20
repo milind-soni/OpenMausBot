@@ -40,8 +40,12 @@ export function ReplySections({
   );
 
   // no headings: nothing was authored to fold, and splitting a reply the
-  // reader never structured would hide a paragraph they did not ask to hide
-  if (!parts.structured) return markdown(text);
+  // reader never structured would hide a paragraph they did not ask to hide.
+  // It renders `display`, not the raw prop: a tool payload that owned its line
+  // is already gone from it. The voice has never read the leak, and the reader
+  // is the other half of the same reply — showing it here was the one place
+  // the two audiences disagreed.
+  if (!parts.structured) return markdown(parts.display);
 
   const shown = parts.titles.slice(0, MAX_TITLES).join(" · ");
   const hidden = parts.titles.length - MAX_TITLES;

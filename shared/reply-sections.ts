@@ -49,6 +49,12 @@ export interface ReplyParts {
   /** The sections after the lead, headings included. Empty when the reply is
    * only a lead. */
   detail: string;
+  /** The reply as the reader should see it when nothing is folded: the text
+   * with any leaked tool payload removed — or the raw text for a reply that
+   * was nothing but leak, which is the only honest thing to show. Deriving it
+   * here rather than in the renderer is the point: the reader and the voice
+   * must not disagree about what the reply says. */
+  display: string;
   /** The heading titles inside `detail`, in order, for a fold row that has to
    * earn its place with what is behind it. */
   titles: string[];
@@ -244,18 +250,19 @@ export function stripToolLeak(text: string): string {
 export function splitReply(input: string): ReplyParts {
   // Normalized, not rewritten: offsets below index into this string.
   const raw = String(input ?? "").replace(/\r\n?/g, "\n").trim();
-  if (!raw) return { lead: "", detail: "", titles: [], structured: false };
+  if (!raw) return { lead: "", detail: "", display: "", titles: [], structured: false };
 
   const text = stripToolLeak(raw);
-  if (!text) return { lead: raw, detail: "", titles: [], structured: false, toolLeakOnly: true };
+  if (!text) return { lead: raw, detail: "", display: raw, titles: [], structured: false, toolLeakOnly: true };
 
   const sections = headings(text);
   if (sections.length === 0) {
     const gap = text.search(/\n[ \t]*\n/);
-    if (gap < 0) return { lead: text, detail: "", titles: [], structured: false };
+    if (gap < 0) return { lead: text, detail: "", display: text, titles: [], structured: false };
     return {
       lead: text.slice(0, gap).trim(),
       detail: text.slice(gap).trim(),
+      display: text,
       titles: [],
       structured: false,
     };
@@ -267,6 +274,7 @@ export function splitReply(input: string): ReplyParts {
     return {
       lead: text.slice(0, first.start).trim(),
       detail: text.slice(first.start).trim(),
+      display: text,
       titles: sections.map((section) => section.title),
       structured: true,
     };
@@ -279,6 +287,7 @@ export function splitReply(input: string): ReplyParts {
     lead: text.slice(first.end, detailStart).trim(),
     title: first.title,
     detail: second ? text.slice(second.start).trim() : "",
+    display: text,
     titles: sections.slice(1).map((section) => section.title),
     structured: true,
   };

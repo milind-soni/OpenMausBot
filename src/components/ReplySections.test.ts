@@ -33,6 +33,32 @@ describe("ReplySections", () => {
     expect(html).not.toContain("Show detail");
   });
 
+  // The reader's half of the stripping guarantee. A reply with no headings is
+  // rendered whole, so the payload that `splitReply` removed has to be gone
+  // from this branch as well — it used to render the raw prop, which still
+  // carried it, and nothing here caught that.
+  it("keeps a stripped tool payload out of the reply the reader sees", () => {
+    const html = render(
+      'Opening the Run dialog for you.\n{ "action": "press", "keys": ["win", "r"] }\n\nFollow-up note.',
+    );
+    expect(html).toContain("Opening the Run dialog for you.");
+    expect(html).toContain("Follow-up note.");
+    expect(html).not.toContain("action");
+  });
+
+  it("still shows a reply that was nothing but leak", () => {
+    // it is the only thing the message has; the voice is the half that stays
+    // silent about it
+    const html = render('We need to output tool use calls.\n{ "action": "press", "keys": ["win", "r"] }');
+    expect(html).toContain("action");
+  });
+
+  it("leaves an inline payload in the sentence around it", () => {
+    const html = render('The policy uses {"action": "click", "x": 1} by default.');
+    expect(html).toContain("The policy uses");
+    expect(html).toContain("by default.");
+  });
+
   it("keeps the lead's own heading as a label for a reply that opens with one", () => {
     const html = render("## Summary\n\nI fixed the redirect.\n\n## Detail\n\nThe query string.");
     expect(html).toContain("Summary");
