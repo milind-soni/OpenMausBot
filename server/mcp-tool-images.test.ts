@@ -20,4 +20,12 @@ describe("extractMcpImages", () => {
     expect(extractMcpImages(undefined)).toEqual([]);
     expect(extractMcpImages({ content: [{ type: "image", data: 5, mimeType: "image/png" }] })).toEqual([]);
   });
+
+  it("normalizes Anthropic API image blocks (Claude CLI's tool_result shape)", () => {
+    const content = [
+      { type: "text", text: "ok" },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "def456" } },
+    ];
+    expect(extractMcpImages(content)).toEqual([{ data: "def456", mimeType: "image/jpeg" }]);
+  });
 });
