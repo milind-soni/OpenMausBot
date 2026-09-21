@@ -797,7 +797,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(2);
   });
 
-  it.each(["grok-4.6", "grok-4.5", "local-model"])(
+  it.each(["grok-4.7", "grok-4.6", "grok-4.5", "local-model"])(
     "keeps native Grok Auto when selecting and resuming %s",
     async (model) => {
       await create(GrokAgentDriver);
