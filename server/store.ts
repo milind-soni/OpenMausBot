@@ -23,6 +23,7 @@ import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
+import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
 import type { HandedState } from "./delta-context.ts";
 import type {
   BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
@@ -397,13 +398,13 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
   const found: T[] = [];
   let at = -1;
   while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (at > 0 && !/\s/.test(text[at - 1])) continue; // user@host, not a tag
+    if (!isMentionBoundary(text, at)) continue; // user@host, not a tag
     const rest = lower.slice(at + 1);
     const hit = candidates.find((p) => {
       const name = p.name.toLowerCase();
       if (!rest.startsWith(name)) return false;
-      const after = rest[name.length]; // must not run into a longer word
-      return after === undefined || !/[a-z0-9]/i.test(after);
+      const after = rest.slice(name.length); // must not run into a longer word
+      return !isMentionNameContinuation(after);
     });
     if (hit && !found.includes(hit)) found.push(hit);
   }
@@ -443,7 +444,17 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   defaultResponder: GroupDefaultResponder,
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  if (/(?:^|\s)@everyone\b/i.test(text)) return available;
+  const everyone = "everyone";
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    const candidate = text.slice(at + 1, at + 1 + everyone.length);
+    if (
+      isMentionBoundary(text, at) &&
+      candidate.toLocaleLowerCase() === everyone &&
+      !isMentionNameContinuation(text.slice(at + 1 + everyone.length))
+    ) {
+      return available;
+    }
+  }
   const mentioned = mentionedBots(text, available);
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;

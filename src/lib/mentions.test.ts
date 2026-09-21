@@ -14,6 +14,10 @@ describe("mention display ranges", () => {
   it("ignores emails, unknown/hidden bots, partial names and longer words", () => {
     expect(matches("mail me@Atlas.test @Ghost @Hidden @Atl @Atlas2 @New Bottle https://host/@Atlas")).toEqual([]);
   });
+  it("accepts Markdown and opening punctuation boundaries", () => {
+    expect(matches("**@Atlas** (@New Bot 2) 【@調査担当】")).toEqual(["@Atlas", "@New Bot 2", "@調査担当"]);
+    expect(matches("user@Atlas /@Atlas")).toEqual([]);
+  });
   it("only decorates everyone in channels and rejects longer words", () => {
     expect(matches("@everyone @Everyone! @everyone_else @everyone2", true)).toEqual(["@everyone", "@Everyone"]);
     expect(matches("@everyone")).toEqual([]);

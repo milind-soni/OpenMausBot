@@ -1,4 +1,5 @@
 import type { Bot, Group, GroupDefaultResponder } from "@/state/store";
+import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { t } from "./i18n";
 
 /** Be defensive around rooms loaded while an older server is still running,
@@ -47,7 +48,17 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
   group: Pick<Group, "defaultResponder">,
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  if (/(?:^|\s)@everyone\b/i.test(text)) return available;
+  const lower = text.toLowerCase();
+  const everyone = "everyone";
+  let everyoneAt = -1;
+  while ((everyoneAt = lower.indexOf(`@${everyone}`, everyoneAt + 1)) !== -1) {
+    if (
+      isMentionBoundary(text, everyoneAt)
+      && !isMentionNameContinuation(text.slice(everyoneAt + 1 + everyone.length))
+    ) {
+      return available;
+    }
+  }
   const mentioned = mentionedMembers(text, available);
   if (mentioned.length) return mentioned;
   const fallback = effectiveDefaultResponder(group, available);
@@ -92,13 +103,12 @@ function mentionedMembers<T extends { name: string; hidden?: boolean }>(text: st
   const found: T[] = [];
   let at = -1;
   while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (at > 0 && !/\s/.test(text[at - 1])) continue;
+    if (!isMentionBoundary(text, at)) continue;
     const rest = lower.slice(at + 1);
     const hit = candidates.find((p) => {
       const name = p.name.toLowerCase();
       if (!rest.startsWith(name)) return false;
-      const after = rest[name.length];
-      return after === undefined || !/[a-z0-9]/i.test(after);
+      return !isMentionNameContinuation(text.slice(at + 1 + p.name.length));
     });
     if (hit && !found.includes(hit)) found.push(hit);
   }

@@ -50,9 +50,15 @@ describe("mentionedBots", () => {
     expect(mentionedBots("mail milind@milind.dev please", peers)).toEqual([]);
     expect(mentionedBots("@Ghost around?", peers)).toEqual([]);
   });
+  it("routes Markdown- and punctuation-wrapped mentions", () => {
+    expect(mentionedBots("**@Milind** (@New Bot 2) 【@New Bot】", peers).map((bot) => bot.id))
+      .toEqual(["3", "2", "1"]);
+    expect(mentionedBots("user@Milind /@Milind", peers)).toEqual([]);
+  });
   it("requires a word boundary at the end of the name", () => {
     expect(mentionedBots("ask @New Bottle about it", peers)).toEqual([]);
     expect(mentionedBots("@Milindo is someone else", peers)).toEqual([]);
+    expect(mentionedBots("@Milind𐐀 is someone else", peers)).toEqual([]);
   });
 });
 
@@ -74,6 +80,15 @@ describe("roomResponders", () => {
     expect(roomResponders("hello", members, { kind: "everyone" })).toEqual(members);
     expect(roomResponders("hello", members, { kind: "mentions" })).toEqual([]);
     expect(roomResponders("@everyone hello", members, { kind: "mentions" })).toEqual(members);
+  });
+
+  it("applies the shared mention boundaries to everyone", () => {
+    const mentionsOnly = { kind: "mentions" } as const;
+    expect(roomResponders("**@EVERYONE** hello", members, mentionsOnly)).toEqual(members);
+    expect(roomResponders("【@everyone】 hello", members, mentionsOnly)).toEqual(members);
+    expect(roomResponders("@everyone調査 hello", members, mentionsOnly)).toEqual([]);
+    expect(roomResponders("@everyone𐐀 hello", members, mentionsOnly)).toEqual([]);
+    expect(roomResponders("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
   });
 
   it("keeps bot-to-bot channels on their last-speaker routing", () => {
