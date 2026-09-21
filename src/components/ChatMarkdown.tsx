@@ -18,6 +18,8 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
@@ -494,6 +496,59 @@ const NO_MENTION_PEERS: readonly MentionPeer[] = [];
 // holding one must reach the parser byte-for-byte as written.
 const MARKDOWN_IMAGE = "![";
 
+/** Replace CommonMark fenced code blocks with opaque tokens while text is normalized. */
+function protectFencedCode(text: string, protect: (value: string) => string): string {
+  const opener =
+    /(^|\n)( {0,3})(?:(`{3,})([^`\n]*)|(~{3,})([^\n]*))(?:\n|$)/g;
+  let cursor = 0;
+  let tokenized = "";
+  let match: RegExpExecArray | null;
+
+  while ((match = opener.exec(text)) !== null) {
+    const fence = match[3] ?? match[5];
+    const fenceCharacter = fence[0];
+    const closer = new RegExp(
+      `(^|\\n) {0,3}${fenceCharacter}{${fence.length},}[ \\t]*(?=\\n|$)`,
+      "g",
+    );
+    closer.lastIndex = opener.lastIndex;
+    const closingMatch = closer.exec(text);
+    const end = closingMatch === null
+      ? text.length
+      : closingMatch.index + closingMatch[0].length;
+    tokenized += text.slice(cursor, match.index);
+    tokenized += protect(text.slice(match.index, end));
+    cursor = end;
+    opener.lastIndex = end;
+  }
+
+  return tokenized + text.slice(cursor);
+}
+
+/** Convert the TeX delimiters models commonly emit into remark-math syntax.
+ * Fenced and inline code are protected so examples such as `\\(x\\)` remain
+ * literal. Unmatched delimiters are left untouched while a response streams. */
+export function normalizeMathDelimiters(text: string): string {
+  const protectedCode: string[] = [];
+  const protect = (value: string): string => {
+    const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
+    protectedCode.push(value);
+    return token;
+  };
+  const tokenized = protectFencedCode(text, protect)
+    .replace(/(`+)[\s\S]*?\1/g, protect);
+  let normalized = tokenized
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$\n${math}\n$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math}$`)
+    // remark-math treats flow math as a block only when the fences occupy
+    // their own lines; accept the compact form models commonly produce.
+    .replace(/\$\$[ \t]*([^\n][\s\S]*?)[ \t]*\$\$/g, (_match, math: string) => `$$\n${math}\n$$`);
+  protectedCode.forEach((value, index) => {
+    normalized = normalized.split(`\u0000OMB_CODE_${index}\u0000`).join(value);
+  });
+  return normalized;
+}
+
 function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
@@ -504,11 +559,14 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   // A near-miss table from a model renders as an unreadable run of pipes
   // unless it is repaired before parsing. The repair moves source offsets, so
   // a message carrying an image opts out and keeps its text verbatim.
-  const source = text.includes(MARKDOWN_IMAGE) ? text : repairMarkdownTables(text);
+  const source = text.includes(MARKDOWN_IMAGE)
+    ? text
+    : normalizeMathDelimiters(repairMarkdownTables(text));
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        rehypePlugins={[rehypeKatex]}
         urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {

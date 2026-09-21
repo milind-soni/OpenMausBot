@@ -11,6 +11,7 @@ import {
   markdownImageName,
   markdownImageOpenUrl,
   localFilePath,
+  normalizeMathDelimiters,
   textDirection,
 } from "./ChatMarkdown";
 import { StoreProvider } from "@/state/store";
@@ -54,6 +55,38 @@ describe("mention highlighting", () => {
     }));
     expect(html).not.toContain("<img");
     expect(html).not.toContain('<script');
+  });
+});
+
+describe("math rendering", () => {
+  it("renders inline, display, and TeX-style delimiters with KaTeX", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "Inline $s'(t)=2t$.\n\n$$\\int_0^3 2t\\,dt=9$$\n\n\\(x^2\\)\n\n\\[y^2\\]",
+    }));
+    expect(html.match(/class="katex"/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(html).toContain("katex-display");
+  });
+
+  it("keeps code dollar signs and malformed TeX delimiters literal", () => {
+    const text = "`const price = '$5'`\n\n```tex\n\\(not rendered\\)\n```\n\nUnclosed \\(x";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, streaming: true }));
+    expect(html).not.toContain('class="katex"');
+    expect(normalizeMathDelimiters(text)).toBe(text);
+  });
+
+  it("protects fenced code when the closer has different indentation or is longer", () => {
+    const text = "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter \\(rendered\\).";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(normalizeMathDelimiters(text)).toBe(
+      "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter $rendered$.",
+    );
+    expect(html.match(/class="katex"/g)).toHaveLength(1);
+    expect(html).toContain("not rendered");
+  });
+
+  it("rejects backticks in a backtick-fence info string", () => {
+    const text = "```js `invalid`\n\\(rendered\\)\n```";
+    expect(normalizeMathDelimiters(text)).toBe("```js `invalid`\n$rendered$\n```");
   });
 });
 

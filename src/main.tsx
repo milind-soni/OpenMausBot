@@ -5,6 +5,7 @@ import { readSessionState, takePairingCodeFromLocation, takeInvitedEmailFromLoca
 import { bootstrapBrand } from "./lib/brand";
 import { applySkin, readSkin } from "./lib/skins";
 import { PairPage } from "./pair/PairPage";
+import "katex/dist/katex.min.css";
 import "./styles.css";
 
 // Before the first paint, not inside a component: stamping the skin during
