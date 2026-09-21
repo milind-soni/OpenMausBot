@@ -48,12 +48,12 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
   group: Pick<Group, "defaultResponder">,
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  const lower = text.toLowerCase();
   const everyone = "everyone";
   let everyoneAt = -1;
-  while ((everyoneAt = lower.indexOf(`@${everyone}`, everyoneAt + 1)) !== -1) {
+  while ((everyoneAt = text.indexOf("@", everyoneAt + 1)) !== -1) {
     if (
       isMentionBoundary(text, everyoneAt)
+      && text.slice(everyoneAt + 1, everyoneAt + 1 + everyone.length).toLowerCase() === everyone
       && !isMentionNameContinuation(text.slice(everyoneAt + 1 + everyone.length))
     ) {
       return available;
@@ -99,15 +99,13 @@ function mentionedMembers<T extends { name: string; hidden?: boolean }>(text: st
   const candidates = peers
     .filter((p) => !p.hidden && p.name.trim())
     .sort((a, b) => b.name.length - a.name.length);
-  const lower = text.toLowerCase();
   const found: T[] = [];
   let at = -1;
-  while ((at = lower.indexOf("@", at + 1)) !== -1) {
+  while ((at = text.indexOf("@", at + 1)) !== -1) {
     if (!isMentionBoundary(text, at)) continue;
-    const rest = lower.slice(at + 1);
     const hit = candidates.find((p) => {
       const name = p.name.toLowerCase();
-      if (!rest.startsWith(name)) return false;
+      if (text.slice(at + 1, at + 1 + p.name.length).toLowerCase() !== name) return false;
       return !isMentionNameContinuation(text.slice(at + 1 + p.name.length));
     });
     if (hit && !found.includes(hit)) found.push(hit);

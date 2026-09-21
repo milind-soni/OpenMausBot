@@ -30,6 +30,7 @@ describe("roomRespondersForComposer", () => {
     expect(roomRespondersForComposer("user@Milind /@Milind", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("@Milindo", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("@Milind𐐀", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("İ @Milind", members, mentionsOnly)).toEqual([members[1]]);
   });
 
   it("supports everyone and mentions-only room policies", () => {
@@ -47,6 +48,7 @@ describe("roomRespondersForComposer", () => {
     expect(roomRespondersForComposer("@everyone調査 hello", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("@everyone𐐀 hello", members, mentionsOnly)).toEqual([]);
     expect(roomRespondersForComposer("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
+    expect(roomRespondersForComposer("İ @everyone", members, mentionsOnly)).toEqual(members);
   });
 });
 
