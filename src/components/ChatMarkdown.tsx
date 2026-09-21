@@ -499,7 +499,7 @@ const MARKDOWN_IMAGE = "![";
 /** Replace CommonMark fenced code blocks with opaque tokens while text is normalized. */
 function protectFencedCode(text: string, protect: (value: string) => string): string {
   const opener =
-    /(^|\n)( {0,3})(?:(`{3,})([^`\n]*)|(~{3,})([^\n]*))(?:\n|$)/g;
+    /(^|\r?\n)((?: {0,3}>[ \t]?)* {0,3})(?:(`{3,})([^`\r\n]*)|(~{3,})([^\r\n]*))(?:\r?\n|$)/g;
   let cursor = 0;
   let tokenized = "";
   let match: RegExpExecArray | null;
@@ -508,7 +508,7 @@ function protectFencedCode(text: string, protect: (value: string) => string): st
     const fence = match[3] ?? match[5];
     const fenceCharacter = fence[0];
     const closer = new RegExp(
-      `(^|\\n) {0,3}${fenceCharacter}{${fence.length},}[ \\t]*(?=\\n|$)`,
+      `(^|\\r?\\n)(?: {0,3}>[ \\t]?)* {0,3}${fenceCharacter}{${fence.length},}[ \\t]*(?=\\r?\\n|$)`,
       "g",
     );
     closer.lastIndex = opener.lastIndex;
@@ -557,11 +557,11 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   // @mentions were already decorated by remarkMentions, which runs first.
   const { threads, currentBotId } = useThreadRefs();
   // A near-miss table from a model renders as an unreadable run of pipes
-  // unless it is repaired before parsing. The repair moves source offsets, so
-  // a message carrying an image opts out and keeps its text verbatim.
-  const source = text.includes(MARKDOWN_IMAGE)
+  // unless it is repaired before parsing. Table repair moves image source
+  // offsets, so image messages skip that repair but still normalize math.
+  const source = normalizeMathDelimiters(text.includes(MARKDOWN_IMAGE)
     ? text
-    : normalizeMathDelimiters(repairMarkdownTables(text));
+    : repairMarkdownTables(text));
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown

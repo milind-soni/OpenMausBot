@@ -88,6 +88,26 @@ describe("math rendering", () => {
     const text = "```js `invalid`\n\\(rendered\\)\n```";
     expect(normalizeMathDelimiters(text)).toBe("```js `invalid`\n$rendered$\n```");
   });
+
+  it("protects block-quoted and CRLF fenced code", () => {
+    const quoted = "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter \\(rendered\\).";
+    expect(normalizeMathDelimiters(quoted)).toBe(
+      "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter $rendered$.",
+    );
+
+    const crlf = "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter \\(rendered\\).";
+    expect(normalizeMathDelimiters(crlf)).toBe(
+      "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter $rendered$.",
+    );
+  });
+
+  it("normalizes math in messages that also contain an image", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "![diagram](https://example.test/diagram.png)\n\n\\(x^2\\)",
+    }));
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("diagram.png");
+  });
 });
 
 describe("repaired tables", () => {
