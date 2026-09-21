@@ -18,6 +18,7 @@ import type { MemoryJournalEntry } from "./memory-journal.ts";
 import type { Message } from "./store.ts";
 
 import type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
+import { SHELL_TOOL, toolIdentity } from "../shared/tool-name.ts";
 export type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 
 /** Evidence is observed, not inferred from a provider's brand. In particular,
@@ -59,11 +60,17 @@ export function buildTurnDigest(input: DigestInput): TurnDigest {
   const byName = new Map<string, DigestTool>();
   for (const m of input.activities) {
     if (m.kind !== "activity" || !m.tool?.itemId || m.turnId !== input.turnId) continue;
-    const entry = byName.get(m.tool.name) ?? { name: fitBytes(m.tool.name, 160), count: 0, failed: 0 };
+    // by identity, not by the chip's title: a command-titled chip would
+    // otherwise be its own bucket and carry the unredacted command line into
+    // a row that is FTS-indexed and replayed into rebuilt context
+    const identity = toolIdentity(m.tool.name);
+    const entry = byName.get(identity) ?? { name: fitBytes(identity, 160), count: 0, failed: 0 };
     entry.count += 1;
     if (m.tool.ok === false) entry.failed += 1;
+    // the driver's summary is the bounded, redacted one-line command; the
+    // title is neither, so a shell bucket says what it ran only through this
     if (entry.sample === undefined && m.tool.summary) entry.sample = fitBytes(m.tool.summary.replace(/\s+/g, " "), 300);
-    byName.set(m.tool.name, entry);
+    byName.set(identity, entry);
   }
   // busiest first; ties keep first-seen order (Map preserves insertion)
   const ranked = [...byName.values()].sort((a, b) => b.count - a.count);
@@ -120,7 +127,12 @@ function firstSentence(reply: string): string {
 export function renderDigest(d: TurnDigest): string {
   const parts: string[] = ["[digest]"];
   if (d.tools.length) {
-    const tools = d.tools.map((t) => `${t.name} ×${t.count}${t.failed ? ` (${t.failed} failed)` : ""}`).join(", ");
+    const tools = d.tools.map((t) => {
+      // "shell ×12" alone loses the turn's work, so the one bucket whose
+      // name was generalised says what it ran — from the redacted sample
+      const ran = t.name === SHELL_TOOL && t.sample ? ` (${fitBytes(t.sample, 120)})` : "";
+      return `${t.name} ×${t.count}${t.failed ? ` (${t.failed} failed)` : ""}${ran}`;
+    }).join(", ");
     parts.push(`tools: ${tools}${d.toolsDropped ? ` +${d.toolsDropped} more` : ""}${d.hookCoverage === "preview" ? " (from tool previews)" : ""}`);
   } else if (d.hookCoverage === "none") {
     parts.push("no tool activity observed in this turn");

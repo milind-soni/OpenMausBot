@@ -26,10 +26,9 @@ export type RunStep = {
 export type VerifyStep = RunStep;
 
 /** A tool name that is itself a command line (Codex and ACP title their
- * chips with the command) rather than a bare tool name such as `Bash`. */
-export function nameIsCommand(name: string): boolean {
-  return /[\s/]/.test(name);
-}
+ * chips with the command) rather than a bare tool name such as `Bash`.
+ * Shared with the digest, which groups tool calls by identity. */
+export { nameIsCommand } from "../../shared/tool-name";
 
 /** The command a tool chip ran: the driver's summary, which is the shell
  * command by construction. Never the name — server-authored status chips

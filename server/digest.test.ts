@@ -52,6 +52,38 @@ describe("buildTurnDigest", () => {
     ]);
   });
 
+  // Codex titles a commandExecution chip with the whole command line and ACP
+  // prefers rawInput.command over the tool's name, so the chip title is a
+  // command, not a tool identity. Keying the digest on it leaked the command
+  // (paths, ids) into a row that is FTS-indexed and replayed into rebuilt
+  // context, and made counts meaningless: every distinct command was its own
+  // bucket, so a turn that ran one tool twelve times never said so.
+  it("buckets command-titled chips under one shell tool instead of the command line", () => {
+    const d = buildTurnDigest({
+      ...base,
+      activities: [
+        activity('/bin/zsh -lc "jq \'.routines[]?\' ~/.openmausbot/bots/main/routines.json"', true, "jq '.routines[]?' routines.json"),
+        activity('/bin/zsh -lc "rg -n todo src/"', true, "rg -n todo src/"),
+        activity("list_routines", true),
+      ],
+      memory: [],
+    });
+    expect(d.tools).toEqual([
+      { name: "shell", count: 2, failed: 0, sample: "jq '.routines[]?' routines.json" },
+      { name: "list_routines", count: 1, failed: 0 },
+    ]);
+  });
+
+  it("names the shell bucket with its redacted sample when rendered", () => {
+    const d = buildTurnDigest({
+      ...base,
+      activities: [activity('/bin/zsh -lc "pnpm test"', true, "pnpm test")],
+      memory: [],
+    });
+    expect(renderDigest(d)).toContain("shell ×1 (pnpm test)");
+    expect(renderDigest(d)).not.toContain("/bin/zsh");
+  });
+
   it("ignores activity rows from other turns and rows that are not tool calls", () => {
     const d = buildTurnDigest({
       ...base,
