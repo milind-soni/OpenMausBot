@@ -1584,6 +1584,21 @@ public struct CompanionClient: Sendable {
         ]))
     }
 
+    public func setTaskPinned(botId: String, threadId: String, pinned: Bool) async throws {
+        try await send(try makeRequest("PATCH", "/api/bots/\(botId)/tasks/\(threadId)", body: [
+            "pinned": pinned,
+        ]))
+    }
+
+    /// `title` is the thread's current title. An older server ignores `pinned`
+    /// and would turn a body without `title` into an empty rename.
+    public func setRoomTaskPinned(groupId: String, threadId: String, pinned: Bool, title: String) async throws {
+        try await send(try makeRequest("PATCH", "/api/groups/\(groupId)/tasks/\(threadId)", body: [
+            "pinned": pinned,
+            "title": title,
+        ]))
+    }
+
     public func deleteTask(botId: String, threadId: String) async throws -> Bot {
         try await send(try makeRequest("DELETE", "/api/bots/\(botId)/tasks/\(threadId)"), as: BotResponse.self).bot
     }

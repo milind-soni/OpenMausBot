@@ -14572,14 +14572,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const group = store.group(m[1]);
       if (!group) return json(res, 404, { error: "no such channel" });
       if (group.dm) return json(res, 400, { error: "bot-to-bot channels keep one canonical conversation" });
-      if (channelTaskBlocked(group)) {
-        return json(res, 409, { error: "this channel is working or waiting on you — finish that turn first" });
-      }
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
       }
-      const task = store.renameGroupTask(m[1], m[2], String(body.title ?? ""));
-      if (!task) return json(res, 404, { error: "no such channel task" });
+      const allowed = new Set(["title", "pinned"]);
+      if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported channel thread setting" });
+      const existing = store.groupTaskByThread(group.id, m[2]);
+      if (!existing) return json(res, 404, { error: "no such channel task" });
+      const pinning = body.pinned !== undefined;
+      const renaming = body.title !== undefined;
+      if (!pinning && !renaming) return json(res, 400, { error: "unsupported channel thread setting" });
+      if (pinning && typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
+      if (renaming && typeof body.title !== "string") return json(res, 400, { error: "title must be a string" });
+      // Echoing the current title lets a newer client pin on an older server
+      // without the old handler turning a missing title into "Untitled".
+      // That echo is not a rename. A real rename stays blocked while working.
+      const titleChange = renaming && body.title !== existing.title;
+      if (channelTaskBlocked(group) && !(pinning && !titleChange)) {
+        return json(res, 409, { error: "this channel is working or waiting on you — finish that turn first" });
+      }
+      let task = existing;
+      if (pinning) {
+        const pinned = store.setGroupTaskPinned(group.id, m[2], body.pinned === true);
+        if (!pinned) return json(res, 404, { error: "no such channel task" });
+        task = pinned;
+      }
+      if (titleChange) {
+        const renamed = store.renameGroupTask(group.id, m[2], body.title);
+        if (!renamed) return json(res, 404, { error: "no such channel task" });
+        task = renamed;
+      }
       return json(res, 200, { task });
     }
     if (m && method === "DELETE") {
@@ -16746,7 +16768,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
       const current = store.projectBotForTask(m[1], m[2]);
       if (!current) return json(res, 404, { error: "no such task" });
-      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "surface"]);
+      const allowed = new Set(["title", "projectId", "modelSelection", "updateBotDefault", "resetApprovalToAsk", "approvalMode", "autoApprove", "requireAvailableModel", "pinnedMessageId", "acknowledgeLocalAuto", "archivedAt", "pinned", "surface"]);
       if (Object.keys(body).some((key) => !allowed.has(key))) return json(res, 400, { error: "unsupported thread setting" });
       for (const key of ["requireAvailableModel", "acknowledgeLocalAuto", "updateBotDefault", "resetApprovalToAsk"] as const) {
         if (body[key] !== undefined && typeof body[key] !== "boolean") return json(res, 400, { error: `${key} must be a boolean` });
@@ -16771,6 +16793,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (body.archivedAt === null) patch.archivedAt = undefined;
         else if (typeof body.archivedAt === "number" && Number.isFinite(body.archivedAt) && body.archivedAt >= 0) patch.archivedAt = body.archivedAt;
         else return json(res, 400, { error: "archivedAt must be a timestamp, or null to unarchive" });
+      }
+      if (body.pinned !== undefined) {
+        if (typeof body.pinned !== "boolean") return json(res, 400, { error: "pinned must be a boolean" });
+        patch.pinned = body.pinned ? true : undefined;
       }
       if (body.surface !== undefined) {
         if (threadBusy(current.id, current.threadId)) return json(res, 409, { error: "Stop this thread before changing its computer destination." });

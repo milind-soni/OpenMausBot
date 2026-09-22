@@ -100,10 +100,18 @@ export function toWireTask(task: TaskRecord): WireTask {
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
+
+/** Only `true` is a pin. false/undefined must not land in bots.json or groups.json. */
+function persistedPin<T extends { pinned?: boolean }>(task: T): T {
+  if (task.pinned === true) return task;
+  if (!("pinned" in task)) return task;
+  const { pinned: _pinned, ...rest } = task;
+  return rest as T;
+}
 
 /** Everything the BOT authored is scrubbed of content-shaped secrets before
  * it is stored: its reply text, a tool title (an ACP engine's title can be
@@ -656,6 +664,7 @@ export class Store {
           threadId: g.threadId,
           title: this.firstUserLine(g.threadId) ?? UNTITLED_TASK,
           createdAt: g.createdAt,
+          updatedAt: g.createdAt,
         };
         if (g.pinnedCwd !== undefined) initialTask.pinnedCwd = g.pinnedCwd;
         if (g.pinnedMessageId) initialTask.pinnedMessageId = g.pinnedMessageId;
@@ -688,6 +697,7 @@ export class Store {
           threadId: b.threadId,
           title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
           createdAt: b.createdAt,
+          updatedAt: b.createdAt,
           resumeCursors: b.resumeCursors ?? {},
         }];
         botsMigrated = true;
@@ -700,6 +710,7 @@ export class Store {
           threadId: b.threadId,
           title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
           createdAt: b.createdAt,
+          updatedAt: b.createdAt,
           resumeCursors: b.resumeCursors ?? {},
         };
         b.tasks.unshift(active);
@@ -752,20 +763,69 @@ export class Store {
       const legacyFile = messagesFile(threadId);
       if (existsSync(legacyFile)) mdb.readThread(threadId, legacyFile);
     }
+    // After legacy transcripts are in SQLite, so the first boot sees their
+    // newest message instead of stamping createdAt and jumping next launch.
+    this.repairThreadUpdatedAts();
     this.registeringInitialSections = false;
+  }
+
+  /** Advance a task's update stamp in memory only. Message writes must not
+   * rewrite bots.json; the next snapshot and the startup repair read this. */
+  private noteThreadActivity(threadId: string, at: number): void {
+    if (!Number.isFinite(at)) return;
+    const advance = (current: number | undefined) => Math.max(current ?? 0, at);
+    for (const bot of this.bots) {
+      const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
+      if (!task) continue;
+      const next = advance(task.updatedAt);
+      if (task.updatedAt !== next) task.updatedAt = next;
+    }
+    for (const group of this.groups) {
+      const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
+      if (!task) continue;
+      const next = advance(task.updatedAt);
+      if (task.updatedAt !== next) task.updatedAt = next;
+    }
+  }
+
+  /** Fill missing stamps, and raise a stamp that is older than the newest
+   * stored message. Never moves a stamp backwards: there is no per-message
+   * delete, and a clock skew must not reshuffle the list on every boot. */
+  private repairThreadUpdatedAts(): void {
+    const botTasks = this.bots.flatMap((bot) => bot.tasks ?? []);
+    const groupTasks = this.groups.flatMap((group) => group.tasks ?? []);
+    const latest = mdb.latestMessageAts([...botTasks, ...groupTasks].map((task) => task.threadId));
+    let botsDirty = false;
+    let groupsDirty = false;
+    const repair = (task: { threadId: string; createdAt: number; updatedAt?: number }) => {
+      const fromMessages = latest.get(task.threadId);
+      const next = fromMessages !== undefined && (task.updatedAt === undefined || fromMessages > task.updatedAt)
+        ? fromMessages
+        : task.updatedAt ?? task.createdAt;
+      if (task.updatedAt === next) return false;
+      task.updatedAt = next;
+      return true;
+    };
+    for (const task of botTasks) if (repair(task)) botsDirty = true;
+    for (const task of groupTasks) if (repair(task)) groupsDirty = true;
+    if (botsDirty) this.saveBots();
+    if (groupsDirty) this.saveGroups();
   }
 
   private saveBots(bots: BotRecord[] = this.bots) {
     this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
-      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => task),
+      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
     })), null, 2), { mode: 0o600 });
   }
 
   private saveGroups() {
     this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => g), null, 2), { mode: 0o600 });
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+      ...g,
+      ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
+    })), null, 2), { mode: 0o600 });
   }
 
   get sections(): string[] { return readSections(); }
@@ -862,7 +922,7 @@ export class Store {
       section,
     };
     if (!dm) {
-      group.tasks = [{ threadId, title: UNTITLED_TASK, createdAt }];
+      group.tasks = [{ threadId, title: UNTITLED_TASK, createdAt, updatedAt: createdAt }];
       group.setupCompletedAt = setup?.completed ? createdAt : null;
       group.setupSkippedAt = null;
     }
@@ -1010,10 +1070,12 @@ export class Store {
   createGroupTask(groupId: string, title?: string, activate = true): GroupTaskRecord | null {
     const group = this.group(groupId);
     if (!group || group.dm) return null;
+    const createdAt = Date.now();
     const task: GroupTaskRecord = {
       threadId: newId(),
       title: title?.trim().slice(0, 80) || UNTITLED_TASK,
-      createdAt: Date.now(),
+      createdAt,
+      updatedAt: createdAt,
     };
     group.tasks = [task, ...(group.tasks ?? [])];
     if (activate) {
@@ -1036,6 +1098,16 @@ export class Store {
     this.saveGroups();
     this.emit({ type: "group", groupId });
     return group;
+  }
+
+  setGroupTaskPinned(groupId: string, threadId: string, pinned: boolean): GroupTaskRecord | null {
+    const task = this.groupTaskByThread(groupId, threadId);
+    if (!task) return null;
+    if (pinned) task.pinned = true;
+    else delete task.pinned;
+    this.saveGroups();
+    this.emit({ type: "group", groupId });
+    return task;
   }
 
   renameGroupTask(groupId: string, threadId: string, title: string): GroupTaskRecord | null {
@@ -1165,6 +1237,8 @@ export class Store {
     if (this.messagesFor(threadId).length) throw new Error("Cannot import over an existing conversation");
     mdb.importThread(threadId, messages, activeLeafId);
     this.threads.delete(threadId);
+    const newest = messages.reduce((max, message) => Math.max(max, message.at), Number.NEGATIVE_INFINITY);
+    if (Number.isFinite(newest)) this.noteThreadActivity(threadId, newest);
   }
 
   activeLeaf(threadId: string): string | null {
@@ -1215,6 +1289,7 @@ export class Store {
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
     }
+    this.noteThreadActivity(threadId, full.at);
     this.emit({ type: "message", threadId, message: full });
     // The first-run quiz is not a live ask. Talking past it hides it so the
     // transcript is just the greeting plus what they said. Cards with a
@@ -1244,6 +1319,7 @@ export class Store {
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
     }
+    this.noteThreadActivity(threadId, full.at);
     this.emit({ type: "message", threadId, message: full });
     // announced after the insert so no client ever sees two siblings
     // claiming the same parent
@@ -1300,6 +1376,7 @@ export class Store {
     t.messages.push(full);
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);
+    this.noteThreadActivity(threadId, full.at);
     this.emit({ type: "message", threadId, message: full });
     // The message frame alone leaves every client on the OLD branch: a
     // client adopts a new message as its leaf only when it chains onto the
@@ -1391,6 +1468,7 @@ export class Store {
       threadId: bot.threadId,
       title: UNTITLED_THREAD,
       createdAt: bot.createdAt,
+      updatedAt: bot.createdAt,
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
       unread: false,
@@ -1442,7 +1520,7 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
-          tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, resumeCursors: {},
+          tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
             modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],
         };
@@ -1947,6 +2025,7 @@ export class Store {
       }
     }
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
+    if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
     bot.unread = bot.tasks!.some((candidate) => candidate.unread);
     this.saveBots();
@@ -1964,8 +2043,8 @@ export class Store {
     if (!bot || !task) return null;
     const patch = { modelSelection: structuredClone(selection),
       ...(resetApprovalToAsk ? { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] } : {}) };
-    const nextTask = { ...task, ...taskPatch, ...patch,
-      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD } : {}) };
+    const nextTask = persistedPin({ ...task, ...taskPatch, ...patch,
+      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD } : {}) });
     // Older threads may still inherit settings. Freeze their effective
     // values before updating the default so "other threads unchanged" also
     // holds for workspaces created before per-thread approval settings.
@@ -2012,10 +2091,12 @@ export class Store {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
+    const createdAt = Date.now();
     const task: TaskRecord = {
       threadId: newId(),
       title: threadTitleFrom(title),
-      createdAt: Date.now(),
+      createdAt,
+      updatedAt: createdAt,
       ...(projectId ? { projectId } : {}),
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},

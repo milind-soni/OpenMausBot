@@ -1650,6 +1650,21 @@ final class Session: ObservableObject {
     }
 
     @discardableResult
+    func setTaskPinned(_ task: BotTask, pinned: Bool, in chat: Chat) async -> Bool {
+        guard let client else { return false }
+        do {
+            switch chat {
+            case let .bot(bot):
+                try await client.setTaskPinned(botId: bot.id, threadId: task.threadId, pinned: pinned)
+            case let .room(room):
+                try await client.setRoomTaskPinned(groupId: room.id, threadId: task.threadId, pinned: pinned, title: task.title)
+            }
+            await refresh()
+            return true
+        } catch { actionError = error.localizedDescription; return false }
+    }
+
+    @discardableResult
     func setTaskArchived(_ task: BotTask, for bot: Bot, archivedAt: Double?) async -> Bool {
         guard let client else { return false }
         do {

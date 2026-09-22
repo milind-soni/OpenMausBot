@@ -231,7 +231,7 @@ data class CompanionState(
                 result = result.clearStream(frame.threadId)
             }
             frame.message.queueId?.let { result = result.retireQueued(it, frame.threadId) }
-            result
+            result.noteThreadActivity(frame.threadId, frame.message.at)
         }
 
         is Frame.MessagePatch -> {
@@ -243,6 +243,7 @@ data class CompanionState(
                 append(messages, frame.threadId, frame.message).getValue(frame.threadId)
             }
             copy(messages = messages + (frame.threadId to patched))
+                .let { next -> if (index >= 0) next else next.noteThreadActivity(frame.threadId, frame.message.at) }
         }
 
         is Frame.Thread -> copy(
@@ -376,6 +377,36 @@ data class CompanionState(
         return copy(cursor = "${current.substringBefore(':')}:$seq")
     }
 
+    private fun noteThreadActivity(threadId: String, at: Double): CompanionState {
+        if (!at.isFinite()) return this
+        fun List<BotTask>.bump() = map { task ->
+            if (task.threadId != threadId) task
+            else task.copy(updatedAt = maxOf(task.updatedAt ?: 0.0, at))
+        }
+        return copy(
+            bots = bots.map { bot ->
+                val tasks = bot.tasks ?: return@map bot
+                if (tasks.none { it.threadId == threadId }) bot else bot.copy(tasks = tasks.bump())
+            },
+            rooms = rooms.map { room ->
+                val tasks = room.tasks ?: return@map room
+                if (tasks.none { it.threadId == threadId }) room else room.copy(tasks = tasks.bump())
+            },
+        )
+    }
+
+    private fun List<BotTask>?.mergingStamps(previous: List<BotTask>?): List<BotTask>? {
+        val incoming = this ?: return previous
+        return incoming.map { task ->
+            val local = previous?.firstOrNull { it.threadId == task.threadId }?.updatedAt
+            val next = when {
+                local != null && task.updatedAt != null -> maxOf(local, task.updatedAt)
+                else -> local ?: task.updatedAt
+            }
+            if (next == task.updatedAt) task else task.copy(updatedAt = next)
+        }
+    }
+
     private fun applyBot(bot: Bot): CompanionState {
         val index = bots.indexOfFirst { it.id == bot.id }
         if (index < 0) {
@@ -392,8 +423,9 @@ data class CompanionState(
         }
 
         val previous = bots[index]
+        val stamped = bot.copy(tasks = bot.tasks.mergingStamps(previous.tasks))
         if (bot.messages == null) {
-            val merged = bot.copy(
+            val merged = stamped.copy(
                 messages = previous.messages.takeIf { previous.threadId == bot.threadId },
                 activeLeafId = bot.activeLeafId ?: previous.activeLeafId.takeIf { previous.threadId == bot.threadId },
             )
@@ -407,7 +439,7 @@ data class CompanionState(
         }
 
         val result = copy(
-            bots = bots.replacing(index, bot.copy(messages = bot.messages)),
+            bots = bots.replacing(index, stamped.copy(messages = bot.messages)),
             messages = messages + (bot.threadId to bot.messages),
             hasMore = hasMore + (bot.threadId to (bot.hasMore ?: false)),
             activeLeafIds = activeLeafIds + (bot.threadId to bot.activeLeafId),
@@ -456,11 +488,12 @@ data class CompanionState(
         val previous = rooms[index]
         // Metadata-only room frames preserve the active transcript. A task
         // switch carries a replacement transcript and is authoritative.
+        val stamped = room.copy(tasks = room.tasks.mergingStamps(previous.tasks))
         if (room.messages == null) {
-            return copy(rooms = rooms.replacing(index, room.copy(messages = previous.messages)))
+            return copy(rooms = rooms.replacing(index, stamped.copy(messages = previous.messages)))
         }
         var result = copy(
-            rooms = rooms.replacing(index, room.copy(messages = room.messages)),
+            rooms = rooms.replacing(index, stamped.copy(messages = room.messages)),
             messages = messages + (room.threadId to room.messages),
             hasMore = hasMore + (room.threadId to (room.hasMore ?: false)),
         ).clearStream(previous.threadId)

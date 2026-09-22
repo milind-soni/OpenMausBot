@@ -1733,6 +1733,15 @@ class Session(
         true
     }
 
+    suspend fun pinTask(task: BotTask, chat: Chat, pinned: Boolean): Boolean = mutateTask(false) { client ->
+        when (chat) {
+            is Chat.BotChat -> client.setTaskPinned(chat.bot.id, task.threadId, pinned)
+            is Chat.RoomChat -> client.setRoomTaskPinned(chat.room.id, task.threadId, pinned, task.title)
+        }
+        refresh()
+        true
+    }
+
     suspend fun archiveTask(task: BotTask, forBot: Bot, archivedAt: Double?): Boolean = mutateTask(false) { client ->
         client.setTaskArchived(forBot.id, task.threadId, archivedAt)
         refresh()

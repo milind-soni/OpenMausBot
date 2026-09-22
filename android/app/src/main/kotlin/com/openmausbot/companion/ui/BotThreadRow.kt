@@ -58,7 +58,7 @@ internal fun BotThreadRow(
         task.isArchived -> "Archived"
         else -> null
     }
-    val now = remember(task.createdAt) { System.currentTimeMillis() }
+    val now = remember(task.listStamp) { System.currentTimeMillis() }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -105,7 +105,8 @@ internal fun BotThreadRow(
                 }
             }
             val byline = listOfNotNull(
-                RelativeStamp.list(task.createdAt, now).takeIf { it.isNotEmpty() },
+                RelativeStamp.list(task.listStamp, now).takeIf { it.isNotEmpty() },
+                "Pinned".takeIf { task.pinned == true },
                 task.bylineLabel,
             ).joinToString(" · ")
             if (byline.isNotEmpty()) {

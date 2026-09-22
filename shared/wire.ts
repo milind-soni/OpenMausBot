@@ -123,6 +123,12 @@ export interface WireTask {
   closedBy?: TaskClosedBy;
   /** When the person archived this thread. Absent = unarchived. */
   archivedAt?: number;
+  /** The person pinned this thread above the update-ordered list. Only true
+   * is stored; absence means unpinned. */
+  pinned?: boolean;
+  /** Epoch ms of the newest message, or createdAt when the thread has none.
+   * Server-derived. Clients must not write it. */
+  updatedAt?: number;
   /** Defaults are copied when a task is created. */
   modelSelection?: ModelSelection;
   approvalMode?: ApprovalMode;
@@ -439,6 +445,10 @@ export interface GroupTask {
   createdAt: number;
   pinnedCwd?: string | null;
   pinnedMessageId?: string;
+  /** The person pinned this channel thread above the update-ordered list. */
+  pinned?: boolean;
+  /** Epoch ms of the newest message, or createdAt when the thread has none. */
+  updatedAt?: number;
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a room the person may have retitled. */
   titleFromFirstMessage?: true;

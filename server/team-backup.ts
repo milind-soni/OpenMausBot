@@ -75,6 +75,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       closedBy: "closedBy" in task && task.closedBy
         ? { botId: task.closedBy.botId, name: task.closedBy.name, at: task.closedBy.at }
         : undefined,
+      pinned: task.pinned === true ? true : undefined,
       activeLeafId: store.activeLeaf(task.threadId),
       messages: store.messagesFor(task.threadId).map((message) => ({
         id: message.id, role: message.role, text: messageText(message), at: message.at,
@@ -196,6 +197,9 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         // the same way, or absent when it was a stranger.
         const closer = task.closedBy && botIds.get(task.closedBy.botId);
         if (task.closedBy && closer) record.closedBy = { botId: closer, name: task.closedBy.name, at: task.closedBy.at };
+        if (task.pinned === true) record.pinned = true;
+        const newest = task.messages.reduce((max, message) => Math.max(max, message.at), task.createdAt);
+        record.updatedAt = newest;
         return record;
       });
       // Own the task IDs before writing their transcripts, so rollback also
@@ -222,6 +226,8 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       if (!source.dm) {
         group.tasks = source.tasks.map((task, i) => ({
           threadId: threads[i], title: task.title, createdAt: task.createdAt,
+          updatedAt: task.messages.reduce((max, message) => Math.max(max, message.at), task.createdAt),
+          ...(task.pinned === true ? { pinned: true as const } : {}),
           ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
         }));
         store.switchGroupTask(group.id, threads[source.tasks.findIndex((task) => task.key === source.activeTask)]);

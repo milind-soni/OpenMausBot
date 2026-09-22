@@ -36,7 +36,7 @@ final class ThreadNavigationTests: XCTestCase {
         XCTAssertNil(groups.last?.project)
     }
 
-    func testAttentionFloatsAboveIdleThreadsAndIdleThreadsKeepStoredOrder() {
+    func testThreadListKeepsStoredOrderWhenStampsMatchAndAttentionOrderStaysSeparate() {
         var unread = task("unread")
         unread.unread = true
         var working = task("working")
@@ -45,11 +45,15 @@ final class ThreadNavigationTests: XCTestCase {
 
         XCTAssertEqual(
             bot.threadGroups().flatMap(\.tasks).map(\.threadId),
+            ["idle-a", "unread", "idle-b", "working", "idle-c"]
+        )
+        XCTAssertEqual(
+            bot.attentionOrderedTasks().map(\.threadId),
             ["working", "unread", "idle-a", "idle-b", "idle-c"]
         )
     }
 
-    func testAttentionRanksWaitingOnYouAboveWorkingAndQueuedAboveUnread() {
+    func testAttentionOrderStillRanksWaitingAboveWorkingForUpdates() {
         var unread = task("unread")
         unread.unread = true
         var queued = task("queued")
@@ -63,17 +67,25 @@ final class ThreadNavigationTests: XCTestCase {
 
         XCTAssertEqual(
             bot.threadGroups().flatMap(\.tasks).map(\.threadId),
+            ["unread", "queued", "working", "waiting"]
+        )
+        XCTAssertEqual(
+            bot.attentionOrderedTasks().map(\.threadId),
             ["waiting", "working", "queued", "unread"]
         )
     }
 
-    func testTheThreadOpenHereRidesAboveIdleButBelowAttentionTiers() {
+    func testTheOpenThreadDoesNotJumpTheUpdateOrderedList() {
         var waiting = task("waiting")
         waiting.activity = "waiting-on-you"
         let bot = makeBot(tasks: [task("idle"), task("current"), waiting])
 
         XCTAssertEqual(
             bot.threadGroups().flatMap(\.tasks).map(\.threadId),
+            ["idle", "current", "waiting"]
+        )
+        XCTAssertEqual(
+            bot.attentionOrderedTasks().map(\.threadId),
             ["waiting", "current", "idle"]
         )
     }
@@ -93,7 +105,31 @@ final class ThreadNavigationTests: XCTestCase {
         )
         XCTAssertEqual(
             bot.threadGroups(queuedThreadIds: ["helper", "plan"]).flatMap(\.tasks).map(\.threadId),
+            ["helper", "current", "plan"]
+        )
+        XCTAssertEqual(
+            bot.attentionOrderedTasks(queuedThreadIds: ["helper", "plan"]).map(\.threadId),
             ["helper", "plan", "current"]
+        )
+    }
+
+    func testPinsLeadAndNewerUpdatesRise() {
+        var pinnedOld = task("pinned-old")
+        pinnedOld.pinned = true
+        pinnedOld.updatedAt = 5
+        var pinnedNew = task("pinned-new")
+        pinnedNew.pinned = true
+        pinnedNew.updatedAt = 20
+        var fresh = task("fresh")
+        fresh.updatedAt = 30
+        var stale = task("stale")
+        stale.updatedAt = 10
+        stale.activity = "waiting-on-you"
+        let bot = makeBot(tasks: [stale, pinnedOld, fresh, pinnedNew])
+
+        XCTAssertEqual(
+            bot.threadGroups().flatMap(\.tasks).map(\.threadId),
+            ["pinned-new", "pinned-old", "fresh", "stale"]
         )
     }
 
@@ -118,7 +154,7 @@ final class ThreadNavigationTests: XCTestCase {
 
         XCTAssertEqual(
             bot.threadGroups().first { $0.id == "unfiled" }?.tasks.map(\.threadId),
-            ["busy", "current", "idle-b", "idle-a"]
+            ["idle-b", "busy", "idle-a", "current"]
         )
         XCTAssertEqual(bot.threadGroups(matching: "idle").map(\.id), ["unfiled"])
         XCTAssertEqual(
@@ -298,7 +334,7 @@ final class ThreadNavigationTests: XCTestCase {
 
         XCTAssertEqual(
             bot.threadGroups().flatMap(\.tasks).map(\.threadId),
-            ["waiting", "current", "running", "held", "plan"]
+            ["waiting", "running", "held", "current", "plan"]
         )
         XCTAssertEqual(bot.threadGroups(includingClosed: true).flatMap(\.tasks).count, 7)
         XCTAssertEqual(bot.threadGroups(matching: "put away").flatMap(\.tasks).map(\.threadId), ["put-away"])

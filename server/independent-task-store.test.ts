@@ -474,4 +474,26 @@ describe("independent bot task state", () => {
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });
     expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
   });
+
+  it("pins a thread without storing false, and advances updatedAt from a message without rewriting bots.json", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Pinned later")!;
+    const before = readFileSync(join(DATA_DIR, "bots.json"));
+    const message = store.appendMessage(task.threadId, { role: "user", kind: "text", text: "still here" });
+    expect(store.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
+    expect(readFileSync(join(DATA_DIR, "bots.json"))).toEqual(before);
+    expect(store.patchTask(bot.id, task.threadId, { pinned: true })?.pinned).toBe(true);
+    expect(savedBots().find((entry) => entry.id === bot.id)!.tasks!.find((entry) => entry.threadId === task.threadId)!.pinned).toBe(true);
+    expect(store.patchTask(bot.id, task.threadId, { pinned: false })?.pinned).toBeUndefined();
+    expect("pinned" in savedBots().find((entry) => entry.id === bot.id)!.tasks!.find((entry) => entry.threadId === task.threadId)!).toBe(false);
+    const group = store.createGroup("Channel", [bot.id], false);
+    const channel = store.createGroupTask(group.id, "Side")!;
+    expect(store.setGroupTaskPinned(group.id, channel.threadId, true)?.pinned).toBe(true);
+    expect(savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!.pinned).toBe(true);
+    store.setGroupTaskPinned(group.id, channel.threadId, false);
+    expect("pinned" in savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!).toBe(false);
+    const restarted = new Store(selection);
+    expect(restarted.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
+  });
 });

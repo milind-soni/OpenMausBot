@@ -301,6 +301,13 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var archivedAt: Double?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
+    /// The person pinned this thread above the update-ordered list.
+    public var pinned: Bool? = nil
+    /// Newest message time. Absent on older computers; the list uses createdAt.
+    public var updatedAt: Double? = nil
+
+    /// The time the thread list sorts and stamps by.
+    public var listStamp: Double { updatedAt ?? createdAt }
 
     /// The thread list's quiet second line, worded as the desktop words it.
     public var openedByLabel: String? {

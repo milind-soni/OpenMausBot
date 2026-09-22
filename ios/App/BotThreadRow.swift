@@ -50,11 +50,16 @@ struct BotThreadRow: View {
                 }
 
                 HStack(spacing: 5) {
-                    if task.createdAt > 0 {
-                        Text(RelativeStamp.list(task.createdAt))
+                    if task.listStamp > 0 {
+                        Text(RelativeStamp.list(task.listStamp))
+                    }
+                    if task.pinned == true {
+                        if task.listStamp > 0 { Text("·") }
+                        Image(systemName: "pin.fill")
+                            .accessibilityLabel("Pinned")
                     }
                     if let byline = task.bylineLabel {
-                        if task.createdAt > 0 { Text("·") }
+                        if task.listStamp > 0 || task.pinned == true { Text("·") }
                         Text(verbatim: byline)
                     }
                 }

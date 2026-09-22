@@ -94,6 +94,20 @@ class ThreadNavigationTest {
     }
 
     @Test
+    fun pinsLeadAndNewerUpdatesRiseAboveOlderWaitingThreads() {
+        val threads = listOf(
+            task("stale").copy(updatedAt = 10.0, activity = "waiting-on-you"),
+            task("pinned-old").copy(pinned = true, updatedAt = 5.0),
+            task("fresh").copy(updatedAt = 30.0),
+            task("pinned-new").copy(pinned = true, updatedAt = 20.0),
+        )
+        assertEquals(
+            listOf("pinned-new", "pinned-old", "fresh", "stale"),
+            bot.copy(tasks = threads).threadGroups().single().tasks.map { it.threadId },
+        )
+    }
+
+    @Test
     fun attentionFloatsLiveThreadsAboveIdleHistoryWithoutFilteringAnything() {
         val threads = listOf(
             task("old-1"), task("unread").copy(unread = true), task("old-2"),
@@ -103,12 +117,12 @@ class ThreadNavigationTest {
         val grouped = bot.copy(tasks = threads)
 
         assertEquals(
-            listOf("waiting", "working", "queued", "unread", "old-1", "old-2", "idle"),
+            listOf("old-1", "unread", "old-2", "queued", "working", "waiting", "idle"),
             grouped.threadGroups().single().tasks.map { it.threadId },
         )
         assertEquals(
             listOf("waiting", "working", "queued", "unread", "old-1", "old-2", "idle"),
-            grouped.threadGroups(includingClosed = true).single().tasks.map { it.threadId },
+            orderedThreads(threads, grouped.threadId).map { it.threadId },
         )
     }
 
@@ -124,7 +138,7 @@ class ThreadNavigationTest {
         )
 
         assertEquals(
-            listOf("busy", "current", "idle-b", "idle-a"),
+            listOf("idle-b", "busy", "idle-a", "current"),
             grouped.threadGroups().single { it.id == "unfiled" }.tasks.map { it.threadId },
         )
         assertEquals(
@@ -143,10 +157,9 @@ class ThreadNavigationTest {
             )
         }
         val grouped = bot.copy(tasks = archived)
-        // Folding and attention ordering compose: "quiet" folds away, and the
-        // rest come back in attention order (waiting 0, busy 1, unread 3,
-        // current 4, idle 5) rather than in stored order.
-        assertEquals(listOf("waiting", "busy", "unread", "current", "open"),
+        // "quiet" folds away. The rest stay in stored order: attention no
+        // longer reorders the tree.
+        assertEquals(listOf("current", "unread", "busy", "waiting", "open"),
             grouped.threadGroups().single().tasks.map { it.threadId })
         assertEquals(6, grouped.threadGroups(includingClosed = true).single().tasks.size)
         assertEquals(listOf("quiet"), grouped.threadGroups("quiet").single().tasks.map { it.threadId })

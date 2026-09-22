@@ -46,6 +46,15 @@ fun attentionRank(task: BotTask, activeThreadId: String, queued: Boolean = false
     else -> 5
 }
 
+/** Pin, then newest update. Equal stamps keep the caller's order. Attention
+ * does not move a row — [orderedThreads] still does, for activity surfaces. */
+fun listedThreads(tasks: List<BotTask>): List<BotTask> =
+    tasks.withIndex().sortedWith(
+        compareByDescending<IndexedValue<BotTask>> { it.value.pinned == true }
+            .thenByDescending { it.value.listStamp }
+            .thenBy { it.index },
+    ).map { it.value }
+
 /** Order, never filter: whatever the caller passes stays visible, only the
  * position changes. Sorting is stable, so equal ranks keep stored order. */
 fun orderedThreads(
@@ -84,12 +93,13 @@ fun Bot.threadGroups(
         // that starts working, waits on the person, turns unread, or is
         // holding a queued send is back.
         else -> visibleTasks.filter {
-            (!it.isClosed && !it.isArchived) ||
+            it.pinned == true ||
+                (!it.isClosed && !it.isArchived) ||
                 it.demandsAttention(queued = queuedThreadIds.contains(it.threadId)) ||
                 it.threadId == threadId
         }
     }
-    val ordered = if (search.isEmpty()) orderedThreads(threads, threadId, queuedThreadIds) else threads
+    val ordered = listedThreads(threads)
     val projectIds = mutableSetOf<String>()
     val groups = buildList {
         projects.orEmpty().forEach { project ->
