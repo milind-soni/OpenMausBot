@@ -1873,13 +1873,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               </>
             )}
           </div>
-          {/* The avatar column stacks the header's actions vertically, so the
-              menu must anchor to its own button there: anchored to the
-              cluster, top-full dropped it below the + button instead (the
-              reported bug). In the row densities the wrapper dissolves
-              (display: contents) and the menu keeps its cluster anchor:
-              right-aligned to this button alone, the wide menu would spill
-              past the window's left edge. */}
           <div className={density === "icons" ? "relative" : "contents"}>
             <button
               type="button"
@@ -1899,10 +1892,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 <div className={cn(
                   "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
                   density === "icons" ? "left-0" : "right-0",
-                  // The 272px compact sidebar cannot host a 288px (w-72) menu
-                  // under a right-0 anchor: it would spill 32px past the
-                  // window's left edge and clip the header row. w-60 keeps the
-                  // 16px inset the comfortable sidebar gives w-72.
                   density === "compact" ? "w-60" : "w-72",
                 )}>
                   <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
