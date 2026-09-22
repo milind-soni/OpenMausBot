@@ -71,7 +71,8 @@ val Bot.visibleTasks: List<BotTask>
  * Preserve saved folder order. Threads inside a folder follow pin, then
  * newest update ([listedThreads]); attention does not reorder this list.
  * A missing folder leaves its threads unfiled. Search includes closed threads
- * and matches folder names, and keeps that same list order.
+ * and matches folder names. Those rows use the same pin-then-update order;
+ * they are not the default list's row set.
  */
 fun Bot.threadGroups(
     matching: String = "",

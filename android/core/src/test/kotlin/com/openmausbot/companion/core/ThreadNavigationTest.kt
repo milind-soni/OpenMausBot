@@ -61,7 +61,8 @@ class ThreadNavigationTest {
         assertEquals(listOf("current", "unread", "busy", "waiting", "queued"), listed.map { it.threadId })
         assertEquals(listOf("waiting", "busy", "queued", "unread", "current"),
             orderedThreads(listed, grouped.threadId).map { it.threadId })
-        assertEquals(6, grouped.threadGroups(includingClosed = true).single().tasks.size)
+        assertEquals(listOf("quiet", "current", "unread", "busy", "waiting", "queued"),
+            grouped.threadGroups(includingClosed = true).single().tasks.map { it.threadId })
         assertTrue(grouped.threadGroups("run").isEmpty())
         assertEquals("run", grouped.forTask("run")?.threadId)
     }

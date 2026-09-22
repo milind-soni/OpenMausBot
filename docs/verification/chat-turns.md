@@ -160,7 +160,7 @@ the pending job to catch up.
 
 ```sh
 pnpm exec vitest run server/delegations.test.ts server/peer-roster.test.ts server/drivers/agents-proxy.test.ts
-pnpm exec vitest run server/independent-threads-api.test.ts -t 'queues coordinated work behind a peer'"'"'s approval'
+pnpm exec vitest run server/independent-threads-api.test.ts -t "queues coordinated work behind a peer's approval"
 pnpm exec vitest run server/comms.test.ts
 ```
 
