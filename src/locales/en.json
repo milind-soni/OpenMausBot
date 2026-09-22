@@ -2270,5 +2270,12 @@
   "engines.icon.formatError": "Upload a PNG, JPEG, or WebP image.",
   "engines.icon.sizeError": "Provider icons must be 128 KB or smaller.",
   "engines.icon.invalidError": "Upload a complete PNG, JPEG, or WebP image up to 128 KB and {dimension} × {dimension} pixels.",
-  "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels."
+  "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels.",
+  "settings.defaultModel.title": "Default model for new bots",
+  "settings.defaultModel.hint": "Existing bots and threads keep their models.",
+  "settings.defaultModel.saved": "Saved",
+  "settings.defaultModel.saving": "Saving…",
+  "settings.defaultModel.error": "Could not save the default model.",
+  "settings.defaultModel.reasoning": "Reasoning",
+  "settings.defaultModel.effort": "Effort"
 }
