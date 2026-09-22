@@ -1987,6 +1987,14 @@ describe("live config frames", () => {
     localVm: { mode: "shared", maxInstances: 1 },
   };
 
+  it("preserves the new-bot default model through live config updates", () => {
+    const defaultModelSelection = { instanceId: "codex", model: "gpt-5.6", effort: "low" as const };
+    const config = configStatusFromFrame({ ...baseFrame, defaultModelSelection });
+    const state = reducer(initialState, { type: "configStatus", config });
+    expect(state.config?.defaultModelSelection).toEqual(defaultModelSelection);
+    expect(configStatusFromFrame({ ...baseFrame, defaultModelSelection: null }).defaultModelSelection).toBeNull();
+  });
+
   it("preserves edition, budgets and billing through configStatusFromFrame", () => {
     const frame: ConfigStatusFrame = {
       ...baseFrame,
