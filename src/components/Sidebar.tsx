@@ -1873,50 +1873,59 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               </>
             )}
           </div>
-          <button
-            type="button"
-            onClick={() => setAttentionOpen((o) => !o)}
-            aria-label={t("attention.title")}
-            title={t("attention.title")}
-            className="relative flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
-          >
-            <Activity size={20} strokeWidth={2} />
-            {attention.length > 0 && (
-              <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
-            )}
-          </button>
-          {attentionOpen && (
-            <>
-              <div className="fixed inset-0 z-30" onMouseDown={() => setAttentionOpen(false)} />
-              <div className={cn(
-                "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                density === "icons" ? "left-0" : "right-0",
-                // The 272px compact sidebar cannot host a 288px (w-72) menu
-                // under a right-0 anchor: it would spill 32px past the
-                // window's left edge and clip the header row. w-60 keeps the
-                // 16px inset the comfortable sidebar gives w-72.
-                density === "compact" ? "w-60" : "w-72",
-              )}>
-                <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
-                  <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
-                  <button
-                    type="button"
-                    onClick={() => setAttentionPinned(!attentionPinned)}
-                    aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                    title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                    className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
-                  >
-                    {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                  </button>
+          {/* The avatar column stacks the header's actions vertically, so the
+              menu must anchor to its own button there: anchored to the
+              cluster, top-full dropped it below the + button instead (the
+              reported bug). In the row densities the wrapper dissolves
+              (display: contents) and the menu keeps its cluster anchor:
+              right-aligned to this button alone, the wide menu would spill
+              past the window's left edge. */}
+          <div className={density === "icons" ? "relative" : "contents"}>
+            <button
+              type="button"
+              onClick={() => setAttentionOpen((o) => !o)}
+              aria-label={t("attention.title")}
+              title={t("attention.title")}
+              className="relative flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              <Activity size={20} strokeWidth={2} />
+              {attention.length > 0 && (
+                <span className="absolute right-1 top-1 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
+              )}
+            </button>
+            {attentionOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onMouseDown={() => setAttentionOpen(false)} />
+                <div className={cn(
+                  "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
+                  density === "icons" ? "left-0" : "right-0",
+                  // The 272px compact sidebar cannot host a 288px (w-72) menu
+                  // under a right-0 anchor: it would spill 32px past the
+                  // window's left edge and clip the header row. w-60 keeps the
+                  // 16px inset the comfortable sidebar gives w-72.
+                  density === "compact" ? "w-60" : "w-72",
+                )}>
+                  <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
+                    <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
+                    <button
+                      type="button"
+                      onClick={() => setAttentionPinned(!attentionPinned)}
+                      aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+                      title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+                    >
+                      {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                    </button>
+                  </div>
+                  {attention.length === 0 ? (
+                    <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
+                  ) : (
+                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId }); }} />
+                  )}
                 </div>
-                {attention.length === 0 ? (
-                  <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
-                ) : (
-                  <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId }); }} />
-                )}
-              </div>
-            </>
-          )}
+              </>
+            )}
+          </div>
           <button
             ref={importReturnRef}
             onClick={() => setPlusOpen((o) => !o)}

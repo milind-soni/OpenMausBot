@@ -4,10 +4,14 @@
 // evidence without asserting, for before/after composites on other trees).
 // The disposable fake-engine server holds one bot whose settled reply is
 // never read - the unread state the cross-bot attention list collects - and
-// the real Sidebar is mounted at each expanded density through the shared
-// preview fixture. The popover must keep its 16px inset in both: in compact
-// a static w-72 (288px) crossed the window edge by 32px (272 < 16 + 288) and
-// the OS clipped the title row, which is the reported field bug.
+// the real Sidebar is mounted at each density through the shared preview
+// fixture. The popover must keep its 16px inset in the row densities: in
+// compact a static w-72 (288px) crossed the window edge by 32px
+// (272 < 16 + 288) and the OS clipped the title row, which is the reported
+// field bug. In the avatar column the header's actions stack vertically, so
+// the menu must anchor to the Active Threads button itself: anchored to the
+// action cluster it opened below the + button instead, the reported
+// avatar-view bug.
 //
 // Determinism: the popover opens the instant the button is clicked, but its
 // rows exist only once the store's first /api/bots fetch lands in the page,
@@ -57,6 +61,7 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
       const title = [...document.querySelectorAll('span')].find((node) => node.textContent.trim() === 'Active Threads' && node.closest('div.absolute'));
       if (!title) return null;
       const menu = title.closest('div.absolute');
+      const button = ${attentionButton};
       const sidebar = document.querySelector('[data-sidebar]');
       const rect = menu.getBoundingClientRect();
       const rows = [...menu.querySelectorAll('button')].filter((button) => (button.getAttribute('aria-label') || '').includes('Sidebar attention fixture')).length;
@@ -66,8 +71,11 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
       if (rows === 0) return null;
       return JSON.stringify({
         left: rect.left,
+        top: rect.top,
         width: rect.width,
         titleLeft: title.getBoundingClientRect().left,
+        buttonLeft: button.getBoundingClientRect().left,
+        buttonBottom: button.getBoundingClientRect().bottom,
         sidebarLeft: sidebar.getBoundingClientRect().left,
         rows,
       });
@@ -96,6 +104,29 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
         assert.ok(measured.titleLeft >= -0.5,
           `the ${density} title must start inside the window: ${JSON.stringify(measured)}`);
       }
+    }
+    // The avatar column anchors the menu to the Active Threads button
+    // itself: left-0 on the button's left edge and top directly under it
+    // (top-full + mt-1). Anchored to the cluster the menu opened a full
+    // button-plus-gap lower - under the + button - which is the reported
+    // avatar-view bug.
+    await window.loadURL(`${preview.previewUrl}?density=icons`);
+    await until(async () => await evaluate(sidebarAtWidth(80)) === true);
+    const icons = await openAndMeasure();
+    writeFileSync(join(evidence, "icons.png"), (await window.webContents.capturePage()).toPNG());
+    results.icons = icons;
+    if (!captureOnly) {
+      assert.equal(icons.rows, 1, `the icons menu must show the one unread thread: ${JSON.stringify(icons)}`);
+      assert.ok(Math.abs(icons.left - icons.buttonLeft) <= 0.5,
+        `the icons menu must align its left edge with the Active Threads button: ${JSON.stringify(icons)}`);
+      assert.ok(Math.abs(icons.top - (icons.buttonBottom + 4)) <= 0.5,
+        `the icons menu must open directly below the Active Threads button, not below the cluster: ${JSON.stringify(icons)}`);
+      assert.ok(icons.left >= -0.5,
+        `the icons menu must not spill past the window's left edge: ${JSON.stringify(icons)}`);
+      assert.ok(Math.abs(icons.width - 288) <= 0.5,
+        `the icons menu must be 288px wide: ${JSON.stringify(icons)}`);
+      assert.ok(icons.titleLeft >= -0.5,
+        `the icons title must start inside the window: ${JSON.stringify(icons)}`);
     }
     console.log(JSON.stringify({ captureOnly, ...results, evidence }));
   } finally {
