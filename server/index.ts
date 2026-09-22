@@ -1151,6 +1151,12 @@ function botAtThreadCapacity(botId: string): boolean {
   return store.tasks(botId).filter((task) => threadBusy(botId, task.threadId)).length >= maxConcurrentBotThreads(cfg);
 }
 
+/** A card waiting on the person still owns fresh coordinated work, even
+ * when another thread slot is free. A sibling that is only working does not. */
+function recipientAwaitingPerson(botId: string, exceptThreadId: string): boolean {
+  return store.tasks(botId).some((task) => task.threadId !== exceptThreadId && task.activity === "waiting-on-you");
+}
+
 function hasDirectDispatch(botId: string): boolean {
   return [...directTurnDispatchClaims.values()].some((claim) => claim.botId === botId);
 }
@@ -2759,12 +2765,16 @@ function outstandingAssignmentsPrompt(threadId: string): string {
 const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   validate: (node, parent) => roomHandoffProblem(node, parent) ??
     (parent && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
-  // Direct assignments and follow-ups use independent threads. Match direct
-  // turn admission: unrelated work need not block a free thread slot, but
-  // never overlap the addressed thread, exceed capacity, or race a group turn.
-  busy: n => !n.groupId
-    ? threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId) || Boolean(activeGroupTurnForBot(n.botId))
-    : Boolean(store.bot(n.botId)?.busy || (n.groupId && store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!))),
+  // A free slot admits fresh work beside a sibling that is actually running
+  // (#1589). A card waiting on the person still holds fresh work (#1128).
+  // An owed resume is not fresh work, so a sibling card must not starve it
+  // (#1278). Never overlap the addressed thread, exceed capacity, or race a
+  // group turn.
+  busy: n => {
+    if (n.groupId) return Boolean(store.bot(n.botId)?.busy || (store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!)));
+    const slot = threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId) || Boolean(activeGroupTurnForBot(n.botId));
+    return n.status === "resume" ? slot : slot || recipientAwaitingPerson(n.botId, n.threadId);
+  },
   changed: (groupIds, directThreadIds) => {
     for (const id of groupIds) {
       const group = store.group(id);

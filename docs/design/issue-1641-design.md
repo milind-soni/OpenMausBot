@@ -8,9 +8,9 @@
 
 ### handoff
 
-製品コードは #1637 で `roomHandoffs` の busy を変えていない。`e8729497` でも、enqueue 直後は `queued`、約 250ms の tick の後は `running` になる。peer の承認スレッドは `waiting-on-you` のまま、別スレッド `@Mailbox Chief` が `working` になる。既定の同時スレッド数は 3 で、承認中の 1 本は枠を使い切らない。
+`roomHandoffs` の fresh work は、相手の別スレッドが `waiting-on-you` でも空き枠があると次の tick で `running` になっていた。tick は 250ms 間隔なので、enqueue から次の tick までは 0〜250ms である。検査が tick 前の `queued` を読むと通り、負荷のかかった runner は 10 秒 `running` を見て落ちる。`e8729497` でも同じで、#1637 が busy を変えたわけではない。
 
-これは #1589（`ec8e79dc`）の契約である。direct の fresh work は bot 全体の busy では待たず、宛先スレッドが空いていて枠があれば開始する。#1278 から #1589 まで、fresh work は bot 全体の busy で待ち、resume だけがスレッド単位だった。#1589 が fresh work も空きスロットへ進めるようにした。tick は 250ms 間隔なので、enqueue から次の tick までは 0〜250ms である。送信元ターンの終了は、別スレッドの handoff を止めない。
+承認カードのあいだ fresh work を待つのは #1128 のメールボックス契約である。#1278 は resume だけをスレッド単位にし、fresh work はカードのあいだ待たせると書いた。#1589 が空き枠を認めたのは、兄弟が実際に走っているときであり、承認カードの検査は `queued` のままだった。フックがカードと実行中を区別しなくなったのが回帰で、レースがそれを隠していた。
 
 #1626 が `expect(status).toBe("queued")` を `expect.poll(...).toBe("queued")` に変えた。状態は最初から `queued` で、tick の後に `queued` ではなくなる。poll は最初の観測が tick より後だと 10 秒 `running` を見続けて失敗する。速い観測は tick 前の `queued` で通る。マージ CI の macOS 成功と Windows 失敗、ローカルで遅延を入れると `e8729497` でも失敗すること、はこのレースで説明できる。`running` になってから承認しても、結果は 1 回だけ別スレッドに届き、開いているスレッドには `MAILBOX_REVIEW` が入らない。
 
@@ -22,7 +22,9 @@
 
 - Android の core 検査は一覧順と `orderedThreads` の注意順を両方断言する。`threadGroups` の KDoc は「注意が行を動かす」と書かない。
 - `TaskRules.tasks` も同じ一覧順で、開いている帯・閉じた帯・アーカイブの帯に分けたあと各帯の中を並べる。core の失敗で app の単体テストまで進んでいなかったので、`TaskRulesTest` の注意順期待も合わせる。KDoc も合わせる。
-- handoff 検査は同時スレッド数を 1 に固定し、承認中は 1 tick を超えて `queued` のままであることを見る。そのあと 3 に上げ、開いているスレッドが `waiting-on-you` のまま、別スレッドが `busy` かつ ledger が `running` になることを承認の前に見る。`orderedThreads` は画面から呼ばれていないので、その説明を「未使用の注意順ヘルパー」に直す。一覧の KDoc も同じ。
+- fresh work の busy は、宛先スレッド、枠、グループターンに加え、他スレッドの `waiting-on-you` でも待つ。resume は #1278 のままカードでは待たない。兄弟が `working` のときの空き枠開始（#1589）は維持する。
+- handoff 検査は同時スレッド数 3 のまま、承認カードが開いているあいだ ledger が tick を超えて `queued` で、別スレッドは `busy` にならないことを見る。承認のあと 1 回届くことは残す。
+- `orderedThreads` は画面から呼ばれていないので、その説明を「未使用の注意順ヘルパー」に直す。
 
 ## 影響範囲
 
@@ -31,7 +33,8 @@
 | `threadGroups` の説明 | `android/core/.../ThreadNavigation.kt` | コメントのみ | 実装に合わせる。並びのコードは変えない |
 | 一覧検査 | `ThreadNavigationTest.kt` の当該関数 | テスト | 一覧順 + `orderedThreads` |
 | シートの並び | `TaskRules.kt` の KDoc と `TaskRulesTest.kt` | コメントとテスト | 実装は `listedThreads` のまま。期待を帯の中の保存順 / 更新順に合わせる |
-| handoff 検査 | `server/independent-threads-api.test.ts` の当該 `it` | テスト | `running` を待つ。製品の busy は変えない |
+| handoff の busy | `server/index.ts` の `recipientAwaitingPerson` | 機能 | fresh work だけ、他スレッドの `waiting-on-you` で待つ。resume と、兄弟が `working` の空き枠は変えない |
+| handoff 検査 | `server/independent-threads-api.test.ts` の当該 `it` | テスト | 枠が 3 でも承認中は `queued` |
 
 `listedThreads` / `orderedThreads` / `roomHandoffs` の busy 実装は変更しない。呼び出し元の挙動は変わらない。
 

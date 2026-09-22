@@ -18,7 +18,7 @@ iOS UI は PR head で落ち、マージ後の run では通った。今回は�
 
 - Android の一覧検査は、同じスタンプなら保存順（見えるスレッドは `current, unread, busy, waiting, queued`）。注意順は `orderedThreads` が引き続き `waiting, busy, queued, unread, current` であること。
 - `TaskRules.tasks` の検査も同じ契約にする。開いている帯の中は保存順または更新順で、注意順では並べない。ピンは帯の先頭。未読のアーカイブは開いている帯に残るが、同じ時刻なら保存位置のまま。routine 実行だけピッカーから隠す。
-- 同時スレッド数 1 のあいだ、承認中の peer への coordinated work は tick を超えて `queued` のまま。3 に上げたあと、開いているスレッドが `waiting-on-you` のまま、別スレッドが `busy` かつ ledger が `running` になる。承認ソケットは無人で答えず、レビュー本文は人が開いているスレッドに入らず、結果は 1 回だけ届く。
+- 同時スレッド数が 3 でも、peer の承認カードが開いているあいだ fresh な coordinated work は tick を超えて `queued` のまま、別スレッドは動き出さない。承認すると 1 回だけ届く。兄弟が実行中のときの空き枠開始と、resume がカードで止まらないことは維持する。承認ソケットは無人で答えず、レビュー本文は人が開いているスレッドに入らない。
 - ピン留め、更新順、`updatedAt` の付け方は変えない。
 
 ## 非スコープ

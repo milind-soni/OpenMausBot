@@ -97,16 +97,16 @@ describe("independent bot tasks through the isolated control surface", () => {
     await session.close();
   });
 
-  it("queues coordinated work when the peer has no free thread, then runs it on a spare thread while the sibling approval stays unanswered", async () => {
+  it("queues coordinated work behind a peer's approval even with a spare thread, and delivers it once without another user prompt", async () => {
     const chief = (await tool("create_bot", { name: "Mailbox Chief", instance_id: "claude", model: models[0] })).bot;
     const peer = (await tool("create_bot", { name: "Mailbox Peer", instance_id: "claude", model: models[1] })).bot;
     await api("PATCH", `/api/bots/${peer.id}/tasks/${peer.activeTaskId}`, { approvalMode: "ask" });
     await control(["send", "--bot", peer.id, "--text", "Hold this review until I approve the check."]);
     const answers = await permission(models[1], "mailbox-approval");
     await expect.poll(async () => (await botState(peer.id)).activity).toBe("waiting-on-you");
-    // One busy approval fills capacity 1, so the handoff cannot start. The
-    // default of 3 would hide that. Raising the cap later is what admits it.
-    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 1 } })).status).toBe(200);
+    // A spare slot must not hide the approval hold. Capacity 1 would queue
+    // this for a different reason.
+    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 3 } })).status).toBe(200);
     await control(["send", "--bot", chief.id, "--text", "Ask the reviewer to check the release notes, then return the result here."]);
     const token = (await dump(models[0])).mcpConfig.mcpServers.agents.env.OMB_COMMS_TOKEN;
     const roster = await internal(token, "GET", "/api/internal/agents");
@@ -124,23 +124,20 @@ describe("independent bot tasks through the isolated control surface", () => {
       .find((node: any) => node.id === requestId);
     const peerThread = handoff().threadId;
     expect(peerThread).not.toBe(peer.activeTaskId);
-    // Ending the source turn does not admit the handoff. At capacity 1 the
-    // approval thread keeps the only slot, so the ledger stays queued across
-    // a tick. #1589 admits it once a spare slot exists, without answering
-    // the card on the thread the person has open.
+    // The open approval keeps fresh work queued across a tick, spare slot or
+    // not. Ending the source turn does not release it. #1589 admits a spare
+    // slot only beside a sibling that is running, not beside this card.
     writeFileSync(modelFile(models[0], "gate"), "finish");
     await expect.poll(async () => {
       const current = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
       return current.messages.filter((message: any) => message.tool?.name === "Sent to Mailbox Peer").length;
     }).toBe(1);
     await new Promise((resolve) => setTimeout(resolve, 1_500));
+    const peerNow = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === peer.id);
+    const side = peerNow?.tasks?.find((task: any) => task.threadId === peerThread || task.taskId === peerThread);
+    expect(peerNow?.activity).toBe("waiting-on-you");
+    expect(side?.busy).not.toBe(true);
     expect(handoff()?.status).toBe("queued");
-    expect((await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: 3 } })).status).toBe(200);
-    await expect.poll(async () => {
-      const peerNow = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === peer.id);
-      const side = peerNow?.tasks?.find((task: any) => task.threadId === peerThread || task.taskId === peerThread);
-      return peerNow?.activity === "waiting-on-you" && side?.busy === true && handoff()?.status === "running";
-    }, { timeout: 10_000 }).toBe(true);
     expect(answers).toEqual([]);
     await control(["messages", "--bot", chief.id, "--limit", "10"]);
     const allowed = await api("POST", `/api/threads/${peer.activeTaskId}/respond`, { requestId: "mailbox-approval", behavior: "allow" });
