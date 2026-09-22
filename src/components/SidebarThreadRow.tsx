@@ -15,6 +15,14 @@ type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "a
   updatedAt?: number;
 };
 
+/** Local date and time. The runtime's timezone and locale are used on
+ * purpose: a desktop in Tokyo and one in New York should not be forced
+ * onto UTC. */
+export function formatUpdatedAt(at: number): string {
+  if (!Number.isFinite(at) || at <= 0) return "";
+  return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+}
+
 /** Newest message, else when the thread was created. Missing stamps sort as
  * oldest so a half-loaded row cannot jump the list as NaN. */
 export function threadRecency(task: { updatedAt?: number; createdAt?: number }): number {
@@ -140,6 +148,8 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWorking(task) ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
+  const updatedAt = threadRecency(task);
+  const updatedLabel = formatUpdatedAt(updatedAt);
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
   const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
@@ -173,7 +183,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={[task.title, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
+        title={[task.title, updatedLabel, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         onClick={onSelect} onDoubleClick={startRename}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
@@ -182,6 +192,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
           <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived) && !current && "text-ink-secondary/70")}>{task.title}</span>
           {byline && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{byline}</span>}
         </span>
+        {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
         {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}

@@ -51,7 +51,7 @@ struct BotThreadRow: View {
 
                 HStack(spacing: 5) {
                     if task.listStamp > 0 {
-                        Text(RelativeStamp.list(task.listStamp))
+                        Text(ThreadStamp.updated(task.listStamp))
                     }
                     if task.pinned == true {
                         if task.listStamp > 0 { Text("·") }

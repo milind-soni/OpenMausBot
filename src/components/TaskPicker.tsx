@@ -6,7 +6,7 @@
 // long job and a quick question can sit side by side under one agent.
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Activity, Check, ChevronDown, FolderInput, Pencil, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
-import { useStore, formatTime, type Bot, type BotProject, type Group, type Task } from "@/state/store";
+import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
@@ -15,7 +15,7 @@ import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
-import { orderedThreadList, threadByline, threadRecency } from "./SidebarThreadRow";
+import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -351,7 +351,7 @@ function ConversationTaskPicker({
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
                         {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
-                        {formatTime(threadRecency(task))}
+                        {formatUpdatedAt(threadRecency(task))}
                         <TaskUsage usage={task.usage} />
                         {opener && ` · ${opener}`}
                       </div>

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 // The More menu lives behind component state and a portal, which a static
 // render never reaches. SidebarThreadRow uses exactly useState, useRef and
@@ -139,6 +139,21 @@ describe("threads a bot closed", () => {
     // a live status outranks the closed note; the selected row is not dimmed
     expect(render({ threadId: "h", title: "Helper 1", closedBy, busy: true })).toContain('title="Helper 1 · Working"');
     expect(render({ threadId: "h", title: "Helper 1", closedBy }, true)).not.toContain("text-ink-secondary/70");
+  });
+});
+
+describe("formatUpdatedAt", () => {
+  it("uses the runtime locale and timezone, and skips a missing stamp", () => {
+    const at = Date.UTC(2026, 0, 15, 0, 30);
+    expect(formatUpdatedAt(at)).toBe(new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }));
+    expect(formatUpdatedAt(0)).toBe("");
+    expect(formatUpdatedAt(Number.NaN)).toBe("");
+    const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
+      task: { threadId: "t", title: "Notes", updatedAt: at },
+      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    }));
+    expect(markup).toContain(formatUpdatedAt(at));
+    expect(markup).toContain(new Date(at).toISOString());
   });
 });
 
