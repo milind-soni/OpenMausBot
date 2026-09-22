@@ -10,7 +10,7 @@
 
 製品コードは #1637 で `roomHandoffs` の busy を変えていない。`e8729497` でも、enqueue 直後は `queued`、約 250ms の tick の後は `running` になる。peer の承認スレッドは `waiting-on-you` のまま、別スレッド `@Mailbox Chief` が `working` になる。既定の同時スレッド数は 3 で、承認中の 1 本は枠を使い切らない。
 
-これは #1589（`ec8e79dc`）の契約である。direct の fresh work は bot 全体の busy では待たず、宛先スレッドが空いていて枠があれば開始する。#1278 までは fresh work だけ bot 全体の busy で待っていたが、#1589 がその条件を外した。検査コメントは #1278 以前の文言のまま残った。
+これは #1589（`ec8e79dc`）の契約である。direct の fresh work は bot 全体の busy では待たず、宛先スレッドが空いていて枠があれば開始する。#1278 から #1589 まで、fresh work は bot 全体の busy で待ち、resume だけがスレッド単位だった。#1589 が fresh work も空きスロットへ進めるようにした。tick は 250ms 間隔なので、enqueue から次の tick までは 0〜250ms である。送信元ターンの終了は、別スレッドの handoff を止めない。
 
 #1626 が `expect(status).toBe("queued")` を `expect.poll(...).toBe("queued")` に変えた。状態は最初から `queued` で、tick の後に `queued` ではなくなる。poll は最初の観測が tick より後だと 10 秒 `running` を見続けて失敗する。速い観測は tick 前の `queued` で通る。マージ CI の macOS 成功と Windows 失敗、ローカルで遅延を入れると `e8729497` でも失敗すること、はこのレースで説明できる。`running` になってから承認しても、結果は 1 回だけ別スレッドに届き、開いているスレッドには `MAILBOX_REVIEW` が入らない。
 
@@ -22,7 +22,7 @@
 
 - Android の core 検査は一覧順と `orderedThreads` の注意順を両方断言する。`threadGroups` の KDoc は「注意が行を動かす」と書かない。
 - `TaskRules.tasks` も同じ一覧順で、開いている帯・閉じた帯・アーカイブの帯に分けたあと各帯の中を並べる。core の失敗で app の単体テストまで進んでいなかったので、`TaskRulesTest` の注意順期待も合わせる。KDoc も合わせる。
-- handoff 検査は、送信元ターンを終えたあと ledger が `running` になることを 10 秒 poll する。承認ソケットが空であることと、その後の 1 回配送は残す。検査名は「空きスレッドで動き、兄弟の承認は未回答のまま」にする。
+- handoff 検査は同時スレッド数を 1 に固定し、承認中は 1 tick を超えて `queued` のままであることを見る。そのあと 3 に上げ、開いているスレッドが `waiting-on-you` のまま、別スレッドが `busy` かつ ledger が `running` になることを承認の前に見る。`orderedThreads` は画面から呼ばれていないので、その説明を「未使用の注意順ヘルパー」に直す。一覧の KDoc も同じ。
 
 ## 影響範囲
 
