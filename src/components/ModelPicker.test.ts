@@ -68,6 +68,18 @@ function renderEffort(instances: InstanceInfo[], effort?: EffortLevel): string {
 }
 
 describe("EffortRow", () => {
+  it("sends controlled effort changes to settings without changing a bot", () => {
+    fixture.instances = [engine(["high"])];
+    fixture.dispatch.mockClear();
+    const save = vi.fn();
+    const row = EffortRow({ bot: bot(), onSelectionChange: save })!;
+    const levels = Children.toArray(row.props.children).at(-1) as ReactElement<{ children: ReactNode }>;
+    const high = Children.toArray(levels.props.children)[1] as ReactElement<{ onClick: () => void }>;
+    high.props.onClick();
+    expect(save).toHaveBeenCalledWith({ instanceId: "codex", model: "gpt-5.6", effort: "high" });
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
   it("can apply effort to the pinned thread and bot default together", () => {
     fixture.instances = [engine(["high"])];
     const row = EffortRow({ bot: bot(), threadId: "thread-atlas", updateBotDefault: true })!;
@@ -131,6 +143,16 @@ describe("OpenCode model variants", () => {
   const selected = (variant?: string): Bot => ({ ...bot(), modelSelection: { instanceId: "opencode", model: "provider/model", ...(variant !== undefined ? { variant } : {}) } });
   beforeEach(() => { fixture.instances = [opencode()]; fixture.modelVariantSessions = {}; fixture.dispatch.mockClear(); });
   const render = (variant?: string) => renderToStaticMarkup(createElement(ModelVariantRow, { bot: selected(variant), threadId: "thread-atlas" }));
+
+  it("sends controlled variant changes to settings without changing a bot", () => {
+    const save = vi.fn();
+    const row = ModelVariantRow({ bot: selected(), onSelectionChange: save })!;
+    const group = Children.toArray(row.props.children).at(-1) as ReactElement<{ children: ReactNode }>;
+    const button = Children.toArray(group.props.children)[1] as ReactElement<{ onClick: () => void }>;
+    button.props.onClick();
+    expect(save).toHaveBeenCalledWith({ instanceId: "opencode", model: "provider/model", variant: "minimal" });
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
 
   it("offers exact advertised ids without assuming that omission means none or default", () => {
     const markup = render();

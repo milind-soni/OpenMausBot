@@ -56,18 +56,20 @@ export function EffortRow({
   updateBotDefault,
   className,
   label,
+  onSelectionChange,
 }: {
   bot: Bot;
   threadId?: string;
   updateBotDefault?: boolean;
   className?: string;
   label?: ReactNode;
+  onSelectionChange?: (selection: ModelSelection) => void;
 }) {
   const { state, dispatch } = useStore();
   const selection = bot.modelSelection;
   const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
   if (instance?.capabilities?.modelVariants) {
-    return <ModelVariantRow bot={bot} threadId={threadId} updateBotDefault={updateBotDefault} className={className} label={label} />;
+    return <ModelVariantRow bot={bot} threadId={threadId} updateBotDefault={updateBotDefault} className={className} label={label} onSelectionChange={onSelectionChange} />;
   }
   const levels = instance?.capabilities?.effortLevels;
   // An engine with no levels gets no control at all, not an empty one.
@@ -83,13 +85,14 @@ export function EffortRow({
           <button
             key={level ?? "default"}
             type="button"
+            disabled={bot.busy}
             aria-pressed={selection.effort === level}
             title={
               level === undefined
                 ? "Send no effort level and let the engine decide"
                 : `Ask for ${effortLabel(level)} reasoning effort`
             }
-            onClick={() => dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } })}
+            onClick={() => onSelectionChange ? onSelectionChange({ ...selection, effort: level }) : dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } })}
             className={cn(
               "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
               selection.effort === level
@@ -110,12 +113,13 @@ function variantLabel(option: ModelVariantOption): string {
 }
 
 /** ACP variant ids are opaque; their model/session declares the available choices. */
-export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label }: {
+export function ModelVariantRow({ bot, threadId, updateBotDefault, className, label, onSelectionChange }: {
   bot: Bot;
   threadId?: string;
   updateBotDefault?: boolean;
   className?: string;
   label?: ReactNode;
+  onSelectionChange?: (selection: ModelSelection) => void;
 }) {
   const { state, dispatch } = useStore();
   const selection = bot.modelSelection;
@@ -129,7 +133,12 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
   const unavailable = missing && reported !== undefined;
   const current = reported?.currentValue;
   const choose = (variant?: string) => {
+    if (bot.busy) return;
     const { effort: _effort, variant: _variant, ...model } = selection;
+    if (onSelectionChange) {
+      onSelectionChange({ ...model, ...(variant !== undefined ? { variant } : {}) });
+      return;
+    }
     dispatch({ type: "setModel", botId: bot.id, threadId, ...(updateBotDefault ? { updateBotDefault: true } : {}),
       selection: { ...model, ...(variant !== undefined ? { variant } : {}) } });
   };
@@ -329,6 +338,8 @@ export function ModelPicker({
   className,
   contained = false,
   label,
+  onSelectionChange,
+  selectionHint,
 }: {
   bot: Bot;
   threadId?: string;
@@ -337,6 +348,8 @@ export function ModelPicker({
    * narrow parent (the Agent profile sidebar). */
   contained?: boolean;
   label?: ReactNode;
+  onSelectionChange?: (selection: ModelSelection) => void;
+  selectionHint?: ReactNode;
 }) {
   const { state, dispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStore();
   const [open, setOpen] = useState(false);
@@ -464,6 +477,11 @@ export function ModelPicker({
   const pick = (instance: InstanceInfo, model: string) => {
     if (bot.busy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
+    if (onSelectionChange) {
+      onSelectionChange(nextSelection);
+      setOpen(false);
+      return;
+    }
     const updateBotDefault = !threadId || scope === "bot";
     const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
@@ -668,7 +686,7 @@ export function ModelPicker({
                     </p>
                   )}
                   <div className="mt-0.5 text-[11.5px] text-ink-secondary">
-                    {pane === "custom" ? t("model.localHint") : t(threadId && scope === "thread" ? "model.chooseThreadHint" : "model.chooseHint")}
+                    {selectionHint ?? (pane === "custom" ? t("model.localHint") : t(threadId && scope === "thread" ? "model.chooseThreadHint" : "model.chooseHint"))}
                   </div>
                 </div>
 
@@ -799,6 +817,7 @@ export function ModelPicker({
                     bot={bot}
                     threadId={threadId}
                     updateBotDefault={Boolean(threadId && scope === "bot")}
+                    onSelectionChange={onSelectionChange}
                     className="shrink-0 border-t border-hairline/40 px-4 py-3"
                     label={<span className="text-[12.5px] font-medium text-ink">{active?.capabilities?.modelVariants ? "Reasoning" : "Effort"}</span>}
                   />
