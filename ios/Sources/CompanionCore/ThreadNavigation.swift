@@ -31,11 +31,13 @@ extension BotTask {
 }
 
 extension Bot {
-    /// Saved folder order is preserved. Missing folders leave their threads
-    /// in the unfiled group. Within every group, pinned threads come first
-    /// and the rest follow the newest update. Attention stays on the row;
-    /// it does not change this order. `attentionOrderedTasks` keeps the
-    /// old attention order for Updates and Live Activity.
+    /// Within every group, pinned threads come first and the rest follow
+    /// the newest update. A folder rises with the thread of its that sits
+    /// highest in that order, the same way the desktop sidebar does; saved
+    /// folder order only breaks a tie. Unfiled threads stay after the
+    /// folders. Attention stays on the row and does not change this order.
+    /// `attentionOrderedTasks` keeps attention order for Updates and Live
+    /// Activity. Search keeps saved folder order.
     /// A folder-name search keeps all of that folder's visible threads,
     /// in relevance order rather than attention tiers.
     ///
@@ -79,8 +81,15 @@ extension Bot {
         let ordered = threadsInListOrder(threads)
 
         var projectIDs = Set<String>()
-        var groups = (projects ?? []).compactMap { project -> BotThreadGroup? in
-            guard projectIDs.insert(project.id).inserted else { return nil }
+        let savedProjects = (projects ?? []).filter { projectIDs.insert($0.id).inserted }
+        let folderProjects = search.isEmpty
+            ? savedProjects.enumerated().sorted { lhs, rhs in
+                let left = ordered.firstIndex { $0.projectId == lhs.element.id } ?? Int.max
+                let right = ordered.firstIndex { $0.projectId == rhs.element.id } ?? Int.max
+                return left == right ? lhs.offset < rhs.offset : left < right
+            }.map(\.element)
+            : savedProjects
+        var groups = folderProjects.compactMap { project -> BotThreadGroup? in
             let filed = ordered.filter { $0.projectId == project.id }
             return filed.isEmpty ? nil : BotThreadGroup(project: project, tasks: filed)
         }

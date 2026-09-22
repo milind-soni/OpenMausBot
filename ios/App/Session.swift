@@ -1652,6 +1652,7 @@ final class Session: ObservableObject {
     @discardableResult
     func setTaskPinned(_ task: BotTask, pinned: Bool, in chat: Chat) async -> Bool {
         guard let client else { return false }
+        setPinnedLocally(task, pinned: pinned, in: chat)
         do {
             switch chat {
             case let .bot(bot):
@@ -1661,7 +1662,30 @@ final class Session: ObservableObject {
             }
             await refresh()
             return true
-        } catch { actionError = error.localizedDescription; return false }
+        } catch {
+            setPinnedLocally(task, pinned: task.pinned == true, in: chat)
+            actionError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Move the row before the server answers, and put it back if the write fails.
+    private func setPinnedLocally(_ task: BotTask, pinned: Bool, in chat: Chat) {
+        let value: Bool? = pinned ? true : nil
+        switch chat {
+        case let .bot(bot):
+            guard let botIndex = state.bots.firstIndex(where: { $0.id == bot.id }),
+                  var tasks = state.bots[botIndex].tasks,
+                  let taskIndex = tasks.firstIndex(where: { $0.threadId == task.threadId }) else { return }
+            tasks[taskIndex].pinned = value
+            state.bots[botIndex].tasks = tasks
+        case let .room(room):
+            guard let roomIndex = state.rooms.firstIndex(where: { $0.id == room.id }),
+                  var tasks = state.rooms[roomIndex].tasks,
+                  let taskIndex = tasks.firstIndex(where: { $0.threadId == task.threadId }) else { return }
+            tasks[taskIndex].pinned = value
+            state.rooms[roomIndex].tasks = tasks
+        }
     }
 
     @discardableResult

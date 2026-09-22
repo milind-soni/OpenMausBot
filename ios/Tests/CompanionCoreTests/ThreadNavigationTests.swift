@@ -22,18 +22,24 @@ final class ThreadNavigationTests: XCTestCase {
         XCTAssertNil(decoded.projects?.last?.emoji)
     }
 
-    func testFoldersFollowSavedOrderAndThreadsKeepServerOrder() {
+    func testFoldersRiseWithTheirNewestThreadAndUnfiledStaysLast() {
         var bot = makeBot(tasks: [
             task("b-2", project: "b"), task("loose"), task("a-2", project: "a"),
             task("a-1", project: "a"), task("b-1", project: "b"),
         ])
         bot.projects = [project("a"), project("b")]
 
-        let groups = bot.threadGroups()
-        XCTAssertEqual(groups.map(\.id), ["project:a", "project:b", "unfiled"])
-        XCTAssertEqual(groups.map { $0.tasks.map(\.threadId) }, [["a-2", "a-1"], ["b-2", "b-1"], ["loose"]])
-        XCTAssertEqual(groups.first?.project, bot.projects?.first)
+        // Equal stamps keep stored order, so b's first thread outranks a's.
+        // Unfiled still follows every folder, as on the desktop.
+        var groups = bot.threadGroups()
+        XCTAssertEqual(groups.map(\.id), ["project:b", "project:a", "unfiled"])
+        XCTAssertEqual(groups.map { $0.tasks.map(\.threadId) }, [["b-2", "b-1"], ["a-2", "a-1"], ["loose"]])
         XCTAssertNil(groups.last?.project)
+
+        bot.tasks?[2].updatedAt = 50
+        groups = bot.threadGroups()
+        XCTAssertEqual(groups.map(\.id), ["project:a", "project:b", "unfiled"])
+        XCTAssertEqual(groups[0].tasks.map(\.threadId), ["a-2", "a-1"])
     }
 
     func testThreadListKeepsStoredOrderWhenStampsMatchAndAttentionOrderStaysSeparate() {

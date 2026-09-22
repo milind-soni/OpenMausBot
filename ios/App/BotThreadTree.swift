@@ -107,6 +107,14 @@ struct BotThreadTree: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .contextMenu {
+                    Button {
+                        let pinned = task.pinned != true
+                        Task { await session.setTaskPinned(task, pinned: pinned, in: .bot(bot)) }
+                    } label: {
+                        Label(task.pinned == true ? "Unpin" : "Pin", systemImage: task.pinned == true ? "pin.slash" : "pin")
+                    }
+                }
                 .accessibilityIdentifier("thread.\(task.threadId)")
             }
         }
