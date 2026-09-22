@@ -6,6 +6,12 @@ icon: Settings
 
 Most users configure OpenMausBot from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
 
+## Default model for new bots
+
+Open **Settings → General → Default model for new bots**. Choose a provider and model, then select its effort or reasoning option if available. Each change saves automatically; wait for **Saved** before closing Settings. If saving fails, the previous default stays in place and the card shows the error.
+
+This setting applies to bots created afterward through the normal new-bot flow. It does not change existing bots or their conversations. Use a bot's model picker to change that bot or a particular thread. A creation flow that explicitly supplies a model can override the global default.
+
 ## Engine discovery
 
 OpenMausBot checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.
