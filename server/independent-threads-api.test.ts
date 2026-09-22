@@ -97,7 +97,7 @@ describe("independent bot tasks through the isolated control surface", () => {
     await session.close();
   });
 
-  it("queues coordinated work behind a peer's approval and delivers it once without another user prompt", async () => {
+  it("runs coordinated work on a free thread while a sibling approval stays unanswered, and delivers it once without another user prompt", async () => {
     const chief = (await tool("create_bot", { name: "Mailbox Chief", instance_id: "claude", model: models[0] })).bot;
     const peer = (await tool("create_bot", { name: "Mailbox Peer", instance_id: "claude", model: models[1] })).bot;
     await api("PATCH", `/api/bots/${peer.id}/tasks/${peer.activeTaskId}`, { approvalMode: "ask" });
@@ -121,14 +121,17 @@ describe("independent bot tasks through the isolated control surface", () => {
       .find((node: any) => node.id === requestId);
     const peerThread = handoff().threadId;
     expect(peerThread).not.toBe(peer.activeTaskId);
-    // End the source provider turn. The real approval broker still owns the
-    // peer, so coordinated work stays queued and the source waits for its result.
+    // End the source provider turn. #1589 admits a free thread slot while
+    // another of this bot's threads is waiting on the person, so the ledger
+    // leaves "queued" on the next handoff tick. Polling for "queued" races
+    // that tick and fails on a loaded runner. The approval card itself stays
+    // unanswered, and the review never lands on the thread the person has open.
     writeFileSync(modelFile(models[0], "gate"), "finish");
     await expect.poll(async () => {
       const current = (await api("GET", "/api/bots")).body.bots.find((bot: any) => bot.id === chief.id);
       return current.messages.filter((message: any) => message.tool?.name === "Sent to Mailbox Peer").length;
     }).toBe(1);
-    await expect.poll(() => handoff()?.status, { timeout: 10_000 }).toBe("queued");
+    await expect.poll(() => handoff()?.status, { timeout: 10_000 }).toBe("running");
     expect(answers).toEqual([]);
     await control(["messages", "--bot", chief.id, "--limit", "10"]);
     const allowed = await api("POST", `/api/threads/${peer.activeTaskId}/respond`, { requestId: "mailbox-approval", behavior: "allow" });

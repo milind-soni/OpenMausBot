@@ -56,8 +56,11 @@ class ThreadNavigationTest {
                 activity = when (it) { "waiting" -> "waiting-on-you"; "queued" -> "queued"; else -> "idle" })
         }
         val grouped = bot.copy(tasks = closed + task("run").copy(routineRunId = "internal"))
+        // Equal stamps keep stored order. Attention order stays on orderedThreads.
+        val listed = grouped.threadGroups().single().tasks
+        assertEquals(listOf("current", "unread", "busy", "waiting", "queued"), listed.map { it.threadId })
         assertEquals(listOf("waiting", "busy", "queued", "unread", "current"),
-            grouped.threadGroups().single().tasks.map { it.threadId })
+            orderedThreads(listed, grouped.threadId).map { it.threadId })
         assertEquals(6, grouped.threadGroups(includingClosed = true).single().tasks.size)
         assertTrue(grouped.threadGroups("run").isEmpty())
         assertEquals("run", grouped.forTask("run")?.threadId)

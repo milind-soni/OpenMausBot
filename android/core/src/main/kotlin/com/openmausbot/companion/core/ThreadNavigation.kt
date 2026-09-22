@@ -69,9 +69,10 @@ val Bot.visibleTasks: List<BotTask>
     get() = tasks.orEmpty().filter { it.routineRunId == null }
 
 /**
- * Preserve saved folder order; attention floats threads within each group.
+ * Preserve saved folder order. Threads inside a folder follow pin, then
+ * newest update ([listedThreads]); attention does not reorder this list.
  * A missing folder leaves its threads unfiled. Search includes closed threads
- * and matches folder names, and keeps relevance (stored) order.
+ * and matches folder names, and keeps that same list order.
  */
 fun Bot.threadGroups(
     matching: String = "",
