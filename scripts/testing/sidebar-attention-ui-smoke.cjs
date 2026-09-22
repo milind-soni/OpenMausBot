@@ -8,6 +8,16 @@
 // preview fixture. The popover must keep its 16px inset in both: in compact
 // a static w-72 (288px) crossed the window edge by 32px (272 < 16 + 288) and
 // the OS clipped the title row, which is the reported field bug.
+//
+// Determinism: the popover opens the instant the button is clicked, but its
+// rows exist only once the store's first /api/bots fetch lands in the page,
+// so openAndMeasure waits for a populated menu before it measures - geometry
+// is always taken from the popover the field bug is about. The inset model
+// anchors on the popover's right edge: the header's action cluster ends 16px
+// (px-4) inside the sidebar's usable width, plus the sidebar's own 1px
+// border-r, so menuRight = sidebarLeft + sidebarPixels - 17 (a left-edge
+// "sidebarLeft + 16" model is never executable: every anchored menu, healthy
+// comfortable included, measures 15px from the sidebar's left edge).
 const { BrowserWindow } = require("electron");
 const assert = require("node:assert/strict");
 const { mkdirSync, writeFileSync } = require("node:fs");
@@ -44,12 +54,17 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
       const menu = title.closest('div.absolute');
       const sidebar = document.querySelector('[data-sidebar]');
       const rect = menu.getBoundingClientRect();
+      const rows = [...menu.querySelectorAll('button')].filter((button) => (button.getAttribute('aria-label') || '').includes('Sidebar attention fixture')).length;
+      // The empty popover exists before the store's first /api/bots fetch
+      // lands; measuring it would pin the geometry to the empty menu. Wait
+      // for the populated menu the field bug is actually about.
+      if (rows === 0) return null;
       return JSON.stringify({
         left: rect.left,
         width: rect.width,
         titleLeft: title.getBoundingClientRect().left,
         sidebarLeft: sidebar.getBoundingClientRect().left,
-        rows: [...menu.querySelectorAll('button')].filter((button) => (button.getAttribute('aria-label') || '').includes('Sidebar attention fixture')).length,
+        rows,
       });
     })()`));
     return JSON.parse(measured);
@@ -67,8 +82,10 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
       results[density] = measured;
       if (!captureOnly) {
         assert.equal(measured.rows, 1, `the ${density} menu must show the one unread thread: ${JSON.stringify(measured)}`);
-        assert.ok(Math.abs(measured.left - (measured.sidebarLeft + 16)) <= 0.5,
-          `the ${density} menu must sit 16px inside the sidebar: ${JSON.stringify(measured)}`);
+        assert.ok(Math.abs((measured.left + measured.width) - (measured.sidebarLeft + sidebarPixels - 17)) <= 0.5,
+          `the ${density} menu must anchor 16px inside the sidebar's usable width (px-4 plus the sidebar's 1px border-r): ${JSON.stringify(measured)}`);
+        assert.ok(measured.left >= -0.5,
+          `the ${density} menu must not spill past the window's left edge: ${JSON.stringify(measured)}`);
         assert.ok(Math.abs(measured.width - menuWidth) <= 0.5,
           `the ${density} menu must be ${menuWidth}px wide: ${JSON.stringify(measured)}`);
         assert.ok(measured.titleLeft >= -0.5,
