@@ -122,6 +122,11 @@ service. It does not drive the People settings UI through `control-omb`.
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.
 
+The [sidebar attention geometry fixture](sidebar-attention.md) measures the
+Active Threads popover's width and inset at each expanded sidebar density in a
+headless Electron window, including the compact-density case where the menu
+used to cross the window's left edge and lose its title.
+
 The [avatar provider fixture](avatar-providers.md) checks image-provider settings,
 keyless local generation, saved-key handling, and safe errors with a local fake API.
 
