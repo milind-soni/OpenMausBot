@@ -28,6 +28,7 @@ import com.openmausbot.companion.core.isClosed
 import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.isWaitingOnTeammate
 import com.openmausbot.companion.core.isWorking
+import com.openmausbot.companion.core.listStamp
 
 /** The quiet status under a title: waiting states are never painted as work.
  * The queued flag is client state the harness reports out-of-band. */

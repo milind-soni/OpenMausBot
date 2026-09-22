@@ -1602,9 +1602,9 @@ export function reducer(state: AppState, action: Action): AppState {
         // moves that row; it must not be appended to the visible transcript.
         const group = state.groups.find((g) => g.threadId === action.threadId || g.tasks?.some((task) => task.threadId === action.threadId));
         if (!group) return state;
+        if (group.threadId === action.threadId && group.messages.some((m) => m.id === action.message.id)) return state;
         const stamped = bumpThreadUpdatedAt(state, action.threadId, action.message.at);
         if (group.threadId !== action.threadId) return stamped;
-        if (group.messages.some((m) => m.id === action.message.id)) return stamped;
         const optimisticIndex = action.message.sendId
           ? group.messages.findIndex(
               (message) => message.id === optimisticMessageId(action.message.sendId!),
@@ -1629,8 +1629,8 @@ export function reducer(state: AppState, action: Action): AppState {
       // The POST response and the canonical SSE frame may arrive in either
       // order. A repeated message is already folded; moving the active leaf
       // back to it can hide a newer assistant reply that won the race.
+      if (bot.messages.some((message) => message.id === action.message.id)) return state;
       const stamped = bumpThreadUpdatedAt(state, action.threadId, action.message.at);
-      if (bot.messages.some((message) => message.id === action.message.id)) return stamped;
       const optimisticId = action.message.sendId
         ? optimisticMessageId(action.message.sendId)
         : null;

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { StoreProvider, type Bot, type Group } from "@/state/store";
 import { BotThreadList, GroupThreadList } from "./Sidebar";
+import { formatUpdatedAt } from "./SidebarThreadRow";
 import { GroupTaskPicker, TaskPicker } from "./TaskPicker";
 import { workingFolderLabel } from "./ComposerTray";
 
@@ -30,8 +31,8 @@ describe("sidebar bot threads", () => {
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot, selected: true })));
     expect(markup).toContain('aria-label="Maus threads"');
     expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
-    expect(markup).toContain("Long research · Working");
-    expect(markup).toContain("Needs approval · Waiting · Unread");
+    expect(markup).toContain(`Long research · ${formatUpdatedAt(2)} · Working`);
+    expect(markup).toContain(`Needs approval · ${formatUpdatedAt(3)} · Waiting · Unread`);
     expect(markup).toContain("New thread");
     expect(markup).not.toContain("disabled");
     expect(markup).not.toContain("test");
@@ -104,7 +105,7 @@ describe("sidebar bot threads", () => {
     expect(picker).toContain('aria-label="All threads"');
     expect(picker).not.toContain("Tasks");
     const working = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupThreadList, { group: { ...group, working: true }, selected: true })));
-    expect(working).toContain('title="Launch plan · Working"');
+    expect(working).toContain(`title="Launch plan · ${formatUpdatedAt(3)} · Working"`);
     expect(working).toContain('disabled=""');
   });
 });
