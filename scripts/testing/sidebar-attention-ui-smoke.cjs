@@ -12,17 +12,22 @@
 // Determinism: the popover opens the instant the button is clicked, but its
 // rows exist only once the store's first /api/bots fetch lands in the page,
 // so openAndMeasure waits for a populated menu before it measures - geometry
-// is always taken from the popover the field bug is about. The inset model
-// anchors on the popover's right edge: the header's action cluster ends 16px
-// (px-4) inside the sidebar's usable width, plus the sidebar's own 1px
-// border-r, so menuRight = sidebarLeft + sidebarPixels - 17 (a left-edge
-// "sidebarLeft + 16" model is never executable: every anchored menu, healthy
-// comfortable included, measures 15px from the sidebar's left edge).
+// is always taken from the popover the field bug is about.
 const { BrowserWindow } = require("electron");
 const assert = require("node:assert/strict");
 const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { pathToFileURL } = require("node:url");
+
+// The popover anchors right-0 to the header's action cluster, so every
+// anchored menu's right edge sits this far inside the sidebar's outer edge:
+// px-4 ends the cluster 16px inside the sidebar's usable width, and the
+// sidebar's own border-r adds one more pixel. (A left-edge "sidebarLeft + 16"
+// model is never executable: every anchored menu, healthy comfortable
+// included, measures 15px from the sidebar's left edge.)
+const HEADER_ACTION_INSET_PX = 16; // px-4 on the header's action cluster
+const SIDEBAR_BORDER_RIGHT_PX = 1; // border-r on the sidebar itself
+const POPOVER_RIGHT_INSET_PX = HEADER_ACTION_INSET_PX + SIDEBAR_BORDER_RIGHT_PX;
 
 module.exports = async function verifySidebarAttentionUi({ root, url, api, until }) {
   const captureOnly = process.argv.includes("--capture-only");
@@ -82,7 +87,7 @@ module.exports = async function verifySidebarAttentionUi({ root, url, api, until
       results[density] = measured;
       if (!captureOnly) {
         assert.equal(measured.rows, 1, `the ${density} menu must show the one unread thread: ${JSON.stringify(measured)}`);
-        assert.ok(Math.abs((measured.left + measured.width) - (measured.sidebarLeft + sidebarPixels - 17)) <= 0.5,
+        assert.ok(Math.abs((measured.left + measured.width) - (measured.sidebarLeft + sidebarPixels - POPOVER_RIGHT_INSET_PX)) <= 0.5,
           `the ${density} menu must anchor 16px inside the sidebar's usable width (px-4 plus the sidebar's 1px border-r): ${JSON.stringify(measured)}`);
         assert.ok(measured.left >= -0.5,
           `the ${density} menu must not spill past the window's left edge: ${JSON.stringify(measured)}`);
