@@ -40,9 +40,8 @@ object TaskRules {
      * threads fold to the very tail. A folded thread that is running, unread,
      * or the current one is treated as open.
      *
-     * Inside each group, attention floats to the top exactly as the desktop
-     * sidebar orders threads: waiting on the person first, then work, then
-     * queued, then unread; the current thread rides above the idle tail.
+     * Inside each band, order is pin, then newest update. Equal stamps keep
+     * stored order. Attention does not move a row.
      */
     fun tasks(bot: Bot, queuedThreadIds: Set<String> = emptySet()): List<BotTask> {
         val navigable = bot.threadGroups(includingClosed = true).flatMap { it.tasks }

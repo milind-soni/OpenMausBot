@@ -20,7 +20,8 @@
 
 ## 変更
 
-- Android 検査は一覧順と `orderedThreads` の注意順を両方断言する。`threadGroups` の KDoc は「注意が行を動かす」と書かない。
+- Android の core 検査は一覧順と `orderedThreads` の注意順を両方断言する。`threadGroups` の KDoc は「注意が行を動かす」と書かない。
+- `TaskRules.tasks` も同じ一覧順で、開いている帯・閉じた帯・アーカイブの帯に分けたあと各帯の中を並べる。core の失敗で app の単体テストまで進んでいなかったので、`TaskRulesTest` の注意順期待も合わせる。KDoc も合わせる。
 - handoff 検査は、送信元ターンを終えたあと ledger が `running` になることを 10 秒 poll する。承認ソケットが空であることと、その後の 1 回配送は残す。検査名は「空きスレッドで動き、兄弟の承認は未回答のまま」にする。
 
 ## 影響範囲
@@ -29,13 +30,14 @@
 | --- | --- | --- | --- |
 | `threadGroups` の説明 | `android/core/.../ThreadNavigation.kt` | コメントのみ | 実装に合わせる。並びのコードは変えない |
 | 一覧検査 | `ThreadNavigationTest.kt` の当該関数 | テスト | 一覧順 + `orderedThreads` |
+| シートの並び | `TaskRules.kt` の KDoc と `TaskRulesTest.kt` | コメントとテスト | 実装は `listedThreads` のまま。期待を帯の中の保存順 / 更新順に合わせる |
 | handoff 検査 | `server/independent-threads-api.test.ts` の当該 `it` | テスト | `running` を待つ。製品の busy は変えない |
 
 `listedThreads` / `orderedThreads` / `roomHandoffs` の busy 実装は変更しない。呼び出し元の挙動は変わらない。
 
 ## テスト
 
-- 変更した vitest を、Node 22 で隔離フィクスチャとして実行する。
+- 変更した vitest を隔離フィクスチャとして実行する。ローカルは `node:sqlite` がある Node 22.19.0。CI と `package.json` の `engines.node` は 24。この検査の期待は Node の版に依存しない。
 - 変異: busy を「direct かつ bot が busy なら待たせる」に戻すと、`running` の poll が落ちる。確認後に戻す。
 - Android の Gradle は JVM 17 以上が必要で、このマシンは JDK 16 のみ。当該検査は CI の Kotlin job で確認する。断言は完全一致なので、`threadGroups` が注意順に戻ると一覧の期待が落ち、`orderedThreads` が注意順をやめると二番目の期待が落ちる。
 

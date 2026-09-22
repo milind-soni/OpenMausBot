@@ -17,6 +17,7 @@ iOS UI は PR head で落ち、マージ後の run では通った。今回は�
 ## 受け入れ
 
 - Android の一覧検査は、同じスタンプなら保存順（見えるスレッドは `current, unread, busy, waiting, queued`）。注意順は `orderedThreads` が引き続き `waiting, busy, queued, unread, current` であること。
+- `TaskRules.tasks` の検査も同じ契約にする。開いている帯の中は保存順または更新順で、注意順では並べない。ピンは帯の先頭。未読のアーカイブは開いている帯に残るが、同じ時刻なら保存位置のまま。routine 実行だけピッカーから隠す。
 - 承認カードが別スレッドに残ったまま、空きスロットの coordinated work は次の handoff tick で `running` になる。`queued` のままを 10 秒待つ検査には戻さない。承認ソケットは無人で答えず、レビュー本文は人が開いているスレッドに入らず、結果は 1 回だけ届く。
 - ピン留め、更新順、`updatedAt` の付け方は変えない。
 
