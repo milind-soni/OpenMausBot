@@ -10886,6 +10886,7 @@ function configStatus() {
   const eventLogMaxBytes = threadEventLogMaxBytes(cfg);
   const eventLogRetentionDays = threadEventLogRetentionDays(cfg);
   return {
+    defaultModelSelection: cfg.defaultModelSelection ?? null,
     xai: { configured: Boolean(cfg.xai?.key) },
     anthropic: { configured: Boolean(cfg.anthropic?.key) },
     // a fleet agent on this server means Settings → Workspaces has something to drive
