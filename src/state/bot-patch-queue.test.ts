@@ -141,7 +141,11 @@ describe("bot patch queue", () => {
     const queue = createBotPatchQueue({
       send: async (_botId, patch) => {
         sent.push(patch);
-        return bot({ ...patch, computer: patch.computer ?? undefined });
+        return bot({
+          ...patch,
+          computer: patch.computer ?? undefined,
+          connectorGrants: patch.connectorGrants === null ? undefined : patch.connectorGrants,
+        });
       },
       reconcile: async () => bot(),
       onAuthoritative: authoritative,

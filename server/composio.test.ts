@@ -812,6 +812,25 @@ describe.sequential("Composio Sessions", () => {
     });
   });
 
+  it("passes explicit connector grants to the isolated proxy", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    const grants = {
+      gmail: { accountId: "ca_gmail_home", scopes: ["read", "draft"] as const },
+    };
+    const integration = await mcpIntegration(cfg, {
+      harnessUrl: "http://127.0.0.1:8799",
+      commsToken: "secret",
+      botId: "bot-1",
+      threadId: "thread-1",
+      connectorGrants: grants,
+    });
+    expect(integration?.env).toMatchObject({
+      OMB_CONNECTOR_GRANTS: JSON.stringify(grants),
+    });
+  });
+
   it("reports connection state, creates auth links and revokes disconnects", async () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },

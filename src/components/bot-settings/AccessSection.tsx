@@ -17,9 +17,171 @@ import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { CloudBackendPicker } from "../CloudBackendPicker";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { Switch } from "../SettingsPrimitives";
-import { preloadConnectedApps, type ConnectorInventory } from "../PluginsPanel";
+import { preloadConnectedApps, type ConnectorInventory, type ConnectorStatus } from "../PluginsPanel";
 import { inputCls } from "./field";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
+import type { ConnectorGrant, ConnectorScope } from "../../../shared/connector-scopes";
+
+const CONNECTOR_SCOPE_ORDER: readonly ConnectorScope[] = ["read", "draft", "send", "modify", "delete"];
+const CONNECTOR_SCOPE_LABELS: Record<ConnectorScope, string> = {
+  read: "Read",
+  draft: "Draft",
+  send: "Send",
+  modify: "Modify",
+  delete: "Delete",
+};
+
+export function ConnectorGrantEditor({
+  bot,
+  inventory,
+  patch,
+}: {
+  bot: Bot;
+  inventory: ConnectorInventory | null;
+  patch: (patch: { connectorGrants?: Bot["connectorGrants"] | null }) => void;
+}) {
+  const explicit = bot.connectorGrants !== undefined;
+  const grants = bot.connectorGrants ?? {};
+  const services = inventory?.authoritative ? inventory.services : {};
+  const slugs = [...new Set([
+    ...Object.keys(services).filter((slug) => services[slug]?.connected),
+    ...Object.keys(grants),
+  ])].sort();
+
+  const saveGrant = (slug: string, grant: ConnectorGrant | null) => {
+    const next = { ...grants };
+    if (!grant || grant.scopes.length === 0) delete next[slug];
+    else next[slug] = {
+      ...grant,
+      scopes: CONNECTOR_SCOPE_ORDER.filter((scope) => grant.scopes.includes(scope)),
+    };
+    patch({ connectorGrants: next });
+  };
+
+  const addGrant = (slug: string) => {
+    const accounts = services[slug]?.accounts ?? [];
+    saveGrant(slug, {
+      scopes: ["read"],
+      ...(accounts.length === 1 ? { accountId: accounts[0].id } : {}),
+    });
+  };
+
+  const toggleScope = (slug: string, scope: ConnectorScope, checked: boolean) => {
+    const current = grants[slug];
+    const scopes = new Set(current?.scopes ?? []);
+    if (checked) scopes.add(scope);
+    else scopes.delete(scope);
+    saveGrant(slug, current ? { ...current, scopes: [...scopes] } : null);
+  };
+
+  const setAccount = (slug: string, accountId: string) => {
+    const current = grants[slug];
+    if (!current) return;
+    saveGrant(slug, {
+      ...current,
+      ...(accountId ? { accountId } : { accountId: undefined }),
+    });
+  };
+
+  return (
+    <div className="mt-3 rounded-lg border border-hairline/40 bg-inset/40 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium text-ink">Limit this bot to selected apps and actions</div>
+          <div className="mt-0.5 text-[11.5px] text-ink-secondary">
+            {explicit
+              ? "Only the listed toolkit, account, and action grants can reach the connector relay."
+              : "Legacy mode gives this bot the connected-app access it already had. Turn this on to make access explicit."}
+          </div>
+        </div>
+        <Switch
+          checked={explicit}
+          aria-label="Limit connected-app access to explicit grants"
+          onClick={() => patch({ connectorGrants: explicit ? null : {} })}
+        />
+      </div>
+      {explicit && !inventory?.authoritative && (
+        <div className="mt-3 text-[11.5px] text-ink-secondary">
+          The connected-account inventory is unavailable. Existing grants are shown, but new app grants are disabled until it is available.
+        </div>
+      )}
+      {explicit && (
+        <div className="mt-3 space-y-2">
+          {slugs.length === 0 ? (
+            <div className="text-[11.5px] text-ink-secondary">No connected apps are currently available to grant.</div>
+          ) : slugs.map((slug) => {
+            const service: ConnectorStatus | undefined = services[slug];
+            const grant = grants[slug];
+            const accounts = service?.accounts ?? [];
+            return (
+              <div key={slug} className="rounded-lg border border-hairline/40 bg-card px-3 py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-mono text-[12px] text-ink">{slug}</div>
+                    <div className="mt-0.5 text-[11px] text-ink-secondary">
+                      {grant ? "Explicit grant" : !service?.connected ? "Not currently connected" : "Not granted"}
+                    </div>
+                  </div>
+                  {grant ? (
+                    <button
+                      type="button"
+                      className="shrink-0 text-[11px] text-ink-secondary hover:text-ink"
+                      onClick={() => saveGrant(slug, null)}
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!inventory?.authoritative}
+                      className="shrink-0 rounded-md bg-control px-2 py-1 text-[11px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => addGrant(slug)}
+                    >
+                      Grant read
+                    </button>
+                  )}
+                </div>
+                {grant && (
+                  <>
+                    {accounts.length > 0 && (
+                      <label className="mt-2 flex items-center gap-2 text-[11.5px] text-ink-secondary">
+                        <span className="shrink-0">Account</span>
+                        <select
+                          aria-label={`${slug} account`}
+                          value={grant.accountId ?? ""}
+                          onChange={(event) => setAccount(slug, event.target.value)}
+                          className="min-w-0 flex-1 rounded-md border border-hairline/40 bg-inset px-2 py-1 text-[11.5px] text-ink"
+                        >
+                          <option value="">All connected accounts</option>
+                          {accounts.map((account) => (
+                            <option key={account.id} value={account.id}>{account.alias ? `${account.alias} (${account.id})` : account.id}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5">
+                      {CONNECTOR_SCOPE_ORDER.map((scope) => (
+                        <label key={scope} className="flex items-center gap-1.5 text-[11.5px] text-ink-secondary">
+                          <input
+                            type="checkbox"
+                            className="accent-accent"
+                            checked={grant.scopes.includes(scope)}
+                            onChange={(event) => toggleScope(slug, scope, event.target.checked)}
+                          />
+                          {CONNECTOR_SCOPE_LABELS[scope]}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** Where a bot's shell tools run. Set per bot; each task pins its own copy
  * on its first turn (the server does the pinning — Claude keeps sessions
@@ -216,12 +378,6 @@ export function AccessSection({
 
   const webhooks = state.webhooks.filter((webhook) => webhook.botId === bot.id);
   const alwaysAllow = bot.alwaysAllow ?? [];
-  const connectedSlugs = inventory?.authoritative
-    ? Object.entries(inventory.services)
-        .filter(([, status]) => status.connected)
-        .map(([slug]) => slug)
-    : [];
-
   return (
     <div className="flex flex-col gap-4">
       <div className="rounded-xl bg-card p-4">
@@ -343,19 +499,7 @@ export function AccessSection({
             className="disabled:cursor-not-allowed"
           />
         </div>
-        {connectedAppsEnabled && inventory?.authoritative && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {connectedSlugs.length === 0 ? (
-              <span className="text-[11.5px] text-ink-secondary">No apps connected yet.</span>
-            ) : (
-              connectedSlugs.map((slug) => (
-                <span key={slug} className="rounded-full bg-inset px-2 py-0.5 text-[11px] text-ink-secondary">
-                  {slug}
-                </span>
-              ))
-            )}
-          </div>
-        )}
+        {connectedAppsEnabled && <ConnectorGrantEditor bot={bot} inventory={inventory} patch={patch} />}
         {connectedAppsEnabled && connectedAppsConfigured && (
           <button
             type="button"

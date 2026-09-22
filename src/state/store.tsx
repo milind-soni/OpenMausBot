@@ -18,6 +18,7 @@ import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
+import type { ConnectorGrants } from "../../shared/connector-scopes";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
@@ -402,6 +403,9 @@ export interface Bot {
   /** Whether this bot may use the workspace's connected apps. Unset means
    * allowed for existing bots; imported bots start with this disabled. */
   composio?: boolean;
+  /** Explicit per-toolkit connected-app grants. Absent keeps legacy full
+   * access; an empty object is an intentional deny-all policy. */
+  connectorGrants?: ConnectorGrants;
   /** Whether this bot gets the app's built-in browser (Browser tab). On unless switched off. */
   browser?: boolean;
   /** Which app-wide MCP servers (Plugins → MCP servers) this bot mounts, by
@@ -1864,13 +1868,19 @@ export function reducer(state: AppState, action: Action): AppState {
         confirmFullAccess: _fullConfirmation,
         applyToAllThreads: _allThreads,
         computer,
+        connectorGrants,
         ...rest
       } = action.patch;
-      const botPatch = computer === null
+      const computerPatch = computer === null
         ? { ...rest, computer: undefined }
         : computer === undefined
           ? rest
           : { ...rest, computer };
+      const botPatch = connectorGrants === null
+        ? { ...computerPatch, connectorGrants: undefined }
+        : connectorGrants === undefined
+          ? computerPatch
+          : { ...computerPatch, connectorGrants };
       return updateBot(next, action.botId, (b) => ({ ...b, ...botPatch }));
     }
     case "threadActive": {

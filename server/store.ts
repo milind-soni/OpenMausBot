@@ -21,6 +21,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { botAvatarProfile } from "../shared/bot-avatar.ts";
 import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
+import { normalizeConnectorGrants } from "../shared/connector-scopes.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
 import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
@@ -557,6 +558,22 @@ export class Store {
       if (b.autoStartVps !== undefined && b.autoStartVps !== true && b.autoStartVps !== false) {
         delete b.autoStartVps;
         botsMigrated = true;
+      }
+      if (b.connectorGrants !== undefined) {
+        const normalized = normalizeConnectorGrants(b.connectorGrants);
+        if (!normalized) {
+          // A malformed persisted grant must never widen access. Keep an
+          // explicit deny-all map so repair is fail-closed and visible.
+          b.connectorGrants = {};
+          botsMigrated = true;
+        } else {
+          // Normalize harmless casing/property-order differences before the
+          // next atomic save; comparing JSON strings alone would mistake
+          // `{ accountId, scopes }` for a malformed grant because object
+          // property order is not part of its meaning.
+          if (JSON.stringify(normalized) !== JSON.stringify(b.connectorGrants)) botsMigrated = true;
+          b.connectorGrants = normalized;
+        }
       }
       if (b.managedSections !== undefined && (!b.chiefOfStaff || !Array.isArray(b.managedSections) ||
           b.managedSections.length > 100 || b.managedSections.some(section => typeof section !== "string" || section.length > 60))) {
@@ -1357,7 +1374,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "connectorGrants"
       >
     > = {},
     opts: {
@@ -1385,6 +1402,7 @@ export class Store {
       modelSelection: profile.modelSelection ?? this.defaultSelection(),
       resumeCursors: {},
       createdAt: Date.now(),
+      ...(profile.connectorGrants !== undefined ? { connectorGrants: structuredClone(profile.connectorGrants) } : {}),
     };
     if (section) bot.section = section;
     bot.tasks = [{

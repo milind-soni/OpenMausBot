@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { managedConnectorUnavailableReason } from "../shared/connector-availability.ts";
+import type { ConnectorGrants } from "../shared/connector-scopes.ts";
 
 const DEFAULT_BACKEND_ORIGIN = "https://backend.composio.dev";
 
@@ -143,6 +144,7 @@ interface IntegrationContext {
   commsToken: string;
   botId: string;
   threadId: string;
+  connectorGrants?: ConnectorGrants;
 }
 
 let managedBrokerAccess: { url: string; token: string } | null | undefined;
@@ -555,6 +557,9 @@ export async function mcpIntegration(
       OMB_CONNECTOR_TOKEN: context.commsToken,
       OMB_BOT_ID: context.botId,
       OMB_THREAD_ID: context.threadId,
+      ...(context.connectorGrants !== undefined
+        ? { OMB_CONNECTOR_GRANTS: JSON.stringify(context.connectorGrants) }
+        : {}),
     },
   };
 }

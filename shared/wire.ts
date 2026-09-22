@@ -24,6 +24,7 @@ import type { RuntimeEvent } from "./runtime-events.ts";
 import type { Notification } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
+import type { ConnectorGrants } from "./connector-scopes.ts";
 
 /** Reasoning-effort levels, ascending. A union of everything any engine
  * accepts; each driver declares the subset its CLI will take. Lives here
@@ -247,6 +248,9 @@ export interface WireBot {
   peers?: string[];
   /** Whether this bot may use the workspace's connected apps. */
   composio?: boolean;
+  /** Explicit per-service, per-account, per-verb connected-app grants.
+   * Absent preserves the legacy composio behavior; `{}` is deny-all. */
+  connectorGrants?: ConnectorGrants;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */

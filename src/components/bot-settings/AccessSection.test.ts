@@ -22,7 +22,7 @@ vi.mock("../DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined } } }),
 }));
 
-const { AccessSection } = await import("./AccessSection");
+const { AccessSection, ConnectorGrantEditor } = await import("./AccessSection");
 
 // WorkingFolder (moved into this file) reads window.ogb?.pickFolder directly
 // at render time, same "node" environment gap as above — stub per test, the
@@ -136,5 +136,50 @@ describe("AccessSection always-allowed list", () => {
     expect(markup).toContain('aria-label="Remove shell.run from always allowed"');
     expect(markup).toContain('aria-label="Remove fs.write from always allowed"');
     expect(markup).not.toContain("Nothing standing yet.");
+  });
+
+  it("shows an explicit connector grant and every action scope", () => {
+    const markup = render(makeBot({
+      connectorGrants: { gmail: { accountId: "ca_home", scopes: ["read", "send"] } },
+    }));
+    expect(markup).toContain("Limit this bot to selected apps and actions");
+    expect(markup).toContain("gmail");
+    expect(markup).toContain("Explicit grant");
+    expect(markup).toContain("Read");
+    expect(markup).toContain("Draft");
+    expect(markup).toContain("Send");
+    expect(markup).toContain("Modify");
+    expect(markup).toContain("Delete");
+    expect(markup).toContain("Existing grants are shown");
+  });
+
+  it("explains that legacy connected-app access is not an explicit grant", () => {
+    const markup = render(makeBot());
+    expect(markup).toContain("Legacy mode gives this bot the connected-app access it already had");
+    expect(markup).toContain("Turn this on to make access explicit");
+  });
+
+  it("removes an explicit connector grant through the normal bot patch", () => {
+    const derived = makeDerived();
+    let tree!: ReturnType<typeof AccessSection>;
+    function Capture() {
+      tree = ConnectorGrantEditor({
+        bot: makeBot({ connectorGrants: { gmail: { scopes: ["read"] } } }),
+        inventory: null,
+        patch: derived.patch,
+      });
+      return tree;
+    }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
+    type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
+    const nodes = (value: ReactNode): Node[] => {
+      if (!isValidElement(value)) return [];
+      const node = value as Node;
+      return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+    };
+    const remove = nodes(tree).find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Remove"));
+    expect(remove).toBeDefined();
+    remove?.props.onClick?.();
+    expect(derived.patch).toHaveBeenCalledWith({ connectorGrants: {} });
   });
 });

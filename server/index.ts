@@ -103,6 +103,8 @@ import {
   vpsAliasResourceChangeError,
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
+import { filterConnectorDiscoveryPayload, filterConnectorToolsPayload, gateConnectorRequests, gateConnectorRpc, isConnectorDiscoveryCall } from "./connector-scope-gate.ts";
+import { describeConnectorGrants, normalizeConnectorGrants, type ConnectorGrants } from "../shared/connector-scopes.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { canAccessTeam, canReachPeer, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
@@ -1418,7 +1420,7 @@ function phoneIntegration() {
   return { command: process.execPath, args: [phoneProxyPath], env };
 }
 
-function connectedAppsIntegration(botId: string, threadId: string, generation: string) {
+function connectedAppsIntegration(botId: string, threadId: string, generation: string, connectorGrants?: ConnectorGrants) {
   const token = mintInternalCapability({
     botId,
     threadId,
@@ -1434,6 +1436,7 @@ function connectedAppsIntegration(botId: string, threadId: string, generation: s
     commsToken: token,
     botId,
     threadId,
+    connectorGrants,
   });
 }
 
@@ -1879,7 +1882,7 @@ function previewSystemPrompt(bot: BotRecord) {
       computer: previewPlan.computer && previewPlan.computer !== "off" && computerPromptKind ? previewPlan.computer : null,
       browser: previewPlan.computer === undefined ? false : previewPlan.browser,
     }, { note: previewPlan.note }) },
-    { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT : "" },
+    { id: "composio", label: "Connected apps", text: caps?.composioMcp && bot.composio !== false && composio.configured(cfg) ? COMPOSIO_PROMPT + describeConnectorGrants(bot.connectorGrants) : "" },
     { id: "mcp", label: "MCP servers", text: caps?.customMcp ? customMcpPrompt(Object.keys(customMcpServers(cfg, bot.mcpServers))) : "" },
     { id: "browser", label: "Browser", text: previewPlan.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
     { id: "coordination", label: "Team", text: agentsMounted && coordination ? ` ${coordination}` : "" },
@@ -6648,7 +6651,7 @@ async function startTurn(
       // this engine can reach them — and only to a bot the user has not
       // switched off: the key is workspace-wide, the grant is per bot.
       if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-        const connection = await connectedAppsIntegration(bot.id, threadId, dispatchClaimId);
+        const connection = await connectedAppsIntegration(bot.id, threadId, dispatchClaimId, bot.connectorGrants);
         if (connection) integrations.composio = connection;
       }
       // user-configured MCP servers (config.json mcpServers): same rule as
@@ -7183,7 +7186,7 @@ async function startTurn(
         { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note, canSelect: computerSelectionTurns.has(threadId) }) },
         // gated on the integration, not the key: the hint only goes to a
         // bot whose driver actually mounted the tools
-        { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT : "" },
+        { id: "composio", label: "Connected apps", text: integrations.composio ? COMPOSIO_PROMPT + describeConnectorGrants((liveBot ?? bot).connectorGrants) : "" },
         { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
         { id: "browser", label: "Browser", text: integrations.browser ? BUILT_IN_BROWSER_SYSTEM_PROMPT : "" },
         { id: "coordination", label: "Team", text: coordinationPrompt ? ` ${coordinationPrompt}` : "" },
@@ -8469,6 +8472,7 @@ async function runGroupMemberTurn(
   const preparedApprovalMode = roomTurnApprovalMode(bot, orchestration);
   const preparedSelection = { ...bot.modelSelection };
   const preparedComposio = bot.composio;
+  const preparedConnectorGrants = JSON.stringify(bot.connectorGrants);
   const instance = turnInstance(bot);
   const userName = cfg.profile?.name?.trim() || "User";
   if (providerInstancesChanging.has(bot.modelSelection.instanceId)) {
@@ -8587,7 +8591,7 @@ async function runGroupMemberTurn(
   }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-      const connection = await connectedAppsIntegration(bot.id, threadId, internalGeneration);
+      const connection = await connectedAppsIntegration(bot.id, threadId, internalGeneration, bot.connectorGrants);
       if (connection) integrations.composio = connection;
     }
   } catch (error) {
@@ -8627,7 +8631,8 @@ async function runGroupMemberTurn(
     readyBot.modelSelection.model !== preparedSelection.model ||
     readyBot.modelSelection.effort !== preparedSelection.effort ||
     readyBot.modelSelection.variant !== preparedSelection.variant ||
-    readyBot.composio !== preparedComposio;
+    readyBot.composio !== preparedComposio ||
+    JSON.stringify(readyBot.connectorGrants) !== preparedConnectorGrants;
   if (setupChanged) {
     if (setupRetry === 0) {
       return runGroupMemberTurn(
@@ -13285,20 +13290,44 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!currentSender || currentSender.composio === false || !composio.configured(cfg)) {
           return json(res, 403, { error: "connected apps are not enabled for this bot" });
         }
+        const gated = gateConnectorRpc(body, currentSender.connectorGrants);
+        if (!gated.ok) {
+          const rule = `grant:${gated.decision.reason}:${gated.decision.toolkit}${gated.decision.required ? `:${gated.decision.required}` : ""}`;
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId,
+            botId: currentSender.id,
+            botName: currentSender.name,
+            tool: gated.decision.toolName,
+            decision: "auto-denied",
+            source: "connector-scope",
+            rule,
+          });
+          const rpc = body && typeof body === "object" && !Array.isArray(body) ? body as Record<string, unknown> : {};
+          return json(res, 200, {
+            jsonrpc: "2.0",
+            id: rpc.id ?? null,
+            result: { content: [{ type: "text", text: gated.message }], isError: true },
+          });
+        }
         const upstream = await composio.relayMcp(
           cfg,
-          body,
+          gated.body as Parameters<typeof composio.relayMcp>[1],
           Array.isArray(req.headers["mcp-session-id"])
             ? req.headers["mcp-session-id"][0]
             : req.headers["mcp-session-id"],
         );
+        const filteredBytes = gated.body.method === "tools/list"
+          ? filterConnectorToolsPayload(upstream.bytes, upstream.contentType, currentSender.connectorGrants)
+          : isConnectorDiscoveryCall(gated.body)
+            ? filterConnectorDiscoveryPayload(upstream.bytes, upstream.contentType, currentSender.connectorGrants)
+            : upstream.bytes;
         const headers: Record<string, string> = {
           "content-type": upstream.contentType,
           "cache-control": "no-store",
         };
         if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId;
         res.writeHead(upstream.status, headers);
-        return res.end(Buffer.from(upstream.bytes));
+        return res.end(Buffer.from(filteredBytes));
       }
       // ── computer control: proxies read the hold, bots plead for help ──
       if (path === "/api/internal/computer-control") {
@@ -13400,11 +13429,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             continue;
           }
           if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-          const row = raw as { slug?: unknown; toolkit?: unknown; alias?: unknown; account?: unknown };
+          const row = raw as { slug?: unknown; toolkit?: unknown; alias?: unknown; account?: unknown; accountId?: unknown; connected_account_id?: unknown };
           const slug = typeof row.slug === "string" ? row.slug : typeof row.toolkit === "string" ? row.toolkit : undefined;
           if (!slug || !CONNECTOR_SLUG.test(slug.toLowerCase())) continue;
           const alias = composio.normalizeAccountAlias((row.alias ?? row.account) as string | undefined);
-          items.push({ slug: slug.toLowerCase(), ...(alias ? { alias } : {}) });
+          const accountId = typeof row.accountId === "string"
+            ? row.accountId.trim()
+            : typeof row.connected_account_id === "string"
+              ? row.connected_account_id.trim()
+              : undefined;
+          items.push({ slug: slug.toLowerCase(), ...(alias ? { alias } : {}), ...(accountId ? { accountId } : {}) });
         }
         const slugs = [...new Set(items.map((item) => item.slug))];
         const owner = connectorThread(botId, threadId);
@@ -13413,6 +13447,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!items.length || items.length > 12) return json(res, 400, { error: "one to twelve valid connection requests are required" });
         if (!composio.configured(cfg) || owner.bot.composio === false) {
           return json(res, 409, { error: "connected apps are not enabled for this bot" });
+        }
+        const requestGate = gateConnectorRequests(owner.bot.connectorGrants, items);
+        if (!requestGate.ok) {
+          appendDecision(DATA_DIR, {
+            threadId,
+            botId: owner.bot.id,
+            botName: owner.bot.name,
+            tool: requestGate.decision.toolName,
+            summary: requestGate.decision.toolkit,
+            decision: "auto-denied",
+            source: "connector-scope",
+            rule: `grant:${requestGate.decision.reason}:${requestGate.decision.toolkit}`,
+          });
+          return json(res, 403, { error: requestGate.message });
         }
         const connectionState: Record<string, { connected?: boolean }> = await composio.connectionStatus(cfg, slugs).catch(() => ({}));
         requireActiveInternalCapability();
@@ -15006,6 +15054,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       );
       const profile = parseBotProfilePatch(profileInput, true);
       if (!profile.ok) return json(res, 400, { error: profile.error });
+      let connectorGrants: ConnectorGrants | undefined;
+      if (body.connectorGrants !== undefined && body.connectorGrants !== null) {
+        const normalized = normalizeConnectorGrants(body.connectorGrants);
+        if (!normalized) return json(res, 400, { error: "connectorGrants must map toolkit slugs to { scopes, accountId? }" });
+        connectorGrants = normalized;
+      }
       let section: string | undefined;
       if (body.section !== undefined && body.section !== null) {
         if (typeof body.section !== "string") return json(res, 400, { error: "section must be a string" });
@@ -15028,7 +15082,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (store.bots.length >= MAX_WORKSPACE_BOTS) {
         return json(res, 409, { error: `this workspace is limited to ${MAX_WORKSPACE_BOTS} bots` });
       }
-      const bot = store.createBot({ ...profile.patch, section, modelSelection: selection });
+      const bot = store.createBot({ ...profile.patch, section, modelSelection: selection, ...(connectorGrants !== undefined ? { connectorGrants } : {}) });
       return json(res, 201, {
         bot: {
           ...wireBot(bot),
@@ -15281,6 +15335,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
+      }
+      // Explicit connector grants supersede the legacy workspace-wide boolean.
+      // null clears the map and returns this bot to legacy behavior; {} is an
+      // intentional deny-all grant set.
+      if (body.connectorGrants !== undefined) {
+        if (body.connectorGrants === null) {
+          patch.connectorGrants = undefined;
+        } else {
+          const normalized = normalizeConnectorGrants(body.connectorGrants);
+          if (!normalized) return json(res, 400, { error: "connectorGrants must map toolkit slugs to { scopes, accountId? } or null" });
+          patch.connectorGrants = normalized;
+        }
       }
       // Queue this bot's direct messages behind outstanding delegated work
       // instead of steering the conversation immediately (#1194).

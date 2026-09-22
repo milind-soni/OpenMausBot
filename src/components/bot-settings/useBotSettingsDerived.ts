@@ -38,7 +38,13 @@ export type BotPatch = Partial<
     | "mcpServers"
     | "modelSelection"
   >
-> & { computer?: Bot["computer"] | null; acknowledgeLocalAuto?: boolean; confirmFullAccess?: boolean; acknowledgePeerScope?: boolean };
+> & {
+  computer?: Bot["computer"] | null;
+  connectorGrants?: Bot["connectorGrants"] | null;
+  acknowledgeLocalAuto?: boolean;
+  confirmFullAccess?: boolean;
+  acknowledgePeerScope?: boolean;
+};
 
 export function useBotSettingsDerived(bot: Bot) {
   const { state, dispatch } = useStore();

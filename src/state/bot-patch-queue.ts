@@ -35,6 +35,8 @@ export type BotUpdatePatch = Partial<
   /** null is the wire representation for clearing an explicit destination
    * and returning to Auto. Bot state itself keeps Auto as an absent field. */
   computer?: Bot["computer"] | null;
+  /** null clears the explicit policy and returns to legacy full access. */
+  connectorGrants?: Bot["connectorGrants"] | null;
   /** Rides the PATCH body only: the server's proof that the local-auto
    * warning dialog was shown (see server/index.ts's consent gate). It must
    * reach the wire inside the coalesced body and must never fold into bot
@@ -51,9 +53,10 @@ export type BotUpdatePatch = Partial<
 /** A wire patch after clear-only values have been normalized for Bot state. */
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
+  "computer" | "connectorGrants" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
 > & {
   computer?: Bot["computer"];
+  connectorGrants?: Bot["connectorGrants"];
 };
 
 interface BotPatchQueueEntry {
@@ -110,10 +113,18 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
     confirmFullAccess: _fullConfirmation,
     applyToAllThreads: _allThreads,
     computer,
+    connectorGrants,
     ...fields
   } = patch;
-  if (computer === null) return { ...fields, computer: undefined };
-  return computer === undefined ? fields : { ...fields, computer };
+  return {
+    ...fields,
+    ...(computer === null ? { computer: undefined } : computer === undefined ? {} : { computer }),
+    ...(connectorGrants === null
+      ? { connectorGrants: undefined }
+      : connectorGrants === undefined
+        ? {}
+        : { connectorGrants }),
+  };
 };
 
 /**

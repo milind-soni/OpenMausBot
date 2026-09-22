@@ -429,6 +429,31 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.composio).toBe(false);
   });
 
+  it("persists explicit connector grants without widening legacy bots", () => {
+    const store = new Store(selection);
+    const scoped = store.createBot({ connectorGrants: {
+      gmail: { accountId: "ca_work", scopes: ["read", "draft"] },
+    } });
+    const legacy = store.createBot();
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(scoped.id)?.connectorGrants).toEqual({
+      gmail: { accountId: "ca_work", scopes: ["read", "draft"] },
+    });
+    expect(reloaded.bot(legacy.id)?.connectorGrants).toBeUndefined();
+  });
+
+  it("repairs malformed persisted connector grants to deny-all", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ connectorGrants: { gmail: { scopes: ["read"] } } });
+    const records = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
+    const record = records.find((candidate) => candidate.id === bot.id);
+    expect(record).toBeDefined();
+    record!.connectorGrants = { gmail: { scopes: ["read"], accountId: "bad account!" } };
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(records));
+    const repaired = new Store(selection);
+    expect(repaired.bot(bot.id)?.connectorGrants).toEqual({});
+  });
+
   it("rotates colors across created bots", () => {
     const store = new Store(selection);
     const first = store.createBot();

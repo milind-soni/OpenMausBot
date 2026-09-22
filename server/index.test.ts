@@ -158,6 +158,7 @@ let fakeDockerLog: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias: string; status: string; toolkit: { slug: string } }> = [];
 const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
+const connectorMcpCalls: Array<Record<string, unknown>> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
 let browserRegisterDelayMs = 0;
@@ -753,6 +754,39 @@ beforeAll(async () => {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({ items: req.url.startsWith("/api/v3.1/connected_accounts") ? connectorAccounts : [] }));
     }
+    if (req.url === "/mcp") {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+      connectorMcpCalls.push(body);
+      if (body.method === "tools/list") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id ?? null,
+          result: { tools: [
+            { name: "COMPOSIO_MANAGE_CONNECTIONS" },
+            { name: "COMPOSIO_SEARCH_TOOLS" },
+            { name: "GMAIL_FETCH_EMAILS" },
+            { name: "GMAIL_SEND_EMAIL" },
+            { name: "NOTION_SEARCH_PAGES" },
+          ] },
+        }));
+      }
+      if (body.method === "tools/call" && (body.params as Record<string, unknown> | undefined)?.name === "COMPOSIO_SEARCH_TOOLS") {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          jsonrpc: "2.0",
+          id: body.id ?? null,
+          result: { content: [{ type: "text", text: JSON.stringify({ tools: [
+            { tool_slug: "GMAIL_FETCH_EMAILS" },
+            { tool_slug: "NOTION_SEARCH_PAGES" },
+          ] }) }] },
+        }));
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ jsonrpc: "2.0", id: body.id ?? null, result: { content: [{ type: "text", text: "fixture relay" }] } }));
+    }
     if (req.url?.startsWith("/api/v3.1/tool_router/session")) {
       if (req.headers["x-api-key"] !== "ak_good") {
         res.writeHead(401, { "content-type": "application/json" });
@@ -971,6 +1005,12 @@ beforeAll(async () => {
   const browserPrelude = `data:text/javascript,${encodeURIComponent(`
     import childProcess from "node:child_process";
     import { syncBuiltinESMExports } from "node:module";
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.startsWith("https://app.composio.dev/")) return realFetch("http://127.0.0.1:${boxStubPort}/mcp", init);
+      return realFetch(input, init);
+    };
     const spawn = childProcess.spawn;
     const base = ${JSON.stringify(home)};
     childProcess.spawn = function(command, args, options) {
@@ -8845,6 +8885,87 @@ describe("harness HTTP API", () => {
       expect(rejected.body.error).toMatch(/connected apps are not enabled/i);
     } finally {
       held?.close();
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("enforces explicit connector grants at relay and filters both discovery paths", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scoped connectors" })).body.bot;
+    connectorMcpCalls.length = 0;
+    try {
+      expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+      const saved = await api("PATCH", `/api/bots/${bot.id}`, {
+        connectorGrants: { gmail: { accountId: "ca_home", scopes: ["read"] } },
+      });
+      expect(saved.status).toBe(200);
+      expect(saved.body.bot.connectorGrants).toEqual({ gmail: { accountId: "ca_home", scopes: ["read"] } });
+
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const call = async (body: unknown) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+
+      const wrongAccountRequest = await fetch(`${BASE}/api/internal/connectors/request`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          botId: bot.id,
+          threadId: bot.threadId,
+          resumeKey: "scoped-account-fixture",
+          items: [{ slug: "gmail", accountId: "ca_personal" }],
+        }),
+      });
+      expect(wrongAccountRequest.status).toBe(403);
+
+      const read = await call({
+        jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "GMAIL_FETCH_EMAILS", arguments: {} },
+      });
+      expect(read.status).toBe(200);
+      expect(read.body.result.isError).not.toBe(true);
+      expect(connectorMcpCalls.at(-1)?.params).toMatchObject({
+        arguments: { connected_account_id: "ca_home" },
+      });
+
+      const denied = await call({
+        jsonrpc: "2.0", id: 2, method: "tools/call",
+        params: { name: "GMAIL_SEND_EMAIL", arguments: {} },
+      });
+      expect(denied.status).toBe(200);
+      expect(denied.body.result.isError).toBe(true);
+      expect(denied.body.result.content[0].text).toMatch(/scope|not been granted/i);
+      expect(connectorMcpCalls.some((entry) => (entry.params as any)?.name === "GMAIL_SEND_EMAIL")).toBe(false);
+      await expect.poll(async () => {
+        const decisions = (await api("GET", "/api/decisions")).body.decisions as Array<{ tool?: string; source?: string; decision?: string }>;
+        return decisions.some((decision) => decision.tool === "GMAIL_SEND_EMAIL" && decision.source === "connector-scope" && decision.decision === "auto-denied");
+      }).toBe(true);
+
+      const listed = await call({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} });
+      expect(listed.body.result.tools.map((tool: { name: string }) => tool.name)).toEqual([
+        "COMPOSIO_MANAGE_CONNECTIONS",
+        "COMPOSIO_SEARCH_TOOLS",
+        "GMAIL_FETCH_EMAILS",
+      ]);
+
+      const searched = await call({
+        jsonrpc: "2.0", id: 4, method: "tools/call",
+        params: { name: "COMPOSIO_SEARCH_TOOLS", arguments: { queries: ["mail"] } },
+      });
+      const discovered = JSON.parse(searched.body.result.content[0].text);
+      expect(discovered.tools).toEqual([{ tool_slug: "GMAIL_FETCH_EMAILS" }]);
+
+      const malformed = await api("PATCH", `/api/bots/${bot.id}`, { connectorGrants: { gmail: { scopes: ["send", "unknown"] } } });
+      expect(malformed.status).toBe(400);
+      const cleared = await api("PATCH", `/api/bots/${bot.id}`, { connectorGrants: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.bot.connectorGrants).toBeUndefined();
+    } finally {
+      connectorMcpCalls.length = 0;
       await api("DELETE", `/api/bots/${bot.id}`);
     }
   });

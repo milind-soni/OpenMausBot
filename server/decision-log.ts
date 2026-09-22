@@ -28,6 +28,7 @@ import { redactSecrets } from "./redact.ts";
 
 export type DecisionKind =
   | "auto-approved"
+  | "auto-denied"
   | "card-shown"
   | "user-approved"
   | "user-denied"
@@ -49,7 +50,8 @@ export type DecisionSource =
   | "profile"
   | "user"
   | "auto-review"
-  | "auto-review-shadow";
+  | "auto-review-shadow"
+  | "connector-scope";
 
 export interface DecisionRow {
   at: string;
