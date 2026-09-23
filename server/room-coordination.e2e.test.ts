@@ -5,6 +5,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { handleToolCall, request } from "../scripts/mcp-server.ts";
 import { PEER_ACCESS_HELP } from "./peer-roster.ts";
 
+/** Exercise the real coordination proxy in disposable rooms with a scripted provider. */
 async function withRooms(test: (f: any) => Promise<void>) {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
@@ -33,6 +34,170 @@ async function withRooms(test: (f: any) => Promise<void>) {
     await test({ session, api, cli, tool, sender, target, source, destination, plan, savePlan, nodes, messages, start, wait, provider });
   } finally { await session.close(); }
 }
+
+it("routes an explicit direct assignment from a room to the standing peer conversation and returns here", () => withRooms(async f => {
+  const before = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.target.id);
+  const privateThread = before.threadId;
+  const privateMessages = await f.messages(privateThread);
+  f.plan[f.sender.id].steps[0].arguments = {
+    direct: true, bot_ids: [f.target.id], request_key: "direct-work", message: "Please build CSV",
+  };
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const node = f.nodes().find((n: any) => n.parentId && n.botId === f.target.id);
+  expect(node).toMatchObject({ status: "completed", reported: true });
+  expect(node.groupId).toBeUndefined();
+  expect(node.threadId).not.toBe(privateThread);
+  expect((await f.messages(node.threadId)).some((m: any) => m.text === "Built CSV")).toBe(true);
+  expect(await f.messages(privateThread)).toEqual(privateMessages);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const returned = await f.messages(f.source.activeTaskId);
+  expect(returned.some((m: any) => m.text === "Reviewed downstream outcome")).toBe(true);
+  expect(returned.some((m: any) => m.threadRef?.threadId === node.threadId)).toBe(true);
+  const resumed = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);
+  expect(resumed.threadId).toBe(f.source.activeTaskId);
+  expect(JSON.stringify(resumed.prompt)).toContain("Built CSV");
+  const after = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.target.id);
+  expect(after.threadId).toBe(privateThread);
+  // A second independent assignment must reuse the pair, not create a new task.
+  f.plan[f.sender.id].steps[0].arguments.request_key = "direct-again";
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const assignments = f.nodes().filter((n: any) => n.parentId && n.botId === f.target.id);
+  expect(assignments).toHaveLength(2);
+  expect(assignments.map((n: any) => n.threadId)).toEqual([node.threadId, node.threadId]);
+}), 45_000);
+
+it("rejects conflicting direct and room destinations without starting work", () => withRooms(async f => {
+  f.plan[f.sender.id].steps[0].arguments.direct = true;
+  f.plan[f.sender.id].steps[0].expectError = true;
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const response = f.provider()[0].evidence.find((entry: any) => entry.step)?.response;
+  expect(response.result.isError).toBe(true);
+  expect(response.result.content[0].text).toContain("direct");
+}), 45_000);
+
+it.each(["peer", "team"])("direct routing does not bypass %s restrictions", restriction => withRooms(async f => {
+  f.plan[f.sender.id].steps[0] = { arguments: {
+    direct: true, bot_ids: [f.target.id], request_key: "restricted", message: "Do not deliver",
+  }, expectError: true };
+  if (restriction === "peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  else await f.api(`/api/bots/${f.target.id}`, { section: "Other team" }, "PATCH");
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const result = f.provider()[0].evidence.find((entry: any) => entry.step)?.response;
+  expect(result.result.isError).toBe(true);
+  expect(result.result.content[0].text).toContain(restriction === "peer" ? "allowed peer" : "section boundary");
+}), 45_000);
+
+it.each(["allow", "deny"])("direct routing honors %s on a room's peer-approval card", behavior => withRooms(async f => {
+  await f.api(`/api/bots/${f.sender.id}`, { approvePeerComms: true }, "PATCH");
+  f.plan[f.sender.id].steps[0] = { arguments: {
+    direct: true, bot_ids: [f.target.id], request_key: "approved-direct", message: "Please build CSV",
+  }, expectError: behavior === "deny" };
+  await f.start();
+  let card: any;
+  await expect.poll(async () => {
+    card = (await f.messages(f.source.activeTaskId)).find((m: any) => m.card?.tool === "delegate_bot");
+    return Boolean(card);
+  }, { timeout: 10_000 }).toBe(true);
+  expect(f.nodes()).toEqual([]);
+  await f.api(`/api/threads/${f.source.activeTaskId}/respond`, { requestId: card.card.requestId, behavior });
+  expect((await f.wait()).status).toBe("settled");
+  if (behavior === "deny") expect(f.nodes()).toEqual([]);
+  else expect(f.nodes().find((n: any) => n.parentId)).toMatchObject({ status: "completed", approvalGranted: true });
+}), 45_000);
+
+it.each([undefined, false])("keeps default direct=%s routing in the source room", direct => withRooms(async f => {
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id] });
+  delete f.plan[f.sender.id].steps[0].arguments.group_id;
+  f.plan[f.sender.id].steps[0].arguments.direct = direct;
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().find((n: any) => n.parentId && n.botId === f.target.id)).toMatchObject({
+    groupId: f.source.id, threadId: f.source.activeTaskId, status: "completed",
+  });
+}), 45_000);
+
+it("withholds a direct result from a room after peer access is revoked", () => withRooms(async f => {
+  f.plan[f.sender.id].steps[0].arguments = {
+    direct: true, bot_ids: [f.target.id], request_key: "revoke-direct", message: "Please build CSV",
+  };
+  f.plan[f.target.id] = { delayMs: 2000, reply: "PRIVATE_DIRECT_RESULT" };
+  await f.start();
+  await expect.poll(() => f.nodes().find((n: any) => n.parentId)?.status, { timeout: 10_000 }).toBe("running");
+  await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  expect((await f.wait()).status).toBe("settled");
+  const messages = await f.messages(f.source.activeTaskId);
+  expect(messages.some((m: any) => m.tool?.name.includes("Result withheld"))).toBe(true);
+  expect(JSON.stringify(messages)).not.toContain("PRIVATE_DIRECT_RESULT");
+  const resumed = f.provider().filter((turn: any) => turn.botId === f.sender.id).at(-1);
+  expect(JSON.stringify(resumed.prompt)).not.toContain("PRIVATE_DIRECT_RESULT");
+}), 45_000);
+
+/** Grant a Chief supervision of team A and seat it beside both fixture peers. */
+async function addSupervisingChief(f: any, section = "") {
+  const chief = (await f.cli("new-bot", "--name", "Supervisor")).bot;
+  await f.api(`/api/bots/${chief.id}`, { section, chiefOfStaff: true, managedSections: ["A"], acknowledgePeerScope: true }, "PATCH");
+  await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id] });
+  f.plan[chief.id] = { reply: "Supervisor checked the work" };
+  return chief;
+}
+
+it.each(["", "Leadership"])("lists and coordinates with a supervising Chief and same-section peer in the same room (Chief section %j)", section => withRooms(async f => {
+  const chief = await addSupervisingChief(f, section);
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id, f.target.id], request_key: "same-room", message: "Review the work here" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.find((room: any) => room.id === f.source.id).members.map((bot: any) => bot.id)).toEqual(expect.arrayContaining([chief.id, f.target.id]));
+  const children = f.nodes().filter((node: any) => node.parentId);
+  expect(children.map((node: any) => node.botId).sort()).toEqual([chief.id, f.target.id].sort());
+  expect(children.every((node: any) => node.status === "completed" && node.groupId === f.source.id && node.threadId === f.source.activeTaskId)).toBe(true);
+}), 45_000);
+
+it.each(["unmanaged", "outsider", "disallowed-peer"])("refuses supervisor room coordination with %s", reason => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  if (reason === "unmanaged") await f.api(`/api/bots/${chief.id}`, { managedSections: [] }, "PATCH");
+  if (reason === "outsider") {
+    const outsider = (await f.cli("new-bot", "--name", "Outsider", "--section", "Finance")).bot;
+    await f.tool("update_channel", { channel_id: f.source.id, member_ids: [f.sender.id, f.target.id, chief.id, outsider.id] });
+  }
+  if (reason === "disallowed-peer") await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { bot_ids: [chief.id], request_key: "refused", message: "Do not bypass the room boundary" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const turn = f.provider().find((entry: any) => entry.botId === f.sender.id);
+  expect(turn.evidence.find((entry: any) => entry.step).response.result.isError).toBe(true);
+  if (reason === "disallowed-peer") expect(JSON.parse(turn.evidence[1].result.content[0].text).rooms).toEqual([]);
+  else expect(turn.evidence[1].result.isError).toBe(true);
+}), 45_000);
+
+it("does not extend supervisor access to a different room", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  await f.tool("update_channel", { channel_id: f.destination.id, member_ids: [chief.id] });
+  f.plan[f.sender.id].steps = [{ expectError: true, arguments: { group_id: f.destination.id, bot_ids: [chief.id], request_key: "other-room", message: "Keep supervisor access in the shared conversation" } }];
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  expect(await f.messages(f.destination.activeTaskId)).toEqual([]);
+  const discovery = JSON.parse(f.provider().find((turn: any) => turn.botId === f.sender.id).evidence[1].result.content[0].text);
+  expect(discovery.rooms.some((room: any) => room.id === f.destination.id)).toBe(false);
+}), 45_000);
+
+it("refuses queued same-room supervisor work when the owner revokes supervision", () => withRooms(async f => {
+  const chief = await addSupervisingChief(f);
+  const gateFile = join(f.session.info.dataDir, "supervisor-result.gate");
+  f.plan[chief.id] = { reply: "PRIVATE_SUPERVISOR_RESULT" };
+  f.plan[f.sender.id].gateFile = gateFile;
+  f.plan[f.sender.id].steps = [{ arguments: { bot_ids: [chief.id], request_key: "supervisor", message: "Review this work" } }];
+  await f.start();
+  await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15000 }).toBe("queued");
+  await request(`/api/bots/${chief.id}`, { method: "PATCH", headers: { Origin: f.session.info.url }, body: JSON.stringify({ managedSections: [] }) }, f.session.info.url);
+  writeFileSync(gateFile, "release");
+  expect((await f.wait()).status).toBe("settled");
+  expect(f.nodes().find((node: any) => node.parentId).status).toBe("failed");
+  expect(f.provider().some((turn: any) => turn.botId === chief.id)).toBe(false);
+  expect(JSON.stringify(await f.messages(f.source.activeTaskId))).not.toContain("PRIVATE_SUPERVISOR_RESULT");
+  expect((await f.messages(f.source.activeTaskId)).some((message: any) => message.tool?.name.includes("Result withheld"))).toBe(true);
+}), 45_000);
 
 it("refuses a disallowed peer without starting the recipient", () => withRooms(async f => {
   await f.api(`/api/bots/${f.sender.id}`, { peers: [] }, "PATCH");

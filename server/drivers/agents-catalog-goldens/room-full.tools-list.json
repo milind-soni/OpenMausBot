@@ -111,14 +111,18 @@
     },
     {
       "name": "coordinate_bots",
-      "description": "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
+      "description": "Ask existing OpenMausBot teammates for advice or assign concrete work. From normal chat every assignment you send a teammate continues your one standing conversation with that teammate, so they keep the context of what you asked before; from a room it defaults to this room. Use direct=true (without group_id) for your standing bot-to-bot conversation even from a room, or group_id from list_room_targets for a specific room. Give 1-4 bot_ids — teammate ids as list_bots or your roster prints them; a unique teammate name also resolves: they receive only your brief and use their own model, tools and permissions. Busy bots queue. They can consult their specialists; all results return here and resume you automatically. Include exact file paths, constraints and what must be verified. After sending all assignments, END your turn; do not poll or wait. On return, resolve tradeoffs, verify the requested outcome and request concrete corrections if necessary before giving one final answer. Do not send acknowledgements as new work.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "group_id": {
             "type": "string",
-            "description": "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly."
+            "description": "Optional destination room. Omit for this room, or your standing conversation with each teammate when chatting directly. Cannot be combined with direct=true."
+          },
+          "direct": {
+            "type": "boolean",
+            "description": "Set true to contact teammates in your standing bot-to-bot conversations even from a room. Omit group_id. Results return to this conversation; this does not write to the user's private DM. Omit or false keeps the default room routing."
           },
           "bot_ids": {
             "type": "array",

@@ -445,12 +445,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       && typeof canonical.request_key === "string" && canonical.request_key.trim().length > 0;
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids), message and request_key are required; group_id, rework and label are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids), message and request_key are required; group_id, direct, rework and label are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
     const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
-      groupId: canonical.group_id, botIds: ids, message: canonical.message,
+      groupId: canonical.group_id, direct: canonical.direct, botIds: ids, message: canonical.message,
       requestKey: canonical.request_key, rework: canonical.rework, label: canonical.label,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
