@@ -999,7 +999,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
        * the truth — this is. null until init, or on a CLI that omits it. */
       nativePermissionMode: string | null;
       /** the running turn, or null between turns */
-      turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean; stoppedByPerson?: boolean } | null;
+      turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean; stopRequested?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
       stderr: string;
@@ -1364,7 +1364,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (live.idleTimer) clearTimeout(live.idleTimer);
         live.turn = { turnId, input: turn, retryAbort, settled: false, sawStreamDelta: false };
         active.set(threadId, { stop: () => {
-          if (live.turn) live.turn.stoppedByPerson = true;
+          if (live.turn) live.turn.stopRequested = true;
           closeSession(threadId, "interrupted");
           retry.cancelled = true;
           retryAbort.abort();
@@ -1376,8 +1376,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           ? promptMsg
           : claudeUserMessage(withVolatileNote(turn.text, volatile), turn.images);
         live.volatile = volatile;
+        const running = live.turn;
         const written = await writeUser(live, threadId, message);
-        if (!written && !live.turn?.stoppedByPerson) {
+        if (!written && !running?.stopRequested) {
           active.delete(threadId);
           live.turn = null;
           closeSession(threadId, "stdin write failed");
@@ -1747,7 +1748,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // a turn still running when the process died is a failed turn; a
         // process that exited between turns (idle close, contract change)
         // is just a session ending
-        if (session.turn?.stoppedByPerson && !session.turn.settled) {
+        if (session.turn?.stopRequested && !session.turn.settled) {
           settle(false, "interrupted");
         } else if (session.turn && !session.turn.settled) {
           // A retained process may be running a later user turn. Its close
@@ -1927,7 +1928,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       });
 
       const stop = () => {
-        if (session.turn) session.turn.stoppedByPerson = true;
+        if (session.turn) session.turn.stopRequested = true;
         // taskkill is asynchronous on Windows. Retire steering and approvals
         // now, before a still-connected child can submit more work.
         closeSession(threadId, "interrupted");
@@ -1942,7 +1943,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // stdin stays OPEN: that is what keeps the session alive for a
       // mid-turn steer or the next turn; closeSession() ends it.
       if (!(await writeUser(session, threadId, promptMsg))) {
-        settle(false, session.turn?.stoppedByPerson ? "interrupted" : "stdin_write_failed");
+        settle(false, session.turn?.stopRequested ? "interrupted" : "stdin_write_failed");
         closeSession(threadId, "stdin write failed");
       }
 
