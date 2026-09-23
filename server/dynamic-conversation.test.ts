@@ -55,6 +55,24 @@ describe("dynamic conversations", () => {
     const run = await conversation([next("outsider"), next("outsider"), next("outsider")]);
     expect(run.result).toMatchObject({ status: "paused", replies: 0, calls: 2 });
   });
+  it.each([false, true])("does not accumulate repaired routing failures across replies (self-routing=%s)", async (selfRouting) => {
+    const reply = (speaker: string, text: string) => selfRouting ? next(speaker, text) : text;
+    const run = await conversation([
+      reply("a", "First contribution."), next("b"),
+      reply("b", "Second contribution."), next("a"),
+      reply("a", "Third contribution."), next("b"),
+      "The exchange is settled." + completed, completed,
+    ]);
+    expect(run.result).toMatchObject({ status: "completed", replies: 4, calls: 8 });
+  });
+  it("resets repair attempts when an ending assessment finds a speaker", async () => {
+    const run = await conversation([
+      "First contribution.", completed, next("b"),
+      "Second contribution.", completed, next("a"),
+      "Third contribution.", completed, completed,
+    ]);
+    expect(run.result).toMatchObject({ status: "completed", replies: 3, calls: 9 });
+  });
   it("interrupts between turns and yields to a queued human message", async () => {
     expect((await conversation([next("b", "Question?")], { cancelledAt: 1 })).result.status).toBe("stopped");
     expect((await conversation([next("b", "Question?")], { queuedAt: 1 })).result.status).toBe("yielded");
