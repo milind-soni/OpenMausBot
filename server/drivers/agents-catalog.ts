@@ -411,14 +411,14 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "create_room",
     description:
-      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically. Choose response_mode for the room; lead defaults to you. Provide opening_message only when the user asks to start the discussion; it posts one shared invitation and starts the selected response mode. Otherwise no turns or messages are created. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
+      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically. Only supply opening_message when asked to start discussing: it posts one shared invitation and starts response_mode. Otherwise creates no messages or turns. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent room response mode. Dynamic selects speakers by the conversation." },
-        lead_bot_id: { type: "string", description: "Room member to lead when response_mode is lead; defaults to you." },
-        opening_message: { type: "string", minLength: 1, maxLength: 12_000, description: "Optional shared opening to start the requested discussion immediately." },
+        response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent mode; dynamic follows the conversation." },
+        lead_bot_id: { type: "string", description: "Leader for lead mode; defaults to you." },
+        opening_message: { type: "string", minLength: 1, maxLength: 12_000 },
         name: { type: "string", minLength: 1, maxLength: 100, description: "Display name for the room (e.g. \"Nalamdesk Team\")." },
         member_bot_ids: {
           type: "array",
@@ -444,8 +444,8 @@ const toolDefinitions = (externalRuntime: boolean) => [
       type: "object",
       additionalProperties: false,
       properties: {
-        response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent room response mode. Dynamic selects speakers by the conversation." },
-        lead_bot_id: { type: "string", description: "Room member to lead when response_mode is lead; defaults to you." },
+        response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent mode; dynamic follows the conversation." },
+        lead_bot_id: { type: "string", description: "Leader for lead mode; defaults to you." },
         room_id: { type: "string", description: "The ID of the group room to manage." },
         action: {
           type: "string",
