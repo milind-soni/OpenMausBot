@@ -3,7 +3,7 @@
 Run only disposable fixtures:
 
 ```sh
-pnpm exec vitest run server/dynamic-conversation.test.ts server/dynamic-conversation.e2e.test.ts server/chief-rooms.e2e.test.ts server/channel-queue.test.ts src/lib/group-routing.test.ts
+pnpm exec vitest run server/dynamic-conversation.test.ts server/dynamic-conversation.e2e.test.ts server/chief-rooms.e2e.test.ts server/channel-queue.test.ts server/drivers/agents-catalog-wire.test.ts server/drivers/agents-proxy.test.ts src/lib/group-routing.test.ts
 ```
 
 The controller tests cover non-roster speaker order, a return to a previous
@@ -22,3 +22,10 @@ Chief's separate conversation.
 
 These deterministic tests verify routing and persistence, not a live model's
 conversational quality. No provider keys or live user conversations are required.
+
+The catalog checks compare the shipped tool schemas with the checked-in wire
+snapshots for every mount profile, including the packaged proxy, and enforce
+the existing size budgets. After an intentional schema change, regenerate with
+`UPDATE_AGENTS_CATALOG_GOLDENS=1` for `agents-catalog-wire.test.ts`, inspect the
+snapshot diff, then rerun without that environment variable. Do not skip the
+checks or raise the budgets just to pass them.
