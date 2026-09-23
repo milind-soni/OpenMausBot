@@ -1,3 +1,4 @@
+import { configurePromptInspector } from "./prompt-inspector.ts";
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -641,6 +642,7 @@ function customDomainStatus() {
     serverIpv4: DESKTOP_MANAGED ? null : customDomainIpv4(),
   };
 }
+const promptInspector = configurePromptInspector(join(DATA_DIR, "prompt-inspector"));
 const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
 // Engines installed from Settings live under the data directory and win over
 // any other copy on PATH.
@@ -18233,6 +18235,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     // The brand for this deployment (server/brand.ts): read per request so edits show on reload.
     if (method === "GET" && path === "/api/brand") {
       return json(res, 200, loadBrand());
+    }
+
+    m = path.match(/^\/api\/threads\/([\w-]+)\/prompt-inspector$/);
+    if (m && method === "GET") {
+      if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, { error: "no such thread" });
+      res.setHeader("cache-control", "private, no-store");
+      return json(res, 200, { records: promptInspector.read(m[1]) });
     }
 
     // ── inspector: a thread's runtime events + native protocol tee ──
