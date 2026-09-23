@@ -25,14 +25,15 @@ export function PromptInspector({ threadId, onClose }: { threadId: string; onClo
       const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/prompt-inspector`, { signal: controller.signal });
       if (!response.ok) throw new Error(t("promptInspector.loadFailed", { status: response.status }));
       const data = await response.json() as { records: PromptCapture[] };
-      if (!controller.signal.aborted) { setRecords(data.records); setSelected(0); setError(""); }
+      if (!controller.signal.aborted) { setRecords(data.records); setSelected(0); setCopied(false); setError(""); }
     } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)); }
     finally { if (!controller.signal.aborted) setBusy(false); }
   }, [threadId]);
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialog.current?.showModal(); void load();
-    return () => { abort.current?.abort(); if (opener?.isConnected) opener.focus(); };
+    const modal = dialog.current;
+    modal?.showModal(); void load();
+    return () => { abort.current?.abort(); modal?.close(); if (opener?.isConnected) opener.focus(); };
   }, [load]);
   const row = records[selected];
   const previous = row && records.slice(selected + 1).find(candidate => candidate.kind === row.kind && candidate.provider === row.provider);
