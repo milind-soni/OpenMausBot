@@ -3050,6 +3050,7 @@ function finishGroupGoalRun(
 }
 
 function updateGroupGoalRunProgress(operation: GroupTurnOperation, detail: string): void {
+  if (operation.dynamicRun) return updateDynamicProgress(operation, detail);
   const run = operation.goalRun;
   if (!run || run.finished) return;
   const safeDetail = redactSecretsInText(detail.trim()).slice(0, 500);
@@ -9367,7 +9368,7 @@ async function runGroupGoalStep(args: {
   let retriedTransient = false;
   for (;;) {
     const availability = await waitForGroupMemberBot(args.bot, args.operation, (detail) => {
-      updateGroupGoalRunProgress(args.operation, `${detail} This goal will continue when they are available.`);
+      updateGroupGoalRunProgress(args.operation, `${detail} This conversation will continue when they are available.`);
     });
     if (availability === "cancelled") return { ran: false, replyText: "", outcome: "cancelled" };
     if (availability === "unavailable") {
