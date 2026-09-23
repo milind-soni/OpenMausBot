@@ -3,21 +3,29 @@ import { app, safeStorage, dialog, BrowserWindow } from 'electron';
 import { PROVIDERS, publicConfig, transcribeCloud, transcribeLocal, createRequestRegistry } from './stt-core.mjs';
 import { createSttSettings } from './stt-settings.mjs';
 import { createLocalModels } from './stt-local.mjs';
+import { createEngineSelection } from './stt-engine-selection.mjs';
 export function registerStt({ ipcMain, localOnly }) {
     const root = path.join(app.getPath('userData'), 'transcription');
     const settings = createSttSettings(root, safeStorage), load = settings.load;
-    const local = createLocalModels(root), registry = createRequestRegistry();
+    const local = createLocalModels(root), registry = createRequestRegistry(), engines = createEngineSelection();
     async function state() { const cfg = await load(); return { config: publicConfig(cfg), providers: PROVIDERS.filter(p => !p.platforms || p.platforms.includes(process.platform)), local: await local.state(cfg) }; }
     const handle = (name, fn) => ipcMain.handle(name, localOnly(name, fn));
     handle('stt:settings', () => state());
-    handle('stt:save', async (_e, input) => { await settings.save(input); return state(); });
-    handle('stt:install', async (_e, request) => {
+    handle('stt:save', async (event, input) => {
         const cfg = await load();
-        return local.install(request.id, { ...cfg, executable: typeof request.executable === 'string' ? request.executable : cfg.executable });
+        const executable = engines.resolve(event.sender, input?.executable, cfg.executable);
+        await settings.save({ ...input, executable });
+        return state();
+    });
+    handle('stt:install', async (event, request) => {
+        const cfg = await load();
+        return local.install(request.id, { ...cfg, executable: engines.resolve(event.sender, request.executable, cfg.executable) });
     });
     handle('stt:pick-engine', async (event) => {
         const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(event.sender), { title: 'Select whisper-cli', properties: ['openFile'], ...(process.platform === 'win32' ? { filters: [{ name: 'Speech engine', extensions: ['exe'] }] } : {}) });
-        return result.canceled ? null : result.filePaths[0];
+        const selected = result.canceled ? null : result.filePaths[0];
+        if (selected) engines.grant(event.sender, selected);
+        return selected;
     });
     const watched = new WeakSet();
     handle('stt:begin', async (event) => {
