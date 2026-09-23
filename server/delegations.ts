@@ -688,6 +688,22 @@ async function processOne(
       });
       return "settled";
     }
+    if (verdict === "too_many") {
+      recordDelegationReceipt({
+        id: item.id,
+        sourceThreadId,
+        toBotId: target.id,
+        toBotName: target.name,
+        status: "denied",
+        result: "refused: too many approval requests are already waiting for the user",
+      });
+      bus.store.appendMessage(sourceThreadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: `Delegation to @${target.name} refused — too many approvals already waiting for the user`, ok: false },
+      });
+      return "settled";
+    }
     if (verdict !== "allow") {
       recordDelegationReceipt({
         id: item.id,

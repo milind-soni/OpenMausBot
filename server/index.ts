@@ -13266,6 +13266,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
+          if (verdict === "too_many") {
+            return json(res, 200, { error: "too many approval requests are already waiting for the user; try again later" });
+          }
           if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
           // The card may have been open for minutes. Re-read both records so
           // deleted bots cannot recreate transcripts through stale objects.
@@ -13602,6 +13605,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             const verdicts = await Promise.all(targets.map(target =>
               requestPeerApproval(approvalBus, internalSender, store.bot(target.botId)!, parsed.data.message, "delegate_bot", address.threadId)));
             requireActiveInternalCapability();
+            if (verdicts.some(verdict => verdict === "too_many")) {
+              return json(res, 403, { error: "Too many approval requests are already waiting for the user; try again later. No work sent." });
+            }
             if (verdicts.some(verdict => verdict !== "allow")) return json(res, 403, { error: "Denied by user; no work sent." });
             approvalGranted = true;
           }
@@ -13755,6 +13761,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
+          if (verdict === "too_many") {
+            return json(res, 200, { error: "too many approval requests are already waiting for the user; try again later" });
+          }
           if (verdict !== "allow") return json(res, 200, { error: "denied by user" });
           // The card may have been open for minutes. Re-read both records so a
           // roster change, a section move, or a deletion during that window
