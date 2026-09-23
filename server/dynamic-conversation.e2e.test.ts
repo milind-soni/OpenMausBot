@@ -103,3 +103,40 @@ it("persists the mode, emits wrap-up notices through reply 22, then starts a new
     writeFileSync(`${statePath}.evidence.json`, JSON.stringify({ notices: 7, firstDiscussionCalls: 22, totalCalls: 24 }));
   });
 }, 120_000);
+
+
+it.each(["dynamic", "everyone", "mentions", "member"])("enforces a custom public reply cap in %s mode", async mode => {
+  await fixtureWithReplies(["One reply." + envelope("Bo"), "Unexpected second reply." + envelope()], async ({ api, room, statePath }) => {
+    const defaultResponder = mode === "member" ? { kind: mode, botId: room.memberIds[0] } : { kind: mode };
+    await api("PATCH", `/api/groups/${room.id}`, { defaultResponder, meetingLimits: { replies: { hardStop: 1, wrapUpAfter: 0 } } });
+    await api("POST", `/api/groups/${room.id}/messages`, { text: mode === "mentions" ? "@Ada @Bo discuss this." : "Discuss this." });
+    const snapshot = async () => (await api<{ groups: (WireGroup & { messages: Message[] })[] }>("GET", "/api/bots?messages=50")).groups.find(group => group.id === room.id)!;
+    await expect.poll(async () => (await snapshot()).messages.some(message => message.systemNotice?.kind === "dynamic-stop"), { timeout: 25000 }).toBe(true);
+    await expect.poll(async () => (await snapshot()).working, { timeout: 15000 }).toBe(false);
+    expect(Number(readFileSync(statePath, "utf8"))).toBe(1);
+    expect((await snapshot()).messages.find(message => message.meetingBudget)?.meetingBudget?.limits).toEqual({ replies: { hardStop: 1, wrapUpAfter: 0 } });
+  });
+}, 60000);
+
+it("counts private checks and cached input toward tokens, stopping before another dispatch", async () => {
+  await fixtureWithReplies([envelope("Bo"), "The public reply." + envelope(), envelope()], async ({ api, room, statePath }) => {
+    await api("PATCH", `/api/groups/${room.id}`, { meetingLimits: { tokens: { hardStop: 30, wrapUpAt: 20 } } });
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "Review this together." });
+    const snapshot = async () => (await api<{ groups: (WireGroup & { messages: Message[] })[] }>("GET", "/api/bots?messages=50")).groups.find(group => group.id === room.id)!;
+    await expect.poll(async () => (await snapshot()).messages.some(message => message.systemNotice?.kind === "dynamic-stop"), { timeout: 30000 }).toBe(true);
+    await expect.poll(async () => (await snapshot()).working, { timeout: 15000 }).toBe(false);
+    expect(Number(readFileSync(statePath, "utf8"))).toBe(2);
+    expect((await snapshot()).messages.find(message => message.meetingBudget)?.meetingBudget?.state.tokens).toBe(34);
+  });
+}, 60000);
+
+it("interrupts an in-flight member at the meeting deadline", async () => {
+  await fixtureWithReplies(["Held reply." + envelope()], async ({ api, room, statePath }) => {
+    await api("PATCH", `/api/groups/${room.id}`, { meetingLimits: { time: { seconds: 5, wrapUpSeconds: 3 } } });
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "Discuss this." });
+    const snapshot = async () => (await api<{ groups: (WireGroup & { messages: Message[] })[] }>("GET", "/api/bots?messages=50")).groups.find(group => group.id === room.id)!;
+    await expect.poll(async () => (await snapshot()).messages.some(message => message.systemNotice?.kind === "dynamic-stop"), { timeout: 15000 }).toBe(true);
+    await expect.poll(async () => (await snapshot()).working, { timeout: 15000 }).toBe(false);
+    expect(Number(readFileSync(statePath, "utf8"))).toBe(1);
+  }, true);
+}, 45000);
