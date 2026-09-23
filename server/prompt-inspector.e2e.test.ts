@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
@@ -24,8 +24,22 @@ it("captures private and group turns through the real server and removes deleted
     const room = (await api("GET", `/api/threads/${group.threadId}/prompt-inspector`)).records[0];
     expect(room.botId).toBe(bot.id); expect(JSON.stringify(room.body)).toContain("Reply in this room.");
     expect((await api("GET", endpoint)).records[0].id).toBe(first[0].id);
+    const capture = join(fixture.info.dataDir, "prompt-inspector", group.threadId + ".json");
+    await expect.poll(() => { try { return JSON.parse(readFileSync(capture, "utf8"))[0]?.status; } catch { return null; } }).toBe("completed");
+    mkdirSync(capture + ".tmp");
+    const failed = await fetch(`${fixture.info.url}/api/groups/${group.id}`, { method: "DELETE", headers: { origin: fixture.info.url } });
+    expect(failed.status).toBe(500);
+    expect((await api("GET", "/api/bots?messages=0")).groups.some((item: { id: string }) => item.id === group.id)).toBe(true);
+    expect((await api("GET", `/api/threads/${group.threadId}/prompt-inspector`)).records).toEqual([]);
+    rmdirSync(capture + ".tmp");
     await api("DELETE", `/api/groups/${group.id}`);
     expect(existsSync(join(fixture.info.dataDir, "prompt-inspector", group.threadId + ".json"))).toBe(false);
+    const botCapture = join(fixture.info.dataDir, "prompt-inspector", bot.threadId + ".json");
+    mkdirSync(botCapture + ".tmp");
+    const botFailed = await fetch(`${fixture.info.url}/api/bots/${bot.id}`, { method: "DELETE", headers: { origin: fixture.info.url } });
+    expect(botFailed.status).toBe(500);
+    expect((await api("GET", "/api/bots?messages=0")).bots.some((item: { id: string }) => item.id === bot.id)).toBe(true);
+    rmdirSync(botCapture + ".tmp");
     await api("DELETE", `/api/bots/${bot.id}`);
     expect(existsSync(join(fixture.info.dataDir, "prompt-inspector", bot.threadId + ".json"))).toBe(false);
     const response = await fetch(`${fixture.info.url}${endpoint}`); expect(response.status).toBe(404);
