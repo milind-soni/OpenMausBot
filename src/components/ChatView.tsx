@@ -1,3 +1,4 @@
+import { PromptInspectorButton } from "./PromptInspector";
 import { Component, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -1250,6 +1251,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
             </button>
           )}
           <TaskPicker bot={bot} />
+          {!remoteClient && <PromptInspectorButton threadId={bot.threadId} />}
           <UsageChip bot={bot} />
           {!remoteClient && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           <CallButton bot={bot} />
