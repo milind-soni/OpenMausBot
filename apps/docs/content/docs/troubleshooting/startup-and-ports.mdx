@@ -15,6 +15,14 @@ The Electron app starts a local harness and serves the interface from the same m
 
 On macOS, packaged logs are under `~/Library/Logs/OpenMausBot`. On Windows they are under the OpenMausBot log directory in `%APPDATA%`.
 
+## Windows computer-control helper
+
+Packaged Windows builds run the computer-control helper in the background
+without opening a command window. If the desktop log reports that the
+background CUA driver is missing, reinstall the complete application package.
+Custom developer executables selected with `CUA_DRIVER_PATH` keep their own
+console behavior.
+
 ## Development port overrides
 
 Use `OMB_PORT` for a source-run harness. A packaged desktop build owns its server lifecycle and may choose a fallback if the preferred port is unavailable.
