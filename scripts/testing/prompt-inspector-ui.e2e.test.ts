@@ -11,7 +11,7 @@ import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(binary);
-if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
+if (!enabled) console.log("skipping prompt inspector UI e2e: set OMB_UI_E2E=1 to install the pinned browser");
 
 (enabled ? it : it.skip)("inspects real captured turns, compares requests, refreshes, and restores keyboard focus", async () => {
   let child: ChildProcess | undefined;
@@ -64,8 +64,13 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await click("Prompt inspector");
     await click("Changes");
     await expect.poll(snapshot).toContain("First changed line:");
+    await ui("eval", "--js", "Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async () => {} })");
+    await click("Copy view");
+    await expect.poll(snapshot).toContain("Copied");
     await click("Refresh");
     await expect.poll(snapshot).toContain("Continue with a second request.");
+    await expect.poll(snapshot).toContain("Copy view");
+    expect(await snapshot()).not.toContain('button "Copied"');
     await click("Agent input");
     await ui("type", "--ref", await target("Find in this view", ["textbox"]), "--text", "Continue with a second request.");
     await click("Next");
