@@ -1,3 +1,4 @@
+import { forgetPromptCaptures } from "./prompt-inspector.ts";
 // Bot + thread persistence. bots.json holds bot records (including the
 // thread→instance binding and per-instance resume cursors — upstream's
 // ProviderSessionDirectory, recipe step 6: persist the binding from day
@@ -1020,6 +1021,7 @@ export class Store {
    * per-thread event logs. Every delete path funnels here — task, group,
    * and bot deletion — so the logs cannot outlive the thread anywhere. */
   private deleteThreadRecord(threadId: string) {
+    forgetPromptCaptures(threadId);
     this.threads.delete(threadId);
     mdb.deleteThread(threadId);
     for (const file of [
