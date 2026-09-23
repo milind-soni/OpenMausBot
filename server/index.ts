@@ -9672,7 +9672,9 @@ async function runGroupMemberTurn(
   const roomMemory = memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace });
   // Exact records retain the user's handoff as well as the bot's replies.
   // Keep the existing visible notice when private sources enter a room.
-  const history = sharedHistory(sharedHistorySources(bot), bot, { userName, currentThreadId: threadId });
+  const history = orchestration?.roomHandoffId
+    ? { text: "", privateThreadIds: [], omitted: 0 }
+    : sharedHistory(sharedHistorySources(bot), bot, { userName, currentThreadId: threadId });
   {
     const crossing = claimRecallCrossings(threadId, history.privateThreadIds);
     if (crossing.count) {
