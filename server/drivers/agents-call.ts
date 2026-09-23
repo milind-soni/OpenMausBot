@@ -771,6 +771,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         memberIds,
         bulletin,
         responseMode: args.response_mode,
+        meetingLimits: args.meeting_limits,
         leadBotId: args.lead_bot_id,
       }),
     });
@@ -802,6 +803,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         name: roomName,
         bulletin,
         responseMode: args.response_mode,
+        meetingLimits: args.meeting_limits,
         leadBotId: args.lead_bot_id,
       }),
     });
