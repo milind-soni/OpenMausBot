@@ -1,0 +1,29 @@
+model_list:
+  - model_name: azure-gpt
+    litellm_params:
+      model: os.environ/AZURE_MODEL
+      api_base: os.environ/AZURE_OPENAI_ENDPOINT
+      api_key: os.environ/AZURE_OPENAI_API_KEY
+      api_version: os.environ/AZURE_OPENAI_API_VERSION
+  - model_name: gemini-3.8-flash
+    litellm_params:
+      model: gemini/gemini-3.8-flash
+      api_key: os.environ/GEMINI_API_KEY
+      # Codex's optional OpenAI cache hint has no Gemini equivalent.
+      additional_drop_params: [prompt_cache_key]
+  - model_name: bedrock-claude
+    litellm_params:
+      model: os.environ/BEDROCK_MODEL
+      aws_region_name: os.environ/AWS_REGION_NAME
+      additional_drop_params: [prompt_cache_key]
+
+general_settings:
+  master_key: os.environ/OPENMAUS_MODEL_GATEWAY_KEY
+  disable_spend_logs: true
+
+litellm_settings:
+  telemetry: false
+  # Codex owns retries and conversation history. Do not route a failed model
+  # to a different provider or silently replay it through another account.
+  num_retries: 0
+  request_timeout: 180

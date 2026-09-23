@@ -1,0 +1,46 @@
+# Run from the repository root, after the base compose.yaml.
+services:
+  omb:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ENGINES: "@openai/codex@0.154.0"
+    image: openmausbot-gateway:local
+    environment:
+      OPENMAUS_MODEL_GATEWAY_KEY: ${OPENMAUS_MODEL_GATEWAY_KEY:?Set a private gateway key}
+      OMB_COMPOSIO_BROKER_URL: ${OMB_COMPOSIO_BROKER_URL:-}
+      OMB_COMPOSIO_BROKER_TOKEN: ${OMB_COMPOSIO_BROKER_TOKEN:-}
+    volumes:
+      - ./deploy/gateway/configure.mjs:/opt/openmaus-gateway/configure.mjs:ro
+      - ./deploy/gateway/configure-reviewer.mjs:/opt/openmaus-gateway/configure-reviewer.mjs:ro
+
+  model-gateway:
+    build:
+      context: ./deploy/gateway
+    image: openmausbot-model-gateway:local
+    init: true
+    restart: unless-stopped
+    network_mode: service:omb
+    depends_on:
+      omb:
+        condition: service_started
+    environment:
+      OPENMAUS_MODEL_GATEWAY_KEY: ${OPENMAUS_MODEL_GATEWAY_KEY:?Set a private gateway key}
+      AZURE_MODEL: ${AZURE_MODEL:-azure/gpt-5.6-sol}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:?Set the Azure resource endpoint}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:?Set the Azure API key}
+      AZURE_OPENAI_API_VERSION: ${AZURE_OPENAI_API_VERSION:-2025-04-01-preview}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set the Google Gemini API key}
+      BEDROCK_MODEL: ${BEDROCK_MODEL:?Set bedrock/converse/ followed by your Claude model or inference-profile ID}
+      AWS_REGION_NAME: ${AWS_REGION_NAME:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_BEARER_TOKEN_BEDROCK: ${AWS_BEARER_TOKEN_BEDROCK:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 45s
+      retries: 5

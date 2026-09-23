@@ -20,6 +20,7 @@ import {
   codexNativeIncomingLogMessage,
   codexPredatesAstra,
   codexUpdateCommand,
+  type CodexConfig,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
@@ -41,6 +42,28 @@ const CONTROL_PLANE_FIXTURE = {
 };
 
 describe("CodexDriver.decodeConfig", () => {
+  it("decodes custom Responses providers and tagged local models", () => {
+    expect(CodexDriver.decodeConfig({ provider: { url: "https://models.example/v1/", models: ["org/model:latest", "org/model:latest"], apiKeyEnv: "MODEL_KEY" } }).provider)
+      .toEqual({ name: "Custom", url: "https://models.example/v1", models: ["org/model:latest"], apiKeyEnv: "MODEL_KEY" });
+    expect(CodexDriver.decodeConfig({ provider: { url: "http://[::1]:1234/v1", models: ["local"] } }).provider?.apiKeyEnv).toBeUndefined();
+  });
+
+  it.each([
+    null, false, [], {},
+    { url: "https://models.example/v1", models: [] },
+    { url: "https://models.example/v1", models: ["bad model"] },
+    { url: "https://models.example/v1", models: ["m"], apiKeyEnv: "" },
+    { url: "https://models.example/v1", models: ["m"], apiKeyEnv: "API-KEY" },
+    { url: "https://models.example/v1", models: ["m"], name: " " },
+    ...["invalid", "http://models.example/v1", "https://user:secret@models.example/v1", "https://models.example/v1?key=secret", "https://models.example/v1#fragment"].map(url => ({ url, models: ["m"] })),
+  ])("rejects invalid custom provider config %j", (provider) => {
+    expect(() => CodexDriver.decodeConfig({ provider })).toThrow();
+  });
+
+  it("rejects ambiguous custom and Company routing", () => {
+    expect(() => CodexDriver.decodeConfig({ provider: { url: "https://models.example/v1", models: ["m"] }, managed: { url: "https://company.example/v1", models: ["m"] } })).toThrow("not both");
+  });
+
   it("defaults to the codex binary with fullAuto off", () => {
     expect(CodexDriver.decodeConfig({})).toEqual({ cli: "codex", fullAuto: false });
     expect(CodexDriver.decodeConfig(undefined)).toEqual({ cli: "codex", fullAuto: false });
@@ -89,13 +112,14 @@ describe("CodexDriver turns (fake app-server)", () => {
   let scratch: string;
 
   const create = async (
-    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean } = {},
+    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; provider?: CodexConfig["provider"] } = {},
   ) => {
     if (opts.mode) process.env.FAKE_CODEX_MODE = opts.mode;
     instance = await CodexDriver.create({
       instanceId: "codex-test",
       displayName: "Codex Test",
       environment: {
+        ...(opts.provider ? { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex") } : {}),
         ...(opts.managed ? { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex"), OPENMAUSBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
         ...opts.environment,
       },
@@ -103,6 +127,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       config: {
         cli: FAKE_CLI,
         fullAuto: opts.fullAuto ?? false,
+        ...(opts.provider ? { provider: opts.provider } : {}),
         ...(opts.managed ? { managed: { url: "http://127.0.0.1:1/v1", models: ["company-codex-model"] } } : {}),
       },
     });
@@ -115,6 +140,7 @@ describe("CodexDriver turns (fake app-server)", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     delete process.env.FAKE_CODEX_MODE;
     delete process.env.FAKE_CODEX_DUMP;
     delete process.env.FAKE_CODEX_ASK_HOLD;
@@ -146,6 +172,57 @@ describe("CodexDriver turns (fake app-server)", () => {
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
+  });
+
+  it.each([false, true])("pins custom provider routing and computer MCP on start/resume (%s)", async (resume) => {
+    const provider = { name: "Fixture", url: "https://models.example/v1", models: ["org/model:latest"], apiKeyEnv: "OPENAI_API_KEY" };
+    vi.stubEnv("OPENAI_API_KEY", "ambient-key-must-not-authorize");
+    await create({ provider, mode: resume ? "resume" : "happy", environment: { OPENAI_API_KEY: "instance-fixture-key" } });
+    const dump = join(scratch, "custom-provider.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    await instance.adapter.sendTurn({
+      threadId: `custom-${resume}`, text: "Inspect the fixture desktop", cwd: scratch,
+      ...(resume ? { resumeCursor: "existing-custom-thread" } : {}),
+      integrations: {
+        localComputer: { command: "fixture-computer", args: ["--stdio"], env: { COMPUTER_FIXTURE_KEY: "computer-fixture-key" } },
+        custom: { alumnium: { command: "fixture-alumnium", args: ["mcp"], env: { ALUMNIUM_MODEL: "ollama/fixture-model" } } },
+      },
+    });
+    await expect(recorder.until(event => event.type === "turn.completed")).resolves.toMatchObject({ ok: true });
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.calls.find((call: { method: string }) => call.method === (resume ? "thread/resume" : "thread/start")).params)
+      .toMatchObject({ model: "org/model:latest", modelProvider: "openmaus_custom" });
+    expect(seen.argv).toContain('model_providers.openmaus_custom.base_url="https://models.example/v1"');
+    expect(seen.argv).toContain('model_providers.openmaus_custom.wire_api="responses"');
+    expect(seen.argv).toContain("model_providers.openmaus_custom.requires_openai_auth=false");
+    expect(seen.argv).toContain('mcp_servers.computer.command="fixture-computer"');
+    expect(seen.argv).toContain('mcp_servers.alumnium.command="fixture-alumnium"');
+    expect(seen.argv).toContain('mcp_servers.alumnium.args=["mcp"]');
+    expect(seen.env.OPENMAUSBOT_CODEX_PROVIDER_API_KEY).toBe("instance-fixture-key");
+    expect(seen.env.OPENAI_API_KEY).toBeUndefined();
+    expect(JSON.stringify(seen.argv)).not.toContain("instance-fixture-key");
+    expect(JSON.stringify(seen.argv)).not.toContain("computer-fixture-key");
+    expect(instance.models).toEqual({ default: "org/model:latest", options: [{ id: "org/model:latest", label: "org/model:latest" }] });
+    expect(await instance.snapshot()).toMatchObject({ state: "available", authenticated: true });
+    expect(await instance.snapshot()).not.toHaveProperty("account");
+    expect(instance.startAuthentication).toBeUndefined();
+    expect(instance.signOut).toBeUndefined();
+  });
+
+  it("refuses an ambient credential or an unconfigured model before launching a turn", async () => {
+    vi.stubEnv("CUSTOM_MODEL_KEY", "ambient-fixture-key");
+    await create({ provider: { name: "Fixture", url: "https://models.example/v1", models: ["m"], apiKeyEnv: "CUSTOM_MODEL_KEY" } });
+    await expect(instance.adapter.sendTurn({ threadId: "custom-no-key", text: "hi" })).rejects.toThrow("missing from the instance environment");
+    await expect(instance.adapter.sendTurn({ threadId: "custom-wrong-model", text: "hi", model: "gpt-fake-default" })).rejects.toThrow("Select a model configured");
+    expect(await instance.snapshot()).toMatchObject({ authenticated: false });
+    expect(recorder.events).toEqual([]);
+  });
+
+  it("runs a keyless local provider without ChatGPT sign-in", async () => {
+    await create({ mode: "logged-out", provider: { name: "Local", url: "http://127.0.0.1:1234/v1", models: ["local:latest"] } });
+    expect(await instance.snapshot()).toMatchObject({ authenticated: true });
+    await instance.adapter.sendTurn({ threadId: "custom-keyless", text: "hi", cwd: scratch });
+    await expect(recorder.until(event => event.type === "turn.completed")).resolves.toMatchObject({ ok: true });
   });
 
   it("names the signed-in ChatGPT account from Codex's protocol and offers sign-out", async () => {

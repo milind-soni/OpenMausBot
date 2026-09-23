@@ -120,17 +120,67 @@ function codexAstraUpdate(
 export interface CodexConfig {
   cli: string;
   fullAuto: boolean;
+  /** An instance-scoped Responses API provider used by the Codex harness. */
+  provider?: {
+    name: string;
+    url: string;
+    models: string[];
+    apiKeyEnv?: string;
+  };
   /** Ephemeral Company routing, supplied by the trusted desktop parent. */
   managed?: { url: string; models: string[] };
 }
 
 function decodeConfig(raw: unknown): CodexConfig {
   const o = (raw ?? {}) as Record<string, unknown>;
+  if (o.provider !== undefined && o.managed !== undefined) {
+    throw new Error("Configure either a custom Codex provider or Company routing, not both.");
+  }
   return {
     cli: typeof o.cli === "string" ? o.cli : "codex",
     fullAuto: o.fullAuto === true,
+    ...(o.provider !== undefined ? { provider: decodeCodexProvider(o.provider) } : {}),
     ...(o.managed && typeof o.managed === "object" ? { managed: decodeManagedCodex(o.managed) } : {}),
   };
+}
+
+function decodeCodexProvider(raw: unknown): NonNullable<CodexConfig["provider"]> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid custom Codex provider.");
+  const value = raw as Record<string, unknown>;
+  if (typeof value.url !== "string" || !Array.isArray(value.models) || !value.models.length ||
+      value.models.some(model => typeof model !== "string" || !/^[\w][\w./:+-]*$/.test(model)) ||
+      (value.name !== undefined && (typeof value.name !== "string" || !value.name.trim())) ||
+      (value.apiKeyEnv !== undefined && (typeof value.apiKeyEnv !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(value.apiKeyEnv)))) {
+    throw new Error("Custom Codex providers require a URL, model IDs, and an optional API-key environment variable name.");
+  }
+  let url: URL;
+  try { url = new URL(value.url); }
+  catch { throw new Error("Invalid custom Codex endpoint."); }
+  const loopback = url.hostname === "localhost" || url.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(url.hostname);
+  if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && loopback))) {
+    throw new Error("Custom Codex endpoints require HTTPS, or HTTP on loopback, without URL credentials, query, or fragment.");
+  }
+  return {
+    name: typeof value.name === "string" ? value.name.trim() : "Custom",
+    url: url.href.replace(/\/$/, ""),
+    models: [...new Set(value.models as string[])],
+    ...(typeof value.apiKeyEnv === "string" ? { apiKeyEnv: value.apiKeyEnv } : {}),
+  };
+}
+
+const CUSTOM_CODEX_PROVIDER = "openmaus_custom";
+const CUSTOM_CODEX_API_KEY = "OPENMAUSBOT_CODEX_PROVIDER_API_KEY";
+
+function customCodexArgs(provider: NonNullable<CodexConfig["provider"]>): string[] {
+  return [
+    "-c", `model_provider=${JSON.stringify(CUSTOM_CODEX_PROVIDER)}`,
+    "-c", `model_providers.${CUSTOM_CODEX_PROVIDER}.name=${JSON.stringify(provider.name)}`,
+    "-c", `model_providers.${CUSTOM_CODEX_PROVIDER}.base_url=${JSON.stringify(provider.url)}`,
+    "-c", `model_providers.${CUSTOM_CODEX_PROVIDER}.wire_api="responses"`,
+    "-c", `model_providers.${CUSTOM_CODEX_PROVIDER}.requires_openai_auth=false`,
+    ...(provider.apiKeyEnv ? ["-c", `model_providers.${CUSTOM_CODEX_PROVIDER}.env_key=${JSON.stringify(CUSTOM_CODEX_API_KEY)}`] : []),
+    "-c", 'cli_auth_credentials_store="ephemeral"',
+  ];
 }
 
 function decodeManagedCodex(raw: object): NonNullable<CodexConfig["managed"]> {
@@ -577,12 +627,19 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       // The harness process may hold workspace credentials (xai/box/voice
       // keys, env-injected at boot); none of them are this CLI's to see.
       stripWorkspaceCredentialEnv(env);
+      delete env[CUSTOM_CODEX_API_KEY];
+      if (config.provider?.apiKeyEnv) {
+        // Only the explicitly configured instance credential may authorize this
+        // route. An ambient key must not silently enable another billing source.
+        env[CUSTOM_CODEX_API_KEY] = input.environment[config.provider.apiKeyEnv];
+      }
       return env;
     };
     const catalogEnv = childEnv();
-    let models = config.managed ? { default: config.managed.models[0], options: config.managed.models.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
+    const configuredModels = config.provider?.models ?? config.managed?.models;
+    let models = configuredModels ? { default: configuredModels[0], options: configuredModels.map(id => ({ id, label: id })) } : STATIC_CODEX_MODELS;
     const refreshModels = async () => {
-      if (config.managed) return;
+      if (configuredModels) return;
       try {
         const resolved = await readCodexModelCatalog(catalogEnv, fetch, config.cli);
         if (resolved.options.length) models = resolved;
@@ -621,6 +678,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
     });
 
     const sendTurn = async (turn: SendTurnInput) => {
+      const customSelection = config.provider ? {
+        model: turn.model ?? config.provider.models[0], modelProvider: CUSTOM_CODEX_PROVIDER,
+      } : undefined;
+      if (config.provider && customSelection) {
+        if (!config.provider.models.includes(customSelection.model)) {
+          throw new Error("Select a model configured for this custom Codex provider.");
+        }
+        if (config.provider.apiKeyEnv && !input.environment[config.provider.apiKeyEnv]?.trim()) {
+          throw new Error(`Custom Codex provider credential ${config.provider.apiKeyEnv} is missing from the instance environment.`);
+        }
+      }
       if (config.managed) {
         // One blanket refusal hides which prerequisite broke; name it so the
         // person can fix the actual gap instead of reconnecting blind.
@@ -666,7 +734,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
-        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model))];
+        const appServerArgs = ["app-server", ...(config.provider ? customCodexArgs(config.provider) : config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model))];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
@@ -1412,6 +1480,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (cursor) {
           const resumeThread = () => request("thread/resume", {
             threadId: cursor,
+            ...customSelection,
             developerInstructions,
             ...approvalParams.thread,
           });
@@ -1450,7 +1519,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
         }
         if (!codexThreadId) {
-          const selection = config.managed ? { model: turn.model, modelProvider: "openmaus_company" } : decodeCodexSelection(turn.model);
+          const selection = customSelection ?? (config.managed ? { model: turn.model, modelProvider: "openmaus_company" } : decodeCodexSelection(turn.model));
           const startThread = () => request("thread/start", {
               developerInstructions,
               cwd: turn.cwd ?? homedir(),
@@ -1562,6 +1631,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       );
     });
     if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
+    if (config.provider) return {
+      state: "available", version,
+      // This describes credential setup, not a successful endpoint probe.
+      authenticated: !config.provider.apiKeyEnv || Boolean(input.environment[config.provider.apiKeyEnv]?.trim()),
+    };
     if (config.managed) return { state: "available", version, authenticated: Boolean(input.environment.OPENMAUSBOT_COMPANY_API_KEY && input.environment.CODEX_HOME), billing: "metered" };
     const authenticated = await new Promise<boolean>((resolve) => {
       execCli(config.cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) =>
@@ -1591,10 +1665,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       return models;
     },
     refreshModels,
-    startAuthentication: () => authentication.start(),
-    getAuthentication: (flowId) => authentication.get(flowId),
-    cancelAuthentication: () => authentication.cancel(),
-    signOut: () => authentication.signOut(),
+    ...(!config.provider ? {
+      startAuthentication: () => authentication.start(),
+      getAuthentication: (flowId: string) => authentication.get(flowId),
+      cancelAuthentication: () => authentication.cancel(),
+      signOut: () => authentication.signOut(),
+    } : {}),
     snapshot,
     adapter: {
       provider: DRIVER_KIND,

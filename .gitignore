@@ -36,6 +36,7 @@ cloudflare/control-plane/worker-configuration.d.ts
 
 # per-tenant deploy settings (see deploy/.env.example)
 deploy/.env
+deploy/gateway/.env
 deploy/podman/.env
 deploy/podman/.env.*
 !deploy/podman/.env.example
