@@ -26,7 +26,9 @@ final class ThreadNavigationUITests: XCTestCase {
         openGmail(in: app)
 
         let topBarThreads = app.buttons["header-threads"]
-        XCTAssertTrue(topBarThreads.waitForExistence(timeout: 5))
+        // The chat header settles late on a loaded CI runner. 5s timed out
+        // here while the thread open itself was correct, same as assertThread.
+        XCTAssertTrue(topBarThreads.waitForExistence(timeout: 10))
         topBarThreads.tap()
         let iCloud = app.buttons["thread-preview-icloud"]
         XCTAssertTrue(iCloud.waitForExistence(timeout: 5))

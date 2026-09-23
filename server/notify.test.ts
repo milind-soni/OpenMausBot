@@ -25,6 +25,18 @@ describe("buildNotification", () => {
       .toBe("Scout couldn't start");
   });
 
+  it("announces a delegation settle as a resume with results", () => {
+    expect(buildNotification("delegation-settled", bot, "thread-1", "Results in from Atlas")).toMatchObject({
+      kind: "delegation-settled",
+      botId: "bot-1",
+      threadId: "thread-1",
+      title: "Scout resumed with results",
+      body: "Results in from Atlas",
+    });
+    // the toggle rules this frame like every other
+    expect(buildNotification("delegation-settled", { ...bot, notifications: false }, "thread-1", "Results in from Atlas")).toBeNull();
+  });
+
   it("stays silent for a bot whose notifications are off", () => {
     const quiet = { ...bot, notifications: false };
     for (const kind of ["approval", "question", "done", "routine-failed", "turn-failed"] as const) {

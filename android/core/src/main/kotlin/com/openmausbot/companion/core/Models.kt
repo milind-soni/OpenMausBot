@@ -204,7 +204,7 @@ data class Message(
     val queueId: String? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
-    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, UNKNOWN }
+    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, UNKNOWN }
 
     @Serializable(with = MessageRoleSerializer::class)
     enum class Role { BOT, USER }
@@ -218,6 +218,7 @@ object MessageKindSerializer : KSerializer<Message.Kind> {
         "options" -> Message.Kind.OPTIONS
         "activity" -> Message.Kind.ACTIVITY
         "screen" -> Message.Kind.SCREEN
+        "digest" -> Message.Kind.DIGEST
         else -> Message.Kind.UNKNOWN
     }
 

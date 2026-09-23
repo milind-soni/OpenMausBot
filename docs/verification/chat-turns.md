@@ -160,15 +160,16 @@ the pending job to catch up.
 
 ```sh
 pnpm exec vitest run server/delegations.test.ts server/peer-roster.test.ts server/drivers/agents-proxy.test.ts
-pnpm exec vitest run server/independent-threads-api.test.ts -t 'holds a delegation behind an approval'
+pnpm exec vitest run server/independent-threads-api.test.ts -t "queues coordinated work behind a peer's approval"
 pnpm exec vitest run server/comms.test.ts
 ```
 
 The mailbox API fixture uses the isolated launcher and per-model fake-engine
-gates. A peer waits on a real approval-broker card; a Chief delegates through
-its captured turn capability and finishes. The roster reports waiting on the
-user, exactly one waiting chip appears, approving releases the peer, and one
-attributed result returns to the Chief without another user prompt. Exact
+gates. A peer waits on a real approval-broker card. That card keeps fresh
+coordinated work queued even when the peer still has a free thread slot. A
+spare slot admits work only beside a sibling that is actually running.
+Approving the card releases the queued work, and one attributed result
+returns to the Chief without another user prompt. Exact
 control commands, waits, transcripts and the server log path are retained in
 the fixture's `.log.json` evidence, without capability tokens. Queue-unit
 tests cover expiry, multi-job restart recovery, repeated busy periods and

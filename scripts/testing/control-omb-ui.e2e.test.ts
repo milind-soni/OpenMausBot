@@ -160,10 +160,13 @@ describe("control-omb ui drives the real renderer", () => {
     await click("Connections");
     await type("fixture-saved-key");
     await save();
-    await expect.poll(() => evaluate(`${input}.value`)).toBe("");
+    // The Connections panel re-renders after navigation and keystrokes, so a
+    // loaded runner can briefly detach the key field or its Test button; poll
+    // for the settled state with a budget that outlasts a re-render.
+    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("");
     await click("Appearance");
     await click("Connections");
-    await expect.poll(() => evaluate(`${testButton}?.disabled`)).toBe(false);
+    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(false);
     await click("Test");
     await expect.poll(() => evaluate("window.keyTests")).toEqual([{ provider: "openaiCompat" }]);
     await expect.poll(verdict).toBe("Saved key: Model catalog reachable: fixture-model. Authentication and chat not verified.");
@@ -175,8 +178,8 @@ describe("control-omb ui drives the real renderer", () => {
     await expect.poll(verdict).toBe("Unsaved key — save it to use it. Model catalog reachable: fixture-model. Authentication and chat not verified.");
     for (const erased of ["", "   "]) {
       await type(erased);
-      expect(await evaluate(`${input}.value`)).toBe(erased);
-      expect(await evaluate(`${testButton}.disabled`)).toBe(true);
+      await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe(erased);
+      await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(true);
       await evaluate(`${testButton}.click(); true`);
       expect(await evaluate("window.keyTests.length")).toBe(2);
     }
@@ -189,14 +192,14 @@ describe("control-omb ui drives the real renderer", () => {
     await evaluate("window.rejectKeySave = true");
     await save();
     await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot).toContain("Fixture save rejected");
-    expect(await evaluate(`${input}.value`)).toBe("fixture-replacement-key");
+    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("fixture-replacement-key");
     await type("");
-    expect(await evaluate(`${testButton}.disabled`)).toBe(true);
+    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(true);
     await type("fixture-replacement-key");
     await evaluate("window.rejectKeySave = false");
     await save();
-    await expect.poll(() => evaluate(`${input}.value`)).toBe("");
-    await expect.poll(() => evaluate(`${testButton}.disabled`)).toBe(false);
+    await expect.poll(() => evaluate(`${input}?.value ?? null`), { timeout: 10_000 }).toBe("");
+    await expect.poll(() => evaluate(`${testButton}?.disabled ?? null`), { timeout: 10_000 }).toBe(false);
     await click("Test");
     await expect.poll(() => evaluate("window.keyTests")).toEqual([
       { provider: "openaiCompat" }, { provider: "openaiCompat", key: "fixture-draft-key" }, { provider: "openaiCompat" },

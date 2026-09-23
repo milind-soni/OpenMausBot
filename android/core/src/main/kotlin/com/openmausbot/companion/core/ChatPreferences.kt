@@ -117,6 +117,7 @@ internal fun previewText(message: Message): String = when (message.kind) {
     }
     Message.Kind.ACTIVITY -> message.tool?.name.orEmpty()
     Message.Kind.SCREEN -> "Screenshot"
+    Message.Kind.DIGEST -> ""
     Message.Kind.UNKNOWN -> message.text.orEmpty()
 }
 

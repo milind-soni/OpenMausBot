@@ -1,7 +1,7 @@
 // Real OpenCode, disposable home, deterministic loopback model. No user data,
 // real credentials or external model requests are used.
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,10 +24,19 @@ process.env = {
 };
 let calls = 0;
 let readSucceeded = false;
+let failNextRequest = false;
+let failedRequests = 0;
 const server = createServer(async (req, res) => {
   let body = "";
   for await (const chunk of req) body += chunk;
   if (req.method !== "POST" || !req.url?.endsWith("/chat/completions")) { res.writeHead(404).end(); return; }
+  if (failNextRequest) {
+    failNextRequest = false;
+    failedRequests++;
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: { message: "Synthetic provider failure", type: "invalid_request_error" } }));
+    return;
+  }
   const payload = JSON.parse(body);
   const toolResult = payload.messages.at(-1)?.role === "tool";
   readSucceeded ||= toolResult && JSON.stringify(payload.messages.at(-1)).includes("OMB_EXTERNAL_READ_RECEIPT");
@@ -40,10 +49,11 @@ const server = createServer(async (req, res) => {
 await new Promise<void>(done => server.listen(0, "127.0.0.1", done));
 const port = (server.address() as {port:number}).port;
 writeFileSync(join(workspace, "opencode.json"), JSON.stringify({
+  enabled_providers: ["fixture"], autoupdate: false, share: "disabled",
   provider: { fixture: { npm: "@ai-sdk/openai-compatible", name: "Offline fixture", options: { baseURL: `http://127.0.0.1:${port}/v1`, apiKey: "fixture-only" }, models: { fixture: { name: "Fixture", limit: {context:32000,output:1000} } } } },
   model: "fixture/fixture", permission: { external_directory: "ask" },
 }));
-const { ensureDirs } = await import("../server/config.ts");
+const { ensureDirs, NATIVE_DIR } = await import("../server/config.ts");
 const { createOpenCodeDriver } = await import("../server/drivers/acp/opencode-go.ts");
 const { recordEvents } = await import("../server/testing/events.ts");
 ensureDirs();
@@ -71,6 +81,29 @@ try {
     assert.ok(resumeCursor, "The next turn must exercise session resumption");
     console.log(JSON.stringify({approvalMode,readSucceeded,resumed:true}));
   }
+
+  // Use the real provider's ACP error path, then retry explicitly in the same
+  // conversation. No hidden replay: a failed turn must finish before recovery.
+  failNextRequest = true;
+  const failed = await instance.adapter.sendTurn({threadId:"fixture",text:"Read the receipt again.",cwd:workspace,model:"fixture/fixture",approvalMode:"full",resumeCursor});
+  const failure = await recorder.until(e => e.turnId === failed.turnId && e.type === "turn.completed", 30000);
+  assert.ok(failure.type === "turn.completed" && !failure.ok, JSON.stringify(failure));
+  assert.equal(failedRequests, 1);
+  assert.ok(recorder.events.some(e => e.turnId === failed.turnId && e.type === "runtime.error"));
+  assert.equal(instance.adapter.hasSession("fixture"), false, "The failed turn must release the thread");
+  const nativeEvents = readFileSync(join(NATIVE_DIR, "fixture.ndjson"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  assert.equal(nativeEvents.filter(event => event.msg?.close === "rpc-failure").length, 1, "Retire the failed ACP process");
+
+  readSucceeded = false;
+  const retried = await instance.adapter.sendTurn({threadId:"fixture",text:"Read the receipt now.",cwd:workspace,model:"fixture/fixture",approvalMode:"full",resumeCursor});
+  const recovered = await recorder.until(e => e.turnId === retried.turnId && e.type === "turn.completed", 30000);
+  assert.ok(recovered.type === "turn.completed" && recovered.ok, JSON.stringify(recovered));
+  assert.equal(readSucceeded, true);
+  const resumed = recorder.events.find(e => e.turnId === retried.turnId && e.type === "session.started");
+  assert.ok(resumed?.type === "session.started");
+  assert.equal(resumed.sessionId, resumeCursor, "Recovery must retain the real provider conversation");
+  assert.equal(recorder.events.filter(e => e.turnId === failed.turnId && e.type === "turn.completed").length, 1);
+  console.log(JSON.stringify({providerFailureReported:true,explicitRetryRecovered:true,sameSession:true}));
 } finally {
   recorder.stop();
   await instance.dispose();

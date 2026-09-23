@@ -12,7 +12,12 @@ export type NotifyKind =
   /** A run failed, stalled or could not start and no Chief of Staff was
    * there to take it: the person is the one who has to look. */
   | "incident"
-  | "takeover";
+  | "takeover"
+  /** A delegated room request settled and the coordinator auto-resumed with
+   * the results. The delegated turn and the resume are both internal, so
+   * without this frame the parent conversation can sit in silence for the
+   * minutes a huge context takes to reach its first token. */
+  | "delegation-settled";
 
 export interface Notification {
   kind: NotifyKind;
