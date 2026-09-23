@@ -23,6 +23,7 @@ import { activateExistingWindow, releaseSingleInstanceLock } from "./single-inst
 import { pollServerIdentity } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
+import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
 import { collisionFreeDownloadPath, defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
@@ -101,7 +102,9 @@ let desktopViewerOwner = null;
 let desktopViewerContextId = null;
 let desktopWorkspaceManager = null;
 let desktopWorkspaceOwner = null;
-let pendingPackageInstallUrl = packageUrlFromCommandLine(process.argv);
+let pendingOrganizationEntry = takeOrganizationDeepLink(process.argv);
+let pendingPackageInstallUrl = pendingOrganizationEntry ? null : packageUrlFromCommandLine(process.argv);
+let organizationEntryReady = false;
 let mainWindow = null;
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
@@ -239,11 +242,15 @@ function queuePackageInstall(rawLink) {
 }
 
 app.on("open-url", (event, url) => {
-  if (!queuePackageInstall(url)) return;
+  if (!queueOrganizationEntry(url) && !queuePackageInstall(url)) return;
   event.preventDefault();
 });
 
 app.on("second-instance", (_event, commandLine) => {
+  if (takeOrganizationDeepLink(commandLine)) {
+    queueOrganizationEntry("openmausbot://organization");
+    return;
+  }
   const packageUrl = packageUrlFromCommandLine(commandLine);
   if (packageUrl) pendingPackageInstallUrl = packageUrl;
   activateExistingWindow(BrowserWindow.getAllWindows());
@@ -1591,7 +1598,7 @@ ipcMain.on("desktop:unread-count", (event, value) => {
 // The app switches by loading the chosen server's own UI (electron/menu.mjs).
 // Only {id, name, origin} is stored here; the session credential is the
 // HttpOnly cookie /pair set for that origin, kept by Chromium's cookie jar.
-const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, withActive, withEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary } = environmentsModule;
+const { LOCAL_ID, activeEnvironment, allowedOrigins, parseEnvironments, parseHostedWorkspaceLink, serializeEnvironments, withActive, withEnvironment, withoutEnvironment, workspaceMenuTemplate, workspaceNavigationAllowed, workspaceSenderAllowed, workspaceSummary, workspaceWindowTitle } = environmentsModule;
 let environmentsState = { environments: [], activeId: LOCAL_ID };
 let computerSharing;
 const sharingPrompts = new Set();
@@ -1707,6 +1714,7 @@ function refreshApplicationMenu() {
       onSwitch: (id) => void workspaceMenuAction(() => switchEnvironment(id)),
       onAddFromClipboard: () => void addServerFromClipboard(),
       onConnect: () => void workspaceMenuAction(openWorkspaceSettings),
+      onOrganizationSignIn: () => queueOrganizationEntry("openmausbot://organization"),
       onForget: (id) => void workspaceMenuAction(() => forgetEnvironment(id)),
       onOpenSettings: () => {
         if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:open-settings");
@@ -1719,6 +1727,7 @@ function persistEnvironments(next) {
   writeEnvironments(next);
   environmentsState = next;
   refreshApplicationMenu();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
 }
 
 async function workspaceMenuAction(action) {
@@ -1737,6 +1746,63 @@ function switchEnvironment(id) {
   if (id === environmentsState.activeId || (id !== LOCAL_ID && !environmentsState.environments.some((entry) => entry.id === id))) return;
   persistEnvironments(withActive(environmentsState, id));
   navigateMainWindow(activeOrigin());
+}
+
+const organizationEntry = createOrganizationEntry({
+  readState: () => ({ environments: environmentsState, remoteAccess: desktopRemoteAccess,
+    restartIntent: organizationRestartIntent(secureCredentialState?.read() ?? secureCredentials) }),
+  confirm: async ({ kind, name, origin }) => {
+    const { response } = await dialog.showMessageBox({
+      type: "question",
+      buttons: [kind === "companion" ? "Disconnect and restart locally" : "Use this computer", "Cancel"],
+      defaultId: 1, cancelId: 1,
+      message: kind === "companion" ? `Disconnect from ${name} to sign in locally?` : `Leave ${name} and sign in on this computer?`,
+      detail: `${origin}\n\nOrganisation sign-in connects company models to this computer's local workspace. ${kind === "companion" ? "This disconnects desktop companion access and restarts the app. You can pair again later." : "The hosted connection stays saved and can be selected again from the Server menu."} No remote bots, conversations or provider accounts are moved or deleted.`,
+    });
+    return response === 0;
+  },
+  saveEnvironments: persistEnvironments,
+  disconnectAndRemember: async expected => {
+    await updateSecureCredentialDocument(credentials => {
+      const current = desktopCompanionAccess(credentials);
+      if (!current || current.endpoint !== expected.endpoint || current.deviceId !== expected.deviceId || current.token !== expected.token) {
+        throw new Error("The companion connection changed. Choose organisation sign-in again.");
+      }
+      return withOrganizationRestartIntent(credentials);
+    });
+    desktopRemoteAccess = null;
+  },
+  clearRestartIntent: () => updateSecureCredentialDocument(credentials =>
+    organizationRestartIntent(credentials) && !desktopCompanionAccess(credentials)
+      ? withoutOrganizationRestartIntent(credentials) : credentials),
+  openLocalSettings: async () => {
+    if (!app.isPackaged) throw new Error("Organisation sign-in requires the installed desktop app.");
+    if (!serverReady) throw new Error("The local workspace is unavailable. Restart the app and try organisation sign-in again.");
+    if (desktopRemoteAccess || activeEnvironment(environmentsState)) throw new Error("Choose this computer before signing in with your organisation.");
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
+    if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) {
+      win.webContents.send("app:open-settings", "organization");
+    } else {
+      await win.loadURL(`${rendererOrigin()}/?desktop-settings=organization`);
+    }
+  },
+  relaunch: relaunchAfterDesktopRemoteChange,
+});
+
+function queueOrganizationEntry(link) {
+  if (!isOrganizationDeepLink(link)) return false;
+  pendingOrganizationEntry = true;
+  activateExistingWindow(BrowserWindow.getAllWindows());
+  void deliverOrganizationEntry();
+  return true;
+}
+
+async function deliverOrganizationEntry() {
+  if (!organizationEntryReady || !pendingOrganizationEntry) return false;
+  pendingOrganizationEntry = false;
+  let delivered = false;
+  await workspaceMenuAction(async () => { delivered = await organizationEntry.request(); });
+  return delivered;
 }
 
 function openWorkspaceSettings(computerId) {
@@ -1866,7 +1932,7 @@ function showContextMenu(win, params) {
  *
  * @returns {void}
  */
-function createWindow() {
+function createWindow({ deferNavigation = false } = {}) {
   const waitsForSkinSync = process.platform === "win32";
   const primary = screen.getPrimaryDisplay();
   const displays = [primary, ...screen.getAllDisplays().filter((display) => display.id !== primary.id)];
@@ -1897,6 +1963,12 @@ function createWindow() {
     },
   });
   mainWindow = win;
+  win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
+  win.webContents.on("page-title-updated", event => {
+    if (!desktopRemoteAccess && !activeEnvironment(environmentsState)) return;
+    event.preventDefault();
+    win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
+  });
   attachUpdaterWindow(win);
   if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
@@ -2093,6 +2165,8 @@ function createWindow() {
 
   const remote = activeEnvironment(environmentsState);
   if (!serverReady && (desktopRemoteAccess || (app.isPackaged && !remote))) serverUnavailableWindows.add(win);
+  // The confirmed native organisation action supplies the fixed local URL.
+  if (deferNavigation) return win;
   if (desktopRemoteAccess) {
     win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : buildErrorPage({ allPortsOccupied: serverStartConflictOnly }));
   } else if (remote) {
@@ -2392,7 +2466,9 @@ function requireMainWindowSender(event) {
 
 function relaunchAfterDesktopRemoteChange() {
   const timer = setTimeout(() => {
-    app.relaunch();
+    // Electron's default uses its original native argv, not the JS array
+    // from which we consumed the one-shot organisation action.
+    app.relaunch({ args: process.argv.slice(1) });
     app.exit(0);
   }, 250);
   timer.unref?.();
@@ -2406,7 +2482,7 @@ ipcMain.handle("desktop-remote:pair", localOnly("desktop-remote:pair", async (ev
     code,
     deviceName: `${installationDisplayName()} desktop`,
   });
-  await updateSecureCredentialDocument((credentials) => withDesktopCompanionAccess(credentials, access));
+  await updateSecureCredentialDocument((credentials) => withoutOrganizationRestartIntent(withDesktopCompanionAccess(credentials, access)));
   desktopRemoteAccess = access;
   relaunchAfterDesktopRemoteChange();
   return publicDesktopRemoteState();
@@ -2436,6 +2512,7 @@ const workspaceOnly = (handler) => (event, ...args) => {
   return handler(event, ...args);
 };
 const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnly(handler));
+ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));
 ipcMain.handle("organization:cancel", localWorkspaceOnly("organization:cancel", () => ensureManagedDesktop().cancelEnrollment()));
@@ -2825,7 +2902,13 @@ app.whenReady().then(async () => {
   // The outbound connector never starts while computer sharing is off: no
   // poll loop, no registration, no grant replay from disk.
   void refreshSharedComputersAllowed().then((allowed) => { if (allowed) sharingController().start(); });
-  createWindow();
+  let restoredOrganizationEntry = false;
+  await workspaceMenuAction(async () => { restoredOrganizationEntry = await organizationEntry.restore(); });
+  organizationEntryReady = true;
+  // A cold-start action owns its first navigation. Starting the default load
+  // first would let the action abort that unawaited navigation immediately.
+  const deliveredOrganizationEntry = await deliverOrganizationEntry();
+  if (!restoredOrganizationEntry && !deliveredOrganizationEntry && (!mainWindow || mainWindow.isDestroyed())) createWindow();
   // Reconcile incomplete setup and resume interrupted sign-out only after the
   // local app is usable. This background network work never gates LAN pairing
   // or the first window.

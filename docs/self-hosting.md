@@ -602,6 +602,67 @@ CSV export gain a **billable** column next to the provider's cost. Both are
 plain settings in `config.json` (`budgets`, `billing`) and through
 `PUT /api/config`.
 
+## A bot that also runs outside the server
+
+Some engines have their own long-running front door — a Hermes Agent Telegram
+gateway, a Slack bot, an OpenClaw session. That process is the same bot with
+the same workspace and memory, but the server did not spawn it, so it holds
+none of the turn-scoped capabilities the peer-comms tools need and cannot ask
+or delegate to its teammates.
+
+Give it a standing one with `external-runtimes.json` in the data directory,
+mapping the bot's id to a secret of at least 32 characters and one existing
+thread owned by that bot. Use the bot and task `threadId` from the local
+`GET /api/bots` response; selecting a different thread in the sidebar will
+not change this binding. This connects peer communications, not the external
+engine's filesystem or login configuration.
+
+For a **new** file (add entries to the existing JSON instead if already set up):
+
+```sh
+umask 077
+BOT_ID=your-bot-id
+THREAD_ID=your-existing-thread-id
+TOKEN=$(openssl rand -hex 32)
+printf '{ "%s": {"token":"%s","threadId":"%s"} }\n' "$BOT_ID" "$TOKEN" "$THREAD_ID" > ~/.openmausbot/external-runtimes.json
+chmod 600 ~/.openmausbot/external-runtimes.json
+```
+
+Keep the file private (`600` on Unix; restrict its Windows file permissions).
+A Unix file other users can access is ignored with a warning. It is read on
+demand, so adding, removing or rotating a token needs no restart, including
+requests waiting on a body, approval or status poll. Use a different secret
+for each bot. Deleting or archiving the bound thread disables its token; it
+never silently moves to another conversation. A bare token without `threadId`
+is rejected, including on bots that currently have just one thread.
+
+The runtime runs the bundled MCP bridge from the source checkout with the same
+bot, thread and token (replace the port with your server's actual address):
+
+```sh
+OMB_HARNESS_URL=http://127.0.0.1:8799 OMB_BOT_ID=$BOT_ID OMB_THREAD_ID=$THREAD_ID \
+  OMB_COMMS_TOKEN=$TOKEN OMB_EXTERNAL_RUNTIME=1 \
+  node --experimental-strip-types server/drivers/agents-proxy.ts
+```
+
+Scope is deliberately narrow: the token is an *agents* capability for that
+bot's pinned thread only, and the server accepts just four routes with it — list
+peers, ask, delegate, and read the status of its own delegations. Opening
+threads, creating bots or rooms, skills, memory and every other internal route
+answer 403. External mode advertises only `list_bots`, `ask_bot`, `delegate_bot`,
+`check_delegation` and `wait_delegation`. It can check a delegation from the
+same long-running process without inventing a turn end. The server still
+enforces peer access and approval settings. An idle source starts dispatch
+immediately; a busy teammate is queued until available. Regular in-app turns
+keep their existing dispatch timing.
+
+The credentials stay on this server and are excluded from workspace backups;
+restoring a backup preserves destination registrations. Never put this token
+in chat or source control. Everything else the server offers still needs the
+owner's session or a per-turn capability.
+
+Verification: [external runtime fixture](verification/external-runtime.md).
+
 ## Updating
 
 For the npm service, [install the chosen new version](deploy-vps.md#update)

@@ -31,6 +31,9 @@ export function OrganizationSettings() {
   };
 
   useEffect(() => {
+    // This acknowledges only the rendered destination, never enrollment.
+    // Failure leaves the native restart intent available on the next launch.
+    void bridge?.settingsOpened?.().catch(() => {});
     const current = ++generation.current;
     const initialRevision = revision.current;
     const receive = (next: ManagedDesktopState) => {

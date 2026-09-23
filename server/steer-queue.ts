@@ -19,6 +19,7 @@
 
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import type { ResolvedSender } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 
 /** The slice of Store this module needs — narrow so tests can fake it. */
@@ -44,6 +45,9 @@ interface QueueEntry {
      * a queue is a delay, not a person sitting down at the keyboard. */
     unattended?: boolean;
     peerAsk?: Message["peerAsk"];
+    /** The person who sent the words: a queue is a delay, not a change of
+     * author, so the drained line names them like an immediate send would. */
+    sender?: ResolvedSender;
   }>;
 }
 
@@ -99,7 +103,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean; peerAsk?: Message["peerAsk"] } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -115,6 +119,7 @@ export function queueSteeredMessage(
     reason: options.reason,
     unattended: options.unattended,
     peerAsk: options.peerAsk,
+    sender: options.sender,
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   entry.items.push(item);
@@ -135,6 +140,13 @@ export function queuedThreadPosition(botId: string, threadId: string): number | 
     if (candidate === threadId) return position;
   }
   return null;
+}
+
+/** Any queued correction supersedes a tool-planned continuation, whether it
+ * waits for this thread's turn or for the bot's shared capacity. */
+export function hasQueuedSteeredMessages(botId: string, threadId: string): boolean {
+  const entry = queues.get(threadId);
+  return entry?.botId === botId && entry.items.length > 0;
 }
 
 /** Drain every queue whose task is idle: append the held lines (leaf is now
@@ -188,6 +200,7 @@ export function drainSteeredMessages(
           sendId: item.sendId,
           queueId: item.messageId,
           peerAsk: item.peerAsk,
+          sender: item.sender,
         }),
       );
     }

@@ -72,6 +72,13 @@ function workspaceSummary(state) {
   return active ? { local: false, name: active.name, origin: active.origin } : { local: true, name: "This computer" };
 }
 
+/** Native identity must not depend on a hosted renderer's version/title. */
+function workspaceWindowTitle(state, companion) {
+  if (companion) return `OpenMausBot — Connected to: ${companion.serverName} (${new URL(companion.endpoint).host})`;
+  const active = activeEnvironment(state);
+  return active ? `OpenMausBot — Hosted: ${active.name} (${new URL(active.origin).host})` : "OpenMausBot";
+}
+
 /** Renderer navigation stays in the selected workspace. Switching is a main
  * process action; a cloud page must not navigate itself onto the local bridge. */
 function workspaceNavigationAllowed(url, state, localOrigin) {
@@ -199,4 +206,5 @@ module.exports = {
   workspaceNavigationAllowed,
   workspaceSenderAllowed,
   workspaceSummary,
+  workspaceWindowTitle,
 };

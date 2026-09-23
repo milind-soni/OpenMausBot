@@ -79,6 +79,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
       interruptCalls.push(threadId); started.get(threadId)!.resolve(); return interrupted.get(threadId)!.promise;
     } } }) },
     turnResourceOwners: owners, directTurnGenerationByThread: generations, directTurnBots: directBots, groupSpeakers: speakers,
+    directRequestOwners: new Map(),
     autoVmClaims,
     turnResources: { release() {} }, settlingResourceOwners: new Map(), turnComputerResources: new Map(), teamComputerTurns: new Map(),
     roomHandoffs: { stopAwaitingDirect() {} }, noteTeammatesLeftRunning() {},
@@ -230,7 +231,7 @@ it("reattaches rebuilt personal providers before a Company restore failure", asy
       load: async () => { order.push("load-personal"); },
       instances: () => [personal],
     },
-    instanceConfigs: () => ({ personal: { driver: "fake" } }), cfg: {},
+    providerConfigs: () => ({ personal: { driver: "fake" } }), decorateHostedProvider: undefined,
     managedDesktop: { restore: async () => { order.push("restore-company"); throw new Error("Fixture Company restore failure"); } },
   });
   vm.runInContext(reloadProvidersCode, context, { filename: "index.ts (provider reload fixture)" });

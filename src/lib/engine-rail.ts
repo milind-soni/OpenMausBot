@@ -3,6 +3,18 @@
 // payloads stay in the top group. VibeCoder would join Local later.
 import type { InstanceInfo } from "@/state/store";
 
+/** The picker is for usable connections; the full catalog stays in Settings.
+ * A signed-out CLI can still run its configured custom/local models. */
+export function configuredModelInstances(instances: readonly InstanceInfo[]): InstanceInfo[] {
+  return instances.flatMap((instance) => {
+    if (instance.snapshot.state !== "available") return [];
+    const options = instance.access !== "custom" && instance.snapshot.authenticated === false
+      ? instance.models.options.filter((option) => option.custom)
+      : instance.models.options;
+    return options.length ? [{ ...instance, models: { ...instance.models, options } }] : [];
+  });
+}
+
 export function isCustomOnly(instance: { access?: InstanceInfo["access"] } | undefined): boolean {
   return instance?.access === "custom";
 }

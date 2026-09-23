@@ -18,6 +18,43 @@ async function fixture(test: (engine: RoomHandoffs, hooks: RoomHandoffHooks, fil
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe("addressed room request tree", () => {
+  it("starts independent work before its author settles, but resumes only after settlement", () => fixture(async (engine, hooks) => {
+    const source = { botId: "chief", threadId: "chief-chat" };
+    const child = engine.enqueue(source, "turn", undefined, { botId: "builder", threadId: "builder-chat" }, "build", "Build it").node;
+    engine.tick(); await flush(); engine.tick();
+    expect(child.status).toBe("completed");
+    expect(engine.nodes.get("turn")?.status).toBe("source");
+    expect(hooks.run).toHaveBeenCalledTimes(1);
+    engine.sourceSettled("turn", false);
+    engine.tick(); await flush();
+    expect(hooks.run).toHaveBeenCalledTimes(2);
+    expect(engine.nodes.get("turn")?.status).toBe("completed");
+  }));
+  it("keeps same-room work queued until the current speaker settles", () => fixture(async (engine, hooks) => {
+    const child = engine.enqueue(addr("A"), "turn", undefined, { ...addr("A"), botId: "peer" }, "review", "Review it").node;
+    engine.tick(); await flush();
+    expect(child.status).toBe("queued");
+    expect(hooks.run).not.toHaveBeenCalled();
+    engine.sourceSettled("turn", true); engine.tick(); await flush();
+    expect(child.status).toBe("completed");
+  }));
+  it.each([false, true])("keeps accepted nested work when its lead fails (throws: %s)", throws => fixture(async (engine, hooks) => {
+    const chief = { botId: "chief", threadId: "chief" };
+    const lead = { botId: "lead", threadId: "lead" };
+    hooks.run = vi.fn(async (node, resumed) => {
+      if (node.botId === lead.botId && !resumed) {
+        engine.enqueue(lead, "unused", node.id, { botId: "reviewer", threadId: "reviewer" }, "review", "Verify it");
+        if (throws) throw new Error("Lead provider disconnected");
+        return { ok: false, text: "Lead provider disconnected" };
+      }
+      return { ok: true, text: "Verified result" };
+    });
+    engine.enqueue(chief, "source", undefined, lead, "build", "Build it");
+    engine.sourceSettled("source", true);
+    for (let i = 0; i < 8; i++) { engine.tick(); await flush(); }
+    expect([...engine.nodes.values()].every(node => node.status === "completed")).toBe(true);
+    expect(hooks.run).toHaveBeenCalledTimes(4);
+  }));
   it("treats group-less tasks as bounded work, deduplicates pinned threads and rejects direct or mixed cycles", () => fixture(engine => {
     const source = { botId: "clive", threadId: "clive-chat" };
     const target = { botId: "lead", threadId: "lead-task" };
@@ -109,7 +146,7 @@ describe("addressed room request tree", () => {
     engine.enqueue(addr("X"), "other", undefined, addr("Y"), "work", "build", false, false, "x".repeat(20_000));
     expect(engine.nodes.get("other")?.text).toHaveLength(12_000);
   }));
-  it("releases the middle turn before starting its child, then returns and resumes both ancestors", () => fixture(async (engine, hooks) => {
+  it("starts independent children immediately, then returns and resumes both ancestors", () => fixture(async (engine, hooks) => {
     const order: string[] = [];
     hooks.run = async (node, resumed) => {
       order.push(`${node.groupId}:${resumed}`);
@@ -117,7 +154,7 @@ describe("addressed room request tree", () => {
       return { ok: true, text: `${node.groupId} done` };
     };
     engine.enqueue(addr("A"), "turn", undefined, addr("B"), "develop", "build");
-    engine.tick(); expect(order).toEqual([]);
+    engine.tick(); expect(order).toEqual(["B:false", "C:false"]);
     engine.sourceSettled("turn", true);
     for (let i = 0; i < 12; i++) { engine.tick(); await flush(); }
     expect(order).toEqual(["B:false", "C:false", "B:true", "A:true"]);
@@ -168,10 +205,10 @@ describe("addressed room request tree", () => {
     }
     expect(() => engine.enqueue(source, "second-root", parentId, addr("too-deep"), "work", "build")).toThrow("depth");
   }));
-  it("cancels queued work when its source fails and never runs a revoked route", () => fixture(async (engine, hooks) => {
+  it("retains accepted work when its source fails but never runs a revoked route", () => fixture(async (engine, hooks) => {
     engine.enqueue(addr("A"), "turn", undefined, addr("B"), "work", "build");
     engine.sourceSettled("turn", false); engine.tick(); await flush();
-    expect(hooks.run).not.toHaveBeenCalled();
+    expect(hooks.run).toHaveBeenCalledTimes(1);
     const { node } = engine.enqueue(addr("C"), "turn2", undefined, addr("D"), "work", "build");
     engine.sourceSettled("turn2", true);
     hooks.validate = n => n.id === node.id ? "route revoked" : undefined;

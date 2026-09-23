@@ -346,6 +346,7 @@ struct ChatView: View {
         .task(id: threadId) {
             if selectedThreadWasRemoved { dismiss(); return }
             let openedChat = current
+            session.threadSelection.rememberThread(openedChat, connectionID: session.connection?.id)
             await session.loadThreadIfNeeded(openedChat.threadId)
             // opening a chat is what marks it read, exactly as on the desktop
             if openedChat.unread { await session.markRead(openedChat) }
@@ -1581,6 +1582,12 @@ struct TextBubble: View {
                     Text(speaker.name)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(MausPalette.color(speaker.color))
+                }
+                ForEach(message.generatedImages, id: \.path) { attachment in
+                    TranscriptAttachmentView(
+                        attachment: attachment, threadId: chat.threadId,
+                        messageId: message.id, foreground: mine ? BubbleColor.mineText : .primary
+                    )
                 }
                 // Bots get markdown, you do not — the same split the desktop
                 // makes. Markdown you did not intend is worse than markdown

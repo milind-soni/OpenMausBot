@@ -5,8 +5,8 @@
 // own transcript and its own provider session — so sensitive work, a
 // long job and a quick question can sit side by side under one agent.
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Activity, Check, ChevronDown, FolderInput, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useStore, formatTime, type Bot, type BotProject, type Group, type Task } from "@/state/store";
+import { Activity, Check, ChevronDown, FolderInput, Pencil, Pin, PinOff, Plus, Search, Trash2 } from "lucide-react";
+import { useStore, type Bot, type BotProject, type Group, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
@@ -14,8 +14,8 @@ import { formatTaskTokens } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AttentionThreadRows, crossBotAttentionThreads, sidebarBotActivityTasks, type AttentionThread } from "./SidebarBotActivity";
-import { orderedSidebarThreads, threadByline } from "./SidebarThreadRow";
+import { AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -68,7 +68,7 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
   );
 }
 
-type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy" | "archivedAt"> & { usage?: Task["usage"] };
+type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "updatedAt" | "pinned" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy" | "archivedAt"> & { usage?: Task["usage"] };
 
 /** The full picker searches both thread titles and their project names.
  * Legacy/orphaned project IDs remain visible under Ungrouped. */
@@ -90,6 +90,7 @@ function ConversationTaskPicker({
   onRename,
   onDelete,
   onMove,
+  onPin,
   attention,
   onAttentionJump,
 }: {
@@ -102,6 +103,7 @@ function ConversationTaskPicker({
   onRename: (threadId: string, title: string) => void;
   onDelete: (threadId: string) => void;
   onMove?: (threadId: string, projectId: string | null) => void;
+  onPin?: (threadId: string, pinned: boolean) => void;
   attention?: AttentionThread[];
   onAttentionJump?: (entry: AttentionThread) => void;
 }) {
@@ -349,10 +351,21 @@ function ConversationTaskPicker({
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
                         {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
-                        {formatTime(task.createdAt)}
+                        {formatUpdatedAt(threadRecency(task))}
                         <TaskUsage usage={task.usage} />
                         {opener && ` · ${opener}`}
                       </div>
+                    </button>
+                  )}
+                  {onPin && renaming !== task.threadId && (
+                    <button
+                      type="button"
+                      onClick={() => onPin(task.threadId, task.pinned !== true)}
+                      aria-label={task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}
+                      title={task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}
+                      className="rounded p-1 text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      {task.pinned === true ? <PinOff size={13} /> : <Pin size={13} />}
                     </button>
                   )}
                   {renaming !== task.threadId && (
@@ -413,7 +426,7 @@ export function BotActivityPicker({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   if (showThreads) return null;
-  const activity = orderedSidebarThreads(sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId), bot.threadId);
+  const activity = threadsWhenTreeHidden(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
   // A display preference must not strand a sibling approval or queued job,
   // including on narrow screens where the sidebar is closed. This is an
   // activity switcher only: idle histories and creation remain hidden.
@@ -443,7 +456,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}
-      tasks={(bot.tasks ?? []).filter((task) => !task.routineRunId)}
+      tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
       busy={false}
       bot={bot}
       attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id)}
@@ -452,6 +465,7 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
+      onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
       onAttentionJump={(entry) => dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId })}
     />
   );
@@ -464,12 +478,16 @@ export function GroupTaskPicker({ group }: { group: Group }) {
   return (
     <ConversationTaskPicker
       threadId={group.threadId}
-      tasks={group.tasks ?? []}
+      tasks={orderedThreadList(group.tasks ?? [])}
       busy={Boolean(group.working || group.busyBotId)}
       onNew={() => dispatch({ type: "newGroupTask", groupId: group.id })}
       onSwitch={(threadId) => dispatch({ type: "switchGroupTask", groupId: group.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId })}
+      onPin={(threadId, pinned) => {
+        const title = group.tasks?.find((task) => task.threadId === threadId)?.title ?? "";
+        dispatch({ type: "pinGroupTask", groupId: group.id, threadId, pinned, title });
+      }}
     />
   );
 }

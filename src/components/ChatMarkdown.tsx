@@ -18,6 +18,8 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Check, Copy, Download, LoaderCircle, RotateCcw, WrapText } from "lucide-react";
 import { remarkMentions, type MentionPeer } from "@/lib/mentions";
 
@@ -41,6 +43,14 @@ import { ThreadLink, threadLinkFromProps, useThreadRefs } from "./ThreadRefs";
 // makes the settled bubble render highlighted on mount.
 const highlightCache = new Map<string, string>();
 const CACHE_MAX = 200;
+// rendered mermaid SVGs, keyed by skin scheme + content hash so revisiting a
+// thread re-mounts straight from cache — same idea as highlightCache, smaller
+// cap because SVGs are bigger than token streams
+const mermaidCache = new Map<string, string>();
+const MERMAID_CACHE_MAX = 50;
+// every mermaid.render() call needs an id no earlier call used, including the
+// calls that failed and may have left an orphan element behind
+let mermaidRenderId = 0;
 // how long a streaming block's content must be unchanged before we spend a
 // tokenize on it — long enough to skip per-token churn mid-fence, short
 // enough that the highlight lands before the stream settles
@@ -371,6 +381,205 @@ export function CodeBlock({ code, lang, streaming }: CodeBlockProps) {
   );
 }
 
+/** Scheme of the nearest skin, read the same way the Shiki blocks read it:
+ * from the --code-color-scheme token, which resolves through any data-skin
+ * subtree. Anything unreadable falls back to dark, the default skin's value. */
+function mermaidScheme(element: HTMLElement | null): "dark" | "light" {
+  if (!element || typeof window === "undefined" || typeof window.getComputedStyle !== "function") return "dark";
+  try {
+    return window.getComputedStyle(element).getPropertyValue("--code-color-scheme").trim() === "light"
+      ? "light"
+      : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+/** Props for the {@link MermaidDiagram} component. */
+export interface MermaidDiagramProps {
+  /** Mermaid diagram source from a fenced code block. */
+  code: string;
+  /** Whether the parent message is still actively receiving tokens. */
+  streaming: boolean;
+}
+
+const MERMAID_FONT = '"Inter", -apple-system, BlinkMacSystemFont, "SF UI Text", "Segoe UI", system-ui, sans-serif';
+
+/**
+ * Mermaid fence renderer: draws the diagram instead of highlighting its
+ * source. Mermaid is a heavy import, so it loads only when a diagram fence
+ * actually appears — the same lazy pattern Shiki uses. The SVG
+ * mermaid.render() returns under securityLevel "strict" is the only thing
+ * injected; a diagram that fails to parse falls back to its source with the
+ * error above it, and a still-streaming block stays plain source so a
+ * half-arrived diagram never flashes a parse error.
+ *
+ * @param props - Component props containing the mermaid source and streaming flag.
+ * @returns Rendered diagram, or the source with the parse error.
+ */
+export function MermaidDiagram({ code, streaming }: MermaidDiagramProps) {
+  const frame = useRef<HTMLDivElement | null>(null);
+  const [skinEpoch, setSkinEpoch] = useState(0);
+  const [svg, setSvg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showSource, setShowSource] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Skins are stamped on <html>, a subtree could someday carry its own, so
+  // watch the whole document for data-skin changes and re-render the diagram
+  // in the new scheme. Both schemes stay cached, like Shiki's dual palette.
+  useEffect(() => {
+    if (typeof MutationObserver === "undefined" || typeof document === "undefined") return;
+    const observer = new MutationObserver(() => setSkinEpoch((epoch) => epoch + 1));
+    observer.observe(document.documentElement, { subtree: true, attributeFilter: ["data-skin"] });
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const scheme = mermaidScheme(frame.current);
+    const key = `${scheme}:${hash(code)}`;
+    const cached = mermaidCache.get(key);
+    if (cached) {
+      setSvg(cached);
+      setError(null);
+      return;
+    }
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const render = () => {
+      import("mermaid")
+        .then((module) => {
+          mermaidRenderId += 1;
+          module.default.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            suppressErrorRendering: true,
+            theme: scheme === "light" ? "default" : "dark",
+            fontFamily: MERMAID_FONT,
+          });
+          return module.default.render(`omb-mermaid-${mermaidRenderId}`, code);
+        })
+        .then((out) => {
+          if (!alive) return;
+          if (mermaidCache.size >= MERMAID_CACHE_MAX) {
+            const first = mermaidCache.keys().next().value;
+            if (first) mermaidCache.delete(first);
+          }
+          mermaidCache.set(key, out.svg);
+          setSvg(out.svg);
+          setError(null);
+        })
+        .catch((cause: unknown) => {
+          // a streaming diagram is probably just incomplete: keep the source
+          // up and stay quiet until the stream settles and re-runs this effect
+          if (!alive || streaming) return;
+          const message = cause instanceof Error ? cause.message : String(cause);
+          setError(message.length > 300 ? `${message.slice(0, 300)}…` : message);
+        });
+    };
+    if (streaming) {
+      // an earlier render is of a shorter snapshot — drop it so the growing
+      // source shows the real content, then wait for the block to hold still
+      setSvg(null);
+      setError(null);
+      timer = setTimeout(render, STREAM_SETTLE_MS);
+    } else {
+      render();
+    }
+    return () => {
+      alive = false;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [code, streaming, skinEpoch]);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current !== null) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const copy = () => {
+    if (!navigator.clipboard?.writeText) return;
+    navigator.clipboard
+      .writeText(code)
+      .then(() => {
+        setCopied(true);
+        if (copyTimeoutRef.current !== null) {
+          clearTimeout(copyTimeoutRef.current);
+        }
+        copyTimeoutRef.current = setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {
+        // Clipboard write rejected or failed silently
+      });
+  };
+
+  // Diagrams read left-to-right whatever language surrounds them, so the
+  // frame pins its own direction rather than inheriting the message's.
+  return (
+    <div ref={frame} dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
+      <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">
+        <span title="Mermaid diagram" className="min-w-0 truncate rounded border border-hairline/40 bg-raised px-1.5 py-0.5 text-[11px] font-medium tracking-wide text-ink select-none">
+          Mermaid diagram
+        </span>
+        <div className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+          <button
+            type="button"
+            onClick={() => setShowSource((visible) => !visible)}
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors ${
+              showSource
+                ? "bg-accent/15 text-accent font-medium"
+                : "text-ink-secondary hover:bg-raised hover:text-ink"
+            }`}
+            title={showSource ? "Hide diagram source" : "Show diagram source"}
+            aria-label={showSource ? "Hide diagram source" : "Show diagram source"}
+            aria-pressed={showSource}
+          >
+            <WrapText size={12} aria-hidden="true" />
+            <span className="hidden sm:inline">{showSource ? "Hide source" : "Show source"}</span>
+          </button>
+          <button
+            type="button"
+            onClick={copy}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            title={copied ? "Copied to clipboard" : "Copy diagram source"}
+            aria-label={copied ? "Diagram source copied to clipboard" : "Copy diagram source to clipboard"}
+          >
+            {copied ? (
+              <>
+                <Check size={12} className="text-success" aria-hidden="true" />
+                <span className="text-success font-medium hidden sm:inline">Copied!</span>
+              </>
+            ) : (
+              <>
+                <Copy size={12} aria-hidden="true" />
+                <span className="hidden sm:inline">Copy</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+      {error && (
+        <p role="alert" className="px-3 pt-2 text-[12px] text-danger">
+          Diagram could not be rendered: {error}
+        </p>
+      )}
+      {svg && (
+        <div
+          className="overflow-x-auto p-3 [&_svg]:!max-w-full"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      )}
+      {(showSource || !svg || error) && (
+        <pre className="overflow-x-auto p-3 text-[13px] leading-relaxed text-ink">{code}</pre>
+      )}
+    </div>
+  );
+}
+
 // A bot handing over a file it created renders as a button, not an anchor.
 // Two reasons the href is dropped rather than merely preventDefault()ed:
 // an absolute path in an href resolves against the page origin, so the link
@@ -494,6 +703,59 @@ const NO_MENTION_PEERS: readonly MentionPeer[] = [];
 // holding one must reach the parser byte-for-byte as written.
 const MARKDOWN_IMAGE = "![";
 
+/** Replace CommonMark fenced code blocks with opaque tokens while text is normalized. */
+function protectFencedCode(text: string, protect: (value: string) => string): string {
+  const opener =
+    /(^|\r?\n)((?: {0,3}>[ \t]?)* {0,3})(?:(`{3,})([^`\r\n]*)|(~{3,})([^\r\n]*))(?:\r?\n|$)/g;
+  let cursor = 0;
+  let tokenized = "";
+  let match: RegExpExecArray | null;
+
+  while ((match = opener.exec(text)) !== null) {
+    const fence = match[3] ?? match[5];
+    const fenceCharacter = fence[0];
+    const closer = new RegExp(
+      `(^|\\r?\\n)(?: {0,3}>[ \\t]?)* {0,3}${fenceCharacter}{${fence.length},}[ \\t]*(?=\\r?\\n|$)`,
+      "g",
+    );
+    closer.lastIndex = opener.lastIndex;
+    const closingMatch = closer.exec(text);
+    const end = closingMatch === null
+      ? text.length
+      : closingMatch.index + closingMatch[0].length;
+    tokenized += text.slice(cursor, match.index);
+    tokenized += protect(text.slice(match.index, end));
+    cursor = end;
+    opener.lastIndex = end;
+  }
+
+  return tokenized + text.slice(cursor);
+}
+
+/** Convert the TeX delimiters models commonly emit into remark-math syntax.
+ * Fenced and inline code are protected so examples such as `\\(x\\)` remain
+ * literal. Unmatched delimiters are left untouched while a response streams. */
+export function normalizeMathDelimiters(text: string): string {
+  const protectedCode: string[] = [];
+  const protect = (value: string): string => {
+    const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
+    protectedCode.push(value);
+    return token;
+  };
+  const tokenized = protectFencedCode(text, protect)
+    .replace(/(`+)[\s\S]*?\1/g, protect);
+  let normalized = tokenized
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$\n${math}\n$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math}$`)
+    // remark-math treats flow math as a block only when the fences occupy
+    // their own lines; accept the compact form models commonly produce.
+    .replace(/\$\$[ \t]*([^\n][\s\S]*?)[ \t]*\$\$/g, (_match, math: string) => `$$\n${math}\n$$`);
+  protectedCode.forEach((value, index) => {
+    normalized = normalized.split(`\u0000OMB_CODE_${index}\u0000`).join(value);
+  });
+  return normalized;
+}
+
 function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
   text: string; streaming?: boolean; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
@@ -502,13 +764,16 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   // @mentions were already decorated by remarkMentions, which runs first.
   const { threads, currentBotId } = useThreadRefs();
   // A near-miss table from a model renders as an unreadable run of pipes
-  // unless it is repaired before parsing. The repair moves source offsets, so
-  // a message carrying an image opts out and keeps its text verbatim.
-  const source = text.includes(MARKDOWN_IMAGE) ? text : repairMarkdownTables(text);
+  // unless it is repaired before parsing. Table repair moves image source
+  // offsets, so image messages skip that repair but still normalize math.
+  const source = normalizeMathDelimiters(text.includes(MARKDOWN_IMAGE)
+    ? text
+    : repairMarkdownTables(text));
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        rehypePlugins={[rehypeKatex]}
         urlTransform={chatUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
@@ -521,6 +786,11 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
             const flat = (n: any): string =>
               typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : (n?.props?.children ? flat(n.props.children) : "");
             const code = flat(child?.props?.children).replace(/\n$/, "");
+            // a mermaid fence is a picture, not a program: hand it to the
+            // diagram renderer instead of the highlighter
+            if (lang.trim().toLowerCase() === "mermaid") {
+              return <MermaidDiagram code={code} streaming={streaming} />;
+            }
             return <CodeBlock code={code} lang={lang} streaming={streaming} />;
           },
           img(props) {

@@ -1,11 +1,15 @@
 package com.openmausbot.companion.core
 
+import java.io.IOException
 import java.net.ConnectException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.security.cert.CertificateException
 import javax.net.ssl.SSLException
 import kotlin.coroutines.cancellation.CancellationException
+
+/** A successful HTTP response ended before the event stream established the session. */
+internal class MissingStreamHelloException : IOException("Lost the connection.")
 
 /**
  * Walks candidates without weakening credential protection: a cleartext route may upgrade to a
@@ -132,8 +136,11 @@ object ConnectionAdvice {
      * every other address would answer them identically.
      */
     fun shouldTryAnotherRoute(error: Throwable): Boolean {
-        val status = statusCode(error) ?: return shouldTryAnotherHost(classify(error))
-        return isGatewayStatus(status)
+        val status = statusCode(error)
+        if (status != null) return isGatewayStatus(status)
+        // Only a close before hello is a route failure; a truncated live stream retries in place.
+        return generateSequence(error) { it.cause }.any { it is MissingStreamHelloException } ||
+            shouldTryAnotherHost(classify(error))
     }
 
     /** The HTTP status this failure should be reported as, when a gateway produced it. */

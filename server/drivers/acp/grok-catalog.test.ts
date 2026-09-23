@@ -20,7 +20,7 @@ function scratchConfig(toml: string): string {
 }
 
 describe("readGrokModelCatalog", () => {
-  it("returns the static cloud pair when there is no config", () => {
+  it("returns the static cloud models when there is no config", () => {
     expect(readGrokModelCatalog({ HOME: join(tmpdir(), "omb-grok-missing-home") })).toEqual(STATIC_GROK_MODELS);
   });
 
@@ -44,6 +44,7 @@ name = "MiniMax M3 4bit (oMLX)"
     expect(readGrokModelCatalog({ HOME: home })).toEqual({
       default: "ollama-ornith-35b-bf16",
       options: [
+        { id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 },
         { id: "grok-4.6", label: "Grok 4.6" },
         { id: "grok-4.5", label: "Grok 4.5" },
         { id: "ollama-ornith-35b-bf16", label: "ornith:35b-bf16 (Ollama)", custom: true },
@@ -64,8 +65,8 @@ name = "nope"
 name = "OK"
 `);
     const catalog = readGrokModelCatalog({ HOME: home });
-    expect(catalog.default).toBe("grok-4.6");
-    expect(catalog.options.map((o) => o.id)).toEqual(["grok-4.6", "grok-4.5", "ok-model"]);
+    expect(catalog.default).toBe("grok-4.7");
+    expect(catalog.options.map((o) => o.id)).toEqual(["grok-4.7", "grok-4.6", "grok-4.5", "ok-model"]);
   });
 
   it("honors GROK_HOME over HOME", () => {
@@ -88,7 +89,7 @@ default = "grok-4.5"
 [model.ok-model]
 name = "OK"
 `);
-    expect(readGrokModelCatalog({ HOME: home }).default).toBe("grok-4.6");
+    expect(readGrokModelCatalog({ HOME: home }).default).toBe("grok-4.7");
   });
 });
 

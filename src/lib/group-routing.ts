@@ -1,4 +1,5 @@
 import type { Bot, Group, GroupDefaultResponder } from "@/state/store";
+import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { t } from "./i18n";
 
 /** Be defensive around rooms loaded while an older server is still running,
@@ -47,7 +48,17 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
   group: Pick<Group, "defaultResponder">,
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  if (/(?:^|\s)@everyone\b/i.test(text)) return available;
+  const everyone = "everyone";
+  let everyoneAt = -1;
+  while ((everyoneAt = text.indexOf("@", everyoneAt + 1)) !== -1) {
+    if (
+      isMentionBoundary(text, everyoneAt)
+      && text.slice(everyoneAt + 1, everyoneAt + 1 + everyone.length).toLowerCase() === everyone
+      && !isMentionNameContinuation(text.slice(everyoneAt + 1 + everyone.length))
+    ) {
+      return available;
+    }
+  }
   const mentioned = mentionedMembers(text, available);
   if (mentioned.length) return mentioned;
   const fallback = effectiveDefaultResponder(group, available);
@@ -88,17 +99,14 @@ function mentionedMembers<T extends { name: string; hidden?: boolean }>(text: st
   const candidates = peers
     .filter((p) => !p.hidden && p.name.trim())
     .sort((a, b) => b.name.length - a.name.length);
-  const lower = text.toLowerCase();
   const found: T[] = [];
   let at = -1;
-  while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (at > 0 && !/\s/.test(text[at - 1])) continue;
-    const rest = lower.slice(at + 1);
+  while ((at = text.indexOf("@", at + 1)) !== -1) {
+    if (!isMentionBoundary(text, at)) continue;
     const hit = candidates.find((p) => {
       const name = p.name.toLowerCase();
-      if (!rest.startsWith(name)) return false;
-      const after = rest[name.length];
-      return after === undefined || !/[a-z0-9]/i.test(after);
+      if (text.slice(at + 1, at + 1 + p.name.length).toLowerCase() !== name) return false;
+      return !isMentionNameContinuation(text.slice(at + 1 + p.name.length));
     });
     if (hit && !found.includes(hit)) found.push(hit);
   }

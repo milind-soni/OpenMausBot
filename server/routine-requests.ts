@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { z } from "zod";
 
@@ -83,6 +84,7 @@ const routineToolDefinitionSchema = z.object({
   durationMinutes: z.number().optional(),
   timeoutMinutes: z.number().nullable().optional(),
   continuity: z.boolean().optional(),
+  overlap: z.enum(["skip", "queue"]).optional(),
 }).strict();
 
 const routineToolChangesSchema = routineToolDefinitionSchema
@@ -209,6 +211,7 @@ const storedDefinitionSchema = z.object({
   durationMinutes: z.number().int().min(5).max(240),
   timeoutMinutes: z.number().int().min(5).max(240).optional(),
   continuity: z.boolean().optional(),
+  overlap: z.enum(["skip", "queue"]).optional(),
 }).strict();
 const storedChangesSchema = storedDefinitionSchema
   .omit({ schedule: true, timeoutMinutes: true })
@@ -550,6 +553,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number): Ro
     durationMinutes: duration(input.durationMinutes),
     ...(timeoutMinutes == null ? {} : { timeoutMinutes }),
     ...(input.continuity === true ? { continuity: true } : {}),
+    ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
   };
 }
 
@@ -562,6 +566,7 @@ function normalizeChanges(input: RoutineToolChangesInput, now: number): RoutineR
   if (input.durationMinutes !== undefined) changes.durationMinutes = duration(input.durationMinutes);
   if (input.timeoutMinutes !== undefined) changes.timeoutMinutes = timeout(input.timeoutMinutes);
   if (input.continuity !== undefined) changes.continuity = input.continuity === true;
+  if (input.overlap !== undefined) changes.overlap = input.overlap;
   return changes;
 }
 
@@ -782,6 +787,7 @@ function effectiveDefinition(operation: RoutineRequestOperation, manager: Routin
     durationMinutes: existing.durationMinutes,
     ...(existing.timeoutMinutes === undefined ? {} : { timeoutMinutes: existing.timeoutMinutes }),
     ...(existing.continuity ? { continuity: true } : {}),
+    ...(existing.overlap ? { overlap: existing.overlap } : {}),
   };
   if (operation.action !== "update") return base;
   const { schedule, timeoutMinutes, ...changes } = operation.changes;
@@ -865,6 +871,7 @@ function cardCopy(
       `Runs on: ${destination}`,
       `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
       `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
+      `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
       // Last before the instructions: the one sentence that says what
       // confirming actually does, in the reader's terms.
       ...(operation.action === "create" || operation.action === "update"
@@ -890,6 +897,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     durationMinutes: definition.durationMinutes,
     ...(definition.timeoutMinutes === undefined ? {} : { timeoutMinutes: definition.timeoutMinutes }),
     ...(definition.continuity ? { continuity: true } : {}),
+    ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
   };
 }
 
@@ -906,6 +914,7 @@ function updateFromChanges(
   if (changes.durationMinutes !== undefined) patch.durationMinutes = changes.durationMinutes;
   if (changes.timeoutMinutes !== undefined) patch.timeoutMinutes = changes.timeoutMinutes;
   if (changes.continuity !== undefined) patch.continuity = changes.continuity;
+  if (changes.overlap !== undefined) patch.overlap = changes.overlap;
   return patch;
 }
 
@@ -969,6 +978,35 @@ function requestCommit(payload: RoutineRequestCardData, messageId: string): Rout
 }
 
 function revalidateOperation(operation: RoutineRequestOperation, manager: RoutineManager, botId: string, now: number): void {
+  if (operation.action === "create") {
+    const definition = operation.routine;
+    const owner = operation.forBot?.botId ?? botId;
+    const schedule = asSchedule(definition.schedule, now);
+    const duplicate = manager.listRoutines().find((routine) => {
+      if (!routine.enabled || routine.target !== "bot" || routine.botId !== owner
+        || routine.runOn !== definition.runOn || routine.prompt !== definition.instructions
+        || routine.durationMinutes !== definition.durationMinutes
+        || routine.timeoutMinutes !== definition.timeoutMinutes
+        || Boolean(routine.continuity) !== Boolean(definition.continuity)
+        || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
+        || (routine.attachments?.length ?? 0) > 0) return false;
+      // An omitted start means "every N minutes", not a new phase each time
+      // the model retries. Explicit starts and all other constraints stay exact.
+      const candidate = schedule.type === "interval" && routine.schedule.type === "interval"
+        && definition.schedule.type === "interval" && definition.schedule.anchorAt === undefined
+        ? { ...schedule, anchorAt: routine.schedule.anchorAt }
+        : schedule;
+      return isDeepStrictEqual(candidate, routine.schedule);
+    });
+    if (duplicate) {
+      // The tool cannot choose a result destination. Return the existing ID,
+      // without moving its reports or treating a renamed request as new work.
+      throw new RoutineRequestError(
+        `An enabled routine with the same instructions and execution settings already exists (${duplicate.id}). Use list_routines to review it, then update or run that routine instead.`,
+        409,
+      );
+    }
+  }
   const current = operation.action === "create"
     ? null
     : verifyManageSnapshot(operation, manager, botId);

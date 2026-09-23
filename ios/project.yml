@@ -62,10 +62,12 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        # What appears under the icon. Distinct from the desktop app on
-        # purpose: someone may well have both, and two identical labels on
-        # one person's devices is a small cruelty.
-        CFBundleDisplayName: OpenMausMobile
+        # What appears under the icon. This MUST stay close to the App Store
+        # listing name ("MausBot") or review rejects the build under
+        # guideline 2.3.8: a person who installs "MausBot" has to be able to
+        # find it on the home screen. The desktop app is "OpenMausBot", which
+        # is near enough to read as the same family and still tell them apart.
+        CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSApplicationCategoryType: public.app-category.productivity
@@ -179,7 +181,7 @@ targets:
     info:
       path: ShareExtension/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausBot
+        CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         OpenMausKeychainAccessGroup: $(AppIdentifierPrefix)group.com.openmausbot.shared
@@ -231,7 +233,7 @@ targets:
     info:
       path: Widgets/Info.plist
       properties:
-        CFBundleDisplayName: OpenMausMobile
+        CFBundleDisplayName: MausBot
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

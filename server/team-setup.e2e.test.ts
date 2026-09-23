@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,10 +33,21 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const state = async () => (await api("GET", "/api/bots")).bots;
+    // The fixture starts with a randomly named bot, which can itself be
+    // Mira, Patch, or Quill. Compare identities, not that starter's name.
+    const initialBotIds = new Set((await state()).map((bot: any) => bot.id));
+    const setupBots = async () => (await state()).filter((bot: any) => !initialBotIds.has(bot.id));
     let previousPid: number | undefined;
-    const start = async (text: string) => {
+    let guardedMessageId: string | undefined;
+    const start = async (text: string, sendId?: string) => {
       if (existsSync(gate)) unlinkSync(gate);
-      await control("send", "--bot", chief.id, "--task", chief.threadId, "--text", text);
+      if (sendId) {
+        const before = await api("GET", `/api/threads/${chief.threadId}/messages`);
+        const accepted = await api("POST", `/api/bots/${chief.id}/messages/guarded`, {
+          threadId: chief.threadId, sendId, text, expectedActiveLeafId: before.activeLeafId,
+        }, 202);
+        guardedMessageId = accepted.message.id;
+      } else await control("send", "--bot", chief.id, "--task", chief.threadId, "--text", text);
       await expect.poll(() => {
         if (!existsSync(fixture.fixtureDumpPath)) return false;
         return JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid !== previousPid;
@@ -86,12 +98,14 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     await api("POST", "/api/internal/team-setup-requests", { plan: { ...plan, operations: [build("Bad", "Research", { instanceId: "codex", model: "invented-model" })] } }, 400, token);
     await api("POST", "/api/internal/team-setup-requests", { fromBotId: "foreign", plan }, 403, token);
     const denied = await api("POST", "/api/internal/team-setup-requests", { plan }, 201, token);
-    expect((await state()).filter((bot: any) => ["Mira", "Patch", "Quill"].includes(bot.name))).toHaveLength(0);
+    expect(await setupBots()).toHaveLength(0);
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: denied.requestId, behavior: "deny" });
     await finish(); await continueOnce(denied.requestId);
     expect((await state()).find((bot: any) => bot.id === chief.id).managedSections).toBeUndefined();
 
-    token = await start("Apply the reviewed Research, Engineering and Growth setup.");
+    const setupSendId = randomUUID();
+    token = await start("Apply the reviewed Research, Engineering and Growth setup.", setupSendId);
+    const requestSnapshot = () => api("GET", `/api/bots/${chief.id}/requests/${setupSendId}?threadId=${chief.threadId}`);
     const proposed = await api("POST", "/api/internal/team-setup-requests", { plan }, 201, token);
     const before = (await state()).find((bot: any) => bot.id === chief.id);
     const card = before.messages.find((message: any) => message.card?.requestId === proposed.requestId).card;
@@ -99,17 +113,33 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     expect(card.subtitle).toContain("Authorize @Clive");
     // Origin is forgeable by an active bot shell: it cannot self-grant teams.
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" }, 403);
-    expect((await state()).some((bot: any) => bot.name === "Patch")).toBe(false);
+    expect(await setupBots()).toHaveLength(0);
     await finish();
+    const waiting = await requestSnapshot();
+    expect(waiting).toMatchObject({ messageId: guardedMessageId, phase: "waiting", activeTurnId: null, executionId: expect.any(String) });
+    expect(waiting.messages[0]).toMatchObject({ id: guardedMessageId, sendId: setupSendId, role: "user" });
+    expect(waiting.messages.at(-1).id).toBe(waiting.activeLeafId);
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" }, 403, undefined, false);
     const approved = await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
     expect(approved.result.state).toBe("applied"); await continueOnce(proposed.requestId);
+    const settled = await requestSnapshot();
+    expect(settled).toMatchObject({ messageId: guardedMessageId, phase: "settled", activeTurnId: null, executionId: expect.any(String) });
+    expect(settled.executionId).not.toBe(waiting.executionId);
+    expect(settled.messages[0].id).toBe(guardedMessageId);
+    expect(settled.messages.at(-1).id).toBe(settled.activeLeafId);
+    const replies = settled.messages.filter((message: any) => message.role === "bot" && message.kind === "text" && message.turnTerminal);
+    expect(replies).toHaveLength(2);
+    expect(new Set(replies.map((message: any) => message.turnId)).size).toBe(2);
+    expect(replies.every((message: any) => message.requestMessageId === guardedMessageId)).toBe(true);
+    expect(replies.at(-1).text).toContain(`team setup decision ${proposed.requestId}:`);
     const saved = await state();
-    const engineer = saved.find((bot: any) => bot.name === "Patch");
+    const created = saved.filter((bot: any) => !initialBotIds.has(bot.id));
+    expect(created.map((bot: any) => bot.name).sort()).toEqual(["Mira", "Patch", "Quill"]);
+    const engineer = created.find((bot: any) => bot.name === "Patch");
     expect(engineer).toMatchObject({ title: "Implementation and verification engineer", section: "Engineering", modelSelection: selection(codex), approvalMode: "ask", autoApprove: false, composio: false });
     expect(saved.find((bot: any) => bot.id === chief.id).managedSections).toEqual(expect.arrayContaining(plan.newTeams));
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
-    expect((await state()).filter((bot: any) => bot.name === "Patch")).toHaveLength(1);
+    expect((await setupBots()).filter((bot: any) => bot.name === "Patch")).toHaveLength(1);
     expect(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).pid).toBe(previousPid);
 
     token = await start("Move Patch to Growth and switch its default engine to Claude; retain its existing thread.");
@@ -141,6 +171,8 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     expect((await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: deletion.requestId, behavior: "allow" })).result.bots).toEqual([{ id: engineer.id, name: "Patch", action: "deleted" }]);
     await continueOnce(deletion.requestId);
     expect((await state()).some((bot: any) => bot.id === engineer.id)).toBe(false);
+    expect((await state()).filter((bot: any) => initialBotIds.has(bot.id)).map((bot: any) => bot.id).sort())
+      .toEqual([...initialBotIds].sort());
     await api("POST", `/api/threads/${chief.threadId}/respond`, { requestId: deletion.requestId, behavior: "allow" });
     const room = (await control("new-channel", "--name", "Chief review", "--members", chief.id)).channel;
     unlinkSync(gate);

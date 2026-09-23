@@ -1,0 +1,112 @@
+{
+  "tools": [
+    {
+      "name": "list_bots",
+      "description": "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or requesting advice through your available coordination tools.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "ask_bot",
+      "description": "Brief synchronous consultation with a reachable teammate. Quick replies return inline; busy or slow replies become asynchronous delegations with a task id. Use check_delegation or wait_delegation to retrieve their outcome. Use delegate_bot for assigning work. Existing peer approvals still apply.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "description": "The target bot's id (from list_bots or your roster); a unique teammate name also resolves."
+          },
+          "message": {
+            "type": "string",
+            "description": "What to say / ask the bot."
+          }
+        },
+        "required": [
+          "bot_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "delegate_bot",
+      "description": "Hand work to a reachable teammate asynchronously. Returns a task id; the server dispatches when its source conversation and the peer are available and required approvals are granted. Use check_delegation or wait_delegation with that id; the external runtime does not need to end for polling.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "bot_id": {
+            "type": "string",
+            "description": "The target bot's id (from list_bots or your roster); a unique teammate name also resolves."
+          },
+          "message": {
+            "type": "string",
+            "description": "What the peer should do / answer."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Optional one-line reason for the delegation (shown to the user as a chip)."
+          }
+        },
+        "required": [
+          "bot_id",
+          "message"
+        ]
+      }
+    },
+    {
+      "name": "check_delegation",
+      "description": "Check one of this external runtime's delegations without waiting: queued, running, or finished with its result. Newly returned task ids can be checked immediately; the server enforces ownership and current peer access.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task id delegate_bot returned."
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "wait_delegation",
+      "description": "Wait for one of this external runtime's delegations, including a newly returned task id, for up to timeout_seconds (maximum 240). Returns its result or current queued/running status; the server enforces ownership and current peer access.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "The task id delegate_bot returned."
+          },
+          "timeout_seconds": {
+            "type": "integer",
+            "description": "give up waiting after this many seconds; default 60, max 240"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

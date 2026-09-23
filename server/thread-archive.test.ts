@@ -51,6 +51,22 @@ describe("thread archive through an isolated HTTP fixture", () => {
     expect((await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { archivedAt: Date.now() })).status).toBe(200);
   });
 
+  it("pins and unpins a thread, and refuses a client-supplied updatedAt", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Pin fixture" })).body.bot;
+    const task = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Keep this" })).body.task;
+    expect(task.updatedAt).toBe(task.createdAt);
+    const pinned = await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { pinned: true });
+    expect(pinned.status).toBe(200);
+    expect(pinned.body.task.pinned).toBe(true);
+    expect(persistedTask(bot.id, task.threadId).pinned).toBe(true);
+    const cleared = await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { pinned: false });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.task.pinned).toBeUndefined();
+    expect("pinned" in persistedTask(bot.id, task.threadId)).toBe(false);
+    expect((await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { pinned: "yes" })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { updatedAt: Date.now() })).status).toBe(400);
+  });
+
   it("still rejects thread settings outside the allowlist", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Archive allowlist" })).body.bot;
     const task = (await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Allowlist" })).body.task;

@@ -615,7 +615,10 @@ describe.skipIf(process.platform === "win32")("serve --domain", () => {
       expect(caddyfile).toContain(`reverse_proxy 127.0.0.1:${port}`);
       expect(caddyfile).toContain(`reverse_proxy 127.0.0.1:${port + 1}`);
     } finally {
-      const caddyPid = Number(readFileSync(join(home, "caddy.pid"), "utf8").trim() || "0");
+      // Cleanup must not mask the real failure: a server that never reached
+      // the Caddy step has no pid file, and the assertions above already
+      // named what actually went wrong.
+      const caddyPid = existsSync(join(home, "caddy.pid")) ? Number(readFileSync(join(home, "caddy.pid"), "utf8").trim() || "0") : 0;
       child.kill("SIGTERM");
       await exited(child);
       await new Promise((r) => setTimeout(r, 300));

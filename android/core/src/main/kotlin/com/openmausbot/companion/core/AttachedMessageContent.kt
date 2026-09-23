@@ -175,7 +175,7 @@ data class AttachedMessageContent(
             .replace("&gt;", ">")
             .replace("&amp;", "&")
 
-        private fun displayName(
+        internal fun displayName(
             providedName: String?,
             path: String,
             kind: DisplayedMessageAttachment.Kind,
@@ -194,3 +194,17 @@ data class AttachedMessageContent(
         }
     }
 }
+
+/** Preserve the server path exactly for the originating message's authenticated file route. */
+val Message.generatedImages: List<DisplayedMessageAttachment>
+    get() = attachments.orEmpty()
+        .filter { it.kind == "image" && !it.path.isNullOrBlank() }
+        .distinctBy { it.path }
+        .map {
+            val path = requireNotNull(it.path)
+            DisplayedMessageAttachment(
+                kind = DisplayedMessageAttachment.Kind.IMAGE,
+                path = path,
+                name = AttachedMessageContent.displayName(null, path, DisplayedMessageAttachment.Kind.IMAGE),
+            )
+        }

@@ -182,6 +182,7 @@ const packageSchema = z.object({
       schedule: packageRoutineScheduleSchema,
       durationMinutes: z.number().int().min(5).max(240),
       timeoutMinutes: z.number().int().min(5).max(240).optional(),
+      overlap: z.enum(["skip", "queue"]).optional(),
       enabledAfterInstall: z.literal(false),
     })).max(50).optional(),
     playbooks: z.array(z.object({
@@ -353,6 +354,7 @@ export function renderBotPackageMarkdown(document: ParsedBotPackage): string {
           : `once at ${routine.schedule.at}`
     }  `,
     `**Run limit:** ${routine.timeoutMinutes === undefined ? "none" : `${routine.timeoutMinutes} minutes`}  `,
+    `**While busy:** ${routine.overlap === "queue" ? "queue one scheduled run" : "skip scheduled occurrences"}  `,
     "**Initial state:** paused — the user must enable it",
     "",
     routine.prompt,

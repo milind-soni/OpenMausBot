@@ -11,6 +11,7 @@
 // and preserves that history or reports a failed resume.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { codexConfigMcpServerNames, mountedMcpServerName } from "./codex-mcp-names.ts";
 
 import { stripWorkspaceCredentialEnv } from "../config.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
@@ -39,6 +40,7 @@ import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
+import { extractMcpImages } from "../mcp-tool-images.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -164,6 +166,14 @@ const DENY_TIMEOUT_NOTE =
   "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
 
 const skippedSseServers = new Set<string>();
+const renamedMcpServers = new Set<string>();
+/** Logged once per name: the rename is deliberate, not a lost server. */
+function noteRenamedMcpServer(name: string, mountName: string): void {
+  if (renamedMcpServers.has(name)) return;
+  renamedMcpServers.add(name);
+  console.error(`codex: MCP server ${JSON.stringify(name)} is also declared in Codex's own config.toml — mounted as ${JSON.stringify(mountName)} for this bot so the two do not merge`);
+}
+
 function noteSkippedSseServer(name: string): void {
   if (skippedSseServers.has(name)) return;
   skippedSseServers.add(name);
@@ -671,6 +681,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.browser) {
           mountMcpServer(appServerArgs, env, "browser", turn.integrations.browser);
         }
+        // A custom server named like one in the user's own config.toml would
+        // be merged with it by the `-c` override — a stdio command over a
+        // remote url is "invalid configuration" and kills the turn before the
+        // model is asked. Such a server mounts under a name of its own.
+        const declaredInCodexConfig = codexConfigMcpServerNames(env);
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
           // codex speaks streamable HTTP to a remote server, not the older
           // SSE transport: such an entry still reaches Claude bots, and is
@@ -679,7 +694,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             noteSkippedSseServer(name);
             continue;
           }
-          mountMcpServer(appServerArgs, env, name, server, false);
+          const mountName = mountedMcpServerName(name, declaredInCodexConfig);
+          if (mountName !== name) noteRenamedMcpServer(name, mountName);
+          mountMcpServer(appServerArgs, env, mountName, server, false);
         }
         if (turn.integrations?.phone) {
           const bridge = turn.integrations.phone;
@@ -1116,6 +1133,11 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                 ok: item.status !== "failed" && item.status !== "declined",
                 output: toolDetailPreview(item.type === "commandExecution" ? { output: item.aggregatedOutput, exitCode: item.exitCode } : item.type === "mcpToolCall" ? item.error ?? item.result : item.type === "fileChange" ? item.changes : item.action),
               });
+              if (item.type === "mcpToolCall") {
+                for (const img of extractMcpImages(item.result)) {
+                  emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data });
+                }
+              }
             } else if (item.type === "reasoning") {
               emit({ ...base(threadId, turnId), type: "item.updated", itemType: "reasoning", tokens: null });
             }
@@ -1352,10 +1374,17 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             includeLayers: false,
           });
           effectiveConfig = configured?.config;
-        } catch {
+        } catch (error) {
           // Do not expose a possibly secret-bearing native config error or
-          // overwrite unknown instructions with an empty fallback.
-          throw new Error("Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.");
+          // overwrite unknown instructions with an empty fallback. A config
+          // codex itself rejected is the one case worth naming: the person
+          // can act on it, and the message carries no credential.
+          const invalid = error instanceof CodexRpcError && /^invalid configuration\b/i.test(error.message);
+          throw new Error(
+            invalid
+              ? "Codex rejected its configuration as invalid. Check ~/.codex/config.toml (or CODEX_HOME) for a broken entry, then retry."
+              : "Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.",
+          );
         }
         const developerInstructions = codexDeveloperInstructions(effectiveConfig, turn.system ?? "");
         let approvalParams: CodexApprovalParams;

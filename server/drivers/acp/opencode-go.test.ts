@@ -332,6 +332,8 @@ describe("OpenCode session variants", () => {
     const recorder = recordEvents(instance.adapter);
     fixtures.push({ scratch, instance, recorder });
     const run = async (input: Partial<SendTurnInput> = {}) => {
+      promptsBefore = promptCount();
+      pidBefore = dumpPid();
       const { turnId } = await instance.adapter.sendTurn({ threadId: "variant-thread", text: "fixture", model, ...input });
       const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
       return { done, events: recorder.events.filter((event) => event.turnId === turnId) };
@@ -339,7 +341,15 @@ describe("OpenCode session variants", () => {
     const calls = (): Array<{ params: { sessionId: string; configId: string; value: string } }> => (
       existsSync(`${dump}.config.json`) ? JSON.parse(readFileSync(`${dump}.config.json`, "utf8")) : []
     );
-    const prompted = () => JSON.parse(readFileSync(`${dump}.methods.json`, "utf8")).includes("session/prompt");
+    // the fake's methods file accumulates for the whole (pooled) process, so
+    // "was the LAST run prompted" is a count delta, not an includes()
+    const promptCount = () =>
+      (existsSync(`${dump}.methods.json`) ? JSON.parse(readFileSync(`${dump}.methods.json`, "utf8")) as string[] : [])
+        .filter((method) => method === "session/prompt").length;
+    const dumpPid = () => (existsSync(dump) ? JSON.parse(readFileSync(dump, "utf8")).pid as number | undefined : undefined);
+    let promptsBefore = 0;
+    let pidBefore: number | undefined;
+    const prompted = () => dumpPid() === pidBefore ? promptCount() > promptsBefore : promptCount() > 0;
     return { instance, recorder, run, calls, prompted, dump };
   };
   afterEach(async () => {

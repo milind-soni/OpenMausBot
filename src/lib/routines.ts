@@ -16,3 +16,4 @@ export type {
   RoutineRun,
   RoutineInput,
 } from "../../shared/routines";
+export { ROUTINE_PROBLEM_STATUSES, isRoutineProblemRun, type RoutineRunStatusFilter } from "../../shared/routines";

@@ -37,7 +37,7 @@ extension CompanionState {
         }
 
         for bot in bots where bot.hidden != true {
-            for task in bot.threadGroups(queuedThreadIds: queuedThreadIds).flatMap(\.tasks) {
+            for task in bot.attentionOrderedTasks(queuedThreadIds: queuedThreadIds) {
                 guard let projected = bot.projected(forThread: task.threadId) else { continue }
                 let chat = Chat.bot(projected)
                 guard seen.insert(chat.conversationID).inserted else { continue }

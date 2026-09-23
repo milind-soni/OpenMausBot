@@ -30,7 +30,9 @@ function displayText(value: string, multiline = false): string {
   const plain = stripVTControlCharacters(value);
   // Provider-supplied labels must not issue terminal control commands.
   // eslint-disable-next-line no-control-regex
-  return plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => character === "\n" && multiline ? "\n" : " ");
+  const withoutControls = plain.replace(/[\u0000-\u001f\u007f-\u009f]/g, (character) => character === "\n" && multiline ? "\n" : " ");
+  // Log lines must not end in trailing spaces; question prompts keep spacing like "Key: ".
+  return multiline ? withoutControls.replace(/[ \t]+(?=\n|$)/g, "") : withoutControls;
 }
 
 /** A line-based fallback with no cursor/color output. Readline has no output

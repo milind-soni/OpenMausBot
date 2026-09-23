@@ -142,6 +142,7 @@ const PANEL_WIDTH_KEY = "omb-computer-panel-width";
 const PANEL_MIN_WIDTH = 360;
 const PANEL_MAX_WIDTH = 960;
 const PANEL_DEFAULT_WIDTH = 400;
+const PANEL_RESIZE_STEP = 40;
 
 function readPanelWidth(): number {
   try {
@@ -166,6 +167,13 @@ export function ComputerPanel({
   // makes it wide enough to actually read a page in the Browser tab.
   const [panelWidth, setPanelWidth] = useState(readPanelWidth);
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
+  const persistPanelWidth = (width: number) => {
+    try {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(width));
+    } catch {
+      /* storage blocked — width lives for this session */
+    }
+  };
   const onResizeStart = (event: React.PointerEvent<HTMLDivElement>) => {
     resizeFrom.current = { x: event.clientX, width: panelWidth };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -179,11 +187,36 @@ export function ComputerPanel({
     if (!resizeFrom.current) return;
     resizeFrom.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
-    try {
-      localStorage.setItem(PANEL_WIDTH_KEY, String(panelWidth));
-    } catch {
-      /* storage blocked — width lives for this session */
-    }
+    persistPanelWidth(panelWidth);
+  };
+  /** Keyboard resize: the same clamp and stored preference the pointer flow
+   * uses, so arrow-key changes stay in React state like a drag would. */
+  const onResizeBy = (delta: number) => {
+    setPanelWidth((current) => {
+      const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, current + delta));
+      persistPanelWidth(next);
+      return next;
+    });
+  };
+  const separatorRef = useRef<HTMLDivElement>(null);
+  const [separatorWidth, setSeparatorWidth] = useState<number | null>(null);
+  useEffect(() => {
+    // The width state lives with the panel; mirror the styled panel only
+    // so the slider semantics stay truthful for assistive tech.
+    const panel = separatorRef.current?.closest("aside");
+    if (!panel) return;
+    const read = () => setSeparatorWidth(panel.offsetWidth);
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, []);
+  const onSeparatorKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    const widen = event.key === "ArrowLeft" ? PANEL_RESIZE_STEP : event.key === "ArrowRight" ? -PANEL_RESIZE_STEP : null;
+    if (widen === null || separatorWidth === null) return;
+    event.preventDefault();
+    onResizeBy(widen);
   };
   const { state, dispatch, flushBotPatches } = useStore();
   // Where this bot's current conversation works and whether a turn is acting
@@ -841,16 +874,34 @@ export function ComputerPanel({
     if (panelView !== "computer" || phase !== "vm" || !computerStatusCurrent || viewerOpen || !pageVisible) return;
     const controller = new AbortController();
     let inFlight = false;
+    let lastAttemptAt = -Infinity;
+    let retryDelay: number | null = null;
+    let initialAttempt = true;
     const shoot = async () => {
       if (inFlight || controller.signal.aborted) return;
+      if (Date.now() - lastAttemptAt < (retryDelay ?? (bot.busy ? 3000 : 30_000))) return;
       inFlight = true;
+      retryDelay = null;
       try {
         const { image } = await api(threadPath("local-computer/screenshot"), { method: "POST", signal: controller.signal });
-        if (!controller.signal.aborted && typeof image === "string") setVmFrame(image);
+        if (!controller.signal.aborted && typeof image === "string") {
+          setVmFrame(image);
+          setPreviewError(null);
+        }
       } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+        // The first miss leaves the pane with nothing to show, so it stays a
+        // panel error. Later transient misses are the preview's own retry
+        // business — they keep the last frame, back off, and never rewrite
+        // the panel banner every tick.
+        if (!controller.signal.aborted) {
+          retryDelay = 5000;
+          if (initialAttempt) setError(e instanceof Error ? e.message : String(e));
+          else setPreviewError(e instanceof Error ? e : new LocalizedPanelError("computer.err.screenUnavailable"));
+        }
       } finally {
         inFlight = false;
+        initialAttempt = false;
+        lastAttemptAt = Date.now();
       }
     };
     void shoot();
@@ -859,7 +910,7 @@ export function ComputerPanel({
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [panelView, phase, computerStatusCurrent, threadPath, viewerOpen, pageVisible, bot.busy]);
+  }, [panelView, phase, computerStatusCurrent, threadPath, viewerOpen, pageVisible, bot.busy, setError, setPreviewError, setVmFrame]);
 
   // local preview: frames from the Electron main process. The FIRST capture
   // attempt is what makes macOS show the Screen Recording prompt (there is
@@ -1050,6 +1101,9 @@ export function ComputerPanel({
           setResolvedComputerSelection(null);
           setBoxState(cloudBackend === "vps" ? "stopped" : "archived");
           if (cloudBackend === "vps") setPhase("vps-stopped");
+          // The deciders map an archived box to the sleeping observation
+          // phase; re-resolving would see "ensure-box" and wake it again.
+          else setPhase("show-sleeping-box");
         }
       })
       .catch((e) => {
@@ -1160,14 +1214,20 @@ export function ComputerPanel({
       style={{ width: panelWidth }}
     >
       <div
+        ref={separatorRef}
         role="separator"
         aria-orientation="vertical"
         aria-label={t("computer.resizeAria")}
+        aria-valuemin={PANEL_MIN_WIDTH}
+        aria-valuemax={PANEL_MAX_WIDTH}
+        aria-valuenow={separatorWidth ?? undefined}
+        tabIndex={0}
+        onKeyDown={onSeparatorKeyDown}
         onPointerDown={onResizeStart}
         onPointerMove={onResizeMove}
         onPointerUp={onResizeEnd}
         onPointerCancel={onResizeEnd}
-        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40"
+        className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60"
       />
       {/* Header */}
       <div className={cn("flex items-center justify-between px-4 py-3", padClass)}>

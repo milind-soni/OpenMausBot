@@ -354,7 +354,9 @@ struct ChatListView: View {
     private func botRows(_ rows: [ChatSummary]) -> some View {
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, summary in
             VStack(spacing: 0) {
-                NavigationLink(value: summary.chat) {
+                Button {
+                    path.append(session.threadSelection.restoringThread(summary.chat, connectionID: session.connection?.id))
+                } label: {
                     ChatRow(
                         chat: summary.chat,
                         preview: summary.preview,

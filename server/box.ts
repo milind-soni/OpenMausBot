@@ -129,6 +129,7 @@ export interface ManagedBoxInventory {
   configured: boolean;
   available: boolean;
   problem: string | null;
+  credentialRejected?: boolean;
   instances: ManagedBoxInventoryInstance[];
 }
 
@@ -500,7 +501,7 @@ function safeBoxState(value: unknown): string {
 
 async function listBoxPages(
   cfg: AppConfig,
-): Promise<{ ok: true; boxes: any[] } | { ok: false; problem: string }> {
+): Promise<{ ok: true; boxes: any[] } | { ok: false; problem: string; credentialRejected?: boolean }> {
   const boxes: any[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | null = null;
@@ -514,7 +515,7 @@ async function listBoxPages(
       return { ok: false, problem: "Could not reach ascii.dev to list cloud computers — check your connection and refresh" };
     }
     if (!listed.ok || !Array.isArray(listed.body?.boxes)) {
-      return { ok: false, problem: boxInventoryProblem(listed.status, listed.body) };
+      return { ok: false, problem: boxInventoryProblem(listed.status, listed.body), credentialRejected: listed.status === 401 || listed.status === 403 };
     }
     boxes.push(...listed.body.boxes);
 
@@ -558,6 +559,7 @@ export async function listManagedBoxes(
       configured: true,
       available: false,
       problem: listed.problem,
+      credentialRejected: listed.credentialRejected,
       instances: [],
     };
   }
@@ -1379,21 +1381,38 @@ export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FR
 }
 const SHOT_CMD = panelShotCommand();
 
+// A compromised box can answer with an arbitrarily large "frame"; cap what
+// the server ever buffers for one (raw bytes, before base64) so a single
+// response cannot exhaust memory.
+const MAX_FRAME_BYTES = 8 * 1024 * 1024;
+const FRAME_TOO_LARGE = "the box frame exceeds the 8 MB limit";
+
 /** Read a file off the box as base64 — raw artifact bytes when the API
  * supports it (33% less transfer, no JSON envelope), else the files API. */
 async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Promise<string | null> {
+  let bytes: Buffer | null = null;
+  let tooLarge = false;
   try {
     const res = await boxFetch(cfg, `/boxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`);
     if (res.ok) {
-      const bytes = Buffer.from(await res.arrayBuffer());
-      if (bytes.length) return bytes.toString("base64");
+      const declaredLength = res.headers.get("content-length");
+      if (declaredLength !== null && Number(declaredLength) > MAX_FRAME_BYTES) tooLarge = true;
+      else bytes = Buffer.from(await res.arrayBuffer());
     }
   } catch {
     /* fall through */
   }
+  if (tooLarge || (bytes !== null && bytes.length > MAX_FRAME_BYTES)) {
+    throw new Error(FRAME_TOO_LARGE);
+  }
+  if (bytes?.length) return bytes.toString("base64");
   const { ok, body } = await boxJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`);
   const content = body?.content;
-  return ok && typeof content === "string" && content ? content : null;
+  if (ok && typeof content === "string" && content) {
+    if (Buffer.byteLength(content, "base64") > MAX_FRAME_BYTES) throw new Error(FRAME_TOO_LARGE);
+    return content;
+  }
+  return null;
 }
 
 /** `knownBoxId` skips box resolution entirely — the screen poller holds

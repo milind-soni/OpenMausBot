@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -146,10 +146,14 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     expect((await api("GET", "/api/bots?messages=10")).bots).toEqual(before);
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "team-computers.json"), "utf8")).computers)
       .toContainEqual(expect.objectContaining({ id: machine.id, section: "Research", name: machine.name }));
+    // Wait for each destination before operating controls from the next view.
     await click("Close computers");
+    await expect.poll(snapshot, { timeout: 10_000 }).not.toContain('complementary "Team computers"');
     await click("Open chat with Ben");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('log "Conversation with Ben"');
     await click("Bot's computer");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Team default");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ben's screen");
+    await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Team default");
     expect(await snapshot()).toContain("Engineering desktop");
     expect(await snapshot()).not.toContain("Choose Cloud");
     await click("Open Team map");
@@ -187,12 +191,16 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     Object.assign(evidence, { computers: await computers(), provider: providerResult, finalSnapshot: await snapshot() });
     await ui("screenshot", "--out", `${fixture.logPath}.team-computers.png`);
   } finally {
-    if (info) {
-      try { evidence.finalUi = await runControlOmb(["ui", "snapshot", "--ui", info.ui]); } catch { /* keep original failure */ }
-      const path = `${info.logPath}.team-computers.json`;
-      writeFileSync(path, JSON.stringify({ fixture: info, ...evidence }, null, 2));
-      console.info(JSON.stringify({ evidence: path }));
+    try {
+      if (info) {
+        try { evidence.finalUi = await runControlOmb(["ui", "snapshot", "--ui", info.ui]); } catch { /* keep original failure */ }
+        const path = `${info.logPath}.team-computers.json`;
+        writeFileSync(path, JSON.stringify({ fixture: info, ...evidence }, null, 2), { mode: 0o600 });
+        console.info(JSON.stringify({ evidence: path }));
+      }
+    } finally {
+      await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+      if (info) expect(existsSync(info.dataDir)).toBe(false);
     }
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
   }
 }, binary ? 300_000 : 720_000);

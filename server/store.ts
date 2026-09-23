@@ -3,7 +3,7 @@
 // ProviderSessionDirectory, recipe step 6: persist the binding from day
 // one). messages-<threadId>.json holds the folded transcript.
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, mkdirSync, rmSync, unlinkSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
@@ -13,6 +13,7 @@ import type { BotProfilePatch } from "./bot-profile.ts";
 import { peerAllowKey, type PeerAction } from "./peer-approval-key.ts";
 import { DATA_DIR, EVENTS_DIR, NATIVE_DIR, loadBrowserProfileIdAliases } from "./config.ts";
 import * as mdb from "./message-db.ts";
+import { runCommand, type Command } from "./commands.ts";
 import { workspaceDir } from "./workspace.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
@@ -22,6 +23,7 @@ import { approvalModeFor, isApprovalMode } from "../shared/approval-mode.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
 import type { GroupGoalRunCardData } from "../shared/group-goal-run.ts";
+import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-boundary.ts";
 import type { HandedState } from "./delta-context.ts";
 import type {
   BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
@@ -49,7 +51,6 @@ export type GroupWireProjection = GroupRecord & { working: boolean };
 export type GroupWireProjectionIsExact = AssertExact<WireGroup, GroupWireProjection> & AssertSameKeys<WireGroup, GroupWireProjection>;
 export const groupWireProjectionIsExact: GroupWireProjectionIsExact = true;
 
-
 // Unicode's complete emoji sequences include flags, skin tones and ZWJ
 // combinations. Also allow unqualified single symbols (e.g. ♥), but not
 // standalone components such as a digit, skin tone or regional indicator.
@@ -71,12 +72,16 @@ export interface TaskRecord extends WireTask {
   /** per instance: the stored messages that instance's current native
    * session has been handed on this task (server/delta-context.ts) */
   handedMessages?: Record<string, HandedState>;
+  /** Last compaction represented by a dispatched session on this task. */
+  appliedCompactionId?: string;
+  contextFloor?: number;
+  lastContextModel?: string;
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -88,16 +93,25 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 /** The typed wire projection for one task. Pairs with the assertion above:
  * returning WireTask means an undeclared server field cannot ride silently. */
 export function toWireTask(task: TaskRecord): WireTask {
-  const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages, ...wire } = task;
+  const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
+    appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel, ...wire } = task;
   return wire;
 }
 
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
-  "unread", "rewound", "archivedAt", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-  "routineRunId", "surface",
+  "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
+  "routineRunId", "surface", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
+
+/** Only `true` is a pin. false/undefined must not land in bots.json or groups.json. */
+function persistedPin<T extends { pinned?: boolean }>(task: T): T {
+  if (task.pinned === true) return task;
+  if (!("pinned" in task)) return task;
+  const { pinned: _pinned, ...rest } = task;
+  return rest as T;
+}
 
 /** Everything the BOT authored is scrubbed of content-shaped secrets before
  * it is stored: its reply text, a tool title (an ACP engine's title can be
@@ -110,6 +124,7 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
   if (message.role !== "bot") return message;
   const out = { ...message };
   if (typeof out.text === "string") out.text = redactSecretsInText(out.text);
+  if (out.compaction) out.compaction = { ...out.compaction, summary: redactSecretsInText(out.compaction.summary) };
   if (out.tool?.name) {
     out.tool = { ...out.tool, name: redactSecretsInText(out.tool.name) };
     if (out.tool.summary) out.tool.summary = redactSecretsInText(out.tool.summary);
@@ -340,6 +355,8 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
     threadId?: string;
     /** Composer grant: leave the bot default and other threads unchanged. */
     threadOnly?: true;
+    /** Explicit bot-wide grant, including existing threads. */
+    allThreads?: true;
   };
   /** Receipt committed with a confirmed profile, for retrying card settlement. */
   lastProfileRequestId?: string;
@@ -359,6 +376,20 @@ export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
 
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
+
+/** The registries carry souls, project paths and per-bot settings, so they are
+ * owner-only like the other data-dir stores. A file written by an older
+ * release (or loosened by hand) is tightened on load. Best effort: failing to
+ * tighten must never stop the fleet from loading, and the next save replaces
+ * the file with a 0600 one anyway. Windows has no POSIX mode bits. */
+function tightenRegistryFile(file: string): void {
+  if (process.platform === "win32") return;
+  try {
+    if ((statSync(file).mode & 0o077) !== 0) chmodSync(file, 0o600);
+  } catch {
+    /* absent, or not ours to change */
+  }
+}
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
 
 const COLORS: MausColor[] = [
@@ -391,13 +422,13 @@ export function mentionedBots<T extends { name: string; hidden?: boolean }>(text
   const found: T[] = [];
   let at = -1;
   while ((at = lower.indexOf("@", at + 1)) !== -1) {
-    if (at > 0 && !/\s/.test(text[at - 1])) continue; // user@host, not a tag
+    if (!isMentionBoundary(text, at)) continue; // user@host, not a tag
     const rest = lower.slice(at + 1);
     const hit = candidates.find((p) => {
       const name = p.name.toLowerCase();
       if (!rest.startsWith(name)) return false;
-      const after = rest[name.length]; // must not run into a longer word
-      return after === undefined || !/[a-z0-9]/i.test(after);
+      const after = rest.slice(name.length); // must not run into a longer word
+      return !isMentionNameContinuation(after);
     });
     if (hit && !found.includes(hit)) found.push(hit);
   }
@@ -437,7 +468,17 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   defaultResponder: GroupDefaultResponder,
 ): T[] {
   const available = members.filter((member) => !member.hidden);
-  if (/(?:^|\s)@everyone\b/i.test(text)) return available;
+  const everyone = "everyone";
+  for (let at = text.indexOf("@"); at !== -1; at = text.indexOf("@", at + 1)) {
+    const candidate = text.slice(at + 1, at + 1 + everyone.length);
+    if (
+      isMentionBoundary(text, at) &&
+      candidate.toLocaleLowerCase() === everyone &&
+      !isMentionNameContinuation(text.slice(at + 1 + everyone.length))
+    ) {
+      return available;
+    }
+  }
   const mentioned = mentionedBots(text, available);
   if (mentioned.length) return mentioned;
   if (defaultResponder.kind === "everyone") return available;
@@ -470,6 +511,7 @@ export class Store {
   constructor(defaultSelection: () => ModelSelection) {
     this.defaultSelection = defaultSelection;
     mkdirSync(DATA_DIR, { recursive: true });
+    for (const file of [BOTS_FILE, GROUPS_FILE]) tightenRegistryFile(file);
     try {
       this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
     } catch {
@@ -622,6 +664,7 @@ export class Store {
           threadId: g.threadId,
           title: this.firstUserLine(g.threadId) ?? UNTITLED_TASK,
           createdAt: g.createdAt,
+          updatedAt: g.createdAt,
         };
         if (g.pinnedCwd !== undefined) initialTask.pinnedCwd = g.pinnedCwd;
         if (g.pinnedMessageId) initialTask.pinnedMessageId = g.pinnedMessageId;
@@ -654,6 +697,7 @@ export class Store {
           threadId: b.threadId,
           title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
           createdAt: b.createdAt,
+          updatedAt: b.createdAt,
           resumeCursors: b.resumeCursors ?? {},
         }];
         botsMigrated = true;
@@ -666,6 +710,7 @@ export class Store {
           threadId: b.threadId,
           title: this.firstUserLine(b.threadId) ?? UNTITLED_TASK,
           createdAt: b.createdAt,
+          updatedAt: b.createdAt,
           resumeCursors: b.resumeCursors ?? {},
         };
         b.tasks.unshift(active);
@@ -718,20 +763,69 @@ export class Store {
       const legacyFile = messagesFile(threadId);
       if (existsSync(legacyFile)) mdb.readThread(threadId, legacyFile);
     }
+    // After legacy transcripts are in SQLite, so the first boot sees their
+    // newest message instead of stamping createdAt and jumping next launch.
+    this.repairThreadUpdatedAts();
     this.registeringInitialSections = false;
+  }
+
+  /** Advance a task's update stamp in memory only. Message writes must not
+   * rewrite bots.json; the next snapshot and the startup repair read this. */
+  private noteThreadActivity(threadId: string, at: number): void {
+    if (!Number.isFinite(at)) return;
+    const advance = (current: number | undefined) => Math.max(current ?? 0, at);
+    for (const bot of this.bots) {
+      const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
+      if (!task) continue;
+      const next = advance(task.updatedAt);
+      if (task.updatedAt !== next) task.updatedAt = next;
+    }
+    for (const group of this.groups) {
+      const task = group.tasks?.find((candidate) => candidate.threadId === threadId);
+      if (!task) continue;
+      const next = advance(task.updatedAt);
+      if (task.updatedAt !== next) task.updatedAt = next;
+    }
+  }
+
+  /** Fill missing stamps, and raise a stamp that is older than the newest
+   * stored message. Never moves a stamp backwards: there is no per-message
+   * delete, and a clock skew must not reshuffle the list on every boot. */
+  private repairThreadUpdatedAts(): void {
+    const botTasks = this.bots.flatMap((bot) => bot.tasks ?? []);
+    const groupTasks = this.groups.flatMap((group) => group.tasks ?? []);
+    const latest = mdb.latestMessageAts([...botTasks, ...groupTasks].map((task) => task.threadId));
+    let botsDirty = false;
+    let groupsDirty = false;
+    const repair = (task: { threadId: string; createdAt: number; updatedAt?: number }) => {
+      const fromMessages = latest.get(task.threadId);
+      const next = fromMessages !== undefined && (task.updatedAt === undefined || fromMessages > task.updatedAt)
+        ? fromMessages
+        : task.updatedAt ?? task.createdAt;
+      if (task.updatedAt === next) return false;
+      task.updatedAt = next;
+      return true;
+    };
+    for (const task of botTasks) if (repair(task)) botsDirty = true;
+    for (const task of groupTasks) if (repair(task)) groupsDirty = true;
+    if (botsDirty) this.saveBots();
+    if (groupsDirty) this.saveGroups();
   }
 
   private saveBots(bots: BotRecord[] = this.bots) {
     this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomic(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
-      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => task),
-    })), null, 2));
+      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
+    })), null, 2), { mode: 0o600 });
   }
 
   private saveGroups() {
     this.rememberSections(this.groups.map((group) => group.section));
-    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => g), null, 2));
+    writeFileAtomic(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId: _busyBotId, turnStartedAt: _turnStartedAt, ...g }) => ({
+      ...g,
+      ...(g.tasks ? { tasks: g.tasks.map((task) => persistedPin(task)) } : {}),
+    })), null, 2), { mode: 0o600 });
   }
 
   get sections(): string[] { return readSections(); }
@@ -828,7 +922,7 @@ export class Store {
       section,
     };
     if (!dm) {
-      group.tasks = [{ threadId, title: UNTITLED_TASK, createdAt }];
+      group.tasks = [{ threadId, title: UNTITLED_TASK, createdAt, updatedAt: createdAt }];
       group.setupCompletedAt = setup?.completed ? createdAt : null;
       group.setupSkippedAt = null;
     }
@@ -976,10 +1070,12 @@ export class Store {
   createGroupTask(groupId: string, title?: string, activate = true): GroupTaskRecord | null {
     const group = this.group(groupId);
     if (!group || group.dm) return null;
+    const createdAt = Date.now();
     const task: GroupTaskRecord = {
       threadId: newId(),
       title: title?.trim().slice(0, 80) || UNTITLED_TASK,
-      createdAt: Date.now(),
+      createdAt,
+      updatedAt: createdAt,
     };
     group.tasks = [task, ...(group.tasks ?? [])];
     if (activate) {
@@ -1002,6 +1098,16 @@ export class Store {
     this.saveGroups();
     this.emit({ type: "group", groupId });
     return group;
+  }
+
+  setGroupTaskPinned(groupId: string, threadId: string, pinned: boolean): GroupTaskRecord | null {
+    const task = this.groupTaskByThread(groupId, threadId);
+    if (!task) return null;
+    if (pinned) task.pinned = true;
+    else delete task.pinned;
+    this.saveGroups();
+    this.emit({ type: "group", groupId });
+    return task;
   }
 
   renameGroupTask(groupId: string, threadId: string, title: string): GroupTaskRecord | null {
@@ -1131,6 +1237,8 @@ export class Store {
     if (this.messagesFor(threadId).length) throw new Error("Cannot import over an existing conversation");
     mdb.importThread(threadId, messages, activeLeafId);
     this.threads.delete(threadId);
+    const newest = messages.reduce((max, message) => Math.max(max, message.at), Number.NEGATIVE_INFINITY);
+    if (Number.isFinite(newest)) this.noteThreadActivity(threadId, newest);
   }
 
   activeLeaf(threadId: string): string | null {
@@ -1165,18 +1273,23 @@ export class Store {
     return null;
   }
 
-  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }): Message {
+  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }, command?: Command): Message {
     const t = this.thread(threadId);
     const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
+    const persist = () => { mdb.appendMessage(threadId, full); return full; };
+    const committed = command ? runCommand(command, persist) : persist();
+    if (committed.id !== full.id) return committed;
+    // Only publish the committed write. A failed receipt must leave both
+    // the in-memory branch and subscribers unchanged, just like SQLite.
     t.messages.push(full);
     t.activeLeafId = full.id;
-    mdb.appendMessage(threadId, full);
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
     }
+    this.noteThreadActivity(threadId, full.at);
     this.emit({ type: "message", threadId, message: full });
     // The first-run quiz is not a live ask. Talking past it hides it so the
     // transcript is just the greeting plus what they said. Cards with a
@@ -1206,6 +1319,7 @@ export class Store {
         this.emit({ type: "message.patch", threadId, message: pruned });
       }
     }
+    this.noteThreadActivity(threadId, full.at);
     this.emit({ type: "message", threadId, message: full });
     // announced after the insert so no client ever sees two siblings
     // claiming the same parent
@@ -1262,6 +1376,7 @@ export class Store {
     t.messages.push(full);
     t.activeLeafId = full.id;
     mdb.appendMessage(threadId, full);
+    this.noteThreadActivity(threadId, full.at);
     this.emit({ type: "message", threadId, message: full });
     // The message frame alone leaves every client on the OLD branch: a
     // client adopts a new message as its leaf only when it chains onto the
@@ -1290,7 +1405,7 @@ export class Store {
     return cur;
   }
 
-  patchMessage(threadId: string, messageId: string, patch: Partial<Message>): Message | null {
+  patchMessage(threadId: string, messageId: string, patch: Partial<Message>, command?: Command): Message | null {
     const t = this.thread(threadId);
     const idx = t.messages.findIndex((m) => m.id === messageId);
     if (idx === -1) return null;
@@ -1298,7 +1413,10 @@ export class Store {
     // SQLite is the durable source of truth. Persist before changing memory so
     // a failed write cannot make this process believe a card was answered
     // while a restart would still show it as pending.
-    mdb.updateMessage(threadId, next);
+    let applied = false;
+    const persist = () => { mdb.updateMessage(threadId, next); applied = true; return next; };
+    const committed = command ? runCommand(command, persist) : persist();
+    if (!applied) return committed;
     t.messages[idx] = next;
     this.emit({ type: "message.patch", threadId, message: next });
     return next;
@@ -1350,6 +1468,7 @@ export class Store {
       threadId: bot.threadId,
       title: UNTITLED_THREAD,
       createdAt: bot.createdAt,
+      updatedAt: bot.createdAt,
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
       unread: false,
@@ -1401,7 +1520,7 @@ export class Store {
           title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
           modelSelection: operation.fields.modelSelection, resumeCursors: {}, createdAt, ...operation.fields,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
-          tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, resumeCursors: {},
+          tasks: [{ threadId: operation.threadId, title: UNTITLED_THREAD, createdAt, updatedAt: createdAt, resumeCursors: {},
             modelSelection: structuredClone(operation.fields.modelSelection), approvalMode: "ask", autoApprove: false,
             unread: false, activity: "idle", busy: false }],
         };
@@ -1906,6 +2025,7 @@ export class Store {
       }
     }
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
+    if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);
     bot.unread = bot.tasks!.some((candidate) => candidate.unread);
     this.saveBots();
@@ -1923,8 +2043,8 @@ export class Store {
     if (!bot || !task) return null;
     const patch = { modelSelection: structuredClone(selection),
       ...(resetApprovalToAsk ? { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] } : {}) };
-    const nextTask = { ...task, ...taskPatch, ...patch,
-      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD } : {}) };
+    const nextTask = persistedPin({ ...task, ...taskPatch, ...patch,
+      ...(typeof taskPatch.title === "string" ? { title: taskPatch.title.trim().slice(0, 80) || UNTITLED_THREAD } : {}) });
     // Older threads may still inherit settings. Freeze their effective
     // values before updating the default so "other threads unchanged" also
     // holds for workspaces created before per-thread approval settings.
@@ -1944,6 +2064,20 @@ export class Store {
     return task;
   }
 
+  /** One durable write: never leave only part of a bot's threads updated. */
+  setAllThreadApprovalMode(botId: string, mode: "full" | "ask"): BotRecord | null {
+    const bot = this.bot(botId);
+    if (!bot) return null;
+    const patch = { approvalMode: mode, autoApprove: false, alwaysAllow: [] };
+    const tasks = (bot.tasks ?? []).map(task => ({ ...task, ...patch }));
+    const next = { ...bot, ...patch, approvalGrant: undefined, tasks };
+    this.saveBots(this.bots.map(candidate => candidate === bot ? next : candidate));
+    bot.tasks?.forEach((task, index) => Object.assign(task, tasks[index]));
+    Object.assign(bot, patch, { approvalGrant: undefined });
+    this.emit({ type: "bot", botId });
+    return bot;
+  }
+
   private mirrorActiveTask(bot: BotRecord, task: TaskRecord) {
     bot.threadId = task.threadId;
     bot.resumeCursors = structuredClone(task.resumeCursors);
@@ -1953,21 +2087,23 @@ export class Store {
 
   /** A fresh context on the same bot: new thread, new session, same
    * persona/tools/computer. Becomes the active task. */
-  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy): TaskRecord | null {
+  createTask(botId: string, title?: string, activate = true, projectId?: string, openedBy?: TaskOpenedBy, approvalMode?: "ask" | "full"): TaskRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
     if (projectId !== undefined && !this.project(botId, projectId)) return null;
+    const createdAt = Date.now();
     const task: TaskRecord = {
       threadId: newId(),
       title: threadTitleFrom(title),
-      createdAt: Date.now(),
+      createdAt,
+      updatedAt: createdAt,
       ...(projectId ? { projectId } : {}),
       ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
       resumeCursors: {},
       modelSelection: structuredClone(bot.modelSelection),
-      approvalMode: approvalModeFor(bot),
-      autoApprove: Boolean(bot.autoApprove),
-      alwaysAllow: [...(bot.alwaysAllow ?? [])],
+      approvalMode: approvalMode ?? approvalModeFor(bot),
+      autoApprove: approvalMode ? false : Boolean(bot.autoApprove),
+      alwaysAllow: approvalMode ? [] : [...(bot.alwaysAllow ?? [])],
       unread: false,
       activity: "idle",
       busy: false,

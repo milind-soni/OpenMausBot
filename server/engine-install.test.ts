@@ -9,14 +9,17 @@ import * as procs from "./procs.ts";
 
 // A stand-in npm: records its arguments, honours --prefix, and behaves per
 // FAKE_NPM_MODE. Nothing reaches a registry or the network.
+// CommonJS on purpose: an extensionless shebang script parses as CJS, which
+// skips the ESM-detection reparse and lets the stubborn-mode trap below arm
+// itself before anything slower (requires, log writes) can delay boot.
 const FAKE_NPM = `#!/usr/bin/env node
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+if (process.env.FAKE_NPM_MODE === 'stubborn') process.on('SIGTERM', () => {});
+const { appendFileSync, mkdirSync, writeFileSync } = require('node:fs');
+const { join } = require('node:path');
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_NPM_MODE || 'ok';
 appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify({ args, cwd: process.cwd(), secret: process.env.XAI_API_KEY ?? null }) + '\\n');
 if (mode === 'fail') { console.error('npm ERR! code E404\\nnpm ERR! 404 Not Found - registry-token-fixture'); process.exit(1); }
-if (mode === 'stubborn') process.on('SIGTERM', () => {});
 if (mode === 'hang' || mode === 'stubborn') { setInterval(() => {}, 1000); }
 else {
   const prefix = args[args.indexOf('--prefix') + 1];
@@ -111,12 +114,14 @@ describe.skipIf(process.platform === "win32")("installing with npm", () => {
     process.env.FAKE_NPM_MODE = "stubborn";
     const stopped = vi.spyOn(procs, "killCliTree");
     try {
-      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 300 })).rejects.toThrow("took too long and was stopped");
+      // Enough headroom for the fixture's Node boot under load, so TERM
+      // arrives after the trap above is armed and only KILL can finish it.
+      await expect(installNpmEngine("fake-engine", { baseDir: base, timeoutMs: 5000 })).rejects.toThrow("took too long and was stopped");
       expect(stopped.mock.calls[0]![0].signalCode).toBe("SIGKILL");
     } finally {
       stopped.mockRestore();
     }
-  }, 10_000);
+  }, 20_000);
 
   it("reports an uncertain stop without waiting forever for npm close", async () => {
     process.env.FAKE_NPM_MODE = "hang";

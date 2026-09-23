@@ -603,6 +603,26 @@ class CompanionClient(
     /** The unarchive PATCH carries an explicit null, so jsonBody's skip-nulls
      * rule cannot be used here. Stamps are whole milliseconds: a Double would
      * serialize large ones in scientific notation. */
+    suspend fun setTaskPinned(botId: String, threadId: String, pinned: Boolean) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/bots/${segment(botId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject { put("pinned", pinned) },
+        ))
+    }
+
+    /** Title is echoed so an older server does not rename the thread to empty. */
+    suspend fun setRoomTaskPinned(groupId: String, threadId: String, pinned: Boolean, title: String) {
+        sendUnit(makeRequest(
+            "PATCH",
+            "/api/groups/${segment(groupId)}/tasks/${segment(threadId)}",
+            body = buildJsonObject {
+                put("pinned", pinned)
+                put("title", title)
+            },
+        ))
+    }
+
     suspend fun setTaskArchived(botId: String, threadId: String, archivedAt: Double?) {
         sendUnit(makeRequest(
             "PATCH",

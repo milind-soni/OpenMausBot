@@ -42,6 +42,14 @@ in `.omb-scratch/verify-evidence/model-switch/`. This proves settings and turn
 dispatch, not the quality of a real model's engineering output. The store test
 also simulates a failed disk write and confirms neither scope changes.
 
+The picker smoke also includes an installed but signed-out Claude account and
+a missing Codex installation. Both stay in the full engine catalog for Settings
+but are absent from the model picker, which keeps an **Engines and accounts**
+shortcut. `src/lib/engine-rail.test.ts` covers configured custom/local models,
+empty catalogs, per-account filtering, and leaving the source catalog unchanged.
+The smoke selects a configured local Codex model, browses Claude, closes and
+reopens the picker, and checks that the selected local model is visible again.
+
 ## Live Claude smoke — 2026-09-12
 
 Separately, the exact system prompts captured from the disposable app were

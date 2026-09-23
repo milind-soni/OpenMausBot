@@ -7,10 +7,12 @@ import {
   holdChannelQueue,
   queuedChannelMessage,
   queueChannelMessage,
+  restoreChannelMessages,
   restoreHeldChannelQueue,
   resolveHeldReplyTarget,
   settleHeldChannelQueueHead,
 } from "./channel-queue.ts";
+import { saveChatFollowup } from "./message-db.ts";
 
 describe("channel queue", () => {
   it("keeps messages off the running channel and drains one follow-up at a time", () => {
@@ -50,6 +52,42 @@ describe("channel queue", () => {
       mode: "goal",
     }));
     expect(_queuedChannelCount("thread-a")).toBe(0);
+  });
+
+  it("hands the drain who sent a queued message, through a restart too", () => {
+    queueChannelMessage("group-sender", "thread-sender", "from the paired person", { sender: { name: "Priya" } });
+    queueChannelMessage("group-sender", "thread-sender", "from the owner");
+    restoreChannelMessages(); // a restart reads the name back from the durable row
+
+    const run = vi.fn();
+    drainChannelMessages(() => false, run);
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "thread-sender", text: "from the paired person", sender: { name: "Priya" },
+    }));
+    drainChannelMessages(() => false, run);
+    const owner = run.mock.calls.map(([input]) => input).find((input) => input.text === "from the owner");
+    expect(owner).toBeDefined();
+    expect(owner.sender).toBeUndefined();
+  });
+
+  it("keeps who sent the head of a held queue, so a room steer can still name them", () => {
+    const head = queueChannelMessage("group-sender-held", "thread-sender-held", "steer me", { sender: { name: "Priya" } });
+    const held = holdChannelQueue("group-sender-held", "thread-sender-held", head.id);
+    expect(held?.items[0].sender).toEqual({ name: "Priya" });
+    settleHeldChannelQueueHead(held!);
+  });
+
+  it("still loads and drains a durable row written before senders were kept", () => {
+    saveChatFollowup({
+      id: "legacy-channel-followup-without-sender", kind: "channel", ownerId: "group-legacy", threadId: "thread-legacy",
+      payload: { text: "queued by an older build", mode: "chat" },
+    });
+    expect(() => restoreChannelMessages()).not.toThrow();
+    const run = vi.fn();
+    drainChannelMessages(() => false, run);
+    const legacy = run.mock.calls.map(([input]) => input).find((input) => input.threadId === "thread-legacy");
+    expect(legacy).toMatchObject({ id: "legacy-channel-followup-without-sender", text: "queued by an older build", mode: "chat" });
+    expect(legacy.sender).toBeUndefined();
   });
 
   it("cancels only the requested channel message", () => {

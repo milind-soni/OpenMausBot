@@ -206,6 +206,7 @@ describe("encrypted full workspace backups", () => {
     const target = directory();
     const authPaths = [
       "workspace-credentials.json", "browser-engine-key", "config.json.123.tmp",
+      "external-runtimes.json", "external-runtimes.json.123.tmp",
       "providers/account/auth.json", "providers/antigravity/account/acp_token.json",
       "caddy/data/private.key", "chrome-profile/Cookies", ".agent-browser/auth.json",
       "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc/.browser-profiles/chromium/Cookies",
@@ -244,6 +245,49 @@ describe("encrypted full workspace backups", () => {
     expect(readJson(join(source, "webhooks.json")).webhooks[0].secretHash).toBe("a".repeat(64));
   });
 
+  it("never lists a per-turn hook token directory in a backup manifest", async () => {
+    const source = directory();
+    mkdirSync(join(source, "hook-tokens"), { mode: 0o700 });
+    writeFileSync(join(source, "hook-tokens", `${"a".repeat(24)}.token`), "SOURCE_TURN_BEARER", { mode: 0o600 });
+    mkdirSync(join(source, "attachments"));
+    writeFileSync(join(source, "attachments", "note.txt"), "ordinary user file");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const staging = join(source, ".backups", staged.id, "staged");
+    const paths: string[] = readJson(join(staging, "manifest.json")).entries.map((entry: { path: string }) => entry.path);
+    expect(paths).toContain("attachments/note.txt");
+    expect(paths.filter((path) => /token/i.test(path))).toEqual([]);
+    expect(existsSync(join(staging, "data", "hook-tokens"))).toBe(false);
+    for (const path of paths) {
+      if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toContain("SOURCE_TURN_BEARER");
+    }
+  });
+
+  it("still restores an archive from a release that exported hook tokens, without installing them", async () => {
+    const source = directory();
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const probe = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const base = readJson(join(source, ".backups", probe.id, "staged", "manifest.json"));
+    const token = "STALE_TURN_BEARER";
+    const note = "kept";
+    const file = (path: string, content: string) => ({ path, type: "file", size: Buffer.byteLength(content), mode: 0o600, sha256: createHash("sha256").update(content).digest("hex") });
+    const manifest = {
+      ...base,
+      entries: [{ path: "hook-tokens", type: "directory", size: 0, mode: 0o700 }, file("hook-tokens/old.token", token), file("note.txt", note)],
+      summary: { ...base.summary, directories: 1, files: 2, bytes: Buffer.byteLength(token) + Buffer.byteLength(note) },
+    };
+    const archive = encryptedPayload(source, Buffer.concat([
+      tarEntry("manifest.json", "File", JSON.stringify(manifest)), tarEntry("data", "Directory"), tarEntry("data/hook-tokens", "Directory"),
+      tarEntry("data/hook-tokens/old.token", "File", token), tarEntry("data/note.txt", "File", note), Buffer.alloc(1024),
+    ]));
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, archive, { password: PASSWORD });
+    commitPendingWorkspaceRestore(target, staged.id);
+    expect(applyPendingWorkspaceRestore(target)).toMatchObject({ restored: true });
+    expect(readFileSync(join(target, "note.txt"), "utf8")).toBe(note);
+    expect(existsSync(join(target, "hook-tokens"))).toBe(false);
+  });
+
   it("rejects authenticated credential metadata, saved auth paths, and connection-bearing config", async () => {
     const source = directory();
     const exported = await createWorkspaceBackup(source, { password: PASSWORD });
@@ -259,6 +303,8 @@ describe("encrypted full workspace backups", () => {
     for (const [name, content] of [
       ["team-computers.json", '{"computers":[{"id":"foreign-computer","section":"Design"}]}'],
       ["workspace-credentials.json", '{"xaiApiKey":"secret"}'],
+      ["external-runtimes.json", '{"bot-id":"external-runtime-secret"}'],
+      ["External-Runtimes.json", "external-runtime-secret"],
       ["Sessions.json", "secret"],
       ["Providers", "secret"],
       ["Caddy", "secret"],

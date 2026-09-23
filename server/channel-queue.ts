@@ -8,6 +8,7 @@
 
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import type { ResolvedSender } from "../shared/wire.ts";
 
 interface ChannelQueueItem {
   id: string;
@@ -17,6 +18,8 @@ interface ChannelQueueItem {
   mode: "chat" | "goal";
   /** kept so the drain appends it with the same provenance it arrived with */
   via?: "api";
+  /** the person who sent it, so the drained line still names them */
+  sender?: ResolvedSender;
 }
 
 interface ChannelQueueEntry {
@@ -50,6 +53,7 @@ export function queueChannelMessage(
     sendId?: string;
     mode?: "chat" | "goal";
     via?: "api";
+    sender?: ResolvedSender;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -61,6 +65,7 @@ export function queueChannelMessage(
     sendId: options.sendId,
     mode: options.mode ?? "chat",
     via: options.via,
+    sender: options.sender,
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
   entry.items.push(item);

@@ -53,6 +53,7 @@ final class Session: ObservableObject {
     @Published private(set) var state = CompanionState()
     @Published private(set) var connection: Connection?
     @Published private(set) var connections: [Connection] = []
+    let threadSelection = BotThreadSelection()
     /// Whether the live pairing may administer the workspace — see
     /// `Connection.canAdminister`. Views hide owner-only controls when this
     /// is false rather than offer buttons the server would answer 403 to.
@@ -166,7 +167,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : (arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview"),
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -192,6 +193,11 @@ final class Session: ObservableObject {
                 connections = registry.connections
             } else {
                 connections = [preview]
+            }
+            if arguments.contains("-images-preview") {
+                let config = URLSessionConfiguration.ephemeral
+                config.protocolClasses = [ImagePreviewProtocol.self]
+                client = CompanionClient(connection: preview, token: "image-fixture-token", session: URLSession(configuration: config))
             }
             state.hydrate(fleet)
             if arguments.contains("-threads-preview"),
@@ -1641,6 +1647,45 @@ final class Session: ObservableObject {
             await refresh()
             return true
         } catch { actionError = error.localizedDescription; return false }
+    }
+
+    @discardableResult
+    func setTaskPinned(_ task: BotTask, pinned: Bool, in chat: Chat) async -> Bool {
+        guard let client else { return false }
+        setPinnedLocally(task, pinned: pinned, in: chat)
+        do {
+            switch chat {
+            case let .bot(bot):
+                try await client.setTaskPinned(botId: bot.id, threadId: task.threadId, pinned: pinned)
+            case let .room(room):
+                try await client.setRoomTaskPinned(groupId: room.id, threadId: task.threadId, pinned: pinned, title: task.title)
+            }
+            await refresh()
+            return true
+        } catch {
+            setPinnedLocally(task, pinned: task.pinned == true, in: chat)
+            actionError = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Move the row before the server answers, and put it back if the write fails.
+    private func setPinnedLocally(_ task: BotTask, pinned: Bool, in chat: Chat) {
+        let value: Bool? = pinned ? true : nil
+        switch chat {
+        case let .bot(bot):
+            guard let botIndex = state.bots.firstIndex(where: { $0.id == bot.id }),
+                  var tasks = state.bots[botIndex].tasks,
+                  let taskIndex = tasks.firstIndex(where: { $0.threadId == task.threadId }) else { return }
+            tasks[taskIndex].pinned = value
+            state.bots[botIndex].tasks = tasks
+        case let .room(room):
+            guard let roomIndex = state.rooms.firstIndex(where: { $0.id == room.id }),
+                  var tasks = state.rooms[roomIndex].tasks,
+                  let taskIndex = tasks.firstIndex(where: { $0.threadId == task.threadId }) else { return }
+            tasks[taskIndex].pinned = value
+            state.rooms[roomIndex].tasks = tasks
+        }
     }
 
     @discardableResult

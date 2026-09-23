@@ -1,6 +1,8 @@
 // The bot settings dialog's section rail — one entry per BotSettingsSection,
 // in the fixed order the rail renders them. Search filters against label
 // plus keywords, the same convention as the app SettingsModal's SECTIONS.
+// "slack" is listed here but shown only when the server offers a link to the
+// organisation's Admin (BotSettingsDialog filters it out otherwise).
 import {
   BookOpen,
   Brain,
@@ -13,6 +15,7 @@ import {
   Mic,
   Network,
   ShieldCheck,
+  Slack,
   Sparkles,
   User,
 } from "lucide-react";
@@ -27,6 +30,7 @@ export const BOT_SECTIONS: Array<{
 }> = [
   { id: "overview", label: "Overview", icon: LayoutDashboard, keywords: ["summary", "status", "what it does", "won't", "prompt", "what the model sees"] },
   { id: "identity", label: "Identity", icon: User, keywords: ["name", "title", "avatar", "blurb", "instructions"] },
+  { id: "slack", label: "Slack", icon: Slack, keywords: ["slack", "slack app", "admin", "message", "direct messages", "mentions"] },
   { id: "soul", label: "Soul", icon: Sparkles, keywords: ["standing instructions", "instructions", "persona", "rules", "soul.md"] },
   { id: "skills", label: "Skills", icon: BookOpen, keywords: ["skills", "learned", "procedures", "teach"] },
   { id: "memory", label: "Memory", icon: Brain, keywords: ["memory", "notes", "remember", "topics"] },

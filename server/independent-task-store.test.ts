@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { DATA_DIR } from "./config.ts";
@@ -15,6 +15,45 @@ const savedGroups = (): GroupRecord[] => JSON.parse(readFileSync(join(DATA_DIR, 
 describe("independent bot task state", () => {
   // The shared Vitest setup gives this file its own disposable home.
   beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
+
+  it("applies an explicit bot-wide approval mode without changing history or provider choices", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const other = store.createBot({}, { seedMessages: false });
+    const first = bot.threadId;
+    store.appendMessage(first, { role: "user", kind: "text", text: "Keep this conversation" });
+    const archived = store.createTask(bot.id, "Archived")!;
+    store.patchTask(bot.id, archived.threadId, { archivedAt: Date.now(), modelSelection: { instanceId: "codex", model: "different" } });
+    store.setResumeCursor(bot.id, "codex", "keep-session", archived.threadId);
+    const history = store.messagesFor(first);
+    store.setAllThreadApprovalMode(bot.id, "full");
+    expect(store.tasks(bot.id).every(task => task.approvalMode === "full")).toBe(true);
+    const restarted = new Store(selection);
+    expect(restarted.bot(bot.id)?.approvalMode).toBe("full");
+    expect(restarted.tasks(bot.id).every(task => task.approvalMode === "full")).toBe(true);
+    expect(restarted.taskByThread(bot.id, archived.threadId)).toMatchObject({
+      archivedAt: archived.archivedAt, modelSelection: { instanceId: "codex", model: "different" }, resumeCursors: { codex: "keep-session" },
+    });
+    expect(restarted.messagesFor(first)).toEqual(history);
+    expect(restarted.createTask(bot.id)?.approvalMode).toBe("full");
+    expect(approvalModeFor(restarted.bot(other.id)!)).toBe("ask");
+    restarted.setAllThreadApprovalMode(bot.id, "ask");
+    expect(new Store(selection).tasks(bot.id).every(task => task.approvalMode === "ask")).toBe(true);
+  });
+
+  it("does not partially elevate any thread when saving the all-threads change fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.createTask(bot.id, "Second thread");
+    const before = JSON.stringify(bot);
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots").mockImplementation(() => { throw new Error("fixture disk full"); });
+    try {
+      expect(() => store.setAllThreadApprovalMode(bot.id, "full")).toThrow("fixture disk full");
+      expect(JSON.stringify(bot)).toBe(before);
+      const restarted = new Store(selection);
+      expect(restarted.tasks(bot.id).every(task => approvalModeFor(restarted.projectBotForTask(bot.id, task.threadId)!) === "ask")).toBe(true);
+    } finally { save.mockRestore(); }
+  });
 
   it("persists routine execution identity without sharing context or approval settings", () => {
     const store = new Store(selection);
@@ -434,5 +473,27 @@ describe("independent bot task state", () => {
     expect(reloaded.project(bot.id, project.id)).toEqual({ id: project.id, name: "General", emoji: "⭐" });
     expect(reloaded.taskByThread(bot.id, bot.threadId)?.modelSelection).toEqual({ instanceId: "codex", model: "existing-thread" });
     expect(reloaded.createTask(bot.id, undefined, false, project.id)?.modelSelection).toEqual(selection());
+  });
+
+  it("pins a thread without storing false, and advances updatedAt from a message without rewriting bots.json", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const task = store.createTask(bot.id, "Pinned later")!;
+    const before = readFileSync(join(DATA_DIR, "bots.json"));
+    const message = store.appendMessage(task.threadId, { role: "user", kind: "text", text: "still here" });
+    expect(store.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
+    expect(readFileSync(join(DATA_DIR, "bots.json"))).toEqual(before);
+    expect(store.patchTask(bot.id, task.threadId, { pinned: true })?.pinned).toBe(true);
+    expect(savedBots().find((entry) => entry.id === bot.id)!.tasks!.find((entry) => entry.threadId === task.threadId)!.pinned).toBe(true);
+    expect(store.patchTask(bot.id, task.threadId, { pinned: false })?.pinned).toBeUndefined();
+    expect("pinned" in savedBots().find((entry) => entry.id === bot.id)!.tasks!.find((entry) => entry.threadId === task.threadId)!).toBe(false);
+    const group = store.createGroup("Channel", [bot.id], false);
+    const channel = store.createGroupTask(group.id, "Side")!;
+    expect(store.setGroupTaskPinned(group.id, channel.threadId, true)?.pinned).toBe(true);
+    expect(savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!.pinned).toBe(true);
+    store.setGroupTaskPinned(group.id, channel.threadId, false);
+    expect("pinned" in savedGroups().find((entry) => entry.id === group.id)!.tasks!.find((entry) => entry.threadId === channel.threadId)!).toBe(false);
+    const restarted = new Store(selection);
+    expect(restarted.taskByThread(bot.id, task.threadId)?.updatedAt).toBe(message.at);
   });
 });

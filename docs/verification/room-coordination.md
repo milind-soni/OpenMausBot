@@ -1,5 +1,26 @@
 # In-chat team coordination
 
+Independent bot conversations now dispatch as soon as a handoff is accepted;
+speakers in the same group chat still serialize. A Chief waiting for returned
+results exposes `waitingForTeammates: true`, not a fake active `busy` turn.
+The chat header shows **Teammates working**, leaves the composer usable and
+retains Stop. Explicit command-line `wait` still waits for the whole result.
+Accepted handoffs survive a failed source provider turn; explicit Stop,
+deleted conversations and revoked routes keep their existing cancellation
+behavior. This does not add restart replay or remove task capacity limits.
+
+Regression checks (all use disposable fixtures):
+
+```sh
+pnpm exec vitest run server/room-handoffs.test.ts server/direct-coordination.e2e.test.ts server/room-coordination.e2e.test.ts
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/direct-coordination-ui.e2e.test.ts
+```
+
+Gated fake-model turns prove a teammate starts before the Chief settles,
+the Chief becomes available while results are pending, failure of the source
+does not discard accepted work, and exactly one final answer returns to the
+original thread. These tests verify orchestration, not live-model planning.
+
 In an ordinary bot chat or group conversation, ask the lead to consult named
 teammates or have them build and review a concrete artifact. No new dashboard,
 incoming-route panel or mandatory discussion. The existing **Finish together** goal loop
@@ -89,7 +110,8 @@ The direct-chat suite exercises Clive → lead → specialist → lead → Clive
 the real MCP proxy, no room, and no changes to unrelated conversations. It also
 checks one conversation per bot pair across separate user turns, its title,
 labelled concurrent work that closes itself, recipient model/permission
-defaults, idempotency without extra tasks, busy queues, pinned parent
+defaults, idempotency without extra tasks, capacity-bound queues, dispatch to a
+spare recipient thread while unrelated work remains active, pinned parent
 selection, steering a live coordination (including an automation turn
 landing in the same conversation), conversation-scoped Stop, source
 deletion, access revocation, and fresh transcript replay after
@@ -97,6 +119,11 @@ revocation. The UI test sends from the real
 composer and clicks the existing handoff receipt into the exact recipient task,
 with ordinary tool chips hidden. Screenshots and JSON are retained beside the
 fixture's printed server log; all fixture processes and temporary data are closed.
+The legacy routine `ask_bot` path is covered by `server/comms.test.ts`: a
+gated peer outlives the production 15-second inline budget, the caller finishes
+with an asynchronous receipt, and releasing the peer delivers its late reply
+to the original conversation. This budget releases the caller, not the peer;
+it does not impose a 15-second limit on delegated work.
 Follow-up checks cover retained report context and withholding after peer access
 is revoked, without mirroring a second visible transcript.
 Addressing checks cover what a bot may put in a `bot_ids` slot: an id is always

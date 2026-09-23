@@ -38,6 +38,8 @@ recipe from sending messages to the user's running app by accident.
 Use only mapped, tested commands:
 
 - [Chat turns](chat-turns.md)
+- [Conversation context compaction](context-compaction.md)
+- [Work summaries and engine hooks](digests.md)
 - [OpenAI-compatible structured tools](openai-tools.md)
 - [OpenCode model variants through ACP](opencode-variants.md)
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
@@ -62,6 +64,7 @@ Use only mapped, tested commands:
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
 - [Usage ledger](usage-ledger.md)
+- [Bounded built-in tool results](tool-results.md)
 - [Spend cap and sell prices](spend-cap.md)
 
 `control-omb ui` ([Chat UI, driven headlessly](chat-ui.md)) drives the real
@@ -86,6 +89,10 @@ and proves quit cancels recovery without replaying an interrupted fixture turn.
 The [Tailscale discovery fixture](tailscale.md) checks standalone macOS CLI mode
 and HTTP tailnet endpoint refresh without touching a real Tailscale installation.
 
+The [external runtimes recipe](external-runtime.md) proves a bot's standing
+comms capability from `external-runtimes.json` against a disposable server and
+the fake engine: scope, on-demand token reads, and immediate delegation drain.
+
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
 
@@ -99,6 +106,10 @@ desktop app or controlling the user's computer.
 
 The [bot settings fixture](bot-settings.md) checks profile saves, standing
 instructions, history restore, skill/memory refresh, and stale-response isolation.
+
+The [hosted Slack management fixture](hosted-slack-management.md) checks the
+agent settings link to Admin: hosted-only availability, the member-readable
+route module, and stale-response isolation.
 
 The [chat and settings polish fixture](chat-polish.md) exercises attachment
 galleries, opt-in video playback, persisted tool details, and responsive settings
@@ -117,8 +128,20 @@ keyless local generation, saved-key handling, and safe errors with a local fake 
 The [independent threads fixture](threads.md) checks nested sidebar navigation,
 per-thread models, simultaneous direct conversations and thread-scoped Stop.
 
+The [mobile generated-image checks](mobile-generated-images.md) cover native image
+attachments and message-scoped download authorization using isolated fixtures.
+
+The [guarded external messages fixture](guarded-messages.md) checks atomic
+branch and approval preconditions, retry receipts, and refusal to queue or
+steer messages from external interfaces. It also verifies bounded request
+lineage snapshots, Chief continuations and exact-execution Stop without
+interrupting a newer request.
+
 The [iOS thread checks](ios-threads.md) cover the native thread tree, folder
 search and draft isolation using disposable simulators and an offline fixture.
+
+The [Android stream recovery checks](android-stream-recovery.md) exercise early
+stream closure and fallback through disposable HTTP endpoints.
 
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.

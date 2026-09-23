@@ -144,7 +144,7 @@ function disable(botId: string, message: string): void {
 let gitProbe: Promise<boolean> | null = null;
 function gitAvailable(): Promise<boolean> {
   gitProbe ??= new Promise((resolveProbe) => {
-    execFile("git", ["--version"], { windowsHide: true }, (err) => resolveProbe(!err));
+    execFile("git", ["--version"], { windowsHide: true, timeout: 5_000 }, (err) => resolveProbe(!err));
   });
   return gitProbe;
 }
@@ -214,12 +214,13 @@ function gitEnv(shadow: string, cwd: string): NodeJS.ProcessEnv {
  * "." pathspec in add/restore resolves relative to it. A hung git (index
  * lock, dead network filesystem) would otherwise jam the per-repo queue for
  * the whole session, so every call carries a hard timeout. */
-function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<string> {
+function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<string> {
   return new Promise((resolvePromise, rejectPromise) => {
+    signal?.throwIfAborted();
     execFile(
       "git",
       args,
-      { cwd, env, windowsHide: true, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
+      { cwd, env, signal, windowsHide: true, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) rejectPromise(new Error(`git ${args[0]}: ${(stderr || err.message).trim().slice(0, 400)}`));
         else resolvePromise(stdout);
@@ -232,12 +233,13 @@ function runGit(args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<st
  * instead of `status --porcelain` emptiness on purpose — a nested repo with
  * a dirty work tree shows up in status forever while staging nothing, which
  * would either commit empty churn every turn or fail the commit outright. */
-function hasStagedChanges(cwd: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+function hasStagedChanges(cwd: string, env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<boolean> {
   return new Promise((resolvePromise, rejectPromise) => {
+    signal?.throwIfAborted();
     execFile(
       "git",
       ["diff", "--cached", "--quiet", "--ignore-submodules=dirty"],
-      { cwd, env, windowsHide: true, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
+      { cwd, env, signal, windowsHide: true, encoding: "utf8", timeout: 120_000, maxBuffer: 16 * 1024 * 1024 },
       (err, _stdout, stderr) => {
         if (err === null) resolvePromise(false);
         else if (err.code === 1) resolvePromise(true);
@@ -271,21 +273,22 @@ function serialize<T>(key: string, fn: () => Promise<T>): Promise<T> {
  * always resolves — it is filtered from listings and refused as a restore
  * target, because "restore to empty" on a user's own project folder would
  * delete their files. */
-async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string): Promise<void> {
+async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   mkdirSync(shadow, { recursive: true, mode: 0o700 });
   writeFileSync(join(shadow, "gitconfig"), GITCONFIG, { mode: 0o600 });
   writeFileSync(join(shadow, "gitconfig_empty"), "", { mode: 0o600 });
   if (!existsSync(join(shadow, ".git", "HEAD"))) {
     // --template= keeps the user's init.templateDir hooks/config out
-    await runGit(["init", "--initial-branch=main", "--template="], cwd, env);
+    await runGit(["init", "--initial-branch=main", "--template="], cwd, env, signal);
   }
   mkdirSync(join(shadow, ".git", "info"), { recursive: true });
   writeFileSync(join(shadow, ".git", "info", "exclude"), EXCLUDES);
   try {
-    await runGit(["rev-parse", "--verify", "HEAD"], cwd, env);
+    await runGit(["rev-parse", "--verify", "HEAD"], cwd, env, signal);
   } catch {
     // brand-new repo (or a crash between init and first commit)
-    await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env);
+    await runGit(["commit", "--no-verify", "--allow-empty", "-m", "checkpoint base"], cwd, env, signal);
   }
 }
 
@@ -294,26 +297,27 @@ type CommitResult = { hash: string; complete: boolean };
 /** Stage everything and commit if anything actually changed. `complete`
  * records whether every path was indexable: ordinary snapshots may keep the
  * useful subset, but restore must not delete files its safety point missed. */
-async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string): Promise<CommitResult> {
+async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, signal?: AbortSignal): Promise<CommitResult> {
   // --ignore-errors skips files git cannot index (unreadable, FIFOs) instead
   // of aborting — but still exits 1 when it skipped an unreadable file, so
   // the exit code is retained even though a partial snapshot remains useful.
   // Restore treats an incomplete safety point as a hard stop before touching
   // the work tree.
   let complete = true;
-  await runGit(["add", "-A", "--ignore-errors", "."], cwd, env).catch(() => {
+  await runGit(["add", "-A", "--ignore-errors", "."], cwd, env, signal).catch(() => {
     complete = false;
   });
-  if (await hasStagedChanges(cwd, env)) {
-    await runGit(["commit", "--no-verify", "-m", label], cwd, env);
+  if (await hasStagedChanges(cwd, env, signal)) {
+    await runGit(["commit", "--no-verify", "-m", label], cwd, env, signal);
   }
-  return { hash: (await runGit(["rev-parse", "HEAD"], cwd, env)).trim(), complete };
+  return { hash: (await runGit(["rev-parse", "HEAD"], cwd, env, signal)).trim(), complete };
 }
 
 /** Snapshot the folder. Returns the checkpoint hash, or null when the
  * feature is off for this bot, git is missing, or the folder is refused.
  * Never throws — this is called fire-and-forget on the turn path. */
-export async function snapshot(botId: string, cwd: string, label: string): Promise<string | null> {
+export async function snapshot(botId: string, cwd: string, label: string, signal?: AbortSignal): Promise<string | null> {
+  if (signal?.aborted) return null;
   if (disabledBots.has(botId)) return null;
   if (!(await gitAvailable())) return null;
   if (refusalReason(cwd) !== null) return null;
@@ -322,11 +326,49 @@ export async function snapshot(botId: string, cwd: string, label: string): Promi
     const shadow = shadowDir(botId, worktree);
     return await serialize(shadow, async () => {
       const env = gitEnv(shadow, worktree);
-      await ensureShadow(worktree, env, shadow);
-      return (await commitAll(worktree, env, label)).hash;
+      await ensureShadow(worktree, env, shadow, signal);
+      return (await commitAll(worktree, env, label, signal)).hash;
     });
   } catch (e) {
-    disable(botId, e instanceof Error ? e.message : String(e));
+    if (!signal?.aborted) disable(botId, e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+export interface CheckpointDiff {
+  changed: string[];
+  added: string[];
+  deleted: string[];
+}
+
+/** Paths that differ between two checkpoints of the same bot+folder, from
+ * `git diff --name-status` against the shadow repo. Null when the hashes
+ * are equal, the folder is refused or checkpoints are off, or git fails —
+ * the digest then simply omits its file list. Never throws (turn path). */
+export async function diffStat(botId: string, cwd: string, fromHash: string, toHash: string, signal?: AbortSignal): Promise<CheckpointDiff | null> {
+  if (signal?.aborted) return null;
+  if (fromHash === toHash) return null;
+  if (disabledBots.has(botId)) return null;
+  if (!(await gitAvailable())) return null;
+  if (refusalReason(cwd) !== null) return null;
+  try {
+    const worktree = realpathSync(resolve(cwd));
+    const shadow = shadowDir(botId, worktree);
+    const env = gitEnv(shadow, worktree);
+    const out = await serialize(shadow, () =>
+      runGit(["diff", "--name-status", "--no-renames", "-z", fromHash, toHash], worktree, env, signal),
+    );
+    const diff: CheckpointDiff = { changed: [], added: [], deleted: [] };
+    const fields = out.split("\0").filter((field) => field.length > 0);
+    for (let i = 0; i + 1 < fields.length; i += 2) {
+      const status = fields[i]!;
+      const path = fields[i + 1]!;
+      if (status.startsWith("A")) diff.added.push(path);
+      else if (status.startsWith("D")) diff.deleted.push(path);
+      else diff.changed.push(path);
+    }
+    return diff;
+  } catch {
     return null;
   }
 }

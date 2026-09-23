@@ -50,9 +50,15 @@ describe("mentionedBots", () => {
     expect(mentionedBots("mail milind@milind.dev please", peers)).toEqual([]);
     expect(mentionedBots("@Ghost around?", peers)).toEqual([]);
   });
+  it("routes Markdown- and punctuation-wrapped mentions", () => {
+    expect(mentionedBots("**@Milind** (@New Bot 2) 【@New Bot】", peers).map((bot) => bot.id))
+      .toEqual(["3", "2", "1"]);
+    expect(mentionedBots("user@Milind /@Milind", peers)).toEqual([]);
+  });
   it("requires a word boundary at the end of the name", () => {
     expect(mentionedBots("ask @New Bottle about it", peers)).toEqual([]);
     expect(mentionedBots("@Milindo is someone else", peers)).toEqual([]);
+    expect(mentionedBots("@Milind𐐀 is someone else", peers)).toEqual([]);
   });
 });
 
@@ -74,6 +80,15 @@ describe("roomResponders", () => {
     expect(roomResponders("hello", members, { kind: "everyone" })).toEqual(members);
     expect(roomResponders("hello", members, { kind: "mentions" })).toEqual([]);
     expect(roomResponders("@everyone hello", members, { kind: "mentions" })).toEqual(members);
+  });
+
+  it("applies the shared mention boundaries to everyone", () => {
+    const mentionsOnly = { kind: "mentions" } as const;
+    expect(roomResponders("**@EVERYONE** hello", members, mentionsOnly)).toEqual(members);
+    expect(roomResponders("【@everyone】 hello", members, mentionsOnly)).toEqual(members);
+    expect(roomResponders("@everyone調査 hello", members, mentionsOnly)).toEqual([]);
+    expect(roomResponders("@everyone𐐀 hello", members, mentionsOnly)).toEqual([]);
+    expect(roomResponders("user@everyone /@everyone", members, mentionsOnly)).toEqual([]);
   });
 
   it("keeps bot-to-bot channels on their last-speaker routing", () => {
@@ -224,11 +239,12 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
             environment: { FAKE_ACP_MODE: "exit-early" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
-          // a successful peer turn that deliberately emits no assistant
-          // text — the channel still needs a positive terminal record.
-          helperEmpty: {
+          // a successful peer turn that deliberately emits no assistant text,
+          // only an image — the channel still needs a positive terminal
+          // record for output a person can see but not read.
+          helperImage: {
             driver: "grokAgent",
-            environment: { FAKE_ACP_MODE: "empty-reply" },
+            environment: { FAKE_ACP_MODE: "image" },
             config: { cli: FAKE_CLI, fullAuto: true },
           },
           // a turn that remains busy until provider reload disposes it.
@@ -253,9 +269,8 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       HOME: home,
       USERPROFILE: home,
       OMB_PORT: String(PORT),
-      // e2e-friendly ask ceiling: the timeout-conversion test needs the
-      // synchronous wait to end while the gated peer turn is still open
-      OMB_ASK_BOT_TIMEOUT_MS: "8000",
+      // Keep the production ask budget: the gated-peer test verifies the
+      // caller is released promptly without a test-only timeout override.
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     // Without SystemRoot, winsock fails to initialize in the child.
@@ -956,7 +971,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       });
 
       // the ask starts the peer's gated turn, which stays open well past
-      // the 8s ceiling — the asker must get a claim ticket, not a drop
+      // the production inline budget — the asker must get a claim ticket, not a drop
       expect((await startRoutine(asker.id, "ask @SlowHelper for the numbers")).status).toBe(201);
       let askerBot: any;
       await waitUntil(async () => {
@@ -966,6 +981,8 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       }, 30_000, "asker never got the timeout-conversion reply");
       const conversionReply = askerBot.messages.findLast((m: any) => m.kind === "text" && m.role === "bot");
       expect(conversionReply.text).toContain("Task id:");
+      expect(conversionReply.text).toContain("after 15 seconds");
+      expect((await api("GET", "/api/bots?messages=0")).body.bots.find((b: any) => b.id === helper.id).busy).toBe(true);
       expect(conversionReply.text).toContain("delivered to this conversation automatically");
       expect(conversionReply.text).not.toContain("wait_delegation");
       expect(askerBot.messages.some(
@@ -992,17 +1009,17 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
   // ── delegation terminal-state mirroring ─────────────────────────────
   // A delegated turn is fire-and-forget. Its result is returned to the
   // initiating chat and mirrored into the A⇄B channel. These tests pin a
-  // successful empty reply plus both non-happy terminal states: the
+  // successful reply without text plus both non-happy terminal states: the
   // delegated turn crashed, and the delegated turn never started.
   it(
-    "mirrors a successful delegated turn with no reply as a completed terminal chip",
+    "mirrors a successful delegated turn with no text reply as a completed terminal chip",
     async () => {
       const seeded = (await api("GET", "/api/bots")).body.bots[0];
       await api("PATCH", `/api/bots/${seeded.id}`, { hidden: true });
       const helper = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${helper.id}`, {
         name: "Helper",
-        modelSelection: { instanceId: "helperEmpty", model: "fake-model" },
+        modelSelection: { instanceId: "helperImage", model: "fake-model" },
       });
       const asker = (await api("POST", "/api/bots")).body.bot;
       await api("PATCH", `/api/bots/${asker.id}`, {

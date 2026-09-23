@@ -189,6 +189,8 @@ data class Message(
     val hasImage: Boolean? = null,
     val png: String? = null,
     val mime: String? = null,
+    /** Agent-generated images on text replies, including late message patches. */
+    val attachments: List<MessageImageAttachment>? = null,
     /**
      * A user line the engine took INTO the turn that was already running,
      * rather than one that started a turn of its own.
@@ -301,7 +303,15 @@ data class BotTask(
     val archivedAt: Double? = null,
     /** Bot-only internal execution. Keep it addressable, but out of thread pickers. */
     val routineRunId: String? = null,
+    /** The person pinned this thread above the update-ordered list. */
+    val pinned: Boolean? = null,
+    /** Newest message time. Absent on older computers; the list uses createdAt. */
+    val updatedAt: Double? = null,
 )
+
+/** The time the thread list sorts and stamps by. */
+val BotTask.listStamp: Double
+    get() = updatedAt ?: createdAt
 
 /** The thread list's quiet second line, worded as the desktop words it. */
 val BotTask.openedByLabel: String?
@@ -1192,4 +1202,12 @@ data class BotOverview(
     val reaches: List<String> = emptyList(),
     val wont: List<String> = emptyList(),
     val recent: List<BotOverviewRecent> = emptyList(),
+)
+
+/** Unknown attachment kinds remain decodable and are not rendered. */
+@Serializable
+data class MessageImageAttachment(
+    val kind: String,
+    val path: String? = null,
+    val mime: String? = null,
 )

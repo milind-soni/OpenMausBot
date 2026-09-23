@@ -1,7 +1,7 @@
 // Exercise real provider adapters against the existing scripted ACP peer.
 // These tests prove OMB's flags/settings and handling of residual requests,
 // not a native engine's risk classifier or a model's willingness to use tools.
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -70,6 +70,7 @@ describe("remaining ACP approval mappings", () => {
       config: { cli: FAKE_CLI, fullAuto: true },
     });
     const recorder = recordEvents(instance.adapter);
+    const pidOf = () => JSON.parse(readFileSync(dump, "utf8")).pid as number;
     try {
       // The residual request reaches the user at every level, including the
       // ones an engine claims natively. Full is unsupported on most rows here
@@ -77,6 +78,8 @@ describe("remaining ACP approval mappings", () => {
       // fullAuto=true; where Full is supported the flag tracks the turn's own
       // mode, so the legacy instance value still cannot outrank Ask or Auto.
       for (const approvalMode of ["full", "auto", "ask"] as const) {
+        const pidBefore = existsSync(dump) ? pidOf() : null;
+        const methodsBefore = existsSync(rpcDump) ? (JSON.parse(readFileSync(rpcDump, "utf8")) as string[]).length : 0;
         const { turnId } = await instance.adapter.sendTurn({
           threadId: "approval-matrix-thread",
           text: "Exercise one provider permission request.",
@@ -87,15 +90,34 @@ describe("remaining ACP approval mappings", () => {
         const opened = await recorder.until((event) => event.type === "request.opened" && event.turnId === turnId);
         expect(opened).toMatchObject({ requestType: "permission", tool: "shell" });
         expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === turnId)).toBe(false);
-        expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual([...argv, ...(native?.[approvalMode] ?? [])]);
-        if (driver === OpenCodeDriver) {
-          const native = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
-          expect(native).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });
-          if (approvalMode === "full") expect(native).toMatchObject({ "*": "allow", read: "allow", bash: "allow", edit: "allow" });
-          else expect(native).toEqual({ external_directory: "ask" });
+        const respawned = pidOf() !== pidBefore;
+        // a pooled child never rewrites its spawn dump, so argv and env are
+        // evidence only for a turn that really spawned a process
+        if (respawned) {
+          expect(JSON.parse(readFileSync(dump, "utf8")).argv).toEqual([...argv, ...(native?.[approvalMode] ?? [])]);
+          if (driver === OpenCodeDriver) {
+            const permission = JSON.parse(JSON.parse(readFileSync(dump, "utf8")).env.OPENCODE_PERMISSION);
+            expect(permission).toMatchObject({ external_directory: approvalMode === "full" ? "allow" : "ask" });
+            if (approvalMode === "full") expect(permission).toMatchObject({ "*": "allow", read: "allow", bash: "allow", edit: "allow" });
+            else expect(permission).toEqual({ external_directory: "ask" });
+          }
         }
-        expect(JSON.parse(readFileSync(rpcDump, "utf8")))
-          .toContain(approvalMode === "full" ? "session/new" : "session/load");
+        // Agent processes are pooled per spawn contract: a turn whose mode
+        // changed the contract respawns (fresh dump pid) and must establish
+        // its session — session/new for the cursorless full turn, the
+        // cursor's session/load otherwise. A reused pooled child skips
+        // establishment and prompts the live session instead. A respawn
+        // rewrites the rpc dump, a reuse appends to it, so only the methods
+        // past the pre-turn baseline are this turn's.
+        const methods = JSON.parse(readFileSync(rpcDump, "utf8")) as string[];
+        const turnMethods = respawned ? methods : methods.slice(methodsBefore);
+        if (respawned) {
+          expect(turnMethods).toContain(approvalMode === "full" ? "session/new" : "session/load");
+        } else {
+          expect(turnMethods).toContain("session/prompt");
+          expect(turnMethods).not.toContain("session/new");
+          expect(turnMethods).not.toContain("session/load");
+        }
         if (driver === DroidAgentDriver) {
           const settings = JSON.parse(readFileSync(`${dump}.config.json`, "utf8"));
           expect(settings[0]).toEqual({

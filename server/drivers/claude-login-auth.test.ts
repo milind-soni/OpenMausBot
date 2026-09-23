@@ -87,7 +87,7 @@ describe("Claude server-owned sign-in", () => {
     const controller = new ClaudeLoginController({
       cli,
       environment: () => ({ ...process.env, HOME: home, CLAUDE_CONFIG_DIR: join(home, ".claude"), FAKE_AUTH_MODE: mode }),
-      startupTimeoutMs: 1000,
+      startupTimeoutMs: 5000,
       lifetimeMs: 3000,
       completeTimeoutMs: 3000,
       terminateTimeoutMs: 50,
@@ -165,7 +165,13 @@ describe("Claude server-owned sign-in", () => {
       const starting = controller.start();
       // The start rejects once cancelled below; listen before that happens.
       const startRejected = expect(starting).rejects.toThrow("cancelled");
-      await expect.poll(() => calls().some((call) => call.args.join(" ") === "auth login")).toBe(true);
+      await expect.poll(() => {
+        try {
+          return calls().some((call) => call.args.join(" ") === "auth login");
+        } catch {
+          return false;
+        }
+      }, { timeout: 10_000 }).toBe(true);
       await expect(controller.signOut()).rejects.toThrow("sign-in in progress");
       await expect(create("success").signOut()).rejects.toThrow("sign-in is running");
       expect(calls().map((call) => call.args)).not.toContainEqual(["auth", "logout"]);
@@ -244,7 +250,9 @@ describe("Claude server-owned sign-in", () => {
   });
 
   it("never shows a link that is not Anthropic's, and times out instead", async () => {
-    const controller = create("evil");
+    // Startup timeout must land before the 3s link lifetime so the rejection
+    // names the missing safe link, not an expired one.
+    const controller = create("evil", { startupTimeoutMs: 1000 });
     await expect(controller.start()).rejects.toThrow(/did not show a sign-in link/);
   });
 

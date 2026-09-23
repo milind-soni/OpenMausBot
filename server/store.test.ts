@@ -2,7 +2,8 @@
 // the durable record — everything here must survive a process restart
 // except `busy`, which never does (no turn survives one either).
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,7 +14,7 @@ import type { ModelSelection } from "./contracts.ts";
 import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { canAccessTeam } from "./peer-roster.ts";
-import { Store, type BotRecord } from "./store.ts";
+import { Store, toWireTask, type BotRecord } from "./store.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE } from "./section-context.ts";
 
@@ -22,6 +23,82 @@ const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-
 describe("Store", () => {
   beforeEach(() => {
     rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("persists compaction records but keeps session bookkeeping off the wire", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const user = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Original history" });
+    const key = "sk-ant-" + "a".repeat(90);
+    const record = store.appendMessage(bot.threadId, { role: "bot", kind: "compaction", compaction: {
+      summary: `Historical data -5 != 5; ${key}`, firstKeptId: "", foldedThroughId: user.id, tokensBefore: 100, by: "person",
+    } });
+    const patch = { appliedCompactionId: record.id, contextFloor: 500, lastContextModel: "claude:fixture" };
+    store.patchTask(bot.id, bot.threadId, patch);
+    const reloaded = new Store(selection);
+    expect(reloaded.taskByThread(bot.id, bot.threadId)).toMatchObject(patch);
+    expect(reloaded.messagesFor(bot.threadId)).toHaveLength(2);
+    expect(reloaded.messagesFor(bot.threadId)[1].compaction?.summary).toContain("-5 != 5");
+    expect(JSON.stringify(reloaded.messagesFor(bot.threadId))).not.toContain(key);
+    const wire = toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!);
+    for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
+  });
+
+  it.skipIf(process.platform === "win32")("writes the bot and group registries owner-only and tightens loose ones on load", () => {
+    const mode = (name: string) => statSync(join(DATA_DIR, name)).mode & 0o777;
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.createGroup("Team", [bot.id]);
+    expect(mode("bots.json")).toBe(0o600);
+    expect(mode("groups.json")).toBe(0o600);
+    // A registry left behind by an older release (or loosened by hand) is
+    // tightened before anything else happens, not only on the next save.
+    for (const name of ["bots.json", "groups.json"]) chmodSync(join(DATA_DIR, name), 0o644);
+    const reloaded = new Store(selection);
+    expect(mode("bots.json")).toBe(0o600);
+    expect(mode("groups.json")).toBe(0o600);
+    expect(reloaded.bots.map((record) => record.id)).toContain(bot.id);
+    // ...and a save after that keeps them owner-only.
+    reloaded.createGroup("Second team", [bot.id]);
+    reloaded.createBot({}, { seedMessages: false });
+    expect(mode("bots.json")).toBe(0o600);
+    expect(mode("groups.json")).toBe(0o600);
+  });
+
+  it("commits receipt-backed transcript changes before publishing and replays without duplicates", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const threadId = bot.threadId;
+    const before = structuredClone(store.messagesFor(threadId));
+    const changes = vi.fn();
+    store.onChange(changes);
+    const database = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    const failReceipts = () => database.exec("CREATE TRIGGER reject_test_receipt BEFORE INSERT ON command_receipts BEGIN SELECT RAISE(ABORT, 'fixture receipt failure'); END");
+    const allowReceipts = () => database.exec("DROP TRIGGER reject_test_receipt");
+    const append = () => store.appendMessage(threadId, { role: "bot", kind: "text", text: "Recorded work" }, { kind: "test.append", key: threadId });
+    try {
+      failReceipts();
+      expect(append).toThrow("fixture receipt failure");
+      expect(store.messagesFor(threadId)).toEqual(before);
+      expect(mdb.readThread(threadId, "/nonexistent").messages).toEqual(before);
+      expect(changes).not.toHaveBeenCalled();
+      allowReceipts();
+      const message = append();
+      expect(append()).toEqual(message);
+      expect(store.messagesFor(threadId)).toHaveLength(before.length + 1);
+      expect(changes).toHaveBeenCalledTimes(1);
+      changes.mockClear();
+      const patch = () => store.patchMessage(threadId, message.id, { text: "Updated evidence" }, { kind: "test.patch", key: message.id });
+      failReceipts();
+      expect(patch).toThrow("fixture receipt failure");
+      expect(store.messagesFor(threadId).at(-1)?.text).toBe("Recorded work");
+      expect(mdb.readThread(threadId, "/nonexistent").messages.at(-1)?.text).toBe("Recorded work");
+      expect(changes).not.toHaveBeenCalled();
+      allowReceipts();
+      expect(patch()?.text).toBe("Updated evidence");
+      expect(patch()?.text).toBe("Updated evidence");
+      expect(changes).toHaveBeenCalledTimes(1);
+    } finally { database.close(); }
   });
 
   it("commits a confirmed model switch once, preserving siblings and rolling back failed writes", () => {
@@ -244,6 +321,36 @@ describe("Store", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Imported" }, { seedMessages: false });
     expect(store.messagesFor(bot.threadId)).toHaveLength(0);
+  });
+
+  it("persists request provenance, failure and cancellation without altering message identity", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const source = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "Fixture request", sendId: "fixture-send-id-1234" });
+    const reply = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "Earlier handoff", turnId: "initial-turn",
+      requestMessageId: source.id, turnTerminal: true, turnSucceeded: true });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "activity", turnSucceeded: false, tool: { name: "error: fixture continuation failed", ok: false } });
+    store.patchMessage(bot.threadId, source.id, { requestCancelled: true, requestPending: true });
+    const saved = new Store(selection).messagesFor(bot.threadId);
+    expect(saved[0]).toMatchObject({ id: source.id, sendId: source.sendId, requestCancelled: true, requestPending: true });
+    expect(saved[1]).toMatchObject({ id: reply.id, requestMessageId: source.id, turnSucceeded: true });
+    expect(saved[2].turnSucceeded).toBe(false);
+  });
+
+  it("creates explicitly scoped tasks atomically without inheriting remembered grants or changing siblings", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { approvalMode: "full", autoApprove: false, alwaysAllow: ["old-tool"] });
+    const old = store.activeTask(bot.id)!;
+    const before = structuredClone(old);
+    const save = vi.spyOn(store as unknown as { saveBots(): void }, "saveBots");
+    const ask = store.createTask(bot.id, "Explicit Ask", true, undefined, undefined, "ask")!;
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(ask).toMatchObject({ approvalMode: "ask", autoApprove: false, alwaysAllow: [] });
+    const full = store.createTask(bot.id, "Authorized Full", true, undefined, undefined, "full")!;
+    expect(full).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+    expect(old).toEqual(before);
+    expect(bot).toMatchObject({ approvalMode: "full", autoApprove: false, alwaysAllow: ["old-tool"] });
   });
 
   it("addTaskUsage accumulates settled-turn totals per task and survives a restart", () => {

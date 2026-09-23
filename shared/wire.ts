@@ -9,6 +9,7 @@
  * fails compilation until it is either declared here or explicitly listed
  * as server-private. */
 import type { ApprovalMode } from "./approval-mode.ts";
+import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { MascotBodyId } from "./mascot-bodies.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
@@ -104,6 +105,8 @@ export interface TaskUsage {
  * session. Wire form: no resumeCursors or lastInstanceId — the harness's
  * own bookkeeping that no client has ever used. */
 export interface WireTask {
+  /** Outstanding handoffs, not an active provider turn. */
+  waitingForTeammates?: boolean;
   threadId: string;
   title: string;
   createdAt: number;
@@ -120,6 +123,12 @@ export interface WireTask {
   closedBy?: TaskClosedBy;
   /** When the person archived this thread. Absent = unarchived. */
   archivedAt?: number;
+  /** The person pinned this thread above the update-ordered list. Only true
+   * is stored; absence means unpinned. */
+  pinned?: boolean;
+  /** Epoch ms of the newest message, or createdAt when the thread has none.
+   * Server-derived. Clients must not write it. */
+  updatedAt?: number;
   /** Defaults are copied when a task is created. */
   modelSelection?: ModelSelection;
   approvalMode?: ApprovalMode;
@@ -176,6 +185,7 @@ export interface InstalledPackageMetadata {
  * projected tasks are WireTask[] and avatarUrl is always present
  * (null when the bot has none). */
 export interface WireBot {
+  waitingForTeammates?: boolean;
   id: string;
   /** The task selected in the UI; running turns keep their own thread id. */
   threadId: string;
@@ -260,14 +270,29 @@ export interface WireBot {
   createdAt: number;
 }
 
+/** The person a user message is from, as the server resolved it from their
+ * own session. Attribution only, never authority: nothing may be allowed or
+ * refused because of it, and no request body can supply it. */
+export interface ResolvedSender {
+  name: string;
+}
+
 /** One transcript line. Serialized as stored — the durable delivery
  * identity (roomRequest) rides the wire unchanged. */
 export interface WireMessage {
   roomRequest?: { id: string; phase: "request" | "result" };
   id: string;
   role: "bot" | "user";
-  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run";
+  kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "routine.run" | "goal.run" | "digest" | "compaction";
   text?: string;
+  digest?: TurnDigest;
+  compaction?: {
+    summary: string;
+    firstKeptId: string;
+    foldedThroughId: string;
+    tokensBefore: number;
+    by: "person" | "harness";
+  };
   /** Durable provider output stored by the harness; renderers receive only
    * the allowlisted /api/attachments URL. */
   attachments?: Array<{ kind: "image"; path: string; mime: string }>;
@@ -279,7 +304,14 @@ export interface WireMessage {
   /** Terminal receipt for a bounded multi-bot channel goal. */
   goalRun?: GroupGoalRunCardData;
   /** activity messages: tool name + outcome. */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string };
+  tool?: {
+    name: string; ok?: boolean; spoken?: string; setup?: boolean; terminal?: boolean; summary?: string; input?: string; output?: string;
+    /** Provider item identity, scoped to the owning turn. */
+    itemId?: string;
+    /** Whether the harness captured the full redacted result. Private
+     * server-local spill paths are not exposed to clients. */
+    fullResult?: boolean;
+  };
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
   /** A user-role message that arrived through the server's HTTP API. */
@@ -291,9 +323,19 @@ export interface WireMessage {
    * wrong person and remembered work under their name. Absent for the
    * desktop owner's own sends and for every message written before this
    * existed; both still read as the profile name. */
-  sender?: { name: string };
+  sender?: ResolvedSender;
   /** Provider turn that produced this message. */
   turnId?: string;
+  /** Server-proven originating user message, including supported harness
+   * continuations. Absent means external clients must not infer ownership. */
+  requestMessageId?: string;
+  /** Provider completion outcome, independent of whether it emitted text. */
+  turnSucceeded?: boolean;
+  /** An exact request was stopped; a restart must not revive an old result. */
+  requestCancelled?: boolean;
+  /** Set before execution and cleared only after the request's verified
+   * final turn and dependencies settle. A restart never clears it. */
+  requestPending?: boolean;
   /** The last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
   /** screen messages: a frame of the bot's computer (base64 image) */
@@ -403,6 +445,10 @@ export interface GroupTask {
   createdAt: number;
   pinnedCwd?: string | null;
   pinnedMessageId?: string;
+  /** The person pinned this channel thread above the update-ordered list. */
+  pinned?: boolean;
+  /** Epoch ms of the newest message, or createdAt when the thread has none. */
+  updatedAt?: number;
   /** The first message already drove a title attempt for this thread, so a
    * later one does not rename a room the person may have retitled. */
   titleFromFirstMessage?: true;

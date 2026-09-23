@@ -49,10 +49,12 @@ function Shell() {
       dispatch({ type: "toggleAppSettings", open: true, section: "desktopWorkspaces" });
     };
     const url = new URL(window.location.href);
-    if (url.searchParams.get("desktop-settings") === "workspaces") {
+    const requestedSettings = url.searchParams.get("desktop-settings");
+    if (requestedSettings === "workspaces" || (requestedSettings === "organization" && window.ogb.organization && !remoteClient)) {
       url.searchParams.delete("desktop-settings");
       window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
-      open();
+      if (requestedSettings === "organization") dispatch({ type: "toggleAppSettings", open: true, section: "organization" });
+      else open();
     }
     return window.ogb.environments.onOpenSettings?.(open);
   }, [dispatch]);
@@ -201,7 +203,8 @@ function Shell() {
   // Local-shell only: remote server pages never receive the channel, and ogb
   // is absent in the browser.
   useEffect(() => {
-    return window.ogb?.onOpenAppSettings?.(() => dispatch({ type: "toggleAppSettings", open: true }));
+    return window.ogb?.onOpenAppSettings?.(section => dispatch({ type: "toggleAppSettings", open: true,
+      ...(section === "organization" && window.ogb?.organization && !remoteClient ? { section } : {}) }));
   }, [dispatch]);
 
   // The viewer outlives ComputerPanel and can target any bot, so release control

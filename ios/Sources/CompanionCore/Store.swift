@@ -304,6 +304,7 @@ public struct CompanionState: Sendable {
 
         case let .message(threadId, message):
             append(message, to: threadId)
+            noteThreadActivity(threadId: threadId, at: message.at)
             // The line a held send finally became. Landing in the transcript
             // retires the row and leaves a tombstone, so the POST response
             // that is still in flight cannot re-add it.
@@ -335,6 +336,7 @@ public struct CompanionState: Sendable {
                 // a patch for something we never saw — the append is more
                 // useful than dropping it, and dedupes on id anyway
                 append(message, to: threadId)
+                noteThreadActivity(threadId: threadId, at: message.at)
             }
 
         case let .thread(threadId, activeLeafId):
@@ -354,6 +356,7 @@ public struct CompanionState: Sendable {
             // that is authoritative and must replace the previous context.
             if let index = bots.firstIndex(where: { $0.id == bot.id }) {
                 var merged = bot
+                merged.tasks = mergingStamps(merged.tasks, previous: bots[index].tasks)
                 if let replacement = bot.messages {
                     messages[bot.threadId] = replacement
                     hasMore[bot.threadId] = bot.hasMore ?? false
@@ -411,6 +414,7 @@ public struct CompanionState: Sendable {
                 } else {
                     merged.messages = previous.messages
                 }
+                merged.tasks = mergingStamps(merged.tasks, previous: previous.tasks)
                 rooms[index] = merged
             } else {
                 rooms.append(room)
@@ -462,6 +466,42 @@ public struct CompanionState: Sendable {
     /// and the authoritative record when the turn ends. Rendering only the
     /// settled message — which is what this did until now — means a long
     /// answer looks like nothing is happening for thirty seconds.
+    private mutating func noteThreadActivity(threadId: String, at: Double) {
+        guard at.isFinite else { return }
+        for index in bots.indices {
+            guard var tasks = bots[index].tasks, tasks.contains(where: { $0.threadId == threadId }) else { continue }
+            for taskIndex in tasks.indices where tasks[taskIndex].threadId == threadId {
+                tasks[taskIndex].updatedAt = max(tasks[taskIndex].updatedAt ?? 0, at)
+            }
+            bots[index].tasks = tasks
+        }
+        for index in rooms.indices {
+            guard var tasks = rooms[index].tasks, tasks.contains(where: { $0.threadId == threadId }) else { continue }
+            for taskIndex in tasks.indices where tasks[taskIndex].threadId == threadId {
+                tasks[taskIndex].updatedAt = max(tasks[taskIndex].updatedAt ?? 0, at)
+            }
+            rooms[index].tasks = tasks
+        }
+    }
+
+    private func mergingStamps(_ incoming: [BotTask]?, previous: [BotTask]?) -> [BotTask]? {
+        guard let incoming else { return previous }
+        return incoming.map { task in
+            let local = previous?.first { $0.threadId == task.threadId }?.updatedAt
+            let next: Double?
+            switch (local, task.updatedAt) {
+            case let (local?, remote?): next = max(local, remote)
+            case let (local?, nil): next = local
+            case let (nil, remote?): next = remote
+            case (nil, nil): next = nil
+            }
+            guard next != task.updatedAt else { return task }
+            var copy = task
+            copy.updatedAt = next
+            return copy
+        }
+    }
+
     private mutating func apply(runtime event: RuntimeEvent) {
         switch event.type {
         case "content.delta":

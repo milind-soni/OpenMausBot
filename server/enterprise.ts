@@ -76,6 +76,13 @@ export function hostedWorkspaceConfiguration(env: NodeJS.ProcessEnv = process.en
   } catch { return null; }
 }
 
+/** An operator may authorize new Full tasks only on a dedicated,
+ * portal-managed server. This is not an HTTP setting or a desktop grant. */
+export function sharedWorkspaceFullAccessConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.OMB_SHARED_WORKSPACE_FULL_ACCESS === "1" && env.OMB_DESKTOP_PARENT !== "1" &&
+    hostedWorkspaceConfiguration(env)?.portalMembership === true;
+}
+
 /** No enterprise import or portal dependency enters the core bundle. A
  * configured server without this hook must refuse hosted access, not fall
  * back to legacy email or QR credentials. */

@@ -9,11 +9,15 @@ export function FullAccessWarning({
   onCancel,
   onConfirm,
   scope = "bot",
+  allThreads,
+  onAllThreadsChange,
 }: {
   open: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   scope?: "bot" | "thread";
+  allThreads?: boolean;
+  onAllThreadsChange?: (value: boolean) => void;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -75,6 +79,13 @@ export function FullAccessWarning({
             </p>
           </div>
         </div>
+        {scope === "bot" && onAllThreadsChange && <label className="mt-4 flex items-start gap-2 text-[13px] text-ink">
+          <input type="checkbox" className="mt-0.5 accent-accent" checked={Boolean(allThreads)}
+            onChange={event => onAllThreadsChange(event.target.checked)} />
+          <span>Apply to all existing and future threads
+            <span className="mt-1 block text-ink-secondary">Includes archived threads. Other bots keep their settings.</span>
+          </span>
+        </label>}
         <div className="mt-5 flex justify-end gap-2">
           <button
             ref={cancelRef}

@@ -156,6 +156,10 @@ how chat routine proposals failed in the field hours after 0.1.38 shipped (#544)
   fixes the next call.
 - A schema test should assert the tool surface stays flat
   (see `server/drivers/agents-proxy.test.ts` — it regexp-guards the serialized schema).
+- The agents tools live in `server/drivers/agents-catalog.ts`, and their serialized `tools/list`
+  is pinned byte for byte and size-budgeted by `server/drivers/agents-catalog-wire.test.ts`.
+  After changing one on purpose, run that file once with `UPDATE_AGENTS_CATALOG_GOLDENS=1`,
+  review the golden diff, and move its `BUDGET_BASELINE` by hand.
 
 ## Adding a language
 
@@ -254,7 +258,13 @@ out of its commits and screenshots.
 
 ## CI, in one glance
 
-Every PR runs the same checks, each as its own job so a failure names itself:
+Every PR runs the same checks, each as its own job so a failure names itself.
+The quick static job runs first; only after it passes do the expensive test and
+build jobs enter the runner queue. This saves capacity on submissions with type,
+lint or build errors, without skipping any checks on mergeable PRs. The required
+gates still fail if preflight fails or a required test job is skipped. It adds
+the preflight duration to an otherwise idle runner pool; it does not cure a
+GitHub-wide scheduling backlog.
 
 - **typecheck + lint** — typecheck, lint, locale catalogs (`pnpm i18n:check`), Electron syntax check, production UI build. Once, on Ubuntu; none of it is platform-specific.
 - **vitest (os, shard n/4)** — the suite on macOS, Ubuntu and Windows, split into four shards each. The suite runs its files serially on purpose (fake CLIs and a real harness server), so one runner takes ~19 minutes; a shard takes 4–10. To reproduce a shard's failure locally, run the same `pnpm exec vitest run --shard=n/4`. Failures also appear as annotations on the PR.

@@ -15,8 +15,16 @@ server, confirms the resulting card, and verifies list/update/pause/resume,
 persisted timing and HTTP 400 validation failures. It scripts the tool call;
 it does not measure a real model's natural-language-to-cron accuracy.
 
+It also retries an existing schedule under a different name through the real
+tool, checking that the response identifies the existing routine and creates
+neither a second approval card nor a second schedule. The proposal-service
+tests cover competing confirmations, Full Access, per-bot ownership, explicit
+interval starts, meaningful punctuation and differing execution settings.
+This guard only applies to agent creation proposals; intentional duplicates
+in the manual editor remain possible. Existing routines are never removed.
+
 ```sh
-pnpm exec vitest run shared/routine-schedule.test.ts server/routine-cron.e2e.test.ts server/routines.test.ts server/routines-startup.test.ts src/components/routines/cron-editor.test.ts src/lib/routine-calendar.test.ts src/lib/schedule-label.test.ts server/bot-package.test.ts server/package-export.test.ts
+pnpm exec vitest run shared/routine-schedule.test.ts server/routine-cron.e2e.test.ts server/routine-requests.test.ts server/routines.test.ts server/routines-startup.test.ts src/components/routines/cron-editor.test.ts src/lib/routine-calendar.test.ts src/lib/schedule-label.test.ts server/bot-package.test.ts server/package-export.test.ts
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/cron-routines-ui.e2e.test.ts
 ```
 
@@ -137,6 +145,24 @@ data. The server log and adjacent JSON remain. Close the dedicated browser tab;
 never kill processes by name or delete a broad temporary root.
 
 ## Automated regressions
+
+In the editor's Advanced section, recurring routines offer **Skip this
+occurrence** (the default) or **Queue one run**. The queued scheduled run waits
+for the same routine to finish, including delegated work; extra occurrences
+are skipped, not accumulated. Manual runs and webhook deliveries remain
+independent. Pausing still cancels queued work. The cron renderer test changes
+this option, saves it, opens the editor again and switches it back.
+
+The List view and `list_routines` expose saved skipped-occurrence counts and
+recent consecutive failures. Skips count occurrences observed by the scheduler
+while busy, not every interval elapsed while offline. Failure streaks are
+derived from retained terminal receipts (up to the existing history limit),
+ignore cancelled/missed runs, and reset only after the whole run succeeds—not
+an intermediate turn waiting for a teammate. Neither indicator pauses work
+automatically. The scheduler tests cover bounded queues, daily/cron/interval
+parity, restart recovery, duplicate completion events and atomic cursor/counter
+rollback on a failed save. The MCP fixture verifies reviewed policy changes
+and the listing through the actual tool and API, using no live accounts.
 
 The routine tool defaults to `maus` (the bot's configured model and computer,
 including VPS); `box` explicitly selects the separate Box agent. Legacy `cloud`

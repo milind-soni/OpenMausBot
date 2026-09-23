@@ -17,9 +17,11 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { saveChatFollowup } from "./message-db.ts";
 import {
   cancelSteeredMessage,
   drainSteeredMessages,
+  hasQueuedSteeredMessages,
   holdSteeredQueue,
   onSteeredQueueChange,
   queuedSteerSnapshot,
@@ -77,6 +79,18 @@ function fakeStore(bots: BotRecord[]): SteerStore & { messages: Message[] } {
 }
 
 describe("steer-queue module", () => {
+  it.each([undefined, "capacity"] as const)("detects an exact owner's queued correction with reason %s", (reason) => {
+    const botId = `correction-${reason ?? "busy"}`;
+    const threadId = `${botId}-thread`;
+    expect(hasQueuedSteeredMessages(botId, threadId)).toBe(false);
+    const queued = queueSteeredMessage(botId, threadId, "Use this new request", { reason });
+    expect(hasQueuedSteeredMessages(botId, threadId)).toBe(true);
+    expect(hasQueuedSteeredMessages("other-bot", threadId)).toBe(false);
+    expect(hasQueuedSteeredMessages(botId, "other-thread")).toBe(false);
+    expect(cancelSteeredMessage(botId, queued.id, threadId)).toBe(true);
+    expect(hasQueuedSteeredMessages(botId, threadId)).toBe(false);
+  });
+
   it("preserves self-opened request provenance through persistence and a capacity wait", () => {
     const bot = fakeBot("bot-self-provenance", "thread-self-provenance", true);
     const store = fakeStore([bot]);
@@ -91,6 +105,49 @@ describe("steer-queue module", () => {
     expect(store.messages).toHaveLength(1);
     expect(store.messages[0].peerAsk).toEqual(peerAsk);
     expect(run.mock.calls[0][3].peerAsk).toEqual(peerAsk);
+  });
+
+  it("keeps who sent each queued message, so a steer of the held queue can still name them", () => {
+    const botId = "bot-sender-held";
+    const threadId = "thread-sender-held";
+    const theirs = queueSteeredMessage(botId, threadId, "from the paired person", { sender: { name: "Priya" } });
+    queueSteeredMessage(botId, threadId, "from the owner");
+    restoreSteeredMessages(); // a restart reads the name back from the durable row
+    const held = holdSteeredQueue(botId, threadId, theirs.id);
+    expect(held?.items.map((item) => item.sender)).toEqual([{ name: "Priya" }, undefined]);
+    settleHeldSteeredQueue(held!);
+  });
+
+  it("appends a drained message in the name of the person who queued it", () => {
+    const bot = fakeBot("bot-sender-drain", "thread-sender-drain", true);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    queueSteeredMessage(bot.id, bot.threadId, "from the owner");
+    queueSteeredMessage(bot.id, bot.threadId, "from the paired person", { sender: { name: "Priya" } });
+    bot.busy = false;
+    drainSteeredMessages(store, run);
+    expect(store.messages.map((message) => [message.text, message.sender])).toEqual([
+      ["from the owner", undefined],
+      ["from the paired person", { name: "Priya" }],
+    ]);
+    // the line handed to the turn is the stamped one, not a copy without it
+    expect(run.mock.calls[0][3].sender).toEqual({ name: "Priya" });
+  });
+
+  it("still loads and drains a durable row written before senders were kept", () => {
+    const bot = fakeBot("bot-sender-legacy", "thread-sender-legacy", false);
+    const store = fakeStore([bot]);
+    const run = vi.fn();
+    saveChatFollowup({
+      id: "legacy-followup-without-sender", kind: "bot", ownerId: bot.id, threadId: bot.threadId,
+      payload: { text: "queued by an older build", prompt: "queued by an older build" },
+    });
+    expect(() => restoreSteeredMessages()).not.toThrow();
+    drainSteeredMessages(store, run);
+    expect(store.messages).toEqual([expect.objectContaining({
+      text: "queued by an older build", queueId: "legacy-followup-without-sender",
+    })]);
+    expect(store.messages[0].sender).toBeUndefined();
   });
 
   it("keeps queue operations and other listeners working when a listener throws", () => {

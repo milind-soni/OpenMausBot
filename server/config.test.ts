@@ -31,6 +31,7 @@ import { customMcpServers,
   browserProfilePartitionTarget,
   browserProfileReplacementConflict,
   browserProfileRoutingConflict,
+  stripControlPlaneEnv,
   stripWorkspaceCredentialEnv,
   syncCredentialEnv,
   vpsSshAlias,
@@ -41,6 +42,18 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("validates context budgets and keeps changes independent of provider reload", () => {
+    const context = { autoCompact: false, compactAt: 0.7, rebuildBytes: 32_000 };
+    expect(parseStoredConfig({ context })).toEqual({ context });
+    expect(parseConfigPatch({ context })).toEqual({ context });
+    expect(providerReloadKeys({ context })).toEqual([]);
+    for (const value of [0, -1, "10", null, Infinity]) {
+      expect(() => parseConfigPatch({ context: { compactAt: value } })).toThrow();
+    }
+    for (const value of [512, 1_024.1, 1_000_001]) {
+      expect(() => parseConfigPatch({ context: { rebuildBytes: value } })).toThrow();
+    }
+  });
   it("keeps Fish Audio and ElevenLabs voice credentials separate", () => {
     const parsed = parseConfigPatch({
       tts: { provider: "fish", key: "eleven-key", fishKey: "fish-key", voice: "fish-voice" },
@@ -68,7 +81,10 @@ describe("configuration boundaries", () => {
     expect(threadEventLogMaxBytes({ threads: { maxConcurrentPerBot: 3 } })).toBeNull();
     const parsed = parseStoredConfig({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: 50 * 1024 * 1024 } });
     expect(threadEventLogMaxBytes(parsed)).toBe(50 * 1024 * 1024);
-    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000", null]) {
+    // the knob patches on its own and null is the explicit clear marker
+    expect(parseConfigPatch({ threads: { eventLogMaxBytes: 50 * 1024 * 1024 } })).toEqual({ threads: { eventLogMaxBytes: 50 * 1024 * 1024 } });
+    expect(parseConfigPatch({ threads: { eventLogMaxBytes: null } })).toEqual({ threads: { eventLogMaxBytes: null } });
+    for (const value of [0, -1, 256 * 1024 - 1, 1.5, "1000"]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 3, eventLogMaxBytes: value } })).toThrow("threads.eventLogMaxBytes");
     }
   });
@@ -78,7 +94,10 @@ describe("configuration boundaries", () => {
     expect(threadEventLogRetentionDays(parseStoredConfig({ threads: { maxConcurrentPerBot: 2 } }))).toBeNull();
     const configured = parseStoredConfig({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: 30 } });
     expect(threadEventLogRetentionDays(configured)).toBe(30);
-    for (const value of [0, -1, 1.5, "30", null, 3660]) {
+    // the knob patches on its own and null is the explicit clear marker
+    expect(parseConfigPatch({ threads: { eventLogRetentionDays: 30 } })).toEqual({ threads: { eventLogRetentionDays: 30 } });
+    expect(parseConfigPatch({ threads: { eventLogRetentionDays: null } })).toEqual({ threads: { eventLogRetentionDays: null } });
+    for (const value of [0, -1, 1.5, "30", 3660]) {
       expect(() => parseConfigPatch({ threads: { maxConcurrentPerBot: 2, eventLogRetentionDays: value } })).toThrow("threads.eventLogRetentionDays");
     }
   });
@@ -531,6 +550,42 @@ describe("saving the newer sections", () => {
       rmSync(path, { force: true });
     }
   });
+
+  it("clears a thread event-log knob with null while other keys survive", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig({ threads: { maxConcurrentPerBot: 3, eventLogRetentionDays: 30, eventLogMaxBytes: 50 * 1024 * 1024 } });
+      // clearing one knob leaves the sibling knob and the concurrency limit alone
+      saveConfig({ threads: { eventLogRetentionDays: null } });
+      let disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogMaxBytes: 50 * 1024 * 1024 });
+      saveConfig({ threads: { eventLogMaxBytes: null } });
+      disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3 });
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3 });
+      expect(threadEventLogRetentionDays(parseStoredConfig(disk))).toBeNull();
+      expect(threadEventLogMaxBytes(parseStoredConfig(disk))).toBeNull();
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
+
+  it("seeds the concurrency default when the first threads save is an event-log knob", () => {
+    const path = join(DATA_DIR, "config.json");
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({}));
+    try {
+      saveConfig({ threads: { eventLogRetentionDays: 30 } });
+      const disk = JSON.parse(readFileSync(path, "utf8"));
+      expect(disk.threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+      // the persisted section must survive the stricter boot-time parse
+      expect(parseStoredConfig(disk).threads).toEqual({ maxConcurrentPerBot: 3, eventLogRetentionDays: 30 });
+    } finally {
+      rmSync(path, { force: true });
+    }
+  });
 });
 
 describe("default fleet", () => {
@@ -933,6 +988,12 @@ describe("credential env preference", () => {
     expect(() => parseConfigPatch({ onboarding: { unknown: true } })).toThrow();
   });
 
+  it("persists a context change without losing the other context preferences", () => {
+    saveConfig({ context: { rebuildBytes: 32_000, autoCompact: false } });
+    saveConfig({ context: { compactAt: 0.75 } });
+    expect(loadConfig().context).toEqual({ rebuildBytes: 32_000, autoCompact: false, compactAt: 0.75 });
+  });
+
   it("falls back to the config file when the env var is unset (dev mode)", () => {
     writeFileSync(
       join(DATA_DIR, "config.json"),
@@ -1173,6 +1234,29 @@ describe("workspace credential env strip", () => {
     };
     stripWorkspaceCredentialEnv(env);
     expect(env).toEqual({ PATH: "/usr/bin", MY_FLAG: "1" });
+  });
+
+  it("keeps a hosted tenant's control-plane secrets out of every child env, and only those", () => {
+    // What the hosting control plane and a fleet put in the server's
+    // environment. `OMB_CLOUD_FUTURE_SECRET` stands for a name added later.
+    const operator = {
+      OMB_CLOUD_READY_TOKEN: "ready", OMB_CLOUD_BOOTSTRAP: "bootstrap", OMB_CLOUD_GATEWAY_TOKEN: "gateway",
+      OMB_CLOUD_MODELS: "models", OMB_CLOUD_REVISION: "revision", OMB_CLOUD_FUTURE_SECRET: "later",
+      OMB_LICENSE_KEY: "license", OMB_INSTALLATION_CREDENTIAL: "fleet", omb_cloud_ready_token: "windows-spelling",
+    };
+    // What an engine deliberately receives (server/hosted-models.ts passes the
+    // hosted model token as the provider key), plus look-alike names.
+    const engine = {
+      PATH: "/usr/bin", ANTHROPIC_API_KEY: "hosted-token", ANTHROPIC_AUTH_TOKEN: "hosted-token",
+      ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/w/anthropic", OPENMAUSBOT_COMPANY_API_KEY: "hosted-token",
+      OMB_MANAGED_CODEX_TOKEN: "hosted-token", CODEX_HOME: "/data/codex", OMB_HOOK_TOKEN_FILE: "/data/hook-tokens/a.token",
+      OMB_CLOUDFLARED_PATH: "/usr/local/bin/cloudflared", OMB_CLOUD: "not-prefixed", MY_OMB_CLOUD_NOTE: "user",
+    };
+    for (const strip of [stripControlPlaneEnv, stripWorkspaceCredentialEnv]) {
+      const env: Record<string, string | undefined> = { ...operator, ...engine };
+      strip(env);
+      expect(env).toEqual(engine);
+    }
   });
 
   it("covers in-process secrets and private app-state paths", () => {

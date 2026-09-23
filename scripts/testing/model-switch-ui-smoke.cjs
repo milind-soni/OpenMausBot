@@ -46,7 +46,16 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     await window.loadURL(`${preview.previewUrl}?bot=${bot.id}&model-switch=1`);
     await until(() => evaluate("!!document.querySelector('[data-tour=model]')"));
     await openPicker();
+    const instances = (await api("/api/instances")).body.instances;
+    assert.equal(instances.find(instance => instance.instanceId === "claude-signed-out").snapshot.authenticated, false);
+    assert.notEqual(instances.find(instance => instance.instanceId === "missing-codex").snapshot.state, "available");
+    assert.equal(await evaluate("!!document.querySelector('[data-model-picker-content] button[aria-label=\"Missing provider fixture\"]')"), false);
+    assert.ok((await text()).includes("Engines and accounts"));
     assert.equal(await evaluate("[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'Only this thread').getAttribute('aria-pressed')"), "true");
+    await click("Claude");
+    await until(() => evaluate("!!document.querySelector('[data-model-picker-content] select option[value=claude]')"));
+    assert.equal(await evaluate("[...document.querySelectorAll('[data-model-picker-content] select option')].some(option => option.value === 'claude-signed-out')"), false);
+    writeFileSync(join(evidence, "configured-providers.png"), (await window.webContents.capturePage()).toPNG());
     await selectClaude();
     assert.equal(await evaluate("document.activeElement.textContent.trim()"), "Cancel");
     await click("Cancel");
@@ -94,9 +103,22 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Return" });
     await until(async () => !(await read()).busy && (await text()).includes("hello from fake claude"));
     writeFileSync(join(evidence, "after-send.png"), (await window.webContents.capturePage()).toPNG());
-    console.log(JSON.stringify({ modelSwitch: true, customHttpRefused: true, cancelPreservedSettings: true,
+    const localModel = instances.find(instance => instance.instanceId === "codex").models.options.find(option => option.custom && option.id.includes("fixture-local"));
+    assert.ok(localModel, "Fixture includes a configured local model alongside Codex cloud models");
+    assert.equal((await api(`/api/bots/${bot.id}/tasks/${selected.threadId}`, "PATCH", { modelSelection: { instanceId: "codex", model: localModel.id } })).status, 200);
+    await until(() => evaluate(`document.querySelector('[data-tour=model]').textContent.includes(${JSON.stringify(localModel.label)})`));
+    await openPicker();
+    await click("Claude");
+    window.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+    window.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+    await until(() => evaluate("!document.querySelector('[data-model-picker-content]')"));
+    await openPicker();
+    await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+    await until(() => evaluate(`[...document.querySelectorAll('[data-model-picker-content] button')].some(button => button.textContent.includes(${JSON.stringify(localModel.label)}))`));
+    writeFileSync(join(evidence, "reopened-local-model.png"), (await window.webContents.capturePage()).toPNG());
+    console.log(JSON.stringify({ modelSwitch: true, configuredProvidersOnly: true, unconfiguredRetainedInCatalog: true, customHttpRefused: true, cancelPreservedSettings: true,
       scopedCustomSwitch: true, defaultMismatchHandled: true, siblingUnchanged: true, newThreadUsesDefault: true,
-      sentAfterSwitch: true, narrowLayout: true, providerReplies: "offline fake CLI", evidence }));
+      sentAfterSwitch: true, narrowLayout: true, selectedLocalModelOnReopen: true, providerReplies: "offline fake CLI", evidence }));
   } finally {
     ipcMain.removeHandler("fixture:thread-approval");
     window.destroy();

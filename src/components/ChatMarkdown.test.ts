@@ -11,6 +11,7 @@ import {
   markdownImageName,
   markdownImageOpenUrl,
   localFilePath,
+  normalizeMathDelimiters,
   textDirection,
 } from "./ChatMarkdown";
 import { StoreProvider } from "@/state/store";
@@ -54,6 +55,58 @@ describe("mention highlighting", () => {
     }));
     expect(html).not.toContain("<img");
     expect(html).not.toContain('<script');
+  });
+});
+
+describe("math rendering", () => {
+  it("renders inline, display, and TeX-style delimiters with KaTeX", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "Inline $s'(t)=2t$.\n\n$$\\int_0^3 2t\\,dt=9$$\n\n\\(x^2\\)\n\n\\[y^2\\]",
+    }));
+    expect(html.match(/class="katex"/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(html).toContain("katex-display");
+  });
+
+  it("keeps code dollar signs and malformed TeX delimiters literal", () => {
+    const text = "`const price = '$5'`\n\n```tex\n\\(not rendered\\)\n```\n\nUnclosed \\(x";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, streaming: true }));
+    expect(html).not.toContain('class="katex"');
+    expect(normalizeMathDelimiters(text)).toBe(text);
+  });
+
+  it("protects fenced code when the closer has different indentation or is longer", () => {
+    const text = "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter \\(rendered\\).";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(normalizeMathDelimiters(text)).toBe(
+      "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter $rendered$.",
+    );
+    expect(html.match(/class="katex"/g)).toHaveLength(1);
+    expect(html).toContain("not rendered");
+  });
+
+  it("rejects backticks in a backtick-fence info string", () => {
+    const text = "```js `invalid`\n\\(rendered\\)\n```";
+    expect(normalizeMathDelimiters(text)).toBe("```js `invalid`\n$rendered$\n```");
+  });
+
+  it("protects block-quoted and CRLF fenced code", () => {
+    const quoted = "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter \\(rendered\\).";
+    expect(normalizeMathDelimiters(quoted)).toBe(
+      "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter $rendered$.",
+    );
+
+    const crlf = "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter \\(rendered\\).";
+    expect(normalizeMathDelimiters(crlf)).toBe(
+      "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter $rendered$.",
+    );
+  });
+
+  it("normalizes math in messages that also contain an image", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "![diagram](https://example.test/diagram.png)\n\n\\(x^2\\)",
+    }));
+    expect(html).toContain('class="katex"');
+    expect(html).toContain("diagram.png");
   });
 });
 
@@ -555,4 +608,62 @@ describe("mention roster comparison", () => {
     expect(samePeers(roster, [...roster, { name: "Kim" }])).toBe(false);
     expect(samePeers(roster, [roster[0]!])).toBe(false);
   });
+});
+describe("mermaid diagrams", () => {
+  it("routes mermaid fences to the diagram frame instead of the code chrome", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```mermaid\nflowchart LR\n  Ship-->Sea\n```",
+    }));
+    expect(html).toContain('title="Mermaid diagram"');
+    expect(html).toContain("flowchart LR");
+    expect(html).not.toContain('aria-label="Wrap long lines"');
+  });
+
+  it("matches the fence tag case-insensitively", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```Mermaid\nflowchart LR\n  Ship-->Sea\n```",
+    }));
+    expect(html).toContain('title="Mermaid diagram"');
+  });
+
+  it("keeps ordinary fenced code on the highlighter path", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "```ts\nconst sea = true;\n```",
+    }));
+    expect(html).not.toContain("Mermaid diagram");
+    expect(html).toContain('aria-label="Copy code to clipboard"');
+  });
+});
+
+it("renders mermaid strictly and serves repeat views from cache", async () => {
+  const originalUseEffect = (await vi.importActual<typeof React>("react")).useEffect;
+  const effects: React.EffectCallback[] = [];
+  const effect = vi.mocked(React.useEffect).mockImplementation((callback) => { effects.push(callback); });
+  const initialize = vi.fn();
+  const render = vi.fn().mockResolvedValue({ svg: "<svg>sea lanes</svg>" });
+  vi.doMock("mermaid", () => ({ default: { initialize, render } }));
+  const cleanup: ReturnType<React.EffectCallback>[] = [];
+  const fence = "```mermaid\nflowchart LR\n  Ship-->Sea\n```";
+  try {
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await vi.waitFor(() => expect(render).toHaveBeenCalledTimes(1));
+    expect(initialize).toHaveBeenCalledWith(expect.objectContaining({
+      startOnLoad: false,
+      securityLevel: "strict",
+      suppressErrorRendering: true,
+    }));
+    expect(render).toHaveBeenCalledWith(expect.any(String), "flowchart LR\n  Ship-->Sea");
+
+    // a settled remount (revisiting the thread, a skin flip) re-renders from
+    // cache: still exactly one real mermaid render for this source
+    renderToStaticMarkup(createElement(ChatMarkdown, { text: fence }));
+    for (const callback of effects.splice(0)) cleanup.push(callback());
+    await Promise.resolve();
+    expect(render).toHaveBeenCalledTimes(1);
+  } finally {
+    for (const close of cleanup) if (typeof close === "function") close();
+    effect.mockImplementation(originalUseEffect);
+    vi.doUnmock("mermaid");
+  }
 });

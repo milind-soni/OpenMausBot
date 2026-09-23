@@ -51,6 +51,11 @@ Check on iPhone and iPad:
    pill, and return. iCloud must not inherit Gmail's draft; Gmail must retain
    it. With the opening island animation enabled, use the separate Threads
    button in the top bar to open the same picker and switch again.
+   Return to the roster and tap Pepper's main row: it must reopen the last
+   selected thread. Terminate and relaunch the fixture app and repeat. An
+   explicit sidebar thread link must still open that exact thread.
+   `BotThreadSelectionTests` separately check durable storage, per-computer
+   and per-bot isolation, deleted-thread fallback, and unchanged room behavior.
 4. Open Updates. Active sibling threads must have distinct entries and titles.
 5. In the thread picker, attempt creation while offline. The sheet must stay
    open and show an error. Failed renames must retain the entered title.
@@ -82,3 +87,22 @@ introduced by the thread UI.
 - Retained results: `/tmp/omb-ios-threads-iphone-acceptance.xcresult` and
   `/tmp/omb-ios-threads-ipad-clean.xcresult`, including screenshots.
 - No physical-device, live pairing or provider verification was performed.
+
+## Last opened thread regression — 2026-09-20 UTC (2026-09-21 IST)
+
+Choosing iCloud, returning to the roster, and tapping Pepper used to reopen
+Gmail. The new regression failed against the original implementation, then
+passed after persisting the phone's choice. It also terminates and relaunches
+the fixture app before checking the bot row again.
+
+- 465 Swift core tests passed, including persisted selection, connection/bot
+  isolation, deleted-thread fallback, and unchanged room selection.
+- All 9 thread-navigation UI cases passed on a disposable iPhone 17 Pro;
+  relaunch persistence and explicit thread navigation also passed on a
+  disposable iPad Pro 13-inch (M5), both using iOS 26.5.
+- Local evidence: `/tmp/moca229-ios-red.xcresult`,
+  `/tmp/moca229-ios-green.xcresult`, and `/tmp/moca229-ipad.xcresult`.
+
+| Reopening Pepper before the fix | Reopening Pepper after choosing iCloud |
+| --- | --- |
+| ![Gmail reopened](assets/mobile-thread-selection/before.png) | ![iCloud restored](assets/mobile-thread-selection/after.png) |

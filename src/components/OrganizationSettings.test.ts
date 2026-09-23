@@ -52,6 +52,7 @@ beforeEach(() => {
   fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.updating = false;
   unsubscribe = vi.fn(); push = () => {};
   bridge = {
+    settingsOpened: vi.fn().mockResolvedValue(true),
     state: vi.fn().mockResolvedValue({ status: "signed-out" }), begin: vi.fn().mockResolvedValue(connecting),
     cancelEnrollment: vi.fn().mockResolvedValue({ status: "signed-out" }), refresh: vi.fn().mockResolvedValue(connected),
     disconnect: vi.fn().mockResolvedValue({ status: "signed-out" }),
@@ -68,6 +69,29 @@ async function ready(state: ManagedDesktopState = { status: "signed-out" }) {
 }
 
 describe("optional desktop Organisation settings", () => {
+  it("acknowledges only the mounted local panel without authorizing enrollment", async () => {
+    render();
+    expect(bridge.settingsOpened).not.toHaveBeenCalled();
+    fixture.effects[0](); await flush();
+    expect(bridge.settingsOpened).toHaveBeenCalledExactlyOnceWith();
+    expect(bridge.begin).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge local Settings from a companion renderer", async () => {
+    vi.stubGlobal("window", { ogb: { organization: bridge, remoteClient: { active: true } } });
+    render(); fixture.effects[0](); await flush();
+    expect(bridge.settingsOpened).not.toHaveBeenCalled();
+    expect(bridge.state).not.toHaveBeenCalled();
+  });
+
+  it("keeps the panel usable if its native destination acknowledgment fails", async () => {
+    vi.mocked(bridge.settingsOpened!).mockRejectedValueOnce(new Error("fixture write failure"));
+    await ready();
+    expect(render().html).toContain("Sign in with your organisation");
+    expect(bridge.begin).not.toHaveBeenCalled();
+  });
+
   it("uses the default portal from one sign-in action and keeps custom setup advanced", async () => {
     await ready();
     let view = render();

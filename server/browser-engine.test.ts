@@ -150,7 +150,9 @@ describe("deleting one browser session's saved logins", () => {
     expect(readFileSync(join(directory, "other-other.json"), "utf8")).toBe("keep");
   });
 
-  it.each(["", "../personal", "work/client", "work.client", "work*", "x".repeat(97)])("rejects invalid session %j before invoking a process", async (session) => {
+  // Dotted ids are legitimate browserSessionId output; only path-shaped,
+  // glob-shaped, empty, and over-long names stay invalid.
+  it.each(["", "../personal", "work/client", "work*", "x".repeat(97)])("rejects invalid session %j before invoking a process", async (session) => {
     const { options } = fixture();
     expect(await clearBrowserSessionState("fixture-browser", session, options)).toBe(false);
     expect(spawn).not.toHaveBeenCalled();

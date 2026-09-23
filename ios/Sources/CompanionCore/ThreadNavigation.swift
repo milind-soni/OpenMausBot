@@ -8,6 +8,21 @@ public struct BotThreadGroup: Identifiable, Hashable, Sendable {
     public var id: String { project.map { "project:\($0.id)" } ?? "unfiled" }
 }
 
+/// Pin, then newest update. Equal stamps keep the caller's order.
+public func threadsInListOrder(_ threads: [BotTask]) -> [BotTask] {
+    threads.enumerated()
+        .sorted { lhs, rhs in
+            let leftPinned = lhs.element.pinned == true
+            let rightPinned = rhs.element.pinned == true
+            if leftPinned != rightPinned { return leftPinned && !rightPinned }
+            let left = lhs.element.listStamp
+            let right = rhs.element.listStamp
+            if left != right { return left > right }
+            return lhs.offset < rhs.offset
+        }
+        .map(\.element)
+}
+
 extension BotTask {
     public var displayTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -16,10 +31,13 @@ extension BotTask {
 }
 
 extension Bot {
-    /// Saved folder order and server thread order are preserved. Missing
-    /// folders leave their threads accessible in the unfiled group, and
-    /// within every group attention outranks recency: a thread that needs
-    /// the person floats above the idle tail, which keeps stored order.
+    /// Within every group, pinned threads come first and the rest follow
+    /// the newest update. A folder rises with the thread of its that sits
+    /// highest in that order, the same way the desktop sidebar does; saved
+    /// folder order only breaks a tie. Unfiled threads stay after the
+    /// folders. Attention stays on the row and does not change this order.
+    /// `attentionOrderedTasks` keeps attention order for Updates and Live
+    /// Activity. Search keeps saved folder order.
     /// A folder-name search keeps all of that folder's visible threads,
     /// in relevance order rather than attention tiers.
     ///
@@ -54,16 +72,24 @@ extension Bot {
             threads = visibleTasks
         } else {
             threads = visibleTasks.filter { task in
-                !(task.isClosed || task.isArchived)
+                task.pinned == true
+                    || !(task.isClosed || task.isArchived)
                     || task.demandsAttention(queued: queuedThreadIds.contains(task.threadId))
                     || task.threadId == threadId
             }
         }
-        let ordered = search.isEmpty ? threadsInAttentionOrder(threads, queuedThreadIds: queuedThreadIds) : threads
+        let ordered = threadsInListOrder(threads)
 
         var projectIDs = Set<String>()
-        var groups = (projects ?? []).compactMap { project -> BotThreadGroup? in
-            guard projectIDs.insert(project.id).inserted else { return nil }
+        let savedProjects = (projects ?? []).filter { projectIDs.insert($0.id).inserted }
+        let folderProjects = search.isEmpty
+            ? savedProjects.enumerated().sorted { lhs, rhs in
+                let left = ordered.firstIndex { $0.projectId == lhs.element.id } ?? Int.max
+                let right = ordered.firstIndex { $0.projectId == rhs.element.id } ?? Int.max
+                return left == right ? lhs.offset < rhs.offset : left < right
+            }.map(\.element)
+            : savedProjects
+        var groups = folderProjects.compactMap { project -> BotThreadGroup? in
             let filed = ordered.filter { $0.projectId == project.id }
             return filed.isEmpty ? nil : BotThreadGroup(project: project, tasks: filed)
         }
@@ -96,6 +122,27 @@ extension Bot {
         if task.unread == true { return 3 }
         if task.threadId == threadId { return 4 }
         return 5
+    }
+
+    /// The bell, Updates, and Live Activity stay on attention order. The
+    /// thread tree uses `threadsInListOrder` instead.
+    public func attentionOrderedTasks(queuedThreadIds: Set<String> = []) -> [BotTask] {
+        let threads: [BotTask]
+        if tasks == nil {
+            threads = [BotTask(
+                threadId: threadId, title: "", createdAt: createdAt,
+                modelSelection: modelSelection, busy: busy, waitingOnTeammate: waitingOnTeammate,
+                unread: unread,
+                approvalMode: approvalMode, autoApprove: autoApprove, alwaysAllow: alwaysAllow
+            )]
+        } else {
+            threads = visibleTasks.filter { task in
+                !(task.isClosed || task.isArchived)
+                    || task.demandsAttention(queued: queuedThreadIds.contains(task.threadId))
+                    || task.threadId == threadId
+            }
+        }
+        return threadsInAttentionOrder(threads, queuedThreadIds: queuedThreadIds)
     }
 
     /// Order, never filter: whatever the caller passed stays in the list,

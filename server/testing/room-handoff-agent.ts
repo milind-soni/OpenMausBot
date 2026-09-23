@@ -18,7 +18,27 @@ export async function runRoomHandoffAgent(argv: string[], planPath: string, prom
   const integration = launch?.integration ?? Object.values(JSON.parse(readFileSync(arg("--mcp-config"), "utf8")).mcpServers as Record<string, AgentsIntegration>)
     .find(s => s.env?.OMB_BOT_ID);
   // A depth-capped delegated turn mounts no agents server: answer from the prompt alone.
-  if (!integration) return `Handled without teammate tools: ${String((prompt as any)?.message?.content ?? "")}`;
+  if (!integration) {
+    // Nothing in such a launch's argv says which bot it is — only the task
+    // text does. A test that needs a delegated reply to land at an exact
+    // point (a wake it must follow) holds it here on a gate file, named by a
+    // substring of the task text: `${planPath}.gates.json`, a JSON array of
+    // { promptIncludes, gateFile }. The wait is unbounded like any plan
+    // gate: the test that set it owns when it opens.
+    const gatesPath = `${planPath}.gates.json`;
+    const taskText = String((prompt as any)?.message?.content ?? "");
+    for (const rule of existsSync(gatesPath) ? JSON.parse(readFileSync(gatesPath, "utf8")) as Array<{ promptIncludes: string; gateFile: string }> : []) {
+      if (!taskText.includes(rule.promptIncludes) || existsSync(rule.gateFile)) continue;
+      await new Promise<void>(resolve => {
+        const timer = setInterval(() => {
+          if (!existsSync(rule.gateFile)) return;
+          clearInterval(timer);
+          resolve();
+        }, 10);
+      });
+    }
+    return `Handled without teammate tools: ${taskText}`;
+  }
   const botId = integration.env.OMB_BOT_ID;
   const system = launch?.system ?? readFileSync(arg("--append-system-prompt-file"), "utf8");
   // Claude snapshots the launch-time system prompt for a session. A retained

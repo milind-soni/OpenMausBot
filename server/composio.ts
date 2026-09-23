@@ -1010,13 +1010,25 @@ const CURATED: ToolkitCard[] = [
   { slug: "stripe", label: "Stripe", blurb: "Payments and customers", domain: "stripe.com", logo: null },
 ];
 
-let toolkitCache: { at: number; cards: ToolkitCard[]; identity: string } | null = null;
+let toolkitCache: { at: number; cards: ToolkitCard[]; identity: string; pagination: CatalogPagination } | null = null;
+
+/** What the marketplace endpoint is actually serving. A partial catalog is
+ * usable, but only if the UI can say so instead of passing it off as the
+ * whole marketplace (#1614). */
+export interface CatalogPagination {
+  /** Unique cards this install can show right now. */
+  items: number;
+  /** Upstream's own count of the full marketplace, when it reports one. */
+  totalItems?: number;
+  /** True when paging stopped before the reported total. */
+  stalled: boolean;
+}
 
 /**
  * Marketplace catalog. Tries the v3 toolkits API (official names,
  * descriptions, logos — cached 10 min); falls back to the curated list.
  */
-export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard[]; source: "api" | "curated" }> {
+export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard[]; source: "api" | "curated"; pagination?: CatalogPagination }> {
   const backendKey = projectApiKey(cfg);
   const broker = backendKey ? null : brokerAccess();
   const identity = backendKey
@@ -1025,7 +1037,7 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
       ? backendFingerprint("managed-catalog", broker.url, broker.token)
       : null;
   if (identity && toolkitCache?.identity === identity && Date.now() - toolkitCache.at < 10 * 60_000) {
-    return { cards: toolkitCache.cards, source: "api" };
+    return { cards: toolkitCache.cards, source: "api", pagination: toolkitCache.pagination };
   }
   if (backendKey || broker) {
     try {
@@ -1037,6 +1049,12 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
       const seenCursors = new Set<string>();
       let cursor: string | undefined;
       let lastReportedPage: number | undefined;
+      let reportedTotalItems: number | undefined;
+      let reportedTotalPages: number | undefined;
+      // Why the walk ended. "limit" means the loop ran out of iterations;
+      // every early exit names itself so a stalled catalog can be logged
+      // instead of silently posing as the complete marketplace.
+      let stop: "end" | "total-reached" | "page-stuck" | "cursor-repeated" | "http-error" | "bad-page" | "limit" = "limit";
       for (let page = 0; page < MAX_CONNECTED_ACCOUNT_PAGES; page += 1) {
         const params = new URLSearchParams({ limit: "500", sort_by: "usage" });
         if (cursor) params.set("cursor", cursor);
@@ -1048,31 +1066,51 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
           : await brokerRequest(cursor ? `/v1/catalog?cursor=${encodeURIComponent(cursor)}` : "/v1/catalog", {
               signal: AbortSignal.timeout(15_000),
             });
-        if (!res.ok) break;
+        if (!res.ok) {
+          stop = "http-error";
+          break;
+        }
         const json: any = await res.json();
         const pageItems = json.items ?? json.data ?? [];
-        if (!Array.isArray(pageItems)) break;
+        if (!Array.isArray(pageItems)) {
+          stop = "bad-page";
+          break;
+        }
         items.push(...pageItems);
+        const pageTotalItems = Number(json.total_items);
+        if (Number.isFinite(pageTotalItems) && pageTotalItems > 0) reportedTotalItems = pageTotalItems;
         // Composio reports current_page and total_pages beside next_cursor.
         // A broker that drops the cursor (or an upstream regression) can replay
         // a page while minting fresh cursors, so trust page movement: once it
         // stops advancing, the catalog is stuck and paging stops cleanly.
         const reportedPage = Number(json.current_page);
         if (Number.isFinite(reportedPage)) {
-          if (lastReportedPage !== undefined && reportedPage <= lastReportedPage) break;
+          if (lastReportedPage !== undefined && reportedPage <= lastReportedPage) {
+            stop = "page-stuck";
+            break;
+          }
           lastReportedPage = reportedPage;
         }
-        const reportedTotalPages = Number(json.total_pages);
+        const pageTotalPages = Number(json.total_pages);
+        if (Number.isFinite(pageTotalPages) && pageTotalPages > 0) reportedTotalPages = pageTotalPages;
         if (
           lastReportedPage !== undefined &&
-          Number.isFinite(reportedTotalPages) &&
-          reportedTotalPages > 0 &&
-          lastReportedPage >= reportedTotalPages
+          Number.isFinite(pageTotalPages) &&
+          pageTotalPages > 0 &&
+          lastReportedPage >= pageTotalPages
         ) {
+          stop = "total-reached";
           break;
         }
         const next = typeof json.next_cursor === "string" ? json.next_cursor.trim() : "";
-        if (!next || seenCursors.has(next)) break;
+        if (!next) {
+          stop = "end";
+          break;
+        }
+        if (seenCursors.has(next)) {
+          stop = "cursor-repeated";
+          break;
+        }
         seenCursors.add(next);
         cursor = next;
       }
@@ -1088,8 +1126,23 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
         const uniqueCards = cards.filter(
           (card, index) => card.slug && cards.findIndex((candidate) => candidate.slug === card.slug) === index,
         );
-        toolkitCache = { at: Date.now(), cards: uniqueCards, identity: identity! };
-        return { cards: uniqueCards, source: "api" };
+        const shortOfReportedTotal = reportedTotalItems !== undefined && uniqueCards.length < reportedTotalItems;
+        // Trust reported page counts even when the walk ends "cleanly": an
+        // endpoint that stops at page 1 of 4 without a cursor is still partial.
+        const pagingStoppedEarly = lastReportedPage !== undefined
+          && reportedTotalPages !== undefined
+          && lastReportedPage < reportedTotalPages;
+        const pagination: CatalogPagination = { items: uniqueCards.length, stalled: shortOfReportedTotal || pagingStoppedEarly };
+        if (reportedTotalItems !== undefined) pagination.totalItems = reportedTotalItems;
+        if (pagination.stalled) {
+          console.warn(
+            `[composio] marketplace catalog paging stopped early (${stop}) after ${uniqueCards.length} toolkits`
+              + (reportedTotalItems !== undefined ? ` of ~${reportedTotalItems}` : "")
+              + "; serving a partial marketplace",
+          );
+        }
+        toolkitCache = { at: Date.now(), cards: uniqueCards, identity: identity!, pagination };
+        return { cards: uniqueCards, source: "api", pagination };
       }
     } catch {
       /* fall through to curated */

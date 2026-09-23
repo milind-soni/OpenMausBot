@@ -1,6 +1,7 @@
 // Real server + injected MCP tools; only the provider's planning is scripted.
 // Persisted Full grants below belong exclusively to this stopped fixture.
 import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
   const planPath = join(dataDir, "room-plan.json");
   const plans: Record<string, { turns: any[] }> = {};
   const evidence: unknown[] = [];
+  const guardedRoutes = new Map<string, string>();
   let restarted: ChildProcess | undefined;
   const providerTurns = (): any[] => existsSync(`${planPath}.evidence.jsonl`)
     ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
@@ -32,13 +34,16 @@ it("applies requested Full Access workflows through MCP without duplicate approv
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
   const unanswered = async (threadId: string) => (await messages(threadId)).filter(message => message.card && !message.card.answered && !message.card.dismissed);
   const step = (tool: string, args: unknown, expectError = false) => ({ tool, arguments: args, expectError });
-  const run = async (bot: any, threadId: string, text: string, steps: any[], options: { pending?: boolean; resumeReply?: string } = {}) => {
+  const run = async (bot: any, threadId: string, text: string, steps: any[], options: { pending?: boolean; resumeReply?: string; guarded?: "ask" | "full" } = {}) => {
     const before = providerTurns().length;
     const reply = `Fixture result ${before}: ${text}`;
     (plans[bot.id] ??= { turns: [] }).turns.push({ steps, reply });
     if (options.resumeReply) plans[bot.id].turns.push({ reply: options.resumeReply });
     writeFileSync(planPath, JSON.stringify(plans));
-    await cli("send", "--bot", bot.id, "--task", threadId, "--text", text);
+    const guardedInput = options.guarded ? { threadId, text, sendId: randomUUID(), expectedApprovalMode: options.guarded,
+      expectedActiveLeafId: (await api("GET", `/api/threads/${threadId}/messages?limit=1`)).activeLeafId } : undefined;
+    const accepted = guardedInput ? await api("POST", `/api/bots/${bot.id}/messages/guarded`, guardedInput, 202)
+      : await cli("send", "--bot", bot.id, "--task", threadId, "--text", text);
     const expectedTurns = options.resumeReply ? 3 : 1; // caller, requested teammate, caller's one summary
     await expect.poll(() => providerTurns().length, { timeout: 25_000 }).toBe(before + expectedTurns);
     expect((await cli("wait", "--bot", bot.id, "--task", threadId, "--timeout", "25")).status).toBe(options.pending ? "needs-user" : "settled");
@@ -54,6 +59,15 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     // A settled immediate tool result must not queue a later setup continuation.
     await new Promise(resolve => setTimeout(resolve, 150));
     expect(providerTurns()).toHaveLength(before + expectedTurns);
+    if (guardedInput) {
+      const route = `/api/bots/${bot.id}/requests/${guardedInput.sendId}?threadId=${threadId}`;
+      guardedRoutes.set(threadId, route);
+      const snapshot = await api("GET", route);
+      expect(snapshot).toMatchObject({ messageId: accepted.message.id, phase: options.pending ? "waiting" : "settled" });
+      expect(snapshot.messages.filter((message: any) => message.turnTerminal).every((message: any) => message.requestMessageId === accepted.message.id)).toBe(true);
+      expect((await api("POST", `/api/bots/${bot.id}/messages/guarded`, guardedInput, 202)).message.id).toBe(accepted.message.id);
+      expect(providerTurns()).toHaveLength(before + expectedTurns);
+    }
     return caller;
   };
   const restart = async () => {
@@ -105,6 +119,14 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     savedInverse.tasks.find((task: any) => task.threadId === inverse.activeTaskId).approvalMode = "full";
     writeFileSync(join(dataDir, "bots.json"), JSON.stringify(savedBots, null, 2));
     await restart();
+    expect((await api("GET", "/api/health")).capabilities).toMatchObject({ guardedFullAccess: 1 });
+    expect((await api("GET", "/api/health")).capabilities.sharedWorkspaceFullAccess).toBeUndefined();
+    const request = { threadId: chief.activeTaskId, text: "WRONG_MODE_MUST_NOT_RUN", sendId: randomUUID(),
+      expectedActiveLeafId: (await api("GET", `/api/threads/${chief.activeTaskId}/messages?limit=1`)).activeLeafId };
+    expect((await api("POST", `/api/bots/${chief.id}/messages/guarded`, request, 409)).code).toBe("guarded_permissions");
+    expect((await api("POST", `/api/bots/${chief.id}/messages/guarded`, { ...request, threadId: ask.threadId, expectedApprovalMode: "full", expectedActiveLeafId: null }, 409)).code).toBe("guarded_permissions");
+    await api("POST", `/api/bots/${chief.id}/tasks`, { title: "No operator grant", approvalMode: "full" }, 403);
+    expect(providerTurns()).toHaveLength(0);
     evidence.push({ setup: "fixture-only persisted modes", restartedPid: restarted?.pid, modes: [
       { botId: chief.id, default: "full", fullTask: chief.activeTaskId, askTask: ask.threadId },
       { botId: inverse.id, default: "ask", fullTask: inverse.activeTaskId },
@@ -125,7 +147,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
         step("propose_team_setup", { reason: "Requested Research specialist and Chief description", newTeams: ["Research"], operations: [
           specialist("Mira", "Research"), { action: "update", botId: chief.id, fields: { description: "Coordinates monthly fixture reports" } },
         ] }),
-      ]);
+      ], { guarded: "full" });
     expect(created.permissionMode).toBe("bypassPermissions");
     for (const entry of created.evidence.filter((item: any) => ["propose_profile", "propose_routine", "skill_manage", "propose_team_setup"].includes(item.step?.tool))) {
       expect(entry.response.result.content[0].text).toContain("No additional confirmation is needed");
@@ -160,7 +182,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     plans[peer.id] = { turns: [{ reply: "Fixture peer verified the reporting instructions." }] };
     await run(chief, chief.activeTaskId, "Have Ada independently verify the fixture reporting instructions and return the result.", [
       step("coordinate_bots", { bot_ids: [peer.id], request_key: "verify-monthly", message: "Verify the fixture reporting instructions and state your result." }),
-    ], { resumeReply: "Ada verified the fixture reporting instructions; requested work is complete." });
+    ], { guarded: "full", resumeReply: "Ada verified the fixture reporting instructions; requested work is complete." });
     const handoffs = JSON.parse(readFileSync(join(dataDir, "room-handoffs.json"), "utf8"));
     expect(handoffs.every((node: any) => node.status === "completed")).toBe(true);
     expect(providerTurns().filter(turn => turn.botId === peer.id)).toHaveLength(1);
@@ -179,7 +201,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
       step("propose_routine", { name: "Pending Ask report", instructions: "Wait for review.", schedule }),
       step("skill_manage", { action: "create", skill_md: skill("pending-ask-review", "Wait for review before using this skill."), source: "conversation" }),
       step("propose_team_setup", { reason: "Ask task specialist review", operations: [specialist("Pending specialist", "Operations")] }),
-    ], { pending: true });
+    ], { pending: true, guarded: "ask" });
     expect(askTurn.permissionMode).not.toBe("bypassPermissions");
     expect(await unanswered(ask.threadId)).toHaveLength(4);
     expect((await bots()).find(bot => bot.id === chief.id).title).toBe("Monthly reporting Chief");
@@ -189,7 +211,7 @@ it("applies requested Full Access workflows through MCP without duplicate approv
 
     const inverseTurn = await run(inverse, inverse.activeTaskId, "Apply my requested title in this Full Access task even though my bot default is Ask.", [
       step("propose_profile", { title: "Applied from Full task", reason: "User requested this title" }),
-    ]);
+    ], { guarded: "full" });
     expect(inverseTurn.permissionMode).toBe("bypassPermissions");
     expect((await bots()).find(bot => bot.id === inverse.id)).toMatchObject({ title: "Applied from Full task", approvalMode: "ask" });
     expect(await unanswered(chief.activeTaskId)).toHaveLength(0);
@@ -205,6 +227,33 @@ it("applies requested Full Access workflows through MCP without duplicate approv
     expect(JSON.parse(readFileSync(join(dataDir, "routines.json"), "utf8")).routines[0]).toMatchObject({ enabled: false, schedule });
     evidence.push({ persistedBots: persisted, routines: await api("GET", "/api/routines"), handoffs,
       fullMessages: await messages(chief.activeTaskId), askMessages: await messages(ask.threadId), inverseMessages: await messages(inverse.activeTaskId) });
+
+    // A restart while the Chief awaits a teammate must not promote its
+    // earlier "assigned" terminal to a final. Completed requests survive.
+    const interrupted = (await api("POST", `/api/bots/${chief.id}/tasks`, { title: "Restart while awaiting teammate" }, 201)).task;
+    const gate = join(dataDir, "restart-peer.gate");
+    plans[chief.id].turns.push({ steps: [step("coordinate_bots", { bot_ids: [peer.id], request_key: "restart-proof", message: "Wait at the isolated fixture gate." })],
+      reply: "Assigned the restart check", resumeReply: "THIS_MUST_NOT_REPLAY_AFTER_RESTART" });
+    plans[peer.id].turns.push({ gateFile: gate, reply: "The gated check finished" });
+    writeFileSync(planPath, JSON.stringify(plans));
+    const pendingInput = { threadId: interrupted.threadId, text: "Coordinate the gated restart check.", sendId: randomUUID(), expectedActiveLeafId: null, expectedApprovalMode: "full" };
+    const pendingReceipt = await api("POST", `/api/bots/${chief.id}/messages/guarded`, pendingInput, 202);
+    const pendingRoute = `/api/bots/${chief.id}/requests/${pendingInput.sendId}?threadId=${interrupted.threadId}`;
+    await expect.poll(async () => {
+      const snapshot = await api("GET", pendingRoute);
+      return snapshot.phase === "waiting" && snapshot.messages.some((message: any) => message.turnTerminal && message.turnSucceeded);
+    }, { timeout: 25_000 }).toBe(true);
+    expect((await api("GET", pendingRoute)).messages[0]).toMatchObject({ id: pendingReceipt.message.id, requestPending: true });
+    await waitForExit(restarted, { signal: "SIGTERM" });
+    const beforeRestart = providerTurns().length;
+    await restart();
+    const recovered = await api("GET", pendingRoute);
+    expect(recovered).toMatchObject({ phase: "untracked", activeTurnId: null, executionId: null });
+    expect(recovered.messages.some((message: any) => message.turnTerminal && message.text === "Assigned the restart check" && message.turnSucceeded)).toBe(true);
+    expect((await api("GET", guardedRoutes.get(inverse.activeTaskId)!)).phase).toBe("settled");
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(providerTurns()).toHaveLength(beforeRestart);
+    evidence.push({ restartWhileAwaiting: { phase: recovered.phase, noProviderReplay: true, completedRequestStillSettled: true } });
     expect(readFileSync(logPath, "utf8")).not.toMatch(/ReferenceError|change listener threw|Unexpected extra fixture turn/);
   } finally {
     await waitForExit(restarted, { signal: "SIGTERM" });

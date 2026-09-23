@@ -408,6 +408,20 @@ describe("structured tool execution boundaries", () => {
     ]);
   });
 
+  it("keeps Full access across router model changes without per-tool approvals", async () => {
+    const f = await fixture((_body, response, round) => sse(response, [{
+      model: `router-backend-${round}`,
+      ...chunk(round <= 2
+        ? { tool_calls: [toolCall("audit_write", JSON.stringify({ name: `step-${round}`, value: "done" }), `call-${round}`)] }
+        : { content: "Both operations completed." }, round <= 2 ? "tool_calls" : "stop"),
+    }]));
+    await f.start({ approvalMode: "full" });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toHaveLength(2);
+    expect(f.requests).toHaveLength(3);
+    expect(f.recorder.events.some((event) => event.type === "request.opened")).toBe(false);
+  });
+
   it("aggregates model usage across execution and continuation", async () => {
     const f = await fixture((_body, response, round) => sse(response, [
       round === 1 ? chunk({ tool_calls: [toolCall()] }, "tool_calls") : chunk({ content: "Receipt verified." }, "stop"),

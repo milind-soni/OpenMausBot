@@ -177,7 +177,7 @@ const __APP_VERSION__: string;
         setMode(
           botId: string,
           mode: import("../../shared/approval-mode").ApprovalMode,
-          options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean;
+          options?: { acknowledgeLocalAuto?: boolean; threadId?: string; threadOnly?: boolean; allThreads?: boolean;
             modelSelection?: import("../state/store").ModelSelection; updateBotDefault?: boolean },
         ): Promise<import("../state/store").Bot>;
       };
@@ -237,7 +237,7 @@ const __APP_VERSION__: string;
       /** The desktop shell's app-menu Preferences… item was activated; open
        * app Settings. Local-shell only: remote server pages never receive
        * the channel, and the bridge is absent in the browser. */
-      onOpenAppSettings?(cb: () => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization") => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */

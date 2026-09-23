@@ -2,30 +2,31 @@ import { useState } from "react";
 import { CircleAlert, FileText, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { RoutineRun } from "@/lib/routines";
+import { isRoutineProblemRun, type RoutineRun, type RoutineRunStatusFilter } from "@/lib/routines";
 import { routineDateTime, routineRunLabel, routineRunTime, routineRunTone } from "@/lib/routine-display";
 import type { Bot } from "@/state/store";
 
-export function RoutineLogs({ runs, bots, loading, error, routineId, onClearRoutine, onOpen }: {
+export function RoutineLogs({ runs, bots, loading, error, routineId, status, onStatusChange, onClearRoutine, onOpen }: {
   runs: RoutineRun[];
   bots: Bot[];
   loading?: boolean;
   error?: boolean;
   routineId?: string;
+  status: RoutineRunStatusFilter;
+  onStatusChange: (status: RoutineRunStatusFilter) => void;
   onClearRoutine: () => void;
   onOpen: (run: RoutineRun) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
   const [limit, setLimit] = useState(50);
-  const filtered = runs.filter((run) => (!routineId || run.routineId === routineId) && (status === "all" || run.status === status)
+  const filtered = runs.filter((run) => (!routineId || run.routineId === routineId) && (status === "all" || (status === "problems" ? isRoutineProblemRun(run) : run.status === status))
     && `${run.routineName} ${bots.find((bot) => bot.id === run.botId)?.name ?? ""} ${run.output ?? ""} ${run.error ?? ""} ${run.attention ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()))
     .sort((a, b) => routineRunTime(b) - routineRunTime(a));
   return <section className="mx-auto w-full max-w-5xl space-y-4 p-4 sm:p-6" aria-label={t("routines.logs")}>
     <div><h2 className="text-[17px] font-semibold text-ink">{t("routines.logs")}</h2><p className="mt-1 text-[12px] text-ink-secondary">{t("routines.logsHint")}</p></div>
     <div className="flex flex-wrap items-center gap-2">
       <label className="flex min-w-[180px] flex-1 items-center gap-2 rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-ink-secondary"><Search size={14} /><input aria-label={t("routines.searchLogs")} placeholder={t("routines.searchLogs")} value={query} onChange={(event) => { setQuery(event.target.value); setLimit(50); }} className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none" /></label>
-      <select aria-label={t("routines.filterStatus")} value={status} onChange={(event) => { setStatus(event.target.value); setLimit(50); }} className="rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink"><option value="all">{t("routines.allStatuses")}</option>{(["queued", "running", "waiting", "completed", "failed", "missed", "cancelled"] as const).map((value) => <option key={value} value={value}>{t(`routines.status.${value}`)}</option>)}</select>
+      <select aria-label={t("routines.filterStatus")} value={status} onChange={(event) => { onStatusChange(event.target.value as RoutineRunStatusFilter); setLimit(50); }} className="rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink"><option value="all">{t("routines.allStatuses")}</option><option value="problems">{t("routines.status.problems")}</option>{(["queued", "running", "waiting", "completed", "failed", "missed", "cancelled"] as const).map((value) => <option key={value} value={value}>{t(`routines.status.${value}`)}</option>)}</select>
     </div>
     {routineId && <div className="flex items-center gap-2 text-[12px] text-ink-secondary">{t("routines.filteredRoutine")}<button type="button" onClick={onClearRoutine} className="text-accent hover:underline">{t("routines.showAll")}</button></div>}
     {error && <p role="alert" className="flex items-center gap-2 rounded-lg bg-danger/10 p-3 text-[12px] text-danger"><CircleAlert size={14} />{t("routines.loadError")}</p>}

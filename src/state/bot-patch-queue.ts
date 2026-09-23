@@ -44,12 +44,14 @@ export type BotUpdatePatch = Partial<
    * confirmed. StoreProvider consumes it before the private Electron request;
    * it is never sent over HTTP or folded into bot state. */
   confirmFullAccess?: boolean;
+  /** Private desktop grant scope, never an HTTP patch or bot field. */
+  applyToAllThreads?: boolean;
 };
 
 /** A wire patch after clear-only values have been normalized for Bot state. */
 export type BotStatePatch = Omit<
   BotUpdatePatch,
-  "computer" | "acknowledgeLocalAuto" | "confirmFullAccess"
+  "computer" | "acknowledgeLocalAuto" | "confirmFullAccess" | "applyToAllThreads"
 > & {
   computer?: Bot["computer"];
 };
@@ -106,6 +108,7 @@ const stateOverlay = (patch: BotUpdatePatch): BotStatePatch => {
   const {
     acknowledgeLocalAuto: _localAck,
     confirmFullAccess: _fullConfirmation,
+    applyToAllThreads: _allThreads,
     computer,
     ...fields
   } = patch;

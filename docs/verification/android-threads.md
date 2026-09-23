@@ -23,6 +23,12 @@ desktop selection, switching drafts from the header, status updates, and
 failed create/rename/delete actions. Deletion requires confirmation; errors
 keep the form and its entered text available for retry.
 
+The roster reopening regression selects a sibling thread through the real
+header picker, returns home, and taps the bot row again. It must reopen the
+chosen thread without a server task-switch request. `ChatPreferencesTest`
+checks that a fresh store restores the choice, isolates it by computer and bot,
+falls back after deletion, and leaves rooms on their shared selection.
+
 The reconnect regression keeps a nonactive thread open while a second,
 non-resumable `Hello` hydrates the desktop-active thread. Its history must be
 fetched again and rendered without navigation or changing the desktop's active
@@ -83,3 +89,16 @@ claim those flows tested from the build or Robolectric suite alone.
 - Preview APK assembled successfully; its v2 signature and separate preview
   application ID were verified with the Android SDK tools.
 - No physical-device installation, real pairing or live-provider test was run.
+
+## Last opened thread regression — 2026-09-20 UTC (2026-09-21 IST)
+
+The new real Compose regression failed before the fix: returning from the
+chosen second thread to the roster and tapping the bot reopened the first
+thread. After persisting the phone-local choice, the same regression passed
+without any task-switch POST or change to the server-selected thread.
+
+- 549 core tests and 919 app tests passed, including fresh-store restoration,
+  connection/bot isolation, deleted-thread fallback, and room selection.
+- Preview APK assembled and its v2 signature verified.
+- Fixtures remained synthetic and confined to disposable loopback HTTP;
+  no real pairing, device installation, or live-provider test was performed.

@@ -41,6 +41,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
   const [viewer, setViewer] = useState<{ id: string; url: string } | null>(null);
   const [heldHere, setHeldHere] = useState<string | null>(null);
   const controlLeaseId = useRef(crypto.randomUUID());
+  const heldHereRef = useRef<string | null>(null);
   const shelf = useRef<HTMLElement>(null);
   const pointer = useRef<{ id: number; x: number; y: number; moved: boolean; computer: TeamComputer; handle: HTMLElement } | null>(null);
   const highlighted = useRef<HTMLElement | null>(null);
@@ -57,6 +58,19 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
     if (!open) clearDrag();
     return () => { highlighted.current?.removeAttribute("data-computer-dropping"); };
   }, [open, clearDrag]);
+  useEffect(() => { heldHereRef.current = heldHere; }, [heldHere]);
+  // The shelf mounts conditionally; a control lease this client took must
+  // not outlive it. Best-effort release, mirroring LocalVmWorkspace.
+  useEffect(() => () => {
+    const held = heldHereRef.current;
+    if (!held) return;
+    void fetch(`/api/team-computers/${encodeURIComponent(held)}/control`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "release", controlLeaseId: controlLeaseId.current }),
+      keepalive: true,
+    }).catch(() => {});
+  }, []);
   const requestAssignment = useCallback((computer: TeamComputer, section: string | null) => {
     if (pending.current || computer.section === section) return;
     if (computer.section !== null && section !== null) {
@@ -140,7 +154,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
     onDropHandled();
   }, [drop, inventory, onDropHandled, requestAssignment]);
 
-  const mutate = async (key: string, action: () => Promise<unknown>, success?: (value: any) => void) => {
+  const mutate = async (key: string, action: () => Promise<unknown>, success?: (value: any) => void, failure?: () => void) => {
     if (pending.current) return;
     pending.current = true;
     setBusy(key);
@@ -150,7 +164,10 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
       const value = await action();
       if (mounted.current) success?.(value);
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : String(cause));
+      if (mounted.current) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        failure?.();
+      }
     } finally {
       pending.current = false;
       if (mounted.current) { setBusy(null); await refresh(); }
@@ -181,6 +198,8 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
           submittedName.current = value;
           void mutate("create", () => api("/api/team-computers", { method: "POST", body: JSON.stringify({ name: value, requestId: requestId.current, acknowledgeCost: true }) }), () => {
             setName(""); setCreating(false); requestId.current = crypto.randomUUID(); submittedName.current = null;
+          }, () => {
+            submittedName.current = null;
           });
         }}>
           <label className="block text-[12px] font-medium" htmlFor="canvas-computer-name">New Box computer</label>
@@ -196,7 +215,8 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
         {inventory?.computers.map((computer) => {
           const ready = ["idle", "ready", "running"].includes(computer.state);
           const starting = ["init", "provisioning", "provisioned", "cloning", "starting"].includes(computer.state);
-          const held = computer.held || heldHere === computer.id;
+          const heldHereNow = heldHere === computer.id;
+          const held = computer.held || heldHereNow;
           return <article key={computer.id} data-computer-id={computer.id} className="rounded-xl border border-hairline/60 bg-card p-3">
           <div data-computer-drag-id={computer.id} role="group" tabIndex={-1} aria-label={`Drag ${computer.name} to a team`}
             onPointerDown={(event) => {
@@ -232,7 +252,8 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
               // another lifecycle request, and provider URLs are never iframes.
               if (typeof value.joinUrl === "string" && value.joinUrl.startsWith("https://")) setViewer({ id: computer.id, url: value.joinUrl });
             })}>Open desktop <ExternalLink size={11} /></button>}
-            {held && <button className={`${control} text-accent`} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "control", { action: "release" }), () => { setHeldHere(null); setViewer(null); })}>Return to bots</button>}
+            {heldHereNow && <button className={`${control} text-accent`} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "control", { action: "release", controlLeaseId: controlLeaseId.current }), () => { setHeldHere(null); setViewer(null); })}>Return to bots</button>}
+            {computer.held && !heldHereNow && <button className={control} disabled title="Another viewer has paused bot control on this desktop">In use</button>}
           </div>
           {viewer?.id === computer.id && <a href={viewer.url} target="_blank" rel="noopener noreferrer" className="mt-2 block rounded-lg px-3 py-2 text-[12px] text-accent hover:bg-control">Open secure desktop ↗</a>}
         </article>; })}

@@ -2,6 +2,8 @@ package com.openmausbot.companion.storage
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.openmausbot.companion.core.Chat
+import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.QuickReply
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,11 +62,29 @@ class ChatPreferences(
         prefs.edit().putString(key, destinationId).commit()
     }
 
+    /** Only a generic roster tap restores this preference; explicit links keep their target. */
+    fun restoringThread(chat: Chat, connectionId: String?): Chat {
+        if (chat !is Chat.BotChat || connectionId == null) return chat
+        val threadId = prefs.getString(threadKey(connectionId, chat.id), null) ?: return chat
+        return chat.bot.forTask(threadId)?.let(Chat::BotChat) ?: chat
+    }
+
+    fun rememberThread(chat: Chat, connectionId: String?) {
+        if (chat !is Chat.BotChat || connectionId == null) return
+        val key = threadKey(connectionId, chat.id)
+        if (prefs.getString(key, null) != chat.threadId) {
+            prefs.edit().putString(key, chat.threadId).commit()
+        }
+    }
+
     companion object {
         const val NAME = "openmaus.chat-preferences"
         const val FILE = "$NAME.xml"
         private const val ACTIVITY_DETAIL = "companion.prefs.activityDetail"
         private const val QUICK_REPLIES = "companion.prefs.quickReplies"
+
+        private fun threadKey(connectionId: String, botId: String): String =
+            "thread.last-opened.${connectionId.length}:$connectionId$botId"
 
         private fun destinationKey(connectionId: String): String =
             "share.last-destination.$connectionId"

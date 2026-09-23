@@ -528,6 +528,11 @@ private fun LoadedChat(
     LaunchedEffect(showingTasks) { if (showingTasks) dictation.stop() }
     LaunchedEffect(showingProfile) { if (showingProfile) dictation.stop() }
 
+    val connection by session.connection.collectAsState()
+    LaunchedEffect(chatId, threadId, connection?.id) {
+        environment.chatPreferences.rememberThread(chat, connection?.id)
+    }
+
     // Opening a chat is what marks it read, exactly as on the desktop — and a
     // message can arrive while it is already on screen, so this keys on the bit
     // rather than running once.

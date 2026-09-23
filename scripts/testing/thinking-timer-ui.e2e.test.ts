@@ -17,11 +17,11 @@
 // directory, OMB_AGENT_BROWSER_PATH or PATH) or when OMB_UI_E2E=1 asks for the
 // verified download; otherwise it is skipped with a printed reason.
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
@@ -113,6 +113,18 @@ function elapsedSeconds(text: string): number {
   return -1;
 }
 
+/** Selection can already expand a thread list. Click only its collapsed DOM
+ * chevron, avoiding both accidental collapse and transient duplicate AX names. */
+async function expandThreads(handle: string, name: string): Promise<void> {
+  const collapsed = JSON.stringify(`button[aria-label="Expand ${name} threads"]`);
+  const expanded = JSON.stringify(`button[aria-label="Collapse ${name} threads"]`);
+  await waitUntil(async () => (await ui("eval", handle, "--js", `(() => {
+    if (document.querySelector(${expanded})) return true;
+    document.querySelector(${collapsed})?.click();
+    return false;
+  })()`)).result, 10_000, `${name}'s thread list to expand`);
+}
+
 /** Poll a probe until it returns a truthy value; fail with the last result. */
 async function waitUntil<T>(probe: () => Promise<T>, timeoutMs: number, what: string): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -128,10 +140,25 @@ async function waitUntil<T>(probe: () => Promise<T>, timeoutMs: number, what: st
 describe("the thinking timer stays anchored across a thread switch", () => {
   let launched: Launched | undefined;
 
-  afterAll(async () => {
-    if (launched && launched.child.exitCode === null && launched.child.signalCode === null) {
-      await waitForExit(launched.child, { signal: "SIGINT", graceMs: 30_000 });
+  afterEach(async () => {
+    const current = launched;
+    launched = undefined;
+    if (!current) return;
+    try {
+      if (current.child.exitCode === null && current.child.signalCode === null) {
+        const api = fixtureApi(current.info.url);
+        const state = await api("GET", "/api/bots").catch(error => ({ error: String(error) }));
+        const snapshot = await ui("snapshot", current.info.ui).catch(error => ({ error: String(error) }));
+        writeFileSync(`${current.info.logPath}.thinking-timer.json`, JSON.stringify({ info: current.info, state, snapshot }, null, 2), { mode: 0o600 });
+        console.log("Thinking timer fixture evidence saved.");
+      }
+    } finally {
+      await waitForExit(current.child, { signal: "SIGINT", graceMs: 30_000 });
+      expect(existsSync(current.info.dataDir)).toBe(false);
     }
+  });
+
+  afterAll(async () => {
     if (ownsEvidenceDir) await removeTempDir(evidenceDir);
   });
 
@@ -150,10 +177,13 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     // POST the sidebar's "New thread" menu item dispatches.
     const busyThread = (await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === info.botId).threadId;
     const otherThread = (await api("POST", `/api/bots/${info.botId}/tasks`, {})).task.threadId;
-    // A bot's thread list starts collapsed (the sidebar's threadsOpen state
-    // defaults false), so expand Pepper's threads before any row is needed.
-    await ui("click", info.ui, "--name", "Expand Pepper threads");
+    // Expand Pepper's thread list if selection has not already opened it.
+    await expandThreads(info.ui, "Pepper");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${otherThread}"]'))`), 10_000, "the new thread's sidebar row to appear");
+    // Creating a thread selects it on the server. Pin the original thread in
+    // the renderer before sending the turn whose stamp this case observes.
+    await selectThread(busyThread);
+    await waitUntil(() => isCurrent(busyThread), 10_000, "the original thread to become current");
 
     // The composer sends; the hang-mode engine accepts the turn and holds it.
     await ui("type", info.ui, "--name", "Message Pepper", "--text", "hello");
@@ -227,10 +257,9 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     })).group;
     const groupId = group.id;
 
-    // Both thread lists start collapsed behind their chevrons.
-    await ui("click", info.ui, "--name", "Expand Pepper threads");
-    await waitUntil(() => evaluate(`Boolean(document.querySelector('button[aria-label="Expand Timer group threads"]'))`), 10_000, "the group's sidebar row to appear");
-    await ui("click", info.ui, "--name", "Expand Timer group threads");
+    // Ensure both lists are open, regardless of the current selection.
+    await expandThreads(info.ui, "Pepper");
+    await expandThreads(info.ui, "Timer group");
     await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${group.threadId}"]'))`), 10_000, "the group's sidebar thread row to appear");
     await selectThread(group.threadId);
     await waitUntil(() => isCurrent(group.threadId), 10_000, "the group to become current");

@@ -29,6 +29,7 @@ describe("GrokDriver turns (fake fetch)", () => {
   /** Script of responses/errors consumed in order; empty = succeed with text. */
   let script: Array<{ status?: number; sse?: string }> = [];
   let calls = 0;
+  let requestedModels: string[] = [];
 
   const create = async () => {
     instance = await GrokDriver.create({
@@ -46,9 +47,11 @@ describe("GrokDriver turns (fake fetch)", () => {
     process.env.FAKE_GROK_RETRY_SCALE = "0.001";
     previousFetch = globalThis.fetch;
     calls = 0;
+    requestedModels = [];
     // SAFETY: the stub only returns real Response objects, the sole member
     // of fetch's return type this driver consumes.
-    globalThis.fetch = (async () => {
+    globalThis.fetch = (async (_url, init) => {
+      requestedModels.push((JSON.parse(String(init?.body)) as { model: string }).model);
       const step = script.shift();
       calls++;
       if (!step || step.sse !== undefined) return sseResponse(step?.sse ?? SSE_BODY("done from fake grok"));
@@ -94,7 +97,9 @@ describe("GrokDriver turns (fake fetch)", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as { dir: string; msg: { model?: string } });
-    expect(entries.find((entry) => entry.dir === "out")?.msg.model).toBe("grok-4");
+    expect(entries.find((entry) => entry.dir === "out")?.msg.model).toBe("grok-4.7");
+    expect(requestedModels).toEqual(["grok-4.7"]);
+    expect(instance.models.options).toContainEqual({ id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 });
   });
 
   it("auto-retries transient 429/5xx responses, then completes once", async () => {

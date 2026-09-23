@@ -240,7 +240,7 @@ public struct AttachedMessageContent: Hashable, Sendable {
             .replacingOccurrences(of: "&amp;", with: "&")
     }
 
-    private static func displayName(
+    static func displayName(
         providedName: String?,
         path: String,
         kind: DisplayedMessageAttachment.Kind
@@ -265,5 +265,21 @@ public struct AttachedMessageContent: Hashable, Sendable {
             return CharacterSet.controlCharacters.contains(scalar) || isBidiControl ? " " : String(scalar)
         }.joined()
         return String(oneLine.prefix(180))
+    }
+}
+
+extension Message {
+    /// Paths are server metadata, passed unchanged to the message-scoped file route.
+    public var generatedImages: [DisplayedMessageAttachment] {
+        var seen = Set<String>()
+        return (attachments ?? []).compactMap { attachment in
+            guard attachment.kind == "image", let path = attachment.path,
+                  !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  seen.insert(path).inserted else { return nil }
+            return DisplayedMessageAttachment(
+                kind: .image, path: path,
+                name: AttachedMessageContent.displayName(providedName: nil, path: path, kind: .image)
+            )
+        }
     }
 }

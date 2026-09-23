@@ -12,7 +12,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.selected
@@ -29,6 +28,7 @@ import com.openmausbot.companion.core.isClosed
 import com.openmausbot.companion.core.isArchived
 import com.openmausbot.companion.core.isWaitingOnTeammate
 import com.openmausbot.companion.core.isWorking
+import com.openmausbot.companion.core.listStamp
 
 /** The quiet status under a title: waiting states are never painted as work.
  * The queued flag is client state the harness reports out-of-band. */
@@ -58,7 +58,6 @@ internal fun BotThreadRow(
         task.isArchived -> "Archived"
         else -> null
     }
-    val now = remember(task.createdAt) { System.currentTimeMillis() }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -105,7 +104,8 @@ internal fun BotThreadRow(
                 }
             }
             val byline = listOfNotNull(
-                RelativeStamp.list(task.createdAt, now).takeIf { it.isNotEmpty() },
+                RelativeStamp.updated(task.listStamp).takeIf { it.isNotEmpty() },
+                "Pinned".takeIf { task.pinned == true },
                 task.bylineLabel,
             ).joinToString(" · ")
             if (byline.isNotEmpty()) {

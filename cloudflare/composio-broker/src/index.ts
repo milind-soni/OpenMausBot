@@ -587,11 +587,14 @@ async function route(request: Request, env: Env, ctx: ExecutionContext) {
   if (request.method === "GET" && url.pathname === "/v1/catalog") return catalog(env, url);
   if (request.method === "GET" && url.pathname === "/v1/connectors/connected") return connectedServices(installation, env, ctx);
   if (request.method === "GET" && url.pathname === "/v1/connectors") return connectionStatus(url, installation, env, ctx);
-  const accountMatch = url.pathname.match(/^\/v1\/connectors\/([a-z0-9][a-z0-9_-]{0,80})\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);
+  const accountMatch = url.pathname.match(/^\/v1\/connectors\/([a-z0-9_][a-z0-9_-]{0,80})\/accounts\/([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/);
   if (accountMatch && request.method === "DELETE") {
     return disconnectAccount(accountMatch[1], accountMatch[2], installation, env, ctx);
   }
-  const match = url.pathname.match(/^\/v1\/connectors\/([a-z0-9][a-z0-9_-]{0,80})(?:\/(authorize))?$/);
+  // Composio prefixes slugs that would otherwise start with a digit, so
+  // 1Password is `_1password` and 21RISK is `_21risk`. Admitting a leading
+  // underscore keeps those toolkits reachable instead of 404ing here.
+  const match = url.pathname.match(/^\/v1\/connectors\/([a-z0-9_][a-z0-9_-]{0,80})(?:\/(authorize))?$/);
   if (match?.[2] && request.method === "POST") return authorize(match[1], await requestAlias(request), installation, env, ctx);
   if (match && !match[2] && request.method === "DELETE") return disconnect(match[1], installation, env, ctx);
   return json({ error: "not found" }, 404);

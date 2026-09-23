@@ -226,6 +226,8 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     /// Screen messages in the full shape: base64 pixels, inline.
     public var png: String?
     public var mime: String?
+    /// Agent-generated images carried on a text reply, including late message patches.
+    public var attachments: [MessageImageAttachment]?
 
     public var date: Date { Date(timeIntervalSince1970: at / 1000) }
 }
@@ -299,6 +301,13 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var archivedAt: Double?
     /// Bot-only internal execution. Keep it addressable, but out of thread pickers.
     public var routineRunId: String?
+    /// The person pinned this thread above the update-ordered list.
+    public var pinned: Bool? = nil
+    /// Newest message time. Absent on older computers; the list uses createdAt.
+    public var updatedAt: Double? = nil
+
+    /// The time the thread list sorts and stamps by.
+    public var listStamp: Double { updatedAt ?? createdAt }
 
     /// The thread list's quiet second line, worded as the desktop words it.
     public var openedByLabel: String? {
@@ -1294,4 +1303,11 @@ public struct ServerEnvironment: Codable, Hashable, Sendable {
     public var label: String
     public var platform: String?
     public var version: String?
+}
+
+/// Keep future attachment kinds decodable; only image entries are displayed.
+public struct MessageImageAttachment: Codable, Hashable, Sendable {
+    public var kind: String
+    public var path: String?
+    public var mime: String?
 }

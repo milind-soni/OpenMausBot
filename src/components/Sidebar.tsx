@@ -37,7 +37,9 @@ import { peerLine } from "@/lib/peer-message";
 import { BotAvatar, InitialsAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
+import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
+import { isRoutineProblemRun } from "@/lib/routines";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { WorkingDots } from "./WorkingIndicator";
@@ -51,7 +53,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu, NewThreadButton } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { isArchived, orderedSidebarThreads, SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
+import { isArchived, orderedThreadList, SidebarThreadRow, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -114,8 +116,9 @@ function preview(bot: Bot): string {
   if (bot.activity === "waiting-on-you") return t("sidebar.preview.waiting");
   if (bot.busy) return t("sidebar.preview.working");
   // the visible branch's tail — bot.messages holds every fork, so its last
-  // entry can belong to a version the user switched away from
-  const last = visibleMessages(bot).at(-1);
+  // entry can belong to a version the user switched away from — read past
+  // the harness's receipts (digest, compaction) to the reply a person reads
+  const last = lastNonReceipt(visibleMessages(bot));
   if (!last) return "";
   if (last.kind === "options" && last.card) return last.card.title;
   if (last.kind === "activity" && last.tool) return last.tool.name;
@@ -138,7 +141,7 @@ function groupPreview(group: Group, bots: Bot[]): string {
     });
   }
   if (group.working) return t("sidebar.preview.teamWorking");
-  const last = group.messages.at(-1);
+  const last = lastNonReceipt(group.messages);
   if (!last) return t("sidebar.preview.noMessages");
   const text = last.kind === "activity" && last.tool
     ? last.tool.name
@@ -272,13 +275,14 @@ export function GroupThreadList({ group, selected, density = "comfortable", quer
     ...task, busy: task.threadId === group.threadId && busy, unread: task.threadId === group.threadId && group.unread,
     activity: task.threadId === group.threadId && waiting ? "waiting-on-you" as const : undefined,
   }));
-  const visible = visibleSidebarThreads(tasks, group.threadId, query, [], showAll);
+  const visible = orderedThreadList(visibleSidebarThreads(tasks, group.threadId, query, [], showAll));
   useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
   return <div className="mb-2 ml-5 space-y-0.5 border-l border-hairline/30 pl-2" role="group" aria-label={t("task.namedList", { name: group.name })}>
     {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} ownerId={group.id} current={selected && task.threadId === group.threadId} compact={density === "compact"}
       onSelect={() => { if (task.threadId !== group.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: task.threadId }); else dispatch({ type: "select", id: group.id }); }}
       onRename={(title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId: task.threadId, title })}
-      onDelete={() => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId: task.threadId })} />)}
+      onDelete={() => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId: task.threadId })}
+      onPin={(pinned) => dispatch({ type: "pinGroupTask", groupId: group.id, threadId: task.threadId, pinned, title: task.title })} />)}
     {!query && !showAll && tasks.length > visible.length && <button type="button" onClick={() => setShowAll(true)} className="px-3 py-1.5 text-[11px] text-ink-secondary hover:text-ink">{t("task.showAll", { count: tasks.length })}</button>}
     <button type="button" disabled={busy} onClick={() => dispatch({ type: "newGroupTask", groupId: group.id })} title={t(busy ? "task.newBusy" : "task.newShort")}
       className="mt-1 flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-1.5 text-left text-[12px] text-ink-secondary hover:bg-raised/40 hover:text-ink disabled:opacity-40"><Plus size={12} />{t("task.newShort")}</button>
@@ -861,8 +865,8 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
 }
 
 /** The thread tree under one bot row: project folders, then ungrouped rows.
- * Visibility folds old threads away; ordering floats attention to the top so
- * the person never hunts for a working thread below newer idle ones. */
+ * Visibility folds old threads away. Pins stay, then the newest update.
+ * Waiting and working stay visible as status, not as a sort key. */
 export function BotThreadList({ bot, selected, density = "comfortable", query = "", hidden = false }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string; hidden?: boolean }) {
   const { state, dispatch } = useStore();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
@@ -891,15 +895,17 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       return next;
     });
   }, [selected, currentProjectId]);
-  // Attention floats within the default list; search keeps relevance order.
-  const visibleTasks = query
-    ? visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll)
-    : orderedSidebarThreads(visibleSidebarThreads(tasks, bot.threadId, "", projects, showAll), bot.threadId);
-  // Folders follow their best thread in that same order, so a folder holding
-  // a waiting approval outranks one holding only idle history; search keeps
-  // relevance order, and the stored order still governs move up and down.
+  // Pin, then newest update. Search keeps the same order among matches.
+  const visibleTasks = orderedThreadList(visibleSidebarThreads(tasks, bot.threadId, query, projects, showAll));
+  // A folder rises with the thread of its that sits highest in that order.
+  // An empty index sorts last. Saved order breaks ties, and still governs
+  // move up and down.
   const visibleProjectIndex = (projectId: string) => visibleTasks.findIndex((task) => task.projectId === projectId);
-  const orderedProjects = query ? projects : [...projects].sort((a, b) => visibleProjectIndex(b.id) - visibleProjectIndex(a.id));
+  const folderRank = (projectId: string) => {
+    const index = visibleProjectIndex(projectId);
+    return index < 0 ? Number.POSITIVE_INFINITY : index;
+  };
+  const orderedProjects = query ? projects : [...projects].sort((a, b) => folderRank(a.id) - folderRank(b.id) || projects.indexOf(a) - projects.indexOf(b));
   useRevealedThreadRow(state.revealThread, selected ? bot.threadId : null);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
@@ -908,7 +914,8 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
       onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
       onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}
       onMove={(projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { projectId } })}
-      onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })} />;
+      onArchive={(archivedAt) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { archivedAt } })}
+      onPin={(pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId: task.threadId, patch: { pinned } })} />;
   };
   const ungrouped = visibleTasks.filter((task) => !projects.some((project) => project.id === task.projectId));
   // The archived disclosure holds only what the default list folds away; an
@@ -2167,7 +2174,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           >
             <CalendarDays size={20} className={state.activeView === "routines" ? "text-accent" : "text-ink-secondary"} />
             <span className={cn("flex-1 text-[14px]", density === "icons" && "hidden")}>{t("sidebar.nav.automations")}</span>
-            {state.routineRuns.some((run) => ["failed", "missed"].includes(run.status) && !run.seenAt) && (
+            {state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) && (
               <span className="size-2 rounded-full bg-danger" />
             )}
           </button>
@@ -2206,7 +2213,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 active: state.activeView === "routines",
                 // folded away, this dot would otherwise vanish with the row
                 attention: state.routineRuns.some(
-                  (run) => ["failed", "missed"].includes(run.status) && !run.seenAt,
+                  (run) => isRoutineProblemRun(run) && !run.seenAt,
                 ),
                 onSelect: () => dispatch({ type: "showRoutines" }),
               },

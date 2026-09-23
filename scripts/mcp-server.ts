@@ -572,6 +572,7 @@ function projectTask(task: Record<string, any>, activeThreadId: unknown) {
     title: task.title,
     createdAt: task.createdAt,
     ...(typeof task.busy === "boolean" ? { busy: task.busy } : {}),
+    ...(typeof task.waitingForTeammates === "boolean" ? { waitingForTeammates: task.waitingForTeammates } : {}),
     ...(task.activity ? { activity: task.activity } : {}),
     ...(task.modelSelection ? { modelSelection: task.modelSelection } : {}),
     ...(typeof activeThreadId === "string" ? { active: task.threadId === activeThreadId } : {}),
@@ -596,6 +597,7 @@ function projectBot(bot: Record<string, any>) {
     chiefOfStaff: Boolean(bot.chiefOfStaff),
     modelSelection: bot.modelSelection,
     busy: Boolean(bot.busy),
+    waitingForTeammates: Boolean(bot.waitingForTeammates),
     activity: bot.activity,
     unread: Boolean(bot.unread),
     activeTaskId: bot.threadId,
@@ -1093,7 +1095,7 @@ export async function handleToolCall(
           if (task.activity === "waiting-on-you") return terminal("needs-user");
           if (task.activity === "dead") return terminal("failed");
           if (task.activity === "no-signal") return terminal("stalled");
-          if (!task.busy) return terminal("settled");
+          if (!task.busy && !task.waitingForTeammates) return terminal("settled");
           sawBusy = true;
         } else {
           if (target.threadId !== taskId) return terminal("settled");

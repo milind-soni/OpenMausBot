@@ -229,6 +229,15 @@ export function ServiceIcon({ card, className = "size-11" }: { card: Pick<Toolki
   );
 }
 
+/** Catalog completeness, as reported by /api/connectors/catalog. Absent
+ * totalItems means upstream never stated a total, so there is nothing to
+ * compare the served cards against. */
+export interface CatalogPagination {
+  items: number;
+  totalItems?: number;
+  stalled: boolean;
+}
+
 export function PluginsPanel() {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -236,6 +245,7 @@ export function PluginsPanel() {
   const surface = state.pluginsSurface;
   const [cards, setCards] = useState<ToolkitCard[] | null>(null);
   const [source, setSource] = useState<"api" | "curated">("curated");
+  const [pagination, setPagination] = useState<CatalogPagination | null>(null);
   const [configured, setConfigured] = useState(false);
   const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
   // Paint what we last knew before any request goes out: the module cache if
@@ -365,6 +375,7 @@ export function PluginsPanel() {
         if (!alive) return;
         setCards(r.cards ?? []);
         setSource(r.source ?? "curated");
+        setPagination(r.pagination ?? null);
         setConfigured(Boolean(r.configured));
         setMode(r.mode ?? "unavailable");
       })
@@ -690,6 +701,17 @@ export function PluginsPanel() {
                   : search
                     ? t("connectors.section.results")
                     : t("connectors.section.available")}
+                {tab === "marketplace" && !search && pagination
+                  && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems)) && (
+                  <span className="ml-2 font-normal">
+                    {pagination.totalItems !== undefined && pagination.items < pagination.totalItems
+                      ? t("connectors.marketplace.partialCount", {
+                        shown: pagination.items.toLocaleString(),
+                        total: pagination.totalItems.toLocaleString(),
+                      })
+                      : t("connectors.marketplace.partialStalled")}
+                  </span>
+                )}
               </div>
               <div className="grid grid-cols-1 gap-x-10 md:grid-cols-2">
               {visible.map((card) => {

@@ -34,7 +34,7 @@ const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
 /** Native restore looks up a filename prefix. Fixed-length keys prevent a
  * legacy profile named work from accidentally restoring work-client. */
 export function browserRestoreKey(session: string): string {
-  if (!/^[A-Za-z0-9_-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
+  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) throw new Error("Invalid browser session.");
   return `omb-${createHash("sha256").update(session).digest("hex")}`;
 }
 
@@ -63,7 +63,7 @@ function ensureManagedBrowserConfig(env: NodeJS.ProcessEnv): string {
 
 /** Close exactly one daemon without the CLI's implicit launch envelope. */
 export async function closeBrowserSession(binaryPath: string, env: NodeJS.ProcessEnv, timeoutMs = 15_000): Promise<boolean> {
-  if (!env.AGENT_BROWSER_SESSION || !/^[A-Za-z0-9_-]{1,96}$/.test(env.AGENT_BROWSER_SESSION)) return false;
+  if (!env.AGENT_BROWSER_SESSION || !/^[A-Za-z0-9_.-]{1,96}$/.test(env.AGENT_BROWSER_SESSION)) return false;
   // Native CLI prepends a launch even to `close` when launch flags are set.
   // Remove them, and bypass external project/user config, so closing a
   // missing profile cannot launch and restore another legacy prefix match.
@@ -80,15 +80,23 @@ export async function closeBrowserSession(binaryPath: string, env: NodeJS.Proces
     let child: ReturnType<typeof spawn>;
     try { child = spawn(binaryPath, args, { env: closeEnv, stdio: capture ? ["ignore", "pipe", "ignore"] : "ignore", windowsHide: true }); }
     catch { return finish(false); }
-    const timer = setTimeout(() => { child.kill(); finish(false); }, Math.max(1, deadline - Date.now()));
+    let exited = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const timer = setTimeout(() => {
+      // TERM lets the daemon flush; KILL after a grace period reaps a stuck one.
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => { if (!exited) child.kill("SIGKILL"); }, 5_000);
+      killTimer.unref?.();
+      finish(false);
+    }, Math.max(1, deadline - Date.now()));
     timer.unref?.();
     child.stdout?.on("data", (chunk: Buffer) => {
       output += String(chunk);
       if (output.length > 262_144) { clearTimeout(timer); child.kill(); finish(false); }
     });
-    child.on("error", () => { clearTimeout(timer); finish(false); });
+    child.on("error", () => { exited = true; clearTimeout(timer); clearTimeout(killTimer); finish(false); });
     // exit can precede the last piped stdout chunk; close follows stdio.
-    child.on("close", (code) => { clearTimeout(timer); finish(code === 0); });
+    child.on("close", (code) => { exited = true; clearTimeout(timer); clearTimeout(killTimer); finish(code === 0); });
   });
   if (!(await run(["close"])).ok) return false;
   // Native close acknowledges before the daemon exits. Observe its actual
@@ -203,6 +211,12 @@ interface BrowserLookupOptions {
   platform?: NodeJS.Platform;
   arch?: string;
   exists?: (p: string) => boolean;
+  /** Count only the runtimes OpenMausBot itself configured (the explicit
+   * override, the desktop bundle) or downloaded (the pinned asset). The
+   * ambient PATH is skipped: whatever it turns up — a repo's
+   * node_modules/.bin, a dev machine's global wrapper — is not the engine
+   * whose saved sessions this process manages. */
+  managedOnly?: boolean;
 }
 
 function packagedBrowser(options: BrowserLookupOptions) {
@@ -231,6 +245,7 @@ export function resolveAgentBrowserBinary(options: BrowserLookupOptions = {}): s
   if (bundle && exists(bundle.directory)) return completePackage(bundle, exists) ? bundle.engine : null;
   const pinned = pinnedBinaryPath(options.dataDir, platform, options.arch);
   if (exists(pinned)) return pinned;
+  if (options.managedOnly) return null;
   return onPath(env, platform, exists);
 }
 
@@ -261,13 +276,40 @@ export async function installAgentBrowserBinary(options: {
   try {
     const response = await (options.fetchImpl ?? fetch)(url, { redirect: "follow", signal: controller.signal });
     if (!response.ok) throw new Error(`the agent-browser download failed (HTTP ${response.status})`);
-    body = Buffer.from(await response.arrayBuffer());
+    const declared = Number(response.headers.get("content-length") ?? NaN);
+    if (Number.isFinite(declared) && declared !== asset.bytes) throw new Error("the agent-browser download did not match its pinned size; nothing was installed");
+    // Stream, never buffer whole: a body past the pin is cut off mid-flight.
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    if (response.body) {
+      try {
+        for await (const chunk of response.body) {
+          chunks.push(chunk);
+          received += chunk.byteLength;
+          if (received > asset.bytes) { controller.abort(); break; }
+        }
+      } catch (error) {
+        // Only the abort we asked for is swallowed; the size check reports it.
+        if (received <= asset.bytes) throw error;
+      }
+      body = Buffer.concat(chunks);
+    } else {
+      body = Buffer.from(await response.arrayBuffer());
+      if (body.length > asset.bytes) controller.abort();
+    }
   } finally {
     clearTimeout(timer);
   }
   if (body.length !== asset.bytes) throw new Error("the agent-browser download did not match its pinned size; nothing was installed");
   const digest = createHash("sha256").update(body).digest("hex");
   if (digest !== asset.sha256) throw new Error("the agent-browser download failed its SHA-256 check; nothing was installed");
+  // Sweep staging files abandoned by earlier runs before writing a new one.
+  try {
+    for (const name of readdirSync(directory)) {
+      if (!name.endsWith(".part")) continue;
+      try { unlinkSync(join(directory, name)); } catch { /* already gone */ }
+    }
+  } catch { /* best effort */ }
   const staging = `${destination}.${randomBytes(6).toString("hex")}.part`;
   writeFileSync(staging, body, { mode: 0o755 });
   if (platform !== "win32") chmodSync(staging, 0o755);
@@ -288,10 +330,31 @@ export function ensureChrome(binaryPath: string, options: { withDeps?: boolean; 
   return new Promise((done, fail) => {
     const child = spawn(binaryPath, args, { env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let output = "";
-    child.stdout?.on("data", (chunk) => { output += String(chunk); });
-    child.stderr?.on("data", (chunk) => { output += String(chunk); });
-    child.on("error", fail);
+    // Keep only the tail: the failure path quotes the last lines, so a chatty
+    // installer cannot grow the buffer without bound while it hangs.
+    const record = (chunk: Buffer) => {
+      output += String(chunk);
+      if (output.length > 262_144) output = output.slice(-262_144);
+    };
+    child.stdout?.on("data", record);
+    child.stderr?.on("data", record);
+    let timedOut = false;
+    let exited = false;
+    // A hung installer gets the same wall clock as the download: TERM, then
+    // KILL after a grace period, with the promise failing at the deadline.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      const killTimer = setTimeout(() => { if (!exited) child.kill("SIGKILL"); }, 5_000);
+      killTimer.unref?.();
+      fail(new Error("agent-browser install timed out"));
+    }, DOWNLOAD_TIMEOUT_MS);
+    timer.unref?.();
+    child.on("error", (error) => { exited = true; clearTimeout(timer); fail(error); });
     child.on("exit", (code) => {
+      exited = true;
+      clearTimeout(timer);
+      if (timedOut) return; // already failed with the timeout error
       if (code === 0) {
         options.log?.("agent-browser: Chrome is ready");
         done();
@@ -484,7 +547,7 @@ export async function clearBrowserSessionState(
 ): Promise<boolean> {
   // The native state-clear CLI ignores the daemon session, and even its named
   // form currently drops that name before dispatch. Never invoke it here.
-  if (!/^[A-Za-z0-9_-]{1,96}$/.test(session)) return false;
+  if (!/^[A-Za-z0-9_.-]{1,96}$/.test(session)) return false;
   const env = browserRuntimeEnv({ ...options.env, AGENT_BROWSER_SESSION: session, AGENT_BROWSER_HEADLESS: "1" });
   let directory: string;
   try { directory = browserSessionsDirectory(env); }

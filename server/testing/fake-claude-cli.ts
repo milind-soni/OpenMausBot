@@ -41,6 +41,21 @@
 //                      one tool_use (fresh id, that name and input) followed
 //                      by its tool_result (is_error unless ok, default true).
 //                      Unset, a turn makes the single default Bash call.
+//   FAKE_CLAUDE_HOOKS  1: honour the `hooks` block of the --settings file the
+//                      way the real CLI does — after each tool_result run
+//                      every PostToolUse command with the event JSON on
+//                      stdin (synchronously, inheriting this env), and once
+//                      at the end run the Stop commands.
+//   FAKE_CLAUDE_COMPACT 1: on this process's second and later turns, play a
+//                      compaction the way the CLI does — run the PreCompact
+//                      hooks (trigger auto), then the SessionStart hooks with
+//                      source "compact", and treat whatever SessionStart's
+//                      stdout said as context by echoing it into the reply.
+//   FAKE_CLAUDE_TURN_STATE path of a counter file shared by fresh CLI
+//                      processes, so FAKE_CLAUDE_COMPACT's "second turn"
+//                      survives a respawn between turns.
+//   FAKE_CLAUDE_CONTEXT_TOKENS report this latest-prompt size in a scripted
+//                      room-plan reply, for automatic compaction fixtures.
 //   FAKE_CLAUDE_AUTH   in (default) | out | unsupported | malformed |
 //                      inherited-api-key — what `auth status` reports
 //   FAKE_CLAUDE_AUTO_UNAVAILABLE_MODELS comma-separated --model values for
@@ -49,6 +64,7 @@
 //                      Sonnet 4.5: init reports the mode it actually runs in.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
@@ -64,7 +80,7 @@ const scriptedReplies = (() => {
     return [];
   }
 })();
-type ScriptedToolCall = { name: string; input: Record<string, unknown>; ok: boolean; output?: unknown };
+type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown };
 // null = unset (or unparseable): keep the single default Bash call.
 const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
   const raw = process.env.FAKE_CLAUDE_TOOL_CALLS;
@@ -73,9 +89,10 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
     return parsed
-      .filter((call): call is { name: string; input?: unknown; ok?: unknown; output?: unknown } => typeof call?.name === "string")
+      .filter((call): call is { name: string; id?: unknown; input?: unknown; ok?: unknown; output?: unknown } => typeof call?.name === "string")
       .map((call) => ({
         name: call.name,
+        ...(typeof call.id === "string" ? { id: call.id } : {}),
         input: call.input && typeof call.input === "object" && !Array.isArray(call.input) ? call.input as Record<string, unknown> : {},
         ok: call.ok !== false,
         output: call.output,
@@ -102,6 +119,38 @@ const nextScriptedReply = (): string[] => {
 };
 
 const argv = process.argv.slice(2);
+const settingsHooks: Record<string, Array<{ hooks?: Array<{ type?: string; command?: string; timeout?: number }> }>> = (() => {
+  if (process.env.FAKE_CLAUDE_HOOKS !== "1") return {};
+  const i = argv.indexOf("--settings");
+  if (i === -1) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(argv[i + 1]!, "utf8"));
+    return parsed && typeof parsed.hooks === "object" ? parsed.hooks : {};
+  } catch {
+    return {};
+  }
+})();
+/** Run every command hook registered for `event`, like the real CLI: JSON on
+ * stdin, wait for exit (bounded), ignore its output except to a dump. */
+function runHooks(event: string, payload: Record<string, unknown>): string {
+  let stdout = "";
+  for (const entry of settingsHooks[event] ?? []) {
+    for (const hook of entry.hooks ?? []) {
+      if (hook.type !== "command" || !hook.command) continue;
+      const result = spawnSync(hook.command, {
+        shell: true,
+        input: JSON.stringify({ hook_event_name: event, session_id: "fake-session", cwd: process.cwd(), ...payload }),
+        env: process.env,
+        timeout: ((hook.timeout ?? 5) + 1) * 1000,
+        stdio: ["pipe", "pipe", "pipe"],
+        encoding: "utf8",
+      });
+      stdout += result.stdout ?? "";
+    }
+  }
+  return stdout;
+}
+let turnsPlayed = 0;
 const argAfter = (flag: string): string | null => {
   const i = argv.indexOf(flag);
   return i === -1 ? null : (argv[i + 1] ?? null);
@@ -320,7 +369,9 @@ const playTurn = (prompt: JsonValue) => {
   if (process.env.FAKE_CLAUDE_ROOM_PLAN) {
     const progress = (text: string) => out({ type: "assistant", message: { content: [{ type: "text", text }] } });
     void runRoomHandoffAgent(argv, process.env.FAKE_CLAUDE_ROOM_PLAN, prompt, undefined, progress).then(text => {
-      out({ type: "assistant", message: { content: [{ type: "text", text }] } });
+      const contextTokens = Number(process.env.FAKE_CLAUDE_CONTEXT_TOKENS);
+      const usage = Number.isSafeInteger(contextTokens) && contextTokens > 0 ? { input_tokens: contextTokens, output_tokens: 5 } : undefined;
+      out({ type: "assistant", message: { content: [{ type: "text", text }], ...(usage ? { usage } : {}) } });
       out({ type: "result", is_error: false, stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 5 } });
     }).catch(error => {
       out({ type: "result", is_error: true, result: String(error), stop_reason: "error" });
@@ -374,14 +425,30 @@ const playTurn = (prompt: JsonValue) => {
     });
   }
 
-  const replyParts = nextScriptedReply();
+  let replyParts = nextScriptedReply();
+  const defaultToolId = `tu-${process.pid}-${++toolUseCount}`;
+  // FAKE_CLAUDE_TURN_STATE: a counter file so "second turn" survives a
+  // respawn between turns (the harness may relaunch the CLI legitimately)
+  if (process.env.FAKE_CLAUDE_TURN_STATE) {
+    let n = 0;
+    try { n = Number(readFileSync(process.env.FAKE_CLAUDE_TURN_STATE, "utf8")) || 0; } catch {}
+    turnsPlayed = n;
+    writeFileSync(process.env.FAKE_CLAUDE_TURN_STATE, String(n + 1));
+  }
+  turnsPlayed += 1;
+  if (process.env.FAKE_CLAUDE_COMPACT === "1" && turnsPlayed >= 2) {
+    runHooks("PreCompact", { trigger: "auto" });
+    const context = runHooks("SessionStart", { source: "compact" });
+    if (context.trim()) replyParts = [`${context.trim()}\n\n${replyParts[0] ?? ""}`, ...replyParts.slice(1)];
+  }
   const usage = { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 };
   if (scriptedToolCalls) {
     // scripted calls come first, each settled before the reply text
     for (const call of scriptedToolCalls) {
-      const id = `tu-${++toolUseCount}`;
+      const id = call.id ?? `tu-${process.pid}-${++toolUseCount}`;
       out({ type: "assistant", message: { content: [{ type: "tool_use", id, name: call.name, input: call.input }], usage } });
       out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, is_error: !call.ok, content: call.output }] } });
+      runHooks("PostToolUse", { tool_name: call.name, tool_input: call.input, tool_response: call.output, tool_use_id: id });
     }
     for (const text of replyParts) out({ type: "assistant", message: { content: [{ type: "text", text }], usage } });
   } else {
@@ -389,13 +456,15 @@ const playTurn = (prompt: JsonValue) => {
       const content: Array<
         { type: "text"; text: string } | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
       > = [{ type: "text", text }];
-      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: "tu-1", name: "Bash", input: { command: "echo hi" } });
+      if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
       out({ type: "assistant", message: { content, usage } });
     });
-    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu-1", is_error: false, content: [{ type: "text", text: "hi" }] }] } });
+    out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
+    runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }
 
   const finish = () => {
+    runHooks("Stop", { stop_hook_active: false });
     out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
     turnRunning = false;
     finishIfDone();

@@ -182,7 +182,7 @@ fun RosterScreen(navigator: CompanionNavigator) {
                 face = faces[summary.id] ?: MausState.IDLE,
                 waiting = summary.id in waiting,
                 last = last,
-                onClick = { navigator.open(summary.chat) },
+                onClick = { navigator.open(environment.chatPreferences.restoringThread(summary.chat, connection?.id)) },
             )
             (summary.chat as? Chat.BotChat)?.bot?.let { bot ->
                 BotThreadTree(

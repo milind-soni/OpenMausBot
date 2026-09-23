@@ -12,7 +12,8 @@ function Probe() {
     <output id="ready">{String(state.connected && !!bot)}</output>
     <output id="text">{bot && stream.streaming[bot.threadId]}</output>
     <output id="reasoning">{bot && stream.reasoning[bot.threadId]}</output>
-    <output id="messages">{JSON.stringify(bot?.messages.filter((message) => message.role === "bot").map((message) => message.text) ?? [])}</output>
+    <output id="messages">{JSON.stringify(bot?.messages.filter((message) => message.role === "bot" && message.kind === "text").map((message) => message.text) ?? [])}</output>
+    <output id="digests">{JSON.stringify(bot?.messages.filter((message) => message.kind === "digest").map((message) => message.id) ?? [])}</output>
   </>;
 }
 

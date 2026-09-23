@@ -47,13 +47,21 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
       return ui("click", "--ref", "@" + match![0]);
     };
     const lead = (await api("/api/bots", { name: "Engineer", title: "Implementation", section: "" })).bot;
+    const gateFile = join(temporary, "finish-teammate");
     writeFileSync(planPath, JSON.stringify({
       [info.botId]: { steps: [{ arguments: { bot_ids: [lead.id], request_key: "review", message: "Check the fixture CSV export" } }], reply: "Assigned", resumeReply: "Engineer checked the fixture CSV export" },
-      [lead.id]: { reply: "CSV export checked in my separate task" },
+      [lead.id]: { gateFile, reply: "CSV export checked in my separate task" },
     }));
     await ui("flag", "--set", "features.showToolCalls=false");
     await ui("type", "--name", "Message Pepper", "--text", "Please have Engineer check the CSV export and report back");
     await ui("press", "--keys", "Enter");
+    await expect.poll(snapshot, { timeout: 15_000 }).toContain("Teammates working");
+    const waiting = (await api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === info.botId);
+    expect(waiting).toMatchObject({ busy: false, waitingForTeammates: true });
+    const controls = (await ui("snapshot")).refs as Record<string, { role: string; name: string }>;
+    expect(Object.values(controls).some(control => control.role === "textbox" && control.name === "Message Pepper")).toBe(true);
+    await ui("screenshot", "--out", info.logPath + ".teammates-working.png");
+    writeFileSync(gateFile, "complete fixture work");
     await ui("wait-settle", "--timeout", "60");
     await expect.poll(snapshot, { timeout: 15_000 }).toContain("Engineer checked the fixture CSV export");
     expect(await snapshot()).toContain("Sent to Engineer");

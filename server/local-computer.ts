@@ -334,16 +334,39 @@ export function validateLinuxDescriptorRuntime(
   }
 }
 
+/** Legacy darwin/win32 descriptors still name any command, so at runtime at
+ * least the file itself must be one only this user could have written: a
+ * regular file, not a symlink, owned by this user, and closed against
+ * group/other writes. libuv reports every writable Windows file as uid 0
+ * mode 0o666, so the ownership and permission bits cannot carry meaning
+ * there — only the symlink refusal applies on win32. */
+function validateLegacyDescriptorRuntime(
+  descriptorFile: string,
+  platform: NodeJS.Platform,
+  { uid = process.getuid?.() ?? -1 }: { uid?: number } = {},
+): boolean {
+  try {
+    const stat = lstatSync(descriptorFile);
+    if (!stat.isFile() || stat.isSymbolicLink()) return false;
+    if (platform !== "win32" && (stat.uid !== uid || (stat.mode & 0o022) !== 0)) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function readCuaConnection({
   platform = process.platform,
   userData = process.env.OMB_USER_DATA,
   home = homedir(),
   validateLinuxRuntime = validateLinuxDescriptorRuntime,
+  validateLegacyRuntime = validateLegacyDescriptorRuntime,
 }: {
   platform?: NodeJS.Platform;
   userData?: string;
   home?: string;
   validateLinuxRuntime?: (file: string, raw: LinuxConnectionDescriptor) => boolean;
+  validateLegacyRuntime?: (file: string, platform: NodeJS.Platform) => boolean;
 } = {}): LocalComputerConnection | null {
   const candidates = userData ? [join(userData, "cua-connection.json")] : [];
   if (platform === "darwin") {
@@ -361,7 +384,7 @@ export function readCuaConnection({
         if (decoded && validateLinuxRuntime(file, raw)) return decoded;
       } else {
         const decoded = decodeLegacyDescriptor(raw, platform);
-        if (decoded) return decoded;
+        if (decoded && validateLegacyRuntime(file, platform)) return decoded;
       }
     } catch {
       // Missing, invalid, tampered, or stale descriptors are unavailable.

@@ -10,6 +10,9 @@ export interface BrowserSpawnSpec {
 export const BROWSER_CONTROL_REFUSAL = "Browser tools are paused while a person controls this browser. Wait for them to hand control back; do not try another browser or execution tool.";
 const MAX_REQUEST_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 16_777_216;
+/** Startup, not per-request work: a cold engine spawn can exceed a tight
+ * per-request budget before anything has been accepted to guard. */
+const HANDSHAKE_TIMEOUT_MS = 1_000;
 const HOST_ENV = ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "PATH", "Path", "TMPDIR", "TMP", "TEMP", "SystemRoot", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_RUNTIME_DIR"];
 
 /** MCP, viewer commands, and cleanup must resolve the same HOME/socket paths.
@@ -37,6 +40,7 @@ class BrowserClient {
   private idleMs: number;
   private maxPending: number;
   private onClose: () => void;
+  private onRequestTimeout: () => void;
 
   constructor(
     spec: BrowserSpawnSpec,
@@ -44,11 +48,13 @@ class BrowserClient {
     idleMs: number,
     maxPending: number,
     onClose: () => void,
+    onRequestTimeout: () => void,
   ) {
     this.requestTimeoutMs = requestTimeoutMs;
     this.idleMs = idleMs;
     this.maxPending = maxPending;
     this.onClose = onClose;
+    this.onRequestTimeout = onRequestTimeout;
     this.child = spawnCli(spec.command, spec.args, {
       env: browserRuntimeEnv(spec.env), stdio: ["pipe", "pipe", "pipe"], shell: false,
     });
@@ -60,7 +66,7 @@ class BrowserClient {
     this.ready = this.rpc("initialize", {
       protocolVersion: "2024-11-05", capabilities: {},
       clientInfo: { name: "openmausbot-browser", version: "1" },
-    }).then((result) => {
+    }, Math.max(this.requestTimeoutMs, HANDSHAKE_TIMEOUT_MS)).then((result) => {
       if (!result || typeof result !== "object" || !("protocolVersion" in result)) {
         throw new TransportError("Browser engine returned an invalid handshake.");
       }
@@ -112,7 +118,7 @@ class BrowserClient {
     });
   }
 
-  rpc(method: string, params: unknown): Promise<unknown> {
+  rpc(method: string, params: unknown, timeoutMs: number = this.requestTimeoutMs): Promise<unknown> {
     if (this.stopped) return Promise.reject(new TransportError("Browser connection closed."));
     if (this.pending.size >= this.maxPending) return Promise.reject(new Error("Too many pending browser requests. Try again when the current action finishes."));
     const id = this.nextId++;
@@ -120,7 +126,13 @@ class BrowserClient {
     if (Buffer.byteLength(JSON.stringify(message)) > MAX_REQUEST_BYTES) return Promise.reject(new Error("Browser request exceeded the size limit."));
     if (this.idleTimer) clearTimeout(this.idleTimer);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { void this.stop(new TransportError("Browser request timed out; restart the browser before taking control.")); }, this.requestTimeoutMs);
+      const timer = setTimeout(() => {
+        // Seal the gate synchronously with the timer, before stop() teardown:
+        // the rejection can surface through the ready handshake, which sits
+        // outside agentRpc's uncertainty classifier.
+        this.onRequestTimeout();
+        void this.stop(new TransportError("Browser request timed out; restart the browser before taking control."));
+      }, timeoutMs);
       timer.unref();
       this.pending.set(id, { resolve, reject, timer });
       try { this.write(message); }
@@ -238,6 +250,12 @@ export class BrowserRuntime {
 
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void): Promise<unknown> {
     if (method !== "tools/list" && method !== "tools/call") throw new Error("Unsupported browser method.");
+    // tools/list bypasses withAgentAction (a human may hold control), so it
+    // must refuse the closing window itself or its client outlives restart().
+    if (method !== "tools/call" && this.gate(session).closing) throw new Error("The browser is closing. Try again shortly.");
+    // Uncertainty survives client replacement and never self-resolves: refuse
+    // every new browser request until an explicit restart clears it.
+    if (this.gate(session).uncertain) throw new Error("A browser action was interrupted. Restart this browser before continuing.");
     const invoke = async () => {
       const key = JSON.stringify([spec.command, spec.args, Object.entries(spec.env).sort(([a], [b]) => a.localeCompare(b))]);
       let entry = this.clients.get(session);
@@ -245,6 +263,9 @@ export class BrowserRuntime {
       if (!entry) {
         const client = new BrowserClient(spec, this.options.requestTimeoutMs, this.options.idleMs, this.options.maxPending, () => {
           if (this.clients.get(session)?.client === client) this.clients.delete(session);
+        }, () => {
+          const gate = this.gate(session);
+          if (!gate.closing) gate.uncertain = true;
         });
         entry = { key, client };
         this.clients.set(session, entry);
@@ -265,7 +286,8 @@ export class BrowserRuntime {
       catch (error) {
         // An MCP timeout cannot prove the independent daemon stopped an
         // accepted action. Recovery must close the browser, not just its pipe.
-        if (method === "tools/call" && error instanceof TransportError) {
+        // A stop from close()/restart() is intentional, not uncertainty.
+        if (method === "tools/call" && error instanceof TransportError && !this.gate(session).closing) {
           const gate = this.gate(session);
           gate.uncertain = true;
         }
@@ -355,6 +377,10 @@ export class BrowserRuntime {
     try {
       await closeBrowser();
       await this.clients.get(session)?.client.stop();
+      // A tools/list admitted before closing set in can register a client
+      // while that stop awaits; registration is synchronous, so one re-check
+      // is deterministic and no stray transport survives to idle expiry.
+      await this.clients.get(session)?.client.stop();
       gate.uncertain = false;
       gate.owner = null;
       gate.releasing = false;
@@ -374,10 +400,11 @@ export class BrowserRuntime {
     const gate = this.gate(session);
     gate.closing = true;
     gate.ready = false;
+    // Clear before the awaited stop: any uncertain latch after this point must win.
+    gate.uncertain = false;
     this.changed(gate);
     await this.clients.get(session)?.client.stop();
     gate.closing = false;
-    gate.uncertain = false;
     this.changed(gate);
     if (!gate.owner && !gate.agents && !gate.humans) this.gates.delete(session);
   }

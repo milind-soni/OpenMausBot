@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createWorkspaceAccess, describeEdition, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, loadEnterpriseLayer } from "./enterprise.ts";
+import { createWorkspaceAccess, describeEdition, editionStatus, entitled, hostedWorkspaceConfiguration, hostedWorkspaceConfigured, sharedWorkspaceFullAccessConfigured, loadEnterpriseLayer } from "./enterprise.ts";
 import { SessionRegistry } from "./sessions.ts";
 
 const dirs: string[] = [];
@@ -23,6 +23,17 @@ afterEach(async () => {
 });
 
 describe("enterprise hook point", () => {
+  it("requires an explicit operator policy on a complete portal-managed non-desktop workspace", () => {
+    const env = { OMB_ADMIN_URL: "https://admin.example.test", OMB_ADMIN_WORKSPACE: "acme", OMB_PUBLIC_URL: "https://acme.example.test",
+      OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" };
+    expect(sharedWorkspaceFullAccessConfigured(env)).toBe(true);
+    for (const patch of [
+      { OMB_SHARED_WORKSPACE_FULL_ACCESS: undefined }, { OMB_SHARED_WORKSPACE_FULL_ACCESS: "true" },
+      { OMB_DESKTOP_PARENT: "1" }, { OMB_ADMIN_MEMBERSHIP: "local" }, { OMB_ADMIN_MEMBERSHIP: undefined },
+      { OMB_ADMIN_URL: "http://admin.example.test" }, { OMB_PUBLIC_URL: "" }, { OMB_ADMIN_WORKSPACE: "" },
+    ]) expect(sharedWorkspaceFullAccessConfigured({ ...env, ...patch })).toBe(false);
+    expect(sharedWorkspaceFullAccessConfigured({ OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" })).toBe(false);
+  });
   it("does not create a hosted bridge unless opted in, and marks partial configuration as hosted", () => {
     expect(hostedWorkspaceConfigured({})).toBe(false);
     expect(hostedWorkspaceConfigured({ OMB_PUBLIC_URL: "https://legacy.example.test" })).toBe(false);

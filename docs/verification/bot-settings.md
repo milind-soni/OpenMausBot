@@ -72,6 +72,11 @@ This browser fixture verifies renderer interaction and persistence, not
 packaged Electron privileges, actual operating-system access, or the
 provider-specific execution of elevated approval modes.
 
+The [hosted Slack management fixture](hosted-slack-management.md) separately
+checks Slack → Manage in Admin: the row exists only on a hosted workspace,
+admins and members read the same link, and switching agents during a pending
+load never shows another agent's link.
+
 ## Last exercised
 
 The isolated browser run on 2026-09-06 confirmed immediate Identity/Soul

@@ -2,7 +2,7 @@ import { BellDot, CircleAlert, Clock3, Loader2 } from "lucide-react";
 import { useStore, type Bot, type Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { orderedSidebarThreads } from "./SidebarThreadRow";
+import { orderedSidebarThreads, orderedThreadList } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
 /** Attention is not history browsing: idle conversations never enter this list.
@@ -18,10 +18,21 @@ export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.queued || task.unread);
 }
 
+/** What stays reachable when the thread tree is folded away: anything that
+ * needs the person, plus a pin, in pin-then-update order. The bell does not
+ * use this — it stays on attention order. */
+export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>) {
+  const attention = sidebarBotActivityTasks(bot, queued);
+  const seen = new Set(attention.map((task) => task.threadId));
+  const pinned = (bot.tasks ?? [])
+    .filter((task) => task.pinned === true && !task.routineRunId && !seen.has(task.threadId))
+    .map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }));
+  return orderedThreadList([...attention, ...pinned]);
+}
+
 /** One thread that needs the person, from any bot other than the one they
- * are in. Built from the same attention rule and ordering as the sidebar
- * tree, so the bell, the all-threads picker, and the tree itself can never
- * disagree about what needs attention. */
+ * are in. Attention order, not the thread list: a waiting approval stays
+ * above a merely recent unread thread. */
 export type AttentionThread = { botId: string; botName: string; task: Task & { queued: boolean } };
 
 export function crossBotAttentionThreads(bots: Bot[], queued: Record<string, unknown[]>, exceptBotId?: string): AttentionThread[] {
@@ -66,7 +77,7 @@ export function AttentionThreadRows({ entries, onJump }: { entries: AttentionThr
  * These are selection-only buttons: no create, rename, move, or delete menu. */
 export function SidebarBotActivity({ bot, density }: { bot: Bot; density: SidebarDensity }) {
   const { state, dispatch } = useStore();
-  const tasks = orderedSidebarThreads(sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId), bot.threadId);
+  const tasks = threadsWhenTreeHidden(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>

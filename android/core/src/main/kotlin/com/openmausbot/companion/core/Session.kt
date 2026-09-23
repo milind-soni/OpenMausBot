@@ -790,6 +790,7 @@ class Session(
         while (currentCoroutineContext().isActive) {
             val activeClient = client ?: return
             _status.value = Status.Connecting
+            var receivedHello = false
             try {
                 eventsFn(activeClient, _state.value.cursor, screenWatchers > 0)
                     .collect { frame ->
@@ -798,6 +799,7 @@ class Session(
 
                         when (val payload = frame.frame) {
                             is Frame.Hello -> {
+                                receivedHello = true
                                 if (!payload.resumed) {
                                     hydrate()
                                     _state.update { it.resetCursor(payload.cursor) }
@@ -816,7 +818,10 @@ class Session(
                             }
                         }
                     }
-                // Clean stream end — harness went away
+                // A live stream may close normally and should reopen on the working route.
+                // An empty/comment-only response never connected: retrying it forever would
+                // strand the phone even when another advertised route can reach the computer.
+                if (!receivedHello) throw MissingStreamHelloException()
                 _status.value = Status.Offline("Lost the connection.")
             } catch (error: Throwable) {
                 if (!currentCoroutineContext().isActive || error is kotlinx.coroutines.CancellationException) {
@@ -1724,6 +1729,15 @@ class Session(
 
     suspend fun renameTask(task: BotTask, forBot: Bot, title: String): Boolean = mutateTask(false) { client ->
         client.renameTask(forBot.id, task.threadId, title)
+        refresh()
+        true
+    }
+
+    suspend fun pinTask(task: BotTask, chat: Chat, pinned: Boolean): Boolean = mutateTask(false) { client ->
+        when (chat) {
+            is Chat.BotChat -> client.setTaskPinned(chat.bot.id, task.threadId, pinned)
+            is Chat.RoomChat -> client.setRoomTaskPinned(chat.room.id, task.threadId, pinned, task.title)
+        }
         refresh()
         true
     }

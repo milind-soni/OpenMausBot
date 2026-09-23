@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -17,6 +17,9 @@ const flag = "--omb-organization-fixture";
 if (process.versions.electron && process.argv.includes(flag)) {
   const { app, BrowserWindow, ipcMain, session } = await import("electron");
   const { createManagedDesktopClient, createManagedDesktopRelay } = await import("../electron/managed-desktop.mjs");
+  const { createOrganizationEntry } = await import("../electron/organization-entry.mjs");
+  const { buildApplicationMenu } = await import("../electron/menu.mjs");
+  const { parseEnvironments, serializeEnvironments, activeEnvironment } = createRequire(import.meta.url)("../electron/environments.cjs");
   const [url, output, runtimeUrl] = process.argv.slice(process.argv.indexOf(flag) + 1);
   app.setPath("userData", join(output, "user-data"));
   app.setPath("sessionData", join(output, "user-data"));
@@ -31,10 +34,14 @@ if (process.versions.electron && process.argv.includes(flag)) {
   const token = `omd_${randomBytes(32).toString("base64url")}`;
   const modelToken = `omg_${randomBytes(32).toString("base64url")}`;
   let approved = false, revoked = false, begins = 0, revokes = 0, grantsApplied = 0, clearsApplied = 0;
-  let origin, win, saved = null;
+  let origin, win, entry, saved = null;
   const browserRequests = [];
   const admin = createHttpServer(async (req, res) => {
     const reply = (status, value) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }); res.end(JSON.stringify(value)); };
+    if (req.url === "/") {
+      res.writeHead(200, { "content-type": "text/html" });
+      return res.end('<html><body><h1>Old hosted workspace</h1><p>These chats belong to the server.</p></body></html>');
+    }
     if (req.url === "/api/public/config") return reply(200, { desktopContractVersion: 1, capabilities: { desktopEnrollment: true } });
     if (req.url === "/api/desktop/enrollment" && req.method === "POST") {
       approved = false; revoked = false; begins++;
@@ -76,6 +83,12 @@ if (process.versions.electron && process.argv.includes(flag)) {
       return client[method](input);
     });
   }
+  let settingsOpened = 0;
+  ipcMain.handle("organization:settings-opened", event => {
+    assert.equal(new URL(event.senderFrame.url).origin, localOrigin);
+    settingsOpened++;
+    return entry?.settingsOpened() ?? false;
+  });
   ipcMain.handle("update:get-state", () => ({ status: "idle" }));
   ipcMain.handle("companion:state", () => ({ running: false, enabled: false, devices: [], bind: null, publicUrl: null }));
   ipcMain.handle("perm:status", () => ({}));
@@ -91,7 +104,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
   app.whenReady().then(async () => {
     session.defaultSession.webRequest.onBeforeRequest((request, callback) => {
       const target = new URL(request.url);
-      callback({ cancel: target.host !== new URL(url).host && target.origin !== runtimeUrl });
+      callback({ cancel: target.host !== new URL(url).host && target.origin !== runtimeUrl && target.origin !== origin });
     });
     const open = async (local, path = url) => {
       const window = new BrowserWindow({ show: false, width: 820, height: 760, webPreferences: {
@@ -194,9 +207,67 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(await evaluate("document.querySelectorAll('[role=dialog]').length"), 1, "welcome yields only to explicit connection Settings");
     await evaluate("new Promise(resolve => setTimeout(resolve, 180))"); // Capture settled navigation colors.
     writeFileSync(join(output, "organization-in-app.png"), (await win.webContents.capturePage()).toPNG());
+
+    // Reproduce the upgrade trap: an old hosted selection survives a fresh
+    // renderer. Use the actual native transition and menu with recorded
+    // confirmation; navigation, preload classification and disk state are real.
+    const environmentsFile = join(output, "user-data", "environments.json");
+    const hostedState = { activeId: "old-host", environments: [{ id: "old-host", name: "Retained cloud workspace", origin }] };
+    writeFileSync(environmentsFile, serializeEnvironments(hostedState));
+    const readEnvironments = () => parseEnvironments(readFileSync(environmentsFile, "utf8"));
+    let confirmLocal = false;
+    let restartIntent = false;
+    const confirmations = [];
+    entry = createOrganizationEntry({
+      readState: () => ({ environments: readEnvironments(), remoteAccess: null, restartIntent }),
+      confirm: async options => { confirmations.push(options); return confirmLocal; },
+      saveEnvironments: next => writeFileSync(environmentsFile, serializeEnvironments(next)),
+      disconnectAndRemember: () => { throw new Error("Legacy hosted entry must not clear companion credentials"); },
+      clearRestartIntent: () => { restartIntent = false; },
+      openLocalSettings: () => win.loadURL(`${url}?app=1&desktop-settings=organization`),
+      relaunch: () => { throw new Error("Legacy hosted entry needs no restart"); },
+    });
+    await win.loadURL(activeEnvironment(readEnvironments()).origin);
+    await until(() => evaluate("document.body.textContent.includes('Old hosted workspace')"), "saved old server restored");
+    assert.equal(await evaluate("typeof window.ogb.organization"), "undefined", "old cloud renderer has no organisation authority");
+    const beforeCancel = readFileSync(environmentsFile, "utf8");
+    await entry.request();
+    assert.equal(readFileSync(environmentsFile, "utf8"), beforeCancel, "cancel preserves the exact saved selection");
+    assert.equal(new URL(win.webContents.getURL()).origin, origin);
+    confirmLocal = true;
+    const acknowledgmentsBeforeReturn = settingsOpened;
+    let menuRequest;
+    const menu = buildApplicationMenu({ ...readEnvironments(), onOrganizationSignIn: () => { menuRequest = entry.request(); },
+      onSwitch: () => {}, onAddFromClipboard: () => {}, onConnect: () => {}, onForget: () => {}, onOpenSettings: () => {} });
+    menu.getMenuItemById("organization-sign-in").click();
+    await menuRequest;
+    await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "native organisation action opens local Settings before onboarding");
+    await until(() => settingsOpened > acknowledgmentsBeforeReturn, "mounted local Organisation settings acknowledged");
+    assert.equal(new URL(win.webContents.getURL()).origin, localOrigin);
+    assert.equal(readEnvironments().activeId, "local");
+    assert.deepEqual(readEnvironments().environments, hostedState.environments, "hosted entry retained; no chat migration or deletion");
+    assert.equal(begins, beginsBeforeApp, "opening local Settings does not enroll automatically");
+    assert.equal(confirmations.length, 2);
+    writeFileSync(join(output, "organization-returned-local.png"), (await win.webContents.capturePage()).toPNG());
+    // A new renderer after relaunch uses the persisted local choice rather
+    // than loading the old server again. No sign-in wall for personal use.
+    const previousWindow = win;
+    win = await open(true, activeEnvironment(readEnvironments())?.origin ?? `${url}?app=1`);
+    previousWindow.destroy();
+    await until(() => evaluate("document.body.textContent.includes('Welcome to OpenMausBot')"), "local choice survives recreated renderer");
+    assert.equal(await evaluate("typeof window.ogb.organization"), "object");
+    assert.equal(new URL(win.webContents.getURL()).origin, localOrigin);
+    // Simulate the already-confirmed companion disconnect's one-bit restart
+    // intent; only the actual local panel's acknowledgement consumes it.
+    restartIntent = true;
+    writeFileSync(environmentsFile, serializeEnvironments(hostedState));
+    await entry.restore();
+    await until(() => !restartIntent, "confirmed restart intent consumed after local panel mounts");
+    assert.equal(readEnvironments().activeId, "local");
+    assert.equal(await evaluate(`Boolean(${button("Sign in with your organisation")})`), true);
     const receipt = { passed: true, renderer: "OrganizationSettings + actual app shell", preload: "electron/preload.cjs", client: "electron/managed-desktop.mjs",
-      checks: ["organization logo and icon grid", "chosen icon becomes a durable local attachment", "admin removal clears branding without deleting chosen avatar", "one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "organisation sign-in preserves local desktop capabilities", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding"],
-      limitation: "Synthetic loopback Admin, in-memory credential store and fake utility-process acknowledgement; not proof of real Admin consent, OS keychain, native driver execution, private runtime synchronization, backups or public DNS/TLS." };
+      checks: ["organization logo and icon grid", "chosen icon becomes a durable local attachment", "admin removal clears branding without deleting chosen avatar", "one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "organisation sign-in preserves local desktop capabilities", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding", "saved old hosted renderer restored without local authority", "cancel keeps hosted selection", "native menu returns to local Organisation Settings", "hosted entry remains saved", "persisted local selection survives recreated renderer"],
+      limitation: "Synthetic loopback Admin, confirmation, credential store and utility-process acknowledgement. Renderer recreation and a synthetic restart intent, not an installed update or OS relaunch; no real Admin consent, OS keychain, native driver execution, private runtime synchronization, backups or public DNS/TLS." };
     writeFileSync(join(output, "receipt.json"), `${JSON.stringify(receipt, null, 2)}\n`);
     console.log(JSON.stringify(receipt));
     client.close(); admin.close(); win.destroy(); app.exit(0);
@@ -237,6 +308,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     const code = await new Promise((resolve, reject) => { child.once("error", reject); child.once("close", resolve); })
       .finally(() => { clearTimeout(timer); process.off("SIGINT", stop); process.off("SIGTERM", stop); });
     assert.equal(code, 0, `Organisation smoke failed; inspect ${join(output, "electron.log")}`);
+    assert.equal(JSON.parse(readFileSync(join(output, "receipt.json"), "utf8")).passed, true, "Electron must finish every workflow assertion");
   } finally {
     await ui.close(); await fixture.close();
     for (const name of ["home", "user-data"]) rmSync(join(output, name), { recursive: true, force: true });

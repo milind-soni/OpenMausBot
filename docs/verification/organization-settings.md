@@ -44,6 +44,12 @@ The smoke checks:
 - The actual fresh app still opens its existing optional welcome flow, not an
   organisation sign-in wall. Explicit Settings → Organisation works before
   completing local provider onboarding.
+- A persisted old hosted selection loads the old server's page without an
+  organisation bridge. Cancelling native organisation sign-in leaves the saved
+  selection byte-for-byte unchanged. Confirming through the production native
+  menu opens local Organisation Settings, preserves the hosted entry and does
+  not enroll automatically. Recreating the renderer from the saved choice
+  stays local. A completion receipt is required, not merely an exit code.
 
 The printed evidence directory retains `receipt.json`, `electron.log`, and
 connected, narrow confirmation and in-app screenshots. Cleanup removes only
@@ -57,6 +63,37 @@ native provider execution, cloud backups, public DNS/TLS or paid model calls.
 Provider isolation, expiry and no-personal-fallback behavior are separately
 covered by `server/managed-desktop.test.ts`. Read-only Company engine settings
 and preservation of personal controls have focused renderer regressions.
+
+## Returning from a hosted workspace
+
+Use **Server → Sign in with organisation…** in the installed desktop app, or
+**Use desktop app → Open desktop app** in Admin. The fixed
+`openmausbot://organization` link opens local settings only; it carries no
+credentials and does not approve enrollment. Remote pages do not gain access
+to the organisation bridge. Existing hosted server selections are not reset
+on an ordinary update.
+
+When a hosted workspace is selected, the native confirmation explains that
+its data stays on the server. The hosted entry remains saved. In desktop
+companion mode, confirming explicitly disconnects and restarts locally; the
+local Settings destination is remembered in the same encrypted write. A
+failed write or cancelled dialog does not disconnect. The pending destination
+is consumed only when the local Organisation panel acknowledges its mount.
+Relaunch arguments exclude the consumed one-shot link so later updates cannot
+replay it. Restore/retry and
+stale-confirmation cases are covered by
+`node --test electron/organization-entry.node-test.mjs`.
+
+The Electron smoke uses actual menu selection, renderer navigation and a
+disposable saved-environments file, but substitutes native confirmation and
+credential storage. It recreates the renderer rather than installing a real
+update or invoking an OS protocol handler. Companion restart/keychain behavior
+is controller-tested, not a production migration claim.
+
+2026-09-20: the extended isolated desktop workflow passed. Evidence:
+`/var/folders/91/pdc4mdh53xs59x0r4z7_0qzc0000gn/T/omb-organization-ui-kdmfy4/`.
+Installed-app update/protocol testing and production rollout remain separate
+follow-ups; no customer workspace was changed.
 
 2026-09-16: the extended isolated Electron workflow passed, including logo
 decoding, avatar selection/retrieval and removal propagation. Evidence:

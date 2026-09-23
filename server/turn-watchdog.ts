@@ -1,6 +1,6 @@
 // Stall watchdog for dispatched turns.
 //
-// ask_bot has a 4-minute ceiling, while room turns have a separately
+// ask_bot has a short inline wait budget, while room turns have a separately
 // configurable absolute ceiling. The main 1:1 path had none: a wedged CLI
 // (hung network call, dead MCP child,
 // a provider that stops streaming without exiting) left its bot busy

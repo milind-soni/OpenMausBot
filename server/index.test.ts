@@ -521,10 +521,12 @@ beforeAll(async () => {
   const linkedImage = join(linkedWorkspace, "preview.png");
   const privateAttachments = join(home, ".openmausbot", "attachments");
   const userAttachment = join(privateAttachments, "shared-notes.pdf");
+  const generatedImage = join(privateAttachments, "generated.png");
   mkdirSync(linkedWorkspace, { recursive: true });
   mkdirSync(privateAttachments, { recursive: true, mode: 0o700 });
   writeFileSync(linkedFile, "# Phone-ready report\n");
   writeFileSync(linkedImage, "png preview bytes");
+  writeFileSync(generatedImage, "generated image bytes");
   writeFileSync(userAttachment, "%PDF shared from the phone\n", { mode: 0o600 });
   writeFileSync(
     join(home, ".openmausbot", "messages-test-linked-file-room-thread.json"),
@@ -567,9 +569,24 @@ beforeAll(async () => {
           text: `<attached-file path="${userAttachment}" name="Trip notes.exe" />`,
         },
         {
+          id: "generated-image-message", at: 7.1, role: "bot", kind: "text",
+          parentId: "user-attached-file-message",
+          attachments: [{ kind: "image", path: generatedImage, mime: "image/png" }],
+        },
+        {
+          id: "outside-generated-image-message", at: 7.2, role: "bot", kind: "text",
+          parentId: "generated-image-message",
+          attachments: [{ kind: "image", path: linkedImage, mime: "image/png" }],
+        },
+        {
+          id: "not-image-attachment-message", at: 7.3, role: "bot", kind: "text",
+          parentId: "outside-generated-image-message",
+          attachments: [{ kind: "image", path: userAttachment, mime: "image/png" }],
+        },
+        {
           id: "user-outside-file-message",
           at: 8,
-          parentId: "user-attached-file-message",
+          parentId: "not-image-attachment-message",
           role: "user",
           kind: "text",
           text: `<attached-file path="${linkedFile}" />`,
@@ -1531,8 +1548,11 @@ describe("harness HTTP API", () => {
       const afterDirect = (await api("GET", "/api/bots?messages=20")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
+      // Admission returns the append receipt; the hanging fake turn adds its
+      // durable pending marker to that same stored message before this read.
+      expect(direct.body.message).not.toHaveProperty("requestPending");
       expect(afterDirect.messages.find((message: { id: string }) => message.id === direct.body.message.id))
-        .toEqual(direct.body.message);
+        .toEqual({ ...direct.body.message, requestPending: true });
 
       expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
       await expect.poll(async () => {
@@ -1591,7 +1611,9 @@ describe("harness HTTP API", () => {
 
       const duplicate = await api("POST", `/api/bots/${bot.id}/messages`, request);
       expect(duplicate.status).toBe(202);
-      expect(duplicate.body).toEqual(first.body);
+      expect(first.body.message).not.toHaveProperty("requestPending");
+      const pendingReceipt = { ...first.body, message: { ...first.body.message, requestPending: true } };
+      expect(duplicate.body).toEqual(pendingReceipt);
 
       const conflict = await api("POST", `/api/bots/${bot.id}/messages`, {
         ...request,
@@ -1630,7 +1652,11 @@ describe("harness HTTP API", () => {
 
       const inactiveRetry = await api("POST", `/api/bots/${bot.id}/messages`, request);
       expect(inactiveRetry.status).toBe(202);
-      expect(inactiveRetry.body).toEqual(first.body);
+      // A retry returns the existing message with its current lifecycle
+      // metadata; it neither starts another turn nor forgets the earlier Stop.
+      expect(inactiveRetry.body).toEqual({
+        ...pendingReceipt, message: { ...pendingReceipt.message, requestCancelled: true },
+      });
       const current = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === bot.id,
       );
@@ -5991,7 +6017,7 @@ describe("harness HTTP API", () => {
     expect(nothing.status).toBe(400);
   });
 
-  it("clears incompatible default and per-agent voices when the provider changes", async () => {
+  it.each(["fish", "xai"])("clears incompatible default and per-agent voices when switching to %s", async (provider) => {
     let botId = "";
     try {
       expect((await api("PUT", "/api/config", {
@@ -6003,15 +6029,15 @@ describe("harness HTTP API", () => {
         voice: "eleven-agent",
       })).status).toBe(200);
 
-      const changed = await api("PUT", "/api/config", { tts: { provider: "fish" } });
+      const changed = await api("PUT", "/api/config", { tts: { provider } });
       expect(changed.status).toBe(200);
-      expect(changed.body.tts).toMatchObject({ provider: "fish", voice: "", ready: false });
+      expect(changed.body.tts).toMatchObject({ provider, voice: "", ready: false });
       const bot = (await api("GET", "/api/bots?messages=0")).body.bots.find(
         (candidate: { id: string }) => candidate.id === botId,
       );
       expect(bot).not.toHaveProperty("voice");
       const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
-      expect(disk.tts).toMatchObject({ provider: "fish", voice: "" });
+      expect(disk.tts).toMatchObject({ provider, voice: "" });
     } finally {
       if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
       await api("PUT", "/api/config", { tts: { provider: "elevenlabs", voice: "" } }).catch(() => undefined);
@@ -6083,6 +6109,47 @@ describe("harness HTTP API", () => {
     } finally {
       managedBoxRows = [];
       if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+    }
+  });
+
+  it.each([false, true])("replaces a rejected Box key without losing remembered computers (provisioned=%s)", async (provisioned) => {
+    let botId = "";
+    try {
+      managedBoxRows = [];
+      expect((await api("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      const bot = (await api("POST", "/api/bots")).body.bot;
+      botId = bot.id;
+      if (provisioned) {
+        await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud", cloudBackend: "box" });
+        managedBoxCreateMode = "success";
+        managedBoxCreateId = "bx_hjkmnpqr";
+        managedBoxCreateName = managedBoxNameForFixture(bot.id);
+        expect((await api("POST", `/api/bots/${bot.id}/computer/provision`, {})).status).toBe(200);
+      }
+      managedBoxRejectedTokens.add("Bearer box_route");
+      if (provisioned) {
+        // A valid key for another account must not detach a remembered Box.
+        expect((await api("PUT", "/api/config", { box: { token: "box_good" } })).status).toBe(409);
+      }
+      managedBoxRejectedTokens.add("Bearer box_route_rotated");
+      expect((await api("PUT", "/api/config", { box: { token: "box_route_rotated" } })).status).toBe(400);
+      managedBoxRejectedTokens.delete("Bearer box_route_rotated");
+      const rotated = await api("PUT", "/api/config", { box: { token: "box_route_rotated" } });
+      expect(rotated.status).toBe(200);
+      expect(rotated.body.box).toEqual({ configured: true });
+      if (provisioned) {
+        const journal = readFileSync(join(home, ".openmausbot", "box-create-requests.json"), "utf8");
+        expect(journal).toContain(managedBoxCreateId);
+      }
+    } finally {
+      managedBoxRejectedTokens.clear();
+      if (botId) await api("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      managedBoxCreateMode = "refuse";
+      managedBoxCreateId = "bx_cdefghjk";
+      managedBoxCreateName = "";
+      managedBoxRows = [];
+      managedBoxCreatedIds.clear();
       await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
     }
   });
@@ -6525,8 +6592,7 @@ describe("harness HTTP API", () => {
       expect((await api("POST", `/api/bots/${bot.id}/messages`, {
         text: "/create-verification-skill for my notes app",
       })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
       const system = seen.systemPrompt ?? "";
       // the skill's instructions ride the system prompt the agent receives
       expect(system).toContain('<openmaus-skill id="create-verification-skill"');
@@ -6546,8 +6612,7 @@ describe("harness HTTP API", () => {
       })).status).toBe(200);
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
       const system: string = seen.systemPrompt ?? "";
       expect(system.startsWith("You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.")).toBe(true);
       const persona = "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.";
@@ -6647,8 +6712,7 @@ describe("harness HTTP API", () => {
       })).status).toBe(200);
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "/setup watch Discord too" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string; prompt?: { message?: { content?: unknown } } }>(fakeClaudeDump, 15_000);
       const system: string = seen.systemPrompt ?? "";
       // soul first, setup block right after it
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
@@ -6685,8 +6749,7 @@ describe("harness HTTP API", () => {
       writeFileSync(join(home, ".openmausbot", "bots", bot.id, "SOUL.md"), "File text.");
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "hello" })).status).toBe(202);
-      await expect.poll(() => existsSync(fakeClaudeDump), { timeout: 5_000 }).toBe(true);
-      const seen = JSON.parse(readFileSync(fakeClaudeDump, "utf8"));
+      const seen = await readJsonFileWhenReady<{ systemPrompt?: string }>(fakeClaudeDump, 15_000);
       const systemPrompt: string = seen.systemPrompt ?? "";
       expect(systemPrompt).toContain("Record text.");
       expect(systemPrompt).not.toContain("File text.");
@@ -9214,6 +9277,61 @@ describe("bot memory API", () => {
     }
   });
 
+  it("marks every unseen routine failure seen through one client endpoint", async () => {
+    const bot = (await api("POST", "/api/bots", {})).body.bot;
+    let missedRoutineId: string | null = null;
+    let failingRoutineId: string | null = null;
+    const mine = (snapshot: { runs: Array<{ id: string; routineId: string; status: string; seenAt?: number }> }, id: string | null) =>
+      id ? snapshot.runs.filter((run) => run.routineId === id) : [];
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        modelSelection: { instanceId: "ghost", model: "unavailable-fixture" },
+      })).status).toBe(200);
+      const missed = await api("POST", "/api/routines", {
+        name: "Long-stale digest", prompt: "Summarise the week", botId: bot.id,
+        schedule: { type: "once", at: Date.now() - 13 * 3_600_000 },
+      });
+      expect(missed.status).toBe(201);
+      missedRoutineId = missed.body.routine.id as string;
+      const failing = await api("POST", "/api/routines", {
+        name: "Doomed brief", prompt: "Try the work", botId: bot.id,
+        schedule: { type: "once", at: Date.now() + 3_600_000 },
+      });
+      expect(failing.status).toBe(201);
+      failingRoutineId = failing.body.routine.id as string;
+      expect((await api("POST", `/api/routines/${failingRoutineId}/run`)).status).toBe(201);
+
+      await expect.poll(async () => {
+        const snapshot = (await api("GET", "/api/routines")).body;
+        return [mine(snapshot, missedRoutineId).some((run) => run.status === "missed"),
+          mine(snapshot, failingRoutineId).some((run) => run.status === "failed")];
+      }, { timeout: 20_000 }).toEqual([true, true]);
+
+      const sweep = await api("POST", "/api/routine-runs/seen-all");
+      expect(sweep.status).toBe(200);
+      const stampedIds = new Set<string>();
+      for (const run of sweep.body.runs as Array<{ id: string; routineId: string; seenAt?: number }>) {
+        if ([missedRoutineId, failingRoutineId].includes(run.routineId)) {
+          stampedIds.add(run.id);
+          expect(run.seenAt).toBeTypeOf("number");
+        }
+      }
+      const snapshot = (await api("GET", "/api/routines")).body;
+      const problems = [...mine(snapshot, missedRoutineId), ...mine(snapshot, failingRoutineId)]
+        .filter((run) => ["failed", "missed"].includes(run.status));
+      expect(problems).toHaveLength(2);
+      for (const run of problems) expect(stampedIds.has(run.id)).toBe(true);
+
+      const again = await api("POST", "/api/routine-runs/seen-all");
+      expect(again.status).toBe(200);
+      expect((again.body.runs as Array<{ id: string }>).filter((run) => stampedIds.has(run.id))).toEqual([]);
+    } finally {
+      if (missedRoutineId) await api("DELETE", `/api/routines/${missedRoutineId}`).catch(() => undefined);
+      if (failingRoutineId) await api("DELETE", `/api/routines/${failingRoutineId}`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it("session_search by time lists the bot's recent messages, its rooms included, and only its own", async () => {
     const bot = (await api("POST", "/api/bots", {})).body.bot;
     const other = (await api("POST", "/api/bots", {})).body.bot;
@@ -9762,6 +9880,91 @@ describe("message pages", () => {
     expect((await api("GET", `/api/threads/${full.threadId}/messages?limit=1.5`)).status).toBe(400);
   });
 
+  it("bounds a channel task switch the same way as a snapshot", async () => {
+    const full = await seedRoom(6);
+    const created = await api("POST", `/api/groups/${full.id}/tasks`, { title: "Second" });
+    expect(created.status).toBe(201);
+
+    // switching back with a page bounds the transcript it answers with
+    const paged = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=2`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.group.threadId).toBe(full.threadId);
+    expect(paged.body.group.messages).toHaveLength(2);
+    expect(paged.body.group.hasMore).toBe(true);
+    expect(paged.body.group.tasks).toHaveLength(2);
+
+    // "0" predates paging: settings only, no transcript key at all
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const settings = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=0`);
+    expect(settings.status).toBe(200);
+    expect(settings.body.group).not.toHaveProperty("messages");
+
+    // and no parameter still answers with the whole thread
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const whole = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}`);
+    expect(whole.body.group.messages).toHaveLength(6);
+    expect(whole.body.group).not.toHaveProperty("hasMore");
+
+    // A rejected parameter must not move the channel first: park it on the
+    // other thread and ask for this one with a value the server refuses.
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+    const parked = (await api("GET", "/api/bots?messages=0")).body.groups.find((g: { id: string }) => g.id === full.id).threadId;
+    expect(parked).toBe(created.body.task.threadId);
+    expect((await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=lots`)).status).toBe(400);
+    expect((await api("GET", "/api/bots?messages=0")).body.groups.find((g: { id: string }) => g.id === full.id).threadId).toBe(parked);
+    await api("DELETE", `/api/groups/${full.id}`);
+  });
+
+  it("bounds a bot thread switch the same way as a snapshot", async () => {
+    const { body } = await api("GET", "/api/bots?messages=0");
+    const bot = body.bots[0];
+    const created = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Second" });
+    expect(created.status).toBe(201);
+
+    const paged = await api("POST", `/api/bots/${bot.id}/tasks/${bot.threadId}?messages=1`);
+    expect(paged.status).toBe(200);
+    expect(paged.body.bot.threadId).toBe(bot.threadId);
+    expect(paged.body.bot.messages.length).toBeLessThanOrEqual(1);
+    expect(paged.body.bot).toHaveProperty("hasMore");
+
+    await api("POST", `/api/bots/${bot.id}/tasks/${created.body.task.threadId}`);
+    const settings = await api("POST", `/api/bots/${bot.id}/tasks/${bot.threadId}?messages=0`);
+    expect(settings.body.bot).not.toHaveProperty("messages");
+
+    await api("DELETE", `/api/bots/${bot.id}/tasks/${created.body.task.threadId}`);
+  });
+
+  it("keeps the switch frame bounded, so a paged switch never emits the whole thread", async () => {
+    // Longer than one default page: a frame carrying the lot would be exactly
+    // the payload the bounded HTTP page exists to avoid.
+    const full = await seedRoom(60);
+    const created = await api("POST", `/api/groups/${full.id}/tasks`, { title: "Second" });
+    await api("POST", `/api/groups/${full.id}/tasks/${created.body.task.threadId}`);
+
+    const stream = await openSse(`${BASE}/api/events`);
+    try {
+      const paged = await api("POST", `/api/groups/${full.id}/tasks/${full.threadId}?messages=5`);
+      expect(paged.status).toBe(200);
+      expect(paged.body.group.messages).toHaveLength(5);
+
+      // The switch emits a settings-only frame too; this is the one that
+      // carries a transcript, and it is the one that has to stay bounded.
+      const frame = await stream.until((f) => f.kind === "group"
+        && f.group?.id === full.id
+        && f.group?.threadId === full.threadId
+        && Array.isArray(f.group?.messages));
+      expect(frame.group.messages.length).toBeLessThanOrEqual(50);
+      expect(frame.group.messages.length).toBeLessThan(full.messages.length);
+      expect(frame.group.hasMore).toBe(true);
+      // the newest page, so a client that only folds frames stays current
+      expect(frame.group.messages.at(-1).id).toBe(full.messages.at(-1).id);
+      expect(stream.frames.every((f: any) => (f.group?.messages?.length ?? 0) < full.messages.length)).toBe(true);
+    } finally {
+      stream.close();
+      await api("DELETE", `/api/groups/${full.id}`);
+    }
+  });
+
   it("404s an image on a message that has none", async () => {
     const full = await seedRoom(1);
     const res = await fetch(`${BASE}/api/threads/${full.threadId}/messages/${full.messages[0].id}/image`);
@@ -9804,6 +10007,25 @@ describe("message pages", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ path: linkedFile }),
     })).status).toBe(404);
+  });
+
+  it("downloads a structured generated image from an image-only reply", async () => {
+    const image = join(home, ".openmausbot", "attachments", "generated.png");
+    const response = await fetch(`${BASE}/api/threads/test-linked-file-room-thread/messages/generated-image-message/file`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: image }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(await response.text()).toBe("generated image bytes");
+  });
+
+  it("confines structured generated images to their message and private image files", async () => {
+    const image = join(home, ".openmausbot", "attachments", "generated.png");
+    const route = (id: string) => `/api/threads/test-linked-file-room-thread/messages/${id}/file`;
+    expect((await api("POST", route("prose-file-message"), { path: image })).status).toBe(403);
+    expect((await api("POST", route("generated-image-message"), { path: join(home, ".openmausbot", "attachments", "other.png") })).status).toBe(403);
+    expect((await api("POST", route("outside-generated-image-message"), { path: join(home, ".openmausbot", "workspaces", "test-bot-a", "preview.png") })).status).toBe(403);
+    expect((await api("POST", route("not-image-attachment-message"), { path: join(home, ".openmausbot", "attachments", "shared-notes.pdf") })).status).toBe(415);
   });
 
   it("downloads an image rendered by the exact stored bot message", async () => {

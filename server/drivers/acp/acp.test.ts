@@ -6,7 +6,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,6 +81,11 @@ const ClassifiedErrorDriver = createAcpDriver({
       ? "invalid_credentials"
       : undefined,
 });
+
+const CONTROL_PLANE_FIXTURE = {
+  OMB_CLOUD_READY_TOKEN: "ready-should-not-leak", OMB_CLOUD_BOOTSTRAP: "bootstrap-should-not-leak",
+  OMB_LICENSE_KEY: "license-should-not-leak", OMB_INSTALLATION_CREDENTIAL: "fleet-should-not-leak",
+};
 
 describe("skipSubscriptionAuthForLocalInject", () => {
   it("is true only for a host:: inject id", () => {
@@ -219,6 +224,12 @@ describe("ACP turns (fake CLI)", () => {
   afterEach(async () => {
     delete process.env.FAKE_ACP_MODE;
     delete process.env.FAKE_ACP_DUMP;
+    delete process.env.FAKE_ACP_RPC_DUMP;
+    delete process.env.FAKE_ACP_RPC_APPEND_FILE;
+    delete process.env.FAKE_ACP_RPC_FAILURE_FILE;
+    delete process.env.FAKE_ACP_RPC_FAILURE_METHOD;
+    delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT;
+    delete process.env.FAKE_ACP_LOAD_ERROR;
     delete process.env.FAKE_ACP_ALLOW_ALWAYS;
     delete process.env.FAKE_ACP_PERMISSION_ANSWER;
     delete process.env.XAI_API_KEY;
@@ -227,13 +238,19 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.CURSOR_AUTH_TOKEN;
     delete process.env.BOX_TOKEN;
     delete process.env.OMB_TTS_KEY;
+    for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) delete process.env[name];
     delete process.env.FAKE_ACP_MODELS;
     delete process.env.FAKE_ACP_MODEL_STICKS;
     delete process.env.FAKE_ACP_USAGE_ROOT;
     delete process.env.FAKE_ACP_LOAD_NULL;
+    delete process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE;
     delete process.env.FAKE_ACP_IMAGE_CAPABILITY;
     delete process.env.FAKE_ACP_GROK_VERSION;
     delete process.env.FAKE_ACP_DUMP_PROMPT;
+    delete process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS;
+    delete process.env.OMB_ACP_SESSION_IDLE_MS;
+    delete process.env.OMB_ACP_SESSION_IDLE_MIN_MS;
+    delete process.env.FAKE_ACP_LAUNCH_COUNT_FILE;
     recorder?.stop();
     await instance?.dispose();
     await removeTempDir(scratch);
@@ -453,6 +470,7 @@ describe("ACP turns (fake CLI)", () => {
     // harness (env-injected at boot by the desktop shell), used in-process
     process.env.BOX_TOKEN = "box-should-not-leak";
     process.env.OMB_TTS_KEY = "tts-should-not-leak";
+    Object.assign(process.env, CONTROL_PLANE_FIXTURE);
 
     await instance.adapter.sendTurn({ threadId: "t-hygiene", text: "go" });
     await recorder.until((e) => e.type === "turn.completed");
@@ -467,6 +485,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(seen.env.CURSOR_AUTH_TOKEN).toBeUndefined();
     expect(seen.env.BOX_TOKEN).toBeUndefined();
     expect(seen.env.OMB_TTS_KEY).toBeUndefined();
+    for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) expect(seen.env[name]).toBeUndefined();
   });
 
   // ACP session/new accepts stdio MCP entries, so connected apps use the
@@ -773,6 +792,8 @@ describe("ACP turns (fake CLI)", () => {
     expect(readFileSync(answer, "utf8")).toBe("allow-once");
 
     // a fresh native session forgets it
+    // the pool keeps the native session alive between turns; stopAll closes it so the third turn really is a fresh native session
+    await instance.adapter.stopAll();
     const third = await instance.adapter.sendTurn({ threadId: "t-always-memory", text: "fresh", approvalMode: "ask" });
     const reopened = await recorder.until((e) => e.type === "request.opened" && e.turnId === third.turnId);
     await instance.adapter.respondToRequest("t-always-memory", (reopened as { requestId: string }).requestId, { behavior: "deny" });
@@ -780,7 +801,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(2);
   });
 
-  it.each(["grok-4.6", "grok-4.5", "local-model"])(
+  it.each(["grok-4.7", "grok-4.6", "grok-4.5", "local-model"])(
     "keeps native Grok Auto when selecting and resuming %s",
     async (model) => {
       await create(GrokAgentDriver);
@@ -943,6 +964,57 @@ describe("ACP turns (fake CLI)", () => {
     expect(recorder.events.some((e) => e.type === "runtime.error")).toBe(true);
   });
 
+  it("does not expire an agent while a person is answering an approval", async () => {
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-idle-approval", text: "go", approvalMode: "ask" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    await new Promise(resolve => setTimeout(resolve, 450));
+    expect(recorder.events.some(e => e.type === "turn.completed")).toBe(false);
+    await instance.adapter.respondToRequest("t-idle-approval", (opened as { requestId: string }).requestId, { behavior: "allow" });
+    expect(await recorder.until(e => e.type === "turn.completed")).toMatchObject({ ok: true });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    expect(recorder.events.some(e => e.type === "runtime.error")).toBe(false);
+  });
+
+  it("an agent that goes silent mid-answer is failed and closed by the prompt idle guard", async () => {
+    process.env.OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS = "150";
+    await create(GrokAgentDriver, "stall-after-text");
+    await instance.adapter.sendTurn({ threadId: "t-stall", text: "go" });
+
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ type: "turn.completed", ok: false, stopReason: "rpc_error" });
+    const err = recorder.events.find((e) => e.type === "runtime.error");
+    expect(err?.message).toMatch(/went fully silent/i);
+    expect(err?.message).toContain("OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS");
+    // the streamed chunk reached the UI before the child went silent
+    expect(recorder.events.some((e) => e.type === "content.delta")).toBe(true);
+    expect(instance.adapter.hasSession("t-stall")).toBe(false);
+  });
+
+  it("an end_turn with no reply, image, or tool result becomes runtime.error + failed turn", async () => {
+    await create(GrokAgentDriver, "empty-reply");
+    await instance.adapter.sendTurn({ threadId: "t-empty", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
+      .toMatch(/no reply, image, or tool result/);
+  });
+
+  it("reasoning with no answer is a lost turn, not a success", async () => {
+    // the shape of a provider that never leaves its thinking stream: thought
+    // chunks stream, the engine still answers end_turn, and the turn must be
+    // reported as failed rather than completed-with-nothing
+    await create(GrokAgentDriver, "reasoning-only");
+    await instance.adapter.sendTurn({ threadId: "t-reasoning", text: "go" });
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: false, stopReason: "empty_turn" });
+    expect(recorder.events.some((e) => e.type === "content.delta" && (e as any).streamKind === "reasoning_text")).toBe(true);
+    expect(recorder.events.some((e) => e.type === "item.completed")).toBe(false);
+    expect(recorder.events.find((e) => e.type === "runtime.error")?.message)
+      .toMatch(/no reply, image, or tool result/);
+  });
+
   it("preserves ACP error codes for provider setup classification", async () => {
     await create(ClassifiedErrorDriver, "auth-required");
     await instance.adapter.sendTurn({ threadId: "t-auth-required", text: "go" });
@@ -1042,6 +1114,48 @@ describe("ACP turns (fake CLI)", () => {
     expect(started).toMatchObject({ sessionId: "fake-acp-session" });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it.each(["null", "opencode-not-found"])("rebuilds a missing native session from the canonical recovery text once (%s)", async (failure) => {
+    if (failure === "null") process.env.FAKE_ACP_LOAD_NULL = "1";
+    else process.env.FAKE_ACP_LOAD_ERROR = JSON.stringify({ code: -32602, message: "Session not found", data: { sessionId: "missing-cursor" } });
+    const dump = join(scratch, "recovery.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create(GrokAgentDriver);
+    const recoveryText = "User: Remember ALPHA.\nAssistant: Remembered.\nUser: What did I say?";
+    await instance.adapter.sendTurn({
+      threadId: "t-resume-history", text: "What did I say?", resumeCursor: "missing-cursor",
+      recoveryText, system: "Keep current bot instructions.",
+    });
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(recorder.events.find((e) => e.type === "session.started")).toMatchObject({ rebuilt: true });
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+    expect(prompt).toEqual([{ type: "text", text: `Keep current bot instructions.\n\n${recoveryText}` }]);
+  });
+
+  it.each([
+    [-32000, "authentication required", "auth_required"],
+    [-32602, "Invalid params", "rpc_error"],
+  ])("does not replace native history after a resume refusal (%s)", async (code, message, stopReason) => {
+    process.env.FAKE_ACP_LOAD_ERROR = JSON.stringify({ code, message });
+    const rpcFile = join(scratch, "refused-load.json");
+    process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+    const countFile = join(scratch, "launches");
+    process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+    await create(ClassifiedErrorDriver);
+    const turn = {
+      threadId: "t-load-refused", text: "Continue", resumeCursor: "saved-session", recoveryText: "Prior messages\nContinue",
+    };
+    await instance.adapter.sendTurn(turn);
+    expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: false, stopReason });
+    const methods = JSON.parse(readFileSync(rpcFile, "utf8"));
+    expect(methods).toContain("session/load");
+    expect(methods).not.toContain("session/new");
+    expect(methods).not.toContain("session/prompt");
+    const retry = await instance.adapter.sendTurn(turn);
+    expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === retry.turnId)).toMatchObject({ ok: false, stopReason });
+    expect(Number(readFileSync(countFile, "utf8"))).toBe(1);
   });
 
   it("applyTurnEnv sees the picker model after resolveTurnModel", async () => {
@@ -1165,6 +1279,307 @@ describe("ACP turns (fake CLI)", () => {
     expect(argv[modelFlag + 1]).toBe("grok-4.5");
     expect(argv.indexOf("--reasoning-effort")).toBeGreaterThan(agent);
     expect(argv.indexOf("--permission-mode")).toBeLessThan(agent);
+  });
+
+  describe("ACP session pool (persistent child)", () => {
+    let countFile: string;
+    let rpcFile: string;
+    const launches = () => Number(readFileSync(countFile, "utf8"));
+    const rpc = () => JSON.parse(readFileSync(rpcFile, "utf8")) as string[];
+
+    it("recovers on the next explicit turn after session establishment fails", async () => {
+      countFile = join(scratch, "launches");
+      const appendFile = join(scratch, "rpc-all.jsonl");
+      const failureFile = join(scratch, "failure.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_APPEND_FILE = appendFile;
+      process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+      process.env.FAKE_ACP_RPC_FAILURE_METHOD = "session/new";
+      writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: {
+        service: "directory", details: "OpenCode service failure", errorName: "Error",
+      } }));
+      await create();
+      const threadId = "t-new-rpc-recovery";
+      const first = await instance.adapter.sendTurn({ threadId, text: "Hello" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      const calls = () => readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(launches()).toBe(1);
+      expect(calls().filter((entry) => entry.method === "session/prompt")).toHaveLength(0);
+      expect(recorder.events.some((e) => e.type === "session.started")).toBe(false);
+      unlinkSync(failureFile);
+      const next = await instance.adapter.sendTurn({ threadId, text: "Hello again" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === next.turnId)).toMatchObject({ ok: true });
+      expect(launches()).toBe(2);
+      expect(calls().filter((entry) => entry.method === "session/prompt")).toHaveLength(1);
+      expect(recorder.events.filter((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toHaveLength(1);
+    });
+
+    it.each([false, true])("evicts internal-error processes without replaying a failed prompt (output: %s)", async (afterOutput) => {
+      countFile = join(scratch, "launches");
+      const appendFile = join(scratch, "rpc-all.jsonl");
+      const failureFile = join(scratch, "failure.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_APPEND_FILE = appendFile;
+      process.env.FAKE_ACP_RPC_FAILURE_FILE = failureFile;
+      if (afterOutput) process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT = "1";
+      await create();
+      const threadId = "t-rpc-recovery";
+      const first = await instance.adapter.sendTurn({ threadId, text: "Remember ALPHA" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toMatchObject({ ok: true });
+      writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: {
+        details: "OpenCode service failure; api_key=fixture-secret",
+        service: "session", errorName: "APIError",
+        responseBody: "PRIVATE RESPONSE BODY MUST NOT APPEAR",
+      } }));
+      const failed = await instance.adapter.sendTurn({ threadId, text: "Do work", resumeCursor: "fake-acp-session" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(launches()).toBe(1);
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      const error = recorder.events.find((e) => e.type === "runtime.error" && e.turnId === failed.turnId);
+      const message = error?.type === "runtime.error" ? error.message : "";
+      expect(message).toContain("Internal error: OpenCode service failure");
+      expect(message).toContain("session/prompt, service: session, APIError");
+      expect(message).not.toContain("fixture-secret");
+      expect(message).not.toContain("PRIVATE RESPONSE");
+      expect(recorder.events.filter((e) => e.type === "item.completed" && e.itemType === "tool" && e.turnId === failed.turnId)).toHaveLength(afterOutput ? 1 : 0);
+      unlinkSync(failureFile);
+      const next = await instance.adapter.sendTurn({ threadId, text: "Continue after the interruption", resumeCursor: "fake-acp-session" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === next.turnId)).toMatchObject({ ok: true });
+      expect(launches()).toBe(2);
+      const calls = readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+      expect(calls.filter((entry) => entry.method === "session/prompt")).toHaveLength(3);
+      expect(calls.filter((entry) => entry.method === "session/load")).toHaveLength(1);
+      expect(recorder.events.filter((e) => e.type === "turn.completed" && e.turnId === failed.turnId)).toHaveLength(1);
+    });
+
+    it("honors explicit session reset even when a healthy child and cursor are retained", async () => {
+      countFile = join(scratch, "launches");
+      rpcFile = join(scratch, "rpc.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+      await create();
+      const first = await instance.adapter.sendTurn({ threadId: "t-reset", text: "one" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      const second = await instance.adapter.sendTurn({ threadId: "t-reset", text: "rebuilt conversation", sessionReset: true, resumeCursor: "fake-acp-session" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true });
+      expect(launches()).toBe(2);
+      expect(rpc()).toContain("session/new");
+      expect(rpc()).not.toContain("session/load");
+    });
+
+    it("reuses one agent process across turns and skips the handshake", async () => {
+      countFile = join(scratch, "launches");
+      rpcFile = join(scratch, "rpc.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+      await create();
+      const first = await instance.adapter.sendTurn({ threadId: "t-pool-reuse", text: "one" });
+      const firstDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      expect(firstDone).toMatchObject({ ok: true });
+
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-pool-reuse",
+        text: "two",
+        resumeCursor: "fake-acp-session",
+      });
+      const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(secondDone).toMatchObject({ ok: true });
+
+      // one live child per thread: the second prompt rides the same process
+      expect(launches()).toBe(1);
+      expect(rpc().filter((m) => m === "initialize")).toHaveLength(1);
+      expect(rpc().filter((m) => m === "session/new")).toHaveLength(1);
+      expect(rpc().filter((m) => m === "session/load")).toHaveLength(0);
+      expect(rpc().filter((m) => m === "session/prompt")).toHaveLength(2);
+      expect(recorder.events.filter((e) => e.type === "session.started")).toMatchObject([
+        { sessionId: "fake-acp-session" },
+        { sessionId: "fake-acp-session" },
+      ]);
+    });
+
+    it("closes the idle process and resumes on the next turn", async () => {
+      process.env.OMB_ACP_SESSION_IDLE_MIN_MS = "50";
+      process.env.OMB_ACP_SESSION_IDLE_MS = "100";
+      countFile = join(scratch, "launches");
+      rpcFile = join(scratch, "rpc.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+      await create();
+      const first = await instance.adapter.sendTurn({ threadId: "t-pool-idle", text: "one" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      // the close reason is only logged, never emitted — poll the native log
+      // for it rather than sleeping a fixed window past the idle deadline
+      await new Promise<void>((resolve, reject) => {
+        const deadline = Date.now() + 5_000;
+        const log = join(NATIVE_DIR, "t-pool-idle.ndjson");
+        const check = () => {
+          if (Date.now() > deadline) return reject(new Error("idle close was never logged"));
+          try {
+            if (readFileSync(log, "utf8").includes('"close":"idle"')) return resolve();
+          } catch (error) {
+            // appendNative() suppresses append errors, so the file may not exist yet
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") return reject(error);
+          }
+          setTimeout(check, 25);
+        };
+        check();
+      });
+      expect(launches()).toBe(1);
+
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-pool-idle",
+        text: "two",
+        resumeCursor: "fake-acp-session",
+      });
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(done).toMatchObject({ ok: true });
+      expect(launches()).toBe(2);
+      // the dump is per-process and overwritten on spawn, so this is the resumed child
+      expect(rpc()).toContain("session/load");
+      expect(rpc()).toContain("initialize");
+    });
+
+    it("respawns when the spawn contract changes", async () => {
+      countFile = join(scratch, "launches");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      const dirA = mkdtempSync(join(scratch, "a-"));
+      const dirB = mkdtempSync(join(scratch, "b-"));
+      await create();
+      const first = await instance.adapter.sendTurn({ threadId: "t-pool-contract", text: "one", cwd: dirA });
+      const firstDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      expect(firstDone).toMatchObject({ ok: true });
+
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-pool-contract",
+        text: "two",
+        cwd: dirB,
+        resumeCursor: "fake-acp-session",
+      });
+      const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(secondDone).toMatchObject({ ok: true });
+      expect(launches()).toBe(2);
+    });
+
+    it("rotating integration credentials re-establishes the session on the same process", async () => {
+      countFile = join(scratch, "launches");
+      rpcFile = join(scratch, "rpc.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+      await create();
+      // The harness mints a fresh bearer token in the agents proxy env every
+      // turn. That is session establishment input (it rides session/new and
+      // session/load), never a reason to pay the process handshake again.
+      const integration = (token: string) => ({
+        command: process.execPath,
+        args: [FAKE_CLI],
+        env: { OMB_COMMS_TOKEN: token },
+      });
+      const first = await instance.adapter.sendTurn({
+        threadId: "t-pool-token",
+        text: "one",
+        integrations: { agents: integration("token-one") },
+      });
+      const firstDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      expect(firstDone).toMatchObject({ ok: true });
+
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-pool-token",
+        text: "two",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: integration("token-two") },
+      });
+      const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(secondDone).toMatchObject({ ok: true });
+
+      expect(launches()).toBe(1);
+      expect(rpc().filter((m) => m === "initialize")).toHaveLength(1);
+      expect(rpc().filter((m) => m === "session/new")).toHaveLength(1);
+      expect(rpc().filter((m) => m === "session/load")).toHaveLength(1);
+      expect(rpc().filter((m) => m === "session/prompt")).toHaveLength(2);
+    });
+
+    it("an agent that refuses to re-load its live session gets one fresh process, then resumes", async () => {
+      countFile = join(scratch, "launches");
+      const appendFile = join(scratch, "rpc-all.jsonl");
+      const rejectFile = join(scratch, "reject-live-load");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      // the per-process dump would hold only the replacement child's calls;
+      // the append log keeps both children's, pid-tagged
+      process.env.FAKE_ACP_RPC_APPEND_FILE = appendFile;
+      process.env.FAKE_ACP_REJECT_LIVE_LOAD_FILE = rejectFile;
+      await create();
+      const rpcAll = () =>
+        readFileSync(appendFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { pid: number; method: string });
+      const integration = (token: string) => ({
+        command: process.execPath,
+        args: [FAKE_CLI],
+        env: { OMB_COMMS_TOKEN: token },
+      });
+      const first = await instance.adapter.sendTurn({
+        threadId: "t-pool-reject",
+        text: "one",
+        integrations: { agents: integration("token-one") },
+      });
+      const firstDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      expect(firstDone).toMatchObject({ ok: true });
+
+      // from here the fake refuses session/load for a session already live
+      // in its own process, the way a real agent can
+      writeFileSync(rejectFile, "1");
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-pool-reject",
+        text: "two",
+        resumeCursor: "fake-acp-session",
+        integrations: { agents: integration("token-two") },
+      });
+      const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(secondDone).toMatchObject({ ok: true });
+
+      // the pooled child is closed and the recorded session resumes on one
+      // fresh process — the conversation is never traded for session/new
+      expect(launches()).toBe(2);
+      const calls = rpcAll();
+      expect(calls.filter((c) => c.method === "initialize")).toHaveLength(2);
+      expect(calls.filter((c) => c.method === "session/new")).toHaveLength(1);
+      expect(calls.filter((c) => c.method === "session/load")).toHaveLength(2);
+      expect(calls.filter((c) => c.method === "session/prompt")).toHaveLength(2);
+      // the refused load and the successful one really hit two processes
+      expect(new Set(calls.map((c) => c.pid)).size).toBe(2);
+    });
+
+    it("stopAll closes the pooled process; the next turn resumes", async () => {
+      countFile = join(scratch, "launches");
+      rpcFile = join(scratch, "rpc.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+      await create();
+      const first = await instance.adapter.sendTurn({ threadId: "t-pool-stop", text: "one" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      await instance.adapter.stopAll();
+      const second = await instance.adapter.sendTurn({
+        threadId: "t-pool-stop",
+        text: "two",
+        resumeCursor: "fake-acp-session",
+      });
+      const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+      expect(done).toMatchObject({ ok: true });
+      expect(launches()).toBe(2);
+      expect(rpc()).toContain("session/load");
+    });
+
+    it("an interrupt that the agent honors keeps the process pooled", async () => {
+      countFile = join(scratch, "launches");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      await create(GrokAgentDriver, "hang");
+      await instance.adapter.sendTurn({ threadId: "t-pool-interrupt", text: "go" });
+      await recorder.until((e) => e.type === "session.started");
+      await instance.adapter.interruptTurn("t-pool-interrupt");
+      const done = await recorder.until((e) => e.type === "turn.completed");
+      expect(done).toMatchObject({ stopReason: "cancelled" });
+      // hang never resolves prompts, so a second turn would hang too — the
+      // process staying pooled is the launch count, not another prompt
+      expect(launches()).toBe(1);
+    });
   });
 });
 

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { orderedSidebarThreads, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, orderedSidebarThreads, orderedThreadList, SidebarThreadRow, threadByline, threadOpenerLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 // The More menu lives behind component state and a portal, which a static
 // render never reaches. SidebarThreadRow uses exactly useState, useRef and
@@ -142,6 +142,57 @@ describe("threads a bot closed", () => {
   });
 });
 
+describe("formatUpdatedAt", () => {
+  it("uses the runtime locale and timezone, and skips a missing stamp", () => {
+    const at = Date.UTC(2026, 0, 15, 0, 30);
+    expect(formatUpdatedAt(at)).toBe(new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }));
+    expect(formatUpdatedAt(0)).toBe("");
+    expect(formatUpdatedAt(Number.NaN)).toBe("");
+    const markup = renderToStaticMarkup(createElement(SidebarThreadRow, {
+      task: { threadId: "t", title: "Notes", updatedAt: at },
+      ownerId: "b", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
+    }));
+    expect(markup).toContain(formatUpdatedAt(at));
+    expect(markup).toContain(new Date(at).toISOString());
+  });
+});
+
+describe("orderedThreadList", () => {
+  const task = (threadId: string, over: Record<string, unknown> = {}) => ({
+    threadId,
+    title: threadId,
+    createdAt: 1,
+    ...over,
+  });
+
+  it("pins first, then newest update, and keeps equal stamps in stored order", () => {
+    const ordered = orderedThreadList([
+      task("old", { updatedAt: 10 }),
+      task("pinned-old", { pinned: true, updatedAt: 5 }),
+      task("new", { updatedAt: 30 }),
+      task("pinned-new", { pinned: true, updatedAt: 20 }),
+      task("tie-b", { updatedAt: 10 }),
+    ]);
+    expect(ordered.map((item) => item.threadId)).toEqual(["pinned-new", "pinned-old", "new", "old", "tie-b"]);
+  });
+
+  it("does not let waiting or working outrank a newer idle thread", () => {
+    const ordered = orderedThreadList([
+      task("waiting", { updatedAt: 1, activity: "waiting-on-you" }),
+      task("fresh", { updatedAt: 5 }),
+    ]);
+    expect(ordered.map((item) => item.threadId)).toEqual(["fresh", "waiting"]);
+  });
+
+  it("uses createdAt when the thread has never been updated", () => {
+    const ordered = orderedThreadList([
+      task("created-early", { createdAt: 1 }),
+      task("created-late", { createdAt: 4 }),
+    ]);
+    expect(ordered.map((item) => item.threadId)).toEqual(["created-late", "created-early"]);
+  });
+});
+
 describe("orderedSidebarThreads", () => {
   const task = (threadId: string, over: Record<string, unknown> = {}) => ({
     threadId,
@@ -193,6 +244,21 @@ describe("archived threads", () => {
   const render = (task: Parameters<typeof SidebarThreadRow>[0]["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
     task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(),
   }));
+  it("keeps the six newest open threads, and does not spend those slots on a pin", () => {
+    const rows = [
+      { threadId: "old-open", title: "Old", createdAt: 1, updatedAt: 1 },
+      { threadId: "newer", title: "Newer", createdAt: 2, updatedAt: 50 },
+      { threadId: "mid", title: "Mid", createdAt: 3, updatedAt: 40 },
+      { threadId: "also", title: "Also", createdAt: 4, updatedAt: 30 },
+      { threadId: "fourth", title: "Fourth", createdAt: 5, updatedAt: 20 },
+      { threadId: "fifth", title: "Fifth", createdAt: 6, updatedAt: 15 },
+      { threadId: "sixth", title: "Sixth", createdAt: 7, updatedAt: 12 },
+      { threadId: "pinned-closed", title: "Pinned", createdAt: 8, updatedAt: 2, pinned: true, closedBy: { botId: "b", name: "Scout", at: 2 } },
+    ];
+    expect(visibleSidebarThreads(rows, "none").map((task) => task.threadId)).toEqual([
+      "pinned-closed", "newer", "mid", "also", "fourth", "fifth", "sixth",
+    ]);
+  });
   it("folds archived threads out of the default list, but never when they need the person", () => {
     const rows = [
       { threadId: "0", title: "Current work" },

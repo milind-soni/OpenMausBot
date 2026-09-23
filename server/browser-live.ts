@@ -259,14 +259,17 @@ export class BrowserLive {
     const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
     try {
       const { stdout } = await execute(viewer.spec.command, [...args, "--json", "--no-webmcp"], {
-        env, timeout: 30_000, maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
+        env, timeout: 30_000, killSignal: "SIGKILL", maxBuffer: 1024 * 1024, encoding: "utf8", windowsHide: true,
       });
       if (!this.current(viewer)) throw new Error("stale viewer");
       const result = object(JSON.parse(stdout));
       const data = object(result?.data);
       if (result?.success !== true || !data) throw new Error("browser command failed");
       return data;
-    } catch { throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503); }
+    } catch (error) {
+      console.warn("browser-live:", error);
+      throw new BrowserLiveError("The browser could not complete this action. Check that the browser engine is installed, then reconnect.", 503);
+    }
   }
 
   private async input(viewer: Viewer, message: ObjectValue): Promise<void> {
@@ -370,6 +373,7 @@ export class BrowserLive {
       }, HEARTBEAT_MS);
       viewer.heartbeat.unref();
     } catch (error) {
+      console.warn("browser-live:", error);
       if (options.res.headersSent) {
         this.send(viewer, { type: "error", retryable: true, message: "The browser stream could not start." });
         this.close(viewer); return;

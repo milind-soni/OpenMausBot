@@ -143,6 +143,7 @@ export function createBotPackageExport(input: {
           : { type: "daily", time: routine.schedule.time, weekdays: [...routine.schedule.weekdays] },
       durationMinutes: routine.durationMinutes,
       ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
+      ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
       enabledAfterInstall: false as const,
     }];
   });

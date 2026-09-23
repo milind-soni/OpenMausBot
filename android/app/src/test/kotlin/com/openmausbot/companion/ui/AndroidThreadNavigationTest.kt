@@ -138,6 +138,29 @@ class AndroidThreadNavigationTest {
     }
 
     @Test
+    fun `reopening a bot from the roster keeps the thread chosen on this phone`() {
+        val navigator = CompanionNavigator()
+        mount {
+            when (val destination = navigator.current) {
+                is Destination.Conversation -> ChatScreen(
+                    destination, onResolved = { navigator.selectTask(destination, it) },
+                    onBack = navigator::pop, onOpenComputer = {}, onOpenOverview = {},
+                )
+                else -> RosterScreen(navigator)
+            }
+        }
+        compose.onNodeWithText(fixture.name).performClick()
+        compose.onNodeWithText("First thread").performClick()
+        compose.onNodeWithText("Second thread").performClick()
+        compose.waitUntil(5_000) { (navigator.current as? Destination.Chat)?.target?.threadId == "second" }
+        compose.onNodeWithContentDescription("Back").performClick()
+        compose.onNodeWithText(fixture.name).performClick()
+        compose.onNodeWithText("Second thread").assertIsDisplayed()
+        assertEquals("first", scene.session.state.value.bot(fixture.id)?.threadId)
+        assertTrue(requests.none { it.method == "POST" })
+    }
+
+    @Test
     fun `an open nonactive thread reloads its history after a full reconnect`() {
         val reads = AtomicInteger()
         answerHistory = {

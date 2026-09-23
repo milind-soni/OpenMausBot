@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, FolderInput, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Trash2 } from "lucide-react";
 import type { BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
@@ -8,7 +8,44 @@ import { nextRename } from "@/lib/rename";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { ConfirmDialog } from "./ConfirmDialog";
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt"> & { queued?: boolean };
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt"> & {
+  queued?: boolean;
+  pinned?: boolean;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+/** Local date and time. The runtime's timezone and locale are used on
+ * purpose: a desktop in Tokyo and one in New York should not be forced
+ * onto UTC. */
+export function formatUpdatedAt(at: number): string {
+  if (!Number.isFinite(at) || at <= 0) return "";
+  return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+}
+
+/** Newest message, else when the thread was created. Missing stamps sort as
+ * oldest so a half-loaded row cannot jump the list as NaN. */
+export function threadRecency(task: { updatedAt?: number; createdAt?: number }): number {
+  if (typeof task.updatedAt === "number" && Number.isFinite(task.updatedAt)) return task.updatedAt;
+  if (typeof task.createdAt === "number" && Number.isFinite(task.createdAt)) return task.createdAt;
+  return 0;
+}
+
+/** Pin, then newest update. Equal stamps keep the caller's order. Attention
+ * state does not move a row — the bell and the activity hatch still use
+ * orderedSidebarThreads for that. */
+export function orderedThreadList<T extends { pinned?: boolean; updatedAt?: number; createdAt?: number }>(tasks: T[]): T[] {
+  return tasks
+    .map((task, index) => ({ task, index }))
+    .sort((a, b) => {
+      const pin = Number(b.task.pinned === true) - Number(a.task.pinned === true);
+      if (pin) return pin;
+      const recency = threadRecency(b.task) - threadRecency(a.task);
+      if (recency) return recency;
+      return a.index - b.index;
+    })
+    .map((entry) => entry.task);
+}
 
 /** "opened by Scout" for a thread a bot started, null for the person's own.
  * Shared by the sidebar row and the All-threads picker so both say it the
@@ -42,13 +79,13 @@ const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activ
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
   task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || Boolean(task.queued) || Boolean(task.unread);
 
-/** The default list is the six most recent OPEN threads plus anything that
- * demands attention. A thread a bot closed is folded away — a PM bot that
- * opened ten helper threads and closed them must not leave ten rows behind —
- * but it is never gone: "show all" and search still list it, and a closed
- * thread that becomes busy or unread again is back in the list at once. The
- * person archiving a thread folds it away the same way, with the same
- * attention override: a working or waiting archived thread stays visible. */
+/** The default list is the six most recently updated OPEN threads, plus
+ * anything pinned or demanding attention. Pins and attention rows do not
+ * consume one of the six. A thread a bot closed is folded away — a PM bot
+ * that opened ten helper threads and closed them must not leave ten rows
+ * behind — but it is never gone: "show all" and search still list it, a
+ * closed thread that becomes busy or unread is back at once, and a pin
+ * keeps a closed or archived thread in the list. */
 export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false): T[] {
   const needle = query.trim().toLowerCase();
   if (needle) {
@@ -56,9 +93,12 @@ export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
   }
   if (showAll) return tasks;
   let open = 0;
-  return tasks.filter((task) => task.closedBy || isArchived(task)
-    ? demandsAttention(task, activeId)
-    : open++ < 6 || demandsAttention(task, activeId));
+  return orderedThreadList(tasks).filter((task) => {
+    if (task.pinned === true) return true;
+    return task.closedBy || isArchived(task)
+      ? demandsAttention(task, activeId)
+      : open++ < 6 || demandsAttention(task, activeId);
+  });
 }
 
 /** Attention outranks recency within a bot: waiting-on-you needs the person
@@ -85,7 +125,7 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive }: {
+export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin }: {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
@@ -97,6 +137,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   onDelete: () => void;
   onMove?: (folderId: string | null) => void;
   onArchive?: (archivedAt: number | null) => void;
+  onPin?: (pinned: boolean) => void;
 }) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const [renaming, setRenaming] = useState(false);
@@ -107,9 +148,11 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWorking(task) ? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
+  const updatedAt = threadRecency(task);
+  const updatedLabel = formatUpdatedAt(updatedAt);
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
-  const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 190)) });
+  const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
     setMenu(null);
@@ -140,7 +183,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={[task.title, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
+        title={[task.title, updatedLabel, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         onClick={onSelect} onDoubleClick={startRename}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
@@ -149,6 +192,8 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
           <span className={cn("min-w-0 truncate", task.unread && "font-semibold text-ink", (closed || archived) && !current && "text-ink-secondary/70")}>{task.title}</span>
           {byline && <span className="min-w-0 truncate text-[10.5px] leading-tight text-ink-secondary/80">{byline}</span>}
         </span>
+        {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
+        {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
       </button>}
@@ -169,6 +214,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
         </select>
       </label>}
+      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
       {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
     </div>, document.body)}

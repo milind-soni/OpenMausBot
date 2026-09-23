@@ -35,9 +35,11 @@ export function PermissionsSection({
   const { state, dispatch } = useStore();
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const [fullAccessTarget, setFullAccessTarget] = useState<string | null>(null);
+  const [allThreads, setAllThreads] = useState(true);
   const setApprovalMode = (mode: ApprovalMode) => {
     if (bot.busy || mode === approvalMode) return;
     if (mode === "full") {
+      setAllThreads(true);
       setFullAccessTarget(bot.id);
       return;
     }
@@ -120,8 +122,8 @@ export function PermissionsSection({
       <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Approval level</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
-          Default for new threads, routines and delegated work. Existing threads keep their own level;
-          change it from that thread’s composer.
+          Default for new threads, routines and delegated work. When enabling Full access,
+          you can also apply it to every existing thread.
         </div>
         <div className="mt-3">
           <ApprovalModeSelector
@@ -136,6 +138,11 @@ export function PermissionsSection({
             trustedModesAvailable={trustedModesAvailable}
           />
         </div>
+        {approvalMode === "full" && trustedModesAvailable && <button
+          type="button" disabled={Boolean(bot.busy)}
+          className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
+          onClick={() => { setAllThreads(true); setFullAccessTarget(bot.id); }}
+        >Apply Full access to all threads</button>}
       </div>
 
       <LocalComputerAutoWarning
@@ -150,12 +157,14 @@ export function PermissionsSection({
       />
       <FullAccessWarning
         open={fullAccessTarget !== null}
+        allThreads={allThreads}
+        onAllThreadsChange={setAllThreads}
         onCancel={() => setFullAccessTarget(null)}
         onConfirm={() => {
           const target = fullAccessTarget;
           setFullAccessTarget(null);
           if (!target) return;
-          dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "full", confirmFullAccess: true } });
+          dispatch({ type: "updateBot", botId: target, patch: { approvalMode: "full", confirmFullAccess: true, applyToAllThreads: allThreads } });
         }}
       />
     </div>

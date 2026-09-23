@@ -107,6 +107,7 @@ struct TranscriptAttachmentView: View {
     let attachment: DisplayedMessageAttachment
     let threadId: String
     let messageId: String
+    var foreground: Color = BubbleColor.mineText
 
     @EnvironmentObject private var session: Session
     @State private var thumbnail: UIImage?
@@ -139,10 +140,10 @@ struct TranscriptAttachmentView: View {
                     Spacer(minLength: 2)
                     Button("Retry", action: retry)
                         .fontWeight(.semibold)
-                        .foregroundStyle(BubbleColor.mineText)
+                        .foregroundStyle(foreground)
                 }
                 .font(.system(size: 11))
-                .foregroundStyle(BubbleColor.mineText.opacity(0.92))
+                .foregroundStyle(foreground.opacity(0.92))
                 .accessibilityElement(children: .contain)
             }
         }
@@ -175,7 +176,7 @@ struct TranscriptAttachmentView: View {
         Button(action: openPreview) {
             ZStack(alignment: .bottomLeading) {
                 RoundedRectangle(cornerRadius: 13)
-                    .fill(BubbleColor.mineText.opacity(0.12))
+                    .fill(foreground.opacity(0.12))
 
                 if let thumbnail {
                     Image(uiImage: thumbnail)
@@ -185,12 +186,12 @@ struct TranscriptAttachmentView: View {
                         .clipped()
                 } else if thumbnailLoading {
                     ProgressView()
-                        .tint(BubbleColor.mineText)
+                        .tint(foreground)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     Image(systemName: "photo")
                         .font(.system(size: 30, weight: .medium))
-                        .foregroundStyle(BubbleColor.mineText.opacity(0.72))
+                        .foregroundStyle(foreground.opacity(0.72))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
@@ -222,13 +223,14 @@ struct TranscriptAttachmentView: View {
             .clipShape(RoundedRectangle(cornerRadius: 13))
             .overlay {
                 RoundedRectangle(cornerRadius: 13)
-                    .strokeBorder(BubbleColor.mineText.opacity(0.18))
+                    .strokeBorder(foreground.opacity(0.18))
             }
             .contentShape(RoundedRectangle(cornerRadius: 13))
         }
         .buttonStyle(.plain)
         .disabled(previewLoading || thumbnailLoading)
         .accessibilityLabel("Image: \(attachment.name)")
+        .accessibilityValue(thumbnail != nil ? "Loaded" : (thumbnailLoading ? "Loading" : "Unavailable"))
         .accessibilityHint(thumbnail == nil ? "Loads the image preview" : "Opens the image full screen")
     }
 
@@ -237,9 +239,9 @@ struct TranscriptAttachmentView: View {
             HStack(spacing: 10) {
                 Image(systemName: "doc.fill")
                     .font(.system(size: 16, weight: .medium))
-                    .foregroundStyle(BubbleColor.mineText)
+                    .foregroundStyle(foreground)
                     .frame(width: 38, height: 38)
-                    .background(BubbleColor.mineText.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    .background(foreground.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
                     .accessibilityHidden(true)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -248,29 +250,29 @@ struct TranscriptAttachmentView: View {
                         .lineLimit(1)
                     Text(previewLoading ? "Opening…" : "Tap to preview")
                         .font(.system(size: 11))
-                        .foregroundStyle(BubbleColor.mineText.opacity(0.68))
+                        .foregroundStyle(foreground.opacity(0.68))
                 }
 
                 Spacer(minLength: 8)
                 if previewLoading {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(BubbleColor.mineText)
+                        .tint(foreground)
                         .accessibilityHidden(true)
                 } else {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(BubbleColor.mineText.opacity(0.65))
+                        .foregroundStyle(foreground.opacity(0.65))
                         .accessibilityHidden(true)
                 }
             }
-            .foregroundStyle(BubbleColor.mineText)
+            .foregroundStyle(foreground)
             .padding(8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(BubbleColor.mineText.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
+            .background(foreground.opacity(0.10), in: RoundedRectangle(cornerRadius: 13))
             .overlay {
                 RoundedRectangle(cornerRadius: 13)
-                    .strokeBorder(BubbleColor.mineText.opacity(0.12))
+                    .strokeBorder(foreground.opacity(0.12))
             }
             .contentShape(RoundedRectangle(cornerRadius: 13))
         }

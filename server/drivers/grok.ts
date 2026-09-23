@@ -6,8 +6,9 @@ import { createOpenAIChatRuntime } from "./openai-chat.ts";
 const DRIVER_KIND = "grok";
 const DEFAULT_URL = "https://api.x.ai/v1";
 const MODELS = {
-  default: "grok-4",
+  default: "grok-4.7",
   options: [
+    { id: "grok-4.7", label: "Grok 4.7", contextWindow: 500_000 },
     { id: "grok-4", label: "Grok 4" },
     { id: "grok-4-fast", label: "Grok 4 Fast" },
     { id: "grok-3-mini", label: "Grok 3 Mini" },

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
 import { Laptop, Loader2, Unplug } from "lucide-react";
 import { Card } from "./SettingsPrimitives";
@@ -40,13 +40,23 @@ export function RemoteComputerSection() {
   const pending = useRef(false);
   const serverMode = Boolean(environments) && connection === "server";
 
-  useEffect(() => {
-    let alive = true;
-    void bridge?.state().then((next) => alive && setState(next)).catch(() => {});
-    return () => {
-      alive = false;
-    };
+  const aliveRef = useRef(true);
+  const refreshState = useCallback(() => {
+    // Pairing and disconnecting change connection state off the render path;
+    // the bridge's own snapshot is the source of truth, so re-read it after
+    // every transition instead of trusting the action's return value.
+    void bridge?.state().then((next) => {
+      if (aliveRef.current) setState(next);
+    }).catch(() => {});
   }, [bridge]);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    refreshState();
+    return () => {
+      aliveRef.current = false;
+    };
+  }, [refreshState]);
 
   const pair = async () => {
     if (pending.current || (!bridge && !environments)) return;
@@ -57,8 +67,10 @@ export function RemoteComputerSection() {
       if (serverMode && environments) {
         if (!isServerPairingLink(serverLink)) throw new Error(t("remote.client.server.invalidLink"));
         await environments.addFromLink(serverLink.trim());
+        refreshState();
       } else if (bridge) {
-        setState(await bridge.pair(endpoint, code));
+        await bridge.pair(endpoint, code);
+        refreshState();
       }
     } catch (nextError) {
       setError(errorText(nextError));
@@ -75,6 +87,7 @@ export function RemoteComputerSection() {
     setError("");
     try {
       await bridge.disconnect();
+      refreshState();
     } catch (nextError) {
       setError(errorText(nextError));
     } finally {

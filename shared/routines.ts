@@ -71,6 +71,19 @@ export type RoutineRunStatus =
   | "cancelled"
   | "missed";
 
+/** The statuses both failure indicators count: a run that went wrong and has
+ * not been acknowledged. One home so the sidebar dot, the errors pill, the
+ * logs filter and the bulk-seen sweep cannot drift apart. */
+export const ROUTINE_PROBLEM_STATUSES: readonly RoutineRunStatus[] = ["failed", "missed"];
+
+export function isRoutineProblemRun(run: { status: RoutineRunStatus }): boolean {
+  return ROUTINE_PROBLEM_STATUSES.includes(run.status);
+}
+
+/** The logs view's status filter: every run, the composite problem set the
+ * indicators count, or one exact status. */
+export type RoutineRunStatusFilter = "all" | "problems" | RoutineRunStatus;
+
 export interface Routine {
   id: string;
   name: string;
@@ -84,6 +97,10 @@ export interface Routine {
   durationMinutes: number;
   /** Optional wall-clock safety limit. Missing means the run is unlimited. */
   timeoutMinutes?: number;
+  overlap?: "skip" | "queue";
+  skippedRuns?: number;
+  lastSkippedAt?: number;
+  failureStreak?: number;
   attachments?: RoutineContextAttachment[];
   sourceThreadId?: string;
   resultsThreadId?: string;
@@ -140,8 +157,8 @@ export interface RoutineInput {
   durationMinutes?: number;
   /** `null` explicitly removes the limit; omission preserves it on updates. */
   timeoutMinutes?: number | null;
+  overlap?: "skip" | "queue";
   attachments?: RoutineContextAttachment[];
   /** Omission preserves routing; null creates a new dedicated results task. */
   resultsThreadId?: string | null;
 }
-

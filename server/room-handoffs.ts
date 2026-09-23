@@ -229,8 +229,12 @@ export class RoomHandoffs {
   sourceSettled(generation: string, ok: boolean) {
     const node = this.nodes.get(generation);
     if (!node || node.status !== "source") return;
-    if (!ok) this.cancelTree(node, "The originating room turn did not finish", "failed");
-    else { node.status = "waiting"; this.publish(node); }
+    // An accepted assignment belongs to the queue, not the provider that
+    // submitted it. A failed/expired source turn must not erase that work.
+    // Explicit Stop, deletion and revoked routes still cancel separately.
+    if (!ok) node.result = "The originating turn ended before its teammates returned.";
+    node.status = "waiting";
+    this.publish(node);
   }
 
   cancelTree(node: RoomHandoff, reason: string, status: "failed" | "cancelled" = "cancelled") {
@@ -312,8 +316,10 @@ export class RoomHandoffs {
         if (children.length && children.every(c => terminal(c) && c.reported)) { n.status = "resume"; this.publish(n); }
       }
       if (n.status !== "queued" && n.status !== "resume") continue;
-      // A newly queued child starts only after its author has settled.
-      if (parent && (parent.status === "source" || parent.status === "running")) continue;
+      // Independent conversations can start as soon as work is accepted.
+      // Same-room speakers still serialize; never overlap their shared chat.
+      if (parent && (parent.status === "source" || parent.status === "running") &&
+        (parent.threadId === n.threadId || (n.groupId && n.groupId === parent.groupId))) continue;
       // A stopped source stops waiting; only work that never started is
       // dropped with it. A teammate mid-turn keeps its process and reports.
       if (parent && terminal(parent) && n.status === "queued") { this.cancelTree(n, "Originating request has ended"); continue; }
@@ -335,15 +341,23 @@ export class RoomHandoffs {
       void this.hooks.run(n, resumed, controller.signal).then(result => {
         if (terminal(n)) return;
         n.result = result.text.slice(0, 12_000);
-        if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
-        else if (this.children(n.id).length > childCount) n.status = "waiting";
+        if (this.children(n.id).length > childCount) n.status = "waiting";
+        else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
         else n.status = "completed";
         // Close the paused span with the settlement itself: work enqueued
         // before the next periodic tick must be admitted against the aged
         // budget, not the still-open pause's overstated runway.
         this.trackExecutionPauses();
         this.publish(n);
-      }).catch(e => { this.cancelTree(n, String(e).slice(0, 1000), "failed"); })
+      }).catch(e => {
+        if (terminal(n)) return;
+        n.result = String(e).slice(0, 1000);
+        if (this.children(n.id).length > childCount) {
+          n.status = "waiting";
+          this.trackExecutionPauses();
+          this.publish(n);
+        } else this.cancelTree(n, n.result, "failed");
+      })
         .finally(() => this.controllers.delete(n.id));
     }
   }

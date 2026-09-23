@@ -56,5 +56,7 @@ export function createBrowserInputQueue(send: (body: Input) => Promise<void>, on
       while (active || queue.length) { run(); await active; }
     },
     clear() { generation++; queue = []; stopped = false; },
+    /** Halted queues drop input silently; callers keep the halt banner up. */
+    stopped() { return stopped; },
   };
 }

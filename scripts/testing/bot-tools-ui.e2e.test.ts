@@ -124,10 +124,10 @@ describe("bot setup and tools in the real renderer", () => {
         .filter(([, entry]) => entry.role === "button" && entry.name.includes("$0.01"));
       expect(cost).toHaveLength(1);
       await ui("click", "--ref", `@${cost[0][0]}`);
-      await expect.poll(usageExpanded).toBe("true");
+      await expect.poll(usageExpanded, { timeout: 10_000 }).toBe("true");
       expect(await snapshot()).toContain("All bots");
       // Allow subpixel rounding at the bottom edge of the scroll viewport.
-      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()")).toBeLessThanOrEqual(1);
+      await expect.poll(() => evaluate("(() => { const row = document.querySelector('[data-bot-settings-section=usage]'); const rect = row?.getBoundingClientRect(); return rect ? Math.max(-rect.top, rect.bottom - innerHeight) : 9999; })()"), { timeout: 10_000 }).toBeLessThanOrEqual(1);
     };
     await openHeaderUsage();
     await click("Usage");

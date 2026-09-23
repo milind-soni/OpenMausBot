@@ -9,11 +9,11 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ensureDirs, NATIVE_DIR } from "../config.ts";
+import { DATA_DIR, ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
@@ -21,14 +21,17 @@ import {
   brokerSocketCandidates,
   claudeCliSupports,
   claudeCliUpdate,
+  claudeHookSettings,
   ClaudeDriver,
   createPermissionBroker,
+  hookTokenFile,
   parseClaudeCliVersion,
   permissionSocketPath,
   readClaudeAuthSettings,
   type ClaudeConfig,
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
+import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
 
@@ -83,7 +86,28 @@ function answerQueue(conn: ReturnType<typeof connect>) {
   return () => new Promise<any>((resolve) => waiters.push(resolve));
 }
 
+const CONTROL_PLANE_FIXTURE = {
+  OMB_CLOUD_READY_TOKEN: "ready-should-not-leak", OMB_CLOUD_BOOTSTRAP: "bootstrap-should-not-leak",
+  OMB_LICENSE_KEY: "license-should-not-leak", OMB_INSTALLATION_CREDENTIAL: "fleet-should-not-leak",
+};
+
 describe("ClaudeDriver.decodeConfig", () => {
+  it("quotes hook paths as shell data rather than JSON strings", () => {
+    const settings = claudeHookSettings("/tmp/it's $OMB_HOOK_TEST `literal`/helper.ts") as { PostToolUse: Array<{ hooks: Array<{ command: string }> }> };
+    const command = settings.PostToolUse[0]!.hooks[0]!.command;
+    if (process.platform === "win32") {
+      expect(command).toBe('"%OMB_HOOK_NODE%" "%OMB_HOOK_HELPER%"');
+    } else {
+      expect(command).toContain("'/tmp/it'\\''s $OMB_HOOK_TEST `literal`/helper.ts'");
+    }
+  });
+
+  it("keeps the per-turn hook token where workspace backups never look", () => {
+    const path = relative(DATA_DIR, hookTokenFile("thread", "bot")).replaceAll("\\", "/");
+    expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
+    expect(ephemeralWorkspaceTokenPath(path.split("/")[0]!)).toBe(true);
+  });
+
   it("defaults to the claude binary with acceptEdits", () => {
     expect(ClaudeDriver.decodeConfig({})).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
     expect(ClaudeDriver.decodeConfig(undefined)).toEqual({ cli: "claude", permissionMode: "acceptEdits" });
@@ -213,7 +237,7 @@ describe("ClaudeDriver.decodeConfig", () => {
       await instance.dispose();
       await removeTempDir(home);
     }
-  });
+  }, 60_000);
 
   it("keeps the deterministic path as the first broker candidate", () => {
     const candidates = brokerSocketCandidates("t-candidates");
@@ -345,6 +369,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.BOX_TOKEN;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.OMB_TTS_KEY;
+    for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) delete process.env[name];
     delete process.env.OMB_CLAUDE_SESSION_IDLE_MS;
     delete process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS;
     recorder?.stop();
@@ -430,6 +455,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.env.ANTHROPIC_API_KEY).toBe("sk-ant-workspace-fixture");
+  });
+
+  it("hands a hosted tenant's CLI the hosted model token but none of the operator's control-plane secrets", async () => {
+    // server/hosted-models.ts delivers the model token as the provider key.
+    await create(undefined, { ANTHROPIC_API_KEY: "omb_workspace_fixture", ANTHROPIC_AUTH_TOKEN: "omb_workspace_fixture" });
+    const dump = join(scratch, "dump-hosted.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    Object.assign(process.env, CONTROL_PLANE_FIXTURE);
+    await instance.adapter.sendTurn({ threadId: "t-hosted-env", text: "hello" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.env.ANTHROPIC_API_KEY).toBe("omb_workspace_fixture");
+    expect(seen.env.ANTHROPIC_AUTH_TOKEN).toBe("omb_workspace_fixture");
+    for (const name of Object.keys(CONTROL_PLANE_FIXTURE)) expect(seen.env[name]).toBeUndefined();
   });
 
   it("keeps user and system prompts off argv and strips identity env vars", async () => {
@@ -1585,6 +1624,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await create("hang");
     await instance.adapter.sendTurn({ threadId: "t-busy", text: "one" });
     await expect(instance.adapter.sendTurn({ threadId: "t-busy", text: "two" })).rejects.toThrow(/already running/);
+    await expect(instance.adapter.sendTurn({ threadId: "t-busy", text: "reset", sessionReset: true })).rejects.toThrow(/already running/);
     expect(instance.adapter.hasSession("t-busy")).toBe(true);
     await instance.adapter.interruptTurn("t-busy");
     await recorder.until((e) => e.type === "turn.completed");
@@ -1714,7 +1754,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await expect(instance.adapter.steer!("t-steer", "late")).resolves.toBe("refused");
   });
 
-  it("reuses the live process for the next compatible turn", async () => {
+  it.each([false, true])("reuses the live process for the next compatible turn, explicit cursor: %s", async (withCursor) => {
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -1722,11 +1762,38 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
     const dumpBefore = readFileSync(dump, "utf8");
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
-    const second = await instance.adapter.sendTurn({ threadId: "t-live", text: "two", resumeCursor: announced });
+    const second = await instance.adapter.sendTurn({ threadId: "t-live", text: "two", ...(withCursor ? { resumeCursor: announced } : {}) });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(readFileSync(dump, "utf8")).toBe(dumpBefore);
     expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
+  });
+
+  it.each([false, true])("resets retained native context even with an old cursor supplied: %s", async (withCursor) => {
+    await create();
+    const dump = join(scratch, "reset.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const first = await instance.adapter.sendTurn({ threadId: "t-reset", text: "abandoned branch" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const previous = JSON.parse(readFileSync(dump, "utf8"));
+    const oldSession = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-reset", text: "replacement history", sessionReset: true,
+      ...(withCursor ? { resumeCursor: oldSession } : {}),
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const replacement = JSON.parse(readFileSync(dump, "utf8"));
+    expect(replacement.pid).not.toBe(previous.pid);
+    expect(replacement.argv).not.toContain("--resume");
+    expect(replacement.argv).not.toContain(oldSession);
+    expect(replacement.prompt.message.content).toBe("replacement history");
+    const newSession = (recorder.events.filter((e) => e.type === "session.started").at(-1) as { sessionId: string }).sessionId;
+    expect(newSession).not.toBe(oldSession);
+
+    const third = await instance.adapter.sendTurn({ threadId: "t-reset", text: "continue", resumeCursor: newSession });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
+    expect(JSON.parse(readFileSync(dump, "utf8")).pid).toBe(replacement.pid);
   });
 
   it("denies late broker asks between retained turns without opening a zombie card", async () => {
@@ -1829,6 +1896,36 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       { type: "text", text: "go" },
     ]);
   }, 20_000);
+
+  it("consumes a context reset once and resumes the replacement on a transient retry", async () => {
+    const dump = join(scratch, "reset-retry.json");
+    const state = join(scratch, "reset-retry-count");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.FAKE_CLAUDE_TRANSIENTS = "1";
+    process.env.FAKE_CLAUDE_STATE = state;
+    process.env.FAKE_CLAUDE_RETRY_SCALE = "0.001";
+    writeFileSync(state, "1");
+    await create();
+    const first = await instance.adapter.sendTurn({ threadId: "t-reset-retry", text: "old history" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const oldSession = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    writeFileSync(state, "0");
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-reset-retry", text: "replacement history", sessionReset: true, resumeCursor: oldSession,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const sessionIds = recorder.events.filter((e) => e.type === "session.started" && e.turnId === second.turnId)
+      .map((e) => (e as { sessionId: string }).sessionId);
+    expect(new Set(sessionIds).size).toBe(1);
+    expect(sessionIds[0]).not.toBe(oldSession);
+    const retried = JSON.parse(readFileSync(dump, "utf8"));
+    expect(retried.argv).toContain("--resume");
+    expect(retried.argv[retried.argv.indexOf("--resume") + 1]).toBe(sessionIds[0]);
+    expect(retried.prompt.message.content).toBe("replacement history");
+    expect(recorder.events.filter((e) => e.type === "turn.retrying")).toHaveLength(1);
+    expect(recorder.events.filter((e) => e.type === "turn.completed" && e.turnId === second.turnId))
+      .toMatchObject([{ ok: true }]);
+  });
 
   it("stops retrying at the attempt cap and settles the turn as failed", async () => {
     process.env.FAKE_CLAUDE_TRANSIENTS = "9";

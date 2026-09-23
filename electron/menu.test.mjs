@@ -50,4 +50,13 @@ describe("buildApplicationMenu", () => {
       expect(item.label).not.toBe("OpenMausBot");
     }
   });
+
+  it.each(["darwin", "linux", "win32"])("offers native organisation sign-in while a hosted workspace is active on %s", platform => {
+    const onOrganizationSignIn = vi.fn();
+    const template = build(platform, { onOrganizationSignIn });
+    const item = template.find(entry => entry.label === "Server").submenu.find(entry => entry.id === "organization-sign-in");
+    expect(item.label).toBe("Sign in with organisation…");
+    item.click();
+    expect(onOrganizationSignIn).toHaveBeenCalledOnce();
+  });
 });

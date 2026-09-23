@@ -94,7 +94,7 @@ beforeAll(async () => {
 
     const apiKey = String(req.headers["x-api-key"] ?? "");
     if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
-        "ak_catalog_page_stuck", "ak_catalog_exhausted"].includes(apiKey)) {
+        "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
@@ -116,6 +116,8 @@ beforeAll(async () => {
         || apiKey === "ak_catalog_stuck"
         || apiKey === "ak_catalog_page_stuck"
         || apiKey === "ak_catalog_exhausted"
+        || apiKey === "ak_catalog_stalled_total"
+        || apiKey === "ak_catalog_end_short"
       )
     ) {
       if (apiKey === "ak_catalog_stuck") {
@@ -153,6 +155,27 @@ beforeAll(async () => {
           total_pages: 2,
         }));
       }
+      if (apiKey === "ak_catalog_stalled_total") {
+        // The live failure mode from #1614: upstream reports the full count
+        // but stops offering cursors after the first page.
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [{ slug: "gmail", name: "Gmail" }],
+          current_page: 1,
+          total_pages: 4,
+          total_items: 1540,
+        }));
+      }
+      if (apiKey === "ak_catalog_end_short") {
+        // Page counts say more pages exist, but no cursor and no total_items
+        // arrive, so only the page metadata can flag the partial catalog.
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({
+          items: [{ slug: "gmail", name: "Gmail" }],
+          current_page: 1,
+          total_pages: 4,
+        }));
+      }
       // Mirrors the real marketplace: a usage-sorted head, then an alphabetical
       // tail only a second page reaches. ak_catalog_partial loses that page.
       if (url.searchParams.get("cursor") === "catalog-page-2") {
@@ -163,6 +186,9 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify({
           items: [{ slug: "deepgram", name: "Deepgram" }, { slug: "zoom", name: "Zoom" }],
+          current_page: 2,
+          total_pages: 2,
+          total_items: 5,
         }));
       }
       res.writeHead(200, { "content-type": "application/json" });
@@ -173,6 +199,9 @@ beforeAll(async () => {
           { slug: "currencyscoop", name: "CurrencyScoop" },
         ],
         next_cursor: "catalog-page-2",
+        current_page: 1,
+        total_pages: 2,
+        total_items: 5,
       }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3/toolkits") {
@@ -361,10 +390,11 @@ describe.sequential("Composio Sessions", () => {
 
   it("pages the marketplace catalog past the first page", async () => {
     const before = calls.length;
-    const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_pages" } });
+    const { cards, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_pages" } });
 
     // "Deepgram" only exists on page two: #634 saw the catalog stop at "CurrencyScoop".
     expect(cards.map((card) => card.slug)).toEqual(["gmail", "bland_ai", "currencyscoop", "deepgram", "zoom"]);
+    expect(pagination).toEqual({ items: 5, totalItems: 5, stalled: false });
     const pages = calls.slice(before).filter((call) => call.path === "/api/v3/toolkits");
     expect(pages).toHaveLength(2);
     expect(pages[0]?.query).not.toContain("cursor=");
@@ -388,10 +418,51 @@ describe.sequential("Composio Sessions", () => {
 
   it("stops cleanly when replayed pages hide behind rotating cursors", async () => {
     const before = calls.length;
-    const { cards } = await listToolkits({ composio: { apiKey: "ak_catalog_page_stuck" } });
+    const { cards, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_page_stuck" } });
 
     expect(cards).toEqual([expect.objectContaining({ slug: "gmail" })]);
+    expect(pagination).toEqual({ items: 1, stalled: true });
     expect(calls.slice(before).filter((call) => call.path === "/api/v3/toolkits")).toHaveLength(2);
+  });
+
+  it("reports a partial catalog when upstream stops offering cursors before its own total", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_stalled_total" } });
+      expect(pagination).toEqual({ items: 1, totalItems: 1540, stalled: true });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("partial marketplace"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("flags a partial catalog that ends early with only page counts to reveal it", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_end_short" } });
+      expect(pagination).toEqual({ items: 1, stalled: true });
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("partial marketplace"));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("flags a catalog that loses a later page mid-walk", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_partial" } });
+      expect(pagination).toEqual({ items: 3, totalItems: 5, stalled: true });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("keeps pagination with the cached catalog", async () => {
+    const first = await listToolkits({ composio: { apiKey: "ak_catalog_stalled_total" } });
+    const before = calls.length;
+    const second = await listToolkits({ composio: { apiKey: "ak_catalog_stalled_total" } });
+    expect(second.pagination).toEqual(first.pagination);
+    expect(calls.slice(before)).toHaveLength(0);
   });
 
   it("stops at the reported last page even when a cursor is still offered", async () => {

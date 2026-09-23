@@ -276,7 +276,8 @@ function parseFlagPatch(raw: unknown): { features: Record<string, boolean | numb
 }
 
 const summarizeBots = (bots: Array<Record<string, unknown>>) =>
-  bots.map((bot) => ({ id: bot.id, name: bot.name, busy: bot.busy === true, activity: bot.activity ?? null }));
+  bots.map((bot) => ({ id: bot.id, name: bot.name, busy: bot.busy === true,
+    waitingForTeammates: bot.waitingForTeammates === true, activity: bot.activity ?? null }));
 
 /** Settled means three things at once: the seeded bot's turn ended (the shared
  * wait tool decides how), no bot in the fixture is still busy, and the page
@@ -294,7 +295,7 @@ async function waitSettle(handle: UiHandle, timeoutSeconds: number): Promise<Rec
     wait = await runControlOmb(["wait", "--bot", handle.botId, "--timeout", String(Math.min(120, remaining())), "--url", handle.url]) as Record<string, unknown>;
     if (wait.status !== "settled") return { ok: false, ...state(), status: wait.status };
     bots = summarizeBots(((await api("GET", "/api/bots?messages=0")) as { bots: Array<Record<string, unknown>> }).bots);
-    if (!bots.some((bot) => bot.busy)) break;
+    if (!bots.some((bot) => bot.busy || bot.waitingForTeammates)) break;
     if (Date.now() >= deadline) return { ok: false, ...state() };
     await new Promise((resolve) => setTimeout(resolve, 200));
   }

@@ -9,6 +9,7 @@ export function modelContextWindow(model: string | undefined): number | undefine
   if (/^(gpt-5|o[34]\b|codex)/.test(id)) return 272_000;
   if (id.startsWith("gpt-4.1")) return 1_000_000;
   if (/gemini/.test(id)) return 1_000_000;
+  if (id === "grok-4.7") return 500_000;
   if (id.startsWith("grok")) return 256_000;
   return undefined;
 }

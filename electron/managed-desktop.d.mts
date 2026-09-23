@@ -11,6 +11,7 @@ export interface ManagedDesktopState {
   branding?: import("./organization-branding.mjs").OrganizationBranding;
 }
 export interface ManagedDesktopBridge {
+  settingsOpened?(): Promise<boolean>;
   state(): Promise<ManagedDesktopState>;
   begin(input: { portalOrigin: string }): Promise<ManagedDesktopState>;
   cancelEnrollment(): Promise<ManagedDesktopState>;

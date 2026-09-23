@@ -102,6 +102,7 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Electron opens it into the OS-encrypted credential store.
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/secret-cards\/[\w-]+\/provide$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/active-branch$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/compact$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks$/ },
   { method: "POST", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+\/tasks\/[\w-]+$/ },
