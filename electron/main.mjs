@@ -7,6 +7,8 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
+import { registerStt } from "./stt-service.mjs";
+import { openWindowsVoiceTyping } from "./stt-windows.mjs";
 import { finishSpeech, startSpeech, stopSpeech } from "./speech.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
@@ -2427,6 +2429,13 @@ ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pa
   return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${anchor}`);
 }));
 
+registerStt({ ipcMain, localOnly });
+ipcMain.handle("stt:voice-typing", localOnly("stt:voice-typing", async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) throw new Error("The dictation window is unavailable.");
+  win.focus();
+  await openWindowsVoiceTyping();
+}));
 ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
