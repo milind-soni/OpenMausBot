@@ -25,3 +25,22 @@ Editing an earlier message creates a new conversation path. OpenMausBot avoids r
 ## Memory and working folders
 
 Bot memory is visible and editable. A bot may also have a dedicated working folder; groups can use a shared working folder. Cloud workspaces use a stable default so generated files remain discoverable across threads. A sidebar folder is only organization, not a working directory or a permission boundary.
+
+## Continuing work between conversations
+
+A bot receives text records from its own other tasks and the groups it currently
+belongs to and is allowed to read. This includes what people said, not only the
+bot’s last reply, so a handoff from a group to a private chat retains its wording.
+The records keep their speakers, conversation names and timestamps.
+
+Only the selected branches and sent text messages are included. The current
+conversation is supplied separately. Removed conversations and groups the bot
+can no longer access are excluded from new snapshots. This does not erase
+requests already sent to a model provider or its existing session.
+
+The automatic record keeps complete messages within a 64,000-character budget,
+prioritizing newer records when necessary. Omitted detail remains available
+through conversation search. This can add input tokens compared with a short
+recent-work summary. When private sources enter a group, the existing activity
+notice identifies that crossing; do not treat a bot’s private chat as isolated
+from groups in which that same bot participates.
