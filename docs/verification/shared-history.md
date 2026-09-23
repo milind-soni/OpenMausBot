@@ -3,7 +3,7 @@
 Run:
 
 ```sh
-pnpm exec vitest run server/shared-history.test.ts server/shared-history.e2e.test.ts server/recent-work.test.ts server/recent-work.e2e.test.ts server/recall-disclosure.test.ts server/delta-context.e2e.test.ts
+pnpm exec vitest run server/shared-history.test.ts server/shared-history.e2e.test.ts server/recent-work.test.ts server/recent-work.e2e.test.ts server/recall-disclosure.test.ts server/delta-context.e2e.test.ts server/routine-results.e2e.test.ts server/thread-capacity-api.test.ts server/independent-threads-api.test.ts
 ```
 
 The unit cases cover a user handoff before any bot reply; corrections and named
@@ -37,3 +37,9 @@ Delegated tasks keep their explicit task scope. Automatic private-chat continuat
 instead of taking another cross-chat snapshot. This prevents duplicate or
 premature delivery of delegated replies. The unchanged delta-context suite
 checks queued replies, session resumption, replay and profile/model changes.
+
+Fresh unattended routine executions retain their explicit input and do not import
+previous runs through shared history. A human opening a completed run as a chat
+can still use ordinary cross-conversation context. Independent task tests retain
+separate user-message records, message IDs, processes, models and permissions;
+the same bot may see the other task as labeled historical context.
