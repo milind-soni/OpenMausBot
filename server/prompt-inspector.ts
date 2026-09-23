@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
+import { writeFile, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { redactSecrets, redactSecretsInText } from "./redact.ts";
@@ -38,61 +39,162 @@ type Meta = Pick<PromptCapture, "threadId" | "botId" | "turnId" | "provider"> & 
 export class PromptInspector {
   private epochs = new Map<string, number>();
   private active = new Set<string>();
+  private rows = new Map<string, PromptCapture[]>();
+  private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private writes = new Map<string, Promise<void>>();
+  private dirty = new Set<string>();
+  private deletions = new Set<string>();
+  private retry?: ReturnType<typeof setTimeout>;
   private folder: string;
-  constructor(folder: string) { this.folder = folder; mkdirSync(folder, { recursive: true, mode: 0o700 }); }
+  constructor(folder: string) {
+    this.folder = folder;
+    mkdirSync(folder, { recursive: true, mode: 0o700 });
+    try {
+      const ids: unknown = JSON.parse(readFileSync(this.journal(), "utf8"));
+      if (!Array.isArray(ids) || !ids.every(id => typeof id === "string" && valid(id))) throw new Error("Invalid prompt cleanup journal");
+      this.deletions = new Set(ids);
+    } catch (error) { if (!this.missing(error)) throw error; }
+    this.retryCleanup();
+  }
   epoch(id: string) { return this.epochs.get(id) ?? 0; }
+  private missing(error: unknown) { return (error as NodeJS.ErrnoException)?.code === "ENOENT"; }
   private file(id: string) { if (!valid(id)) throw new Error("Invalid thread"); return join(this.folder, id + ".json"); }
-  read(id: string): PromptCapture[] {
-    try { const rows: PromptCapture[] = JSON.parse(readFileSync(this.file(id), "utf8")); return Array.isArray(rows) ? rows.map(row => row.status === "sending" && !this.active.has(row.id) ? { ...row, status: "interrupted" as const } : row) : []; } catch { return []; }
+  private journal() { return join(this.folder, ".pending-deletions.json"); }
+  private persistDeletions(next: Set<string>) {
+    // This small durable journal is written before the owning conversation is
+    // removed. Pending async writes can never outlive their cleanup receipt.
+    const temp = this.journal() + ".tmp";
+    writeFileSync(temp, JSON.stringify([...next]), { mode: 0o600 });
+    renameSync(temp, this.journal());
+    this.deletions = next;
   }
-  private save(id: string, rows: PromptCapture[]) {
-    const file = this.file(id), temp = file + ".tmp";
-    writeFileSync(temp, JSON.stringify(rows.slice(0, 6)), { mode: 0o600 }); renameSync(temp, file);
-  }
-  remove(id: string) {
-    this.epochs.set(id, (this.epochs.get(id) ?? 0) + 1);
-    for (const suffix of ["", ".tmp"]) { try { unlinkSync(this.file(id) + suffix); } catch {} }
-  }
-  forget(threadId: string) {
-    this.remove(threadId);
-    for (const file of readdirSync(this.folder)) {
-      if (!/^[\w-]+\.json$/.test(file)) continue;
-      const id = file.slice(0, -5);
-      if (JSON.stringify(this.read(id)).includes(threadId)) this.remove(id);
+  private cleanup(id: string) {
+    for (const suffix of ["", ".tmp"]) {
+      try { unlinkSync(this.file(id) + suffix); }
+      catch (error) { if (!this.missing(error)) throw error; }
+    }
+    if (!this.writes.has(id)) {
+      const next = new Set(this.deletions); next.delete(id); this.persistDeletions(next);
     }
   }
+  private retryCleanup() {
+    for (const id of this.deletions) {
+      if (this.writes.has(id)) continue;
+      try { this.cleanup(id); } catch { /* Durable receipt remains for retry. */ }
+    }
+    if (this.deletions.size && !this.retry) {
+      this.retry = setTimeout(() => { this.retry = undefined; this.retryCleanup(); }, 1000);
+      this.retry.unref?.();
+    }
+  }
+  read(id: string): PromptCapture[] {
+    this.file(id);
+    if (this.deletions.has(id)) return [];
+    let rows = this.rows.get(id);
+    if (!rows) {
+      try { rows = JSON.parse(readFileSync(this.file(id), "utf8")); }
+      catch (error) { if (!this.missing(error)) throw error; rows = []; }
+      if (!Array.isArray(rows)) throw new Error("Invalid prompt capture record");
+      this.rows.set(id, rows);
+    }
+    return rows.map(row => row.status === "sending" && !this.active.has(row.id) ? { ...row, status: "interrupted" as const } : row);
+  }
+  private trimCache() {
+    // Finished idle threads are cheap to reload when the inspector is opened.
+    // Avoid retaining an unbounded history of large request bodies in memory.
+    for (const [id, rows] of this.rows) {
+      if (this.rows.size <= 4) break;
+      if (!this.writes.has(id) && !this.timers.has(id) && !rows.some(row => this.active.has(row.id))) this.rows.delete(id);
+    }
+  }
+  private schedule(id: string, immediate = false) {
+    this.dirty.add(id);
+    if (this.writes.has(id)) return;
+    const timer = this.timers.get(id);
+    if (timer && !immediate) return;
+    if (timer) clearTimeout(timer);
+    if (immediate) { this.timers.delete(id); this.write(id); }
+    else {
+      const next = setTimeout(() => { this.timers.delete(id); this.write(id); }, 250);
+      next.unref?.(); this.timers.set(id, next);
+    }
+  }
+  private write(id: string) {
+    if (this.writes.has(id) || this.deletions.has(id) || !this.dirty.delete(id)) return;
+    const epoch = this.epoch(id);
+    // Defer serialization too, so capture/header/usage/completion patches in
+    // one event-loop pass coalesce. File I/O never blocks model streaming.
+    const job = Promise.resolve().then(async () => {
+      if (this.epoch(id) !== epoch || this.deletions.has(id)) return;
+      const serialized = JSON.stringify(this.rows.get(id) ?? []);
+      await writeFile(this.file(id) + ".tmp", serialized, { mode: 0o600 });
+      if (this.epoch(id) === epoch && !this.deletions.has(id)) await rename(this.file(id) + ".tmp", this.file(id));
+    }).catch(() => { /* Diagnostics must not change the provider outcome. */ }).finally(() => {
+      this.writes.delete(id);
+      if (this.deletions.has(id)) this.retryCleanup();
+      else if (this.dirty.has(id)) this.write(id);
+      this.trimCache();
+    });
+    this.writes.set(id, job);
+  }
+  async flush() {
+    for (const [id, timer] of this.timers) { clearTimeout(timer); this.timers.delete(id); this.write(id); }
+    while (this.writes.size) await Promise.all(this.writes.values());
+    this.retryCleanup();
+  }
+  forget(threadId: string) {
+    this.file(threadId);
+    const ids = new Set([threadId, ...this.rows.keys(), ...readdirSync(this.folder).filter(file => /^[\w-]+\.json$/.test(file)).map(file => file.slice(0, -5))]);
+    const affected = new Set([threadId]);
+    for (const id of ids) if (!this.deletions.has(id) && JSON.stringify(this.read(id)).includes(threadId)) affected.add(id);
+    this.persistDeletions(new Set([...this.deletions, ...affected]));
+    for (const id of affected) {
+      this.epochs.set(id, this.epoch(id) + 1);
+      this.rows.delete(id); this.dirty.delete(id);
+      clearTimeout(this.timers.get(id)); this.timers.delete(id);
+    }
+    // Non-ENOENT errors are visible to the deletion caller. In-flight writes
+    // retain their journal entry until they settle and any late file is gone.
+    try { for (const id of affected) this.cleanup(id); }
+    finally { this.retryCleanup(); }
+  }
   capture(meta: Meta, kind: PromptCapture["kind"], body: unknown, endpoint?: string) {
+    this.file(meta.threadId);
     const epoch = this.epoch(meta.threadId);
-    if (meta.epoch !== undefined && meta.epoch !== epoch) throw new Error("Conversation capture invalidated");
+    if (this.deletions.has(meta.threadId) || meta.epoch !== undefined && meta.epoch !== epoch) throw new Error("Conversation capture invalidated");
     const safe = safePrompt(body), serialized = JSON.stringify(safe);
     const { epoch: _epoch, ...identity } = meta;
     const row: PromptCapture = { ...identity, id: randomUUID(), kind, sentAt: new Date().toISOString(), status: "sending",
       body: Buffer.byteLength(serialized) <= MAX_BYTES ? safe : null, ...(Buffer.byteLength(serialized) > MAX_BYTES ? { omitted: true } : {}) };
     if (endpoint) { const url = new URL(endpoint); row.endpoint = url.origin + url.pathname; }
+    const previous = this.read(meta.threadId);
     this.active.add(row.id);
-    try { this.save(meta.threadId, [row, ...this.read(meta.threadId)]); }
-    catch (error) { this.active.delete(row.id); throw error; }
+    this.rows.set(meta.threadId, [row, ...previous].slice(0, 6));
+    this.schedule(meta.threadId);
     const began = performance.now(); let done = false;
     const patch = (next: Partial<PromptCapture>) => {
-      if (done || (this.epochs.get(meta.threadId) ?? 0) !== epoch) return;
-      Object.assign(row, next);
-      const rows = this.read(meta.threadId), index = rows.findIndex(item => item.id === row.id);
-      if (index < 0) return;
-      rows[index] = row; this.save(meta.threadId, rows);
+      if (done || this.epoch(meta.threadId) !== epoch || this.deletions.has(meta.threadId)) return;
+      const rows = this.rows.get(meta.threadId);
+      if (!rows?.some(item => item.id === row.id)) return;
+      Object.assign(row, next); this.schedule(meta.threadId);
     };
     return {
       patch,
       finish: (status: PromptCapture["status"], error?: string) => {
         try { patch({ status, durationMs: Math.round(performance.now() - began), ...(error ? { error: redactSecretsInText(error).slice(0, 1000) } : {}) }); }
-        finally { done = true; this.active.delete(row.id); }
+        finally {
+          done = true; this.active.delete(row.id);
+          if (this.dirty.has(meta.threadId)) this.schedule(meta.threadId, true);
+        }
       },
     };
   }
 }
+
 type Handle = ReturnType<PromptInspector["capture"]>;
 let configured: PromptInspector | undefined;
 export function configurePromptInspector(folder: string) { configured = new PromptInspector(folder); return configured; }
-export function forgetPromptCaptures(threadId: string) { try { configured?.forget(threadId); } catch {} }
+export function forgetPromptCaptures(threadId: string) { configured?.forget(threadId); }
 const context = new AsyncLocalStorage<Meta>();
 export function captureApiRequest(body: unknown, endpoint: string): Handle | undefined {
   try { const meta = context.getStore(); const handle = meta && configured?.capture(meta, "api-request", body, endpoint);
@@ -132,6 +234,6 @@ export function inspectProvider(instance: ProviderInstance): ProviderInstance {
     }
     catch (error) { try { capture.finish("failed", error instanceof Error ? error.message : String(error)); } catch {} close(); throw error; }
   };
-  instance.dispose = async () => { for (const cancel of pending.values()) { try { cancel(); } catch {} } return dispose(); };
+  instance.dispose = async () => { for (const cancel of pending.values()) { try { cancel(); } catch {} } await configured?.flush(); return dispose(); };
   return instance;
 }
