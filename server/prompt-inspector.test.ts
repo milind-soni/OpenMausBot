@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, mkdirSync, existsSync, rmdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, existsSync, rmdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { configurePromptInspector, diagnosticHeaders, inspectProvider, PromptInspector, promptUsage } from "./prompt-inspector.ts";
 import { OpenAICompatDriver } from "./drivers/openai-compat.ts";
 import { makeFakeDriver } from "./testing/fake-driver.ts";
@@ -148,4 +148,22 @@ it("reports unlink failure, hides pending captures and retries a durable deletio
   const restarted = createStore(dir);
   expect(restarted.read("thread")).toEqual([]);
   expect(JSON.parse(readFileSync(join(dir, ".pending-deletions.json"), "utf8"))).toEqual([]);
+});
+
+
+it("scans uncached captures without parsing them or retaining unrelated files", () => {
+  const dir = directory(), store = createStore(dir);
+  writeFileSync(join(dir, "thread.json"), "invalid target JSON");
+  writeFileSync(join(dir, "referencing.json"), '{"incomplete": "thread"');
+  writeFileSync(join(dir, "unrelated.json"), "unrelated invalid JSON");
+  for (let n = 0; n < 12; n++) writeFileSync(join(dir, `other-${n}.json`), "[]");
+  const read = vi.spyOn(store, "read");
+  store.forget("thread");
+  expect(read).not.toHaveBeenCalled();
+  expect(existsSync(join(dir, "thread.json"))).toBe(false);
+  expect(existsSync(join(dir, "referencing.json"))).toBe(false);
+  expect(readFileSync(join(dir, "unrelated.json"), "utf8")).toBe("unrelated invalid JSON");
+  // A fresh disk edit must be observed: cleanup did not cache the old rows.
+  writeFileSync(join(dir, "other-0.json"), "invalid after cleanup");
+  expect(() => store.read("other-0")).toThrow();
 });
