@@ -39,7 +39,13 @@ Six records per thread are retained; bodies above 4 MiB are omitted, deeply
 nested content is bounded, and previews/diffs are limited. Credentials are
 redacted before persistence, but ordinary conversation content remains private:
 review an export before sharing it. Deletion invalidates pending captures and
-purges stored cross-thread copies referencing the deleted conversation.
+purges stored cross-thread copies referencing the deleted conversation. Metadata
+updates are coalesced in memory and persisted asynchronously. Deletion writes a
+durable cleanup receipt first; filesystem failures are reported before removing
+the owning bot/group/task. Pending captures are hidden and cleanup retries on
+restart. Tests cover failed unlink operations and deletion during an active write.
+The renderer test also verifies copy-state reset on refresh and focus restoration
+through the application's StrictMode mount/cleanup cycle.
 
 These checks prove local integration, not paid-provider availability, model
 quality or cache-hit guarantees. Unknown caching is displayed as unknown,
