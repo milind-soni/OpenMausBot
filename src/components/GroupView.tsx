@@ -381,7 +381,7 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
   const value = responder.kind === "member" ? `member:${responder.botId}` : responder.kind;
   const lead = responder.kind === "member" ? members.find((member) => member.id === responder.botId) : undefined;
   const title =
-    responder.kind === "dynamic" ? "Speakers follow the topic and reply to one another" : responder.kind === "everyone"
+    responder.kind === "dynamic" ? t("room.setup.dynamic") : responder.kind === "everyone"
       ? t("room.responder.everyone")
       : responder.kind === "mentions"
         ? t("room.responder.mentions")
