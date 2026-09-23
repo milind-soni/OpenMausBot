@@ -1,0 +1,33 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { expect, it } from "vitest";
+import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { fixtureApi } from "../scripts/testing/preview-fixture.ts";
+
+it("captures private and group turns through the real server and removes deleted conversations", async () => {
+  const fixture = await launchVerificationServer();
+  const api = fixtureApi(fixture.info.url), control = (...args: string[]) => runControlOmb([...args, "--url", fixture.info.url]);
+  try {
+    const { bot } = await control("new-bot", "--name", "Capture fixture") as { bot: { id: string; threadId: string } };
+    const saved = (await api("GET", "/api/bots?messages=0")).bots.find((item: { id: string }) => item.id === bot.id);
+    bot.threadId = saved.tasks[0].threadId;
+    const endpoint = `/api/threads/${bot.threadId}/prompt-inspector`;
+    expect((await api("GET", endpoint)).records).toEqual([]);
+    await control("send", "--bot", bot.id, "--text", "Describe what was supplied.");
+    await control("wait", "--bot", bot.id, "--timeout", "30");
+    const first = (await api("GET", endpoint)).records;
+    expect(first).toHaveLength(1); expect(first[0]).toMatchObject({ threadId: bot.threadId, botId: bot.id, kind: "agent-input", status: "completed" });
+    expect(JSON.stringify(first[0].body)).toContain("Describe what was supplied.");
+    const { group } = await api("POST", "/api/groups", { name: "Capture group", memberIds: [bot.id], setup: { bulletin: "", defaultResponder: { kind: "member", botId: bot.id } } });
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "Reply in this room." });
+    await expect.poll(async () => (await api("GET", `/api/threads/${group.threadId}/prompt-inspector`)).records[0]?.status, { timeout: 30_000 }).toBe("completed");
+    const room = (await api("GET", `/api/threads/${group.threadId}/prompt-inspector`)).records[0];
+    expect(room.botId).toBe(bot.id); expect(JSON.stringify(room.body)).toContain("Reply in this room.");
+    expect((await api("GET", endpoint)).records[0].id).toBe(first[0].id);
+    await api("DELETE", `/api/groups/${group.id}`);
+    expect(existsSync(join(fixture.info.dataDir, "prompt-inspector", group.threadId + ".json"))).toBe(false);
+    await api("DELETE", `/api/bots/${bot.id}`);
+    expect(existsSync(join(fixture.info.dataDir, "prompt-inspector", bot.threadId + ".json"))).toBe(false);
+    const response = await fetch(`${fixture.info.url}${endpoint}`); expect(response.status).toBe(404);
+  } finally { await fixture.close(); }
+}, 180_000);
