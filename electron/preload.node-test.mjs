@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import vm from "node:vm";
 import { createRequire } from "node:module";
 
 // preload.cjs is renderer-side CommonJS that destructures require("electron")
@@ -109,4 +111,28 @@ test("native Settings requests accept only the fixed organisation section", () =
   emit("app:open-settings", { section: "organization", url: "https://other.example" });
   assert.deepEqual(calls, ["organization", undefined, undefined]);
   unsubscribe();
+});
+
+
+test("transcription bridge preserves payloads and is absent on remote pages", async () => {
+  const source = fs.readFileSync(new URL("./preload.cjs", import.meta.url), "utf8");
+  const calls = [];
+  let api;
+  const electron = {
+    ...fakeElectron,
+    ipcRenderer: { ...fakeIpcRenderer, invoke: async (...args) => { calls.push(args); } },
+    contextBridge: { exposeInMainWorld: (_name, value) => { api = value; } },
+  };
+  const load = origin => vm.runInNewContext(source, {
+    require: () => electron, process: { argv: ["--omb-local-origin=http://127.0.0.1:1234"], platform: "win32" },
+    location: { origin },
+  });
+  load("http://127.0.0.1:1234");
+  const config = { provider: "openrouter" }, request = { id: "session", pcm: new ArrayBuffer(4) };
+  await api.sttSettings(); await api.sttSave(config); await api.sttBegin();
+  await api.sttTranscribe(request); await api.sttCancel("session"); await api.sttVoiceTyping();
+  assert.deepEqual(calls, [["stt:settings"], ["stt:save", config], ["stt:begin"], ["stt:transcribe", request], ["stt:cancel", "session"], ["stt:voice-typing"]]);
+  load("https://remote.example");
+  for (const key of ["sttSettings", "sttSave", "sttInstall", "sttPickEngine", "sttBegin", "sttTranscribe", "sttCancel", "sttVoiceTyping"])
+    assert.equal(api[key], undefined, key);
 });
