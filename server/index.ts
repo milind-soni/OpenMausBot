@@ -7967,7 +7967,7 @@ async function startTurn(
         // ledger. Re-reading other chats here can duplicate those updates or
         // expose a later reply before its continuation has been dispatched.
         // Delegated tasks keep their explicit task scope for the same reason.
-        text: opts?.cardContinuation || commsDepth > 0 || opts?.coordination ? dispatchContext.turnText : withSharedHistory(sharedHistory(sharedHistorySources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId }), dispatchContext.turnText),
+        text: opts?.cardContinuation || commsDepth > 0 || opts?.coordination || opts?.automationSource || opts?.unattended ? dispatchContext.turnText : withSharedHistory(sharedHistory(sharedHistorySources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId }), dispatchContext.turnText),
         refreshSystemPrompt: true,
         images: turnImages,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0),
