@@ -1,3 +1,4 @@
+import type { MeetingLimits } from "../../shared/meeting-limits";
 // Server-backed store. The React app holds no transports of its own:
 // it dispatches typed commands over HTTP and folds the one SSE event
 // stream from the harness server into local state. The reducer stays
@@ -209,6 +210,7 @@ export interface Group {
   name: string;
   memberIds: string[];
   defaultResponder: GroupDefaultResponder;
+  meetingLimits?: MeetingLimits;
   bulletin: string;
   unread: boolean;
   createdAt: number;
