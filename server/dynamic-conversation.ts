@@ -159,7 +159,7 @@ export async function runDynamicConversation(options: DynamicOptions): Promise<D
       if (!decision) continue;
       if (decision.status !== "continue") return finish(decision.status, decision.detail);
       const candidate = resolve(decision.next);
-      if (candidate) { next = candidate.id; reason = decision.instruction; return null; }
+      if (candidate) { repairs = 0; next = candidate.id; reason = decision.instruction; return null; }
     }
     return finish("paused", "The next contribution could not be determined.");
   };
@@ -178,7 +178,7 @@ export async function runDynamicConversation(options: DynamicOptions): Promise<D
       const routed = parseDynamicPrivateDecision(result.replyText);
       if (replies === 0 && routed.visibleText.trim()) { speaker = router; combined = result; }
       else if (routed.decision?.status === "continue" && resolve(routed.decision.next)) {
-        speaker = resolve(routed.decision.next)!; reason = routed.decision.instruction;
+        repairs = 0; speaker = resolve(routed.decision.next)!; reason = routed.decision.instruction;
       } else if (routed.decision && routed.decision.status !== "continue") {
         const done = await ending(router, routed.decision); if (done) return done;
         continue;
@@ -204,10 +204,11 @@ export async function runDynamicConversation(options: DynamicOptions): Promise<D
     if (text) { seenReplies.add(normalized); budget(); }
     else if (++repairs > 2) return finish("paused", "No further contribution was returned.");
     const decision = parsed.decision;
+    const candidate = decision?.status === "continue" ? resolve(decision.next) : undefined;
     if (repeated || (decision && decision.status !== "continue")) {
       const done = await ending(speaker, decision); if (done) return done;
-    } else if (decision?.status === "continue" && resolve(decision.next)?.id !== speaker.id) {
-      next = decision.next; reason = decision.instruction;
+    } else if (decision?.status === "continue" && candidate && candidate.id !== speaker.id) {
+      repairs = 0; next = candidate.id; reason = decision.instruction;
     } else {
       next = undefined; reason = "Choose another relevant person for an unanswered point, or finish.";
       if (++repairs > 2) return finish("paused", "The next speaker could not be selected.");
