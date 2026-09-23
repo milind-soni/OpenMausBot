@@ -345,7 +345,12 @@ describe("independent bot tasks through the isolated control surface", () => {
     const messagesA = await control(["messages", "--bot", botId, "--task", taskA]);
     const messagesB = await control(["messages", "--bot", botId, "--task", taskB]);
     expect(JSON.stringify(messagesA.messages)).not.toContain("ONLY_B");
-    expect(JSON.stringify(messagesB.messages)).not.toContain("ONLY_A");
+    // Historical context is intentionally shared by one bot. It must not move
+    // another task's user messages or identity into this task's transcript.
+    expect(messagesB.messages.filter((message: any) => message.role === "user").map((message: any) => message.text)).toEqual(["ONLY_B"]);
+    expect(messagesB.messages.some((message: any) => messagesA.messages.some((other: any) => other.id === message.id))).toBe(false);
+    expect(JSON.stringify(launchedB.prompt)).toContain("other_conversations");
+    expect(JSON.stringify(launchedB.prompt)).toContain("ONLY_A");
     expect(messagesB.messages.some((message: any) => message.role === "bot" && message.text?.includes("ONLY_B"))).toBe(true);
 
     const userA = messagesA.messages.find((message: any) => message.role === "user");
