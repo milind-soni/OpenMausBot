@@ -378,3 +378,19 @@ it("resolves a unique teammate name in a bot_ids slot, and refuses an ambiguous 
     .evidence.find((entry: any) => entry.step).response.result.content[0].text;
   expect(refused).toBe(`2 reachable teammates are named "${f.target.name}" — call list_bots and use the id of the one you mean`);
 }), 60_000);
+
+it("excludes cross-conversation history from scoped room handoffs but preserves it for ordinary room replies", () => withRooms(async f => {
+  f.savePlan();
+  await f.cli("send", "--bot", f.target.id, "--text", "PRIVATE_UNRELATED_SENTINEL_83A");
+  expect((await f.cli("wait", "--bot", f.target.id, "--timeout", "30")).status).toBe("settled");
+  await f.start(); expect((await f.wait()).status).toBe("settled");
+  const handoff = f.provider().filter((turn: any) => turn.botId === f.target.id).at(-1);
+  expect(JSON.stringify(handoff.prompt)).toContain("Please build CSV");
+  expect(JSON.stringify(handoff.prompt)).not.toContain("PRIVATE_UNRELATED_SENTINEL_83A");
+  expect(JSON.stringify(handoff.prompt)).not.toContain("<other_conversations>");
+  expect((await f.messages(f.destination.activeTaskId)).some((message: any) => /private conversation/.test(message.tool?.name ?? ""))).toBe(false);
+  await f.cli("send-channel", "--channel", f.destination.id, "--text", "@Engineer Continue our own discussion.");
+  expect((await f.cli("wait", "--channel", f.destination.id, "--timeout", "30")).status).toBe("settled");
+  const ordinary = f.provider().filter((turn: any) => turn.botId === f.target.id).at(-1);
+  expect(JSON.stringify(ordinary.prompt)).toContain("PRIVATE_UNRELATED_SENTINEL_83A");
+}), 60_000);
