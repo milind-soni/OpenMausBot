@@ -724,6 +724,13 @@ data class InstanceCapabilities(
 data class InstanceList(val instances: List<Instance>)
 
 /**
+ * A reply split into utterances the computer can voice, and whether it can
+ * voice them at all — `POST /api/tts/prepare`.
+ */
+@Serializable
+data class PreparedSpeech(val ready: Boolean, val utterances: List<String>)
+
+/**
  * Which engine actually speaks. `VoiceProvider` in `server/tts/index.ts`;
  * [wire] is the exact string the config write carries, and [fromWire] applies
  * the server's own fallback: a missing field — an older desktop that predates

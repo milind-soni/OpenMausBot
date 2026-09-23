@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object SettingsPolicy {
     const val NOTIFICATIONS_FOOTER =
-        "Approvals and finished work appear while OpenMausMobile is connected, including " +
+        "Approvals and finished work appear while MausBot is connected, including " +
             "frames replayed after a short background pause. Closed-app push needs a " +
             "separate push-relay release that does not exist yet."
 
