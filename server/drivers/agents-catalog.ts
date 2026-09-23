@@ -1,3 +1,4 @@
+import { MEETING_LIMITS_SCHEMA } from "../../shared/meeting-limits-schema.ts";
 // The agents tool catalog: every tool the harness offers a bot about its own
 // team, threads, memory, routines, profile and skills, and which of them a
 // given turn gets to see.
@@ -416,6 +417,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
       type: "object",
       additionalProperties: false,
       properties: {
+        meeting_limits: MEETING_LIMITS_SCHEMA,
         response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent mode; dynamic follows the conversation." },
         lead_bot_id: { type: "string", description: "Leader for lead mode; defaults to you." },
         opening_message: { type: "string", minLength: 1, maxLength: 12_000 },
@@ -444,12 +446,13 @@ const toolDefinitions = (externalRuntime: boolean) => [
       type: "object",
       additionalProperties: false,
       properties: {
+        meeting_limits: MEETING_LIMITS_SCHEMA,
         response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent mode; dynamic follows the conversation." },
         lead_bot_id: { type: "string", description: "Leader for lead mode; defaults to you." },
         room_id: { type: "string", description: "The ID of the group room to manage." },
         action: {
           type: "string",
-          enum: ["add_members", "remove_members", "set_members", "rename", "set_bulletin", "set_response_mode"],
+          enum: ["add_members", "remove_members", "set_members", "rename", "set_bulletin", "set_response_mode", "set_meeting_limits"],
           description: "The action to perform on the room.",
         },
         member_bot_ids: {
