@@ -14,6 +14,34 @@ Use separate threads when you want fresh context or independent work without dup
 
 Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.
 
+### Dynamic conversations
+
+Choose **Dynamic** in the group's response menu, or during room setup. This is a
+saved room setting, alongside a designated lead, everyone replying, and
+mentions only. Members choose the next relevant speaker from the conversation;
+a previous speaker can respond again. Each uses its own configured model.
+
+The first participant can answer and select the next speaker in one turn. When
+a participant proposes ending, one private scheduling check decides whether an
+unanswered contribution remains. These checks use the participant's model and
+incur normal provider usage, but their control text is not posted to the chat.
+Ordinary replies retain the member's usual tools and permissions.
+
+After 16 public bot replies without a new user message, the room posts a wrap-up
+reminder after each reply. Members have room to finish open points; the room
+stops at 22 replies. Private checks, posted invitations and system notices do
+not count as public replies. A new user message starts a fresh allowance. You
+can also press Stop; a queued message is taken up after the current turn ends.
+
+A Chief can set `response_mode: "dynamic"` with `create_room`, and provide an
+`opening_message` to post one shared invitation and start the discussion. Without
+that field, creating a room does not start paid turns. `manage_room` with action
+`set_response_mode` changes an idle room's mode. Existing section boundaries and
+approval requirements still apply. A normal `post_to_room` remains a notification
+and does not start a discussion.
+
+**Finish together** (Goal mode) remains a separate coordinator-led workflow.
+
 ## Delegation
 
 Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
