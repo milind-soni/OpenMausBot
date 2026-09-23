@@ -302,6 +302,7 @@ export interface WireMessage {
   /** One idempotently updated status card for a routine run. */
   routineRun?: RoutineRunCardData;
   /** Terminal receipt for a bounded multi-bot channel goal. */
+  systemNotice?: { kind: "dynamic-stop" | "dynamic-wrap-up"; lastUserMessageId: string | null; repliesSinceUser: number };
   goalRun?: GroupGoalRunCardData;
   /** activity messages: tool name + outcome. */
   tool?: {
@@ -436,7 +437,8 @@ export interface SecretRequestCardData {
 export type GroupDefaultResponder =
   | { kind: "member"; botId: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "dynamic" };
 
 /** One independent conversation inside a user-created channel. */
 export interface GroupTask {
