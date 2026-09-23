@@ -21,3 +21,15 @@ test("a remote server's page is told this computer offers no screen, voice or lo
   assert.equal(remote.host.homeDir, "");
   assert.notEqual(local.host.homeDir, "");
 });
+
+
+test("transcription is local-desktop only without changing native call support", () => {
+  for (const platform of ["darwin", "linux", "win32"]) {
+    const local = desktopCapabilities({ platform, env: {} });
+    assert.equal(local.transcription.available, true);
+    assert.equal(local.dictation.available, platform === "darwin");
+    const remote = desktopCapabilities({ platform, env: {}, remote: true });
+    assert.equal(remote.transcription.available, false);
+  }
+  assert.equal(desktopCapabilities({ platform: "other", env: {} }).transcription.available, false);
+});
