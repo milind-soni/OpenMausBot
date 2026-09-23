@@ -50,6 +50,14 @@ try {
   const open = async () => { await click("Transcription settings"); await until(() => js("Boolean(document.querySelector('[aria-label=\"Transcription provider\"]'))")); };
   await win.loadURL(preview.previewUrl);
   await until(() => js("Boolean(document.querySelector('[aria-label=\"Transcription settings\"]'))"));
+  for (const action of [
+    "window.ogb.sttSave({executable:'C:/unselected/engine.exe'})",
+    "window.ogb.sttInstall({id:'base',executable:'C:/unselected/engine.exe'})",
+  ]) {
+    const rejection = await js(`${action}.then(() => 'unexpected success', error => String(error))`);
+    assert.match(rejection, /file picker/);
+  }
+  report.checks.push("Production IPC rejects unselected engine paths for both save and install");
   await open();
   assert.equal(await js("document.activeElement.getAttribute('role')"), "dialog");
   const height = await js("document.querySelector('[role=dialog]').getBoundingClientRect().height");
