@@ -1,0 +1,20 @@
+OpenMausBot Windows SDK backport for cua-driver 0.28.2.
+Base: trycua/cua fc188250b4ca8549b8e61f937fdb1fb560770e86 (MIT).
+Only suppresses the private embedded daemon's console. The signed official
+driver executable, UniFFI interface and process ownership are unchanged.
+
+diff --git a/libs/cua-driver/rust/crates/cua-driver-sdk/src/embedded.rs b/libs/cua-driver/rust/crates/cua-driver-sdk/src/embedded.rs
+--- a/libs/cua-driver/rust/crates/cua-driver-sdk/src/embedded.rs
++++ b/libs/cua-driver/rust/crates/cua-driver-sdk/src/embedded.rs
+@@ -439,6 +439,11 @@
+                 Stdio::null()
+             })
+             .kill_on_drop(true);
++        // Modified by OpenMausBot: embedded services have no terminal UI.
++        // Preserve the SDK's parent-liveness pipe and owned process PID.
++        #[cfg(windows)]
++        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
++
+         for variable in safe_environment(&self.options.environment) {
+             command.env(variable.name, variable.value);
+         }

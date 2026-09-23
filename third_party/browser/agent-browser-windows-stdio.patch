@@ -1,8 +1,9 @@
-OpenMausBot Windows vendor revision 0.36.0-omb.1.
+OpenMausBot Windows vendor revision 0.36.0-omb.2.
 Base: vercel-labs/agent-browser eb05921bad874cd2a1b4fa5d1149f1ed26576cae.
 Carries only the Windows handle-inheritance fix from upstream PR1781,
 commit 81a98c349d04195396ffae6898bd375ad64280de, plus modification notices
-and package-version metadata. The MCP output-reader rewrite is not included.
+and package-version metadata, plus headless-only CREATE_NO_WINDOW for Chrome.
+The MCP output-reader rewrite is not included.
 
 diff --git a/cli/src/connection.rs b/cli/src/connection.rs
 --- a/cli/src/connection.rs
@@ -67,6 +68,22 @@ diff --git a/cli/src/main.rs b/cli/src/main.rs
          cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
      }
  
+diff --git a/cli/src/native/cdp/chrome.rs b/cli/src/native/cdp/chrome.rs
+--- a/cli/src/native/cdp/chrome.rs
++++ b/cli/src/native/cdp/chrome.rs
+@@ -828,3 +828,12 @@
++    // Modified by OpenMausBot: a detached daemon must not allocate a
++    // console for chrome-headless-shell.exe. Keep headed windows visible.
++    #[cfg(windows)]
++    if options.effectively_headless() {
++        use std::os::windows::process::CommandExt;
++        const CREATE_NO_WINDOW: u32 = 0x08000000;
++        cmd.creation_flags(CREATE_NO_WINDOW);
++    }
++
+     // Scope the virtual display and its auth cookie to the Chrome child;
+     // the daemon's own environment is left untouched.
+     #[cfg(target_os = "linux")]
 diff --git a/cli/Cargo.toml b/cli/Cargo.toml
 --- a/cli/Cargo.toml
 +++ b/cli/Cargo.toml
@@ -75,7 +92,7 @@ diff --git a/cli/Cargo.toml b/cli/Cargo.toml
  [package]
  name = "agent-browser"
 -version = "0.36.0"
-+version = "0.36.0-omb.1"
++version = "0.36.0-omb.2"
  edition = "2021"
  description = "Fast browser automation CLI for AI agents"
  license = "Apache-2.0"
@@ -87,7 +104,7 @@ diff --git a/cli/Cargo.lock b/cli/Cargo.lock
  [[package]]
  name = "agent-browser"
 -version = "0.36.0"
-+version = "0.36.0-omb.1"
++version = "0.36.0-omb.2"
  dependencies = [
   "aes-gcm",
   "async-trait",

@@ -126,6 +126,28 @@ describe("browser viewer protocol boundary", () => {
 });
 
 describe("authenticated browser viewer relay", () => {
+  it("ends observation when Chromium disconnects but the daemon socket stays open", async () => {
+    vi.useFakeTimers();
+    const { res, socket } = await open();
+    socket.receive({ type: "status", connected: false });
+    expect(res.events("error")).toEqual([{ retryable: true, message: "The browser disconnected. Reconnecting the live view…" }]);
+    expect(res.writableEnded).toBe(true);
+    expect(socket.readyState).toBe(3);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(res.events("heartbeat")).toHaveLength(0);
+    // Recovery belongs to the panel's bounded observation retries. Never
+    // restart Chrome or replay the last navigation from this event handler.
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(nativeClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps a healthy native browser status connected", async () => {
+    const { res, socket } = await open();
+    socket.receive({ type: "status", connected: true });
+    expect(res.events("error")).toHaveLength(0);
+    expect(res.writableEnded).toBe(false);
+  });
+
   it("fences a late stream startup when that owner is closed during discovery", async () => {
     let finish!: (value: ReturnType<typeof output>) => void;
     execute.mockImplementationOnce(() => new Promise((resolve) => finish = resolve));

@@ -11,6 +11,11 @@ on:
       - scripts/build-windows-browser-vendor.mjs
       - scripts/build-windows-browser-vendor.test.mjs
       - scripts/smoke-browser-bundle.mjs
+      - scripts/build-windows-cua-sdk.mjs
+      - scripts/prepare-cua-win.mjs
+      - scripts/smoke-cua-win-embedded.mjs
+      - scripts/testing/windows-helper-windows.mjs
+      - third_party/cua/windows-embedded-console.patch
       - third_party/browser/agent-browser-windows-stdio.patch
 
 permissions:
@@ -51,7 +56,7 @@ jobs:
     name: Cold-start and restart on Windows
     needs: build
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,3 +80,7 @@ jobs:
           New-Item -ItemType Directory -Path $resources | Out-Null
           Copy-Item -Recurse "$env:GITHUB_WORKSPACE/dist-native/browser/win32-x64" "$resources/browser-engine"
           node scripts/smoke-browser-bundle.mjs --resources "$resources" --engine-candidate "$env:RUNNER_TEMP/browser-vendor/agent-browser-win32-x64.exe"
+      - name: Build the pinned CUA SDK launch backport
+        run: pnpm build:cua:win
+      - name: Prove the private computer-use daemon starts without a console and stops cleanly
+        run: pnpm smoke:cua-win

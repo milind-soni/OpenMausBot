@@ -12,6 +12,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
 import { inflateSync } from "node:zlib";
+import { assertNoHelperWindows } from "./testing/windows-helper-windows.mjs";
 import { browserBundlePaths, browserBundleSpec } from "../server/browser-bundle-release.ts";
 import { executableTarget } from "./prepare-cloudflared.mjs";
 import { WINDOWS_VENDOR_VERSION, verifyVendorCandidate, verifyVendorPatch } from "./build-windows-browser-vendor.mjs";
@@ -305,6 +306,7 @@ try {
     const inventory = await client.request("tools/list");
     assert(inventory.tools.some((tool) => tool.name === "agent_browser_open"), "Browser tools missing from MCP core profile");
     await client.tool("agent_browser_open", { url });
+    await assertNoHelperWindows([paths.chrome, enginePath]);
   }
   const [alpha, beta] = clients;
   assert.equal((await alpha.tool("agent_browser_get_title")).data.title, title);
@@ -326,6 +328,7 @@ try {
   await waitForOwnedDaemonExit(previousDaemonPid);
   await alpha.tool("agent_browser_open", { url });
   assert.notEqual(await ownedDaemonPid(alpha), previousDaemonPid, "Reopen reused the closed daemon");
+  await assertNoHelperWindows([paths.chrome, enginePath]);
   assert.equal((await alpha.tool("agent_browser_get_title")).data.title, title);
   assert.deepEqual((await alpha.tool("agent_browser_eval", { script: storage })).data.result, { local: null, cookie: "" }, "Guest state was restored after close");
   assert.deepEqual((await beta.tool("agent_browser_eval", { script: storage })).data.result, { local: "beta", cookie: "omb_smoke=beta" }, "Restarting the first bot changed the second bot's state");

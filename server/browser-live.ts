@@ -349,6 +349,15 @@ export class BrowserLive {
         let raw: ObjectValue | null;
         try { raw = object(JSON.parse(event.data)); message = normalizeBrowserLiveMessage(raw); } catch { this.close(viewer); return; }
         if (!message) { if (raw?.type === "frame") this.close(viewer); return; }
+        // The daemon's WebSocket can remain open after Chromium disconnects.
+        // Do not keep sending healthy heartbeats for a dead browser: that
+        // leaves the panel blank and continually resets its retry budget.
+        if (message.type === "status" && message.connected === false && !viewer.restarting) {
+          console.warn("browser-live: Chromium disconnected from the stream");
+          this.send(viewer, { type: "error", retryable: true, message: "The browser disconnected. Reconnecting the live view…" });
+          this.close(viewer);
+          return;
+        }
         const heldBy = this.runtime.heldBy(viewer.session);
         if (heldBy && heldBy !== viewer.id && ["tabs", "url"].includes(String(message.type))) return;
         if (message.type === "frame") this.frame(viewer, message);

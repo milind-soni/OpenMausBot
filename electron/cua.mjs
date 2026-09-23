@@ -328,6 +328,7 @@ export async function cuaPermissionsStatus() {
   if (!binary) return { available: false };
   const out = await execFileAsync(binary, ["permissions", "status", "--json"], {
     encoding: "utf8",
+    windowsHide: true,
     timeout: 5000,
     killSignal: "SIGKILL",
     maxBuffer: 65_536,

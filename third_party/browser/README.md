@@ -27,6 +27,11 @@ The desktop application ships two separate components:
   checks are required before those executable bytes are published and pinned.
   Upstream 0.37.0 does not include that fix; keep this tested Windows build
   until an updated official or backported release passes those native checks.
+  The next candidate, `0.36.0-omb.2`, also suppresses the Windows console at
+  the native Chrome launch site, only when effectively headless. It does not
+  hide headed browser windows. The release resolver remains on the previous
+  verified artifact until the new candidate passes Windows checks and its
+  bytes are published and pinned.
 - **Chromium Headless Shell 153.0.8010.47**, Google's official
   `chrome-headless-shell` assets published through Chrome for Testing:
   <https://googlechromelabs.github.io/chrome-for-testing/153.0.8010.47.json>.

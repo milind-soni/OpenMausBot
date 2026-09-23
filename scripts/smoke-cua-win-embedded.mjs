@@ -7,13 +7,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
+import { assertNoHelperWindows } from "./testing/windows-helper-windows.mjs";
 
 if (process.platform !== "win32") {
   console.error("smoke-cua-win-embedded is Windows-only");
   process.exit(1);
 }
 
-const stage = join(import.meta.dirname, "..", "dist-native", "cua-win32-x64");
+const stage = process.env.OMB_CUA_RESOURCES ?? join(import.meta.dirname, "..", "dist-native", "cua-win32-x64");
 const binary = join(stage, "cua-driver.exe");
 const bundle = join(stage, "cua-sdk", "cua-sdk.mjs");
 const dll = join(stage, "cua-sdk", "native", "cua_driver_sdk.dll");
@@ -51,6 +52,7 @@ const host = new sdk.EmbeddedCuaDriverHost(binary, "com.openmausbot.app");
 try {
   const conn = await host.start({ signal: AbortSignal.timeout(15_000) });
   if (!conn?.socketPath) throw new Error("embedded host reported no socketPath");
+  await assertNoHelperWindows([binary]);
   console.log("embedded host started:", {
     pid: conn.pid,
     driverVersion: conn.driverVersion,

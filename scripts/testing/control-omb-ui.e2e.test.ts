@@ -121,6 +121,36 @@ describe("control-omb ui drives the real renderer", () => {
     if (ownsEvidenceDir) await removeTempDir(evidenceDir);
   });
 
+  run("keeps an existing conversation visible when every engine probe fails", async () => {
+    launched = await launch([]);
+    const { info } = launched;
+    const evaluate = async (js: string) => (await ui("eval", info.ui, "--js", js)).result;
+    await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot).toContain('textbox "Message Pepper"');
+    await ui("type", info.ui, "--name", "Message Pepper", "--text", "Keep this draft");
+    await evaluate(`(() => {
+      const original = window.fetch.bind(window);
+      window.fixtureEngineProbes = 0;
+      window.fetch = async (url, init) => {
+        const response = await original(url, init);
+        if (String(url) !== '/api/instances') return response;
+        const data = await response.json();
+        window.fixtureEngineProbes++;
+        return Response.json({ ...data, instances: data.instances.map(instance => ({
+          ...instance, snapshot: { state: 'unavailable', reason: 'Fixture engine check timed out' }
+        })) });
+      };
+      setTimeout(() => window.dispatchEvent(new Event('focus')), 3100);
+      return true;
+    })()`);
+    await expect.poll(() => evaluate('window.fixtureEngineProbes'), { timeout: 10_000 }).toBeGreaterThan(0);
+    await expect.poll(async () => (await ui("snapshot", info.ui)).snapshot).toContain('textbox "Message Pepper"');
+    const snapshot = (await ui("snapshot", info.ui)).snapshot;
+    expect(snapshot).not.toContain("Install an AI engine to get started");
+    expect(await evaluate(`${COMPOSER}.value`)).toBe("Keep this draft");
+    await waitForExit(launched.child, { signal: "SIGINT", graceMs: 30_000 });
+    expect(launched.child.exitCode).toBe(0);
+  }, LAUNCH_TIMEOUT_MS + 120_000);
+
   run("tests saved keys only from an untouched field and blocks erased drafts", async () => {
     launched = await launch([]);
     const { info } = launched;

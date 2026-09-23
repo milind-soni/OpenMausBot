@@ -84,11 +84,11 @@ function Shell() {
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   const calendarFocus = state.activeView === "routines";
 
-  // Nothing on this machine can run a bot. A missing cloud login does not
-  // count — that CLI can still host a local model. Wait for the first
-  // /api/instances response before deciding: an empty list means "not asked
-  // yet", and flashing the setup screen at every launch would be worse.
+  // Only use the full-page engine onboarding in an empty workspace. A
+  // transient probe failure must never replace an existing conversation.
+  // ChatView keeps history visible and shows the selected provider's error.
   const noEngines =
+    !bot && !group &&
     state.connected &&
     state.instances.length > 0 &&
     !state.instances.some((i) => i.snapshot.state === "available");

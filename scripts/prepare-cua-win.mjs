@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
+import { buildWindowsCuaSdk } from "./build-windows-cua-sdk.mjs";
 
 if (process.platform !== "win32" || process.arch !== "x64") throw new Error("prepare-cua-win requires Windows x64");
 
@@ -34,7 +35,7 @@ if (expectedVersion !== release.version) {
 async function binaryVersion(candidate) {
   if (!candidate || !existsSync(candidate)) return null;
   try {
-    const { stdout } = await run(candidate, ["--version"], { timeout: 5000 });
+    const { stdout } = await run(candidate, ["--version"], { timeout: 5000, windowsHide: true });
     return stdout.match(/cua-driver\s+([\d.]+)/)?.[1] ?? null;
   } catch {
     return null;
@@ -118,7 +119,7 @@ if (!existsSync(winNativePackage)) {
 }
 await mkdir(nativeDir, { recursive: true });
 await Promise.all([
-  copyFile(join(realpathSync(winNativePackage), "cua_driver_sdk.dll"), join(nativeDir, "cua_driver_sdk.dll")),
+  buildWindowsCuaSdk(nativeDir, expectedVersion),
   copyFile(join(realpathSync(winNativePackage), "cua_driver_node_runtime.node"), join(nativeDir, "cua_driver_node_runtime.node")),
 ]);
 

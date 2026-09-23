@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { executableTarget } from "./prepare-cloudflared.mjs";
 import { bundleInventory, releaseBytes } from "./prepare-browser.mjs";
 
-export const WINDOWS_VENDOR_VERSION = "0.36.0-omb.1";
+export const WINDOWS_VENDOR_VERSION = "0.36.0-omb.2";
 export const WINDOWS_VENDOR_TARGET = "x86_64-pc-windows-gnu";
 export const WINDOWS_VENDOR_SOURCE = {
   commit: "eb05921bad874cd2a1b4fa5d1149f1ed26576cae",
@@ -19,7 +19,7 @@ export const WINDOWS_VENDOR_SOURCE = {
   bytes: 1904718,
   sha256: "ed24a72a5260d9c1ea454cd849c44159bac570a6939ac645e4c5bdb98a421646",
 };
-export const WINDOWS_VENDOR_PATCH_SHA256 = "27a268a90de47603a473daefb5679ef9ddde3fad9152d52b04e563b3e192c9a9";
+export const WINDOWS_VENDOR_PATCH_SHA256 = "ae69faac6401694acace7d5e35a28e767406beb7aff4065176effd3b94fbdbf0";
 export const WINDOWS_VENDOR_RUST = "1.97.1";
 export const WINDOWS_VENDOR_PNPM = "11.1.3";
 const repository = fileURLToPath(new URL("../", import.meta.url));
@@ -107,7 +107,7 @@ export async function buildWindowsBrowserVendor(output) {
     const provenance = {
       schemaVersion: 1, version: WINDOWS_VENDOR_VERSION, target: WINDOWS_VENDOR_TARGET,
       source: WINDOWS_VENDOR_SOURCE,
-      patch: { upstream: "https://github.com/vercel-labs/agent-browser/pull/1781", commit: "81a98c349d04195396ffae6898bd375ad64280de", sha256: WINDOWS_VENDOR_PATCH_SHA256, scope: "Windows handle inheritance only; no MCP reader rewrite" },
+      patch: { upstream: "https://github.com/vercel-labs/agent-browser/pull/1781", commit: "81a98c349d04195396ffae6898bd375ad64280de", sha256: WINDOWS_VENDOR_PATCH_SHA256, scope: "Windows handle inheritance and headless Chrome console suppression; no MCP reader rewrite" },
       toolchain: { rust, cargo, pnpm, node: process.version, mingw, linker },
       cargoLockSha256: digest(readFileSync(join(source, "cli/Cargo.lock"))),
       pnpmLockSha256: digest(readFileSync(join(source, "pnpm-lock.yaml"))),

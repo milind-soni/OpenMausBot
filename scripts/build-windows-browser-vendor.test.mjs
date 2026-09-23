@@ -11,7 +11,7 @@ describe("reviewed Windows browser dependency build", () => {
     expect(WINDOWS_VENDOR_SOURCE.commit).toBe("eb05921bad874cd2a1b4fa5d1149f1ed26576cae");
     expect(WINDOWS_VENDOR_SOURCE.url).toContain(WINDOWS_VENDOR_SOURCE.commit);
     expect(WINDOWS_VENDOR_TARGET).toBe("x86_64-pc-windows-gnu");
-    expect(WINDOWS_VENDOR_VERSION).toBe("0.36.0-omb.1");
+    expect(WINDOWS_VENDOR_VERSION).toBe("0.36.0-omb.2");
     expect(WINDOWS_VENDOR_RUST).toBe("1.97.1");
     expect(WINDOWS_VENDOR_PNPM).toBe("11.1.3");
     expect(WINDOWS_VENDOR_PATCH_SHA256).toMatch(/^[0-9a-f]{64}$/);
@@ -19,7 +19,9 @@ describe("reviewed Windows browser dependency build", () => {
     expect(() => verifyVendorPatch(patch)).not.toThrow();
     expect(() => verifyVendorPatch(Buffer.concat([patch, Buffer.from("\n")]))).toThrow(/SHA-256/);
     const changed = [...patch.toString().matchAll(/^diff --git a\/(\S+) /gm)].map((match) => match[1]);
-    expect(changed).toEqual(["cli/src/connection.rs", "cli/src/main.rs", "cli/Cargo.toml", "cli/Cargo.lock"]);
+    expect(changed).toEqual(["cli/src/connection.rs", "cli/src/main.rs", "cli/src/native/cdp/chrome.rs", "cli/Cargo.toml", "cli/Cargo.lock"]);
+    expect(patch.toString()).toContain("if options.effectively_headless()");
+    expect(patch.toString()).toContain("cmd.creation_flags(CREATE_NO_WINDOW)");
     expect(patch.toString()).toContain("SetHandleInformation(handle as isize, HANDLE_FLAG_INHERIT, 0)");
     expect(patch.toString()).not.toContain("run_command_returns_partial_output");
   });
