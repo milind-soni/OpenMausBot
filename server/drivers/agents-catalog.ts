@@ -411,11 +411,14 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "create_room",
     description:
-      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
+      "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically. Choose response_mode for the room; lead defaults to you. Provide opening_message only when the user asks to start the discussion; it posts one shared invitation and starts the selected response mode. Otherwise no turns or messages are created. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
+        response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent room response mode. Dynamic selects speakers by the conversation." },
+        lead_bot_id: { type: "string", description: "Room member to lead when response_mode is lead; defaults to you." },
+        opening_message: { type: "string", minLength: 1, maxLength: 12_000, description: "Optional shared opening to start the requested discussion immediately." },
         name: { type: "string", minLength: 1, maxLength: 100, description: "Display name for the room (e.g. \"Nalamdesk Team\")." },
         member_bot_ids: {
           type: "array",
@@ -436,15 +439,17 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "manage_room",
     description:
-      "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
+      "Manage a room from list_rooms: rename it, change its bulletin, add/remove/set members, or change its response mode. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
+        response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent room response mode. Dynamic selects speakers by the conversation." },
+        lead_bot_id: { type: "string", description: "Room member to lead when response_mode is lead; defaults to you." },
         room_id: { type: "string", description: "The ID of the group room to manage." },
         action: {
           type: "string",
-          enum: ["add_members", "remove_members", "set_members", "rename", "set_bulletin"],
+          enum: ["add_members", "remove_members", "set_members", "rename", "set_bulletin", "set_response_mode"],
           description: "The action to perform on the room.",
         },
         member_bot_ids: {
