@@ -148,6 +148,14 @@ export function resolveDriverBinary() {
   return null;
 }
 
+export function resolveEmbeddedDriverBinary(binary) {
+  if (process.platform !== "win32" || !app.isPackaged || process.env.CUA_DRIVER_PATH ||
+      binary !== path.join(process.resourcesPath, "cua-driver.exe")) return binary;
+  const background = path.join(process.resourcesPath, "cua-driver-background.exe");
+  if (!fs.existsSync(background)) throw new Error("Packaged background CUA driver is missing; reinstall OpenMausBot");
+  return background;
+}
+
 function socketAlive(sockPath) {
   return new Promise((resolve) => {
     if (!fs.existsSync(sockPath)) return resolve(false);
@@ -238,7 +246,8 @@ async function startEmbedded(binary, signal) {
       throw new Error(`${missing || "macOS permissions"} required; grant access in System Settings and restart OpenMausBot`);
     }
   }
-  const host = new sdk.EmbeddedCuaDriverHost(binary, HOST_BUNDLE_ID);
+  // The native SDK owns the child lifecycle but exposes no windowsHide option.
+  const host = new sdk.EmbeddedCuaDriverHost(resolveEmbeddedDriverBinary(binary), HOST_BUNDLE_ID);
   try {
     const conn = await host.start({ signal });
     signal.throwIfAborted();
