@@ -68,13 +68,15 @@ it("creates and manages an own-section room through the mounted Chief MCP proxy"
       return reply.result.content.map((item) => item.text).join("\n");
     };
     const rooms = async () => (await api<{ groups: Room[] }>("GET", "/api/bots?messages=0")).groups;
-    await tool("create_room", { name: "Review room", member_bot_ids: [peer.id], bulletin: "Review only the assigned change.", response_mode: "dynamic" });
+    await tool("create_room", { name: "Review room", member_bot_ids: [peer.id], bulletin: "Review only the assigned change.", response_mode: "dynamic", meeting_limits: { time: { seconds: 300 }, cost: { hardStopUsd: 0.5, wrapUpUsd: 0.35 } } });
     const room = (await rooms()).find((candidate) => candidate.name === "Review room")!;
     expect(room).toMatchObject({ section: "Room verification", memberIds: [chief.id, peer.id], working: false, defaultResponder: { kind: "dynamic" } });
     expect(await tool("list_rooms", {})).toContain(room.id);
     await tool("manage_room", { room_id: room.id, action: "set_response_mode", response_mode: "everyone" });
     expect((await rooms()).find(candidate => candidate.id === room.id)?.defaultResponder).toEqual({ kind: "everyone" });
     await tool("manage_room", { room_id: room.id, action: "set_response_mode", response_mode: "dynamic" });
+    await tool("manage_room", { room_id: room.id, action: "set_meeting_limits", meeting_limits: { tokens: { hardStop: 100000 }, replies: { hardStop: 10, wrapUpAfter: 7 } } });
+    await tool("manage_room", { room_id: room.id, action: "set_meeting_limits", meeting_limits: {} }, true);
     await tool("manage_room", { room_id: room.id, action: "rename", name: "Verified room" });
     await tool("manage_room", { room_id: room.id, action: "add_members", member_bot_ids: [second.id] });
     await tool("manage_room", { room_id: room.id, action: "remove_members", member_bot_ids: [peer.id] });
