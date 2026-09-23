@@ -498,11 +498,30 @@
     },
     {
       "name": "create_room",
-      "description": "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically as the default responder. This creates no turns or messages. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
+      "description": "Create a room in your own section when the user asks for one (maximum four per turn). Chiefs only. Choose active peers from list_bots; you are included automatically. Only supply opening_message when asked to start discussing: it posts one shared invitation and starts response_mode. Otherwise creates no messages or turns. Section moves stay with the user. Follow the tool result under the effective access level; if permission is refused, ask the user to make the room change instead, without trying another route.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "response_mode": {
+            "type": "string",
+            "enum": [
+              "lead",
+              "everyone",
+              "mentions",
+              "dynamic"
+            ],
+            "description": "Persistent mode; dynamic follows the conversation."
+          },
+          "lead_bot_id": {
+            "type": "string",
+            "description": "Leader for lead mode; defaults to you."
+          },
+          "opening_message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 12000
+          },
           "name": {
             "type": "string",
             "minLength": 1,
@@ -532,11 +551,25 @@
     },
     {
       "name": "manage_room",
-      "description": "Manage a room from list_rooms: rename it, change its bulletin, or add/remove/set members. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
+      "description": "Manage a room from list_rooms: rename it, change its bulletin, add/remove/set members, or change its response mode. Chiefs only, within your own section and allowed peers; keep yourself as a member. Busy rooms, pending approvals and team-goal leads are protected. You cannot move rooms or bots between sections. Follow the tool result under the effective access level; if the change is refused, report the blocker and ask the user to make the change instead, without trying another route.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "response_mode": {
+            "type": "string",
+            "enum": [
+              "lead",
+              "everyone",
+              "mentions",
+              "dynamic"
+            ],
+            "description": "Persistent mode; dynamic follows the conversation."
+          },
+          "lead_bot_id": {
+            "type": "string",
+            "description": "Leader for lead mode; defaults to you."
+          },
           "room_id": {
             "type": "string",
             "description": "The ID of the group room to manage."
@@ -548,7 +581,8 @@
               "remove_members",
               "set_members",
               "rename",
-              "set_bulletin"
+              "set_bulletin",
+              "set_response_mode"
             ],
             "description": "The action to perform on the room."
           },
