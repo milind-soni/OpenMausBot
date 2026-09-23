@@ -446,6 +446,7 @@ export function normalizeGroupDefaultResponder(
   if (dm) return { kind: "mentions" };
   if (value && typeof value === "object") {
     const candidate = value as { kind?: unknown; botId?: unknown };
+    if (candidate.kind === "dynamic") return { kind: "dynamic" };
     if (candidate.kind === "everyone") return { kind: "everyone" };
     if (candidate.kind === "mentions") return { kind: "mentions" };
     if (
