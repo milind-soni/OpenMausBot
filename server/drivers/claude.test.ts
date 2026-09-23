@@ -1630,14 +1630,27 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed");
   });
 
-  it("interrupt kills the turn and settles it as failed, not hung", async () => {
-    await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-int", text: "go" });
-    await recorder.until((e) => e.type === "session.started");
+  it.each([false, true])("interrupt kills the turn and settles it as interrupted, not hung (retained: %s)", async (retained) => {
+    const gate = join(scratch, "stop-interrupt.gate");
+    const dump = join(scratch, "stop-interrupt-dump.json");
+    await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: gate, FAKE_CLAUDE_DUMP: dump });
+    const threadId = `t-int-${retained}`;
+    if (retained) {
+      writeFileSync(gate, "finish");
+      const first = await instance.adapter.sendTurn({ threadId, text: "first" });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+      rmSync(gate);
+      rmSync(dump);
+    }
+    const running = await instance.adapter.sendTurn({ threadId, text: "go" });
+    await recorder.until((e) => e.type === "item.completed" && e.itemType === "tool" && e.turnId === running.turnId);
+    const spawnedItsOwnProcess = existsSync(dump);
+    expect(spawnedItsOwnProcess).toBe(!retained);
 
-    await instance.adapter.interruptTurn("t-int");
-    const done = await recorder.until((e) => e.type === "turn.completed");
-    expect(done).toMatchObject({ ok: false, stopReason: "exit_before_result" });
+    await instance.adapter.interruptTurn(threadId);
+    const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === running.turnId);
+    expect(done).toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(recorder.events.filter((e) => e.type === "runtime.error")).toEqual([]);
   });
 
   it.each([false, true])("refuses steering and retires approvals after interrupt before process exit (retained=%s)", async (retained) => {
