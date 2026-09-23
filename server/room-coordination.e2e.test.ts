@@ -388,9 +388,10 @@ it("excludes cross-conversation history from scoped room handoffs but preserves 
   expect(JSON.stringify(handoff.prompt)).toContain("Please build CSV");
   expect(JSON.stringify(handoff.prompt)).not.toContain("PRIVATE_UNRELATED_SENTINEL_83A");
   expect(JSON.stringify(handoff.prompt)).not.toContain("<other_conversations>");
-  expect((await f.messages(f.destination.activeTaskId)).some((message: any) => /private conversation/.test(message.tool?.name ?? ""))).toBe(false);
+  expect((await f.messages(f.destination.activeTaskId)).some((message: any) => /private chat/.test(message.tool?.name ?? ""))).toBe(false);
   await f.cli("send-channel", "--channel", f.destination.id, "--text", "@Engineer Continue our own discussion.");
   expect((await f.cli("wait", "--channel", f.destination.id, "--timeout", "30")).status).toBe("settled");
   const ordinary = f.provider().filter((turn: any) => turn.botId === f.target.id).at(-1);
   expect(JSON.stringify(ordinary.prompt)).toContain("PRIVATE_UNRELATED_SENTINEL_83A");
+  expect((await f.messages(f.destination.activeTaskId)).some((message: any) => /private chat/.test(message.tool?.name ?? ""))).toBe(true);
 }), 60_000);
