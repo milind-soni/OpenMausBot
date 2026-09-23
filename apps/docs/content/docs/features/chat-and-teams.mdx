@@ -25,3 +25,23 @@ Editing an earlier message creates a new conversation path. OpenMausBot avoids r
 ## Memory and working folders
 
 Bot memory is visible and editable. A bot may also have a dedicated working folder; groups can use a shared working folder. Cloud workspaces use a stable default so generated files remain discoverable across threads. A sidebar folder is only organization, not a working directory or a permission boundary.
+
+
+## Inspecting provider input
+
+Open **Prompt inspector** (the braces icon in a private or group chat header)
+after sending a message. Select a captured record to view its input, request
+body, changes from the preceding record, or diagnostics. Search, copy and JSON
+export help compare requests. **Refresh** loads newly captured requests.
+
+Uncached input, cached input and output are separate. A dash means the provider
+did not report the value. **Agent input** shows what OpenMausBot passed to the
+provider client, with whole-turn usage; that client may add its own context.
+**API request** shows a redacted HTTP body and that request's usage, available
+for connections using the direct chat-completions runtime. External CLI/ACP
+clients' final model HTTP requests are not captured by this view.
+
+The inspector is administrator-only and retains the latest six records per
+conversation. Oversized bodies are omitted; diagnostics remain available.
+Deleting a conversation removes its captures and stored captures referencing
+it. Exports contain conversation text: review them before sharing.
