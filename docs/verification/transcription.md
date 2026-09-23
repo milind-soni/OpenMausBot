@@ -6,7 +6,7 @@ transcription credentials, chats, or microphone.
 ## Automated checks
 
 ```sh
-node --test electron/stt-core.node-test.mjs electron/stt-settings.node-test.mjs electron/stt-local.node-test.mjs electron/preload.node-test.mjs electron/capabilities.node-test.mjs
+node --test electron/stt-engine-selection.node-test.mjs electron/stt-core.node-test.mjs electron/stt-settings.node-test.mjs electron/stt-local.node-test.mjs electron/preload.node-test.mjs electron/capabilities.node-test.mjs
 pnpm exec vitest run src/lib/transcription.test.ts src/lib/desktop.test.ts
 ```
 
@@ -49,3 +49,9 @@ Whisper runtime, or packaged OS permission prompt. Those require platform checks
   in-flight segment. No transcript may arrive in the new chat or send itself.
 - Check approved cloud endpoints with consented audio; no API key should appear
   in renderer state, errors, screenshots, or ordinary logs.
+
+Custom executable paths require a main-process native picker grant owned by the
+selecting window. Ordinary saves can retain the persisted selection or clear
+it, but cannot substitute an arbitrary renderer-supplied program. Node tests
+cover cross-window, replaced and destroyed-window grants; the real Electron
+fixture verifies both save and install IPC reject an unselected executable.
