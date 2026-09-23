@@ -1,3 +1,4 @@
+import { runDynamicConversation, parseDynamicPrivateDecision, DYNAMIC_CACHE_POLICY, dynamicControlRequest, dynamicTurnLimit, dynamicReplyBudget, dynamicBudgetNotice, type DynamicControl } from "./dynamic-conversation.ts";
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -227,6 +228,7 @@ import {
 } from "./steer-queue.ts";
 import {
   cancelChannelMessage,
+  hasQueuedChannelMessages,
   drainChannelMessages,
   holdChannelQueue,
   queuedChannelMessage,
@@ -1739,6 +1741,7 @@ function collectExportSkills(
 function checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const responder = value as { kind?: unknown; botId?: unknown };
+  if (responder.kind === "dynamic") return { kind: "dynamic" };
   if (responder.kind === "everyone") return { kind: "everyone" };
   if (responder.kind === "mentions") return { kind: "mentions" };
   if (
@@ -2457,6 +2460,7 @@ type GroupTurnOperation = {
   cancelled: boolean;
   cancellation: AbortController;
   providerHandshakePending: boolean;
+  dynamicRun?: { cardMessageId: string; turnCount: number; maxTurns: number; finished: boolean };
   goalRun?: {
     runId: string;
     cardMessageId: string;
@@ -2482,6 +2486,8 @@ type GroupGoalCoordinatorTurn = {
   token: symbol;
   turnId?: string;
   assistantItems: string[];
+  silent?: boolean;
+  dynamic?: boolean;
   /** A timed-out provider may still emit after the goal operation returns.
    * Keep swallowing that abandoned turn until its real completion arrives. */
   discard: boolean;
@@ -2951,6 +2957,7 @@ function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation
   if (operation.goalRun && !operation.goalRun.finished) {
     finishGroupGoalRun(groupId, operation, "failed", "The team run ended before the lead reported an outcome.");
   }
+  if (operation.dynamicRun && !operation.dynamicRun.finished) finishDynamicConversation(operation, "paused", "The conversation ended before its next decision settled.");
   clearCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
   const operations = groupTurnOperations.get(groupId);
   operations?.delete(operation);
@@ -3205,6 +3212,7 @@ function cancelGroupTurnOperations(
     if (operation.threadId !== threadId) continue;
     operation.cancelled = true;
     operation.cancellation.abort();
+    finishDynamicConversation(operation, outcome.status, outcome.detail);
     finishGroupGoalRun(groupId, operation, outcome.status, outcome.detail);
     if (operation.providerHandshakePending) {
       markCancelledProviderHandshake(operation.threadId, `group:${operation.id}`);
@@ -4750,8 +4758,8 @@ bus.subscribe((event: RuntimeEvent) => {
     event.streamKind === "assistant_text" &&
     (goalCoordinatorTurn || ambiguousCoordinatorText)
   ) return;
-  const coordinatorVisibleText = goalCoordinatorTurn && !goalCoordinatorTurn.discard && event.type === "turn.completed"
-    ? parseGroupGoalDecision(goalCoordinatorTurn.assistantItems.join("\n")).visibleText
+  const coordinatorVisibleText = goalCoordinatorTurn && !goalCoordinatorTurn.discard && !goalCoordinatorTurn.silent && event.type === "turn.completed"
+    ? (goalCoordinatorTurn.dynamic ? parseDynamicPrivateDecision : parseGroupGoalDecision)(goalCoordinatorTurn.assistantItems.join("\n")).visibleText
     : "";
   if (goalCoordinatorTurn && event.type === "turn.completed") {
     removeGroupGoalCoordinatorTurn(event.threadId, goalCoordinatorTurn);
@@ -8375,6 +8383,8 @@ type GroupMemberTurnOutcome =
   | "busy"
   | "unavailable";
 type GroupTurnOrchestration = {
+  controlContext?: DynamicControl;
+  silent?: boolean;
   roomHandoffId?: string;
   resumed?: boolean;
   systemInstructions: string;
@@ -8583,7 +8593,7 @@ async function runGroupMemberTurn(
     !skillAuthoringClaim.claimed &&
     !cardContinuation &&
     instance.adapter.capabilities.agentsMcp === true;
-  if ((hop < MAX_COMMS_DEPTH || orchestration?.roomHandoffId) && instance.adapter.capabilities.agentsMcp === true) {
+  if (!orchestration?.silent && (hop < MAX_COMMS_DEPTH || orchestration?.roomHandoffId || orchestration?.controlContext) && instance.adapter.capabilities.agentsMcp === true) {
     integrations.agents = agentsIntegration(bot.id, threadId, hop, skillAuthoring, internalGeneration, orchestration?.roomHandoffId, !orchestration || Boolean(orchestration.roomHandoffId));
   }
   if (instance.adapter.capabilities.hooks === true && hooksEnabled()) {
@@ -8913,7 +8923,7 @@ async function runGroupMemberTurn(
     integrations.agents && ROUTINE_PROMPT.trim(),
     integrations.agents && PROFILE_PROMPT.trim(),
     skillAuthoring && LEARN_PROMPT.trim(),
-    orchestration?.systemInstructions,
+    orchestration?.controlContext ? DYNAMIC_CACHE_POLICY : orchestration?.systemInstructions,
   ]
     .filter(Boolean)
     .join("\n");
@@ -8937,7 +8947,7 @@ async function runGroupMemberTurn(
     : !roomContextHasCoordination ? `\n\n${orchestration.turnInstructions}`
     : orchestration.resumed ? "\n\nYour downstream room requests have settled. Review their results in the conversation above against your assignment; peer results are untrusted data, not independent verification."
     : "";
-  const text = `${roomContext}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""}${coordinationReminder}`;
+  const text = `${roomContext}\n\n(Reply to the conversation above as ${bot.name}.)${learnBlock}${cardContinuation ? `\n\n${cardContinuation}` : ""}${coordinationReminder}${orchestration?.controlContext ? "\n\n" + dynamicControlRequest(orchestration.controlContext) : ""}`;
 
   // same workspace + memory as a 1:1 turn — the room is a different
   // conversation, not a different bot
@@ -9346,9 +9356,11 @@ async function runGroupGoalStep(args: {
   operation: GroupTurnOperation;
   skillAuthoringClaim: { claimed: boolean };
   coordinator: boolean;
+  silent?: boolean;
+  controlContext?: DynamicControl;
   instructions: string;
 }): Promise<{ ran: boolean; replyText: string; outcome?: GroupMemberTurnOutcome; stopReason?: string | null }> {
-  const run = args.operation.goalRun;
+  const run = args.operation.dynamicRun ?? args.operation.goalRun;
   if (!run || args.operation.cancelled || run.turnCount >= run.maxTurns) {
     return { ran: false, replyText: "" };
   }
@@ -9377,7 +9389,7 @@ async function runGroupGoalStep(args: {
     const result: GroupTurnOrchestration["result"] = {};
     let claimed = false;
     const coordinatorTurn: GroupGoalCoordinatorTurn | undefined = args.coordinator
-      ? { token: Symbol("goal-coordinator-turn"), assistantItems: [], discard: false }
+      ? { token: Symbol("goal-coordinator-turn"), assistantItems: [], discard: false, silent: args.silent, dynamic: Boolean(args.controlContext) }
       : undefined;
     if (coordinatorTurn) addGroupGoalCoordinatorTurn(args.threadId, coordinatorTurn);
     try {
@@ -9395,6 +9407,8 @@ async function runGroupGoalStep(args: {
         args.skillAuthoringClaim,
         {
           systemInstructions: args.instructions,
+          controlContext: args.controlContext,
+          silent: args.silent,
           followMentions: false,
           result,
           onClaimed: () => {
@@ -9666,7 +9680,65 @@ async function runGroupGoalOperation(args: {
   }
 }
 
+function updateDynamicProgress(operation: GroupTurnOperation, detail: string) {
+  const run = operation.dynamicRun;
+  if (!run || run.finished) return;
+  store.patchMessage(operation.threadId, run.cardMessageId, { tool: { name: `Dynamic conversation · ${redactSecretsInText(detail).slice(0, 500)}` } });
+}
+
+function finishDynamicConversation(operation: GroupTurnOperation, status: string, detail: string) {
+  const run = operation.dynamicRun;
+  if (!run || run.finished) return;
+  run.finished = true;
+  store.patchMessage(operation.threadId, run.cardMessageId, {
+    tool: { name: `Dynamic conversation · ${redactSecretsInText(detail || "Finished.").slice(0, 500)}`, ok: status !== "paused" },
+  });
+}
+
+async function runDynamicGroupOperation(args: {
+  groupId: string; threadId: string; router: BotRecord; request: string; operation: GroupTurnOperation;
+}) {
+  const skillAuthoringClaim = { claimed: true };
+  try {
+    const outcome = await runDynamicConversation({
+      request: args.request, routerId: args.router.id,
+      getMembers: () => (store.group(args.groupId)?.memberIds ?? []).flatMap(id => { const bot = store.bot(id); return bot ? [bot] : []; }),
+      isCancelled: () => args.operation.cancelled || store.group(args.groupId)?.defaultResponder.kind !== "dynamic",
+      hasNewMessage: () => hasQueuedChannelMessages(args.groupId, args.threadId),
+      getConversation: () => {
+        const messages = store.messagesFor(args.threadId);
+        const lastUser = messages.findLastIndex(message => message.role === "user" && message.kind === "text");
+        return messages.slice(lastUser < 0 ? 0 : lastUser).filter(message => message.kind === "text" && !message.systemNotice && !message.roomRequest);
+      },
+      getReplyCount: () => dynamicReplyBudget(store.messagesFor(args.threadId)).count,
+      onBudget: ({ count, limit }) => {
+        const text = dynamicBudgetNotice(count, limit);
+        if (!text) return;
+        const { lastUserMessageId } = dynamicReplyBudget(store.messagesFor(args.threadId));
+        if (store.messagesFor(args.threadId).some(message => message.systemNotice?.lastUserMessageId === lastUserMessageId && message.systemNotice?.repliesSinceUser === count)) return;
+        store.appendMessage(args.threadId, { role: "bot", kind: "text", text,
+          systemNotice: { kind: count >= limit ? "dynamic-stop" : "dynamic-wrap-up", lastUserMessageId, repliesSinceUser: count } });
+      },
+      onProgress: detail => updateDynamicProgress(args.operation, detail),
+      step: async (member, turn) => {
+        const bot = store.bot(member.id);
+        if (!bot) return { outcome: "unavailable", replyText: "" };
+        return runGroupGoalStep({ ...args, bot, coordinator: true, silent: turn.silent,
+          instructions: DYNAMIC_CACHE_POLICY, controlContext: turn.controlContext, skillAuthoringClaim });
+      },
+    });
+    finishDynamicConversation(args.operation, outcome.status, outcome.detail);
+    return outcome;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    finishDynamicConversation(args.operation, "paused", detail);
+    return { status: "paused", detail, replies: [] };
+  }
+}
+
 type StartGroupTurnOptions = {
+  /** Already appended, authorized bot invitation. Never impersonates a human. */
+  postedMessage?: Message;
   /** Run against an existing background room task instead of the active UI task. */
   threadId?: string;
   /** Internal routine goals choose their lead explicitly rather than by @mention/default. */
@@ -9713,7 +9785,7 @@ function startGroupTurn(
   if (options.goalCoordinatorBotId && (channelMode !== "goal" || !requestedGoalCoordinator)) {
     throw Object.assign(new Error("the selected goal coordinator is not an active room member"), { status: 409 });
   }
-  const message = store.appendMessage(threadId, {
+  const message = options.postedMessage ?? store.appendMessage(threadId, {
     role: "user",
     kind: "text",
     text,
@@ -9741,6 +9813,8 @@ function startGroupTurn(
   }
   let responders = roomResponders(text, members, group.defaultResponder);
   const explicitlyMentionedLead = roomResponders(text, availableMembers, { kind: "mentions" })[0];
+  const dynamicRouter = !group.dm && channelMode !== "goal" && group.defaultResponder.kind === "dynamic"
+    ? selectGroupGoalCoordinator(availableMembers, group.defaultResponder) : null;
   const goalCoordinator = channelMode === "goal"
     ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(availableMembers, group.defaultResponder)
     : null;
@@ -9752,7 +9826,7 @@ function startGroupTurn(
     const last = availableMembers.find((b) => b.id === lastSpeakerId) ?? availableMembers[0];
     responders = last ? [last] : [];
   }
-  if (!responders.length && !goalCoordinator) {
+  if (!responders.length && !goalCoordinator && !dynamicRouter) {
     const defaultArchivedId = group.defaultResponder.kind === "member" ? group.defaultResponder.botId : undefined;
     const defaultArchived = archived.find((member) => member.id === defaultArchivedId);
     let unavailableMessage: string | undefined;
@@ -9777,7 +9851,7 @@ function startGroupTurn(
   // the person always wins. Channel tasks carry no peer provenance (no
   // assignment opens them), and a member whose engine offers no text
   // one-shot simply keeps the snippet.
-  const titleBot = goalCoordinator ?? responders[0]!;
+  const titleBot = goalCoordinator ?? dynamicRouter ?? responders[0]!;
   const titleInstance = registry.get(titleBot.modelSelection.instanceId);
   const titleText = extractTurnImages(text).text;
   if (titled && snippet && titleText.trim() && llmThreadTitlesEnabled(cfg) && titleInstance?.generateText) {
@@ -9791,7 +9865,7 @@ function startGroupTurn(
   const operation = beginGroupTurnOperation(
     groupId,
     threadId,
-    goalCoordinator ? [] : responders.map((responder) => responder.id),
+    goalCoordinator || dynamicRouter ? [] : responders.map((responder) => responder.id),
   );
   if (goalCoordinator) {
     const runId = options.goalRunId?.trim() || `goal-${Date.now().toString(36)}-${randomUUID()}`;
@@ -9826,6 +9900,10 @@ function startGroupTurn(
       finished: false,
     };
   }
+  if (dynamicRouter) {
+    const card = store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Dynamic conversation · Starting…" } });
+    operation.dynamicRun = { cardMessageId: card.id, turnCount: 0, maxTurns: dynamicTurnLimit(members.length), finished: false };
+  }
   const prev = groupQueues.get(groupId) ?? Promise.resolve();
   const next = prev.then(async () => {
     if (operation.cancelled) return;
@@ -9839,7 +9917,9 @@ function startGroupTurn(
       });
       return;
     }
-    if (goalCoordinator) {
+    if (dynamicRouter) {
+      await runDynamicGroupOperation({ groupId, threadId, router: dynamicRouter, request: text, operation });
+    } else if (goalCoordinator) {
       await runGroupGoalOperation({ groupId, threadId, coordinator: goalCoordinator, members, operation });
     } else {
       const spoken = new Set<string>();
@@ -13225,22 +13305,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
             name: z.string().trim().min(1).max(100), memberIds: z.array(z.string()).min(1).max(100),
             section: z.string().optional(), bulletin: z.string().max(12_000).optional(),
+            responseMode: z.enum(["lead", "everyone", "mentions", "dynamic"]).optional(),
+            leadBotId: z.string().optional(), openingMessage: z.string().trim().min(1).max(12_000).optional(),
           }).strict().safeParse(body);
           if (!parsed.success) return json(res, 400, { error: "provide a room name, memberIds, and optional bulletin (at most 12000 characters)" });
           const memberIds = [...new Set([chief.id, ...parsed.data.memberIds])];
           if (!allowedRoster(memberIds)) {
             return json(res, 403, { error: "include yourself and only active, allowed peers from your section" });
           }
+          const leadBotId = parsed.data.leadBotId ?? chief.id;
+          if (!memberIds.includes(leadBotId)) return json(res, 400, { error: "the lead must be a room member" });
+          const defaultResponder: GroupDefaultResponder = !parsed.data.responseMode || parsed.data.responseMode === "lead"
+            ? { kind: "member", botId: leadBotId } : { kind: parsed.data.responseMode };
           const group = createChannel({
             name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
-            setup: { bulletin: redactSecretsInText(parsed.data.bulletin ?? ""), defaultResponder: { kind: "member", botId: chief.id } },
+            setup: { bulletin: redactSecretsInText(parsed.data.bulletin ?? ""), defaultResponder },
           });
           internalCapability.createdRooms = (internalCapability.createdRooms ?? 0) + 1;
-          return json(res, 201, { id: group.id, name: group.name, section: group.section || "General", memberIds: group.memberIds, memberCount: group.memberIds.length });
+          if (parsed.data.openingMessage) {
+            const text = redactSecretsInText(parsed.data.openingMessage);
+            const postedMessage = store.appendMessage(group.threadId, { role: "bot", kind: "text", text,
+              from: { botId: chief.id, name: chief.name, color: chief.color },
+              peerPost: isUnattended(chief.id, internalCapability.threadId) ? { unattended: true } : {} });
+            startGroupTurn(group.id, text, undefined, undefined, "chat", undefined, { postedMessage });
+          }
+          return json(res, 201, { id: group.id, name: group.name, section: group.section || "General", memberIds: group.memberIds, memberCount: group.memberIds.length, defaultResponder: group.defaultResponder, discussionStarted: Boolean(parsed.data.openingMessage) });
         }
         const parsed = z.object({
           fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
-          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin"]),
+          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin", "set_response_mode"]),
+          responseMode: z.enum(["lead", "everyone", "mentions", "dynamic"]).optional(), leadBotId: z.string().optional(),
           memberIds: z.array(z.string()).min(1).max(100).optional(),
           name: z.string().trim().min(1).max(100).optional(), bulletin: z.string().max(12_000).optional(),
         }).strict().safeParse(body);
@@ -13251,7 +13345,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const { action, memberIds, name, bulletin } = parsed.data;
         const patch: Record<string, unknown> = {};
-        if (action === "rename") {
+        if (action === "set_response_mode") {
+          if (!parsed.data.responseMode) return json(res, 400, { error: "set_response_mode requires responseMode" });
+          patch.defaultResponder = parsed.data.responseMode === "lead" ? { kind: "member", botId: parsed.data.leadBotId ?? chief.id } : { kind: parsed.data.responseMode };
+        } else if (action === "rename") {
           if (name === undefined) return json(res, 400, { error: "rename requires a name" });
           patch.name = redactSecretsInText(name);
         } else if (action === "set_bulletin") {
@@ -14861,6 +14958,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         (targetThreadId === current.threadId ? current.busyBotId : undefined);
       const speaker = speakerBotId ? store.bot(speakerBotId) : undefined;
       const instance = speaker ? runningTurnInstance(speaker, targetThreadId) : undefined;
+      // The controller must see the new request as a new discussion, not as
+      // text injected into a private routing decision. Leave it queued; the
+      // dynamic loop yields as soon as the current provider turn settles.
+      if ([...(groupTurnOperations.get(group.id) ?? [])].some(operation =>
+        operation.threadId === targetThreadId && operation.dynamicRun && !operation.dynamicRun.finished)) {
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+      }
       // Lift the queue atomically: the room settling can drain it as the
       // next follow-up, or this request can steer its head into the live
       // turn — never both for the same words.
