@@ -199,7 +199,8 @@ export interface Message {
 export type GroupDefaultResponder =
   | { kind: "member"; botId: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "dynamic" };
 
 /** A room: several bots + you in one shared thread. */
 export interface Group {
