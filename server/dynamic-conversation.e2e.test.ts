@@ -10,13 +10,15 @@ const envelope = (next?: string) => `<openmaus-goal>${JSON.stringify(next ? { st
 
 async function fixtureWithReplies(replies: string[], run: (context: {
   api: <T>(method: string, path: string, body?: unknown) => Promise<T>;
-  room: WireGroup; statePath: string; promptsPath: string;
-}) => Promise<void>) {
+  room: WireGroup; statePath: string; promptsPath: string; finishGate: string;
+}) => Promise<void>, holdReply = false) {
   const directory = mkdtempSync(join(tmpdir(), "omb-dynamic-script-"));
   const statePath = join(directory, "replies.txt");
   const promptsPath = join(directory, "prompts.jsonl");
+  const finishGate = join(directory, "finish");
   const fixture = await launchVerificationServer({ ...process.env,
     FAKE_CLAUDE_PROMPTS: promptsPath, FAKE_CLAUDE_REPLIES: JSON.stringify(replies), FAKE_CLAUDE_REPLY_STATE: statePath,
+    ...(holdReply ? { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: finishGate } : {}),
   });
   const api = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const response = await fetch(`${fixture.info.url}${path}`, { method,
@@ -35,12 +37,24 @@ async function fixtureWithReplies(replies: string[], run: (context: {
       name: "Dynamic verification", memberIds: members,
       setup: { bulletin: "Keep the shared discussion focused.", defaultResponder: { kind: "dynamic" } },
     });
-    await run({ api, room, statePath, promptsPath });
+    await run({ api, room, statePath, promptsPath, finishGate });
   } finally {
     await fixture.close();
     await removeTempDir(directory);
   }
 }
+
+it("publishes in-flight dynamic progress through the shared step runtime", async () => {
+  await fixtureWithReplies(["The answer is ready." + envelope(), envelope()], async ({ api, room, finishGate }) => {
+    await api("POST", `/api/groups/${room.id}/messages`, { text: "Discuss the request." });
+    const snapshot = async () => (await api<{ groups: (WireGroup & { messages: Message[] })[] }>("GET", "/api/bots?messages=50")).groups.find(group => group.id === room.id)!;
+    await expect.poll(async () => (await snapshot()).messages.find(message => message.tool?.name.startsWith("Dynamic conversation"))?.tool?.name,
+      { timeout: 20_000 }).toMatch(/^Dynamic conversation · Ada is working on team turn 1 of /);
+    writeFileSync(finishGate, "continue");
+    await expect.poll(async () => (await snapshot()).working, { timeout: 20_000 }).toBe(false);
+    expect((await snapshot()).messages.find(message => message.tool?.name.startsWith("Dynamic conversation"))?.tool?.ok).toBe(true);
+  }, true);
+}, 60_000);
 
 it("runs topic-driven turns through the real room runtime and hides the private ending check", async () => {
   await fixtureWithReplies([
