@@ -1021,7 +1021,6 @@ export class Store {
    * per-thread event logs. Every delete path funnels here — task, group,
    * and bot deletion — so the logs cannot outlive the thread anywhere. */
   private deleteThreadRecord(threadId: string) {
-    forgetPromptCaptures(threadId);
     this.threads.delete(threadId);
     mdb.deleteThread(threadId);
     for (const file of [
@@ -1040,6 +1039,7 @@ export class Store {
   deleteGroup(id: string): boolean {
     const group = this.group(id);
     if (!group) return false;
+    for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map(task => task.threadId)])) forgetPromptCaptures(threadId);
     this.groups = this.groups.filter((g) => g.id !== id);
     this.saveGroups();
     for (const threadId of new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)])) {
@@ -1193,6 +1193,7 @@ export class Store {
     const group = this.group(groupId);
     if (!group || group.dm || !group.tasks || group.tasks.length < 2) return null;
     if (!group.tasks.some((task) => task.threadId === threadId)) return null;
+    forgetPromptCaptures(threadId);
     group.tasks = group.tasks.filter((task) => task.threadId !== threadId);
     this.deleteThreadRecord(threadId);
     if (group.threadId === threadId) {
@@ -1631,6 +1632,7 @@ export class Store {
       ] } };
       nextBots = nextBots.map((candidate) => candidate.id === chief.id ? { ...candidate, lastTeamSetupReceipt } : candidate);
     }
+    for (const threadId of new Set([bot.threadId, ...(bot.tasks ?? []).map(task => task.threadId)])) forgetPromptCaptures(threadId);
     // Persist removal and the review receipt before deleting conversation or
     // workspace data. A failed save must leave the bot recoverable in place.
     this.saveBots(nextBots);
@@ -2390,6 +2392,7 @@ export class Store {
     const bot = this.bot(botId);
     if (!bot?.tasks) return null;
     if (!bot.tasks.some((t) => t.threadId === threadId)) return null;
+    forgetPromptCaptures(threadId);
     bot.tasks = bot.tasks.filter((t) => t.threadId !== threadId);
     const visible = bot.tasks.find((task) => !task.routineRunId)
       ?? this.createTask(botId, undefined, bot.threadId === threadId)!;
