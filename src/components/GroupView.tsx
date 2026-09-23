@@ -1,3 +1,4 @@
+import { MeetingLimitsButton } from "./MeetingLimits";
 // A room: several bots + you in one shared thread. The sidebar and call view
 // carry the personality; avatars inside the room stay still so a busy group
 // does not become a wall of competing motion. Plain messages go to the room's
@@ -1211,7 +1212,7 @@ export function GroupView({ group }: { group: Group }) {
           />
           <GroupCallButton group={group} members={members} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
-          {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
+          {!remoteClient && !setupPending && !group.dm && <><DefaultResponderSelect group={group} members={members} /><MeetingLimitsButton group={group} /></>}
           {group.dm || remoteClient ? (
             memberMauses
           ) : (
