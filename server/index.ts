@@ -1,4 +1,7 @@
-import { runDynamicConversation, parseDynamicPrivateDecision, DYNAMIC_CACHE_POLICY, dynamicControlRequest, dynamicTurnLimit, dynamicReplyBudget, dynamicBudgetNotice, type DynamicControl } from "./dynamic-conversation.ts";
+import { normalizeMeetingLimits, meetingBudgetText } from "../shared/meeting-limits.ts";
+import { MeetingSession } from "./meeting-session.ts";
+import { openRouterMeetingPrices, type MeetingPrice } from "./meeting-pricing.ts";
+import { runDynamicConversation, parseDynamicPrivateDecision, DYNAMIC_CACHE_POLICY, dynamicControlRequest, dynamicTurnLimit, dynamicReplyBudget, type DynamicControl } from "./dynamic-conversation.ts";
 // OpenMausBot server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
@@ -2460,6 +2463,8 @@ type GroupTurnOperation = {
   cancelled: boolean;
   cancellation: AbortController;
   providerHandshakePending: boolean;
+  meeting?: MeetingSession;
+  meetingPrices?: Record<string, MeetingPrice>;
   dynamicRun?: { cardMessageId: string; turnCount: number; maxTurns: number; finished: boolean };
   goalRun?: {
     runId: string;
@@ -2603,7 +2608,8 @@ function createChannel(value: unknown): GroupRecord {
     if (!responder) throw Object.assign(new Error("invalid setup.defaultResponder"), { status: 400 });
     setup = { bulletin: requested.bulletin, defaultResponder: responder, completed: true };
   }
-  return store.createGroup(name, memberIds, false, section, setup);
+  const meetingLimits = body.meetingLimits === undefined ? undefined : normalizeMeetingLimits(body.meetingLimits);
+  return store.createGroup(name, memberIds, false, section, { ...setup, meetingLimits });
 }
 
 function updateChannel(groupId: string, value: unknown): GroupRecord {
@@ -2619,7 +2625,7 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
   }
   if (
     channelTaskBlocked(existing) &&
-    (body.memberIds !== undefined || body.defaultResponder !== undefined || body.bulletin !== undefined)
+    (body.memberIds !== undefined || body.defaultResponder !== undefined || body.bulletin !== undefined || body.meetingLimits !== undefined)
   ) {
     throw Object.assign(new Error("this channel is working or waiting on you — finish that turn first"), { status: 409 });
   }
@@ -2664,6 +2670,10 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
       throw Object.assign(new Error("pause or reassign this room's team-goal routine before removing its lead"), { status: 409 });
     }
     patch.memberIds = roster.memberIds;
+  }
+  if (body.meetingLimits !== undefined) {
+    if (existing.dm) throw Object.assign(new Error("direct-message channels cannot set meeting limits"), { status: 400 });
+    patch.meetingLimits = normalizeMeetingLimits(body.meetingLimits);
   }
   if (body.defaultResponder !== undefined) {
     const memberIds = (patch.memberIds as string[] | undefined) ?? existing.memberIds;
@@ -2954,6 +2964,7 @@ function beginGroupTurnOperation(
 }
 
 function finishGroupTurnOperation(groupId: string, operation: GroupTurnOperation) {
+  operation.meeting?.close();
   if (operation.goalRun && !operation.goalRun.finished) {
     finishGroupGoalRun(groupId, operation, "failed", "The team run ended before the lead reported an outcome.");
   }
@@ -8985,6 +8996,10 @@ async function runGroupMemberTurn(
       });
     }
   }
+  if (operation?.meeting && !operation.meeting.check()) return false;
+  const meetingTurnId = randomUUID();
+  const meetingPrice = operation?.meetingPrices?.[instance.instanceId === readyBot.modelSelection.instanceId ? readyBot.modelSelection.model : instance.models.default];
+  if (operation?.meeting?.limits.cost && !meetingPrice) throw new Error("The selected meeting model has no pricing snapshot");
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
@@ -9003,6 +9018,7 @@ async function runGroupMemberTurn(
     { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
     { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
+    { id: "meeting", label: "Meeting allowance", text: operation?.meeting ? meetingBudgetText(operation.meeting.snapshot()) : "" },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ]);
 
@@ -9043,6 +9059,7 @@ async function runGroupMemberTurn(
     else markCancelledProviderHandshake(threadId, retirementOwner);
   };
   const timeoutMinutes = roomTurnTimeoutMinutes(cfg);
+  operation?.meeting?.beginTurn(meetingTurnId);
   const outcome = await new Promise<GroupMemberTurnOutcome>((resolve) => {
     let done = false;
     let unsub = () => {};
@@ -9070,6 +9087,8 @@ async function runGroupMemberTurn(
       if (shouldIgnoreProviderEvent(e)) return;
       if (e.threadId !== threadId) return;
       if (providerTurnId && e.turnId && e.turnId !== providerTurnId) return;
+      if (e.type === "thread.token-usage.updated") operation?.meeting?.usage(meetingTurnId, e, meetingPrice);
+      if (e.type === "turn.completed" && e.usage) operation?.meeting?.usage(meetingTurnId, e.usage, meetingPrice);
       if (e.type === "item.completed" && e.itemType === "assistant_text") replyText += `\n${e.text}`;
       else if (e.type === "turn.completed") {
         if (orchestration && !e.ok) {
@@ -9148,6 +9167,7 @@ async function runGroupMemberTurn(
         finish("dispatch_failed");
       });
   });
+  operation?.meeting?.endTurn(meetingTurnId, outcome === "settled");
   // The provider turn is terminal now. Revoke before any chained teammate
   // work so a retained proxy from this member cannot act during the next
   // member's generation.
@@ -9426,6 +9446,7 @@ async function runGroupGoalStep(args: {
             if (coordinatorTurn && !coordinatorTurn.turnId) coordinatorTurn.turnId = turnId;
           },
         },
+        args.operation,
       );
       if (result.outcome === "busy") continue;
       // One retry for a transient provider failure: a 13-turn goal must not
@@ -9696,6 +9717,39 @@ function finishDynamicConversation(operation: GroupTurnOperation, status: string
   });
 }
 
+async function startMeetingSession(groupId: string, operation: GroupTurnOperation): Promise<void> {
+  const group = store.group(groupId);
+  if (!group || group.dm) return;
+  const limits = normalizeMeetingLimits(group.meetingLimits);
+  if (limits.cost) {
+    operation.meetingPrices = await openRouterMeetingPrices(group.memberIds.flatMap(id => {
+      const bot = store.bot(id); return bot ? [bot.modelSelection.model] : [];
+    }));
+  }
+  if (operation.cancelled || !store.group(groupId)) return;
+  const threadId = operation.threadId;
+  const { lastUserMessageId } = dynamicReplyBudget(store.messagesFor(threadId));
+  const previous = store.messagesFor(threadId).findLast(message => message.meetingBudget?.lastUserMessageId === lastUserMessageId);
+  const saved = previous?.meetingBudget;
+  const reusable = saved && JSON.stringify(saved.limits) === JSON.stringify(limits);
+  const card = reusable ? previous! : store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Meeting allowance" } });
+  const meeting = new MeetingSession(limits, {
+    replies: () => dynamicReplyBudget(store.messagesFor(threadId)).count,
+    persist: state => store.patchMessage(threadId, card.id, { meetingBudget: { limits, state, lastUserMessageId } }),
+    notice: (text, stopped, count) => {
+      const kind = stopped ? "dynamic-stop" : "dynamic-wrap-up";
+      if (store.messagesFor(threadId).some(message => message.systemNotice?.kind === kind && message.systemNotice.lastUserMessageId === lastUserMessageId && message.systemNotice.repliesSinceUser === count)) return;
+      store.appendMessage(threadId, { role: "bot", kind: "text", text, systemNotice: { kind, lastUserMessageId, repliesSinceUser: count } });
+    },
+    stop: text => {
+      finishDynamicConversation(operation, "limit-reached", text);
+      void interruptRoutineGroupGoal(groupId, threadId, { status: "limit-reached", detail: text });
+    },
+  }, reusable ? saved.state : undefined);
+  operation.meeting = meeting;
+  meeting.start();
+}
+
 async function runDynamicGroupOperation(args: {
   groupId: string; threadId: string; router: BotRecord; request: string; operation: GroupTurnOperation;
 }) {
@@ -9712,14 +9766,8 @@ async function runDynamicGroupOperation(args: {
         return messages.slice(lastUser < 0 ? 0 : lastUser).filter(message => message.kind === "text" && !message.systemNotice && !message.roomRequest);
       },
       getReplyCount: () => dynamicReplyBudget(store.messagesFor(args.threadId)).count,
-      onBudget: ({ count, limit }) => {
-        const text = dynamicBudgetNotice(count, limit);
-        if (!text) return;
-        const { lastUserMessageId } = dynamicReplyBudget(store.messagesFor(args.threadId));
-        if (store.messagesFor(args.threadId).some(message => message.systemNotice?.lastUserMessageId === lastUserMessageId && message.systemNotice?.repliesSinceUser === count)) return;
-        store.appendMessage(args.threadId, { role: "bot", kind: "text", text,
-          systemNotice: { kind: count >= limit ? "dynamic-stop" : "dynamic-wrap-up", lastUserMessageId, repliesSinceUser: count } });
-      },
+      getBudget: () => args.operation.meeting!.snapshot(),
+      onBudget: () => { args.operation.meeting?.check(); },
       onProgress: detail => updateDynamicProgress(args.operation, detail),
       step: async (member, turn) => {
         const bot = store.bot(member.id);
@@ -9903,7 +9951,7 @@ function startGroupTurn(
   }
   if (dynamicRouter) {
     const card = store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Dynamic conversation · Starting…" } });
-    operation.dynamicRun = { cardMessageId: card.id, turnCount: 0, maxTurns: dynamicTurnLimit(members.length), finished: false };
+    operation.dynamicRun = { cardMessageId: card.id, turnCount: 0, maxTurns: dynamicTurnLimit(members.length, normalizeMeetingLimits(group.meetingLimits).replies?.hardStop ?? 100000), finished: false };
   }
   const prev = groupQueues.get(groupId) ?? Promise.resolve();
   const next = prev.then(async () => {
@@ -9918,6 +9966,11 @@ function startGroupTurn(
       });
       return;
     }
+    try { await startMeetingSession(groupId, operation); } catch (error) {
+      store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: error instanceof Error ? error.message : "Meeting allowance could not start", ok: false } });
+      return;
+    }
+    if (operation.cancelled) return;
     if (dynamicRouter) {
       await runDynamicGroupOperation({ groupId, threadId, router: dynamicRouter, request: text, operation });
     } else if (goalCoordinator) {
@@ -13304,6 +13357,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           const parsed = z.object({
             fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
+            meetingLimits: z.unknown().optional(),
             name: z.string().trim().min(1).max(100), memberIds: z.array(z.string()).min(1).max(100),
             section: z.string().optional(), bulletin: z.string().max(12_000).optional(),
             responseMode: z.enum(["lead", "everyone", "mentions", "dynamic"]).optional(),
@@ -13319,7 +13373,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const defaultResponder: GroupDefaultResponder = !parsed.data.responseMode || parsed.data.responseMode === "lead"
             ? { kind: "member", botId: leadBotId } : { kind: parsed.data.responseMode };
           const group = createChannel({
-            name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section,
+            name: redactSecretsInText(parsed.data.name), memberIds, section: chief.section, meetingLimits: parsed.data.meetingLimits,
             setup: { bulletin: redactSecretsInText(parsed.data.bulletin ?? ""), defaultResponder },
           });
           internalCapability.createdRooms = (internalCapability.createdRooms ?? 0) + 1;
@@ -13334,7 +13388,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const parsed = z.object({
           fromBotId: z.string().optional(), fromThreadId: z.string().optional(),
-          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin", "set_response_mode"]),
+          meetingLimits: z.unknown().optional(),
+          roomId: z.string(), action: z.enum(["add_members", "remove_members", "set_members", "rename", "set_bulletin", "set_response_mode", "set_meeting_limits"]),
           responseMode: z.enum(["lead", "everyone", "mentions", "dynamic"]).optional(), leadBotId: z.string().optional(),
           memberIds: z.array(z.string()).min(1).max(100).optional(),
           name: z.string().trim().min(1).max(100).optional(), bulletin: z.string().max(12_000).optional(),
@@ -13346,7 +13401,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const { action, memberIds, name, bulletin } = parsed.data;
         const patch: Record<string, unknown> = {};
-        if (action === "set_response_mode") {
+        if (action === "set_meeting_limits") {
+          if (parsed.data.meetingLimits === undefined) return json(res, 400, { error: "set_meeting_limits requires meetingLimits; null restores defaults" });
+          patch.meetingLimits = parsed.data.meetingLimits;
+        } else if (action === "set_response_mode") {
           if (!parsed.data.responseMode) return json(res, 400, { error: "set_response_mode requires responseMode" });
           patch.defaultResponder = parsed.data.responseMode === "lead" ? { kind: "member", botId: parsed.data.leadBotId ?? chief.id } : { kind: parsed.data.responseMode };
         } else if (action === "rename") {
