@@ -40,6 +40,12 @@ export function restoreChannelMessages(): void {
   }
 }
 
+/** Whether a newer human message is waiting for this room task. */
+export function hasQueuedChannelMessages(groupId: string, threadId: string): boolean {
+  const entry = queues.get(threadId);
+  return entry?.groupId === groupId && entry.items.length > 0;
+}
+
 export interface QueuedChannelMessage {
   id: string;
 }
