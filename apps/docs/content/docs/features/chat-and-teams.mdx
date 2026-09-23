@@ -42,6 +42,38 @@ and does not start a discussion.
 
 **Finish together** (Goal mode) remains a separate coordinator-led workflow.
 
+### Meeting limits
+
+Open the timer button beside the response menu to set reply, token, time, or
+dollar limits. Each enabled limit has a wrap-up point and a hard stop; combine
+them as needed. The first limit reached governs the meeting. The defaults remain
+wrap-up after 16 public replies and stop at 22. A custom selection replaces these
+defaults, so a time-only meeting does not also have a 22-reply cap.
+
+Every participant request includes the remaining allowance. Wrap-up asks members
+to finish open work, rather than stop immediately. Token, time and dollar
+reminders can begin earlier when observed turns need more room to finish.
+Participants can finish naturally before any limit. Limits apply to Dynamic,
+everyone, mentions, designated-lead and Goal conversations without changing who
+speaks. A new human message starts a fresh allowance; bot continuations reuse it.
+
+Tokens include all input and output, including cached input and Dynamic's
+private scheduling checks. These checks decide who speaks or whether to finish;
+they do not count as public replies. Time starts when discussion dispatch begins.
+Dollar allowances use a snapshot of OpenRouter's public model rates, including
+reported cache discounts, even when the participant uses another connection.
+They are estimates, not a provider billing cap. Models without unambiguous,
+supported token pricing cannot start a dollar-limited meeting. Fixed request fees
+and tiered rates are not supported. Missing complete provider usage stops a
+token- or dollar-limited meeting instead of continuing without accounting.
+An in-flight request can exceed a token or dollar cap before usage arrives.
+
+A Chief can pass `meeting_limits` to `create_room`, or use `manage_room` with
+`action: "set_meeting_limits"` on an idle room. For example,
+`{"time":{"seconds":300,"wrapUpSeconds":210},"cost":{"hardStopUsd":0.5,"wrapUpUsd":0.35}}`.
+Use `null` to restore the 16/22 default. The dialog preserves its size when limits
+are toggled; question-mark buttons explain each field.
+
 ## Delegation
 
 Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
