@@ -64,7 +64,7 @@ class TaskRulesTest {
     }
 
     @Test
-    fun `attention floats live threads above the idle tail inside each half`() {
+    fun `equal stamps keep stored order inside the open threads and the closed tail`() {
         val closer = ThreadCloser(botId = "pm", name = "Parker", at = 9.0)
         val subject = bot(
             listOf(
@@ -75,9 +75,24 @@ class TaskRulesTest {
         )
 
         assertEquals(
-            listOf("waiting", "busy", "queued", "unread", "t1", "idle", "helper"),
+            listOf("idle", "t1", "unread", "queued", "waiting", "busy", "helper"),
             TaskRules.tasks(subject).map { it.threadId },
         )
+    }
+
+    @Test
+    fun `a pin leads and a newer update rises above an older waiting thread`() {
+        val closer = ThreadCloser(botId = "pm", name = "Parker", at = 9.0)
+        val subject = bot(
+            listOf(
+                task("waiting").copy(activity = "waiting-on-you", updatedAt = 10.0),
+                task("pinned").copy(pinned = true, updatedAt = 5.0, closedBy = closer),
+                task("fresh").copy(updatedAt = 30.0),
+            ),
+            current = "fresh",
+        )
+
+        assertEquals(listOf("pinned", "fresh", "waiting"), TaskRules.tasks(subject).map { it.threadId })
     }
 
     @Test
@@ -87,11 +102,11 @@ class TaskRulesTest {
             task("later", "Later").copy(archivedAt = 0.0),
             task("held", "Held").copy(archivedAt = 5.0, unread = true),
         )
-        // "held" is archived but unread, so it is surfaced AND floated: attention
-        // ordering (rank 3) puts it above the idle "live" thread, and only the
-        // quiet "later" folds to the tail.
+        // "held" is archived but unread, so it stays in the open band. Equal
+        // stamps keep stored order, so it does not jump ahead of "live".
+        // Only the quiet "later" folds to the tail.
         assertEquals(
-            listOf("held", "live", "later"),
+            listOf("live", "held", "later"),
             TaskRules.tasks(bot(tasks)).map { it.threadId },
         )
     }
@@ -196,9 +211,9 @@ class TaskRulesTest {
         val execution = task("run-thread").copy(routineRunId = "run-1", busy = true)
         val subject = bot(listOf(legacy, results, execution), current = "results", busy = true)
 
-        // Attention floats the current thread above the idle tail.
-        assertEquals(listOf(results, legacy), TaskRules.tasks(subject))
-        assertEquals(listOf(results, legacy), TaskRules.tasks(Chat.BotChat(subject)))
+        // Equal stamps keep stored order. The open thread does not float.
+        assertEquals(listOf(legacy, results), TaskRules.tasks(subject))
+        assertEquals(listOf(legacy, results), TaskRules.tasks(Chat.BotChat(subject)))
         assertEquals(3, subject.tasks?.size)
         assertTrue(TaskRules.canCreate(subject))
         assertFalse(TaskRules.canSwitch(execution, subject))

@@ -475,8 +475,8 @@ object MessageActions {
             ?.let { card -> listOf(card.title, card.subtitle).filter { it.isNotBlank() } }
             ?.takeIf { it.isNotEmpty() }
             ?.joinToString("\n\n")
-        // A tool chip is context, and a screenshot is pixels.
-        Message.Kind.ACTIVITY, Message.Kind.SCREEN -> null
+        // A tool chip is context, a screenshot is pixels, a digest is a log line.
+        Message.Kind.ACTIVITY, Message.Kind.SCREEN, Message.Kind.DIGEST -> null
     }
 
     /**

@@ -408,6 +408,9 @@ private fun MessageContent(
         }
         Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
+        // Turn-audit chip (tool list + reply preview). Desktop shows it only
+        // behind a "show tool calls" setting Android doesn't have; hide it.
+        Message.Kind.DIGEST -> {}
         // A message kind from a newer computer. Almost everything the harness
         // sends carries `text`, so showing it is usually the whole message and
         // always better than a gap in the transcript. When there is nothing to

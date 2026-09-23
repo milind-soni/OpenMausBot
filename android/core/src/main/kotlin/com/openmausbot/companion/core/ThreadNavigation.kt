@@ -30,12 +30,10 @@ fun BotTask.demandsAttention(queued: Boolean = false): Boolean =
         activity in setOf("waiting-on-you", "waiting", "queued")
 
 /**
- * Attention outranks recency within a bot: waiting-on-you needs the person
- * most, then working/busy, then queued, then unread. A held send is client
- * state, so it ranks in the queued tier the way the wire value does. The
- * thread being looked at rides just above the idle tail; idle threads keep
- * stored order. Mirrors the desktop's orderedSidebarThreads so the tree, the
- * sheet, and the pickers agree on one order.
+ * Attention rank for [orderedThreads]. The thread list does not use it:
+ * the tree, the sheet, and the pickers use [listedThreads]. The inbox ranks
+ * its own entries. waiting-on-you, then working/busy, then queued, then
+ * unread, then the open thread, then idle. Equal ranks keep stored order.
  */
 fun attentionRank(task: BotTask, activeThreadId: String, queued: Boolean = false): Int = when {
     task.activity == "waiting-on-you" -> 0
@@ -47,7 +45,8 @@ fun attentionRank(task: BotTask, activeThreadId: String, queued: Boolean = false
 }
 
 /** Pin, then newest update. Equal stamps keep the caller's order. Attention
- * does not move a row — [orderedThreads] still does, for activity surfaces. */
+ * does not move a row. [orderedThreads] still ranks by attention, and no
+ * screen calls it. */
 fun listedThreads(tasks: List<BotTask>): List<BotTask> =
     tasks.withIndex().sortedWith(
         compareByDescending<IndexedValue<BotTask>> { it.value.pinned == true }
@@ -69,9 +68,11 @@ val Bot.visibleTasks: List<BotTask>
     get() = tasks.orEmpty().filter { it.routineRunId == null }
 
 /**
- * Preserve saved folder order; attention floats threads within each group.
+ * Preserve saved folder order. Threads inside a folder follow pin, then
+ * newest update ([listedThreads]); attention does not reorder this list.
  * A missing folder leaves its threads unfiled. Search includes closed threads
- * and matches folder names, and keeps relevance (stored) order.
+ * and matches folder names. Those rows use the same pin-then-update order;
+ * they are not the default list's row set.
  */
 fun Bot.threadGroups(
     matching: String = "",

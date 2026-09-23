@@ -6,6 +6,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { openSse } from "./testing/sse.ts";
 
 async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
   const session = await launchVerificationServer({ ...process.env, ...fakeEnv }, undefined, undefined, undefined, undefined, { scripted: true });
@@ -88,6 +89,51 @@ it("coordinates a lead and its specialist from ordinary chat, returns to Clive, 
   expect(bots.find((bot: any) => bot.id === f.lead.id).tasks.find((task: any) => task.threadId === receipt.threadRef.threadId).openedBy)
     .toMatchObject({ botId: f.chief.id, name: "Clive" });
   expect(turn.system).toContain("only an actual coordinate_bots result proves that teammate participated");
+}), 45_000);
+
+it("announces a settled delegation and its resume in the parent thread", () => fixture(async f => {
+  const stream = await openSse(`${f.session.info.url}/api/events`);
+  try {
+    await f.start();
+    expect((await f.wait()).status).toBe("settled");
+    // f.wait() resolves through the control CLI poll, an independent path
+    // from the SSE reader loop; until() (which also resolves on frames
+    // already seen) is what proves both settles are stored before the
+    // assertions below count them
+    await Promise.all([
+      stream.until(frame => frame.kind === "notify"
+        && frame.notification?.kind === "delegation-settled"
+        && frame.notification.botId === f.chief.id),
+      stream.until(frame => frame.kind === "notify"
+        && frame.notification?.kind === "delegation-settled"
+        && frame.notification.botId === f.lead.id),
+    ]);
+    const settles = () => stream.frames.filter(frame => frame.kind === "notify" && frame.notification?.kind === "delegation-settled");
+    // the chief's resume is announced exactly once, pointing at the
+    // conversation the notification opens
+    const chiefFrames = settles().filter(frame => frame.notification.botId === f.chief.id);
+    expect(chiefFrames).toHaveLength(1);
+    expect(chiefFrames[0].notification).toMatchObject({
+      threadId: f.chief.activeTaskId,
+      title: "Clive resumed with results",
+      body: "Results in from Engineering lead",
+    });
+    // the nested lead resume is announced too, on its delegated thread
+    const leadFrames = settles().filter(frame => frame.notification.botId === f.lead.id);
+    expect(leadFrames).toHaveLength(1);
+    expect(leadFrames[0].notification.threadId).not.toBe(f.lead.activeTaskId);
+    // the specialist ran the work and never resumed, so it earns no frame
+    expect(settles().some(frame => frame.notification.botId === f.specialist.id)).toBe(false);
+    // suppression of the delegated turns themselves is unchanged: neither
+    // child earns a done frame. The chief's own asked-for outer turn still
+    // may, exactly as before.
+    expect(stream.frames.some(frame => frame.kind === "notify" && frame.notification?.kind === "done"
+      && (frame.notification.botId === f.lead.id || frame.notification.botId === f.specialist.id))).toBe(false);
+    // one visible chip per settle in the parent's conversation, never per steer
+    const chips = (await f.messages(f.chief.activeTaskId))
+      .filter((message: any) => message.kind === "activity" && message.tool?.name.startsWith("Resumed with "));
+    expect(chips.map((message: any) => message.tool.name)).toEqual(["Resumed with Engineering lead results, reviewing"]);
+  } finally { stream.close(); }
 }), 45_000);
 
 it.each(["resume", "stop", "failed resume", "failed root"] as const)("keeps a guarded Chief request exact through coordination and %s", action => fixture(async f => {

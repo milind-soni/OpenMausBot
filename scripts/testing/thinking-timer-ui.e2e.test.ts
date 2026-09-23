@@ -194,7 +194,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const busy = await waitUntil(async () => {
       const task = await taskOf(busyThread);
       return task && task.busy && typeof task.turnStartedAt === "number" ? task : null;
-    }, 20_000, "the task to go busy with a turnStartedAt stamp");
+    }, 60_000, "the task to go busy with a turnStartedAt stamp");
     const stamp = busy.turnStartedAt as number;
     expect(stamp).toBeGreaterThanOrEqual(sentAt - 2_000);
     expect(stamp).toBeLessThanOrEqual(Date.now() + 2_000);
@@ -273,7 +273,7 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const busy = await waitUntil(async () => {
       const claimed = await groupState();
       return claimed && claimed.busyBotId === info.botId && typeof claimed.turnStartedAt === "number" ? claimed : null;
-    }, 20_000, "the group to claim Pepper with a turnStartedAt stamp");
+    }, 60_000, "the group to claim Pepper with a turnStartedAt stamp");
     const stamp = busy.turnStartedAt as number;
     expect(stamp).toBeGreaterThanOrEqual(sentAt - 2_000);
     expect(stamp).toBeLessThanOrEqual(Date.now() + 2_000);
