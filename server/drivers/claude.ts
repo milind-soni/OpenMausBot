@@ -1943,7 +1943,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // stdin stays OPEN: that is what keeps the session alive for a
       // mid-turn steer or the next turn; closeSession() ends it.
       if (!(await writeUser(session, threadId, promptMsg))) {
-        settle(false, session.turn?.stopRequested ? "interrupted" : "stdin_write_failed");
+        if (!session.turn?.stopRequested) settle(false, "stdin_write_failed");
         closeSession(threadId, "stdin write failed");
       }
 
