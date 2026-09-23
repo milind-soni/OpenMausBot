@@ -1,14 +1,15 @@
+import type { MeetingBudgetSnapshot } from "../shared/meeting-limits.ts";
 import { parseGroupGoalDecision, type GroupGoalDecision } from "./group-goal-run.ts";
 
 export const DYNAMIC_MAX_REPLIES = 22;
 export const DYNAMIC_WRAP_UP_AFTER = 16;
-export const dynamicTurnLimit = (memberCount: number) => DYNAMIC_MAX_REPLIES * (Math.max(1, memberCount) * 4 + 5) + Math.max(1, memberCount) * 4 + 4;
+export const dynamicTurnLimit = (memberCount: number, replyLimit = DYNAMIC_MAX_REPLIES) => replyLimit * (Math.max(1, memberCount) * 4 + 5) + Math.max(1, memberCount) * 4 + 4;
 export interface DynamicMember { id: string; name: string; title?: string; description?: string; busy?: boolean; hidden?: boolean }
 export interface DynamicMessage { id?: string; role?: string; kind?: string; text?: string; turnId?: string; systemNotice?: unknown; peerPost?: unknown; roomRequest?: unknown; from?: { botId: string; name: string } }
 export interface DynamicControl {
   request: string; discussionStart: string | null; speaker: Pick<DynamicMember, "id" | "name">; members: DynamicMember[];
   phase: "route_or_reply" | "route" | "reply" | "ending";
-  remaining: number; wrapUp: boolean; recentSpeakers: string[]; reason?: string;
+  remaining: number | null; allowance?: MeetingBudgetSnapshot; wrapUp: boolean; recentSpeakers: string[]; reason?: string;
   contributions?: { id: string; publicReplies: number }[];
 }
 export interface DynamicResult { status: "completed" | "needs-input" | "blocked" | "paused" | "stopped" | "yielded" | "limit-reached"; detail: string; replies: number; calls: number }
@@ -19,6 +20,7 @@ interface DynamicOptions {
   step: (speaker: DynamicMember, turn: DynamicStep) => Promise<DynamicStepResult>;
   isCancelled: () => boolean; hasNewMessage: () => boolean;
   onProgress?: (detail: string) => void; getReplyCount: () => number; getConversation: () => DynamicMessage[];
+  getBudget?: () => MeetingBudgetSnapshot;
   onBudget?: (state: { count: number; limit: number }) => void;
 }
 
@@ -114,11 +116,12 @@ export async function runDynamicConversation(options: DynamicOptions): Promise<D
   const recentSpeakers: string[] = [];
   const seenReplies = new Set<string>();
   const finish = (status: DynamicResult["status"], detail: string): DynamicResult => ({ status, detail, replies, calls });
-  const budget = () => options.onBudget?.({ count: getReplyCount(), limit: DYNAMIC_MAX_REPLIES });
+  const budget = () => options.onBudget?.({ count: getReplyCount(), limit: options.getBudget?.().replies?.hardStop ?? DYNAMIC_MAX_REPLIES });
   const halted = (): DynamicResult | null => {
+    if (options.getBudget?.().exhausted) { budget(); return finish("limit-reached", "Meeting allowance reached."); }
     if (options.isCancelled()) return finish("stopped", "Stopped by you.");
     if (options.hasNewMessage()) return finish("yielded", "Continuing with your new message.");
-    if (getReplyCount() >= DYNAMIC_MAX_REPLIES) {
+    if (!options.getBudget && getReplyCount() >= DYNAMIC_MAX_REPLIES) {
       budget();
       return finish("limit-reached", dynamicBudgetNotice(getReplyCount()));
     }
@@ -131,14 +134,15 @@ export async function runDynamicConversation(options: DynamicOptions): Promise<D
     calls++;
     const discussion = getConversation();
     const members = getMembers().filter(member => !member.hidden);
-    const remaining = Math.max(0, DYNAMIC_MAX_REPLIES - getReplyCount());
+    const allowance = options.getBudget?.();
+    const remaining = allowance ? allowance.replies?.remaining ?? null : Math.max(0, DYNAMIC_MAX_REPLIES - getReplyCount());
     options.onProgress?.(phase === "ending" ? "Checking whether another contribution is needed…" : phase === "route" ? "Choosing the next speaker…" : `${speaker.name} is replying…`);
     return step(speaker, {
       silent: phase === "route" || phase === "ending",
       controlContext: {
         request, discussionStart: discussion[0]?.id ?? null, speaker: { id: speaker.id, name: speaker.name },
         members: members.map(member => ({ id: member.id, name: member.name, title: member.title, description: member.description, busy: Boolean(member.busy) })),
-        phase, remaining, wrapUp: getReplyCount() >= DYNAMIC_WRAP_UP_AFTER,
+        phase, remaining, ...(allowance ? { allowance } : {}), wrapUp: allowance?.wrapUp ?? (getReplyCount() >= DYNAMIC_WRAP_UP_AFTER),
         recentSpeakers: recentSpeakers.slice(-8), ...(reason ? { reason } : {}),
         ...(phase === "ending" ? { contributions: members.map(member => ({ id: member.id,
           publicReplies: new Set(discussion.filter(message => message.kind === "text" && message.role === "bot" && !message.systemNotice && !message.peerPost && message.from?.botId === member.id).map(message => message.turnId ?? message.id)).size,
@@ -164,7 +168,7 @@ export async function runDynamicConversation(options: DynamicOptions): Promise<D
     return finish("paused", "The next contribution could not be determined.");
   };
 
-  while (calls < dynamicTurnLimit(getMembers().length)) {
+  while (calls < dynamicTurnLimit(getMembers().length, options.getBudget ? options.getBudget().replies?.hardStop ?? 100000 : DYNAMIC_MAX_REPLIES)) {
     const before = halted(); if (before) return before;
     budget();
     let speaker = resolve(next);
