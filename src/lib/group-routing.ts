@@ -9,7 +9,7 @@ export function effectiveDefaultResponder(
   members: Array<{ id: string }>,
 ): GroupDefaultResponder {
   const value = group.defaultResponder;
-  if (value?.kind === "everyone" || value?.kind === "mentions") return value;
+  if (value?.kind === "everyone" || value?.kind === "mentions" || value?.kind === "dynamic") return value;
   if (value?.kind === "member" && members.some((member) => member.id === value.botId)) return value;
   return members[0] ? { kind: "member", botId: members[0].id } : { kind: "mentions" };
 }
@@ -23,6 +23,7 @@ export function defaultResponderName(group: Group, members: Bot[]): string | nul
 export function groupResponseHint(group: Group, members: Bot[]): string {
   if (group.dm) return t("room.hint.dm");
   const value = effectiveDefaultResponder(group, members);
+  if (value.kind === "dynamic") return t("room.setup.dynamic");
   if (value.kind === "everyone") return t("room.hint.everyone");
   if (value.kind === "mentions") return t("room.hint.mentions");
   const name = defaultResponderName(group, members) ?? t("room.hint.leadFallback");
@@ -32,6 +33,7 @@ export function groupResponseHint(group: Group, members: Bot[]): string {
 export function groupComposerHint(group: Group, members: Bot[]): string {
   if (group.dm) return t("composer.hint.dm");
   const value = effectiveDefaultResponder(group, members);
+  if (value.kind === "dynamic") return t("room.setup.dynamic");
   if (value.kind === "everyone") return t("composer.hint.everyone");
   if (value.kind === "mentions") return t("composer.hint.mentions");
   return t("composer.hint.responder", {
@@ -62,7 +64,7 @@ export function roomRespondersForComposer<T extends { id: string; name: string; 
   const mentioned = mentionedMembers(text, available);
   if (mentioned.length) return mentioned;
   const fallback = effectiveDefaultResponder(group, available);
-  if (fallback.kind === "everyone") return available;
+  if (fallback.kind === "everyone" || fallback.kind === "dynamic") return available;
   if (fallback.kind === "member") {
     const lead = available.find((member) => member.id === fallback.botId);
     return lead ? [lead] : [];
