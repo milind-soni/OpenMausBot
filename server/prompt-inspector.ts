@@ -146,7 +146,20 @@ export class PromptInspector {
     this.file(threadId);
     const ids = new Set([threadId, ...this.rows.keys(), ...readdirSync(this.folder).filter(file => /^[\w-]+\.json$/.test(file)).map(file => file.slice(0, -5))]);
     const affected = new Set([threadId]);
-    for (const id of ids) if (!this.deletions.has(id) && JSON.stringify(this.read(id)).includes(threadId)) affected.add(id);
+    for (const id of ids) {
+      if (id === threadId || this.deletions.has(id)) continue;
+      // Scan one file at a time without parsing or retaining unrelated captures.
+      // Malformed JSON must not block cleanup; inaccessible data must not be
+      // silently ignored when it could retain a deleted conversation.
+      const cached = this.rows.get(id);
+      let text: string;
+      if (cached) text = JSON.stringify(cached);
+      else {
+        try { text = readFileSync(this.file(id), "utf8"); }
+        catch (error) { if (this.missing(error)) continue; throw error; }
+      }
+      if (text.includes(threadId)) affected.add(id);
+    }
     this.persistDeletions(new Set([...this.deletions, ...affected]));
     for (const id of affected) {
       this.epochs.set(id, this.epoch(id) + 1);
