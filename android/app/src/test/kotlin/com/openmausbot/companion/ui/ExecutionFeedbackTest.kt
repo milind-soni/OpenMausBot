@@ -403,7 +403,8 @@ class CompanionHapticsTest {
 /**
  * `PlatformBridge.copyToPasteboard` ends every copy with `Haptics.selection()`,
  * unconditionally — so both `Copy Diff` (`GitPRDiffCardView.swift:121`) and
- * `Copy CSV` (`SQLResultTableView.swift:100`) are confirmed by feel. Both cards
+ * Android's Copy CSV are confirmed by feel. iOS no longer has that SQL card
+ * (issue 1707). Both cards
  * hold the same [CardClipboard], which is what stops one of them losing the tick
  * on its own.
  */

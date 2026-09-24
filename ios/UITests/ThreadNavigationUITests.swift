@@ -73,6 +73,76 @@ final class ThreadNavigationUITests: XCTestCase {
     }
 
     @MainActor
+    func testGmailRendersATableAndTasks() {
+        let app = launchPreview()
+        openGmail(in: app)
+        let wide = String(repeating: "W", count: 80)
+
+        let grid = app.descendants(matching: .any)["message-preview-gmail-grid"]
+        XCTAssertTrue(grid.waitForExistence(timeout: 5))
+        func cell(_ label: String) -> XCUIElement {
+            grid.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+        }
+        let labels = ["Alpha", "Beta", "one", wide]
+        for label in labels {
+            XCTAssertTrue(cell(label).waitForExistence(timeout: 5), label)
+        }
+        let alpha = cell("Alpha")
+        let beta = cell("Beta")
+        let one = cell("one")
+        let token = cell(wide)
+        XCTAssertEqual(alpha.frame.midY, beta.frame.midY, accuracy: 1)
+        XCTAssertEqual(one.frame.midY, token.frame.midY, accuracy: 1)
+        XCTAssertGreaterThan(one.frame.midY, alpha.frame.midY)
+        XCTAssertEqual(alpha.frame.width, one.frame.width, accuracy: 1)
+        XCTAssertEqual(beta.frame.width, token.frame.width, accuracy: 1)
+        XCTAssertEqual(token.frame.height, one.frame.height, accuracy: 1)
+        let cellIds = [
+            "message-preview-gmail-grid-scroll-cell-0-0",
+            "message-preview-gmail-grid-scroll-cell-0-1",
+            "message-preview-gmail-grid-scroll-cell-1-0",
+            "message-preview-gmail-grid-scroll-cell-1-1",
+        ]
+        let identified = cellIds.map { grid.descendants(matching: .any)[$0] }
+        for (element, label) in zip(identified, labels) {
+            XCTAssertTrue(element.waitForExistence(timeout: 5))
+            XCTAssertEqual(element.label, label)
+        }
+        let order = identified.map(\.label)
+        XCTAssertEqual(order, labels)
+        func absent(_ label: String, in element: XCUIElement) {
+            let match = element.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
+            XCTAssertFalse(match.exists, label)
+        }
+        absent("DATA TABLE", in: grid)
+        absent("Copy CSV", in: grid)
+        absent("rows", in: grid)
+        absent("| --- | --- |", in: grid)
+
+        let scroll = app.descendants(matching: .any)["message-preview-gmail-grid-scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 5))
+        let before = token.frame.origin.x
+        token.swipeLeft()
+        XCTAssertLessThan(token.frame.origin.x, before)
+
+        let tasks = app.descendants(matching: .any)["message-preview-gmail-tasks"]
+        XCTAssertTrue(tasks.waitForExistence(timeout: 5))
+        XCTAssertTrue(tasks.descendants(matching: .any)["Quant baskets"].waitForExistence(timeout: 5))
+        XCTAssertTrue(tasks.staticTexts["1."].exists)
+        XCTAssertTrue(tasks.descendants(matching: .any)["completed, Ship the notes"].exists)
+        XCTAssertFalse(tasks.buttons["completed, Ship the notes"].exists)
+        XCTAssertTrue(tasks.descendants(matching: .any)["not completed, waiting"].exists)
+        XCTAssertFalse(tasks.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "**")).firstMatch.exists)
+        XCTAssertFalse(tasks.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "[x] Ship the notes")).firstMatch.exists)
+
+        let mine = app.descendants(matching: .any)["message-preview-gmail-user-md"]
+        XCTAssertTrue(mine.waitForExistence(timeout: 5))
+        XCTAssertTrue(mine.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "| --- | --- |")).firstMatch.exists)
+        XCTAssertTrue(mine.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "[x] done")).firstMatch.exists)
+        recordScreenshot("Gmail table and task list", in: app)
+    }
+
+    @MainActor
     func testHomeSearchFindsSiblingTitlesAndFolders() {
         let app = launchPreview()
         app.buttons["threads-toggle.preview-pepper"].tap()

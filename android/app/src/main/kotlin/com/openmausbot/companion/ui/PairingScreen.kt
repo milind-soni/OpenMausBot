@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import com.openmausbot.companion.core.Connection
 import com.openmausbot.companion.core.PairingInvite
 import com.openmausbot.companion.core.PairingRouteError
+import com.openmausbot.companion.core.ServerPairingRetryError
 import com.openmausbot.companion.discovery.DiscoveredService
 import com.openmausbot.companion.discovery.DiscoveryState
 import com.openmausbot.companion.discovery.toConnection
@@ -286,9 +287,10 @@ fun PairingScreen(onCancel: () -> Unit) {
                 confirmation = PairingConfirmation.of(selected, secrets),
                 code = code,
                 onCodeChange = { value ->
-                    val digits = value.filter { it in '0'..'9' }.take(6)
-                    code = digits
-                    secrets.setCode(selected.handle, digits)
+                    val normalized = value.uppercase(java.util.Locale.ROOT)
+                        .filter { it in 'A'..'Z' || it in '0'..'9' }.take(12)
+                    code = normalized
+                    secrets.setCode(selected.handle, normalized)
                 },
                 pairing = pairing,
                 onSubmit = { credential ->
@@ -411,12 +413,12 @@ internal enum class PairingFailureDisposition {
     RESET_TYPED_ATTEMPT,
 }
 
-/** Route ambiguity is the only failure that may keep the same logical request alive. */
+/** Route ambiguity and retryable server refusals keep the same logical request alive. */
 internal fun pairingFailureDisposition(
     error: Throwable,
     cameFromScanner: Boolean,
 ): PairingFailureDisposition = when {
-    error is PairingRouteError -> PairingFailureDisposition.RETAIN_ATTEMPT
+    error is PairingRouteError || error is ServerPairingRetryError -> PairingFailureDisposition.RETAIN_ATTEMPT
     cameFromScanner -> PairingFailureDisposition.DROP_SCANNED_ATTEMPT
     else -> PairingFailureDisposition.RESET_TYPED_ATTEMPT
 }
@@ -566,9 +568,9 @@ private fun CodeSection(
                 OutlinedTextField(
                     value = code,
                     onValueChange = onCodeChange,
-                    placeholder = { Text("000000") },
+                    placeholder = { Text("6-digit or ABCD-EFGH-JKLM code") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
                     textStyle = MaterialTheme.typography.headlineSmall.copy(
                         fontFamily = FontFamily.Monospace,
                         textAlign = TextAlign.Center,
@@ -577,7 +579,7 @@ private fun CodeSection(
                 )
                 Button(
                     onClick = { onSubmit(code) },
-                    enabled = code.length == 6 && !pairing,
+                    enabled = PairingInvite.isPairingCode(code) && !pairing,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     if (pairing) {

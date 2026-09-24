@@ -27,7 +27,11 @@ data class Connection(
     val allowedRouteKinds: Set<CompanionEndpointKind>? = null,
     /** Exact normalized cleartext origins shown on the pairing confirmation. */
     val allowedLocalRouteURLs: Set<String>? = null,
+    val serverEnvironmentId: String? = null,
+    val serverScopes: List<String>? = null,
 ) {
+    val pairedWithServer: Boolean get() = serverEnvironmentId != null
+
     val baseUrl: URI?
         get() {
             activeEndpoint?.let { endpoint ->
@@ -351,6 +355,9 @@ data class PairingInvite(val connection: Connection, val credential: String) {
         private const val MAX_ENDPOINTS = 8
 
         fun parse(url: URI): PairingInvite? {
+            if (url.scheme.equals("https", true) || url.scheme.equals("http", true)) {
+                return parseServerLink(url)
+            }
             if (!url.scheme.equals("openmausbot", ignoreCase = true) ||
                 !url.host.equals("pair", ignoreCase = true)
             ) {
@@ -402,6 +409,33 @@ data class PairingInvite(val connection: Connection, val credential: String) {
         }
 
         fun parse(url: String): PairingInvite? = runCatching { URI(url) }.getOrNull()?.let(::parse)
+
+        /** The server's twelve-symbol code is distinct from companion codes and QR tokens. */
+        fun normalizedServerCode(raw: String): String? = raw.uppercase(java.util.Locale.ROOT)
+            .filter { it in 'A'..'Z' || it in '0'..'9' }
+            .takeIf { it.length == 12 && it.all { symbol -> symbol in "23456789ABCDEFGHJKLMNPQRSTUVWXYZ" } }
+
+        fun isPairingCode(raw: String): Boolean =
+            (raw.length == 6 && raw.all { it in '0'..'9' }) || normalizedServerCode(raw) != null
+
+        private fun parseServerLink(url: URI): PairingInvite? {
+            if (url.host.isNullOrEmpty() || url.rawUserInfo != null || url.rawPath != "/pair" ||
+                url.rawQuery != null
+            ) return null
+            val fragment = url.rawFragment ?: return null
+            val values = linkedMapOf<String, String>()
+            for (item in fragment.split('&')) {
+                val equals = item.indexOf('=')
+                if (equals < 1) return null
+                val name = decodeQuery(item.substring(0, equals)) ?: return null
+                val value = decodeQuery(item.substring(equals + 1)) ?: return null
+                if (values.put(name, value) != null) return null
+            }
+            val code = normalizedServerCode(values["code"] ?: return null) ?: return null
+            val connection = Connection.parse("${url.scheme}://${url.rawAuthority}") ?: return null
+            if (!connection.serverTransportAllowed) return null
+            return PairingInvite(connection.establishingRoutePolicyFromInvite(), code)
+        }
 
         private fun credential(values: Map<String, String>): String? {
             values["token"]?.let { token ->

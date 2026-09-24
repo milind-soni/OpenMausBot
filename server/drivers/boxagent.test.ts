@@ -1,4 +1,4 @@
-// Box agent contract tests against a scripted fake of ascii.dev's box HTTP
+// Box agent contract tests against a scripted fake of boat.dev's box HTTP
 // API. The driver polls events + prompt status; the fake advances one poll
 // per GET so we can assert message → tool → message order without sleeping.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

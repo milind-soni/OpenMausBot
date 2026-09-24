@@ -740,6 +740,16 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(message.text, "Stripe fired")
     }
 
+    // A digest is known, not new: it must not take the unknown-kind path,
+    // which draws any text it carries as a message bubble.
+    func testADigestIsNotAnUnknownKind() throws {
+        let json = """
+        {"id":"m1","role":"bot","kind":"digest","at":1,"text":"[digest] · tools: shell ×1"}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertNotEqual(message.kind, .unknown)
+    }
+
     func testAnUnknownRoleIsNotAttributedToYou() throws {
         let json = """
         {"id":"m1","role":"system","kind":"text","at":1,"text":"hello"}

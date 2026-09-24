@@ -1,6 +1,26 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "completed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "concluído"
+          }
+        }
+      }
+    },
+    "not completed": {
+      "localizations": {
+        "pt-BR": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "não concluído"
+          }
+        }
+      }
+    },
     "%lld saved": {
       "localizations": {
         "pt-BR": {

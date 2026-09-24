@@ -83,6 +83,14 @@ export class TeamComputers {
   setProblem(id: string, problem?: string): TeamComputerRecord {
     return this.patch(id, { problem: problem?.slice(0, 500) });
   }
+  /** Relabel an existing team's assignment; this never changes its computer. */
+  renameSection(from: string, to: string): boolean {
+    const entry = this.forSection(from);
+    if (!entry || from === to) return false;
+    if (this.forSection(to)) throw failure("This team already has a computer");
+    this.patch(entry.id, { section: to });
+    return true;
+  }
   private patch(id: string, patch: Partial<TeamComputerRecord>): TeamComputerRecord {
     const entries = this.list();
     const entry = entries.find(candidate => candidate.id === id);

@@ -10,6 +10,12 @@ Add a Box API key in App Settings to provision an isolated hosted Linux desktop.
 
 Box is a third-party paid service after its trial. OpenMausBot stores the configured credential locally and does not expose it to the renderer.
 
+OpenAI-compatible connections, including OpenRouter, can use the Box desktop
+with the bot's selected model in direct chats, groups and cloud routines. Choose
+a model that supports both images and tools. Screenshots reach that model at
+native resolution; tool approvals and **Take control** still apply. Other engines
+continue to use the native Box runner for cloud turns.
+
 ## Bring your own VPS
 
 OpenMausBot can control Docker on an x86_64 Linux server through an SSH config alias. The agent process stays on your local machine; only Docker commands and the managed desktop container run on the VPS.

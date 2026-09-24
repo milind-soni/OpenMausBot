@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile";
 import { cn } from "@/lib/cn";
 import { firstSentence, soulPatchFor, utf8Bytes } from "@/lib/soul";
-import { api, useStore, type Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
+import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { inputCls } from "./bot-settings/field";
 
 type SoulRead = { soul: string; revision: string; bytes: number; limit: number; file: string; drift: boolean; fileText?: string };
@@ -21,6 +22,7 @@ export function SoulField({
   onPatch: (patch: { soul?: string; description?: string }) => void;
 }) {
   const { dispatch, flushBotPatches } = useStore();
+  const { request: api } = useBotEditor();
   const limit = BOT_PROFILE_LIMITS.soul;
   const [draft, setDraft] = useState(bot.soul ?? "");
   const [info, setInfo] = useState<SoulRead | null>(null);
@@ -116,7 +118,7 @@ export function SoulField({
       />
       <div className="mt-1.5 flex items-start justify-between gap-3 text-[11px] text-ink-secondary">
         <span>
-          In this bot’s context on every turn.{info ? <> Mirrored to <span className="break-all">{info.file}</span>.</> : null}
+          In this bot’s context on every turn.{info?.file ? <> Mirrored to <span className="break-all">{info.file}</span>.</> : null}
         </span>
         <span className={cn("shrink-0 tabular-nums", over && "font-medium text-red-500")}>
           {bytes.toLocaleString()} / {limit.toLocaleString()} bytes{over ? " — not saved" : ""}

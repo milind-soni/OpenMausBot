@@ -71,6 +71,23 @@ export type RuntimeEvent = RuntimeEventBase &
         usage?: { input: number; output: number; cachedInput?: number };
       }
     | {
+        type: "turn.wait_started";
+        /** The computer resource this turn queued behind (e.g. "computer:box:bx_…"). */
+        resource: string;
+        /** Who held the computer when the wait began, if the holder was known. */
+        holder?: { name: string; task?: string };
+      }
+    | {
+        type: "turn.wait_ended";
+        resource: string;
+        holder?: { name: string; task?: string };
+        /** How long the turn actually waited. */
+        waitedMs: number;
+        /** acquired: the claim landed; stopped: the turn was stopped or
+         * cancelled while waiting; gave_up: the wait ceiling fired. */
+        outcome: "acquired" | "gave_up" | "stopped";
+      }
+    | {
         type: "item.started";
         itemType: "tool" | "reasoning";
         title?: string;

@@ -6,9 +6,11 @@
 // Effort card down instead and is fully visible where it opens.
 import { EffortRow, ModelPicker } from "../ModelPicker";
 import { useStore, type Bot } from "@/state/store";
+import { useBotEditor } from "./BotEditorContext";
 
 export function ModelSection({ bot }: { bot: Bot }) {
   const { state } = useStore();
+  const { draft } = useBotEditor();
   const modelVariants = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)?.capabilities?.modelVariants;
   return (
     <div className="flex flex-col gap-4">
@@ -20,7 +22,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
             <div>
               <div className="text-[15px] font-medium text-ink">Default model</div>
               <div className="mt-0.5 text-[13px] text-ink-secondary">
-                For groups and new threads. Also updates the selected idle thread; other existing threads keep their model.
+                {draft ? "Starting model for the new bot and its threads." : "For groups and new threads. Also updates the selected idle thread; other existing threads keep their model."}
               </div>
             </div>
           }
@@ -40,7 +42,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
                 we could not keep for a thread that had already been sent
                 one. Sending nothing is true on every engine. */}
             <div className="mt-0.5 text-[13px] text-ink-secondary">
-              {modelVariants ? "For groups, new threads, and the selected idle thread. Other existing threads keep their variant." : `How hard this bot thinks in groups and new threads${bot.modelSelection.effort ? "" : " (Default: no level is sent)"}`}
+              {modelVariants ? (draft ? "Starting reasoning variant for the new bot." : "For groups, new threads, and the selected idle thread. Other existing threads keep their variant.") : `How hard this bot thinks in groups and new threads${bot.modelSelection.effort ? "" : " (Default: no level is sent)"}`}
             </div>
           </div>
         }

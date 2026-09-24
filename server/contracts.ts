@@ -150,9 +150,8 @@ export interface SendTurnInput {
      * bridge harness-controlled lets it turn connection requests into trusted
      * chat cards consistently across provider CLIs. */
     composio?: { command: string; args: string[]; env: Record<string, string> };
-    /** Box's native agent runner input. Only the Box driver consumes this;
-     * CLI engines cannot use it as an MCP server. Other computers use the
-     * stdio descriptor below. */
+    /** Box's native runner or an explicitly capable driver consumes this
+     * leased descriptor. Other computers use the stdio descriptor below. */
     computer?: {
       kind?: "box";
       boxId: string;
@@ -242,6 +241,8 @@ export interface ProviderAdapter {
      * told it has a computer whose tools its driver cannot mount — it
      * burns turns hunting for tools that aren't there. */
     computerMcp?: boolean;
+    /** Consumes the leased Box descriptor without switching to Box's model. */
+    cloudComputerMcp?: boolean;
     /** True when the driver mounts turn.integrations.composio (the user's
      * connected apps). Same rule again: a key in the config says the user
      * HAS those connections, not that this driver can reach them. */
@@ -471,8 +472,9 @@ export interface ProviderInstance {
 
 /** How an engine is presented in the picker rail.
  *  `subscription` — first-party cloud catalog; Custom is extra.
- *  `custom` — no subscription catalog; Custom is the product. */
-export type EngineAccess = "subscription" | "custom";
+ *  `custom` — no subscription catalog; Custom is the product.
+ *  `api` — a cloud model catalog billed through an API key. */
+export type EngineAccess = "subscription" | "custom" | "api";
 
 export interface ProviderDriver<Config = unknown> {
   readonly driverKind: DriverKind;

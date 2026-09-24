@@ -134,6 +134,8 @@ export function ProviderMark({ driverKind, size, className }: IconProps & { driv
       return <GrokMark size={size} className={className} />;
     case "claudeAgent":
       return <ClaudeMark size={size} className={className} />;
+    case "mistral":
+      return <PresetProviderMark preset="mistral" size={size} className={className} />;
     case "codex":
       return <CodexMark size={size} className={className} />;
     case "kimiAgent":

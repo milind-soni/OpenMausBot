@@ -256,6 +256,7 @@ export class ProviderRegistry {
             modelVariants: inst.adapter.capabilities.modelVariants === true,
             queueing: inst.adapter.capabilities.queueing === true,
             localComputerMcp: inst.adapter.capabilities.localComputerMcp === true,
+            cloudComputerMcp: inst.adapter.capabilities.cloudComputerMcp === true,
             approvalReview: inst.reviewPermission !== undefined,
           },
           access: driver?.metadata.access ?? "subscription",

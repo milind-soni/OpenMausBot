@@ -47,6 +47,22 @@ export function canAccessTeam(
       typeof value === "string" && sectionKey(value) === target));
 }
 
+/** Returns whether `coordinator` is an authorized Chief of Staff supervising `bot`'s section. */
+export function coordinatorSupervises(
+  coordinator: Pick<RosterMember, "chiefOfStaff" | "managedSections"> | null | undefined,
+  bot: Pick<RosterMember, "section"> | null | undefined,
+): boolean {
+  if (!coordinator?.chiefOfStaff || !bot) return false;
+  const target = sectionKey(bot.section);
+  if (!target) return false;
+  return Boolean(
+    Array.isArray(coordinator.managedSections) &&
+    coordinator.managedSections.some((value) =>
+      typeof value === "string" && sectionKey(value) === target,
+    ),
+  );
+}
+
 export type PeerStatus = "available" | "working" | "waiting-on-user" | "not-responding" | "unavailable";
 
 const PEER_STATUS_WORDS: Record<PeerStatus, string> = {

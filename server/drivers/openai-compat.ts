@@ -147,6 +147,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       apiKey,
       apiUrl: config.url,
       tools: config.tools,
+      computerUse: true,
       models: () => catalog,
       refreshModels: fetchModels,
       requestBody: (model, messages, stream) => ({

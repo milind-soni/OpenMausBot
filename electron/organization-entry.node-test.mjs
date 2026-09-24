@@ -45,7 +45,7 @@ test("consuming a launch action prevents it replaying on a later restart without
   assert.deepEqual(argv, original);
 });
 
-test("the actual companion relaunch passes consumed arguments explicitly to Electron", () => {
+test("the actual companion relaunch passes consumed arguments and requests normal shutdown", () => {
   const main = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
   const source = main.slice(main.indexOf("function relaunchAfterDesktopRemoteChange()"), main.indexOf('ipcMain.handle("desktop-remote:state"'));
   const argv = ["/fixture/OpenMausBot", "--fixture", "openmausbot://organization", "openmausbot://organization?ignored"];
@@ -53,9 +53,9 @@ test("the actual companion relaunch passes consumed arguments explicitly to Elec
   const calls = [];
   runInNewContext(`${source}\nrelaunchAfterDesktopRemoteChange();`, {
     process: { argv }, setTimeout: callback => { callback(); return {}; },
-    app: { relaunch: options => calls.push(options.args), exit: code => calls.push(code) },
+    app: { relaunch: options => calls.push(options.args), quit: () => calls.push("quit") },
   });
-  assert.deepEqual(calls, [["--fixture", "openmausbot://organization?ignored"], 0]);
+  assert.deepEqual(calls, [["--fixture", "openmausbot://organization?ignored"], "quit"]);
 });
 
 test("the shipped updater adapter explicitly omits only the fixed action and its reproducible patch fails closed", () => {

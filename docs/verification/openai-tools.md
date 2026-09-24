@@ -59,6 +59,53 @@ path. It does not establish that every third-party model supports tools, or
 that live Grok and MiniMax services accept a particular schema. Model support
 and service-specific limits remain separate from the implemented protocol.
 
+## Computer and browser screenshots
+
+The OpenAI-compatible driver opts into structured image input and mounts the
+harness-provided `localComputer` and `browser` stdio descriptors. It does not
+discover or grant a desktop itself. Host, VM, VPS and room routing continue to
+use the harness's existing ownership and permission gates. The driver's Box
+bridge consumes the separately leased cloud descriptor and keeps the selected
+API model; other engines retain their native Box runner.
+
+MCP images become bounded inline image parts. Tool results retain their call IDs;
+only after the full tool-result batch is appended does a separate image message
+carry labelled screenshots. Image data is not copied into text tool previews.
+Computer-enabled MCP transports accept frames up to 32 MiB for screenshots;
+ordinary text-only transports retain their 2 MiB limit. Each image is bounded to
+20 MiB, with 32 MiB of encoded images retained across the whole turn, including
+user attachments. Exceeding the turn budget stops without replaying an operation.
+Remote image/computer connections require HTTPS; local loopback HTTP is allowed.
+Image-bearing completion requests do not follow redirects. Custom text MCP
+servers retain their 2 MiB transport cap even in computer-enabled sessions.
+PNG, JPEG, WebP and GIF are accepted; invalid base64/MIME results fail
+instead of being reported as successful screenshots.
+
+Native unsigned-number formats and root composition constraints are validated
+locally. For computer-enabled requests, root composition constraints appear in
+the description rather than the outgoing parameter root, preserving the full
+original validator before execution.
+
+The driver contract tests exercise real loopback HTTP and stdio MCP processes:
+input-image encoding, computer/browser screenshot delivery, call-ID ordering,
+approval denial with no side effect, malformed images and a screenshot larger
+than the ordinary text frame limit. They do not use real desktop access or paid
+inference, and do not establish vision/tool support for every provider model.
+
+### Box bridge
+
+`pnpm exec vitest run server/drivers/chat-box-tools.test.ts server/openai-box.e2e.test.ts`
+tests an owned loopback Box/API fixture. It covers direct chats, group member
+turns and cloud routines retaining the selected model, screenshots arriving as
+image parts, and human control blocking an approved action. Bridge tests cover
+each advertised action, invalid arguments, expired control capabilities,
+changed ownership and in-flight cancellation without replay.
+
+Model screenshots use native resolution and a separate file from panel frames.
+Every action rechecks the harness control gate. Commands run with an isolated
+environment; Box and control credentials do not enter model messages. Tests
+use synthetic image bytes, not a paid Box account or real desktop input.
+
 ## Text-only model connections
 
 Tool support is enabled by default for these three API drivers. For a model
@@ -80,3 +127,14 @@ Set `tools` back to `true` to enable discovery and execution. This affects all
 bots using the instance; use separate configured instances for models with
 different tool support. A model response or HTTP error never silently disables
 tools. No fallback replays a requested operation without its tools.
+
+Cloud routine readiness uses the executing bot’s selected runner (including a
+thread’s model override at dispatch), rather than any available cloud engine.
+The probe checks the bot-owned or inherited team Box without provisioning or
+waking it. Dispatch repeats the check so a removed key or unavailable Box fails
+the run before model execution. Explicit Cloud still permits creating/waking
+the bot’s own Box; a missing assigned team computer requires explicit repair.
+
+Run `pnpm exec vitest run server/routine-requests.test.ts server/openai-box.e2e.test.ts`
+for target selection and the isolated direct/group/scheduled bridge fixture,
+including credentials removed after scheduling and a Box outage at dispatch.

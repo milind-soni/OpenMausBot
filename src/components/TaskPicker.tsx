@@ -10,7 +10,7 @@ import { useStore, type Bot, type BotProject, type Group, type Task } from "@/st
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
-import { formatTaskTokens } from "@/lib/usage";
+import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -52,15 +52,14 @@ export function filterTasks<T extends { title: string }>(tasks: readonly T[], qu
   return [...prefix, ...substring];
 }
 
-/** Quiet per-task token tally — input+output combined, because one honest
- * total reads faster than a split; the split lives in the hover title. */
+/** Quiet per-task token tally; the hover title explains the cached share. */
 function TaskUsage({ usage }: { usage: Task["usage"] }) {
   if (!usage) return null;
-  const label = formatTaskTokens(usage.input + usage.output);
+  const label = formatTaskTokens(headlineTokens(usage));
   if (!label) return null;
   return (
     <span
-      title={`${t("chat.usage.in", { tokens: usage.input.toLocaleString() })} · ${t("chat.usage.out", { tokens: usage.output.toLocaleString() })}`}
+      title={usageDetail(usage)}
     >
       {" · "}
       {label}
@@ -206,13 +205,12 @@ function ConversationTaskPicker({
   // the picker button stays as-is — a token count next to a truncated title
   // and count would crowd it; the open task's tally rides the hover title
   const u = current?.usage;
-  const currentLabel = u ? formatTaskTokens(u.input + u.output) : null;
+  const currentLabel = u ? formatTaskTokens(headlineTokens(u)) : null;
   const switchTitle =
     u && currentLabel
-      ? t("task.switchWithUsage", {
+      ? t("task.switchWithUsageDetail", {
           label: currentLabel,
-          input: u.input.toLocaleString(),
-          output: u.output.toLocaleString(),
+          detail: usageDetail(u),
         })
       : t("task.switch");
   const grouped = bot ? groupThreadTasks(tasks, bot.projects ?? [], query) : null;
