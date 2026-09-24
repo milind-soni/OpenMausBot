@@ -7,3 +7,9 @@ The browser Projects screen currently reads `/api/projects` but hides every add 
 3. Test the HTTP routes against the isolated server harness, then run type-check, tests, and build. Commit the scoped fix locally.
 
 The server already executes user-directed file and shell operations; these routes use its existing same-origin request guard. Path validation, duplicate detection, and GitHub URL validation remain in `ProjectService`.
+
+## Browser write boundary
+
+The HTTP `create` and `clone` routes pass the server user's home directory as an allowed root. `ProjectService` resolves the real path of the destination parent and the home directory before creating a folder or starting Git, then rejects destinations outside that home with a clear error. This also rejects parent symlinks that lead outside home. Electron's native picker keeps its existing path behavior. `add-existing` may register any existing absolute directory because it does not create or clone into that directory.
+
+Every `/api/` request reaches the harness `rejectUntrustedRequest` check before routing. Under `dev:network`, Vite applies that same guard at the proxy before stripping browser origin headers and forwarding to the harness. LAN binding relaxes the Host allowlist, while the same-origin and Fetch Metadata checks still apply.

@@ -1639,12 +1639,12 @@ const server = createServer(async (req, res) => {
         if (typeof body.parentPath !== "string" || typeof body.name !== "string") {
           return json(res, 400, { error: "parentPath and name must be strings" });
         }
-        project = await projectService.createProject({ parentPath: body.parentPath, name: body.name });
+        project = await projectService.createProject({ parentPath: body.parentPath, name: body.name, allowedRoot: homedir() });
       } else if (path === "/api/projects/clone") {
         if (typeof body.repositoryUrl !== "string" || typeof body.destinationPath !== "string") {
           return json(res, 400, { error: "repositoryUrl and destinationPath must be strings" });
         }
-        project = await projectService.cloneProject({ repositoryUrl: body.repositoryUrl, destinationPath: body.destinationPath });
+        project = await projectService.cloneProject({ repositoryUrl: body.repositoryUrl, destinationPath: body.destinationPath, allowedRoot: homedir() });
       } else {
         return json(res, 404, { error: `no route: ${method} ${path}` });
       }

@@ -138,6 +138,15 @@ async function canonicalDirectory(targetPath, label = "Folder") {
   return canonical;
 }
 
+async function assertWithinAllowedRoot(parent, allowedRoot) {
+  if (!allowedRoot) return;
+  const root = await canonicalDirectory(allowedRoot, "Allowed project root");
+  const relativePath = path.relative(root, parent);
+  if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) {
+    throw projectError("Browser projects can only be created or cloned inside your home directory.");
+  }
+}
+
 function pathKey(value) {
   const normalized = path.normalize(value);
   return process.platform === "win32" ? normalized.toLowerCase() : normalized;
@@ -257,8 +266,9 @@ export class ProjectService {
     return this.addRecord({ projectPath, source: "existing" });
   }
 
-  async createProject({ parentPath, name }) {
+  async createProject({ parentPath, name, allowedRoot }) {
     const parent = await canonicalDirectory(parentPath, "Parent folder");
+    await assertWithinAllowedRoot(parent, allowedRoot);
     const folderName = validateFolderName(name);
     const projectPath = path.join(parent, folderName);
     try {
@@ -270,13 +280,14 @@ export class ProjectService {
     return this.addRecord({ projectPath, source: "created" });
   }
 
-  async cloneProject({ repositoryUrl, destinationPath }) {
+  async cloneProject({ repositoryUrl, destinationPath, allowedRoot }) {
     const parsed = parseGitHubRepositoryUrl(repositoryUrl);
     const destination = path.resolve(String(destinationPath ?? "").trim());
     if (!destinationPath || !path.isAbsolute(String(destinationPath))) {
       throw projectError("Clone destination must be an absolute path.");
     }
     const parent = await canonicalDirectory(path.dirname(destination), "Destination parent folder");
+    await assertWithinAllowedRoot(parent, allowedRoot);
     const normalizedDestination = path.join(parent, path.basename(destination));
     try {
       await access(normalizedDestination, fsConstants.F_OK);

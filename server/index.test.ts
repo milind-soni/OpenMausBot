@@ -5,7 +5,7 @@
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
 import { request as httpRequest } from "node:http";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,68 @@ describe("harness HTTP API", () => {
 
     expect((await api("POST", "/api/projects/create", { parentPath, name: "../escape" })).status).toBe(400);
     expect((await api("POST", "/api/projects/clone", { repositoryUrl: "https://example.com/a/b", destinationPath: join(parentPath, "clone") })).status).toBe(400);
+  });
+
+  it("limits browser create and clone destinations to the real home directory", async () => {
+    const outside = mkdtempSync(join(tmpdir(), "gbs-outside-home-"));
+    try {
+      const create = await api("POST", "/api/projects/create", { parentPath: outside, name: "blocked-create" });
+      expect(create.status).toBe(400);
+      expect(create.body.error).toMatch(/inside your home directory/);
+      expect(existsSync(join(outside, "blocked-create"))).toBe(false);
+
+      const clone = await api("POST", "/api/projects/clone", {
+        repositoryUrl: "https://github.com/example/repo",
+        destinationPath: join(outside, "blocked-clone"),
+      });
+      expect(clone.status).toBe(400);
+      expect(clone.body.error).toMatch(/inside your home directory/);
+      expect(existsSync(join(outside, "blocked-clone"))).toBe(false);
+
+      if (process.platform !== "win32") {
+        const link = join(home, "outside-link");
+        symlinkSync(outside, link, "dir");
+        const viaLink = await api("POST", "/api/projects/create", { parentPath: link, name: "blocked-link" });
+        expect(viaLink.status).toBe(400);
+        expect(viaLink.body.error).toMatch(/inside your home directory/);
+        expect(existsSync(join(outside, "blocked-link"))).toBe(false);
+      }
+
+      const registered = await api("POST", "/api/projects/add-existing", { projectPath: outside });
+      expect(registered.status).toBe(201);
+      expect(registered.body.project.path).toBe(outside);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("guards every browser project mutation before routing", async () => {
+    const parentPath = join(home, "workspace");
+    const existingPath = join(parentPath, "existing-app");
+    const routes = [
+      ["/api/projects/add-existing", { projectPath: existingPath }],
+      ["/api/projects/create", { parentPath, name: "cross-origin-create" }],
+      ["/api/projects/clone", { repositoryUrl: "https://github.com/example/repo", destinationPath: join(parentPath, "cross-origin-clone") }],
+    ] as const;
+    for (const [route, body] of routes) {
+      const response = await fetch(`${BASE}${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "https://evil.example" },
+        body: JSON.stringify(body),
+      });
+      expect(response.status, route).toBe(403);
+      expect(((await response.json()) as { error: string }).error).toMatch(/cross-origin/);
+    }
+    expect(existsSync(join(parentPath, "cross-origin-create"))).toBe(false);
+    expect(existsSync(join(parentPath, "cross-origin-clone"))).toBe(false);
+
+    const fetchMetadata = await fetch(`${BASE}/api/projects/create`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+      body: JSON.stringify({ parentPath, name: "cross-site-create" }),
+    });
+    expect(fetchMetadata.status).toBe(403);
+    expect(existsSync(join(parentPath, "cross-site-create"))).toBe(false);
   });
 
   it("identifies itself on /api/health", async () => {
