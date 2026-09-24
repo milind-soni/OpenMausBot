@@ -45,6 +45,100 @@ export async function composioTool(cfg: AppConfig, name: string, args: unknown) 
   return parseMcpResponse(await res.text());
 }
 
+export interface ActiveConnection {
+  slug: string;
+  label: string;
+  status: string;
+  accounts: Array<{
+    id?: string;
+    email?: string;
+    name?: string;
+    status?: string;
+  }>;
+}
+
+let activeConnectionsCache: { at: number; connections: ActiveConnection[] } | null = null;
+
+export function invalidateActiveConnectionsCache() {
+  activeConnectionsCache = null;
+}
+
+/**
+ * Active Composio connections (cached 45s). Returns [] if unconfigured or error occurs.
+ */
+export async function listActiveConnections(
+  cfg: AppConfig,
+  forceRefresh = false
+): Promise<ActiveConnection[]> {
+  if (!cfg.composio?.key) return [];
+
+  if (!forceRefresh && activeConnectionsCache && Date.now() - activeConnectionsCache.at < 45_000) {
+    return activeConnectionsCache.connections;
+  }
+
+  try {
+    const { cards } = await listToolkits(cfg);
+    const slugs = cards.map((c) => c.slug);
+    const labelMap = new Map(cards.map((c) => [c.slug, c.label]));
+
+    const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", {
+      toolkits: slugs.map((name) => ({ name, action: "list" })),
+    });
+
+    const results = out?.data?.results ?? {};
+    const connections: ActiveConnection[] = [];
+
+    for (const [slug, data] of Object.entries<any>(results)) {
+      if (!data) continue;
+      const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      const isActive =
+        accounts.some((a: any) => /active/i.test(a.status ?? "")) ||
+        /^active$/i.test(data.status ?? "");
+
+      if (isActive) {
+        connections.push({
+          slug,
+          label: labelMap.get(slug) || slug.charAt(0).toUpperCase() + slug.slice(1),
+          status: "active",
+          accounts: accounts.map((a: any) => ({
+            id: a.id ?? a.account_id ?? a.nanoid ?? undefined,
+            email: a.email ?? a.user_email ?? a.username ?? undefined,
+            name: a.name ?? a.account_name ?? undefined,
+            status: a.status ?? "active",
+          })),
+        });
+      }
+    }
+
+    activeConnectionsCache = { at: Date.now(), connections };
+    return connections;
+  } catch (err) {
+    console.error("[composio] listActiveConnections failed:", err);
+    return activeConnectionsCache?.connections ?? [];
+  }
+}
+
+/**
+ * Formats active connected apps block for system prompt injection.
+ * Degrades gracefully (returns "") if unconfigured, no active connections, or on error.
+ */
+export async function formatConnectedAppsPrompt(cfg: AppConfig): Promise<string> {
+  if (!cfg.composio?.key) return "";
+  try {
+    const activeConns = await listActiveConnections(cfg);
+    if (activeConns.length === 0) return "";
+    const listStr = activeConns
+      .map((c) => {
+        const acctsStr = c.accounts.map((a) => a.email || a.name || a.id).filter(Boolean).join(", ");
+        return `- ${c.label} (${c.slug}): Active${acctsStr ? ` [Account: ${acctsStr}]` : ""}`;
+      })
+      .join("\n");
+    return `\n\n[Connected Studio Apps (Composio)]\nThe user currently has active connections for the following external apps:\n${listStr}\nYou have direct access to tools for these connected apps. You can use them whenever helpful without needing to ask the user if they are connected.`;
+  } catch {
+    return "";
+  }
+}
+
 /** Connection status per service slug: { slack: { connected, status } }. */
 export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
   const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", {
@@ -63,6 +157,7 @@ export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
 
 /** Disconnect a service: remove every connected account for the slug. */
 export async function removeService(cfg: AppConfig, slug: string) {
+  invalidateActiveConnectionsCache();
   const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", {
     toolkits: [{ name: slug, action: "list" }],
   });
@@ -78,6 +173,7 @@ export async function removeService(cfg: AppConfig, slug: string) {
 
 /** Mint a browser auth link for one service. Returns { url } or throws. */
 export async function authorizeService(cfg: AppConfig, slug: string) {
+  invalidateActiveConnectionsCache();
   const out = await composioTool(cfg, "COMPOSIO_MANAGE_CONNECTIONS", {
     toolkits: [{ name: slug, action: "add" }],
   });

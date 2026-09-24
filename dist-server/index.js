@@ -489,6 +489,7 @@ async function startTurn(botId, text, opts) {
             const tagged = integrations.agents && canMessagePeers
                 ? mentionedBots(text, store.bots.filter((b) => b.id !== bot.id))
                 : [];
+            const composioPrompt = await composio.formatConnectedAppsPrompt(cfg);
             await instance.adapter.sendTurn({
                 threadId: bot.threadId,
                 text: turnText,
@@ -500,6 +501,7 @@ async function startTurn(botId, text, opts) {
                 system: persona +
                     (projectContext.system ? `\n\n${projectContext.system}` : "") +
                     (taskContext.system ? `\n\n${taskContext.system}` : "") +
+                    composioPrompt +
                     (integrations.computer && instance.driverKind !== "boxAgent"
                         ? " You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
                         : integrations.localComputer
@@ -634,9 +636,29 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
         .reverse()
         .find((message) => message.role === "user" && message.kind === "text");
     const latestUserText = latestUserMessage?.text ?? "";
+    const integrations = {};
+    if (cfg.composio?.key)
+        integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
+    const wants = bot.computer;
+    if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
+        let b = await box.findBox(cfg, bot.id).catch(() => null);
+        if (!b && instance.driverKind === "boxAgent") {
+            broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
+            await box.provisionBox(cfg, bot.id, bot.name);
+            b = await box.findBox(cfg, bot.id).catch(() => null);
+        }
+        if (b)
+            integrations.computer = { boxId: b.id, token: cfg.box.token };
+    }
+    if (!integrations.computer && wants !== "off" && wants !== "cloud") {
+        const cua = readCuaConnection();
+        if (cua)
+            integrations.localComputer = cua;
+    }
     const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
     const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
     const taskContext = resolveTaskContext([latestUserText, group.bulletin, bot.description], taskStore.list());
+    const composioPrompt = await composio.formatConnectedAppsPrompt(cfg);
     const system = [
         `You are ${bot.name}, a bot in the room "${group.name}" in Gerer Build Studio.`,
         bot.title && `Role: ${bot.title}.`,
@@ -645,11 +667,19 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
         group.bulletin.trim() && `Room bulletin (shared instructions for everyone):\n${group.bulletin.trim()}`,
         projectContext.system,
         taskContext.system,
+        composioPrompt.trim(),
+        integrations.computer && instance.driverKind !== "boxAgent"
+            ? "You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
+            : integrations.localComputer
+                ? "You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
+                : "",
         `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     ]
         .filter(Boolean)
         .join("\n");
     const text = `${serializeRoomContext(group.threadId, userName)}${attPrompt ? `\n\n${attPrompt}` : ""}\n\n(Reply to the conversation above as ${bot.name}.)`;
+    if (integrations.computer)
+        startScreenPoller(bot.id);
     // run the turn and wait for it to settle, folding the reply text so a
     // chained @mention can be routed afterwards
     let replyText = "";
@@ -684,7 +714,7 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
             });
         }, GROUP_TURN_TIMEOUT_MS);
         instance.adapter
-            .sendTurn({ threadId: group.threadId, text, system, cwd: projectContext.cwd })
+            .sendTurn({ threadId: group.threadId, text, system, cwd: projectContext.cwd, integrations })
             .catch((err) => {
             const failure = store.appendMessage(group.threadId, {
                 role: "bot",
@@ -957,6 +987,12 @@ const server = createServer(async (req, res) => {
                     description: b.description || undefined,
                 }));
                 return json(res, 200, { bots });
+            }
+            if (method === "GET" && path === "/api/internal/connectors/active") {
+                if (!cfg.composio?.key)
+                    return json(res, 200, { configured: false, activeConnections: [] });
+                const activeConnections = await composio.listActiveConnections(cfg);
+                return json(res, 200, { configured: true, activeConnections });
             }
             const callerId = String(req.headers["x-gbs-bot-id"] ?? "");
             const caller = taskActorForBot(callerId);
@@ -1604,6 +1640,12 @@ const server = createServer(async (req, res) => {
             return json(res, 200, { ok: true });
         }
         // ── connectors (Composio) ──
+        if (method === "GET" && path === "/api/connectors/active") {
+            if (!cfg.composio?.key)
+                return json(res, 200, { configured: false, activeConnections: [] });
+            const activeConnections = await composio.listActiveConnections(cfg);
+            return json(res, 200, { configured: true, activeConnections });
+        }
         if (method === "GET" && path === "/api/connectors/catalog") {
             const { cards, source } = await composio.listToolkits(cfg);
             return json(res, 200, { configured: Boolean(cfg.composio?.key), source, cards });
