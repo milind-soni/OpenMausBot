@@ -1,5 +1,6 @@
 import { CornerDownRight, Trash2 } from "lucide-react";
 
+import type { SteerQueueReason } from "../../shared/wire";
 import { t } from "@/lib/i18n";
 
 export function composerCanSteerQueuedMessages(
@@ -57,7 +58,7 @@ export function QueuedComposerMessages({
   steerInterrupts = false,
   onCancel,
 }: {
-  items: Array<{ queueId: string; text: string; reason?: "capacity" }>;
+  items: Array<{ queueId: string; text: string; reason?: SteerQueueReason }>;
   onSteer?: () => void;
   steerMode?: "all" | "next";
   steering?: boolean;
@@ -98,6 +99,9 @@ export function QueuedComposerMessages({
       }
       aria-live="polite"
     >
+      {items.some((item) => item.reason === "group-turn") && (
+        <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.groupTurn")}</p>
+      )}
       {items.some((item) => item.reason === "capacity") && (
         <p className="px-3 pt-2 text-[12px] text-ink-secondary">{t("composer.queued.capacity")}</p>
       )}

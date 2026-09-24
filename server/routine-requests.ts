@@ -298,7 +298,7 @@ export interface RoutineRequestServiceOptions {
   /** Server-owned effective mode of the source conversation, never request input. */
   autoApply?: (botId: string, threadId: string) => boolean;
   /** Harness-owned readiness check for proposals that would execute in cloud. */
-  cloudReady?: () => Promise<{ ready: boolean; reason?: string }>;
+  cloudReady?: (botId: string) => Promise<{ ready: boolean; reason?: string }>;
   /** Revalidates conversation ownership and capacity synchronously, directly
    * before the card append. This closes races across an async cloud probe. */
   canPersist?: (
@@ -1069,7 +1069,7 @@ export class RoutineRequestService {
   private readonly routines: RoutineManager;
   private readonly now: () => number;
   private readonly timeZone: () => string;
-  private readonly cloudReady?: () => Promise<{ ready: boolean; reason?: string }>;
+  private readonly cloudReady?: (botId: string) => Promise<{ ready: boolean; reason?: string }>;
   private readonly canPersist?: RoutineRequestServiceOptions["canPersist"];
   private readonly validateTarget?: RoutineRequestServiceOptions["validateTarget"];
   private readonly autoApply?: RoutineRequestServiceOptions["autoApply"];
@@ -1109,7 +1109,7 @@ export class RoutineRequestService {
       const refusal = this.validateTarget(botId, operation.forBot);
       if (refusal) throw new RoutineRequestError(refusal, 403);
     }
-    await this.requireCloudReadiness(operation);
+    await this.requireCloudReadiness(operation, botId);
     // The readiness probe is asynchronous. Another request can edit or
     // delete the routine while it is in flight, so re-check the captured
     // revision before rendering and persisting the confirmation snapshot.
@@ -1189,13 +1189,16 @@ export class RoutineRequestService {
     throw new RoutineRequestError(result.state === "invalid" ? result.error : "The routine change could not be applied", result.state === "invalid" ? result.status : 409);
   }
 
-  private async requireCloudReadiness(operation: RoutineRequestOperation): Promise<void> {
+  private async requireCloudReadiness(operation: RoutineRequestOperation, proposerBotId: string): Promise<void> {
     if (!this.cloudReady || operation.action === "pause" || operation.action === "delete") return;
     const definition = effectiveDefinition(operation, this.routines);
     if (definition?.runOn !== "cloud") return;
     let readiness: { ready: boolean; reason?: string };
     try {
-      readiness = await this.cloudReady();
+      const targetBotId = operation.action === "create"
+        ? operation.forBot?.botId ?? proposerBotId
+        : this.routines.listRoutines().find(routine => routine.id === operation.routineId)?.botId ?? proposerBotId;
+      readiness = await this.cloudReady(targetBotId);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new RoutineRequestError(`Could not verify cloud readiness: ${detail}`, 503);

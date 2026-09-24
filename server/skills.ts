@@ -52,15 +52,21 @@ import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
 import { workspaceDir } from "./workspace.ts";
+import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, type ParsedSkill } from "../shared/skill-md.ts";
 
-/** Spec rule: lowercase alphanumerics with single hyphens, 1-64 chars,
- * folder name must equal it. The regex IS the traversal gate — no dots, no
- * slashes, no way to name a skill "..". */
-const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-export const SKILL_NAME_MAX = 64;
-export const DESCRIPTION_MAX = 1024;
-/** One SKILL.md may be at most this large; the spec recommends <5k tokens. */
-export const SKILL_FILE_MAX_BYTES = 256 * 1024;
+// SKILL.md parsing and the static scan live in shared/ so the package
+// format (Admin and the renderer included) validates skills with the exact
+// same rules; re-exported here under their historical path.
+export {
+  DESCRIPTION_MAX,
+  isSkillName,
+  parseSkillMd,
+  scanSkillText,
+  SKILL_FILE_MAX_BYTES,
+  SKILL_NAME_MAX,
+  type ParsedSkill,
+} from "../shared/skill-md.ts";
+
 /** Index budget: name+description lines only, ~100 tokens per skill. */
 export const INDEX_MAX_SKILLS = 30;
 export const INDEX_MAX_BYTES = 4_000;
@@ -70,67 +76,6 @@ export const STAGED_GIST_MAX = 240;
 /** Learned skills are duplicated onto their durable review card. Keep that
  * exact review payload bounded while leaving fetched skill imports unchanged. */
 export const STAGED_SKILL_FILE_MAX_BYTES = 32 * 1024;
-
-export function isSkillName(name: string): boolean {
-  return name.length >= 1 && name.length <= SKILL_NAME_MAX && SKILL_NAME.test(name);
-}
-
-export interface ParsedSkill {
-  name: string;
-  description: string;
-  license?: string;
-  compatibility?: string;
-  body: string;
-}
-
-/** Minimal frontmatter reader for the two required keys plus the two we
- * display. Deliberately not a YAML engine: values are single-line strings in
- * every skill the spec's own examples show, and a parser that cannot
- * evaluate anchors or tags cannot be surprised by them. */
-export function parseSkillMd(raw: string): ParsedSkill | { error: string } {
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return { error: "SKILL.md has no YAML frontmatter (--- block) at the top" };
-  const fields: Record<string, string> = {};
-  for (const line of match[1]!.split(/\r?\n/)) {
-    const kv = line.match(/^([A-Za-z][\w-]*):\s*(.*)$/);
-    if (!kv) continue;
-    fields[kv[1]!.toLowerCase()] = kv[2]!.replace(/^["']|["']$/g, "").trim();
-  }
-  const name = fields.name ?? "";
-  const description = fields.description ?? "";
-  if (!isSkillName(name)) {
-    return { error: `frontmatter name ${JSON.stringify(name)} is not a valid skill name (lowercase, hyphens, max ${SKILL_NAME_MAX})` };
-  }
-  if (!description || description.length > DESCRIPTION_MAX) {
-    return { error: `frontmatter description is required and must be at most ${DESCRIPTION_MAX} characters` };
-  }
-  return {
-    name,
-    description,
-    license: fields.license || undefined,
-    compatibility: fields.compatibility || undefined,
-    body: match[2] ?? "",
-  };
-}
-
-/** Static red flags before a human review. Presence is a warning shown in
- * the review screen, never a silent rejection — the reviewer decides. These
- * are the three patterns the public registry audits actually caught. */
-export function scanSkillText(raw: string): string[] {
-  const warnings: string[] = [];
-  if (/[A-Za-z0-9+/]{120,}={0,2}/.test(raw)) {
-    warnings.push("contains a long base64-looking blob — a common wrapper for hidden instructions or payloads");
-  }
-  if (/\b(curl|wget)\b[^\n]{0,200}\|\s*(ba|z|da)?sh\b/.test(raw)) {
-    warnings.push("pipes a download straight into a shell (curl|sh) — never enable without understanding why");
-  }
-  // zero-width and bidi-control characters hide text from the reviewer while
-  // the model still reads it — the invisible-instruction trick
-  if (/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/.test(raw)) {
-    warnings.push("contains invisible Unicode characters (zero-width or bidi controls) — text you cannot see");
-  }
-  return warnings;
-}
 
 interface SkillManifestEntry {
   description: string;
@@ -148,6 +93,18 @@ interface SkillManifestEntry {
   /** Immutable workspace revision selected by the protected manifest. Older
    * skills omit this and continue to use skills/<name>. */
   storageRevision?: string;
+  /** Organization library only: which install added it, and the SKILL.md
+   * hashes as released and as written. Never exposed to agents or clients. */
+  package?: SkillPackageStamp;
+}
+
+export interface SkillPackageStamp {
+  installId: string;
+  /** The skill's name in the package. */
+  key: string;
+  release: string;
+  r: string;
+  w: string;
 }
 
 interface SkillManifest {
@@ -166,6 +123,13 @@ const skillManifestEntrySchema = z.object({
   skippedFiles: z.array(z.string()),
   appliedStageId: z.string().optional(),
   storageRevision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  package: z.object({
+    installId: z.string().regex(/^[a-f0-9]{32}$/),
+    key: z.string().min(1).max(64),
+    release: z.string().min(1).max(40),
+    r: z.string().regex(/^[a-f0-9]{64}$/),
+    w: z.string().regex(/^[a-f0-9]{64}$/),
+  }).optional(),
 });
 const skillManifestSchema = z.record(z.string(), skillManifestEntrySchema);
 const managedLinksSchema = z.array(z.string());
@@ -602,7 +566,7 @@ function skillContentMatches(botId: string, name: string, entry: SkillManifestEn
 }
 
 function skillListing(botId: string, name: string, entry: SkillManifestEntry): SkillListing {
-  const { appliedStageId, storageRevision: _storageRevision, ...visible } = entry;
+  const { appliedStageId, storageRevision: _storageRevision, package: _package, ...visible } = entry;
   const intact = skillContentMatches(botId, name, entry);
   return {
     name,
@@ -666,6 +630,30 @@ export function installSkill(
   const prepared = preparedSkillFiles(files);
   if ("error" in prepared) return prepared;
   return installPreparedSkill(botId, source, prepared, { enabled: false });
+}
+
+/** The organization library's path: a skill the organization's Admin
+ * published arrives switched ON (the Admin is the review), with the install
+ * stamp that lets the library find it again. `source` is chosen by the
+ * caller (`org:<ref>@<release>`), never read from the package. */
+export function installOrgSkill(
+  botId: string,
+  source: string,
+  skillMd: string,
+  stamp: SkillPackageStamp,
+): SkillListing | { error: string } {
+  if (!source.startsWith("org:")) return { error: "organization skills need an org: source" };
+  const prepared = preparedSkillFiles([{ path: "SKILL.md", content: skillMd }]);
+  if ("error" in prepared) return prepared;
+  if (prepared.parsed.name !== stamp.key) return { error: `the skill is named "${prepared.parsed.name}", not "${stamp.key}"` };
+  return installPreparedSkill(botId, source, prepared, { enabled: true, package: { ...stamp } });
+}
+
+/** A bot's skills that an organization install added, with their stamps. */
+export function skillPackageStamps(botId: string): Array<{ name: string; enabled: boolean; stamp: SkillPackageStamp }> {
+  return Object.entries(readManifest(botId)).flatMap(([name, entry]) => entry.package
+    ? [{ name, enabled: entry.enabled, stamp: { ...entry.package } }]
+    : []);
 }
 
 export function setSkillEnabled(botId: string, name: string, enabled: boolean): SkillListing | { error: string } {
@@ -1050,7 +1038,7 @@ function installPreparedSkill(
   botId: string,
   source: string,
   prepared: PreparedSkillFiles,
-  options: { enabled: boolean; appliedStageId?: string },
+  options: { enabled: boolean; appliedStageId?: string; package?: SkillPackageStamp },
 ): SkillListing | { error: string } {
   const name = prepared.parsed.name;
   const manifest = readManifest(botId);
@@ -1078,6 +1066,7 @@ function installPreparedSkill(
     warnings: prepared.warnings,
     skippedFiles: prepared.skippedFiles,
     appliedStageId: options.appliedStageId,
+    ...(options.package ? { package: options.package } : {}),
   };
   const root = ensureSkillsRoot(botId);
   if (!root) return { error: "the workspace skills path must be a real directory, not a symlink or file" };

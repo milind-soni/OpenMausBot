@@ -39,7 +39,7 @@ describe("call capability guidance", () => {
       reasonCode: "remote-server",
     }), false)).toEqual({
       label: "Calls are available on This computer",
-      reason: "You're viewing a hosted workspace. Calls use the microphone and on-device speech recognition on your Mac.",
+      reason: "You're viewing a server. Calls use the microphone and on-device speech recognition on your Mac.",
       action: "choose-local-workspace",
     });
   });

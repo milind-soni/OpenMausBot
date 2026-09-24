@@ -99,7 +99,7 @@ are private, single-use, and expire after five minutes. Guided phone
 access permits chat and approvals, not settings or pairing administration.
 Localhost and a bare LAN address cannot connect your phone to this server.
 
-Later launches reuse your saved choices and open the local workspace.
+Later launches reuse your saved choices and open OpenMausBot on this computer.
 Keep the terminal open: this is a foreground server, not a background
 service. Ctrl-C stops the server without deleting saved work. Automatic
 browser opening uses only the local address; it is skipped for SSH and
@@ -110,7 +110,7 @@ openmausbot setup          # reconfigure AI and optional phone access; not a res
 openmausbot --no-open      # do not open a browser
 openmausbot --local        # ignore saved remote access for this launch
 openmausbot --no-pair      # suppress phone prompts and invitations
-openmausbot pair           # another phone while the HTTPS workspace is running
+openmausbot pair           # another phone while the HTTPS server is running
 openmausbot sessions       # list devices; sessions revoke ID signs one out
 openmausbot serve          # no onboarding prompts; explicit remote flags for services
 \`\`\`

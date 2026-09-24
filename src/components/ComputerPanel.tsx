@@ -1,3 +1,4 @@
+import { cloudRunner } from "@/lib/remote-desktop";
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the box on open (idempotent) and preview
 // via SSE frames or a ~4s screenshot poll. macOS local mode keeps the legacy
@@ -451,13 +452,13 @@ export function ComputerPanel({
   const vpsSupported = Boolean(computerToolSupported && selectedInstance?.driverKind !== "boxAgent");
   const cloudSupported = cloudBackend === "vps"
     ? vpsSupported
-    : state.instances.some((instance) => instance.driverKind === "boxAgent");
+    : Boolean(cloudRunner(state.instances, bot.modelSelection.instanceId));
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
   const cloudRoutineReady = Boolean(
     state.config?.box.configured &&
-      state.instances.some((instance) => instance.driverKind === "boxAgent" && instance.snapshot.state === "available"),
+      cloudRunner(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
   );
   const activeRoutineRun = state.routineRuns.find(
     (run) => run.botId === bot.id && ["queued", "running", "waiting"].includes(run.status),

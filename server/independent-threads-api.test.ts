@@ -449,7 +449,8 @@ describe("independent bot tasks through the isolated control surface", () => {
     const descriptorDir = join(session.info.dataDir, "Library", "Application Support", "OpenMausBot");
     mkdirSync(descriptorDir, { recursive: true });
     writeFileSync(join(descriptorDir, "cua-connection.json"), JSON.stringify({
-      mcpCommand: join(session.info.dataDir, "never-launched-computer"), mcpArgs: [], mcpEnv: {},
+      mode: "embedded", socketPath: join(session.info.dataDir, "never-used.sock"),
+      mcpCommand: join(session.info.dataDir, "never-launched-computer"), mcpArgs: ["mcp"], mcpEnv: {},
     }));
     const created = await tool("create_bot", { name: "Computer lease fixture", instance_id: "claude", model: models[0] });
     const botId = created.bot.id;

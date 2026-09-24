@@ -26,6 +26,7 @@ import com.openmausbot.companion.core.bylineLabel
 import com.openmausbot.companion.core.displayTitle
 import com.openmausbot.companion.core.isClosed
 import com.openmausbot.companion.core.isArchived
+import com.openmausbot.companion.core.isSnoozed
 import com.openmausbot.companion.core.isWaitingOnTeammate
 import com.openmausbot.companion.core.isWorking
 import com.openmausbot.companion.core.listStamp
@@ -46,16 +47,19 @@ internal fun BotThreadRow(
     task: BotTask,
     selected: Boolean = false,
     modifier: Modifier = Modifier,
+    now: Long = System.currentTimeMillis(),
     /** The thread is holding a queued send, from the client's queue state.
      * The harness reports this out-of-band; the activity string never says
      * it, so the row derives it here rather than parsing activity. */
     queued: Boolean = false,
 ) {
     val runtime = task.runtimeLabel(queued)
-    val dimmed = (task.isClosed || task.isArchived) && runtime == null && task.unread != true
+    val snoozed = task.isSnoozed(now)
+    val dimmed = (task.isClosed || task.isArchived || snoozed) && runtime == null && task.unread != true
     val foldedState = when {
         task.isClosed -> "Closed"
         task.isArchived -> "Archived"
+        snoozed -> "Snoozed"
         else -> null
     }
     Row(
@@ -106,7 +110,7 @@ internal fun BotThreadRow(
             val byline = listOfNotNull(
                 RelativeStamp.updated(task.listStamp).takeIf { it.isNotEmpty() },
                 "Pinned".takeIf { task.pinned == true },
-                task.bylineLabel,
+                task.bylineLabel(now),
             ).joinToString(" · ")
             if (byline.isNotEmpty()) {
                 Text(

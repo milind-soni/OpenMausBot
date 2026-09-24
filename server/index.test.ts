@@ -158,6 +158,8 @@ let fakeDockerLog: string;
 let stderr = "";
 let connectorAccounts: Array<{ id: string; alias: string; status: string; toolkit: { slug: string } }> = [];
 const connectorLinkRequests: Array<{ toolkit: string; alias?: string }> = [];
+/** Every frame the harness relayed to the stubbed Composio MCP endpoint. */
+const connectorRelayCalls: Array<{ transportSessionId: string; body: any }> = [];
 const browserCapabilityCalls: Array<{ operation: string; authorization?: string; body: any }> = [];
 let browserRevokeFailuresRemaining = 0;
 let browserRegisterDelayMs = 0;
@@ -777,6 +779,21 @@ beforeAll(async () => {
         config: { user_id: body.user_id },
       }));
     }
+    if (req.url?.startsWith("/broker/v1/mcp")) {
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body = raw ? JSON.parse(raw) : null;
+      connectorRelayCalls.push({
+        transportSessionId: typeof req.headers["mcp-session-id"] === "string" ? req.headers["mcp-session-id"] : "",
+        body,
+      });
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({
+        jsonrpc: "2.0",
+        id: body && typeof body === "object" && "id" in body ? (body as { id: unknown }).id : null,
+        result: { content: [{ type: "text", text: "relay-ok" }] },
+      }));
+    }
     if (
       req.headers.authorization === "Bearer box_slow"
       && new URL(req.url ?? "/", "http://box.invalid").pathname === "/boxes"
@@ -998,6 +1015,11 @@ beforeAll(async () => {
       OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
       OMB_COMPOSIO_API: `http://127.0.0.1:${boxStubPort}/api/v3.1`,
       OMB_COMPOSIO_TOOLKITS_API: `http://127.0.0.1:${boxStubPort}/api/v3`,
+      // Managed connected-apps broker on the stub, so relayed MCP frames are
+      // observable without any network. A project key set through the config
+      // API still wins over this, exactly as in production.
+      OMB_COMPOSIO_BROKER_URL: `http://127.0.0.1:${boxStubPort}/broker`,
+      OMB_COMPOSIO_BROKER_TOKEN: "a".repeat(64),
       OMB_STATIC_DIR: staticDir,
       // The bots' browser engine: a stand-in binary the fake engine CLIs never
       // run; the turn only has to mount it.
@@ -2082,10 +2104,15 @@ describe("harness HTTP API", () => {
       expect(await readRoom()).toMatchObject({ bulletin: "Updated brief ✓", memberIds: [chief.id, peer.id] });
     } finally {
       for (const id of roomIds) {
-        await api("POST", `/api/groups/${id}/interrupt`, {});
-        await api("DELETE", `/api/groups/${id}`);
+        expect((await api("POST", `/api/groups/${id}/interrupt`, {})).status).toBe(200);
+        // Interruption is asynchronous; deletion while the turn is retiring
+        // returns 409 and would leak the room and its Chief into later tests.
+        await expect.poll(async () =>
+          (await api("GET", "/api/bots?messages=0")).body.groups.find((group: { id: string }) => group.id === id)?.working === true,
+        { timeout: 15_000 }).toBe(false);
+        expect((await api("DELETE", `/api/groups/${id}`)).status).toBe(200);
       }
-      for (const bot of bots) await api("DELETE", `/api/bots/${bot.id}`);
+      for (const bot of bots) expect((await api("DELETE", `/api/bots/${bot.id}`)).status).toBe(200);
     }
   });
 
@@ -2415,6 +2442,22 @@ describe("harness HTTP API", () => {
     expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: "yes" })).status).toBe(400);
     const gated = await api("PATCH", `/api/bots/${bot.id}`, { composio: false });
     expect(gated.status).toBe(200);
+
+    // connector tool grants: valid shapes canonicalize and round-trip,
+    // malformed slugs/tools and extra grant fields are refused, and null
+    // returns the bot to boolean-only legacy behavior
+    const granted = await api("PATCH", `/api/bots/${bot.id}`, {
+      connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_SEND_EMAIL"] }, github: { tools: "*" } },
+    });
+    expect(granted.status).toBe(200);
+    expect(granted.body.bot.connectorTools).toEqual({ gmail: { tools: ["GMAIL_SEND_EMAIL"] }, github: { tools: "*" } });
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorTools: { gmail: { tools: [] } } })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorTools: { Gmail: { tools: "*" } } })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorTools: { gmail: { tools: "*", accountId: "x" } } })).status).toBe(400);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { connectorTools: "gmail" })).status).toBe(400);
+    const grantsCleared = await api("PATCH", `/api/bots/${bot.id}`, { connectorTools: null });
+    expect(grantsCleared.status).toBe(200);
+    expect(grantsCleared.body.bot.connectorTools).toBeUndefined();
 
     // sidebar sections: assign, round-trip, trim, clear — and the field
     // drops off the record entirely once cleared rather than lingering
@@ -2779,8 +2822,26 @@ describe("harness HTTP API", () => {
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
         { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
       expect((await api("POST", `/api/bots/${botIds[0]}/interrupt`, { threadId: sibling.threadId })).status).toBe(200);
+      // The wait is history, not a placeholder: the waiting chip stays as
+      // written and the stop appends a resolution line beside it.
       await expect.poll(async () => JSON.stringify((await api("GET", `/api/threads/${sibling.threadId}/messages`)).body),
-        { timeout: 5_000 }).toMatch(/Stopped waiting for the computer/);
+        { timeout: 5_000 }).toMatch(/Stopped waiting for the computer after /);
+      const siblingMessages: Array<{ tool?: { name?: string; ok?: boolean } }> =
+        (await api("GET", `/api/threads/${sibling.threadId}/messages`)).body.messages;
+      expect(siblingMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
+      const stoppedChip = siblingMessages.find((message) => (message.tool?.name ?? "").startsWith("Stopped waiting for the computer after "));
+      expect(stoppedChip?.tool?.ok).toBe(true);
+      const siblingEvents = ((await api("GET", `/api/threads/${sibling.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
+      expect(siblingEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+        holder: { name: "Direct shared" },
+        resource: expect.stringMatching(/^computer:/),
+      });
+      expect(siblingEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+        holder: { name: "Direct shared" },
+        outcome: "stopped",
+      });
+      expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
       expect(promptsOnBox()).toBe(1);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
@@ -2800,6 +2861,24 @@ describe("harness HTTP API", () => {
 
       // No Retry or second user message: releasing the owner wakes the turn.
       await promptedOnBox(2, botIds[1]);
+      // The room's wait resolved as acquired: the waiting chip stays, the
+      // resolution names how long it waited, and the wait events carry both
+      // ends of the history.
+      await expect.poll(async () => JSON.stringify((await api("GET", "/api/bots?messages=30")).body.groups.find(
+        (group: { id: string }) => group.id === roomId,
+      )), { timeout: 5_000 }).toMatch(/Computer free — continuing after waiting /);
+      const roomMessages: Array<{ tool?: { name?: string } }> = (await api("GET", "/api/bots?messages=30")).body.groups.find(
+        (group: { id: string }) => group.id === roomId,
+      ).messages;
+      expect(roomMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
+      const roomEvents = ((await api("GET", `/api/threads/${room.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
+      expect(roomEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+        resource: expect.stringMatching(/^computer:/),
+      });
+      expect(roomEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+        outcome: "acquired",
+      });
       expect(existsSync(fakeClaudeDump)).toBe(false);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
       expect((await api("POST", `/api/groups/${roomId}/interrupt`, {})).status).toBe(200);
@@ -2833,6 +2912,135 @@ describe("harness HTTP API", () => {
       rmSync(fakeClaudeDump, { force: true });
     }
   }, 30_000);
+
+  it("keeps the wait history when the wait ceiling gives up", async () => {
+    const requestId = randomUUID();
+    const section = `Give-up machine ${requestId.slice(0, 8)}`;
+    // The main fixture server runs with the production ceiling (minutes); this
+    // test exists to make the ceiling fire, so it boots its own server with a
+    // seconds-scale cap against the same shared Box stub.
+    const isolatedHome = mkdtempSync(join(tmpdir(), "omb-computer-wait-giveup-"));
+    const isolatedData = join(isolatedHome, ".openmausbot");
+    const isolatedStatic = join(isolatedHome, "static");
+    const isolatedPort = await freePortBlock([0, 1]);
+    mkdirSync(join(isolatedStatic, "assets"), { recursive: true });
+    mkdirSync(isolatedData, { recursive: true });
+    writeFileSync(join(isolatedStatic, "index.html"), "<!doctype html><title>Computer wait give-up test</title>");
+    writeFileSync(join(isolatedStatic, "assets", "smoke.css"), "body{}");
+    writeFileSync(join(isolatedData, "config.json"), JSON.stringify({
+      instances: {
+        claude: { driver: "claudeAgent", displayName: "Fixture Claude", config: { cli: FAKE_CLAUDE_CLI } },
+        computer: { driver: "boxAgent", displayName: "Computer" },
+      },
+    }));
+    let isolatedStderr = "";
+    const isolatedChild = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+      cwd: ROOT,
+      env: {
+        ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+        ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+        HOME: isolatedHome,
+        USERPROFILE: isolatedHome,
+        OMB_PORT: String(isolatedPort),
+        OMB_WEBHOOK_PORT: String(isolatedPort + 1),
+        OMB_STATIC_DIR: isolatedStatic,
+        OMB_BOX_API: `http://127.0.0.1:${boxStubPort}`,
+        FAKE_CLAUDE_MODE: "hang",
+        // seconds, not minutes: the point of this file is the cap firing
+        OMB_GOAL_WAIT_MAX_MS: "2000",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    isolatedChild.stderr!.on("data", (chunk) => (isolatedStderr += chunk));
+    const isolatedApi = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
+      const response = await fetch(`http://127.0.0.1:${isolatedPort}${path}`, {
+        method,
+        headers: body ? { "content-type": "application/json" } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { status: response.status, body: await response.json() };
+    };
+    let botId = "";
+    try {
+      await waitForIsolatedServer(isolatedChild, isolatedPort, () => isolatedStderr);
+      managedBoxCreateMode = "success";
+      managedBoxCreateId = "bx_gaveupzz";
+      expect((await isolatedApi("PUT", "/api/config", { box: { token: "box_route" } })).status).toBe(200);
+      const bot = (await isolatedApi("POST", "/api/bots", {
+        name: "Give-up holder", section,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).body.bot;
+      botId = bot.id;
+      expect((await isolatedApi("POST", "/api/team-computers", { requestId, name: "Give-up desktop", acknowledgeCost: true })).status).toBe(201);
+      expect((await isolatedApi("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true })).status).toBe(200);
+      expect((await isolatedApi("POST", `/api/bots/${botId}/messages`, { text: "hold the desktop forever" })).status).toBe(202);
+      await expect.poll(() => boxRouteCalls.filter((call) => call.method === "POST" && call.path === "/boxes/bx_gaveupzz/prompt").length,
+        { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+      const sibling = (await isolatedApi("POST", `/api/bots/${botId}/tasks`, { title: "Waiting sibling" })).body.task;
+      expect((await isolatedApi("POST", `/api/bots/${botId}/messages`, { text: "wait past the ceiling", threadId: sibling.threadId })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await isolatedApi("GET", `/api/threads/${sibling.threadId}/messages`)).body),
+        { timeout: 5_000 }).toMatch(/Waiting for its turn on this computer/);
+      // The ceiling fires: the turn gives up, but the wait it waited through
+      // stays in the transcript and the event log instead of being erased.
+      await expect.poll(async () => JSON.stringify((await isolatedApi("GET", `/api/threads/${sibling.threadId}/messages`)).body),
+        { timeout: 8_000 }).toMatch(/Computer is still busy after /);
+      const siblingMessages: Array<{ tool?: { name?: string; ok?: boolean } }> =
+        (await isolatedApi("GET", `/api/threads/${sibling.threadId}/messages`)).body.messages;
+      expect(siblingMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
+      const gaveUpChip = siblingMessages.find((message) => (message.tool?.name ?? "").startsWith("Computer is still busy after "));
+      expect(gaveUpChip?.tool?.ok).toBe(false);
+      const waitEvents = ((await isolatedApi("GET", `/api/threads/${sibling.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
+      expect(waitEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+        holder: { name: "Give-up holder" },
+        resource: expect.stringMatching(/^computer:/),
+      });
+      expect(waitEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+        holder: { name: "Give-up holder" },
+        outcome: "gave_up",
+      });
+      expect(waitEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.bots
+        .find((entry: any) => entry.id === botId)?.tasks.find((task: any) => task.threadId === sibling.threadId)?.busy,
+      { timeout: 5_000 }).toBe(false);
+      const settledMessages = (await isolatedApi("GET", `/api/threads/${sibling.threadId}/messages`)).body.messages;
+      const failures = settledMessages.filter((message: any) => message.tool?.ok === false && /Computer is still busy after/.test(message.tool.name));
+      expect(failures).toHaveLength(1);
+      expect(failures[0].turnSucceeded).toBe(false);
+
+      // A room speaker hits the same deadline and keeps the same single
+      // resolution, while still settling the room's failed dispatch.
+      const roomBot = (await isolatedApi("POST", "/api/bots", {
+        name: "Give-up room speaker", section,
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      })).body.bot;
+      const room = (await isolatedApi("POST", "/api/groups", {
+        name: "Give-up room", memberIds: [roomBot.id],
+        setup: { bulletin: "", defaultResponder: { kind: "member", botId: roomBot.id } },
+      })).body.group;
+      expect((await isolatedApi("POST", `/api/groups/${room.id}/messages`, { text: "wait for the same occupied desktop" })).status).toBe(202);
+      await expect.poll(async () => JSON.stringify((await isolatedApi("GET", `/api/threads/${room.threadId}/messages`)).body),
+        { timeout: 8_000 }).toMatch(/Computer is still busy after /);
+      await expect.poll(async () => (await isolatedApi("GET", "/api/bots?messages=0")).body.groups
+        .find((group: any) => group.id === room.id)?.working, { timeout: 5_000 }).toBe(false);
+      const roomMessages = (await isolatedApi("GET", `/api/threads/${room.threadId}/messages`)).body.messages;
+      expect(roomMessages.filter((message: any) => message.tool?.ok === false && /Computer is still busy after/.test(message.tool.name))).toHaveLength(1);
+      const roomEvents = (await isolatedApi("GET", `/api/threads/${room.threadId}/events`)).body.entries;
+      expect(roomEvents.filter((entry: any) => entry.kind === "runtime" && entry.data.type === "turn.wait_ended"))
+        .toMatchObject([{ data: { outcome: "gave_up" } }]);
+    } finally {
+      await isolatedApi("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+      await isolatedApi("DELETE", `/api/bots/${botId}`).catch(() => undefined);
+      await isolatedApi("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+      managedBoxRows = [];
+      managedBoxCreatedIds.clear();
+      managedBoxCreateMode = "refuse";
+      managedBoxCreateId = "bx_cdefghjk";
+      await waitForExit(isolatedChild, { signal: "SIGTERM" });
+      await removeTempDir(isolatedHome);
+    }
+    expectStoppedTestServerCleanly(isolatedChild, isolatedStderr);
+  }, 60_000);
 
   it("blocks bot-scoped Box lifecycle changes after a direct turn claims the bot", async () => {
     let botId = "";
@@ -3367,7 +3575,7 @@ describe("harness HTTP API", () => {
       expect(ambiguousCreate.body.error).toMatch(/provider outcome is unknown/i);
       const ambiguousDelete = await api("DELETE", `/api/bots/${ambiguousBot.id}`);
       expect(ambiguousDelete.status).toBe(409);
-      expect(ambiguousDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
+      expect(ambiguousDelete.body.error).toMatch(/pending cloud computer creation.*boat\.dev/i);
 
       // Recover with the original key, finish the deterministic rename, then
       // remove the durable Box before deleting its bot.
@@ -3393,7 +3601,7 @@ describe("harness HTTP API", () => {
       expect(rememberedCreate.body.error).toMatch(/rename unavailable/i);
       const rememberedDelete = await api("DELETE", `/api/bots/${rememberedBot.id}`);
       expect(rememberedDelete.status).toBe(409);
-      expect(rememberedDelete.body.error).toMatch(/pending cloud computer creation.*ascii\.dev/i);
+      expect(rememberedDelete.body.error).toMatch(/pending cloud computer creation.*boat\.dev/i);
 
       // The Box created successfully even though deterministic naming failed.
       // If the original credential expires, the target-bound deletion fence
@@ -4006,6 +4214,35 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("starts new bots with the workspace's new-bot effort unless they choose their own", async () => {
+    const instances = (await api("GET", "/api/instances")).body.instances;
+    const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
+    expect(claude.capabilities.effortLevels).toEqual(expect.arrayContaining(["low", "high"]));
+    const selection = { instanceId: claude.instanceId, model: claude.models.default };
+    const created: string[] = [];
+    try {
+      const saved = await api("PATCH", "/api/config", { newBots: { effort: "high" } });
+      expect(saved.status).toBe(200);
+      expect(saved.body.newBots).toEqual({ effort: "high" });
+      expect((await api("GET", "/api/config")).body.newBots).toEqual({ effort: "high" });
+      const defaulted = (await api("POST", "/api/bots", { modelSelection: selection })).body.bot;
+      const chosen = (await api("POST", "/api/bots", { modelSelection: { ...selection, effort: "low" } })).body.bot;
+      created.push(defaulted.id, chosen.id);
+      expect(defaulted.modelSelection).toEqual({ ...selection, effort: "high" });
+      expect(chosen.modelSelection).toEqual({ ...selection, effort: "low" });
+      const thread = await api("POST", `/api/bots/${defaulted.id}/tasks`, { title: "Next" });
+      expect(thread.body.task.modelSelection).toEqual({ ...selection, effort: "high" });
+
+      expect((await api("PATCH", "/api/config", { newBots: { effort: null } })).body.newBots).toEqual({});
+      const plain = (await api("POST", "/api/bots", { modelSelection: selection })).body.bot;
+      created.push(plain.id);
+      expect(plain.modelSelection).toEqual(selection);
+    } finally {
+      await api("PATCH", "/api/config", { newBots: { effort: null } });
+      for (const id of created) await api("DELETE", `/api/bots/${id}`);
+    }
+  });
+
   it("updates a paired bot's model, persists it, broadcasts it, and clears effort", async () => {
     const instances = (await api("GET", "/api/instances")).body.instances;
     const claude = instances.find((instance: { instanceId: string }) => instance.instanceId === "claude");
@@ -4099,7 +4336,7 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(after.modelSelection).toEqual(selection);
-      expect(after.autoApprove).toBeUndefined();
+      expect(after.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
@@ -4562,6 +4799,7 @@ describe("harness HTTP API", () => {
     expect(scout).toMatchObject({
       chiefOfStaff: true,
       composio: false,
+      connectorTools: {},
       playbooks: [{ key: "signal-check", instructions: "Keep the source URL and confidence." }],
       installedPackage: {
         id: "signal-desk",
@@ -4667,7 +4905,9 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    const groupsBefore = (await api("GET", "/api/bots")).body.groups.length;
+    const beforeImport = (await api("GET", "/api/bots")).body;
+    const groupsBefore = beforeImport.groups.length;
+    const chiefsBefore = beforeImport.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id).sort();
     const room = (await api("POST", "/api/groups", { memberIds: [trusted.id], name: "War Room" })).body.group;
 
     const smuggled = {
@@ -4733,10 +4973,8 @@ describe("harness HTTP API", () => {
       composio: true,
       computer: "off",
     });
-    // the single-Chief invariant survives the manifest's chiefOfStaff claim
-    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id)).toEqual([
-      trusted.id,
-    ]);
+    // Import must not create or replace any Chief, including Chiefs of other teams.
+    expect(after.bots.filter((bot: { chiefOfStaff?: boolean }) => bot.chiefOfStaff).map((bot: { id: string }) => bot.id).sort()).toEqual(chiefsBefore);
 
     // a legacy v1 file carries a room block; import ignores it entirely —
     // it neither creates a room nor touches the existing one sharing its name
@@ -5848,8 +6086,8 @@ describe("harness HTTP API", () => {
         (candidate: { id: string }) => candidate.id === bot.id,
       );
       expect(stored.busy).toBe(true);
-      expect(stored).not.toHaveProperty("approvalMode");
-      expect(stored).not.toHaveProperty("autoApprove");
+      expect(stored.approvalMode).toBe(bot.approvalMode);
+      expect(stored.autoApprove).toBe(bot.autoApprove);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
       await expect.poll(async () => {
@@ -6170,7 +6408,7 @@ describe("harness HTTP API", () => {
       managedBoxCreateName = managedBoxNameForFixture(bot.id);
       expect((await api("POST", `/api/bots/${bot.id}/computer/provision`, {})).status).toBe(200);
 
-      // The person removed it in ascii.dev. LIST and direct GET now both prove
+      // The person removed it in boat.dev. LIST and direct GET now both prove
       // absence while the owning credential is still active.
       managedBoxRows = [];
       managedBoxCreatedIds.delete(managedBoxCreateId);
@@ -6560,6 +6798,7 @@ describe("harness HTTP API", () => {
       expect(card.allowSession).toBe(true);
       expect((await messages()).some((m) => m.tool?.name.startsWith("auto-approved"))).toBe(false);
       // the person is told once who is asking and why, naming the model
+      await expect.poll(async () => (await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer is not available")).length).toBe(1);
       const notices = (await messages()).filter((m) => m.tool?.name.startsWith("Approve for me: Claude's automatic reviewer is not available"));
       expect(notices).toHaveLength(1);
       expect(notices[0].tool!.name).toContain("claude-haiku-4-5");
@@ -8753,7 +8992,7 @@ describe("harness HTTP API", () => {
     expect(saved.status).toBe(200);
     expect(saved.body.composio).toEqual({ configured: true, mode: "self-hosted" });
     expect(saved.body.opencodeGo).toEqual({ configured: true });
-    expect(saved.body.profile).toEqual({ name: "External Store", email: "" });
+    expect(saved.body.profile).toEqual({ name: "External Store", email: "", aboutMe: "" });
     expect(JSON.stringify(saved.body)).not.toContain("ak_good");
 
     const disk = JSON.parse(readFileSync(join(home, ".openmausbot", "config.json"), "utf8"));
@@ -8854,6 +9093,179 @@ describe("harness HTTP API", () => {
     }
   });
 
+  /** Wait until the decision log carries a connector-scope row matching
+   * the predicate (rows are appended fire-and-forget). */
+  const waitForConnectorRows = async (pred: (row: any) => boolean, ms = 15_000) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const rows: any[] = (await api("GET", "/api/decisions?limit=500")).body.decisions ?? [];
+      if (rows.some(pred)) return rows;
+      if (Date.now() > deadline) return rows;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  };
+
+  it("enforces per-bot connector tool grants on relayed tool calls", async () => {
+    // Clear any project key an earlier test left behind, so the relay uses
+    // the stubbed managed broker for the whole test.
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorRelayCalls.length = 0;
+    const relayed = () => connectorRelayCalls.map((entry) => entry.body);
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        composio: true,
+        connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL"] } },
+      })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const call = async (frame: unknown, bearer = token) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` },
+          body: JSON.stringify(frame),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+      const direct = (name: string) => call({ jsonrpc: "2.0", id: 11, method: "tools/call", params: { name, arguments: {} } });
+      const multi = (tools: unknown[]) => call({
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: { name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools, sync_response_to_workbench: false } },
+      });
+
+      // The granted exact tool relays verbatim and the upstream answer passes through.
+      const allowed = await direct("GMAIL_SEND_EMAIL");
+      expect(allowed.status).toBe(200);
+      expect(allowed.body.result.content[0].text).toBe("relay-ok");
+      expect(relayed().at(-1)).toEqual({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: { name: "GMAIL_SEND_EMAIL", arguments: {} },
+      });
+
+      // A MULTI_EXECUTE batch whose names are all granted relays as one call.
+      const batched = await multi([{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {} }]);
+      expect(batched.body.result.content[0].text).toBe("relay-ok");
+
+      // An ungranted tool on the granted service is refused and never relayed.
+      const held = relayed().length;
+      const refused = await direct("GMAIL_FETCH_EMAILS");
+      expect(refused.status).toBe(200);
+      expect(refused.body.id).toBe(11);
+      expect(refused.body.result.isError).toBe(true);
+      expect(refused.body.result.content[0].text).toContain("GMAIL_FETCH_EMAILS");
+      expect(refused.body.result.content[0].text).toContain("Ask the person");
+      expect(relayed().length).toBe(held);
+
+      // An ungranted service is refused the same way.
+      const other = await direct("SLACK_POST_MESSAGE");
+      expect(other.body.result.isError).toBe(true);
+      expect(other.body.result.content[0].text).toContain("SLACK_POST_MESSAGE");
+
+      // One ungranted name refuses the whole batch.
+      const mixed = await multi([
+        { tool_slug: "GMAIL_SEND_EMAIL", arguments: {} },
+        { tool_slug: "SLACK_POST_MESSAGE", arguments: {} },
+      ]);
+      expect(mixed.body.result.isError).toBe(true);
+      expect(mixed.body.result.content[0].text).toContain("SLACK_POST_MESSAGE");
+      expect(relayed().length).toBe(held);
+
+      // Discovery and connection meta-tools keep their existing flows.
+      await direct("COMPOSIO_SEARCH_TOOLS");
+      await direct("GMAIL_MANAGE_CONNECTIONS");
+      expect(relayed().length).toBe(held + 2);
+
+      // The refusal never enumerates what the bot could have called instead.
+      expect(JSON.stringify(refused.body)).not.toContain("GMAIL_SEND_EMAIL");
+
+      // A legacy bot with no grants record keeps today's behavior: everything relays.
+      const legacy = (await api("POST", "/api/bots")).body.bot;
+      try {
+        expect((await api("PATCH", `/api/bots/${legacy.id}`, { composio: true })).status).toBe(200);
+        const legacyToken = await mintTestCapability(BASE, legacy.id, legacy.threadId, { kind: "connectors" });
+        const legacyCall = await call(
+          { jsonrpc: "2.0", id: 21, method: "tools/call", params: { name: "SLACK_POST_MESSAGE", arguments: {} } },
+          legacyToken,
+        );
+        expect(legacyCall.body.result.content[0].text).toBe("relay-ok");
+      } finally {
+        await api("DELETE", `/api/bots/${legacy.id}`);
+      }
+
+      // Allow rows: one per call, naming the first target and the grant key.
+      const rows = await waitForConnectorRows(
+        (row) => row.botId === legacy.id && row.source === "connector-scope" && row.decision === "user-approved",
+      );
+      const allowRows = rows.filter((row) => row.source === "connector-scope" && row.decision === "user-approved");
+      expect(allowRows.some((row) => row.botId === bot.id && row.tool === "GMAIL_SEND_EMAIL" && row.rule === "connectorTools.gmail")).toBe(true);
+      expect(allowRows.some((row) => row.botId === legacy.id && row.tool === "SLACK_POST_MESSAGE" && row.rule === "composio")).toBe(true);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("refuses MULTI_EXECUTE shapes it cannot read and writes connector-scope denial rows", async () => {
+    expect((await api("PUT", "/api/config", { composio: { apiKey: "" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    connectorRelayCalls.length = 0;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, {
+        composio: true,
+        connectorTools: { gmail: { tools: "*" } },
+      })).status).toBe(200);
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+      const call = async (frame: unknown) => {
+        const response = await fetch(`${BASE}/api/internal/connectors/mcp`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify(frame),
+        });
+        return { status: response.status, body: await response.json() as any };
+      };
+
+      // A batch entry that names no tool_slug cannot be checked, so the call is denied whole.
+      const malformed = await call({
+        jsonrpc: "2.0",
+        id: 31,
+        method: "tools/call",
+        params: { name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools: [{ arguments: {} }], sync_response_to_workbench: false } },
+      });
+      expect(malformed.status).toBe(200);
+      expect(malformed.body.result.isError).toBe(true);
+      expect(malformed.body.result.content[0].text).toContain("COMPOSIO_MULTI_EXECUTE_TOOL");
+
+      // No tools list at all, and a direct name that is not a Composio tool name.
+      const missing = await call({
+        jsonrpc: "2.0",
+        id: 32,
+        method: "tools/call",
+        params: { name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { sync_response_to_workbench: true } },
+      });
+      expect(missing.body.result.isError).toBe(true);
+      const lowercase = await call({ jsonrpc: "2.0", id: 33, method: "tools/call", params: { name: "gmail_send_email", arguments: {} } });
+      expect(lowercase.body.result.isError).toBe(true);
+
+      // None of the refused shapes reached the relay.
+      expect(connectorRelayCalls).toHaveLength(0);
+      // The refusal stays safe to hand to a model: it points at the person.
+      expect(malformed.body.result.content[0].text).toContain("Ask the person");
+
+      // Every refusal wrote a connector-scope denial row.
+      const rows = await waitForConnectorRows(
+        (row) => row.botId === bot.id && row.source === "connector-scope" && row.decision === "user-denied" && row.tool === "gmail_send_email",
+      );
+      const denyRows = rows.filter((row) => row.botId === bot.id && row.source === "connector-scope" && row.decision === "user-denied");
+      expect(denyRows.some((row) => row.tool === "COMPOSIO_MULTI_EXECUTE_TOOL" && (row.summary ?? "").includes("tool_slug"))).toBe(true);
+      expect(denyRows.some((row) => row.tool === "COMPOSIO_MULTI_EXECUTE_TOOL" && (row.summary ?? "").includes("no tools"))).toBe(true);
+      expect(denyRows.some((row) => row.tool === "gmail_send_email")).toBe(true);
+    } finally {
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
   it.skipIf(process.platform === "win32")("stores the credentials file with owner-only permissions", () => {
     expect(statSync(join(home, ".openmausbot", "config.json")).mode & 0o777).toBe(0o600);
   });
@@ -8861,10 +9273,10 @@ describe("harness HTTP API", () => {
   it("stores and echoes the user profile (not write-only, unlike keys)", async () => {
     const put = await api("PUT", "/api/config", { profile: { name: "Ada Lovelace", email: "Ada@Example.com" } });
     expect(put.status).toBe(200);
-    expect(put.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com" });
+    expect(put.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com", aboutMe: "" });
 
     const after = await api("GET", "/api/config");
-    expect(after.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com" });
+    expect(after.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com", aboutMe: "" });
   });
 
   it("creates an independent webhook, accepts a delivery, deduplicates it, and rotates its secret", async () => {

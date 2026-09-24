@@ -8,7 +8,7 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { dispatch: vi.fn(), model: null as ComponentProps<typeof ModelPicker> | null,
+  return { dispatch: vi.fn(), platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -22,7 +22,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 // window chrome, and these tests render the desktop-neutral layout.
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
-  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true } }, ready: true }),
+  useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: fixture.platform }, localComputer: { available: false, reasonCode: fixture.localReasonCode, message: fixture.localMessage } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: (props: ComponentProps<typeof ModelPicker>) => {
@@ -68,6 +68,33 @@ describe("thread control placement", () => {
     expect(markup).toContain("Full access controls tool approvals, not provider safety checks");
     expect(markup).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }))).toContain("<button");
+  });
+  it("offers the matching macOS Settings and relaunch actions only for a named CUA permission failure", () => {
+    fixture.platform = "darwin";
+    fixture.localMessage = "Screen Recording required";
+    window.ogb = { platform: "darwin", permOpenSettings: vi.fn(), relaunch: vi.fn() } as unknown as NonNullable<Window["ogb"]>;
+    const screen = renderToStaticMarkup(createElement(ErrorRow, {
+      message: "CUA Driver is not ready for this computer — embedded host failed: Screen Recording required. Relaunch OpenMausBot after granting any missing macOS permission.",
+    }));
+    expect(screen).toContain("Open Screen Recording Settings");
+    expect(screen).toContain("Relaunch OpenMausBot");
+    expect(screen).not.toContain("Open Accessibility Settings");
+    fixture.localMessage = "Accessibility required";
+    const accessibility = renderToStaticMarkup(createElement(ErrorRow, {
+      message: "CUA Driver is not ready for this computer — Accessibility required",
+    }));
+    expect(accessibility).toContain("Open Accessibility Settings");
+    expect(accessibility).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, {
+      message: "CUA Driver is not ready for this computer — Screen Recording required",
+    }))).not.toContain("Open Screen Recording Settings");
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout" }))).not.toContain("Open Screen Recording Settings");
+    fixture.localReasonCode = "remote-server";
+    expect(renderToStaticMarkup(createElement(ErrorRow, { message: "CUA Driver is not ready for this computer — Screen Recording required" }))).not.toContain("Open Screen Recording Settings");
+    fixture.localReasonCode = "cua-driver-unavailable";
+    fixture.platform = "other";
+    fixture.localMessage = "";
+    delete window.ogb;
   });
   it.each([
     "شغّل الاختبارات\nThen run typecheck\nوبعدها ارفع الفرع",

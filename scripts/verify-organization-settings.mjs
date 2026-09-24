@@ -131,7 +131,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     };
     const fillAddress = async () => evaluate(`(() => { const el = document.querySelector('input[type=url]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, ${JSON.stringify(origin)}); el.dispatchEvent(new Event('input', { bubbles: true })); })()`);
     const openAdvanced = async () => evaluate(`document.querySelector('details summary').click()`);
-    await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "optional sign-in form");
+    await until(() => evaluate(`Boolean(${button("Sign in with your organization")})`), "optional sign-in form");
     assert.equal(begins, 0); assert.equal(browserRequests.length, 0);
     assert.equal(await evaluate("document.body.textContent.includes('personal and local models')"), true);
     await openAdvanced(); await fillAddress(); await click("Sign in to custom Admin");
@@ -140,7 +140,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(await evaluate("[...document.querySelectorAll('details')].some(el => el.textContent.includes('ABCDE-FGHJK') && el.open)"), false, "security code stays collapsed by default");
     assert.equal(await evaluate("document.body.textContent.includes('connect automatically')"), true);
     await click("Cancel sign-in");
-    await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "cancel restored form");
+    await until(() => evaluate(`Boolean(${button("Sign in with your organization")})`), "cancel restored form");
     assert.equal(saved, null);
     await openAdvanced(); await fillAddress(); await click("Sign in to custom Admin");
     await until(() => browserRequests.length === 2, "second browser request"); approved = true;
@@ -176,14 +176,14 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await click("Disconnect…");
     writeFileSync(join(output, "organization-disconnect-narrow.png"), (await win.webContents.capturePage()).toPNG());
     await click("Disconnect from organization");
-    await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "confirmed disconnect");
+    await until(() => evaluate(`Boolean(${button("Sign in with your organization")})`), "confirmed disconnect");
     assert.equal(saved, null); assert.equal(revokes, 1); assert.ok(clearsApplied > 0);
     await openAdvanced(); await fillAddress(); await click("Sign in to custom Admin");
     await until(() => browserRequests.length === 3, "third browser request"); approved = true;
     await until(() => evaluate("document.body.textContent.includes('Fixture Studio')"), "reconnected company");
     revoked = true; await click("Refresh");
     await until(() => evaluate("document.body.textContent.includes('Disconnect below, then sign in again')"), "revoked access shown");
-    assert.equal(await evaluate(`Boolean(${button("Sign in with your organisation")})`), false);
+    assert.equal(await evaluate(`Boolean(${button("Sign in with your organization")})`), false);
     await click("Disconnect…"); await click("Disconnect from organization");
     await until(() => client.state().status === "signed-out", "revoked grant cleared");
 
@@ -198,12 +198,12 @@ if (process.versions.electron && process.argv.includes(flag)) {
     win.setSize(1180, 850);
     await win.loadURL(`${url}?app=1`);
     await until(() => evaluate("document.body.textContent.includes('Welcome to OpenMausBot')"), "normal optional welcome flow");
-    assert.equal(await evaluate(`Boolean(${button("Sign in with your organisation")})`), false);
+    assert.equal(await evaluate(`Boolean(${button("Sign in with your organization")})`), false);
     assert.equal(begins, beginsBeforeApp);
     win.webContents.send("app:open-settings");
     await until(() => evaluate("Boolean(document.querySelector('option[value=organization]'))"), "optional Settings section");
-    await click("Organisation");
-    await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "Organisation in real app Settings");
+    await click("Organization");
+    await until(() => evaluate(`Boolean(${button("Sign in with your organization")})`), "Organisation in real app Settings");
     assert.equal(await evaluate("document.querySelectorAll('[role=dialog]').length"), 1, "welcome yields only to explicit connection Settings");
     await evaluate("new Promise(resolve => setTimeout(resolve, 180))"); // Capture settled navigation colors.
     writeFileSync(join(output, "organization-in-app.png"), (await win.webContents.capturePage()).toPNG());
@@ -241,7 +241,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
       onSwitch: () => {}, onAddFromClipboard: () => {}, onConnect: () => {}, onForget: () => {}, onOpenSettings: () => {} });
     menu.getMenuItemById("organization-sign-in").click();
     await menuRequest;
-    await until(() => evaluate(`Boolean(${button("Sign in with your organisation")})`), "native organisation action opens local Settings before onboarding");
+    await until(() => evaluate(`Boolean(${button("Sign in with your organization")})`), "native organisation action opens local Settings before onboarding");
     await until(() => settingsOpened > acknowledgmentsBeforeReturn, "mounted local Organisation settings acknowledged");
     assert.equal(new URL(win.webContents.getURL()).origin, localOrigin);
     assert.equal(readEnvironments().activeId, "local");
@@ -264,7 +264,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     await entry.restore();
     await until(() => !restartIntent, "confirmed restart intent consumed after local panel mounts");
     assert.equal(readEnvironments().activeId, "local");
-    assert.equal(await evaluate(`Boolean(${button("Sign in with your organisation")})`), true);
+    assert.equal(await evaluate(`Boolean(${button("Sign in with your organization")})`), true);
     const receipt = { passed: true, renderer: "OrganizationSettings + actual app shell", preload: "electron/preload.cjs", client: "electron/managed-desktop.mjs",
       checks: ["organization logo and icon grid", "chosen icon becomes a durable local attachment", "admin removal clears branding without deleting chosen avatar", "one-button default organization sign-in", "custom Admin kept under Advanced", "browser handoff and automatic connection", "security code collapsed and cancel works", "approved company and model counts", "model-only capability sent to private process", "no token or private connection method in renderer", "organisation sign-in preserves local desktop capabilities", "390px no overflow", "cancel/confirm disconnect", "revocation requires reconnect", "remote bridge absent", "normal app startup unchanged", "explicit Organisation Settings before local onboarding", "saved old hosted renderer restored without local authority", "cancel keeps hosted selection", "native menu returns to local Organisation Settings", "hosted entry remains saved", "persisted local selection survives recreated renderer"],
       limitation: "Synthetic loopback Admin, confirmation, credential store and utility-process acknowledgement. Renderer recreation and a synthetic restart intent, not an installed update or OS relaunch; no real Admin consent, OS keychain, native driver execution, private runtime synchronization, backups or public DNS/TLS." };

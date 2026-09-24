@@ -98,7 +98,7 @@ describe("optional desktop Organisation settings", () => {
   it("keeps the panel usable if its native destination acknowledgment fails", async () => {
     vi.mocked(bridge.settingsOpened!).mockRejectedValueOnce(new Error("fixture write failure"));
     await ready();
-    expect(render().html).toContain("Sign in with your organisation");
+    expect(render().html).toContain("Sign in with your organization");
     expect(bridge.begin).not.toHaveBeenCalled();
   });
 
@@ -106,14 +106,14 @@ describe("optional desktop Organisation settings", () => {
     await ready();
     let view = render();
     expect(view.html).toContain("https://admin.openmausbot.com");
-    expect(view.html).toContain("Sign in with your organisation");
+    expect(view.html).toContain("Sign in with your organization");
     expect(view.html).toContain("<summary");
     expect(view.html).toContain("Advanced");
     expect(view.html).not.toMatch(/<details[^>]*\bopen/);
     expect(view.html).toContain("personal and local models");
     expect(view.html).toContain("does not upload your chat history");
     expect(bridge.begin).not.toHaveBeenCalled();
-    const signIn = () => view.nodes.find(node => node.type === "button" && node.props.children === "Sign in with your organisation")!.props.onClick!();
+    const signIn = () => view.nodes.find(node => node.type === "button" && node.props.children === "Sign in with your organization")!.props.onClick!();
     signIn(); signIn(); await flush();
     expect(bridge.begin).toHaveBeenCalledExactlyOnceWith({ portalOrigin: "https://admin.openmausbot.com" });
     expect(fetch).not.toHaveBeenCalled();
@@ -145,19 +145,19 @@ describe("optional desktop Organisation settings", () => {
     button("Disconnect…").props.onClick!();
     button("Disconnect from organization").props.onClick!(); await flush();
     expect(bridge.disconnect).toHaveBeenCalledOnce();
-    expect(render().html).toContain("Sign in with your organisation");
+    expect(render().html).toContain("Sign in with your organization");
   });
 
   it("requires disconnect before reconnecting revoked access and does not promise cloud backups", async () => {
     await ready({ ...connected, status: "reauth-required", cloudBackups: true });
     const html = render().html;
     expect(html).toContain("Disconnect below, then sign in again");
-    expect(html).not.toContain("Sign in with your organisation");
+    expect(html).not.toContain("Sign in with your organization");
     expect(html).not.toContain("Approved models:");
     expect(html).not.toContain("backup");
     expect(button("Refresh")).toBeUndefined();
     button("Disconnect…").props.onClick!(); button("Disconnect from organization").props.onClick!(); await flush();
-    expect(render().html).toContain("Sign in with your organisation");
+    expect(render().html).toContain("Sign in with your organization");
   });
 
   it("reopens only the pending sign-in page, with nothing supplied by the panel", async () => {
@@ -196,9 +196,9 @@ describe("optional desktop Organisation settings", () => {
   it("explains a lapsed Admin licence without a sign-in loop and shows Company models unavailable", async () => {
     await ready({ ...connected, status: "license-expired" });
     const html = render().html;
-    expect(html).toContain("Your organisation&#x27;s OpenMaus Admin licence has expired. Contact your admin.");
+    expect(html).toContain("Your organization&#x27;s OpenMaus Admin license has expired. Contact your admin.");
     expect(html).not.toContain("Disconnect below, then sign in again");
-    expect(html).not.toContain("Sign in with your organisation");
+    expect(html).not.toContain("Sign in with your organization");
     expect(html).toContain("Unavailable until the licence is renewed");
     expect(html).not.toContain("Approved models:");
     expect(button("Refresh")).toBeDefined(); expect(button("Disconnect…")).toBeDefined();
@@ -207,8 +207,8 @@ describe("optional desktop Organisation settings", () => {
   it("says so when a sign-in finds the Admin licence expired", async () => {
     await ready({ status: "signed-out", notice: "license-expired" });
     const html = render().html;
-    expect(html).toContain("licence has expired. Contact your admin.");
-    expect(html).toContain("Sign in with your organisation");
+    expect(html).toContain("license has expired. Contact your admin.");
+    expect(html).toContain("Sign in with your organization");
   });
 
   it("keeps newer broadcast state when an initial snapshot or action resolves late", async () => {
@@ -228,7 +228,7 @@ describe("optional desktop Organisation settings", () => {
     const cleanup = await ready();
     let resolveBegin!: (state: ManagedDesktopState) => void;
     vi.mocked(bridge.begin).mockImplementation(() => new Promise(resolve => { resolveBegin = resolve; }));
-    button("Sign in with your organisation").props.onClick!();
+    button("Sign in with your organization").props.onClick!();
     if (typeof cleanup === "function") cleanup();
     push(connected); resolveBegin(connecting); await flush();
     expect(unsubscribe).toHaveBeenCalledOnce();
@@ -267,13 +267,13 @@ describe("optional desktop Organisation settings", () => {
     expect(button("Refresh")).toBeDefined();
     button("Disconnect…").props.onClick!(); button("Disconnect from organization").props.onClick!(); await flush();
     expect(bridge.disconnect).toHaveBeenCalledOnce();
-    expect(render().html).toContain("Sign in with your organisation");
+    expect(render().html).toContain("Sign in with your organization");
   });
 
   it.each([{}, { ogb: { remoteClient: { active: true } } }])("has no sign-in controls without the local desktop bridge", (windowState) => {
     vi.stubGlobal("window", windowState);
     expect(render().html).toContain("desktop app on this computer");
-    expect(render().html).not.toContain("Sign in with your organisation");
+    expect(render().html).not.toContain("Sign in with your organization");
     expect(bridge.state).not.toHaveBeenCalled();
   });
 });

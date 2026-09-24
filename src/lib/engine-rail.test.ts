@@ -9,9 +9,10 @@ describe("splitEngineRail", () => {
       { access: "subscription", instanceId: "claude" },
       { access: "custom", instanceId: "hermes" },
       { instanceId: "grok" },
+      { access: "api", instanceId: "mistral" },
       { access: "custom", instanceId: "qwen" },
     ]);
-    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok"]);
+    expect(subscription.map((row) => row.instanceId)).toEqual(["claude", "grok", "mistral"]);
     expect(custom.map((row) => row.instanceId)).toEqual(["hermes", "qwen"]);
   });
 

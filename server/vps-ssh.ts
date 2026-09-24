@@ -10,11 +10,35 @@
 // that includes theirs first (so anything they set still wins) and fills in
 // connection sharing and fail-fast timeouts, plus an `ssh` shim docker finds
 // ahead of the real one that points at that config.
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 
 export const VPS_SSH_DIR = "ssh";
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/** macOS limits Unix socket paths to 104 bytes, including the terminator.
+ * OpenSSH also appends a temporary suffix while creating a master socket.
+ * A long application/test data path must not disable every SSH command. */
+function controlDirectory(sshDir: string): string {
+  if (Buffer.byteLength(join(sshDir, `cm-${"0".repeat(40)}`)) <= 80) return sshDir;
+  const uid = process.getuid!();
+  const id = createHash("sha256").update(resolve(sshDir)).digest("hex").slice(0, 12);
+  // /tmp is intentionally used instead of tmpdir(): macOS TMPDIR is itself
+  // often too long for a control socket. Validate before chmod or use so an
+  // existing symlink/other user's directory cannot redirect the socket.
+  const dir = `/tmp/omb-ssh-${uid}-${id}`;
+  try { mkdirSync(dir, { mode: 0o700 }); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+  const stat = lstatSync(dir);
+  if (!stat.isDirectory() || stat.uid !== uid) throw new Error("The VPS SSH control directory is not private to this user");
+  chmodSync(dir, 0o700);
+  return dir;
+}
 
 function findExecutable(name: string, pathValue: string, exclude: string): string | null {
   for (const dir of pathValue.split(delimiter)) {
@@ -44,15 +68,15 @@ export function vpsSshConfigText(sshDir: string, userConfig = join(homedir(), ".
   return [
     "# Written by OpenMausBot for its VPS computer connections. Do not edit;",
     "# it is regenerated. Your own ~/.ssh/config is included first and wins.",
-    ...(existsSync(userConfig) ? [`Include ${userConfig}`] : []),
+    ...(existsSync(userConfig) ? [`Include ${JSON.stringify(userConfig)}`] : []),
     "Host *",
     "  ControlMaster auto",
-    `  ControlPath ${join(sshDir, "cm-%C")}`,
+    `  ControlPath ${JSON.stringify(join(sshDir.replace(/%/g, "%%"), "cm-%C"))}`,
     "  ControlPersist 10m",
     "  ServerAliveInterval 15",
     "  ServerAliveCountMax 3",
     "  ConnectTimeout 10",
-    ...(existsSync(systemConfig) ? [`Include ${systemConfig}`] : []),
+    ...(existsSync(systemConfig) ? [`Include ${JSON.stringify(systemConfig)}`] : []),
     "",
   ].join("\n");
 }
@@ -74,14 +98,14 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   mkdirSync(binDir, { recursive: true, mode: 0o700 });
   chmodSync(sshDir, 0o700);
   const configPath = join(sshDir, "config");
-  writeIfChanged(configPath, vpsSshConfigText(sshDir), 0o600);
+  writeIfChanged(configPath, vpsSshConfigText(controlDirectory(sshDir)), 0o600);
   const realSsh = findExecutable("ssh", pathValue, binDir);
   if (!realSsh) return { configPath, path: pathValue };
   const shim = [
     "#!/bin/sh",
     "# Written by OpenMausBot. docker's SSH transport finds this ssh first, so",
     "# every VPS command shares one connection whether or not the alias says so.",
-    `exec ${JSON.stringify(realSsh)} -F ${JSON.stringify(configPath)} "$@"`,
+    `exec ${shellQuote(realSsh)} -F ${shellQuote(configPath)} "$@"`,
     "",
   ].join("\n");
   writeIfChanged(join(binDir, "ssh"), shim, 0o700);

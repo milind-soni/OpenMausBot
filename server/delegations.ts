@@ -18,7 +18,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { getOrCreateChannel, mirrorExchange, type CommsBus } from "./comms-visibility.ts";
 import { DATA_DIR } from "./config.ts";
 import { newId } from "./contracts.ts";
-import { requestPeerApproval, type ApprovalBus } from "./peer-approval.ts";
+import { peerApprovalFailure, requestPeerApproval, type ApprovalBus, type PeerApprovalFailure } from "./peer-approval.ts";
 import { canAccessTeam, peerAllowed } from "./peer-roster.ts";
 import { type BotRecord, type GroupRecord, type Message, type Store } from "./store.ts";
 
@@ -63,11 +63,14 @@ interface PendingDelegationItem extends DelegationItem {
    * transition (releaseDelegationsWaitingOn) clears it and re-drains the
    * source thread; nothing else counts or retries. */
   waitingOnBusy?: boolean;
+  /** Start of the target's observed busy hold, excluding source work and
+   * human approval time. Cleared when the target frees up. */
+  busySince?: number;
 }
 
 /** `busy_gave_up` is only read back from receipts written before handoffs
  * stopped counting busy periods; nothing produces it any more. */
-export type DelegationOutcome = "done" | "failed" | "denied" | "expired" | "busy_gave_up" | "dropped" | "error";
+export type DelegationOutcome = "done" | "failed" | "denied" | "expired" | "cancelled" | "busy_gave_up" | "dropped" | "error";
 
 /** The durable terminal record of one handoff: what the delegating bot reads
  * back with check_delegation / wait_delegation. Bounded and pruned — this is
@@ -78,6 +81,9 @@ export interface DelegationReceipt {
   toBotId: string;
   toBotName: string;
   status: DelegationOutcome;
+  /** Absent on older receipts and outcomes unrelated to peer approval. */
+  approvalOutcome?: PeerApprovalFailure;
+  approvalSource?: "user" | "system";
   /** the peer's reply on success; the failure name otherwise (bounded) */
   result?: string;
   finishedAt: number;
@@ -116,6 +122,17 @@ const RESULT_MAX_CHARS = 4_000;
  * still counts, and a non-expired restored window keeps its deadline. */
 export const DELEGATION_TTL_MS = 24 * 60 * 60 * 1000;
 
+/** How long a handoff may wait on a target that never goes idle. The 24-hour
+ * window above bounds the rare case; the busy hold is the common one — a peer
+ * stays busy for a whole day and the delegating bot hears nothing back. Past
+ * this cap a still-blocked handoff expires with its own wording. Env-tunable
+ * so tests (and patient teams) can shrink or stretch it. */
+const configuredBusyHoldMaxMs = Number(process.env.OMB_DELEGATION_BUSY_HOLD_MAX_MS);
+export const DELEGATION_BUSY_HOLD_MAX_MS = Math.max(
+  1_000,
+  Number.isFinite(configuredBusyHoldMaxMs) && process.env.OMB_DELEGATION_BUSY_HOLD_MAX_MS !== "" ? configuredBusyHoldMaxMs : 2 * 60 * 60 * 1000,
+);
+
 let receipts: DelegationReceipt[] = [];
 
 function saveReceipts(): void {
@@ -139,6 +156,10 @@ export function recordDelegationReceipt(receipt: Omit<DelegationReceipt, "finish
     finishedAt: receipt.finishedAt ?? now,
   };
   if (receipt.result !== undefined) bounded.result = receipt.result.slice(0, RESULT_MAX_CHARS);
+  if (receipt.approvalOutcome !== undefined) {
+    bounded.approvalOutcome = receipt.approvalOutcome;
+    bounded.approvalSource = peerApprovalFailure(receipt.approvalOutcome).approvalSource;
+  }
   receipts = [bounded, ...receipts.filter((existing) => existing.id !== bounded.id)]
     .filter((existing) => now - existing.finishedAt <= RECEIPT_MAX_AGE_MS)
     .slice(0, MAX_RECEIPTS);
@@ -171,9 +192,9 @@ export function threadsWaitingOn(toBotId: string): string[] {
 
 /** Mark a target's observed busy period as finished and return the source
  * threads that should be retried. A handoff waits until the target is free,
- * bounded only by the 24-hour expiry — this just clears the "parked on a
- * busy period" marker so the next drain re-evaluates it, rather than
- * counting or limiting retries.
+ * bounded by the busy-hold cap and the 24-hour expiry — this just clears the
+ * "parked on a busy period" marker so the next drain re-evaluates it, rather
+ * than counting or limiting retries.
  * `only` narrows the release: a bot that is still busy in one thread has
  * nevertheless freed a slot for the fresh-thread handoffs waiting on it,
  * while its active-thread handoffs go on waiting for it to go idle. */
@@ -184,6 +205,7 @@ export function releaseDelegationsWaitingOn(toBotId: string, only?: (item: Deleg
     for (const item of items) {
       if (item.toBotId !== toBotId || item.waitingOnBusy !== true || (only && !only(item))) continue;
       delete item.waitingOnBusy;
+      delete item.busySince;
       any = true;
     }
     if (any) released.push(threadId);
@@ -240,7 +262,13 @@ export function _loadPending(): void {
           queuedAt: hasUsableQueuedAt ? Math.min(item.queuedAt!, now) : now,
         };
         if (item.approvalAlreadyGranted === true) loaded.approvalAlreadyGranted = true;
-        if (item.waitingOnBusy === true) loaded.waitingOnBusy = true;
+        if (item.waitingOnBusy === true) {
+          loaded.waitingOnBusy = true;
+          const currentHold = Number.isFinite(item.busySince) && item.busySince! <= now &&
+            now - item.busySince! < DELEGATION_BUSY_HOLD_MAX_MS;
+          loaded.busySince = currentHold ? item.busySince : now;
+          if (!currentHold) backfilled = true;
+        }
         if (item.waitAnnounced === true || legacyAlreadyAnnounced) loaded.waitAnnounced = true;
         if (typeof item.originatingGroupId === "string" && item.originatingGroupId) {
           loaded.originatingGroupId = item.originatingGroupId;
@@ -277,6 +305,10 @@ export function _loadPending(): void {
         if (!Number.isFinite(finishedAt) || now - finishedAt! > RECEIPT_MAX_AGE_MS) continue;
         const receipt: DelegationReceipt = { id, sourceThreadId, toBotId, toBotName, status, finishedAt: finishedAt! };
         if (typeof result === "string") receipt.result = result;
+        if (candidate.approvalOutcome === "deny" || candidate.approvalOutcome === "expired" || candidate.approvalOutcome === "cancelled") {
+          receipt.approvalOutcome = candidate.approvalOutcome;
+          receipt.approvalSource = peerApprovalFailure(candidate.approvalOutcome).approvalSource;
+        }
         loaded.push(receipt);
       }
       receipts = loaded.slice(0, MAX_RECEIPTS);
@@ -490,40 +522,64 @@ function acknowledgeDelegation(threadId: string, itemId: string): void {
 
 const isExpired = (item: PendingDelegationItem, now: number): boolean => now - item.queuedAt >= DELEGATION_TTL_MS;
 
+/** Past the busy-hold cap — the tighter bound that fires while its target is
+ * still busy, long before the 24-hour window. */
+const busyHoldExpired = (item: PendingDelegationItem, now: number): boolean =>
+  item.busySince !== undefined && now - item.busySince >= DELEGATION_BUSY_HOLD_MAX_MS;
+
+/** The busy-hold cap in chip-ready words ("2 hours", "90 minutes"). */
+export function busyHoldCapText(maxMs = DELEGATION_BUSY_HOLD_MAX_MS): string {
+  const minutes = Math.max(1, Math.round(maxMs / 60_000));
+  const amount = minutes % 60 === 0 ? minutes / 60 : minutes;
+  const unit = minutes % 60 === 0 ? "hour" : "minute";
+  return `${amount} ${unit}${amount === 1 ? "" : "s"}`;
+}
+
 /** Record an expired handoff. The chip goes into the source thread only
  * while it still belongs to the bot that owns the handoff — a deleted
  * conversation gets the receipt and nothing else. */
 function expireDelegation(bus: CommsBus, sourceThreadId: string, item: PendingDelegationItem, ownerId: string): void {
-  const name = bus.store.bot(item.toBotId)?.name ?? item.toBotId;
+  const target = bus.store.bot(item.toBotId);
+  const name = target?.name ?? item.toBotId;
+  // A busy hold has its own words so a two-hour busy wait is never reported
+  // as a 24-hour one; every other expiry keeps the TTL wording.
+  const now = Date.now();
+  const busyHold = Boolean(target) && busyHoldExpired(item, now) && !isExpired(item, now);
   recordDelegationReceipt({
     id: item.id,
     sourceThreadId,
     toBotId: item.toBotId,
     toBotName: name,
     status: "expired",
-    result: `@${name} was not free to take this for 24 hours`,
+    result: busyHold ? `@${name} was still busy after ${busyHoldCapText()}` : `@${name} was not free to take this for 24 hours`,
   });
   if (!sourceThreadBelongsToBot(bus.store, ownerId, sourceThreadId)) return;
   bus.store.appendMessage(sourceThreadId, {
     role: "bot",
     kind: "activity",
-    tool: { name: `Delegation to @${name} expired — not picked up within 24 hours`, ok: false },
+    tool: {
+      name: busyHold
+        ? `Delegation to @${name} expired — still busy after ${busyHoldCapText()}`
+        : `Delegation to @${name} expired — not picked up within 24 hours`,
+      ok: false,
+    },
   });
 }
 
-/** Past its 24 hours AND unable to be delivered right now — the same rule
+/** Past a delivery bound AND unable to be delivered right now — the same rule
  * `processOne` applies, so the hourly sweep and a live drain never disagree
- * about which items are actually stuck. A target that was deleted counts as
- * "cannot take the turn": there is nothing to wait on, so such items still
- * expire even though there is no bot left to test busy/free against. */
+ * about which items are actually stuck. The busy-hold cap expires a handoff
+ * whose target has been busy the whole time; the 24-hour TTL catches the
+ * rest. A target that was deleted counts as "cannot take the turn": there is
+ * nothing to wait on, so such items still expire even though there is no bot
+ * left to test busy/free against. */
 function isDueForExpiry(bus: CommsBus, item: PendingDelegationItem, now: number): boolean {
-  if (!isExpired(item, now)) return false;
   const target = bus.store.bot(item.toBotId);
-  if (!target) return true;
-  return !targetCanTakeTurn(bus, target, item);
+  if (!target) return isExpired(item, now);
+  return !targetCanTakeTurn(bus, target, item) && (isExpired(item, now) || busyHoldExpired(item, now));
 }
 
-/** Expire every queued handoff past DELEGATION_TTL_MS that still cannot be
+/** Expire every queued handoff past a delivery bound that still cannot be
  * delivered, wherever it waits. A drain already expires what it touches;
  * this covers the handoff nothing drains — a target that never settles
  * while its source sits idle. A thread mid-drain is skipped: that drain
@@ -647,13 +703,15 @@ async function processOne(
   if (dropIfThreadGone(bus, target, sourceThreadId, item)) {
     return "settled";
   }
-  // Past its 24 hours AND the target still cannot take the turn: this is the
-  // bound on a busy wait. Use the same free/busy test as holdWhileTargetBusy;
-  // an available target gets even an overdue item. Restart recovery renews
-  // elapsed windows in _loadPending before any target becomes busy. Decide
-  // before announcing a wait so an item cannot post both chips in one pass.
+  // Past a delivery bound AND the target still cannot take the turn: this is
+  // the bound on a busy wait — the busy-hold cap when the target has been
+  // busy the whole time, the 24-hour TTL otherwise. Use the same free/busy
+  // test as holdWhileTargetBusy; an available target gets even an overdue
+  // item. Restart recovery renews elapsed windows in _loadPending before any
+  // target becomes busy. Decide before announcing a wait so an item cannot
+  // post both chips in one pass.
   const canTakeTurn = targetCanTakeTurn(bus, target, item);
-  if (!canTakeTurn && isExpired(item, Date.now())) {
+  if (!canTakeTurn && (isExpired(item, Date.now()) || busyHoldExpired(item, Date.now()))) {
     expireDelegation(bus, sourceThreadId, item, sender.id);
     return "settled";
   }
@@ -661,6 +719,7 @@ async function processOne(
   if (held) return held;
   if (item.waitingOnBusy) {
     delete item.waitingOnBusy;
+    delete item.busySince;
     savePending();
   }
   if (sender.approvePeerComms && !item.approvalAlreadyGranted) {
@@ -685,22 +744,26 @@ async function processOne(
         toBotName: target.name,
         status: "dropped",
         result: "the peer or source conversation no longer exists",
+        ...(verdict !== "allow" ? { approvalOutcome: verdict } : {}),
       });
       return "settled";
     }
     if (verdict !== "allow") {
+      const failure = peerApprovalFailure(verdict);
       recordDelegationReceipt({
         id: item.id,
         sourceThreadId,
         toBotId: target.id,
         toBotName: target.name,
-        status: "denied",
-        result: "the user denied this handoff",
+        status: verdict === "deny" ? "denied" : verdict,
+        approvalOutcome: verdict,
+        result: verdict === "deny" ? "the user denied this handoff" : failure.error,
       });
       bus.store.appendMessage(sourceThreadId, {
         role: "bot",
         kind: "activity",
-        tool: { name: `Delegation to @${target.name} denied by user`, ok: false },
+        tool: { name: verdict === "deny" ? `Delegation to @${target.name} denied by user`
+          : `Delegation to @${target.name}: ${failure.error}`, ok: false },
       });
       return "settled";
     }
@@ -717,9 +780,10 @@ async function processOne(
     }
     // Approval may have waited for minutes (or, with approvalAlreadyGranted,
     // up to 24h since the original ask_bot approval) — recheck the same
-    // free/busy-gated expiry as the pre-approval path before dispatching.
+    // free/busy-gated, busy-hold-capped expiry as the pre-approval path
+    // before dispatching.
     const canTakeTurnAfterApproval = targetCanTakeTurn(bus, current, item);
-    if (!canTakeTurnAfterApproval && isExpired(item, Date.now())) {
+    if (!canTakeTurnAfterApproval && (isExpired(item, Date.now()) || busyHoldExpired(item, Date.now()))) {
       expireDelegation(bus, sourceThreadId, item, currentSender.id);
       return "settled";
     }
@@ -761,12 +825,12 @@ function targetCanTakeTurn(bus: CommsBus, target: BotRecord, item: PendingDelega
       : !target.busy;
 }
 
-/** A busy target holds the handoff. Neither counts busy periods — the only
- * bound is DELEGATION_TTL_MS, checked in processOne before this runs (using
- * the same `targetCanTakeTurn` test, passed in as `canTakeTurn` when the
- * caller already computed it so the two checks can't disagree). One waiting
- * chip per handoff, worded for what the target is actually doing. Returns
- * null when the target can take the turn now. */
+/** A busy target holds the handoff. Neither counts busy periods — the bounds
+ * are the busy-hold cap and DELEGATION_TTL_MS, checked in processOne before
+ * this runs (using the same `targetCanTakeTurn` test, passed in as
+ * `canTakeTurn` when the caller already computed it so the two checks can't
+ * disagree). One waiting chip per handoff, worded for what the target is
+ * actually doing. Returns null when the target can take the turn now. */
 function holdWhileTargetBusy(
   bus: CommsBus,
   target: BotRecord,
@@ -777,6 +841,7 @@ function holdWhileTargetBusy(
   if (canTakeTurn) return null;
   if (item.waitingOnBusy) return "requeued";
   item.waitingOnBusy = true;
+  item.busySince = Date.now();
   if (!item.waitAnnounced) {
     item.waitAnnounced = true;
     bus.store.appendMessage(sourceThreadId, {

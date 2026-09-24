@@ -389,7 +389,7 @@ class SpeechDictation internal constructor(
     companion object {
         /** Android has no separate Speech Recognition TCC — only the mic. */
         const val MIC_DENIED_MESSAGE: String =
-            "Dictation needs Microphone access. Enable it in Settings → OpenMausMobile."
+            "Dictation needs Microphone access. Enable it in Settings → MausBot."
         const val NO_RECOGNIZER_MESSAGE: String =
             "Dictation isn't available for this language."
         const val START_FAILED_MESSAGE: String = "Couldn't start the microphone."

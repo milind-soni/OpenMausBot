@@ -42,6 +42,7 @@ import {
   vpsLifecycleBusy,
   vpsSshTunnelArgs,
   vpsStartsForTurn,
+  inspectVpsForAuto,
   reuseVps,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
@@ -250,6 +251,27 @@ function fixture({
     throw new Error(`unexpected Docker command ${command}`);
   };
   return { calls, runner, state, name };
+}
+
+function mockTransport(runner: VpsCommandRunner): void {
+  spawnMock.mockImplementation((_command: string, args: string[]) => {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write: (_chunk, _encoding, callback) => callback() }),
+      stdout: new PassThrough(), stderr: new PassThrough(),
+      kill: () => true,
+    });
+    queueMicrotask(() => {
+      void runner(args).then((output) => {
+        child.stdout.end(output.stdout);
+        child.stderr.end(output.stderr);
+        child.emit("close", 0, null);
+      }, (error: Error) => {
+        child.stderr.end(error.message);
+        child.emit("close", 1, null);
+      });
+    });
+    return child;
+  });
 }
 
 describe("VPS computer", () => {
@@ -462,6 +484,70 @@ describe("VPS computer", () => {
     expect(fake.calls.filter(({ args }) => args[2] === "run")).toHaveLength(1);
   });
 
+  it("returns an already-ready provision after one fresh inspection", async () => {
+    const fake = fixture();
+    expect((await vpsComputerAction("provision", CONFIG, BOT_ID, fake.runner)).ready).toBe(true);
+    expect(fake.calls.filter(({ args }) => args[2] === "image")).toHaveLength(1);
+    expect(fake.calls.filter(({ args }) => args.includes("get_desktop_state"))).toHaveLength(1);
+  });
+
+  it("shares a slow provision instead of rejecting its second caller after five seconds", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fake = fixture({ image: false, container: false });
+    const runner: VpsCommandRunner = async (args, options) => {
+      if (args[2] === "build") await gate;
+      return fake.runner(args, options);
+    };
+    const first = vpsComputerAction("provision", CONFIG, BOT_ID, runner);
+    let secondFailure: unknown;
+    const second = vpsComputerAction("provision", CONFIG, BOT_ID, runner).catch((error) => { secondFailure = error; return null; });
+    try {
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(secondFailure).toBeUndefined();
+      release();
+      const results = await Promise.all([first, second]);
+      expect(results[0]).toEqual(results[1]);
+      expect(fake.calls.filter(({ args }) => args[2] === "run")).toHaveLength(1);
+      expect(fake.calls.filter(({ args }) => args.includes("get_desktop_state"))).toHaveLength(1);
+    } finally {
+      release();
+      await Promise.allSettled([first, second]);
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["provision", "auto"] as const)("waits through a normal slow preview before %s readiness", async (mode) => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fake = fixture();
+    const runner: VpsCommandRunner = async (args, options) => {
+      if (args.includes("--screenshot-out-file")) await gate;
+      return fake.runner(args, options);
+    };
+    const preview = vpsComputerScreenshot(CONFIG, BOT_ID, runner);
+    await vi.advanceTimersByTimeAsync(0);
+    let failure: unknown;
+    const readiness = (mode === "provision"
+      ? vpsComputerAction("provision", CONFIG, BOT_ID, runner)
+      : inspectVpsForAuto(CONFIG, BOT_ID, runner)).catch((error) => { failure = error; return null; });
+    try {
+      await vi.advanceTimersByTimeAsync(6_000);
+      expect(failure).toBeUndefined();
+      expect(vpsLifecycleBusy()).toBe(true);
+      release();
+      await preview;
+      expect((await readiness)?.ready).toBe(true);
+      expect(vpsLifecycleBusy()).toBe(false);
+    } finally {
+      release();
+      await Promise.allSettled([preview, readiness]);
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps provisioning and readiness checks on the alias captured at operation start", async () => {
     const fake = fixture({ container: false });
     const config: AppConfig = { vps: { sshAlias: "original-vps" } };
@@ -634,9 +720,9 @@ describe("VPS computer", () => {
         const timeoutMs = options?.timeoutMs ?? 120_000;
         calls.push({ args, timeoutMs });
         if (args.includes("openmausbot-preview") || args.includes("rm")) {
-          // Match defaultRunner: time out, terminate, then wait its 5s kill
+          // Match defaultRunner: time out, terminate, then wait its 6s kill
           // grace before settling. Nothing races ahead of this outstanding work.
-          await new Promise((resolve) => setTimeout(resolve, timeoutMs + 5_000));
+          await new Promise((resolve) => setTimeout(resolve, timeoutMs + 6_000));
           throw new Error("Docker-over-SSH command timed out");
         }
         await new Promise((resolve) => setTimeout(resolve, args.includes("--screenshot-out-file") ? 4_000 : 2_000));
@@ -647,8 +733,8 @@ describe("VPS computer", () => {
       const first = vpsComputerScreenshot(CONFIG, BOT_ID, runner).finally(() => { settled = true; });
       const rejected = expect(first).rejects.toMatchObject({ status: 504 });
       await vi.advanceTimersByTimeAsync(35_000);
-      expect(calls.find(({ args }) => args.includes("openmausbot-preview"))?.timeoutMs).toBe(14_000);
-      expect(calls.find(({ args }) => args.includes("rm"))?.timeoutMs).toBe(5_000);
+      expect(calls.find(({ args }) => args.includes("openmausbot-preview"))?.timeoutMs).toBe(13_000);
+      expect(calls.find(({ args }) => args.includes("rm"))?.timeoutMs).toBe(4_000);
       expect(vpsLifecycleBusy()).toBe(true);
       expect(settled).toBe(false);
       const joined = expect(vpsComputerScreenshot(CONFIG, BOT_ID, runner)).rejects.toMatchObject({ status: 504 });
@@ -711,6 +797,125 @@ describe("VPS computer", () => {
       await expect(vpsComputerScreenshot(cfg, BOT_ID)).rejects.toThrow(/stopped|running/);
       expect(captures).toBe(2);
     } finally { release(); spawnMock.mockReset(); vi.useRealTimers(); }
+  });
+
+  it("shares status-first cold inspection with other polls and a preview", async () => {
+    const cfg: AppConfig = { vps: { sshAlias: "status-first-vps" } };
+    const fake = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const inspecting = new Promise<void>((resolve) => { entered = resolve; });
+    mockTransport(async (args, options) => {
+      if (args[2] === "image") { entered(); await gate; }
+      return fake.runner(args, options);
+    });
+    const first = vpsComputerStatus(cfg, BOT_ID);
+    await inspecting;
+    const second = vpsComputerStatus(cfg, BOT_ID);
+    const preview = vpsComputerScreenshot(cfg, BOT_ID);
+    try {
+      release();
+      const results = await Promise.all([first, second, preview]);
+      expect(results[0]).toMatchObject({ ready: true });
+      expect(results[1]).toMatchObject({ ready: true });
+      expect(results[2]).toMatchObject({ format: "png" });
+      expect(fake.calls.filter(({ args }) => args[2] === "image")).toHaveLength(1);
+    } finally {
+      release();
+      await Promise.allSettled([first, second, preview]);
+      spawnMock.mockReset();
+    }
+  });
+
+  it("keeps a preview bounded when an independently owned status poll is slower", async () => {
+    vi.useFakeTimers();
+    const cfg: AppConfig = { vps: { sshAlias: "slow-shared-status-vps" } };
+    const fake = fixture();
+    mockTransport(async (args, options) => {
+      // Every individual command is healthy, but the full inspection is
+      // longer than the preview's budget. No real Docker or SSH is started.
+      await new Promise((resolve) => setTimeout(resolve, 9_000));
+      return fake.runner(args, options);
+    });
+    try {
+      const status = vpsComputerStatus(cfg, BOT_ID);
+      await vi.advanceTimersByTimeAsync(0);
+      const preview = expect(vpsComputerScreenshot(cfg, BOT_ID)).rejects.toMatchObject({ status: 504 });
+      await vi.advanceTimersByTimeAsync(35_000);
+      await preview;
+      expect(vpsLifecycleBusy()).toBe(false);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect((await status).ready).toBe(true);
+      const refreshed = vpsComputerStatus(cfg, BOT_ID);
+      await vi.advanceTimersByTimeAsync(55_000);
+      expect((await refreshed).ready).toBe(true);
+      expect(fake.calls.filter(({ args }) => args[2] === "image")).toHaveLength(2);
+    } finally { spawnMock.mockReset(); vi.useRealTimers(); }
+  });
+
+  it("does not republish an old ready poll after stopping the container", async () => {
+    const cfg: AppConfig = { vps: { sshAlias: "stale-status-vps" } };
+    const fake = fixture();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const probing = new Promise<void>((resolve) => { entered = resolve; });
+    let probes = 0;
+    mockTransport(async (args, options) => {
+      if (args.includes("get_desktop_state") && ++probes === 1) { entered(); await gate; }
+      return fake.runner(args, options);
+    });
+    const stale = vpsComputerStatus(cfg, BOT_ID);
+    await probing;
+    try {
+      expect((await vpsComputerAction("stop", cfg, BOT_ID)).container).toBe("stopped");
+      release();
+      expect((await stale).ready).toBe(true);
+      expect(await vpsComputerStatus(cfg, BOT_ID)).toMatchObject({ ready: false, container: "stopped" });
+    } finally {
+      release();
+      await stale;
+      spawnMock.mockReset();
+    }
+  });
+
+  it("invalidates a late startup poll only after provisioning finishes readiness", async () => {
+    const cfg: AppConfig = { vps: { sshAlias: "startup-status-vps" } };
+    const fake = fixture({ container: false });
+    let releaseReady!: () => void;
+    const readyGate = new Promise<void>((resolve) => { releaseReady = resolve; });
+    let enteredReady!: () => void;
+    const readiness = new Promise<void>((resolve) => { enteredReady = resolve; });
+    let releasePoll!: () => void;
+    const pollGate = new Promise<void>((resolve) => { releasePoll = resolve; });
+    let enteredPoll!: () => void;
+    const diagnosing = new Promise<void>((resolve) => { enteredPoll = resolve; });
+    let probes = 0;
+    mockTransport(async (args, options) => {
+      if (args.includes("get_desktop_state")) {
+        if (++probes === 1) { enteredReady(); await readyGate; }
+        else if (probes === 2) throw new Error("desktop is still starting");
+      }
+      if (args.includes("tail")) { enteredPoll(); await pollGate; }
+      return fake.runner(args, options);
+    });
+    const provision = vpsComputerAction("provision", cfg, BOT_ID);
+    await readiness;
+    const stale = vpsComputerStatus(cfg, BOT_ID);
+    await diagnosing;
+    try {
+      releaseReady();
+      expect((await provision).ready).toBe(true);
+      releasePoll();
+      expect((await stale).ready).toBe(false);
+      expect((await vpsComputerStatus(cfg, BOT_ID)).ready).toBe(true);
+    } finally {
+      releaseReady();
+      releasePoll();
+      await Promise.allSettled([provision, stale]);
+      spawnMock.mockReset();
+    }
   });
 
   it("fails clearly for BoxAgent and engines without computer MCP", () => {
@@ -815,7 +1020,37 @@ describe("VPS computer", () => {
     }
   });
 
-  it("fails lifecycle calls fast instead of queueing behind a long provision", async () => {
+  it("bounds readiness checks including slow desktop failures and final diagnostics", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = fixture({ container: false });
+      const desktopTimeouts: number[] = [];
+      const runner: VpsCommandRunner = async (args, options) => {
+        if (args.includes("get_desktop_state")) {
+          const timeoutMs = options?.timeoutMs ?? 120_000;
+          desktopTimeouts.push(timeoutMs);
+          await new Promise((resolve) => setTimeout(resolve, timeoutMs + 6_000));
+          throw new Error("Docker-over-SSH command timed out");
+        }
+        if (args.includes("tail")) await new Promise((resolve) => setTimeout(resolve, 10_000));
+        return fake.runner(args, options);
+      };
+      const startedAt = Date.now();
+      let finishedAt = Infinity;
+      const pending = vpsComputerAction("provision", CONFIG, BOT_ID, runner).then((status) => {
+        finishedAt = Date.now();
+        return status;
+      });
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect((await pending).ready).toBe(false);
+      expect(finishedAt - startedAt).toBeLessThanOrEqual(60_000);
+      expect(desktopTimeouts).toHaveLength(2);
+      expect(desktopTimeouts[1]).toBeLessThan(20_000);
+      expect(vpsLifecycleBusy()).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(["stop", "remove"] as const)("fails %s fast instead of queueing behind a long provision and drains the lock", async (action) => {
     vi.useFakeTimers();
     try {
       let releaseBuild!: () => void;
@@ -830,7 +1065,7 @@ describe("VPS computer", () => {
       const first = vpsComputerAction("provision", CONFIG, BOT_ID, slowRunner);
       // let the first action reach its (gated) docker build
       await vi.advanceTimersByTimeAsync(0);
-      const second = vpsComputerAction("stop", CONFIG, BOT_ID, slowRunner);
+      const second = vpsComputerAction(action, CONFIG, BOT_ID, slowRunner);
       const rejection = expect(second).rejects.toThrow(/being prepared/);
       await vi.advanceTimersByTimeAsync(5_000);
       await rejection;
@@ -839,6 +1074,8 @@ describe("VPS computer", () => {
       await vi.advanceTimersByTimeAsync(10_000);
       const status = await first;
       expect(status.ready).toBe(true);
+      expect(vpsLifecycleBusy()).toBe(false);
+      expect((await inspectVpsForAuto(CONFIG, BOT_ID, fake.runner)).ready).toBe(true);
     } finally {
       vi.useRealTimers();
     }

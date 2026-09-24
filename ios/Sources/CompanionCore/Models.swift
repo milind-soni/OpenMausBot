@@ -121,6 +121,22 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var setup: Bool?
 }
 
+/// A compaction record: from this message on, rebuilds of the thread's
+/// context carry `summary` instead of the earlier messages.
+public struct Compaction: Codable, Hashable, Sendable {
+    public var summary: String
+    public var tokensBefore: Int
+    public init(summary: String, tokensBefore: Int) {
+        self.summary = summary
+        self.tokensBefore = tokensBefore
+    }
+
+    public var chipText: String {
+        let tokens = NumberFormatter.localizedString(from: NSNumber(value: tokensBefore), number: .decimal)
+        return "Context compacted · \(tokens) tokens summarised"
+    }
+}
+
 /// The thread an activity chip opened — "Opened thread #Title on Scout" —
 /// so the phone can go there. Newer computers only; a chip without one is
 /// just a receipt.
@@ -170,6 +186,13 @@ public struct CommChip: Codable, Hashable, Sendable {
 public struct Message: Codable, Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case text, options, activity, screen, secret
+        /// The harness's receipt of a settled turn: "[digest] · tools: … ·
+        /// reply: …". Desktop shows it only behind "show tool calls"; it is
+        /// a log line, not something anyone said, so the phone never draws,
+        /// previews, or speaks it. Named so it cannot fall into `unknown`,
+        /// which draws whatever text a message carries.
+        case digest
+        case compaction
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single
@@ -205,10 +228,16 @@ public struct Message: Codable, Hashable, Identifiable, Sendable {
     public var kind: Kind
     public var at: Double
     public var text: String?
+    /// Provider turn markers let clients fold settled narration while keeping
+    /// the final answer visible. Older servers may omit both fields.
+    public var turnId: String?
+    public var turnTerminal: Bool?
     public var card: OptionCard?
     public var secret: SecretRequestCardData?
     public var tool: ToolActivity?
     public var threadRef: ThreadRef?
+    /// `kind == .compaction`: the record itself.
+    public var compaction: Compaction?
     /// The message this one follows; nil at the thread root. Two messages
     /// sharing a parent are a fork.
     public var parentId: String?
@@ -294,6 +323,13 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var projectId: String?
     public var openedBy: ThreadOpener?
     public var closedBy: ThreadCloser?
+    /// Asleep until: 0 is the "until new activity" sentinel and sleeps until
+    /// the thread does anything again, a timestamp sleeps until that moment,
+    /// and nil means awake. Expired time snoozes heal server-side on read,
+    /// so snapshots are authoritative; the sentinel wakes server-side on the
+    /// first activity too.
+    public var snoozedUntil: Double?
+
     /// When the person put this thread away, in epoch milliseconds. The
     /// field's presence — not its value — marks the thread archived: the
     /// task API accepts any epoch number, so a thread persisted with
@@ -329,12 +365,24 @@ public struct BotTask: Codable, Hashable, Sendable {
     public var isWorking: Bool { activity == "working" || activity == "running" || busy == true }
 
     /// The one line under a title: who closed it once a bot has, "Archived"
-    /// once the person put it away, otherwise who opened it, otherwise
-    /// nothing. Closed wins because it is the newer fact; archived wins over
-    /// the opener because it explains why the row sits where it does.
+    /// once the person put it away, "Snoozed" while it sleeps, otherwise who
+    /// opened it, otherwise nothing. Closed wins because it is the newer
+    /// fact; archived and snoozed win over the opener because they explain
+    /// why the row sits where it does.
     public var bylineLabel: String? {
         if let closedBy { return "closed by \(closedBy.name)" }
-        return isArchived ? "Archived" : openedByLabel
+        if isArchived { return "Archived" }
+        if isSnoozed() { return "Snoozed" }
+        return openedByLabel
+    }
+
+    /// Snoozed means asleep right now: 0 is the "until new activity"
+    /// sentinel and sleeps until woken, while a timestamp sleeps only until
+    /// it passes. The server drops expired snoozes from snapshots, but a
+    /// live event never refreshes one, so the clock is checked too.
+    public func isSnoozed(now: Date = Date()) -> Bool {
+        guard let until = snoozedUntil else { return false }
+        return until == 0 || until > now.timeIntervalSince1970 * 1_000
     }
 
     /// Waiting on a dispatched teammate: the thread's own turn is done and
@@ -356,6 +404,26 @@ public struct BotTask: Codable, Hashable, Sendable {
         case "waiting-on-you", "waiting", "queued": return true
         default: return false
         }
+    }
+}
+
+/// The snooze presets the desktop offers, computed in the person's local
+/// time on purpose: it is their evening and their morning; the server
+/// stores the absolute moment either way.
+public enum ThreadSnoozePreset {
+    /// The next local 6 PM — "later today", rolling to tomorrow evening
+    /// once tonight's is already past.
+    public static func tonight(now: Date = Date(), calendar: Calendar = .current) -> Double {
+        var when = calendar.date(bySettingHour: 18, minute: 0, second: 0, of: now) ?? now
+        if when <= now { when = calendar.date(byAdding: .day, value: 1, to: when) ?? when }
+        return when.timeIntervalSince1970 * 1_000
+    }
+
+    /// Tomorrow morning at 9 local: a clean overnight break.
+    public static func tomorrowMorning(now: Date = Date(), calendar: Calendar = .current) -> Double {
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) ?? now
+        let when = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: tomorrow) ?? tomorrow
+        return when.timeIntervalSince1970 * 1_000
     }
 }
 
@@ -1234,6 +1302,10 @@ struct SearchResponse: Codable, Sendable {
 
 struct MessageResponse: Codable, Sendable {
     var message: Message
+}
+
+struct EditResponse: Decodable, Sendable {
+    var message: Message?
 }
 
 struct ActiveBranchResponse: Codable, Sendable {

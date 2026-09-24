@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +22,8 @@ let stderr = "";
 let boxServer: Server;
 let boxRow: { id: string; name: string; state: string } | null = null;
 let allowBoxCreation = false;
+let holdBoxPrompt = false;
+let boxReply = "Cloud fixture completed";
 const boxCalls: Array<{ method: string; path: string }> = [];
 const boxPrompts: Array<Record<string, unknown>> = [];
 const vmState = (state: Record<string, unknown> = {}) => writeFileAtomic(stateFile, JSON.stringify(state));
@@ -78,6 +80,7 @@ beforeAll(async () => {
     }
     if (path === "/boxes") return res.end(JSON.stringify({ boxes: boxRow ? [boxRow] : [] }));
     if (/^\/boxes\/bx_[^/]+$/.test(path)) {
+      if (req.method === "DELETE") { boxRow = null; return res.end("{}"); }
       if (!boxRow) res.statusCode = 404;
       else if (req.method === "PATCH" && body.name) boxRow.name = body.name;
       return res.end(JSON.stringify(boxRow ? { box: boxRow } : { error: "missing" }));
@@ -88,7 +91,8 @@ beforeAll(async () => {
       boxPrompts.push(body);
       return res.end(JSON.stringify({ promptRun: { id: "fixture-prompt" } }));
     }
-    if (path.includes("/prompts/")) return res.end(JSON.stringify({ promptRun: { status: "finished", result: "Cloud fixture completed" } }));
+    if (path.includes("/prompts/")) return res.end(JSON.stringify({ promptRun: holdBoxPrompt
+      ? { status: "running" } : { status: "finished", result: boxReply } }));
     return res.end("{}");
   });
   await new Promise<void>(resolve => boxServer.listen(0, "127.0.0.1", resolve));
@@ -147,6 +151,96 @@ const send = (id: string) => api("POST", `/api/groups/${id}/messages`, { text: "
 const stop = (id: string) => api("POST", `/api/groups/${id}/interrupt`, {});
 
 describe("Group Local VM ownership on the real isolated server", () => {
+  it("holds a cloud turn for a marked output question and resumes after the person's reply", async () => {
+    const { bot } = await api("POST", "/api/bots", { name: "Cloud question fixture" });
+    try {
+      await api("PUT", "/api/config", { box: { token: "box_fixture" } });
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" });
+      const environmentId = readFileSync(join(fixtureHome, "data", "environment-id"), "utf8").trim();
+      const scope = createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
+      const prefix = bot.id.slice(0, 8).replace(/[^a-z0-9]/g, "");
+      const suffix = createHash("sha256").update(bot.id).digest("hex").slice(0, 6);
+      boxRow = { id: "bx_23456789", name: `ogb-${scope}-${prefix}-${suffix}`, state: "idle" };
+      boxReply = 'Choose a color.\n```omb-ask\n{"questions":[{"question":"Which color?","options":["Blue","Green"]}]}\n```';
+      const count = boxPrompts.length;
+      await api("POST", `/api/bots/${bot.id}/messages`, { text: "Ask before choosing the color" });
+      const transcript = () => api("GET", `/api/threads/${bot.threadId}/messages?limit=50`);
+      const shown = await until(transcript, value => value.messages.some((message: any) => message.card?.questionRequest));
+      const card = shown.messages.find((message: any) => message.card?.questionRequest).card;
+      expect(card.questionRequest).toMatchObject({ origin: "output", questions: [{ question: "Which color?" }] });
+      expect(card.answered).toBeFalsy();
+      expect(boxPrompts.length).toBe(count + 1);
+      const state = await api("GET", "/api/bots?messages=0");
+      expect(state.bots.find((candidate: any) => candidate.id === bot.id).busy).toBe(true);
+      const decisions = await api("GET", "/api/decisions");
+      expect(decisions.decisions).toContainEqual(expect.objectContaining({ botId: bot.id, source: "question", origin: "output" }));
+
+      boxReply = "Cloud fixture completed";
+      const message = "The user answered your questions.\n\nQ: Which color?\nA: Green";
+      expect(await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "answer", message }))
+        .toMatchObject({ outcome: "answered" });
+      await idle(bot.id);
+      expect(boxPrompts.length).toBe(count + 2);
+      expect(JSON.stringify(boxPrompts.at(-1))).toContain("A: Green");
+      expect(JSON.stringify(await transcript())).toContain("Cloud fixture completed");
+    } finally {
+      boxReply = "Cloud fixture completed";
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await idle(bot.id);
+      await api("DELETE", `/api/bots/${bot.id}`);
+      boxRow = null;
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
+  });
+
+  it("does not stall an admitted turn waiting for another turn's shared computer", async () => {
+    const section = `Watchdog fixture ${randomUUID()}`;
+    const bots: any[] = [];
+    try {
+      vmState();
+      holdBoxPrompt = true;
+      allowBoxCreation = true;
+      await api("PUT", "/api/config", { box: { token: "box_fixture" } });
+      for (const name of ["Computer holder", "Computer waiter"]) {
+        const { bot } = await api("POST", "/api/bots", { name, section });
+        bots.push(bot);
+      }
+      const requestId = randomUUID();
+      await api("POST", "/api/team-computers", { requestId, name: "Wait watchdog fixture", acknowledgeCost: true });
+      await api("PATCH", `/api/team-computers/${requestId}`, { section, acknowledgeSharedAccess: true });
+      const count = boxPrompts.length;
+      await api("POST", `/api/bots/${bots[0].id}/messages`, { text: "Hold the shared computer" });
+      await until(() => boxPrompts.length, length => length > count);
+      await api("POST", `/api/bots/${bots[1].id}/messages`, { text: "Wait for the shared computer" });
+      const transcript = () => api("GET", `/api/threads/${bots[1].threadId}/messages?limit=50`);
+      await until(transcript, value => JSON.stringify(value).includes("Waiting for"));
+      // Only the waiting thread gets the short clock; the holder is a
+      // deliberately gated provider. This exercises the real event wiring.
+      vmState({ stallThread: bots[1].threadId });
+      await new Promise(resolve => setTimeout(resolve, 400));
+      expect(JSON.stringify(await transcript())).not.toContain("the turn was stopped");
+      const state = await api("GET", "/api/bots?messages=0");
+      expect(state.bots.find((bot: any) => bot.id === bots[1].id).busy).toBe(true);
+      vmState();
+      holdBoxPrompt = false;
+      await idle(bots[0].id);
+      await idle(bots[1].id);
+      expect(boxPrompts.length).toBe(count + 2);
+      expect(JSON.stringify(await transcript())).toContain("Cloud fixture completed");
+    } finally {
+      vmState();
+      holdBoxPrompt = false;
+      allowBoxCreation = false;
+      for (const bot of bots) {
+        await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+        await idle(bot.id);
+        await api("DELETE", `/api/bots/${bot.id}`);
+      }
+      boxRow = null;
+      await api("PUT", "/api/config", { box: { token: "" } });
+    }
+  });
+
   it.each(["wake", "removed", "missing-auto"])("chat selection starts or provisions a configured cloud computer (%s) only after selecting it", async state => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
     const { bot } = await api("POST", "/api/bots", { name: "Chat cloud selection" });
@@ -225,6 +319,12 @@ describe("Group Local VM ownership on the real isolated server", () => {
       const state = await api("GET", "/api/bots?messages=30");
       const saved = state.bots.find((b: any) => b.id === bot.id);
       expect(saved.tasks.find((task: any) => task.threadId === bot.threadId).surface).toBe("vm");
+      // the model picked the VM: the pin is the machine's record, not the
+      // person's, so a Works on change sweeps it rather than the thread
+      // staying stuck on the machine's choice
+      await api("PATCH", `/api/bots/${bot.id}`, { computer: "local" });
+      const swept = (await api("GET", "/api/bots?messages=0")).bots.find((b: any) => b.id === bot.id);
+      expect(swept.tasks.find((task: any) => task.threadId === bot.threadId).surface).toBeUndefined();
       expect(saved.messages.filter((message: any) => message.role === "user" && message.kind === "text")).toHaveLength(1);
       expect((await call("GET")).status).toBe(401);
     } finally {
@@ -317,7 +417,7 @@ describe("Group Local VM ownership on the real isolated server", () => {
   it.skipIf(process.platform === "linux")("mounts a channel speaker's own This computer destination behind the control gate", async () => {
     const { bots, group } = await room();
     mkdirSync(dirname(cuaDescriptor), { recursive: true });
-    writeFileSync(cuaDescriptor, JSON.stringify({ mode: "bundled", mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"] }));
+    writeFileSync(cuaDescriptor, JSON.stringify({ mode: "embedded", socketPath: "/fixture/cua.sock", mcpCommand: "/fixture/cua-driver", mcpArgs: ["mcp"], mcpEnv: {} }));
     try {
       await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
       await send(group.id);
@@ -345,6 +445,24 @@ describe("Group Local VM ownership on the real isolated server", () => {
     await until(() => api("GET", "/api/bots?messages=30"), state => JSON.stringify(state).includes("CUA Driver is not ready for this computer"));
     await idle(bots[0].id);
     expect(existsSync(dumpFile)).toBe(false);
+  });
+
+  it.skipIf(process.platform === "linux")("carries the recorded macOS permission failure into the failed turn", async () => {
+    const { bots, group } = await room();
+    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    mkdirSync(dirname(cuaDescriptor), { recursive: true });
+    writeFileSync(cuaDescriptor, JSON.stringify({ mode: "unavailable", reason }), { mode: 0o600 });
+    try {
+      await api("PATCH", `/api/bots/${bots[0].id}`, { computer: "local" });
+      await send(group.id);
+      const state = await until(() => api("GET", "/api/bots?messages=30"),
+        value => JSON.stringify(value).includes(reason));
+      if (process.platform === "darwin") expect(JSON.stringify(state)).toContain("Relaunch OpenMausBot after granting the missing macOS permission");
+      await idle(bots[0].id);
+      expect(existsSync(dumpFile)).toBe(false);
+    } finally {
+      rmSync(cuaDescriptor, { force: true });
+    }
   });
 
   it("runs a channel speaker's own Cloud destination on its Box, waking it first", async () => {
@@ -398,6 +516,34 @@ describe("Group Local VM ownership on the real isolated server", () => {
     expect(existsSync(dumpFile)).toBe(false);
     await send(group.id);
     expect(computer(await dump())).toBeTruthy();
+    await stop(group.id); await idle(bots[0].id);
+  });
+  it("does not dispatch after a stall during delayed room setup and the room can run again", async () => {
+    const { bots, group } = await room();
+    // Park setup in the pre-id quarantine wait — a prior turn's cancelled
+    // handshake can hold a room thread there while its TTL runs — then
+    // stall the turn while it is parked between claim and provider dispatch.
+    vmState({ wedgeClear: true }); rmSync(stateFile + ".entered", { force: true }); rmSync(stateFile + ".clearwait", { force: true });
+    await send(group.id);
+    await until(() => existsSync(stateFile + ".entered"), Boolean);
+    // entry into readiness is not the quarantine: wait until the turn is
+    // actually parked in waitForClear, so the stall below fires inside the
+    // window that used to find no completion handler
+    await until(() => existsSync(stateFile + ".clearwait"), Boolean);
+    vmState({ wedgeClear: true, stall: true });
+    await until(() => api("GET", "/api/bots?messages=30"), r => JSON.stringify(r).includes("the turn was stopped"));
+    vmState();
+    await idle(bots[0].id);
+    // The quarantine released and setup resumed, but the latched stall
+    // completed the turn before the provider dispatch: no CLI was launched.
+    expect(existsSync(dumpFile)).toBe(false);
+    // The claim was released. Wait out the stall's VM-lease grace so a
+    // later turn on the same room can take the VM and run.
+    await new Promise(r => setTimeout(r, 6_500));
+    await send(group.id);
+    expect(computer(await dump())).toBeTruthy();
+    writeFileSync(finishFile, "finish");
+    await idle(bots[0].id);
     await stop(group.id); await idle(bots[0].id);
   });
   it("revokes the previous member and rejects cross-bot control after a shared desktop handoff", async () => {
@@ -521,8 +667,10 @@ describe("Group Local VM ownership on the real isolated server", () => {
     }
   });
 
-  it("keeps refusing screen calls after a rejected lazy claim (issue #1361 F1)", async () => {
+  it("ends the turn with a terminal error after a rejected lazy claim (issues #1361 F1, #1369)", async () => {
     vmState(); rmSync(dumpFile, { force: true }); rmSync(finishFile, { force: true });
+    const { bot: chief } = await api("POST", "/api/bots", { name: "Rejected claim chief" });
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const { bot: auto } = await api("POST", "/api/bots", { name: "Rejected claim Auto" });
     try {
       await api("PATCH", `/api/bots/${auto.id}`, { browser: false });
@@ -540,16 +688,39 @@ describe("Group Local VM ownership on the real isolated server", () => {
       // Honest about why. The contention text would send the model into a
       // screenshot loop waiting on a "thread" that does not exist.
       expect(first.blockedReason).not.toContain("Another thread");
-      // The mount is still live, but every later poll for this generation
-      // must keep refusing: falling through to held:false would let the
-      // bridge forward screen calls onto a VM this turn never claimed.
-      await new Promise(r => setTimeout(r, 150));
-      expect(await (await gate(autoComputer)).json()).toEqual(refused);
-      expect(await (await gate(autoComputer)).json()).toEqual(refused);
+      // Issue #1369: the rejection is terminal, not an open-ended pause.
+      // The thread gets one computer-unavailable error and the turn ends,
+      // so it can never sit busy behind a gate that only refuses.
+      await until(async () => {
+        const state = await api("GET", "/api/bots?messages=30");
+        return (state.bots.find((b: any) => b.id === auto.id)?.messages ?? [])
+          .some((m: any) => m.kind === "activity" &&
+            String(m.tool?.name ?? "").startsWith("error: computer unavailable — the Local VM could not be claimed for this turn"));
+      }, Boolean);
+      await idle(auto.id);
+      // One failure, one incident: the rejection was reported where it
+      // happened, and Claude settling the interrupt as exit_before_result
+      // must not file the same broken turn a second time.
+      const incidents = await until(async () => {
+        const state = await api("GET", "/api/bots?messages=0");
+        const thread = state.bots.find((b: any) => b.id === chief.id)?.tasks?.find((t: any) => t.title === "Team incidents");
+        return thread ? (await api("GET", `/api/threads/${thread.threadId}/messages?limit=100`)).messages : null;
+      }, (msgs: any) => Array.isArray(msgs) && msgs.some((m: any) =>
+        m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:")));
+      const chips = incidents.filter((m: any) => m.kind === "activity" && String(m.tool?.name ?? "").startsWith("Incident:"));
+      expect(chips).toHaveLength(1);
+      expect(String(chips[0]?.tool?.name)).toContain("computer unavailable — the Local VM could not be claimed for this turn");
+      expect(chips[0]?.threadRef?.botId).toBe(auto.id);
+      // Fail-closed outlives the turn: the teardown revokes the bridge's
+      // capability, so a late poll can never fall through to held:false
+      // and forward a screen call onto a VM this turn never claimed.
+      expect((await gate(autoComputer)).status).toBe(401);
     } finally {
       writeFileSync(finishFile, "finish");
       await api("POST", `/api/bots/${auto.id}/interrupt`, {}); await idle(auto.id);
       await api("DELETE", `/api/bots/${auto.id}`);
+      await api("POST", `/api/bots/${chief.id}/interrupt`, {}); await idle(chief.id);
+      await api("DELETE", `/api/bots/${chief.id}`);
     }
   });
 

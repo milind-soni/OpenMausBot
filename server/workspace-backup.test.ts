@@ -263,6 +263,25 @@ describe("encrypted full workspace backups", () => {
     }
   });
 
+  it("leaves the Organization library's downloaded catalog and release files out, and keeps what the runtime added", async () => {
+    const source = directory(), library = join(source, "org-library"), sha = "b".repeat(64);
+    mkdirSync(join(library, "blobs"), { recursive: true, mode: 0o700 });
+    json(join(library, "state.json"), { version: 1, source: null, appliedDigest: null, installs: {} });
+    json(join(library, "presets.json"), { version: 1, presets: [] });
+    writeFileSync(join(library, "catalog.json"), "ORGANIZATION_CATALOG_BYTES", { mode: 0o600 });
+    writeFileSync(join(library, `catalog.json.${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}.tmp`), "ORGANIZATION_CATALOG_BYTES", { mode: 0o600 });
+    writeFileSync(join(library, "blobs", `${sha}.json`), "ORGANIZATION_RELEASE_BYTES", { mode: 0o600 });
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    const staged = await stageWorkspaceBackup(source, exported.path, { password: PASSWORD });
+    const staging = join(source, ".backups", staged.id, "staged");
+    const paths: string[] = readJson(join(staging, "manifest.json")).entries.map((entry: { path: string }) => entry.path);
+    expect(paths.filter((path) => path.startsWith("org-library"))).toEqual(["org-library", "org-library/presets.json", "org-library/state.json"]);
+    expect(existsSync(join(staging, "data", "org-library", "blobs"))).toBe(false);
+    for (const path of paths) {
+      if (statSync(join(staging, "data", path)).isFile()) expect(readFileSync(join(staging, "data", path), "utf8")).not.toMatch(/ORGANIZATION_(?:CATALOG|RELEASE)_BYTES/);
+    }
+  });
+
   it("still restores an archive from a release that exported hook tokens, without installing them", async () => {
     const source = directory();
     const exported = await createWorkspaceBackup(source, { password: PASSWORD });

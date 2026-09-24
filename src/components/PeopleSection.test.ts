@@ -93,7 +93,7 @@ describe("people on a workspace the organisation's Admin manages", () => {
     const people: Person[] = [{ entry: "bob@acme.test", role: "member", isDomain: false, lastSeenAt: null, devices: 1, turns: 3, costUsd: 1.25 }];
     const html = renderToStaticMarkup(createElement(PortalPeople, { peopleUrl: url, people }));
     expect(html).toContain("data-people-portal");
-    expect(html).toContain("People are managed in your organisation&#x27;s Admin");
+    expect(html).toContain("People are managed in your organization&#x27;s Admin");
     expect(html).toContain(`href="${url}"`);
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');

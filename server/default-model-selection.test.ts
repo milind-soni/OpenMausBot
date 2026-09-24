@@ -3,7 +3,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import type { ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
-import { selectDefaultModelSelection } from "./default-model-selection.ts";
+import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { ManagedDesktopPolicy } from "./managed-policy.ts";
 
 const codex = {
@@ -24,6 +24,11 @@ const claude = {
 };
 
 describe("new bot default model selection", () => {
+  it("accepts a configured API-key provider", () => {
+    const instance = { ...codex, instanceId: "mistral", driverKind: "mistral", access: "api" as const };
+    const preferred = { instanceId: "mistral", model: "selected-model" };
+    expect(selectDefaultModelSelection([instance], preferred)).toEqual(preferred);
+  });
   it("preserves an intentional variant for ACP validation, including variants absent from the preview catalog", () => {
     const preferred = { instanceId: "codex", model: "selected-model", variant: "default" };
     expect(selectDefaultModelSelection([{ ...codex, capabilities: { modelVariants: true } }], preferred))
@@ -181,5 +186,25 @@ describe("new bot default model selection wiring in index.ts", () => {
     const saved = server([claude, companyRouter], { enrolled: true, companyModelsOnly: true, saved: { instanceId: "claude", model: "claude-default" } });
     await expect(saved.defaultSelection()).resolves.toEqual({ instanceId: "", model: "" });
     policy.close(); saved.close();
+  });
+});
+
+describe("new bot effort default", () => {
+  const selection: ModelSelection = { instanceId: "codex", model: "codex-default" };
+
+  it("adds the workspace effort when the engine offers it", () => {
+    expect(withNewBotEffort(selection, "high", ["low", "high"])).toEqual({ ...selection, effort: "high" });
+  });
+
+  it("keeps the caller's explicit effort or model variant", () => {
+    expect(withNewBotEffort({ ...selection, effort: "low" }, "high", ["low", "high"])).toEqual({ ...selection, effort: "low" });
+    const variant = { instanceId: "opencodeGo", model: "provider/model", variant: "minimal" };
+    expect(withNewBotEffort(variant, "high", ["high"])).toEqual(variant);
+  });
+
+  it("sends no level when none is configured or the engine does not offer it", () => {
+    expect(withNewBotEffort(selection, undefined, ["high"])).toEqual(selection);
+    expect(withNewBotEffort(selection, "max", ["low", "high"])).toEqual(selection);
+    expect(withNewBotEffort(selection, "high", undefined)).toEqual(selection);
   });
 });

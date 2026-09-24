@@ -740,6 +740,28 @@ final class DecodingTests: XCTestCase {
         XCTAssertEqual(message.text, "Stripe fired")
     }
 
+    // A digest is known, not new: it must not take the unknown-kind path,
+    // which draws any text it carries as a message bubble.
+    func testADigestIsNotAnUnknownKind() throws {
+        let json = """
+        {"id":"m1","role":"bot","kind":"digest","at":1,"text":"[digest] · tools: shell ×1"}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertNotEqual(message.kind, .unknown)
+    }
+
+    func testACompactionMessageDecodesItsRecord() throws {
+        let json = """
+        {"id":"c1","role":"bot","kind":"compaction","at":1,"text":"[compaction] Earlier: …",
+         "compaction":{"summary":"Earlier: the user asked for X.","firstKeptId":"c1","tokensBefore":12345,"by":"person"}}
+        """
+        let message = try JSONDecoder().decode(Message.self, from: Data(json.utf8))
+        XCTAssertEqual(message.kind, .compaction)
+        XCTAssertEqual(message.compaction?.summary, "Earlier: the user asked for X.")
+        XCTAssertTrue(message.compaction?.chipText.hasPrefix("Context compacted · ") == true)
+        XCTAssertTrue(message.compaction?.chipText.hasSuffix("345 tokens summarised") == true)
+    }
+
     func testAnUnknownRoleIsNotAttributedToYou() throws {
         let json = """
         {"id":"m1","role":"system","kind":"text","at":1,"text":"hello"}

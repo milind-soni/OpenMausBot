@@ -36,6 +36,15 @@ describe("Full access delivery", () => {
 });
 
 describe("autoVerdict", () => {
+  it("applies an explicit exact command grant without changing Full or answering questions/elevations", () => {
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true }).source).toBe("command-allowlist");
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true }).approve).toBeTruthy();
+      expect(autoVerdict(mode, "Bash", { commandAllowed: true, requiresExplicitApproval: true }).approve).toBeNull();
+      expect(autoVerdict(mode, "AskUserQuestion", { commandAllowed: true }).approve).toBeNull();
+    }
+    expect(autoVerdict("full", "Bash", { commandAllowed: true, requiresExplicitApproval: true }).source).toBe("full-access");
+  });
   it("answers only for Full access, and then answers everything", () => {
     expect(autoVerdict("full", "Bash")).toEqual({ approve: "approved Bash (full access)", source: "full-access" });
     expect(autoVerdict("full", "Bash", { requiresExplicitApproval: true })).toEqual({
@@ -111,6 +120,7 @@ describe("tools that ask a person", () => {
     for (const mode of modes) {
       expect(autoVerdict(mode, "ask_user").approve, mode).toBeNull();
       expect(autoVerdict(mode, "mcp__ogb__ask_user").approve, mode).toBeNull();
+      expect(autoVerdict(mode, "omb-ask").approve, mode).toBeNull();
     }
   });
 

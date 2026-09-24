@@ -10,11 +10,11 @@ import { useStore, type Bot, type BotProject, type Group, type Task } from "@/st
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
-import { formatTaskTokens } from "@/lib/usage";
+import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
 import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
+import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
 import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
@@ -52,15 +52,14 @@ export function filterTasks<T extends { title: string }>(tasks: readonly T[], qu
   return [...prefix, ...substring];
 }
 
-/** Quiet per-task token tally — input+output combined, because one honest
- * total reads faster than a split; the split lives in the hover title. */
+/** Quiet per-task token tally; the hover title explains the cached share. */
 function TaskUsage({ usage }: { usage: Task["usage"] }) {
   if (!usage) return null;
-  const label = formatTaskTokens(usage.input + usage.output);
+  const label = formatTaskTokens(headlineTokens(usage));
   if (!label) return null;
   return (
     <span
-      title={`${t("chat.usage.in", { tokens: usage.input.toLocaleString() })} · ${t("chat.usage.out", { tokens: usage.output.toLocaleString() })}`}
+      title={usageDetail(usage)}
     >
       {" · "}
       {label}
@@ -68,7 +67,7 @@ function TaskUsage({ usage }: { usage: Task["usage"] }) {
   );
 }
 
-type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "updatedAt" | "pinned" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy" | "archivedAt"> & { usage?: Task["usage"] };
+type PickerTask = Pick<Task, "threadId" | "title" | "createdAt" | "updatedAt" | "pinned" | "busy" | "activity" | "unread" | "projectId" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates"> & { usage?: Task["usage"] };
 
 /** The full picker searches both thread titles and their project names.
  * Legacy/orphaned project IDs remain visible under Ungrouped. */
@@ -206,13 +205,12 @@ function ConversationTaskPicker({
   // the picker button stays as-is — a token count next to a truncated title
   // and count would crowd it; the open task's tally rides the hover title
   const u = current?.usage;
-  const currentLabel = u ? formatTaskTokens(u.input + u.output) : null;
+  const currentLabel = u ? formatTaskTokens(headlineTokens(u)) : null;
   const switchTitle =
     u && currentLabel
-      ? t("task.switchWithUsage", {
+      ? t("task.switchWithUsageDetail", {
           label: currentLabel,
-          input: u.input.toLocaleString(),
-          output: u.output.toLocaleString(),
+          detail: usageDetail(u),
         })
       : t("task.switch");
   const grouped = bot ? groupThreadTasks(tasks, bot.projects ?? [], query) : null;
@@ -221,7 +219,7 @@ function ConversationTaskPicker({
   // a query narrows it by thread title or bot name rather than hiding it.
   const attentionNeedle = query.trim().toLowerCase();
   const attentionRows = (attention ?? []).filter((entry) =>
-    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || entry.botName.toLowerCase().includes(attentionNeedle));
+    !attentionNeedle || entry.task.title.toLowerCase().includes(attentionNeedle) || attentionOwnerName(entry).toLowerCase().includes(attentionNeedle));
   const looking = query.trim();
   // One result list for keyboard, count, and empty state: an attention row
   // that matches the query is a real result even when no tree thread does.
@@ -350,7 +348,7 @@ function ConversationTaskPicker({
                     >
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
-                        {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
+                        {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.waitingForTeammates ? `${t("task.waitingOnTeammate")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
                         {formatUpdatedAt(threadRecency(task))}
                         <TaskUsage usage={task.usage} />
                         {opener && ` · ${opener}`}
@@ -441,7 +439,7 @@ export function BotActivityPicker({ bot }: { bot: Bot }) {
       >
         <option value="" disabled>{t("task.otherActivity", { count: activity.length })}</option>
         {activity.map((task) => <option key={task.threadId} value={task.threadId}>
-          {task.title} · {task.activity === "waiting-on-you" ? t("task.waiting") : task.busy || task.activity === "working" ? t("chat.activity.working") : task.queued ? t("task.queued") : t("task.unread")}
+          {task.title} · {task.activity === "waiting-on-you" ? t("task.waiting") : task.waitingForTeammates ? t("task.waitingOnTeammate") : task.busy || task.activity === "working" ? t("chat.activity.working") : task.queued ? t("task.queued") : t("task.unread")}
         </option>)}
       </select>
       <span className="truncate text-[12px] text-ink-secondary">{bot.tasks?.find((task) => task.threadId === bot.threadId)?.title}</span>
@@ -459,14 +457,14 @@ export function TaskPicker({ bot }: { bot: Bot }) {
       tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
       busy={false}
       bot={bot}
-      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id)}
+      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}
       onDelete={(threadId) => dispatch({ type: "deleteTask", botId: bot.id, threadId })}
       onMove={(threadId, projectId) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { projectId } })}
       onPin={(threadId, pinned) => dispatch({ type: "updateTask", botId: bot.id, threadId, patch: { pinned } })}
-      onAttentionJump={(entry) => dispatch({ type: "switchTask", botId: entry.botId, threadId: entry.task.threadId })}
+      onAttentionJump={(entry) => dispatch(attentionJumpAction(entry))}
     />
   );
 }

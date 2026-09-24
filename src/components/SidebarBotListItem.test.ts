@@ -25,27 +25,42 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 });
 
-function renderRow(candidate: Bot) {
+function renderRow(candidate: Bot, quiet = false) {
   return renderToStaticMarkup(createElement(
     StoreProvider,
     null,
     createElement(BotListItem, {
       bot: candidate,
       density: "comfortable",
+      quiet,
       onMenu: vi.fn(),
     }),
   ));
 }
 
 describe("BotListItem", () => {
-  it("offers a direct New folder button and keyboard-accessible bot menu independently of New thread", () => {
+  it("offers direct New thread and New folder icons and a keyboard-accessible bot menu", () => {
     const markup = renderRow(bot());
+    expect(markup).toContain('aria-label="New thread"');
     expect(markup).toContain('aria-label="New folder under Atlas"');
     expect(markup).toContain('aria-label="Actions for Atlas"');
     expect(markup).toContain('aria-haspopup="menu"');
   });
+  const twoThreads = (): Partial<Bot> => ({
+    tasks: [{ threadId: "thread-atlas", title: "Current", createdAt: 2 }, { threadId: "thread-earlier", title: "Earlier", createdAt: 1 }],
+  });
+
+  it("shows the thread toggle only once there is a list to open", () => {
+    // one thread is the bot itself: no disclosure, no duplicate row
+    expect(renderRow(bot())).not.toContain("Expand Atlas threads");
+    expect(renderRow(bot())).not.toContain('data-sidebar-thread-row=');
+    expect(renderRow(bot(twoThreads()))).toContain("Expand Atlas threads");
+    // a folder is a list too, even with one thread in it
+    expect(renderRow(bot({ projects: [{ id: "p1", name: "Research" }] }))).toContain("Expand Atlas threads");
+  });
+
   it("keeps the native thread toggle beside, not inside, the selectable bot row", () => {
-    const markup = renderRow(bot());
+    const markup = renderRow(bot(twoThreads()));
     expect(markup).toContain('role="button" tabindex="0"');
     expect(markup).toContain('</div><button type="button" aria-label="Expand Atlas threads" aria-expanded="false"');
     const toggle = markup.match(/<button[^>]*aria-label="Expand Atlas threads"[^>]*>/)?.[0];
@@ -133,6 +148,20 @@ describe("BotListItem", () => {
     expect(renderRow(bot({ busy: true, activity: "waiting-on-you" }))).not.toContain('data-testid="working-dot"');
   });
 
+  it("marks an idle bot waiting on a teammate with a quiet dot, never the work signals", () => {
+    const markup = renderRow(bot({ waitingForTeammates: true, busy: false, activity: "idle" }));
+    expect(markup).toContain('data-testid="teammate-wait-dot"');
+    expect(markup).not.toContain('data-testid="working-dot"');
+    expect(markup).not.toContain("animate-status-pulse");
+    expect(markup).toContain("Waiting on a teammate…");
+  });
+
+  it("keeps real sibling work visible while another thread waits for a teammate", () => {
+    const markup = renderRow(bot({ waitingForTeammates: true, busy: true, activity: "working" }));
+    expect(markup).toContain('data-testid="working-dot"');
+    expect(markup).not.toContain('data-testid="teammate-wait-dot"');
+  });
+
   it("keeps Archive in the Actions menu and reveals quiet row controls on focus as well as hover", () => {
     const markup = renderRow(bot());
     expect(markup).not.toContain('aria-label="Archive Atlas"');
@@ -210,5 +239,46 @@ describe("bot deletion feedback", () => {
 
     expect(markup).toContain(">Delete</button>");
     expect(markup).not.toContain('disabled=""');
+  });
+
+  describe("quiet rows", () => {
+    const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
+
+    it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
+      const markup = renderRow(bot({
+        title: "Developer",
+        chiefOfStaff: true,
+        messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt with three lines.", at: 2 }] as Bot["messages"],
+      }), true);
+      expect(titleLine.test(markup)).toBe(false);
+      expect(markup).not.toContain("Chief of Staff</span>");
+      expect(markup).not.toContain("Created notes.txt with three lines.");
+      expect(markup).toContain(">Atlas<");
+      // the crown stays, beside the name, with its label for assistive tech
+      expect(markup).toContain('data-testid="chief-crown"');
+      expect(markup).toContain('aria-label="Chief of Staff"');
+    });
+
+    it("keeps the status line while something is happening", () => {
+      expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
+      expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
+      expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
+    });
+
+    it("keeps the unread dot in the name line when the preview line is gone", () => {
+      const markup = renderRow(bot({ unread: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }), true);
+      expect(markup).toContain('aria-label="Unread threads"');
+      expect(markup).not.toContain(">hello<");
+    });
+
+    it("puts the crown right after the name, inside the name line", () => {
+      const markup = renderRow(bot({ chiefOfStaff: true }), true);
+      expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    });
+
+    it("changes nothing when off", () => {
+      expect(renderRow(bot({ title: "Developer", chiefOfStaff: true }))).toContain("Chief of Staff</span>");
+      expect(renderRow(bot({ title: "Developer", chiefOfStaff: true }))).not.toContain('data-testid="chief-crown"');
+    });
   });
 });

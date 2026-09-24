@@ -17,6 +17,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { Card, CommandLine } from "./SettingsPrimitives";
+import { MacLocalControl } from "./MacLocalControl";
 import { cn } from "@/lib/cn";
 
 type Action = "pull" | "run" | "start" | "stop" | "remove" | "recreate";
@@ -1252,6 +1253,8 @@ export function LocalComputerSection() {
         onRefresh={() => setVpsRefreshKey((key) => key + 1)}
         onRemove={(instance) => void removeVpsComputer(instance)}
       />
+
+      <MacLocalControl />
 
       <Card
         title={t("vm.main.title")}

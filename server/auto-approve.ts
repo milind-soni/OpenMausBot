@@ -4,8 +4,7 @@
 // provider's own permission mode passed straight through (Claude `auto`,
 // Grok `--permission-mode`, Codex `approvalsReviewer`, …), and a request that
 // reaches this process is one the provider left for a person. The only
-// verdict the app synthesizes is Full access, because that level is the
-// person's explicit, separately confirmed grant to answer every prompt.
+// grants the app applies are Full access and the person's exact saved commands.
 // Questions never come through here: a bot's question always reaches a human.
 
 import { supportsApprovalMode, type ApprovalMode } from "../shared/approval-mode.ts";
@@ -68,15 +67,16 @@ export function delegationInheritsFullAccess(input: {
 // the permission path in permission-proxy). Approving it there does not
 // produce an answer: the CLI runs the tool with none and the model is told
 // "The user did not answer the questions." — a question silently lost.
-const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
+const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user", "omb-ask"]);
 
 /** Why a permission request landed where it did — the decision log's "which
- * rule". `full-access` is the one auto-approval; `native-approval` is a card
+ * rule". `full-access` and `command-allowlist` are explicit user grants; `native-approval` is a card
  * the provider's own reviewer (Auto, or Custom's config) left for the person;
  * `explicit-approval-block` is a sandbox widening only Full may answer;
  * `no-grant` is an Ask or Edits card, where asking is the whole point. */
 export type AutoVerdictSource =
   | "full-access"
+  | "command-allowlist"
   | "native-approval"
   | "explicit-approval-block"
   | "no-grant";
@@ -96,6 +96,8 @@ export function autoVerdict(
     /** The provider is asking to widen its configured sandbox rather than
      * perform one ordinary action. Only explicit Full may synthesize this. */
     requiresExplicitApproval?: boolean;
+    /** Exact bot/provider/folder/command match against the person's saved rules. */
+    commandAllowed?: boolean;
   },
 ): AutoVerdict {
   // A question is for a person, whatever channel it arrived on — and
@@ -109,6 +111,7 @@ export function autoVerdict(
   // request.opened caller invokes this for permissions only, never questions.
   if (mode === "full") return { approve: `approved ${tool} (full access)`, source: "full-access" };
   if (context?.requiresExplicitApproval) return { approve: null, source: "explicit-approval-block" };
+  if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
   if (mode === "auto" || mode === "custom") return { approve: null, source: "native-approval" };
   return { approve: null, source: "no-grant" };
 }

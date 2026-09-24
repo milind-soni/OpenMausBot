@@ -12,7 +12,8 @@ import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 // importing Electron main (which would start the app). All IO, connection state,
 // and transfer results are synthetic; these tests do not prove archive transport,
 // OS keychain storage, or a renderer workflow.
-const mainSource = readFileSync(new URL("./main.mjs", import.meta.url), "utf8");
+// Windows checkouts can have CRLF line endings; the source checks below match "\n".
+const mainSource = readFileSync(new URL("./main.mjs", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 function section(start, end) {
   const from = mainSource.indexOf(start);
   const to = mainSource.indexOf(end, from + start.length);
@@ -43,16 +44,26 @@ function fixture() {
     restoreResponse: async () => Response.json({ restoreId: STAGE }),
     onState: null, requests, sent, event, generation: 0, savedSchedule: null, scheduleOptions: null,
     now: Date.now(), scheduleTimer: null, statusResponse: null,
+    stores: [], clientOptions: null, libraryOptions: null, libraryFetches: [], librarySent: [],
+    library: { runtimeReady: () => {}, receive: () => false, close: () => {} },
   };
   const client = { connection: () => f.connection, state: () => f.state, backupGeneration: () => f.generation,
+    fetchLibraryBytes: async (...args) => { f.libraryFetches.push(args); return Buffer.from("{}"); },
     disconnect: async () => { f.generation++; f.connection = null; f.state = { status: "signed-out" }; f.onState(f.state); return f.state; } };
   localOrigin.setLocalOrigin(ORIGIN);
   const context = vm.createContext({
     AbortController, AbortSignal, Date, Headers, setTimeout, clearTimeout, path, randomUUID, Buffer,
     app: { isPackaged: true, getPath: () => "/unused-synthetic-backup-fixture", getVersion: () => "fixture" },
     os: { hostname: () => "Fixture computer" }, process: { platform: "fixture" },
-    createManagedDesktopStore: () => ({ read: async () => f.savedSchedule, write: async value => { f.savedSchedule = structuredClone(value); } }),
-    createManagedDesktopClient: options => { f.onState = options.onState; return client; },
+    createManagedDesktopStore: options => {
+      const store = { file: options.file, read: async () => f.savedSchedule, write: async value => { f.savedSchedule = structuredClone(value); } };
+      f.stores.push(store);
+      return store;
+    },
+    createManagedDesktopClient: options => { f.onState = options.onState; f.clientOptions = options; return client; },
+    // The organization library is wired beside company access; a recording stub.
+    createOrgLibrary: options => { f.libraryOptions = options; return f.library; },
+    managedDesktopRelay: { sendLibrary: async (proc, library) => { f.librarySent.push({ proc, library }); } },
     createCompanyBackupSchedule: options => {
       f.scheduleOptions = options;
       return createCompanyBackupSchedule({ ...options, now: () => f.now,
@@ -84,6 +95,32 @@ function fixture() {
     prepare: () => { context.preparedCompanyRestore = { id: STAGE, proc: context.serverProc, deviceId: DEVICE }; },
   });
 }
+
+test("ensureManagedDesktop gives the organization library its own record, the fixed-route client and the local runtime", async () => {
+  const f = fixture(), options = f.libraryOptions;
+  assert.equal(options.dataDir, path.join("/synthetic-fixture-workspace", "org-library"));
+  assert.deepEqual(f.stores.map(store => path.basename(store.file)), ["company-connection.bin", "company-library.bin", "company-backup-schedule.bin"]);
+  assert.equal(options.store, f.stores[1], "a separate OS-encrypted record, not the connection's");
+  assert.equal(f.clientOptions.store, f.stores[0]);
+  assert.equal(f.clientOptions.library, f.library, "every session sync reaches the library");
+  assert.equal(options.appVersion, "fixture");
+  await options.fetchBytes("/api/desktop/library", 1024, { generation: 3 });
+  assert.deepEqual(f.libraryFetches, [["/api/desktop/library", 1024, { generation: 3 }]], "downloads go through the client's fixed routes");
+  const library = { digest: "d".repeat(64) };
+  await options.relay(library);
+  assert.equal(f.librarySent.length, 1);
+  assert.equal(f.librarySent[0].proc, f.context.serverProc, "only to the current local runtime");
+  assert.equal(f.librarySent[0].library, library);
+});
+
+test("main hands the library a restarted runtime, the runtime's own messages and the quit", () => {
+  // Outside ensureManagedDesktop(), so checked in the source like the recovery-window rule in server-supervisor.node-test.mjs.
+  assert.match(section("onReady(proc) {", "routineWake.start();"), /\n\s*orgLibrary\?\.runtimeReady\(\);\n/);
+  const messages = section('proc.on("message", (message) => {', 'proc.once("spawn"');
+  assert.match(messages, /if \(!serverSupervisor\.isCurrent\(proc\)\) return;/, "a replaced runtime's messages are dropped first");
+  assert.match(messages, /\n\s*if \(orgLibrary\?\.receive\(message\)\) return;\n/);
+  assert.match(section('app.on("before-quit"', "managedDesktop?.close();"), /\n\s*orgLibrary\?\.close\(\);\n/);
+});
 
 for (const kind of ["preview", "create"]) {
   test(`late cancellation rejects ${kind} instead of accepting its completed result`, async () => {

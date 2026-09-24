@@ -1,3 +1,4 @@
+import { codexToolSurfaceArgs } from "./codex-tool-surface.ts";
 // Codex driver — upstream CodexDriver skeleton over agentcal's
 // drivers/codex.js runtime: the official `codex` CLI headless over its
 // app-server JSON-RPC protocol (newline-delimited JSON on stdio).
@@ -34,13 +35,16 @@ import { codexLocalProviderArgs } from "./local-inject.ts";
 import { augmentedPath, splitCliString } from "../env-path.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { appendNative } from "./native.ts";
+import { permissionCommand, permissionLaunchCwd } from "./permission-command.ts";
 import { commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import { codexDeveloperInstructions, syncCodexInstructions } from "./codex-instructions.ts";
+import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
+import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -161,7 +165,6 @@ export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): s
   ];
 }
 
-const QUESTION_TIMEOUT_NOTE = "No answer was given — use your best judgment.";
 const DENY_TIMEOUT_NOTE =
   "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
 
@@ -332,6 +335,21 @@ function namedApprovalParams(mode: Exclude<ApprovalMode, "custom">): CodexApprov
       sandboxPolicy: { type: "workspaceWrite" },
     },
   };
+}
+
+/** Keep the turn on the complete sandbox resolved by native start/resume. */
+function withResolvedSandbox(params: CodexApprovalParams, session: unknown): CodexApprovalParams {
+  const requested = plainRecord(params.turn.sandboxPolicy);
+  // Named permission profiles own their policy; do not mix both selectors.
+  if (!requested) return params;
+  const sandbox = plainRecord(plainRecord(session)?.sandbox);
+  if (!sandbox || typeof sandbox.type !== "string") {
+    throw new Error("Codex did not return its resolved sandbox policy. Update Codex, then retry; the turn was not started because its permissions could not be verified.");
+  }
+  if (sandbox.type !== requested.type) {
+    throw new Error("Codex did not apply the requested sandbox mode; cannot safely start the turn.");
+  }
+  return { ...params, turn: { ...params.turn, sandboxPolicy: sandbox } };
 }
 
 function effectiveApprovalPolicy(value: unknown): unknown {
@@ -666,7 +684,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
 
       const launchAttempt = async (attempt: number): Promise<void> => {
         const env = childEnv();
-        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model))];
+        const appServerArgs = ["app-server", ...(config.managed ? managedCodexArgs(config.managed) : codexLocalProviderArgs(env, turn.model)), ...codexToolSurfaceArgs()];
         if (turn.integrations?.composio) {
           mountMcpServer(appServerArgs, env, "openmausbot_connectors", turn.integrations.composio);
         }
@@ -710,6 +728,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           );
         }
 
+        const commandCwd = permissionLaunchCwd(turn.cwd ?? homedir());
         const child = spawnCli(config.cli, appServerArgs, {
           cwd: turn.cwd ?? homedir(),
           env,
@@ -914,23 +933,22 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           return;
         }
-        // One ask card carries one question honestly: its choices would come
-        // from the first question alone and its one reply (including the
-        // timeout note) would be copied into every question id (#1237).
-        // Refuse the bundled call with a teaching error instead of
-        // fabricating per-question answers.
-        if (isQuestion && (!Array.isArray(params.questions) || params.questions.length !== 1)) {
-          const bundled = Array.isArray(params.questions) && params.questions.length > 1;
+        // The whole set rides one card, answered per id: the protocol pairs
+        // each question with its own id, and the card's single reply is
+        // mapped back block by block (or as the flat single-question
+        // fallback). The only refusal left is an ask with nothing answerable
+        // — #1237 is closed: a bundle no longer copies one answer into
+        // every id.
+        const protocolQuestions = isQuestion ? parseProtocolAskQuestions(params.questions) : null;
+        if (isQuestion && !protocolQuestions) {
           send({
             jsonrpc: "2.0",
             id: msg.id,
             error: {
               code: -32602,
-              message: bundled
-                ? `ask supports one question per call; this request bundled ${params.questions.length}. Split it into separate asks, one question each.`
-                : Array.isArray(params.questions)
-                ? "ask supports one question per call; this request sent none."
-                : "ask supports one question per call; params.questions must be an array with exactly one question.",
+              message: Array.isArray(params.questions)
+                ? "ask needs at least one answerable question — a string id and question text each; this request sent none."
+                : "ask needs params.questions to be an array of questions, each with a string id and question text.",
             },
           });
           return;
@@ -973,22 +991,36 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ? (mcpAppApproval?.summary ?? (typeof params.message === "string" ? params.message : "MCP access requested"))
             : typeof params.command === "string"
             ? params.command
+            : protocolQuestions
+              ? protocolQuestions.map(({ question }) => question.question).join(" · ")
             : Array.isArray(params.questions)
               ? params.questions.map((q: any) => q.question ?? q.header).filter(Boolean).join(" · ")
               : typeof params.reason === "string"
                 ? params.reason
                 : tool;
-        const choices = isQuestion
-          ? (params.questions?.[0]?.options ?? []).map((o: any) => o.label).slice(0, 5)
-          : undefined;
+        // Flat choices only when one non-multiselect question can actually
+        // be answered by a bare reply; a bundle's first-question buttons
+        // would be an unusable lie for flat clients.
+        const choices =
+          isQuestion && protocolQuestions ? questionChoices(protocolQuestions.map(({ question }) => question)) : undefined;
         const finish = (behavior: "allow" | "deny" | "answer", message?: string, source: "user" | "timeout" | "system" = "user") => {
           if (!asks.delete(requestId)) return;
           clearTimeout(timer);
           if (isQuestion) {
-            const answers: Record<string, { answers: string[] }> = {};
-            for (const q of Array.isArray(params.questions) ? params.questions : []) {
-              answers[q.id] = { answers: [message || QUESTION_TIMEOUT_NOTE] };
-            }
+            // Only the person's reply is filed: Q:/A: blocks mapped to the
+            // id that asked them, or the flat fallback for a single
+            // question. Timeout and turn teardown send empty answers so
+            // every id reads unanswered — system notes never occupy the
+            // slot the model reads as the person's words (the rule
+            // permission-proxy already follows).
+            const mapped =
+              behavior === "answer" && source === "user" && typeof message === "string"
+                ? questionAnswersById(message, protocolQuestions ?? [])
+                : {};
+            // Null prototype so an opaque id like __proto__ becomes a real
+            // answer key instead of hitting the inherited setter.
+            const answers: Record<string, { answers: string[] }> = Object.create(null);
+            for (const [id, answer] of Object.entries(mapped)) answers[id] = { answers: [answer] };
             send({ jsonrpc: "2.0", id: msg.id, result: { answers } });
           } else {
             send({
@@ -1000,7 +1032,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           emit({ ...base(threadId, turnId), type: "request.resolved", requestId, behavior, source });
         };
         const timer = setTimeout(
-          () => (isQuestion ? finish("answer", QUESTION_TIMEOUT_NOTE, "timeout") : finish("deny", DENY_TIMEOUT_NOTE, "timeout")),
+          // A timed-out question resolves as denied, not answered: the card
+          // closes with no reply (answers stay empty either way), and the
+          // resolve event must not claim an answer that never happened.
+          () => finish("deny", isQuestion ? undefined : DENY_TIMEOUT_NOTE, "timeout"),
           15 * 60_000,
         );
         timer.unref?.();
@@ -1012,9 +1047,18 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           requestType: isQuestion ? "question" : "permission",
           tool,
           summary,
+          command: method === "execCommandApproval" || method === "item/commandExecution/requestApproval"
+            ? permissionCommand(params.command, params.cwd ?? (
+              // Helpers may have a different workspace from their parent.
+              !params.threadId || params.threadId === codexThreadId ? commandCwd : undefined
+            )) : undefined,
           choices,
+          ...(protocolQuestions ? { questions: protocolQuestions.map((pair) => pair.question) } : {}),
           approvalScope: controlsHost ? "local-computer" : undefined,
-          requiresExplicitApproval: isAdditionalPermission || undefined,
+          requiresExplicitApproval: isAdditionalPermission || (
+            (method === "execCommandApproval" || method === "item/commandExecution/requestApproval") &&
+            (params.additionalPermissions != null || params.networkApprovalContext != null)
+          ) || undefined,
         });
       };
 
@@ -1386,7 +1430,21 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               : "Could not read Codex configuration; cannot safely update bot instructions. Retry after checking Codex.",
           );
         }
-        const developerInstructions = codexDeveloperInstructions(effectiveConfig, turn.system ?? "");
+        // Only the stable half of the prompt belongs in the developer slot:
+        // it is the part that must survive compaction unchanged, and any
+        // change to it invalidates the provider's cached prefix. The volatile
+        // half (memory, mentions, outstanding teammate work) is delivered
+        // inside the turn that changed it, after the cached prefix, the same
+        // contract SendTurnInput.systemStable documents. Without the split
+        // the driver keeps the previous single-block behaviour.
+        const stableInstructions = typeof turn.systemStable === "string" && typeof turn.systemVolatile === "string"
+          ? turn.systemStable
+          : null;
+        const promptSplit = stableInstructions !== null;
+        const developerInstructions = codexDeveloperInstructions(
+          effectiveConfig,
+          stableInstructions ?? turn.system ?? "",
+        );
         let approvalParams: CodexApprovalParams;
         if (approvalMode === "custom") {
           // config/read returns the effective global + project config for this
@@ -1426,6 +1484,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               approvalParams = approvalParams.fallback;
               resumed = await resumeThread();
             }
+            approvalParams = withResolvedSandbox(approvalParams, resumed);
             codexThreadId = resumed?.thread?.id ?? cursor;
             resumedNativeThread = true;
           } catch (error) {
@@ -1467,11 +1526,30 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             approvalParams = approvalParams.fallback;
             started = await startThread();
           }
+          approvalParams = withResolvedSandbox(approvalParams, started);
           codexThreadId = started?.thread?.id ?? null;
           startedModel = started?.model ?? null;
         }
         if (!codexThreadId) throw new Error("Codex did not return a native thread id");
-        await syncCodexInstructions(threadId, codexThreadId, developerInstructions, resumedNativeThread, request);
+        const { deliverVolatile, hadVolatile, commitVolatile } = await syncCodexInstructions(
+          threadId,
+          codexThreadId,
+          developerInstructions,
+          promptSplit ? turn.systemVolatile ?? "" : "",
+          resumedNativeThread,
+          request,
+          Boolean(turn.mentionTurn),
+        );
+        // A changed volatile half rides the next user input as a labelled
+        // context block. It never touches the developer slot, so an
+        // ordinary memory write or roster change neither appends a second
+        // copy of the prompt to history nor re-uploads the conversation.
+        if (deliverVolatile) {
+          promptText = withContextNote(
+            volatileContextNote(promptSplit ? turn.systemVolatile ?? "" : "", hadVolatile),
+            promptText,
+          );
+        }
         emit({ ...base(threadId, turnId), type: "session.started", sessionId: codexThreadId, model: startedModel ?? turn.model ?? null, ...(rebuiltFromReplay ? { rebuilt: true } : {}) });
         const turnInput = [
           ...(promptText ? [{ type: "text" as const, text: promptText }] : []),
@@ -1503,6 +1581,9 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           approvalParams = approvalParams.fallback;
           await startTurn();
         }
+        // turn/start accepted the input: only now may the receipt claim the
+        // volatile half was delivered, so a rejected turn redelivers on retry.
+        if (commitVolatile) commitVolatile();
       } catch (e) {
         const failure = e instanceof Error ? e : { text: String(e) };
         const message = e instanceof Error ? e.message : String(e);

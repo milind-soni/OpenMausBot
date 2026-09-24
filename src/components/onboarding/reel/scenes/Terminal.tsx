@@ -24,7 +24,7 @@ const SCRIPT: Array<{ at: number; line: Line }> = [
   { at: 1800, line: { kind: "pick", label: "Choose your AI connection", options: ["Claude Code", "ChatGPT / Codex", "API key"], chosen: 0 } },
   { at: 2900, line: { kind: "done", label: "Choose your AI connection", value: "Claude Code" } },
   { at: 3150, line: { kind: "done", label: "Choose your model", value: "claude-sonnet" } },
-  { at: 3700, line: { kind: "out", text: "Workspace ready → http://127.0.0.1:8799", tone: "success" } },
+  { at: 3700, line: { kind: "out", text: "OpenMausBot ready → http://127.0.0.1:8799", tone: "success" } },
 ];
 
 const RISE_AT = 4200;

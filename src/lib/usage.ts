@@ -4,6 +4,7 @@ import type { Bot, TaskUsage } from "@/state/store";
 import { t } from "./i18n";
 
 export const EMPTY_USAGE: TaskUsage = { input: 0, output: 0, costUsd: null, turns: 0 };
+type TokenUsage = Pick<TaskUsage, "input" | "output"> & Partial<TaskUsage>;
 
 /** True when a stored cost is a real number (not null, NaN, or Infinity). */
 export function hasFiniteCost(value: unknown): value is number {
@@ -21,6 +22,7 @@ export function sumUsage(items: Array<TaskUsage | undefined>): TaskUsage {
     if (hasFiniteCost(u.cachedInput)) out.cachedInput = (out.cachedInput ?? 0) + u.cachedInput;
     if (hasFiniteCost(u.costUsd)) out.costUsd = (out.costUsd ?? 0) + u.costUsd;
   }
+  if (items.some((u) => u && u.input > 0 && !cachedKnown(u))) delete out.cachedInput;
   return out;
 }
 
@@ -63,37 +65,36 @@ export function formatUsd(usd: number): string {
 /** How much of `input` the provider served from its prompt cache. Clamped to
  * `input` so a provider that reports cache reads outside its input figure
  * can never produce a negative "fresh" number. */
-export function cachedInput(u: TaskUsage): number {
+export function cachedInput(u: TokenUsage): number {
   return hasFiniteCost(u.cachedInput) ? Math.min(Math.max(0, u.cachedInput), u.input) : 0;
 }
 
-/** The in/out breakdown behind the headline figure, with the cached share
- * called out when there is one: "88.2k in (79k cached) · 1.2k out". The
- * headline counts every token the model processed — five short messages
- * on a thread with a system prompt and tool schemas really do cost the
- * model ~17k tokens of reading each turn — so the breakdown is where the
- * "was that really 100k?" question gets answered. */
-export function usageDetail(u: TaskUsage): string {
-  const cached = cachedInput(u);
-  const input =
-    cached > 0
-      ? t("chat.usage.inCached", { tokens: formatTokens(u.input), cached: formatTokens(cached) })
-      : t("chat.usage.in", { tokens: formatTokens(u.input) });
-  return `${input} · ${t("chat.usage.out", { tokens: formatTokens(u.output) })}`;
+/** Keep input and output separate; an absent cache count is not zero. */
+export function usageDetail(u: TokenUsage): string {
+  const input = cachedKnown(u)
+    ? `${t("chat.usage.uncachedInput", { tokens: formatTokens(uncachedInput(u)) })} · ${t("chat.usage.cachedInput", { tokens: formatTokens(cachedInput(u)) })}`
+    : t("chat.usage.totalInput", { tokens: formatTokens(u.input) });
+  return `${input} · ${t("chat.usage.output", { tokens: formatTokens(u.output) })}`;
 }
 
-/** Tokens the model had not seen before, plus what it wrote: `input` minus
- * the cached share, plus `output`. The figure a person means by "how much
- * did this cost me", and the one every other usage tool headlines — the raw
- * total counts the thread being re-read on every call and grows by the whole
- * conversation per message, which reads as a bug (issue #527). */
+/** Callers use this only when the provider reported the cache split. */
+export function uncachedInput(u: TokenUsage): number {
+  return Math.max(0, u.input - cachedInput(u));
+}
+
+/** Non-cached input plus generated output for aggregate token counters.
+ * This is a token count, not a price: cached input may still be billed. */
 export function freshTokens(u: TaskUsage): number {
-  return Math.max(0, u.input - cachedInput(u)) + u.output;
+  return uncachedInput(u) + u.output;
 }
 
-/** Whether the engine ever told us the cached share. Without it the raw
- * total is the only honest headline. */
-export function cachedKnown(u: TaskUsage): boolean {
+/** Aggregate counters preserve the existing input-plus-output meaning.
+ * Chat input chips label their narrower count explicitly. */
+export function headlineTokens(u: TaskUsage): number {
+  return cachedKnown(u) ? freshTokens(u) : u.input + u.output;
+}
+
+export function cachedKnown(u: Pick<TaskUsage, "cachedInput">): boolean {
   return hasFiniteCost(u.cachedInput);
 }
 
@@ -126,22 +127,19 @@ export function contextDetail(u: TaskUsage): string | null {
     : t("chat.usage.context", { tokens: formatTokens(share.tokens) });
 }
 
-/** "Last message: 210k read · 1.2k new". */
+/** The latest turn, with the same separate counts as the thread total. */
 export function lastTurnDetail(u: TaskUsage): string | null {
   const last = u.lastTurn;
   if (!last || !hasFiniteCost(last.input)) return null;
-  const cached = hasFiniteCost(last.cachedInput) ? Math.min(Math.max(0, last.cachedInput), last.input) : 0;
-  return t("chat.usage.lastTurn", { read: formatTokens(last.input + last.output), fresh: formatTokens(Math.max(0, last.input - cached) + last.output) });
+  return t("chat.usage.lastTurnSplit", { detail: usageDetail(last) });
 }
 
-/** The chip text: cost when the engine reports one, else new tokens when the
- * engine reports its cached share, else every token as before. Empty string
- * when nothing has been spent — a fresh task shows no chip. */
+/** Cost when reported; otherwise input only. Output stays in the tooltip. */
 export function usageChip(u: TaskUsage): string {
   if (u.turns === 0 && u.input + u.output === 0) return "";
   if (hasFiniteCost(u.costUsd)) return formatUsd(u.costUsd);
-  if (cachedKnown(u)) return t("chat.usage.new", { tokens: formatTokens(freshTokens(u)) });
-  return t("chat.usage.tokens", { tokens: formatTokens(u.input + u.output) });
+  if (cachedKnown(u)) return t("chat.usage.uncachedShort", { tokens: formatTokens(uncachedInput(u)) });
+  return t("chat.usage.inputShort", { tokens: formatTokens(u.input) });
 }
 
 /** How to caption a cost figure given how the engine is billed. */

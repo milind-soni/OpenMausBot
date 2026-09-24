@@ -51,7 +51,7 @@ export function createOrganizationEntry({ readState, confirm, saveEnvironments, 
         origin: companion?.endpoint ?? remote.origin,
       });
       if (!accepted) return false;
-      if (identity(readState()) !== beforeIdentity) throw new Error("The selected workspace changed. Choose organisation sign-in again.");
+      if (identity(readState()) !== beforeIdentity) throw new Error("The selected server changed. Choose organization sign-in again.");
       if (companion) {
         // Removing the companion credential and remembering the destination
         // must be one durable write, before a restart can begin.

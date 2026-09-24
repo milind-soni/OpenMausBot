@@ -56,7 +56,7 @@ description is in [self-hosting](../self-hosting.md#loopback-trust-owner-or-serv
   `membership {authority, pairingCodes, peopleUrl}`. Settings → People turns
   read-only (who signed in, their spend, "Manage people in Admin" linking to
   `<OMB_ADMIN_URL>/people?workspace=<slug>`); Remote access offers no pairing
-  code and says people sign in through the organisation's portal.
+  code and says people sign in through the organization's portal.
 
 ## Driving it
 

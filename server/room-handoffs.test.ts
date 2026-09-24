@@ -513,3 +513,37 @@ describe("room handoff lifetime budget", () => {
     }, () => nowMs);
   });
 });
+
+
+describe("shared room request display", () => {
+  it("shares one identity across recipients and rejects late additions after real dispatch and restart", () => fixture(async (engine, hooks, file) => {
+    const source = addr("A");
+    const one = engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").node;
+    const two = engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "c" }, "work:c", "Review", false, false, "", "work").node;
+    expect(engine.sharedRequest(one)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
+    expect(engine.sharedRequest(two)).toEqual(engine.sharedRequest(one));
+    engine.tick();
+    expect(one.status).toBe("running");
+    expect(one.startedAt).toBeDefined();
+    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    await flush();
+    expect(one.status).toBe("completed");
+    expect(one.executions).toBe(0); // The root, not this child, owns the execution counter.
+    expect(engine.enqueue(source, "turn", undefined, addr("B"), "work:b", "Review", false, false, "", "work").duplicate).toBe(true);
+    expect(() => engine.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    const restarted = new RoomHandoffs(file, hooks);
+    expect(restarted.sharedRequest(restarted.nodes.get(two.id)!)).toEqual(engine.sharedRequest(two));
+    expect(() => restarted.enqueue(source, "turn", undefined, { ...addr("B"), botId: "late" }, "work:late", "Review", false, false, "", "work")).toThrow("already started");
+    expect(restarted.sharedRequest(restarted.nodes.get(one.id)!)).toEqual({ id: one.id, botIds: [one.botId, two.botId] });
+  }));
+  it("does not merge different requests, conversations, senders or direct assignments", () => fixture(engine => {
+    const a = engine.enqueue(addr("A"), "turn", undefined, addr("B"), "one:b", "Review", false, false, "", "one").node;
+    const b = engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), botId: "c" }, "two:c", "Review", false, false, "", "two").node;
+    const c = engine.enqueue(addr("A"), "other-turn", undefined, addr("B"), "one:b", "Review", false, false, "", "one").node;
+    const d = engine.enqueue(addr("A"), "turn", undefined, addr("D"), "one:d", "Review", false, false, "", "one").node;
+    const direct = engine.enqueue(addr("A"), "turn", undefined, { botId: "direct", threadId: "direct" }, "one:direct", "Review").node;
+    for (const node of [a,b,c,d,direct]) expect(engine.sharedRequest(node)).toEqual({ id: node.id, botIds: [node.botId] });
+    expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), botId: "different" }, "one:different", "Changed", false, false, "", "one")).toThrow("different room work");
+    expect(() => engine.enqueue(addr("A"), "turn", undefined, { ...addr("B"), threadId: "new", botId: "different" }, "one:different", "Review", false, false, "", "one")).toThrow("different room work");
+  }));
+});

@@ -15,6 +15,7 @@ import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
 import { toolLabel } from "./ApprovalCard";
 import { reviewedSkillSha256 } from "../../shared/skill-request";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
 interface ApprovalLabels {
   [tool: string]: LocaleKey;
@@ -27,6 +28,7 @@ export interface Pending {
   /** the narrow grant "always allow" writes, computed server-side */
   allowKey?: string;
   allowSession?: boolean;
+  commandAllowlist?: { command: string; cwd: string; providerInstanceId: string };
   detail: string;
   held?: string;
   heldCode?: string;
@@ -56,6 +58,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
       tool: m.card!.tool!,
       allowKey: m.card!.allowKey,
       allowSession: m.card!.allowSession,
+      commandAllowlist: m.card!.commandAllowlist,
       detail: m.card!.subtitle,
       held: m.card!.held,
       heldCode: m.card!.heldCode,
@@ -192,7 +195,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
         }
         className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink"
       >
-        {pending.detail}
+        {pending.commandAllowlist?.command ?? pending.detail}
       </pre>
       {pending.message.card?.skillRequest && (
         <SkillRequestPreview request={pending.message.card.skillRequest} />
@@ -215,15 +218,17 @@ export function PendingApprovalActions({
   onCancelTurn: () => void;
 }) {
   const { dispatch } = useStore();
+  const ownerOrAdmin = useOwnerOrAdmin();
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
   const isTeamSetup = Boolean(pending.message.card?.teamSetupRequest);
   const durableRequest = isRoutineRequest || isSkillRequest || isProfileRequest || isTeamSetup;
+  const canRememberCommand = ownerOrAdmin === true && !durableRequest && !pending.allowKey && Boolean(pending.commandAllowlist);
   const reviewedSha256 = pending.message.card?.skillRequest
     ? reviewedSkillSha256(pending.message.card.skillRequest)
     : undefined;
-  const decide = (behavior: "allow" | "deny", always = false) =>
+  const decide = (behavior: "allow" | "deny", always = false, rememberCommand = false) =>
     dispatch({
       type: "decideRequest",
       threadId,
@@ -235,6 +240,7 @@ export function PendingApprovalActions({
       // provider's card hands the allow to the provider for its session
       alwaysAllow: always && bot && pending.allowKey ? { botId: bot.id, key: pending.allowKey } : undefined,
       always: always && !pending.allowKey && pending.allowSession ? true : undefined,
+      rememberCommand: rememberCommand || undefined,
     });
 
   const base = "rounded-full px-3.5 py-1.5 text-[13.5px] transition-colors";
@@ -261,13 +267,22 @@ export function PendingApprovalActions({
           {t("approval.action.alwaysAllow")}
         </button>
       )}
-      {!durableRequest && !pending.allowKey && pending.allowSession && (
+      {!durableRequest && !pending.allowKey && !canRememberCommand && pending.allowSession && (
         <button
           onClick={() => decide("allow", true)}
           title={t("approval.action.alwaysAllowSessionHint")}
           className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
         >
           {t("approval.action.alwaysAllowSession")}
+        </button>
+      )}
+      {canRememberCommand && pending.commandAllowlist && (
+        <button
+          onClick={() => decide("allow", false, true)}
+          title={t("approval.action.alwaysAllowCommandHint", { cwd: pending.commandAllowlist.cwd })}
+          className={cn(base, "border border-hairline/50 text-ink hover:bg-control")}
+        >
+          {t("approval.action.alwaysAllowCommand")}
         </button>
       )}
       <button

@@ -6,7 +6,8 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -232,6 +233,9 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_LOAD_ERROR;
     delete process.env.FAKE_ACP_ALLOW_ALWAYS;
     delete process.env.FAKE_ACP_PERMISSION_ANSWER;
+    delete process.env.FAKE_ACP_PERMISSION_TOOL_CALL;
+    delete process.env.FAKE_ACP_PERMISSION_OPTIONS;
+    delete process.env.FAKE_ACP_QUESTION_OPTIONS;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CURSOR_API_KEY;
@@ -336,6 +340,41 @@ describe("ACP turns (fake CLI)", () => {
     const nativeLog = readFileSync(join(NATIVE_DIR, "t-acp-native-image.ndjson"), "utf8");
     expect(nativeLog).not.toContain(base64);
     expect(nativeLog).toContain(`[image data: ${base64.length} base64 chars]`);
+  });
+
+  it("delivers the full prompt once per native session and rides volatile changes as notes", async () => {
+    const dump = join(scratch, "acp-prompt-split.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create();
+    // The receipt store is keyed by thread and session id, so a unique thread
+    // keeps the run hermetic against earlier executions of this suite.
+    const threadId = "t-acp-prompt-split-" + randomUUID();
+    const promptOf = () =>
+      (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    const send = async (text: string, volatile: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\n" + volatile,
+        systemStable: "Standing rules.",
+        systemVolatile: volatile,
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return promptOf();
+    };
+
+    // The establishing turn carries the full prompt, exactly as before.
+    expect(await send("first", "Memory: likes quiet hours."))
+      .toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    // The pooled session already carries it: later turns go through bare.
+    expect(await send("second", "Memory: likes quiet hours.")).toBe("second");
+    // A changed volatile half rides the next prompt as a labelled note.
+    expect(await send("third", "Memory: moved to Toronto."))
+      .toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird");
+    // A cleared volatile half is announced once, not silently dropped.
+    expect(await send("fourth", "")).toContain("have been cleared");
+    expect(await send("fifth", "")).toBe("fifth");
   });
 
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
@@ -690,6 +729,7 @@ describe("ACP turns (fake CLI)", () => {
     await instance.adapter.sendTurn({
       threadId: "t-perm",
       text: "go",
+      cwd: scratch,
       integrations: {
         localComputer: {
           command: "/cua-driver",
@@ -705,9 +745,10 @@ describe("ACP turns (fake CLI)", () => {
       requestType: "permission",
       tool: "shell",
       approvalScope: "local-computer",
+      command: { command: "echo hi", cwd: realpathSync(scratch) },
     });
 
-    await instance.adapter.respondToRequest("t-perm", (opened as any).requestId, { behavior: "allow" });
+    expect(await instance.adapter.respondToRequest("t-perm", (opened as any).requestId, { behavior: "allow" })).toBe("allowed-once");
     const resolved = await recorder.until((e) => e.type === "request.resolved");
     expect(resolved).toMatchObject({
       behavior: "allow",
@@ -716,6 +757,117 @@ describe("ACP turns (fake CLI)", () => {
     });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it.each([
+    { name: "full raw command", toolCall: { kind: "execute", rawInput: { command: `printf '  ${"complete input ".repeat(30)}'\n  pwd  ` } }, descriptor: true },
+    { name: "title without raw input", toolCall: { kind: "execute", title: "echo display only" }, descriptor: false },
+    { name: "argv raw input", toolCall: { kind: "execute", rawInput: { command: ["echo", "do not join argv"] } }, descriptor: false },
+    { name: "MCP tool", toolCall: { kind: "other", title: "mcp__example__run", rawInput: { command: "echo not a shell approval" } }, descriptor: false },
+    { name: "MCP execute tool", toolCall: { kind: "execute", title: "mcp__example__run", rawInput: { command: "echo not a native shell approval" } }, descriptor: false },
+    { name: "question", toolCall: { toolCallId: "interaction_command", kind: "execute", rawInput: { command: "echo not a shell approval" } }, descriptor: false },
+    { name: "relative cwd", toolCall: { kind: "execute", rawInput: { command: "pwd", cwd: "unknown-relative-directory" } }, descriptor: false },
+  ])("keeps command grants scoped to complete shell input: $name", async ({ toolCall, descriptor }) => {
+    process.env.FAKE_ACP_PERMISSION_TOOL_CALL = JSON.stringify(toolCall);
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-acp-command-descriptor", text: "go", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toHaveProperty("command", descriptor ? { command: toolCall.rawInput?.command, cwd: realpathSync(scratch) } : undefined);
+    await instance.adapter.respondToRequest("t-acp-command-descriptor", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  it("uses an explicit ACP shell directory and rejects conflicting directory metadata", async () => {
+    const command = "pwd";
+    const directory = join(scratch, "execution-directory");
+    process.env.FAKE_ACP_PERMISSION_TOOL_CALL = JSON.stringify({ kind: "execute", rawInput: { command, workdir: directory } });
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-acp-explicit-cwd", text: "go", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toHaveProperty("command", { command, cwd: directory });
+    await instance.adapter.respondToRequest("t-acp-explicit-cwd", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+
+    // A separate process observes a new fake provider payload.
+    await instance.dispose();
+    recorder.stop();
+    process.env.FAKE_ACP_PERMISSION_TOOL_CALL = JSON.stringify({ kind: "execute", rawInput: { command, cwd: scratch, workdir: directory } });
+    await create(GrokAgentDriver, "permission");
+    await instance.adapter.sendTurn({ threadId: "t-acp-conflicting-cwd", text: "go", cwd: scratch });
+    const conflict = await recorder.until((event) => event.type === "request.opened");
+    expect(conflict).toHaveProperty("command", undefined);
+    await instance.adapter.respondToRequest("t-acp-conflicting-cwd", conflict.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  it("emits a structured question beside the flat choices", async () => {
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-shape", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Which color?",
+      choices: ["Blue", "Green"],
+      questions: [{ question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] }],
+    });
+  });
+
+  it("answers a structured card reply by recovering the picked option", async () => {
+    const answer = join(scratch, "question-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-answer", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // Exactly what the tabbed QuestionCard submits: one Q:/A: block for the
+    // single question, not a bare option label.
+    const outcome = await instance.adapter.respondToRequest("t-question-answer", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Which color?\nA: Green",
+    });
+    expect(outcome).toBe("answered");
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("green-id");
+  });
+
+  it("cancels a question whose answer matches no offered option", async () => {
+    const answer = join(scratch, "question-cancel.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-cancel", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-question-cancel", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "Purple",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      message: expect.stringContaining("matching answer"),
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("cancelled");
+  });
+
+  it.each([false, true])("maps capped labels back to their option id, refusing collisions (%s)", async collision => {
+    const label = "Green ".repeat(30);
+    const answer = join(scratch, "long-question-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    process.env.FAKE_ACP_QUESTION_OPTIONS = JSON.stringify([
+      { optionId: "green-id", kind: "allow_once", name: label },
+      { optionId: "other-id", kind: "allow_once", name: collision ? label + "other" : "Blue" },
+    ]);
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-long-question", text: "go" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    expect(opened).toMatchObject({ choices: expect.arrayContaining([label.trim().slice(0, 120).trim()]) });
+    await instance.adapter.respondToRequest("t-long-question", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: `The user answered your questions.\n\nQ: Which color?\nA: ${label.trim().slice(0, 120)}`,
+    });
+    await recorder.until(e => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe(collision ? "cancelled" : "green-id");
   });
 
   it("per-bot Ask surfaces permissions from a legacy full-auto instance", async () => {
@@ -756,6 +908,23 @@ describe("ACP turns (fake CLI)", () => {
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
     const argv = JSON.parse(readFileSync(dump, "utf8")).argv as string[];
     expect(argv[argv.indexOf("--permission-mode") + 1]).toBe("acceptEdits");
+  });
+
+  it.each([false, true])("returns rejected when an allow has no native permission option (always: %s)", async (always) => {
+    process.env.FAKE_ACP_PERMISSION_OPTIONS = JSON.stringify([{ optionId: "reject", kind: "reject_once" }]);
+    const answer = join(scratch, "reject-only-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "permission");
+    const threadId = "t-reject-only";
+    await instance.adapter.sendTurn({ threadId, text: "go", approvalMode: "ask" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(await instance.adapter.respondToRequest(threadId, "unknown-request", { behavior: "allow" })).toBe("unavailable");
+    expect(await instance.adapter.respondToRequest(threadId, opened.requestId!, { behavior: "allow", always })).toBe("rejected");
+    const resolved = await recorder.until((event) => event.type === "request.resolved" && event.requestId === opened.requestId);
+    expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("cancelled");
+    expect(await instance.adapter.respondToRequest(threadId, opened.requestId!, { behavior: "allow" })).toBe("unavailable");
   });
 
   it("hands 'Always allow this session' to the agent's own allow_always option", async () => {

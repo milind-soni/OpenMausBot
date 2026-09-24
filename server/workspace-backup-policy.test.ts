@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 describe("workspace backup data boundary", () => {
   it("exports ordinary settings only and retains destination connection sections unchanged", () => {
@@ -29,6 +29,7 @@ describe("workspace backup data boundary", () => {
     "providers/account/.credentials.json", "providers/antigravity/profile/antigravity-acp/acp_token.json",
     "workspace-credentials.json", "browser-engine-key", "caddy/data/certificates/private.key",
     "external-runtimes.json", "external-runtimes.json.123.tmp",
+    "command-allowlist.json", "command-allowlist.json.123.05a7b3e0-1234.tmp",
     "chrome-profile/Default/Cookies", ".agent-browser/auth/site.json",
     "vm-home/.browser-profiles/chrome/Cookies", "vm-homes/abc123/.browser-profiles/chromium/Local State",
     "config.json.123.tmp", "config.json.123.05a7b3e0-1234.tmp", "sessions.json.456.tmp",
@@ -40,6 +41,17 @@ describe("workspace backup data boundary", () => {
   it("never exports the per-turn hook token directory, and only that directory", () => {
     for (const path of ["hook-tokens", "hook-tokens/0123456789abcdef01234567.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(true);
     for (const path of ["hook-tokens.md", "workspaces/bot/hook-tokens/notes.md", "attachments/api.token"]) expect(ephemeralWorkspaceTokenPath(path)).toBe(false);
+  });
+
+  it("leaves out only the Organization library files Electron main downloads again", () => {
+    for (const path of ["org-library/catalog.json", "org-library/catalog.json.05a7b3e0-1234-4abc-8def-0123456789ab.tmp", "org-library/blobs",
+      `org-library/blobs/${"a".repeat(64)}.json`, `org-library/blobs/${"a".repeat(64)}.json.05a7b3e0-1234-4abc-8def-0123456789ab.tmp`]) {
+      expect(redownloadedOrgLibraryPath(path)).toBe(true);
+    }
+    for (const path of ["org-library", "org-library/state.json", "org-library/presets.json", "org-library/catalog.json.bak", "org-library/blobs.md",
+      "workspaces/bot/org-library/catalog.json", "attachments/org-library/blobs/x.json", "catalog.json", "blobs/x.json"]) {
+      expect(redownloadedOrgLibraryPath(path)).toBe(false);
+    }
   });
 
   it.each(["attachments/key.txt", "workspaces/bot/notes.md", "workspaces/bot/external-runtimes.json", "vm-home/project/config.json", "config.json", "webhooks.json"])("does not redact arbitrary user file %s", (path) => {

@@ -162,6 +162,19 @@ conversations, permissions, memory, or computer access. Browse the
 [open-source playbook repository](https://github.com/milind-soni/openmausbot-teams) or read its
 [portable format](https://github.com/milind-soni/openmausbot-teams/blob/main/FORMAT.md).
 
+### 🤝 Share a whole team
+
+Right-click a team and choose **Share team…** (or use **Templates → Share**) to save the whole team as one
+file: its bots with their instructions, pictures and skills, group chats, routines, shared instructions,
+Chief of Staff, connection slots and each bot's starter notes (untick them to leave them out). The dialog
+shows exactly what the file holds before you save it. Chat history, keys and passwords, model choices and
+computers never go in, and anything that looks like a secret is removed from the text. Whoever imports it
+gets new bots on Ask, skills switched off and routines paused. See [docs/team-sharing.md](docs/team-sharing.md).
+Desktops connected to an organization also get **Templates → From {Organization}**: the packages its Admin shares,
+added with one click, skills switched on. See [docs/org-library.md](docs/org-library.md).
+Your New bot defaults can travel too, as a **preset bot** that appears in New bot (in a team file, or on
+their own with **Share as preset…**). See [docs/presets.md](docs/presets.md).
+
 ### 🎧 Bots that talk back
 
 Press the speaker on any reply, or switch a bot to read its answers out as they land — so you can listen
@@ -206,7 +219,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
-| **Box** ([box.ascii.dev](https://box.ascii.dev)) | Each bot's cloud computer |
+| **Box** ([boat.dev](https://boat.dev)) | Each bot's cloud computer |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
@@ -236,7 +249,7 @@ flowchart LR
     BUS -- "one SSE stream" --> UI
     REG --> CL & CX & GR
     CL & CX & GR -- "permission requests" --> BROKER
-    server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
+    server -- "Box API" --> BOX[("Cloud computer<br/>boat.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
@@ -326,7 +339,7 @@ in the sidebar footer) when you want to enable its integration:
 | Credential | What it enables | Where to get it |
 |---|---|---|
 | Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [OpenMausBot Composio setup](docs/composio.md) |
-| Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
+| Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.boat.dev/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
 | Fish Audio key | Read replies aloud with Fish Audio voices, and call your bots | [Fish Audio API keys](https://fish.audio/app/api-keys/) |
 
@@ -394,7 +407,7 @@ openmausbot
 Or use `npx openmausbot` without a global install. First launch guides you with
 arrow-key choices: choose AI access, sign in or paste a hidden API key, choose
 a model, and optionally connect a phone. Next time, the same command reuses your
-saved setup and opens the local workspace. Keep the terminal open; Ctrl-C stops
+saved setup and opens OpenMausBot on this computer. Keep the terminal open; Ctrl-C stops
 the server, not your saved work. Use `--no-open` to skip opening the browser.
 
 Phone access is optional and defaults to skipping. Choose an explicitly

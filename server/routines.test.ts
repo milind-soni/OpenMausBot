@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
+import { ensureDirs } from "./config.ts";
+import { BoxAgentDriver } from "./drivers/boxagent.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -2885,5 +2887,94 @@ describe("routine continuity", () => {
       schedule: { type: "once", at: new Date(2026, 7, 17, 9, 0, 0).getTime() },
       continuity: true,
     })).toThrow(/continuity/i);
+  });
+});
+
+describe("routine runs × turn-held BoxAgent asks", () => {
+  const start = Date.parse("2026-09-13T08:00:00Z");
+
+  /** The slice of the Box HTTP fake this integration needs (the full one
+   * lives in server/drivers/boxagent.test.ts). */
+  function installFakeBox(script: Array<{ events: unknown[]; status?: { promptRun: { status: string; result?: string } } }>, prompts: string[]) {
+    let i = 0;
+    const previous = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      if (method === "POST" && /\/boxes\/[^/]+\/prompt$/.test(url)) {
+        prompts.push(String((JSON.parse(String(init?.body ?? "{}")) as { prompt?: string }).prompt ?? ""));
+        return new Response(JSON.stringify({ promptRun: { id: "p1" } }), { headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/events")) {
+        const step = script[Math.min(i, script.length - 1)]!;
+        i += 1;
+        return new Response(JSON.stringify({ events: step.events }), { headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/prompts/")) {
+        const step = script[Math.min(Math.max(i - 1, 0), script.length - 1)]!;
+        return new Response(JSON.stringify(step.status ?? { promptRun: { status: "running" } }), { headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: "unexpected" }), { status: 404 });
+    }) as typeof fetch;
+    return () => {
+      globalThis.fetch = previous;
+    };
+  }
+
+  // The exact case both plan reviews flagged: a BoxAgent ask arrives at the
+  // run's settle. Holding the OMB turn open is what keeps the routine run in
+  // waiting until the answer instead of completing out from under the card.
+  it("holds the run in waiting until the person answers, then completes it", async () => {
+    const h = harness(start);
+    const prompts: string[] = [];
+    const askText = "```omb-ask\n" + JSON.stringify({
+      questions: [{ question: "Ship the release?", options: [{ label: "Ship now" }, { label: "Wait" }] }],
+    }) + "\n```";
+    const restoreFetch = installFakeBox([
+      { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "running" } } },
+      { events: [{ id: "e1", type: "response", text: askText }], status: { promptRun: { status: "finished", result: askText } } },
+      { events: [{ id: "c1", type: "response", text: "Shipped." }], status: { promptRun: { status: "finished", result: "Shipped." } } },
+    ], prompts);
+    ensureDirs();
+    const instance = await BoxAgentDriver.create({
+      instanceId: "box-routines",
+      displayName: "Box Routines",
+      environment: { BOX_TOKEN: "box-test-token" },
+      enabled: true,
+      config: { pollMs: 0 },
+    });
+    let requestId = "";
+    try {
+      instance.adapter.onEvent((event) => {
+        if (event.type === "request.opened") requestId = event.requestId ?? "";
+        h.manager.handleRuntimeEvent(event);
+      });
+      h.options.startTurn = async (_botId, threadId) => {
+        await instance.adapter.sendTurn({ threadId, text: "sweep", integrations: { computer: { boxId: "box-1", token: "box-test-token" } } });
+      };
+      const routine = h.manager.create({
+        name: "Box sweep",
+        prompt: "Sweep the box",
+        botId: "maus-1",
+        schedule: { type: "interval", everyMinutes: 5, anchorAt: start },
+      });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const run = () => h.manager.listRuns().find((r) => r.threadId === "thread-1");
+      await expect.poll(() => run()?.status).toBe("waiting");
+      expect(run()?.attention).toBe("Ship the release?");
+      expect(requestId).toBeTruthy();
+      expect(
+        await instance.adapter.respondToRequest("thread-1", requestId, {
+          behavior: "answer",
+          message: "The user answered your questions.\n\nQ: Ship the release?\nA: ship it",
+        }),
+      ).toBe("answered");
+      await expect.poll(() => run()?.status).toBe("completed");
+      expect(prompts[1]).toContain("A: ship it");
+    } finally {
+      await instance.dispose();
+      restoreFetch();
+    }
   });
 });

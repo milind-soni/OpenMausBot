@@ -108,7 +108,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   };
   const request = async (env, route, body, signal, secret) => {
     const origin = new URL(env.origin);
-    if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) throw new Error("Computer sharing requires an HTTPS workspace address");
+    if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) throw new Error("Computer sharing requires an HTTPS server address");
     const response = await fetchImpl(`${env.origin}${route}`, {
       method: body === undefined ? "GET" : "POST", credentials: "include", redirect: "error", cache: "no-store",
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(35_000)]) : AbortSignal.timeout(10_000),
@@ -117,18 +117,18 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     });
     const chunks = []; let bytes = 0;
     for await (const chunk of response.body ?? []) {
-      bytes += chunk.length; if (bytes > 4_000_000) throw new Error("Workspace response exceeded limit");
+      bytes += chunk.length; if (bytes > 4_000_000) throw new Error("Server response exceeded limit");
       chunks.push(Buffer.from(chunk));
     }
     let json; try { json = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("This server does not support computer sharing. Update its OpenMausBot installation."); }
-    if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Workspace request failed (${response.status}). Update the server if needed.`);
+    if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? "Pair this desktop again before sharing computer access." : `Server request failed (${response.status}). Update the server if needed.`);
     return json;
   };
   const identity = async env => {
     await requireEnabled();
     const [auth, descriptor] = await Promise.all([request(env, "/api/auth/session"), request(env, "/.well-known/openmausbot/environment")]);
     await requireEnabled();
-    if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw new Error("Complete workspace pairing or sign-in first");
+    if (auth.kind !== "session" || !uuid(auth.id) || !uuid(descriptor.environmentId)) throw new Error("Complete server pairing or sign-in first");
     if (descriptor.capabilities?.sharedComputers !== true) throw new Error("Update this server to enable computer sharing");
     return { sessionId: auth.id, environmentId: descriptor.environmentId };
   };
@@ -148,7 +148,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     void (async () => {
       while (!signal.aborted) {
         try {
-          if (!matches(grant, await identity(env))) throw new Error("Workspace sign-in changed. Review computer access again in Settings.");
+          if (!matches(grant, await identity(env))) throw new Error("Server sign-in changed. Review computer access again in Settings.");
           await validateSharedFolders(grant.folders);
           const effectiveGrant = { ...grant, protectedPaths: protectedRoots };
           await requireEnabled();
@@ -164,7 +164,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             await requireEnabled();
             if (!job) continue;
             if (!uuid(job.id) || typeof job.operation !== "object" || job.operation?.computer_id !== grant.id) throw new Error("Invalid computer request");
-            if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another workspace")) }); continue; }
+            if (executing) { await call("result", { jobId: job.id, result: sharedComputerError(new Error("This computer is busy with another server")) }); continue; }
             executing = true;
             const jobAbort = new AbortController();
             const jobSignal = AbortSignal.any([signal, jobAbort.signal]);
@@ -229,7 +229,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     decline(env, info) { disconnect(env, records[env.id]); store({ ...records, [env.id]: { ...info, enabled: false, folders: [], terminal: false, computer: false } }); },
     async save(env, input, info) {
       const fresh = await identity(env);
-      if (!matches(info, fresh)) throw new Error("Workspace sign-in changed. Review computer access again.");
+      if (!matches(info, fresh)) throw new Error("Server sign-in changed. Review computer access again.");
       const folders = await validateSharedFolders(input.folders);
       await requireEnabled();
       const grant = { ...fresh, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders, terminal: input.terminal === true, computer: input.computer === true };

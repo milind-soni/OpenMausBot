@@ -239,7 +239,7 @@ describe("Box create idempotency", () => {
       ({ provisionBox } = await import("./box.ts"));
       await expect(
         provisionBox({ box: { token: "box_test" } } as any, "expired-5xx-bot", "Expired Recovery"),
-      ).rejects.toThrow(/older than ascii\.dev's 24-hour retry window/i);
+      ).rejects.toThrow(/older than boat\.dev's 24-hour retry window/i);
 
       expect(createKeys).toHaveLength(2);
     } finally {

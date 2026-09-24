@@ -19,9 +19,10 @@ pnpm exec vitest run server/index.test.ts -t "creates team computers|shares one 
 
 The server test uses `launchVerificationServer`, sends a sample conversation,
 creates an empty team, moves two existing bots, saves shared instructions,
-empties and renames the team, imports a legacy template with a colliding name,
-and restarts the exact disposable server. It checks retained instructions and
-conversation messages, archived membership, rejected nonempty deletion and
+renames the populated team, adds and removes members, then empties and renames
+it again. It imports a legacy template with a colliding name and restarts the
+exact disposable server. It checks retained instructions and conversation
+messages, archived bots moving to General when their team is deleted, and
 explicit empty-team deletion. API requests and `control-omb` wait/messages
 results are kept beside the fixture log in `*.team-lifecycle.json`.
 
@@ -31,11 +32,16 @@ conversations readable and persists their task migrations, logs a diagnostic,
 and leaves the malformed file byte-for-byte unchanged. Later team and shared
 instruction writes still fail closed until that file is repaired.
 
-The renderer test uses `control-omb ui launch`, opens **Create team**, leaves it
-empty, moves two bots through Team map, edits shared instructions and reloads.
-A second fixture client moves the bots out; live updates retain the empty team
-and expose rename/delete. Rename preserves instructions; delete confirms that
-the team's instructions will be removed. It captures
+The renderer test uses `control-omb ui launch`, opens **Create team**, and checks
+that renaming preserves the sidebar's collapsed state and ordering. It moves
+two bots through Team map, edits membership, and creates a bot directly in the
+team. Dismissing that pending creation must retain unsaved membership edits and
+select the created bot when its response arrives. It edits shared instructions
+and reloads. A second fixture client moves the bots out; live updates retain the
+empty team. Rename preserves instructions; delete confirms that the team's
+instructions will be removed. A delayed, failed deletion cannot be submitted
+twice and remains retryable; confirmation focus stays contained and returns to
+its trigger when dismissed. It captures
 `.omb-scratch/verify-evidence/team-lifecycle.png` before deletion.
 New lifecycle labels use the existing string catalog; untranslated packs fall
 back to the English labels without changing or regenerating other translations.
@@ -131,9 +137,16 @@ The owner API keeps the existing `/api/sidebar-sections` name for older clients:
 - `POST { name, botIds?: string[] }` creates a named team or moves the supplied
   bots into it. Omitted/empty `botIds` creates an empty team. An empty name with
   selected bots moves them into General. Chief conflicts change no memberships.
-- `PATCH ?section=NAME { name }` renames an empty team and its instructions.
-- `DELETE ?section=NAME` removes an empty team and its instructions. Bots,
-  archived bots and group chats must be moved out first.
+- `PUT ?section=NAME { addBotIds: string[], removeBotIds: string[] }` updates
+  membership in an existing team. Removed bots move to General. Invalid or
+  stale membership changes are rejected without partially applying the move.
+- `PATCH ?section=NAME { name }` renames a team, including its bots, archived
+  bots, group chats, shared instructions, management grants and assigned team
+  computer. It cannot merge into an existing team or rename during active work.
+- `DELETE ?section=NAME` removes the team and its shared instructions while
+  retaining bots, archived bots, group chats and their conversations in General.
+  Finish active work and unassign any team computer first. Chief conflicts
+  reject the deletion rather than changing leadership.
 
 The registry shares the atomic section-context file so rename/delete cannot
 split a team's name from its instructions. Team labels are remembered before a

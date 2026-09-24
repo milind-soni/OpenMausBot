@@ -312,7 +312,7 @@ function LocalVmPane({
       if (bridge) await bridge.close(contextId).catch(() => {});
       if (!alive || !botId) return;
       if (!bridge) {
-        setError("The two-desktop workspace requires the OpenMausBot desktop app.");
+        setError("The two-desktop view requires the OpenMausBot desktop app.");
         return;
       }
       try {
@@ -596,7 +596,7 @@ export function LocalVmWorkspace({
       },
       async setInteractive(contextId) {
         const bridge = window.ogb?.desktopWorkspace;
-        if (!bridge) throw new Error("The desktop workspace bridge is unavailable");
+        if (!bridge) throw new Error("The two-desktop view bridge is unavailable");
         return bridge.setInteractive(contextId);
       },
     }),
@@ -684,7 +684,7 @@ export function LocalVmWorkspace({
       setControlledBotId(null);
       return true;
     } catch {
-      setControlError("OpenMausBot could not hand control back. The workspace stayed open.");
+      setControlError("OpenMausBot could not hand control back. The view stayed open.");
       return false;
     } finally {
       controlBusyRef.current = false;
@@ -772,7 +772,7 @@ export function LocalVmWorkspace({
           <Monitor size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[14px] font-semibold text-ink">Local VM workspace</h1>
+          <h1 className="truncate text-[14px] font-semibold text-ink">Local VM view</h1>
           <p className="truncate text-[11.5px] text-ink-secondary">
             Two live desktops · one active controller · watch-only by default
           </p>
@@ -782,7 +782,7 @@ export function LocalVmWorkspace({
           onClick={() => void closeWorkspace()}
           disabled={controlPending}
           className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
-          aria-label="Close Local VM workspace"
+          aria-label="Close Local VM view"
         >
           <X size={18} />
         </button>

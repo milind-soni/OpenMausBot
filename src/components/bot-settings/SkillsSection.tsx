@@ -9,10 +9,12 @@ import { BookOpen, Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
+import { useBotEditor } from "./BotEditorContext";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
+import { OrgSkillsCard } from "./OrgSkillsCard";
 
 interface ManagedSkill {
   name: string;
@@ -29,6 +31,7 @@ interface StagedSkillSummary {
 }
 
 export function SkillsSection({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
   const { state } = useStore();
   const featureEnabled = skillAuthoringEnabled(state.config);
   const [skills, setSkills] = useState<ManagedSkill[]>([]);
@@ -281,6 +284,8 @@ export function SkillsSection({ bot }: { bot: Bot }) {
         )}
         {error && <div role="alert" className="mt-2 text-[12px] text-danger">{error}</div>}
       </div>
+
+      <OrgSkillsCard bot={bot} onAdded={() => void refresh()} />
 
       {reviewing && (
         <div

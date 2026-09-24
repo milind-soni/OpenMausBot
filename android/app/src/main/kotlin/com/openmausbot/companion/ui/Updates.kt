@@ -127,6 +127,7 @@ private fun CompanionState.lastLine(threadId: String): String {
         Message.Kind.ACTIVITY -> last.tool?.name.orEmpty()
         Message.Kind.SCREEN -> "Screenshot"
         Message.Kind.DIGEST -> ""
+        Message.Kind.COMPACTION -> last.compaction?.chipText ?: last.text.orEmpty()
     }
 }
 

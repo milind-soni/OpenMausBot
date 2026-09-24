@@ -12,7 +12,8 @@
 // every invocation appended to a log the assertions read. The agent is the
 // fake ACP CLI in echo-gated mode (see steer-queue.test.ts), whose echo
 // reply carries the FULL prompt and whose gate file gives a deterministic
-// busy window — no sleeps anywhere.
+// busy window. The slow-preview regression additionally crosses the old
+// five-second lock deadline before releasing its explicit gate.
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -314,6 +315,45 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
     }
   }, 30_000);
 
+  it.each(["cloud", null] as const)("starts a %s turn after a slow preview without reporting preparation failure", async computer => {
+    expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, {
+      computer, cloudBackend: "vps", modelSelection: { instanceId: "vps", model: "fake-model" },
+    });
+    const fixtureDir = dirname(dockerLog);
+    const hold = join(fixtureDir, "hold-capture");
+    const started = join(fixtureDir, "capture-started");
+    writeFileSync(gateFile, "open");
+    rmSync(`${acpDump}.mcp.json`, { force: true });
+    rmSync(started, { force: true });
+    writeFileSync(hold, "hold");
+    const preview = api("POST", `/api/bots/${bot.id}/computer/screenshot`, {});
+    try {
+      await until(async () => existsSync(started), "the slow preview");
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "Check the VPS after its screen refresh" })).status).toBe(202);
+      await until(async () => (await botById(bot.id))?.busy === true, "turn setup waiting on the preview");
+      // Deliberately cross the old 5s acquisition deadline, not an arbitrary
+      // readiness sleep: a normal screen refresh must not terminate the turn.
+      await new Promise(resolve => setTimeout(resolve, 6_000));
+      const waiting = await botById(bot.id);
+      expect(waiting.busy, JSON.stringify(waiting.messages)).toBe(true);
+      expect(JSON.stringify(waiting.messages)).not.toContain("the VPS is being prepared");
+      rmSync(hold, { force: true });
+      expect((await preview).status).toBe(200);
+      await until(async () => {
+        const saved = await botById(bot.id);
+        return !saved.busy && saved.messages.some((message: any) => message.text?.startsWith("echo: "));
+      }, "the recovered VPS turn");
+      const mounted = JSON.parse(readFileSync(`${acpDump}.mcp.json`, "utf8"));
+      expect(mounted.find((tool: any) => tool.name === "computer")?.args).toContain(CONTAINER_ID);
+    } finally {
+      rmSync(hold, { force: true });
+      await preview;
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+    }
+  }, 30_000);
+
   it.each(["stopped", "missing", "stopped-during-turn"])(
     "lets Auto discover a %s VPS and start or create it through its chat tool",
     async state => {
@@ -597,12 +637,14 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
           "Waiting for its turn on this computer — TCPR operator is running Queue check. Starts automatically when that finishes.",
         ), "the wait chip naming the holder");
 
-        // both turns finish; the wait settles as free-and-continuing or as
-        // stopped, depending on which turn ended first — never as an error
+        // both turns finish; the wait resolves as free-and-continuing or as
+        // stopped (with the duration it waited), depending on which turn
+        // ended first — never as an error, and never by erasing the wait
         writeFileSync(gateFile, "open");
         await until(async () => (await botById(bot.id))?.busy === false, "both turns settling");
         const settled = await activities(refill.threadId);
-        expect(settled.some((name) => name === "Computer free — continuing" || name === "Stopped waiting for the computer")).toBe(true);
+        expect(settled.some((name) =>
+          name.startsWith("Computer free — continuing after ") || name.startsWith("Stopped waiting for the computer after "))).toBe(true);
         expect(settled.join("|")).not.toMatch(/still busy|error/i);
         // the last thread out clears the claim: the alias can move again
         expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);

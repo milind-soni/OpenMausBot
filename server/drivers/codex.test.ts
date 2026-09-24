@@ -5,14 +5,14 @@
 //
 // The fake is a shebang script — the same constraint codex.cmd itself
 // hits on Windows. resolveCliSpawn covers both, so these run everywhere.
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { NATIVE_DIR } from "../config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
@@ -116,6 +116,7 @@ describe("CodexDriver turns (fake app-server)", () => {
 
   afterEach(async () => {
     delete process.env.FAKE_CODEX_MODE;
+    delete process.env.FAKE_CODEX_APPROVAL_REQUEST;
     delete process.env.FAKE_CODEX_DUMP;
     delete process.env.FAKE_CODEX_ASK_HOLD;
     delete process.env.FAKE_CODEX_TRANSIENTS;
@@ -133,6 +134,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_INSTRUCTIONS;
     delete process.env.FAKE_CODEX_RESUME_ERROR;
     delete process.env.FAKE_CODEX_START_ERROR;
+    delete process.env.FAKE_CODEX_RESOLVED_SANDBOX;
     delete process.env.FAKE_CODEX_STEER_ERROR;
     delete process.env.FAKE_CODEX_STEER_ERROR_FILE;
     delete process.env.FAKE_CODEX_STEER_HANG;
@@ -246,6 +248,53 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai", developerInstructions: "You are Testy." });
   });
 
+  it("keeps the developer slot stable and delivers volatile context in-turn", async () => {
+    await create({ mode: "resume" });
+    // each turn spawns a fresh app-server whose dump overwrites the file, so
+    // every turn writes its own and the assertions stay per-turn
+    const send = async (dumpName: string, text: string, volatile: string, cursor?: string, mentionTurn?: boolean) => {
+      process.env.FAKE_CODEX_DUMP = join(scratch, dumpName);
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "t-prompt-split",
+        text,
+        system: "Stable rules.",
+        systemStable: "Stable rules.",
+        systemVolatile: volatile,
+        ...(cursor ? { resumeCursor: cursor } : {}),
+        ...(mentionTurn ? { mentionTurn: true } : {}),
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return JSON.parse(readFileSync(join(scratch, dumpName), "utf8")).calls as Array<{
+        method: string;
+        params: Record<string, unknown>;
+      }>;
+    };
+    const first = await send("split-1.json", "first", "Memory: likes quiet hours.");
+    // same volatile half on the resumed thread: the turn text goes through bare
+    const second = await send("split-2.json", "second", "Memory: likes quiet hours.", "codex-thread-1");
+    // a changed volatile half rides the next user input as a labelled block
+    const third = await send("split-3.json", "third", "Memory: moved to Toronto.", "codex-thread-1");
+    const threadStarts = first.filter((c) => c.method === "thread/start");
+    expect(threadStarts).toHaveLength(1);
+    expect(threadStarts[0].params.developerInstructions).toBe("Stable rules.");
+    for (const calls of [first, second, third]) {
+      expect(calls.some((c) => c.method === "thread/inject_items")).toBe(false);
+    }
+    const turnText = (calls: typeof first) => {
+      const input = calls.find((c) => c.method === "turn/start")?.params?.input as Array<{ text?: string }> | undefined;
+      return input?.[0]?.text;
+    };
+    expect(turnText(first)).toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nfirst");
+    expect(turnText(second)).toBe("second");
+    expect(turnText(third)).toContain("Memory: moved to Toronto.");
+    expect(turnText(third)).toContain("third");
+    // a tagged turn redelivers the note even when nothing else changed:
+    // the mention describes this turn, not just the last volatile diff
+    const fourth = await send("split-4.json", "fourth", "Memory: moved to Toronto.", "codex-thread-1", true);
+    expect(turnText(fourth)).toContain("Memory: moved to Toronto.");
+    expect(turnText(fourth)).toContain("fourth");
+  });
+
   it("ignores requests received after turn completion", async () => {
     await create({ mode: "late-request" });
     await instance.adapter.sendTurn({ threadId: "t-late-request", text: "finish" });
@@ -323,6 +372,40 @@ describe("CodexDriver turns (fake app-server)", () => {
       });
     },
   );
+
+  it.each([false, true])("preserves the complete resolved sandbox (resumed=%s)", async (resumed) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "resolved-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const sandbox = {
+      type: "workspaceWrite", networkAccess: true,
+      writableRoots: [join(scratch, "extra-root")],
+      excludeTmpdirEnvVar: true, excludeSlashTmp: true,
+    };
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-resolved", text: "continue", approvalMode: "ask",
+      ...(resumed ? { resumeCursor: "codex-thread-1" } : {}) });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: true });
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.find((call: { method: string }) => call.method === "turn/start").params.sandboxPolicy).toEqual(sandbox);
+  });
+
+  it.each([false, true].flatMap(resumed => [null, {}, { type: "dangerFullAccess" }].map(sandbox => ({ resumed, sandbox }))))("refuses an absent or mismatched resolved sandbox: %j", async ({ resumed, sandbox }) => {
+    await create({ mode: "resume" });
+    const dump = join(scratch, "invalid-sandbox.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    process.env.FAKE_CODEX_RESOLVED_SANDBOX = JSON.stringify(sandbox);
+    await instance.adapter.sendTurn({ threadId: "t-invalid-sandbox", text: "continue", approvalMode: "ask",
+      ...(resumed ? { resumeCursor: "codex-thread-1" } : {}) });
+    await recorder.until((event) => event.type === "turn.completed");
+    expect(recorder.events.at(-1)).toMatchObject({ ok: false });
+    if (!sandbox || !("type" in sandbox)) {
+      expect(recorder.events.some(event => event.type === "runtime.error" && event.message.includes("Update Codex"))).toBe(true);
+    }
+    const calls = JSON.parse(readFileSync(dump, "utf8")).calls;
+    expect(calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
+  });
 
   it.each(["gpt-5.6-sol", "gpt-5.4"])(
     "reapplies Full, Auto, and Ask across thread start and resume for %s",
@@ -794,6 +877,11 @@ describe("CodexDriver turns (fake app-server)", () => {
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
     expect(seen.argv.join(" ")).toContain("mcp_servers.browser.command");
+    expect(seen.argv).toContain("features.browser_use=false");
+    expect(seen.argv).toContain("features.browser_use_external=false");
+    expect(seen.argv).toContain("features.computer_use=false");
+    expect(seen.argv.some((arg: string) => arg.startsWith("web_search="))).toBe(false);
+    expect(seen.argv).toContain('plugins={ "browser@openai-bundled" = { enabled = false }, "computer-use@openai-bundled" = { enabled = false }, "unified-computer-use@openai-bundled" = { enabled = false } }');
     expect(seen.argv).toContain('mcp_servers.browser.default_tools_approval_mode="auto"');
     expect(seen.argv.join(" ")).toContain("/tmp/browser-proxy.js");
     expect(seen.argv.join(" ")).not.toContain("browser-capability-secret");
@@ -1162,9 +1250,13 @@ describe("CodexDriver turns (fake app-server)", () => {
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
-    await instance.adapter.sendTurn({ threadId: "t-approve", text: "clean up" });
-    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.sendTurn({ threadId: "t-approve", text: "clean up", cwd: scratch });
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<
+      RuntimeEvent,
+      { type: "request.opened" }
+    >;
     expect(opened).toMatchObject({ requestType: "permission", tool: "shell", summary: "rm -rf scratch" });
+    expect(opened).toHaveProperty("command", { command: "rm -rf scratch", cwd: realpathSync(scratch) });
 
     await instance.adapter.respondToRequest("t-approve", opened.requestId!, { behavior: "allow" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
@@ -1173,6 +1265,43 @@ describe("CodexDriver turns (fake app-server)", () => {
     await recorder.until((e) => e.type === "turn.completed");
     // legacy method name → legacy decision vocabulary
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+  });
+
+  it.each([
+    { name: "complete native command", method: "item/commandExecution/requestApproval", params: { command: `printf '  ${"complete input ".repeat(30)}'\n  pwd  ` }, descriptor: true },
+    { name: "shell with additional permissions", method: "item/commandExecution/requestApproval", params: { command: "pwd", additionalPermissions: { network: { enabled: true } } }, descriptor: true },
+    { name: "shell with network approval", method: "item/commandExecution/requestApproval", params: { command: "pwd", networkApprovalContext: { host: "example.test", protocol: "https" } }, descriptor: true },
+    { name: "argv command", method: "execCommandApproval", params: { command: ["echo", "do not join argv"] }, descriptor: false },
+    { name: "display reason only", method: "item/commandExecution/requestApproval", params: { reason: "echo display only" }, descriptor: false },
+    { name: "relative directory", method: "item/commandExecution/requestApproval", params: { command: "pwd", cwd: "unknown-relative-directory" }, descriptor: false },
+    { name: "file edit with command property", method: "item/fileChange/requestApproval", params: { command: "echo not a shell approval" }, descriptor: false },
+    { name: "additional permission", method: "item/permissions/requestApproval", params: { command: "echo not a shell approval", permissions: { network: { enabled: true } } }, descriptor: false },
+  ])("emits a command descriptor only for trustworthy shell input: $name", async ({ method, params, descriptor }) => {
+    await create({ mode: "approval" });
+    const effectiveCwd = join(scratch, "effective-command-directory");
+    const nativeParams = { cwd: effectiveCwd, ...params };
+    process.env.FAKE_CODEX_APPROVAL_REQUEST = JSON.stringify({ method, params: nativeParams });
+    await instance.adapter.sendTurn({ threadId: "t-native-command-descriptor", text: "go", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toHaveProperty("command", descriptor ? { command: params.command, cwd: effectiveCwd } : undefined);
+    if (method === "item/permissions/requestApproval" || params.additionalPermissions || params.networkApprovalContext) {
+      expect(opened).toHaveProperty("requiresExplicitApproval", true);
+    }
+    await instance.adapter.respondToRequest("t-native-command-descriptor", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
+  });
+
+  it("does not infer a helper's working directory from the parent turn", async () => {
+    await create({ mode: "approval" });
+    process.env.FAKE_CODEX_APPROVAL_REQUEST = JSON.stringify({
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "helper-thread", command: "pwd" },
+    });
+    await instance.adapter.sendTurn({ threadId: "t-helper-command-descriptor", text: "go", cwd: scratch });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toHaveProperty("command", undefined);
+    await instance.adapter.respondToRequest("t-helper-command-descriptor", opened.requestId!, { behavior: "deny" });
+    await recorder.until((event) => event.type === "turn.completed");
   });
 
   it("answers a single-question ask and keeps its reply scoped to that question", async () => {
@@ -1186,9 +1315,12 @@ describe("CodexDriver turns (fake app-server)", () => {
       requestType: "question",
       tool: "ask_user",
       summary: "Ship today?",
-      // six options offered; the card keeps its five-row ceiling
-      choices: ["Yes", "No", "Maybe", "Later", "Soon"],
+      // All six provider options are retained.
+      choices: ["Yes", "No", "Maybe", "Later", "Soon", "Never"],
+      // the structured question rides the card beside the flat choices
+      questions: [{ question: "Ship today?", options: ["Yes", "No", "Maybe", "Later", "Soon", "Never"].map((label) => ({ label })) }],
     });
+    expect(opened).toHaveProperty("command", undefined);
 
     await instance.adapter.respondToRequest("t-question-single", opened.requestId!, { behavior: "answer", message: "Yes" });
     const resolved = await recorder.until((e) => e.type === "request.resolved");
@@ -1200,20 +1332,88 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
-  it("refuses a bundled multi-question ask instead of copying one answer into every question (#1237)", async () => {
+  it("opens one card for a bundled ask and maps a block reply per question id (#1237)", async () => {
     await create({ mode: "multi-question" });
     const dump = join(scratch, "question-multi.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
     await instance.adapter.sendTurn({ threadId: "t-question-multi", text: "ask me twice" });
-    await recorder.until((e) => e.type === "turn.completed");
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<
+      RuntimeEvent,
+      { type: "request.opened" }
+    >;
+    expect(opened).toMatchObject({
+      requestType: "question",
+      tool: "ask_user",
+      summary: "Ship today? · Who reviews?",
+      questions: [
+        { question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] },
+        { question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] },
+      ],
+    });
+    // a bundle exposes no flat choices: a bare reply cannot say which
+    // question it answers
+    expect(opened.choices).toBeUndefined();
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
 
-    // no card may open: one card cannot carry two questions honestly
-    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
-    const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
-    expect(decision.error.code).toBe(-32602);
-    expect(decision.error.message).toContain("one question");
-    expect(decision.error.message).toContain("2");
+    await instance.adapter.respondToRequest("t-question-multi", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes\n\nQ: Who reviews?\nA: Ada",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
+
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-ship": { answers: ["Yes"] }, "q-review": { answers: ["Ada"] } },
+    });
+  });
+
+  it("answers only the question ids a partial block reply covers", async () => {
+    await create({ mode: "multi-question" });
+    const dump = join(scratch, "question-partial.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-partial", text: "ask me twice" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+
+    await instance.adapter.respondToRequest("t-question-partial", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    // the unanswered id is absent, not filled with a note or a guess
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-ship": { answers: ["Yes"] } },
+    });
+  });
+
+  it("builds the card from the questions that parsed, not the raw entries", async () => {
+    await create({ mode: "mixed-question" });
+    const dump = join(scratch, "question-mixed.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-mixed", text: "ask me" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // the entry with blank question text is skipped before the card is
+    // built, so summary and choices describe the question that is actually
+    // answerable, not the rejected entry
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Who reviews?",
+      choices: ["Ada", "Lin"],
+      questions: [{ question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] }],
+    });
+
+    await instance.adapter.respondToRequest("t-question-mixed", opened.requestId!, {
+      behavior: "answer",
+      message: "Q: Who reviews?\nA: First paragraph\n\nsecond paragraph",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    // the multi-paragraph answer travels whole
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-review": { answers: ["First paragraph\n\nsecond paragraph"] } },
+    });
   });
 
   it("refuses an empty ask instead of opening a card with nothing to answer", async () => {
@@ -1243,15 +1443,15 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
     expect(decision.error.code).toBe(-32602);
-    expect(decision.error.message).toContain("must be an array");
+    expect(decision.error.message).toContain("array of questions");
   });
 
-  it("maps a timed-out ask to the timeout note for its one question", async () => {
+  it("times out an ask with empty answers and a timeout-sourced resolve", async () => {
     // Hold the ask reply without completing the turn: a completed turn
     // starts the driver's child-reap loop, whose 25ms setTimeout poll would
     // freeze on the fake clock and strand the teardown.
     process.env.FAKE_CODEX_ASK_HOLD = "1";
-    await create({ mode: "question" });
+    await create({ mode: "multi-question" });
     const dump = join(scratch, "question-timeout.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
@@ -1262,7 +1462,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       await vi.advanceTimersByTimeAsync(15 * 60_000);
 
       const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "answer", source: "timeout" });
+      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
     } finally {
       vi.useRealTimers();
     }
@@ -1280,9 +1480,8 @@ describe("CodexDriver turns (fake app-server)", () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     }
-    expect(decision).toEqual({
-      answers: { "q-ship": { answers: ["No answer was given — use your best judgment."] } },
-    });
+    // nobody answered, so every id reads unanswered — no note filed as words
+    expect(decision).toEqual({ answers: {} });
   });
 
   it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {

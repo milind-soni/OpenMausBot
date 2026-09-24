@@ -52,6 +52,32 @@ final class AskQuestionTests: XCTestCase {
         XCTAssertNil(card.questions.first?.options.last?.detail)
         XCTAssertFalse(card.questions[0].allowsMultiple)
         XCTAssertTrue(card.questions[1].allowsMultiple)
+        // A tool-call ask leaves origin unset; only the BoxAgent transport
+        // sets it, and unknown fields must never fail the transcript decode.
+        XCTAssertNil(card.questionRequest?.origin)
+    }
+
+    func testDecodesAnAgentComposedAskAndIgnoresUnknownFields() throws {
+        let composed = #"""
+        {
+          "title": "Your bot has a question",
+          "subtitle": "Ship the release?",
+          "options": [],
+          "requestId": "req-2",
+          "questionRequest": {
+            "version": 1,
+            "origin": "output",
+            "questions": [
+              {"question": "Ship the release?", "options": [{"label": "Ship now"}]}
+            ],
+            "futureField": {"anything": true}
+          },
+          "laterField": 7
+        }
+        """#
+        let card = try JSONDecoder().decode(OptionCard.self, from: Data(composed.utf8))
+        XCTAssertEqual(card.questionRequest?.origin, "output")
+        XCTAssertEqual(card.questions.first?.options.first?.label, "Ship now")
     }
 
     func testAStructuredAskIsAQuestion() throws {

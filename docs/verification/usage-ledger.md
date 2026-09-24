@@ -61,6 +61,17 @@ the turn appears under **Bot** and under **Person** as "This computer".
 
 ## Unit regressions
 
+The chat header's input/output breakdown has a separate real-renderer fixture:
+
+```sh
+OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/usage-details-ui.e2e.test.ts
+```
+
+It launches a disposable app, sends one scripted-engine turn through the composer,
+waits for settlement, and checks that the tooltip separates 10 uncached input,
+2 cached input, and 5 output tokens. The synthetic $0.01 cost remains the compact
+headline. Its JSON evidence sits next to the fixture log; no live account is used.
+
 ```sh
 pnpm exec vitest run server/usage-ledger.test.ts src/components/UsageHistory.test.ts server/request-auth.test.ts
 ```

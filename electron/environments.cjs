@@ -110,7 +110,7 @@ function workspaceMenuTemplate(state, { onSwitch, onConnect, onForget }) {
       type: "radio", checked: entry.id === state.activeId, click: () => onSwitch(entry.id),
     })),
     { type: "separator" },
-    { id: "workspace-connect", label: "Connect hosted workspace…", click: onConnect },
+    { id: "workspace-connect", label: "Connect to a server…", click: onConnect },
     ...(active ? [{ id: "workspace-forget", label: `Forget “${active.name}”…`, click: () => onForget(active.id) }] : []),
   ];
 }

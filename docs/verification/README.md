@@ -45,6 +45,8 @@ Use only mapped, tested commands:
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Exact command allowlist UI and saved rules](command-allowlist.md)
+- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
@@ -54,12 +56,17 @@ Use only mapped, tested commands:
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
+- [Codex browser routing and native search](codex-browser-routing.md)
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Sharing a whole team](team-sharing.md)
+- [The organization library](org-library.md)
+- [Preset bots](presets.md)
 - [Teams and shared instructions](teams.md)
 - [Full workspace backups](workspace-backups.md)
 - [Optional company cloud backups](company-backups.md)
+- [Organization library: the desktop channel](desktop-library.md)
 - [Fleet: many workspaces on one server](fleet.md)
 - [Workspaces screen and the fleet agent](workspaces.md)
 - [Hosted workspace sign-in and revocation](hosted-workspaces.md)
@@ -81,7 +88,10 @@ entry only after the shared control surface can really drive it.
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
 
-The [optional organisation connection smoke](organization-settings.md) checks
+The [loading screen and tray smoke](startup-tray.md) checks the startup close
+button, hidden handoff, tray restore, and Quit in a disposable Electron profile.
+
+The [optional organization connection smoke](organization-settings.md) checks
 the real Settings panel and production desktop client against a synthetic
 Admin server, including cancellation, revocation and unchanged normal startup.
 
@@ -98,6 +108,9 @@ the fake engine: scope, on-demand token reads, and immediate delegation drain.
 
 The [cloud preview fixture](cloud-preview.md) mounts the real Computer panel
 against an isolated server for image decoding, loading, and recovery UI checks.
+
+The [VPS recovery fixtures](vps-recovery.md) reproduce preview/startup contention
+and Docker-over-SSH timeout cleanup without contacting a real server.
 
 The [live browser fixture](browser-live.md) mounts the real Browser panel with
 an explicitly selected native engine and Chrome in a disposable home, covering
@@ -151,8 +164,17 @@ search and draft isolation using disposable simulators and an offline fixture.
 The [Android stream recovery checks](android-stream-recovery.md) exercise early
 stream closure and fallback through disposable HTTP endpoints.
 
+The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
+Hidden activity, and compact webhook messages using bundled offline data.
+
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
+
+The [Android server pairing checks](android-server-pairing.md) cover server QR
+confirmation, manual codes, retries and saved-server identity validation.
+
+The [Android transcript checks](android-transcript.md) cover completed-turn
+folds, Hidden reasoning, and compact webhook messages through real Compose UI.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.

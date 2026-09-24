@@ -21,6 +21,15 @@ final class ChatPreferencesTests: XCTestCase {
         return message
     }
 
+    /// What the harness appends after every settled turn: a work receipt,
+    /// decoded from the wire exactly as it arrives.
+    private func digest(_ id: String, at: Double = 1) -> Message {
+        let json = """
+        {"id":"\(id)","role":"bot","kind":"digest","at":\(at),"text":"[digest] · tools: /bin/bash -lc 'composio search' ×1 · reply: Done."}
+        """
+        return try! JSONDecoder().decode(Message.self, from: Data(json.utf8))
+    }
+
     // MARK: - Full
 
     func testFullKeepsEveryMessageInOrder() {
@@ -35,6 +44,28 @@ final class ChatPreferencesTests: XCTestCase {
     func testHiddenDropsActivityAndKeepsTheRest() {
         let messages = [text("a"), activity("b"), activity("c"), text("d")]
         XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a", "d"])
+    }
+
+    // The digest and compaction receipts are the harness talking about the
+    // tool calls: hidden with them, but never folded into a run of them.
+
+    func testHiddenDropsDigestAndCompactionReceiptsToo() {
+        let messages = [text("a"), activity("b"), digest("c"), text("d"), compaction("e")]
+        XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a", "d"])
+    }
+
+    func testReducedKeepsACompactionAsItsOwnRowAndBreaksTheRun() {
+        let messages = [activity("a"), activity("b"), compaction("c"), activity("d"), activity("e")]
+        let rows = transcriptRows(messages, detail: .reduced)
+        XCTAssertEqual(rows.map(\.id), ["run.a", "c", "run.d"])
+        XCTAssertEqual(rows[1].kind, .compaction)
+    }
+
+    private func compaction(_ id: String, at: Double = 1) -> Message {
+        var message = Message(id: id, role: .bot, kind: .compaction, at: at)
+        message.text = "[compaction] summary"
+        message.compaction = Compaction(summary: "summary", tokensBefore: 10)
+        return message
     }
 
     func testHiddenDropsFailedActivityToo() {
@@ -157,5 +188,17 @@ final class ChatPreferencesTests: XCTestCase {
         XCTAssertEqual(IslandIntro.oncePerBot.rawValue, "oncePerBot")
         XCTAssertEqual(IslandIntro(rawValue: "nonsense"), nil)
         XCTAssertEqual(IslandIntro.allCases.count, 3)
+    }
+
+    // MARK: - Digests
+
+    // The harness writes a "[digest] · tools: … · reply: …" receipt after
+    // every turn. Desktop shows it only behind "show tool calls"; the phone
+    // drew it as a bubble under every reply. It is never a row.
+    func testADigestIsNeverATranscriptRow() {
+        let messages = [text("a"), activity("b"), digest("c"), text("d"), digest("e")]
+        XCTAssertEqual(transcriptRows(messages, detail: .full).map(\.id), ["a", "b", "d"])
+        XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a", "d"])
+        XCTAssertEqual(transcriptRows(messages, detail: .reduced).map(\.id), ["a", "b", "d"])
     }
 }

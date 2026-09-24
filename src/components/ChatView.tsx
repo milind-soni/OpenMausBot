@@ -22,8 +22,8 @@ import {
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { MessageActions, messageActionClass } from "@/components/MessageActions";
 import { useSpeech } from "@/lib/tts/useSpeech";
-import { useCaptionChrome } from "@/components/DesktopCapabilities";
-import { cachedInput, cachedKnown, contextChip, contextDetail, contextShare, costCaption, formatTokens, formatUsd, freshTokens, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
+import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
+import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
 import {
   api,
   currentTaskBot,
@@ -38,6 +38,8 @@ import {
   type Message,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
+import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
+import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
 import { isProviderSafetyBlock, PROVIDER_SAFETY_GUIDANCE, PROVIDER_SAFETY_HELP_URL } from "../../shared/provider-safety";
 import { BotAvatar } from "./Avatar";
 import { TurnPresence } from "./TurnPresence";
@@ -156,13 +158,25 @@ export function ErrorRow({
   onRetry?: () => void;
   setupInstance?: InstanceInfo;
 }) {
+  const { capabilities, ready } = useDesktopCapabilities();
+  const failedPermissions = missingMacCuaPermissions(message);
+  const currentPermissions = missingMacCuaPermissions(capabilities.localComputer.message);
+  const macCuaReason = ready && capabilities.host.platform === "darwin" &&
+    capabilities.localComputer.available === false && capabilities.localComputer.reasonCode !== "remote-server" &&
+    message.startsWith("CUA Driver is not ready for this computer — ") &&
+    failedPermissions.length > 0 && failedPermissions.join(",") === currentPermissions.join(",")
+    ? macCuaPermissionMessage(currentPermissions)
+    : null;
   return (
     <div className="flex justify-start">
       <div className="w-fit max-w-[min(42rem,78%)] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
         <div className="flex items-start gap-2">
           <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-          <span className="min-w-0 break-words">{message}</span>
+          <span className="min-w-0 break-words">{macCuaReason ?? message}</span>
         </div>
+        {macCuaReason && <details className="mt-2 text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("computer.mac.permission.driverDetail")}</summary><p className="mt-1 break-words">{message}</p></details>}
+        {macCuaReason &&
+          <MacCuaRecoveryActions reason={message} />}
         {isProviderSafetyBlock(message) ? (
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-secondary">
             {PROVIDER_SAFETY_GUIDANCE}{" "}
@@ -304,7 +318,10 @@ function Bubble({
   const speech = useSpeech();
   const speaking = speech.messageId === message.id && speech.status !== "idle";
   const text = peer ? peer.body : (message.text ?? "");
-  const generatedPaths = useMemo(() => message.attachments?.map((attachment) => attachment.path) ?? [], [message.attachments]);
+  const generatedPaths = useMemo(
+    () => message.attachments?.filter((attachment) => attachment.kind === "image").map((attachment) => attachment.path) ?? [],
+    [message.attachments],
+  );
   const linkedFiles = useMemo(() => user ? [] : collectMessageFiles(text, generatedPaths), [user, text, generatedPaths]);
   const webhookView = user ? webhookMessageView(text) : null;
   const attachments = user && !webhookView ? splitTranscriptAttachments(text) : null;
@@ -325,7 +342,8 @@ function Bubble({
   const versions = user ? messageVersions(bot, message) : [message];
   const versionIndex = versions.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
-    if (v && !bot.busy) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
+    // an edit still waiting for its server fork has no branch to switch to yet
+    if (v && !bot.busy && !v.id.startsWith("optimistic-")) dispatch({ type: "switchBranch", botId: bot.id, threadId: bot.threadId, messageId: v.id });
   };
 
   return (
@@ -336,7 +354,7 @@ function Bubble({
           <MessageActions side="user">
             {/* editing rewinds the thread, so it waits for the turn to end —
                 same rule as the version switcher below */}
-            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && (
+            {message.kind === "text" && !webhookView && !hasAttachments && !bot.busy && !message.id.startsWith("optimistic-") && (
               <button
                 onClick={onStartEdit}
                 aria-label={t("chat.editMessage")}
@@ -1020,7 +1038,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   // regenerate = fork the last user message with the same text — reuses the
   // existing branch machinery, so the old answer stays reachable via ‹ ›
   const regenerate = useCallback(() => {
-    if (lastUserMessage?.text && !bot.busy) {
+    if (lastUserMessage?.text && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")) {
       dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: lastUserMessage.id, text: lastUserMessage.text });
     }
   }, [lastUserMessage, bot.busy, bot.id, bot.threadId, dispatch]);
@@ -1482,7 +1500,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
         onClearReply={clearReply}
         onConsumeReply={consumeReply}
         onRestoreReply={restoreReply}
-        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy
+        onEditLast={lastUserMessage && !lastUserMessageHasAttachments && !bot.busy && !lastUserMessage.id.startsWith("optimistic-")
           ? () => setEditingId(lastUserMessage.id)
           : undefined}
       />
@@ -1511,13 +1529,12 @@ function UsageChip({ bot }: { bot: Bot }) {
     // model re-reading what it already saw — say so, or the figure reads as
     // a bug (issue #527); past 80% of the window the fix is a new thread
     share?.tone === "danger" ? t("chat.usage.contextNudge") : null,
-    cachedInput(usage) > 0 ? (cachedKnown(usage) ? t("chat.usage.newNote") : t("chat.usage.cachedNote")) : null,
     hasFiniteCost(usage.costUsd) ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
   ]
     .filter(Boolean)
     .join("\n");
-  // folded: one figure — cost when the engine reports one, else new tokens
-  const short = hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : formatTokens(cachedKnown(usage) ? freshTokens(usage) : usage.input + usage.output);
+  // Keep the unit visible in the compact header too.
+  const short = text;
   const ctx = contextChip(usage);
   return (
     <button

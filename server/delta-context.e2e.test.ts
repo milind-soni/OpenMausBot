@@ -49,9 +49,12 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
         `if (mode) process.env[${JSON.stringify(name === "codex" ? "FAKE_CODEX_MODE" : "FAKE_CLAUDE_MODE")}] = mode;`,
         "let botId = null;",
         'try { for (const s of Object.values(JSON.parse(readFileSync(after("--mcp-config"), "utf8")).mcpServers ?? {})) botId = s?.env?.OMB_BOT_ID ?? botId; } catch {}',
-        `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
+        `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, pid: process.pid, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
         `else if (argv[0] === "app-server") appendFileSync(${JSON.stringify(codexLaunchesPath)}, JSON.stringify({ botId: process.env.OMB_BOT_ID ?? null }) + "\\n");`,
         `if (botId) process.env.FAKE_CLAUDE_PROMPTS = ${JSON.stringify(join(dataDir, "consumed-"))} + botId + ".jsonl";`,
+        // A crashed fixture server must not leave a gated fake provider (or
+        // its stdio MCP child) alive after its temporary home is removed.
+        'process.stdin.on("end", () => process.exit(0));',
         `if (after("--resume") && modes.holdresume) { while (!existsSync(${JSON.stringify(join(dataDir, "resume-hold.gate"))})) await new Promise((r) => setTimeout(r, 20)); }`,
         `await import(${JSON.stringify(pathToFileURL(join(process.cwd(), "server", "testing", fake)).href)});`,
       ].join("\n"), { mode: 0o700 });
@@ -257,17 +260,28 @@ it("offers the results again when the return turn fails before the provider acts
 it("offers the results again when the person stops the return turn before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "STOPPED_RETURN_RESULT" };
-  f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "never sent", gateFile: f.gate("return") }, { reply: "Recovered" }] };
+  // The return turn holds on a gate that never opens: only the person's Stop
+  // ends it, so it can never answer.
+  f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "never sent", gateFile: f.gate("return") }] };
   await f.send("Please have Engineering build the export.");
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 20_000 }).toBe("completed");
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 20_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.wait();
-  f.open(f.gate("return"));
 
+  // Whether the stopped fixture records a turn of its own depends on the
+  // order the platform tears its process tree down in: when its MCP child
+  // dies first, the fixture fails and records that turn before it is killed.
+  // Indexing the next reply past it made the following turn race that
+  // teardown, so name the next reply explicitly (like the restart test below).
+  f.plan[f.chief.id] = { reply: "Recovered", resumeReply: "Recovered" };
   await f.send("What did Engineering find?");
   await f.wait();
-  expect(count(f.prompt(f.turns().at(-1)), "STOPPED_RETURN_RESULT")).toBe(1);
+  const next = f.turns().filter((turn: any) => f.prompt(turn).includes("What did Engineering find?")).at(-1);
+  expect(count(f.prompt(next), "STOPPED_RETURN_RESULT")).toBe(1);
+  const replies = (await f.messages()).map((message: any) => message.text);
+  expect(replies).toContain("Recovered");
+  expect(replies).not.toContain("never sent");
 }), 60_000);
 
 it("rebuilds a rejected resume with each result exactly once", () => fixture(async (f) => {
@@ -555,9 +569,17 @@ it("gives a replacement session an earlier round's result that its rebuild could
   await expect.poll(() => f.turns().length, { timeout: 10_000 }).toBe(3);
   await expect.poll(() => count(f.prompt(f.turns()[2]), "ROUND_ONE_RESULT_TOKEN"), { timeout: 10_000 }).toBe(1);
   await expect.poll(() => f.launches(f.lead.id).length, { timeout: 15_000 }).toBe(2);
+  // A terminal message is published before the driver releases its turn.
+  // Wait for the source to yield to its outstanding teammate before each
+  // new message; otherwise a loaded runner can steer into the previous turn.
+  const sourceWaiting = () => expect.poll(async () => (await f.api("/api/bots")).bots
+    .find((bot: any) => bot.id === f.chief.id).tasks
+    .find((task: any) => task.threadId === f.thread).waitingForTeammates,
+  { timeout: 15_000 }).toBe(true);
   for (let i = 0; i < chat; i++) {
     // Teammate work stays outstanding, so wait for this turn's own reply —
     // and for the turn to end, or the next send steers into it.
+    await sourceWaiting();
     expect((await f.send(`chat ${i}`)).steered).toBeUndefined();
     await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + i);
     await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${i}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
@@ -568,6 +590,7 @@ it("gives a replacement session an earlier round's result that its rebuild could
   const original = cursor(f);
   f.setMode("resume=dead-session");
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === `chat reply ${chat - 1}` && m.turnTerminal), { timeout: 10_000 }).toBe(true);
+  await sourceWaiting();
   expect((await f.send("One more question.")).steered).toBeUndefined();
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(4 + chat);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "recovered reply"), { timeout: 10_000 }).toBe(true);
@@ -587,7 +610,10 @@ it("gives a replacement session an earlier round's result that its rebuild could
   // older than the rebuild's replay window: left out, not received
   expect(order.indexOf(records[0].omitted)).toBeGreaterThanOrEqual(order.indexOf(resultMessage.id));
 
+  await sourceWaiting();
   f.open(f.gate("r2"));
+  await expect.poll(() => f.turns().length, { timeout: 30_000 }).toBe(5 + chat);
+  await expect.poll(async () => (await f.messages()).some((m: any) => m.text === "Final" && m.turnTerminal), { timeout: 15_000 }).toBe(true);
   await f.wait();
   const returned = f.prompt(f.turns().at(-1));
   expect(count(returned, "ROUND_TWO_RESULT")).toBe(1);
@@ -665,7 +691,7 @@ it("does not offer a message or steer the person stopped before any reply again"
   await f.send("Warm up.");
   await f.wait();
   await f.send("STOPPED_ASK please drop the staging database");
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
+  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(2);
   expect((await f.send("STOPPED_STEER and the backups")).steered).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.idle();
@@ -776,22 +802,29 @@ it("offers the results again when the provider reports an API error instead of a
 it("does not hand the model a queued follow-up that a restart recovered with an unknown outcome", () => fixture(async (f) => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PATCH");
   const other = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Second conversation" })).task.threadId;
-  const answered = { reply: "Answered" };
-  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }, answered, answered] };
+  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }] };
   await f.send("Warm up.", other);
   await f.wait(other);
   await f.send("Hold the only slot.");
   await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
   expect((await f.send("RECOVERED_FOLLOWUP deploy it", other)).queued).toBe(true);
   f.open(f.gate("hold"));
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(3);
+  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(3);
+  const interruptedPid = f.launches().at(-1).pid;
   await f.restart(() => {}, "SIGKILL");
+  await expect.poll(() => {
+    try { process.kill(interruptedPid, 0); return true; } catch { return false; }
+  }, { timeout: 5_000 }).toBe(false);
   await expect.poll(async () => (await f.messages(other)).some((m: any) => m.kind === "activity" && m.tool?.name?.includes("Review the result")), { timeout: 20_000 }).toBe(true);
   expect((await f.messages(other)).filter((m: any) => m.role === "user" && m.text?.includes("RECOVERED_FOLLOWUP"))).toHaveLength(1);
 
+  // The crashed turn never completes its evidence record. Select the next
+  // reply explicitly instead of indexing back into that turn's closed gate.
+  f.plan[f.chief.id] = { reply: "Answered" };
   await f.send("Anything new?", other);
   await f.wait(other);
   const next = f.turns().filter((turn: any) => f.prompt(turn).includes("Anything new?")).at(-1);
+  expect(next).toBeDefined();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(f.prompt(next)).not.toContain("RECOVERED_FOLLOWUP");
 }), 90_000);
@@ -1067,6 +1100,8 @@ it("gives a Codex return today's fresh thread when explicit effort is cleared wh
   await leadRunning(f);
   await expect.poll(async () => (await f.messages()).some((m: any) => m.role === "bot" && m.text === "Assigned"), { timeout: 15_000 }).toBe(true);
   // An effort the driver does not send leaves the native thread's last value.
+  await expect.poll(async () => (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id)
+    .tasks.find((task: any) => task.threadId === f.thread).waitingForTeammates, { timeout: 15_000 }).toBe(true);
   await f.selectModel(model);
   f.open(f.gate("lead"));
   await f.wait();

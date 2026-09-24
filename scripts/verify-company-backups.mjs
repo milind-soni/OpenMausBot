@@ -232,7 +232,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(createCalls, 0); checks.push("signed-out and no-capability states make no cloud calls; connected user explicitly opts in");
     assert.equal(await evaluate("typeof require"), "undefined");
     assert.equal(await evaluate("JSON.stringify(window.ogb.companyBackups).includes('fixture-device-capability')"), false);
-    await click("Back up this workspace");
+    await click("Back up this installation");
     await until(() => evaluate("Boolean(document.querySelector('dialog[open]'))"), "cancelable native dialog");
     win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
     win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
@@ -240,14 +240,14 @@ if (process.versions.electron && process.argv.includes(flag)) {
     assert.equal(createCalls, 0);
 
     const createBackup = async capture => {
-      await click("Back up this workspace");
+      await click("Back up this installation");
       await until(() => evaluate("Boolean(document.querySelector('dialog[open]'))"), "native upload dialog");
-      assert.equal(await evaluate("document.querySelector('dialog[open]').textContent.includes('THIS current workspace')"), true);
+      assert.equal(await evaluate("document.querySelector('dialog[open]').textContent.includes('THIS installation')"), true);
       assert.equal(await evaluate("document.querySelectorAll('dialog input[type=password]').length"), 0);
       assert.equal(await evaluate("document.querySelector('dialog button[type=submit]').disabled"), false);
       if (capture) await screenshot("company-backup-upload-confirmation.png");
       const previous = entries.size;
-      await click("Back up this workspace");
+      await click("Back up this installation");
       await until(() => evaluate("document.body.textContent.includes('Uploading encrypted backup')"), "native upload progress");
       if (capture) await screenshot("company-backup-upload-progress.png");
       await until(() => entries.size > previous && [...entries.values()].at(-1).status === "ready" && !state.busy, "completed encrypted cloud archive");
@@ -294,11 +294,11 @@ if (process.versions.electron && process.argv.includes(flag)) {
     win.setSize(390, 780); await until(() => evaluate("innerWidth === 390"), "narrow viewport");
     assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth && document.querySelector('dialog').scrollWidth <= document.querySelector('dialog').clientWidth + 1"), true);
     await screenshot("company-backup-preview-narrow.png");
-    await fill("dialog input", "replace"); assert.equal(await evaluate(`${button("Replace workspace")}.disabled`), true);
+    await fill("dialog input", "replace"); assert.equal(await evaluate(`${button("Replace installation")}.disabled`), true);
     await fill("dialog input", "REPLACE");
     await evaluate("document.querySelector('dialog input').scrollIntoView({block:'center'}); document.querySelector('dialog input').focus();");
     await screenshot("company-backup-replace-narrow.png");
-    await click("Replace workspace");
+    await click("Replace installation");
     await until(() => evaluate("document.body.textContent.includes('Fully quit OpenMausBot') && !document.querySelector('dialog[open]')"), "restart-required confirmation");
     const restoreId = await evaluate(`localStorage.getItem(${JSON.stringify(MARKER)})`);
     assert.match(restoreId, /^[a-f0-9-]{36}$/); assert.equal(restoreCalls, 1);
@@ -310,7 +310,7 @@ if (process.versions.electron && process.argv.includes(flag)) {
     // A new renderer instance, not the component's transient restart state.
     win.destroy(); win = await open(true); await win.loadURL(url);
     await until(() => evaluate("document.body.textContent.includes('Fully quit OpenMausBot')"), "pending restore on reopen");
-    assert.equal(await evaluate("document.body.textContent.includes('Back up this workspace')"), false);
+    assert.equal(await evaluate("document.body.textContent.includes('Back up this installation')"), false);
     checks.push("pending restore survives closing and reopening the renderer");
     const restarted = new Promise((done, reject) => {
       const timer = setTimeout(() => reject(new Error("Owned runtime restart timed out")), 35_000);

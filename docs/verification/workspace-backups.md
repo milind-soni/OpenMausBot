@@ -75,7 +75,9 @@ saved account credentials/connections, remote VM disks, other workspaces, extern
 project files, external CLI/browser login homes, or live device sessions. The
 10 GB and 100,000-entry limits fail visibly. Scheduled routines/webhooks are paused and
 unfinished work is not replayed after restore. Known temporary sockets, leases,
-tool downloads and caches are excluded; unknown special files are rejected.
+tool downloads and caches are excluded, as are the Organization library's
+downloaded catalog and release files (`org-library/catalog.json`,
+`org-library/blobs/`); unknown special files are rejected.
 If a configured provider login home is inside ordinary workspace files rather
 than the excluded `providers/` directory, export and restore refuse to proceed
 until that login storage is moved outside the backed-up files.

@@ -34,7 +34,7 @@ public enum Walkie {
             return line.isEmpty ? nil : line
         case .secret:
             return "It needs a credential from you. Open the chat to enter it."
-        case .activity, .screen:
+        case .activity, .screen, .digest, .compaction:
             return nil
         }
     }
@@ -47,22 +47,57 @@ public enum Walkie {
         text = replace(#"!?\[([^\]]*)\]\([^)]*\)"#, in: text, with: "$1")
         text = replace(#"https?://\S+"#, in: text, with: "a link")
 
-        let lines = text.components(separatedBy: .newlines).compactMap { raw -> String? in
-            var line = raw.trimmingCharacters(in: .whitespaces)
-            line = replace(#"^(#{1,6}\s*|[-*+]\s+|\d+[.)]\s+|>\s*)"#, in: line, with: "")
-            line = line.replacingOccurrences(of: "**", with: "")
-                .replacingOccurrences(of: "__", with: "")
-                .replacingOccurrences(of: "~~", with: "")
-                .replacingOccurrences(of: "`", with: "")
-                .replacingOccurrences(of: "|", with: ", ")
-            line = replace(#"(?<!\w)[*_](.+?)[*_](?!\w)"#, in: line, with: "$1")
-            line = line.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ",")))
-            guard !line.isEmpty else { return nil }
-            if let last = line.last, !".!?:;".contains(last) { line += "." }
-            return line
-        }
-        let joined = replace(#"\s+"#, in: lines.joined(separator: " "), with: " ")
+        let spoken = Markdown.blocks(text).compactMap(utterance)
+        let joined = replace(#"\s+"#, in: spoken.joined(separator: " "), with: " ")
         return truncated(joined, limit: limit)
+    }
+
+    private static func utterance(_ block: MarkdownBlock) -> String? {
+        switch block {
+        case let .table(table):
+            let lines = ([table.headers] + table.rows).compactMap { row -> String? in
+                let words = row.map { plain($0) }.filter { !$0.isEmpty }
+                return words.isEmpty ? nil : sentence(words.joined(separator: ", "))
+            }
+            return lines.isEmpty ? nil : lines.joined(separator: " ")
+        case let .paragraph(text):
+            guard !Markdown.delimiterParagraph(text) else { return nil }
+            return sentence(piped(plain(text)))
+        case let .heading(_, text), let .bullet(_, text), let .quote(text), let .ordered(_, _, text):
+            return sentence(piped(plain(text)))
+        case let .task(_, _, _, text):
+            return sentence(piped(plain(text)))
+        case .code:
+            return "Code omitted."
+        case .rule:
+            return nil
+        }
+    }
+
+    /// Emphasis and code ticks, without touching pipes. List markers are
+    /// already gone: the splitter consumed them.
+    private static func plain(_ text: String) -> String {
+        var line = text.replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "__", with: "")
+            .replacingOccurrences(of: "~~", with: "")
+            .replacingOccurrences(of: "`", with: "")
+        line = replace(#"(?<!\w)[*_](.+?)[*_](?!\w)"#, in: line, with: "$1")
+        return line.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Join pipe cells the way a table row is spoken. A line with no pipe is
+    /// unchanged.
+    private static func piped(_ text: String) -> String {
+        guard text.contains("|") else { return text }
+        let words = Markdown.cells(text).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        return words.joined(separator: ", ")
+    }
+
+    private static func sentence(_ text: String) -> String? {
+        var line = text.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ",")))
+        guard !line.isEmpty else { return nil }
+        if let last = line.last, !".!?:;".contains(last) { line += "." }
+        return line
     }
 
     /// Split speakable text into utterances the computer will synthesize.

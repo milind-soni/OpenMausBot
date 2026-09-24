@@ -1,4 +1,4 @@
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -27,6 +27,10 @@ import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { createStartupScreen } from "./startup-screen.mjs";
+import { createSystemTray } from "./system-tray.mjs";
+let startupScreen = null;
+let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
@@ -76,6 +80,7 @@ import { buildApplicationMenu } from "./menu.mjs";
 import { createComputerSharing, validateSharedFolders } from "./computer-sharing.mjs";
 import { acquireDataDirLease } from "./data-dir-lease.mjs";
 import { createManagedDesktopClient, createManagedDesktopRelay, createManagedDesktopStore } from "./managed-desktop.mjs";
+import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
 import { createCompanyBackupSchedule } from "./company-backup-schedule.mjs";
 
@@ -237,7 +242,7 @@ function queuePackageInstall(rawLink) {
   const packageUrl = packageUrlFromDeepLink(rawLink);
   if (!packageUrl) return false;
   pendingPackageInstallUrl = packageUrl;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const target = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
   deliverPackageInstall(target);
   return true;
@@ -255,7 +260,7 @@ app.on("second-instance", (_event, commandLine) => {
   }
   const packageUrl = packageUrlFromCommandLine(commandLine);
   if (packageUrl) pendingPackageInstallUrl = packageUrl;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const target = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
   deliverPackageInstall(target);
 });
@@ -272,6 +277,8 @@ let secureCredentials = {};
 let secureCredentialState = null;
 let desktopDataDirLease = null;
 let managedDesktop = null;
+// The organization library channel: catalog and release bytes for the local runtime only.
+let orgLibrary = null;
 let companyBackupController = null;
 let companyBackupState = { busy: false };
 let preparedCompanyRestore = null;
@@ -296,6 +303,8 @@ const serverSupervisor = createServerSupervisor({
     // Re-read the latest account credentials; registration may have completed
     // while the replacement child's health probe was pending.
     syncManagedComposioCredentials();
+    // A restarted runtime has no library catalog until main sends it again.
+    orgLibrary?.runtimeReady();
     if (managedDesktop) void managedDesktop.refresh().catch(() => {});
     routineWake.start();
     // Existing chat windows reconnect in place, preserving unsent drafts.
@@ -968,15 +977,23 @@ function syncPhoneSecretKey(proc) {
 
 function ensureManagedDesktop() {
   if (managedDesktop) return managedDesktop;
-  if (!app.isPackaged || desktopRemoteAccess) throw new Error("Organisation sign-in requires the installed desktop app running on this computer.");
-  const store = createManagedDesktopStore({
-    file: path.join(app.getPath("userData"), "company-connection.bin"),
-    encryption: {
-      available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
-        (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
-      encrypt: value => safeStorage.encryptStringAsync(value),
-      decrypt: value => safeStorage.decryptStringAsync(value),
-    },
+  if (!app.isPackaged || desktopRemoteAccess) throw new Error("Organization sign-in requires the installed desktop app running on this computer.");
+  const encryption = {
+    available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
+      (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
+    encrypt: value => safeStorage.encryptStringAsync(value),
+    decrypt: value => safeStorage.decryptStringAsync(value),
+  };
+  const store = createManagedDesktopStore({ file: path.join(app.getPath("userData"), "company-connection.bin"), encryption });
+  // Only what the Admin's library capability delivers, verified in main and
+  // relayed to the local runtime; never to a remote server's pages.
+  orgLibrary = createOrgLibrary({
+    dataDir: path.join(desktopDataDir(), "org-library"),
+    store: createManagedDesktopStore({ file: path.join(app.getPath("userData"), "company-library.bin"), encryption }),
+    fetchBytes: (route, maxBytes, options) => managedDesktop.fetchLibraryBytes(route, maxBytes, options),
+    relay: library => managedDesktopRelay.sendLibrary(serverProc, library),
+    appVersion: app.getVersion(),
+    log: message => slog(message),
   });
   managedDesktop = createManagedDesktopClient({
     store, platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer",
@@ -984,6 +1001,7 @@ function ensureManagedDesktop() {
     // The organisation's read-only policy overlay; the runtime keeps it in memory.
     applyPolicy: policy => managedDesktopRelay.sendPolicy(serverProc, policy),
     migrateIdentity: identity => managedDesktopRelay.sendIdentity(serverProc, identity),
+    library: orgLibrary,
     appVersion: app.getVersion(),
     openBrowser: url => shell.openExternal(url),
     onState: state => {
@@ -1010,15 +1028,7 @@ function ensureManagedDesktop() {
     },
   });
   companyBackupSchedule = createCompanyBackupSchedule({
-    store: createManagedDesktopStore({
-      file: path.join(app.getPath("userData"), "company-backup-schedule.bin"),
-      encryption: {
-        available: async () => (await safeStorage.isAsyncEncryptionAvailable()) &&
-          (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text"),
-        encrypt: value => safeStorage.encryptStringAsync(value),
-        decrypt: value => safeStorage.decryptStringAsync(value),
-      },
-    }),
+    store: createManagedDesktopStore({ file: path.join(app.getPath("userData"), "company-backup-schedule.bin"), encryption }),
     scope: companyBackupScope,
     run: async (signal, scope) => {
       if (companyBackupController || preparedCompanyRestore || companyRestoreCommitting || desktopShutdownStarted) throw companyBackupDeferred();
@@ -1058,7 +1068,7 @@ function companyBackupScope() {
 }
 
 function companyBackupDeferred() {
-  return Object.assign(new Error("Wait for the local workspace to be available for its daily backup."), { code: "workspace_busy" });
+  return Object.assign(new Error("Wait for this installation to be available for its daily backup."), { code: "workspace_busy" });
 }
 
 function collectCompanyBackupClientState(signal, scope, proc) {
@@ -1109,7 +1119,7 @@ function publishCompanyBackupState(value) {
 
 function localBackupRequest(proc, route, init = {}) {
   if (!proc || proc !== serverProc || !serverReady || !/^\/api\/workspace-backup\/(?:status|export|upload|preview|restore|download\/[A-Za-z0-9_-]+)$/.test(route)) {
-    throw new Error("The local workspace changed. Start this backup operation again.");
+    throw new Error("This installation changed. Start this backup operation again.");
   }
   return fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit",
     headers: { ...Object.fromEntries(new Headers(init.headers)), [DESKTOP_MUTATION_HEADER]: desktopMutationToken } });
@@ -1117,16 +1127,16 @@ function localBackupRequest(proc, route, init = {}) {
 
 async function localBackupStatus(proc) {
   const response = await localBackupRequest(proc, "/api/workspace-backup/status", { signal: AbortSignal.timeout(10_000) });
-  if (!response.ok) throw new Error("Local backup status is unavailable. Try again when the workspace is ready.");
+  if (!response.ok) throw new Error("Local backup status is unavailable. Try again when this installation is ready.");
   const status = await response.json();
-  if (proc !== serverProc || typeof status.busy !== "boolean" || typeof status.pendingRestore !== "boolean") throw new Error("The workspace changed. Check backup status again.");
+  if (proc !== serverProc || typeof status.busy !== "boolean" || typeof status.pendingRestore !== "boolean") throw new Error("This installation changed. Check backup status again.");
   return status;
 }
 
 async function runCompanyBackup(kind, input, scheduled = null) {
   if (companyBackupController || companyRestoreCommitting || desktopShutdownStarted || (scheduled && preparedCompanyRestore)) throw companyBackupDeferred();
   const client = ensureManagedDesktop(), connection = client.connection();
-  if (!connection || !client.state().cloudBackups) throw new Error("Connect your organisation and ask its administrator to enable cloud backups first.");
+  if (!connection || !client.state().cloudBackups) throw new Error("Connect your organization and ask its administrator to enable cloud backups first.");
   const generation = client.backupGeneration();
   if (scheduled) {
     scheduled.signal.throwIfAborted();
@@ -1160,13 +1170,13 @@ async function runCompanyBackup(kind, input, scheduled = null) {
     const result = kind === "backup" ? await transfers.backup({ ...input, appVersion: app.getVersion() }, controller.signal, progress)
       : await transfers.prepareRestore(input, controller.signal, progress);
     controller.signal.throwIfAborted();
-    if (proc !== serverProc || client.backupGeneration() !== generation || client.connection()?.deviceId !== connection.deviceId) throw new Error("The workspace connection changed.");
+    if (proc !== serverProc || client.backupGeneration() !== generation || client.connection()?.deviceId !== connection.deviceId) throw new Error("This installation or its organization connection changed.");
     if (kind === "restore") preparedCompanyRestore = { id: result.id, proc, deviceId: connection.deviceId };
     publishCompanyBackupState({ busy: false, ...(kind === "backup" ? { lastBackupAt: Date.now() } : {}) });
     return result;
   } catch (error) {
-    const message = controller.signal.aborted ? "Cloud backup cancelled. Your workspace has not been replaced."
-      : error?.name === "CompanyBackupError" ? error.message : "Cloud backup could not complete. Check your organisation connection and available disk space, then try again.";
+    const message = controller.signal.aborted ? "Cloud backup cancelled. This installation has not been replaced."
+      : error?.name === "CompanyBackupError" ? error.message : "Cloud backup could not complete. Check your organization connection and available disk space, then try again.";
     publishCompanyBackupState({ busy: false, pendingRestore: companyBackupState.pendingRestore, message });
     throw Object.assign(new Error(message), error?.code === "workspace_busy" ? { code: "workspace_busy" } : {});
   } finally {
@@ -1275,6 +1285,7 @@ async function startServerOn(port) {
     try {
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
+      if (orgLibrary?.receive(message)) return;
       if (receivePhoneSecretSave(proc, message)) return;
     } catch (error) {
       slog(`desktop private sync rejected: ${error?.message ?? error}`);
@@ -1565,7 +1576,7 @@ function ensureDesktopWorkspace(owner) {
   if (!owner || owner.isDestroyed()) throw new Error("The OpenMausBot window is unavailable");
   if (desktopWorkspaceManager) {
     if (desktopWorkspaceOwner !== owner) {
-      throw new Error("The desktop workspace belongs to another app window");
+      throw new Error("The two-desktop view belongs to another app window");
     }
     return desktopWorkspaceManager;
   }
@@ -1603,10 +1614,10 @@ function ensureDesktopWorkspace(owner) {
 function desktopWorkspaceForEvent(event, create = false) {
   const owner = mainWindow;
   if (!owner || owner.isDestroyed() || event.sender !== owner.webContents) {
-    throw new Error("The desktop workspace is available only to the main app window");
+    throw new Error("The two-desktop view is available only to the main app window");
   }
   if (desktopWorkspaceManager && desktopWorkspaceOwner !== owner) {
-    throw new Error("The desktop workspace belongs to another app window");
+    throw new Error("The two-desktop view belongs to another app window");
   }
   return create ? ensureDesktopWorkspace(owner) : desktopWorkspaceManager;
 }
@@ -1692,7 +1703,7 @@ async function offerComputerSharing(win) {
     if (!info || win.isDestroyed() || activeEnvironment(environmentsState)?.id !== env.id || new URL(win.webContents.getURL()).origin !== env.origin) return;
     const choice = await dialog.showMessageBox(win, {
       type: "question", message: `Share this computer with ${env.name}?`,
-      detail: "Let this workspace’s bots use folders and capabilities you choose while this desktop app is running. Nothing is shared unless you enable it. You can change this later in Settings → Connected workspaces.",
+      detail: "Let this server’s bots use folders and capabilities you choose while this desktop app is running. Nothing is shared unless you enable it. You can change this later in Settings → Servers.",
       buttons: ["Choose access", "Not now"], defaultId: 1, cancelId: 1,
     });
     sharingController().decline(env, info);
@@ -1725,7 +1736,7 @@ function writeEnvironments(state) {
       fs.rmSync(temporary, { force: true });
     } catch {}
     slog(`environments save failed: ${error?.message ?? error}`);
-    throw new Error("Could not save workspace connections on this computer. Please try again.");
+    throw new Error("Could not save server connections on this computer. Please try again.");
   }
 }
 
@@ -1761,7 +1772,7 @@ function persistEnvironments(next) {
 
 async function workspaceMenuAction(action) {
   try { await action(); } catch (error) {
-    await dialog.showMessageBox({ type: "error", message: "Could not update workspaces", detail: error.message });
+    await dialog.showMessageBox({ type: "error", message: "Could not update servers", detail: error.message });
   }
 }
 
@@ -1786,7 +1797,7 @@ const organizationEntry = createOrganizationEntry({
       buttons: [kind === "companion" ? "Disconnect and restart locally" : "Use this computer", "Cancel"],
       defaultId: 1, cancelId: 1,
       message: kind === "companion" ? `Disconnect from ${name} to sign in locally?` : `Leave ${name} and sign in on this computer?`,
-      detail: `${origin}\n\nOrganisation sign-in connects company models to this computer's local workspace. ${kind === "companion" ? "This disconnects desktop companion access and restarts the app. You can pair again later." : "The hosted connection stays saved and can be selected again from the Server menu."} No remote bots, conversations or provider accounts are moved or deleted.`,
+      detail: `${origin}\n\nOrganization sign-in connects company models to this computer. ${kind === "companion" ? "This disconnects desktop companion access and restarts the app. You can pair again later." : "The hosted connection stays saved and can be selected again from the Server menu."} No remote bots, conversations or provider accounts are moved or deleted.`,
     });
     return response === 0;
   },
@@ -1795,7 +1806,7 @@ const organizationEntry = createOrganizationEntry({
     await updateSecureCredentialDocument(credentials => {
       const current = desktopCompanionAccess(credentials);
       if (!current || current.endpoint !== expected.endpoint || current.deviceId !== expected.deviceId || current.token !== expected.token) {
-        throw new Error("The companion connection changed. Choose organisation sign-in again.");
+        throw new Error("The companion connection changed. Choose organization sign-in again.");
       }
       return withOrganizationRestartIntent(credentials);
     });
@@ -1805,9 +1816,9 @@ const organizationEntry = createOrganizationEntry({
     organizationRestartIntent(credentials) && !desktopCompanionAccess(credentials)
       ? withoutOrganizationRestartIntent(credentials) : credentials),
   openLocalSettings: async () => {
-    if (!app.isPackaged) throw new Error("Organisation sign-in requires the installed desktop app.");
-    if (!serverReady) throw new Error("The local workspace is unavailable. Restart the app and try organisation sign-in again.");
-    if (desktopRemoteAccess || activeEnvironment(environmentsState)) throw new Error("Choose this computer before signing in with your organisation.");
+    if (!app.isPackaged) throw new Error("Organization sign-in requires the installed desktop app.");
+    if (!serverReady) throw new Error("This installation is unavailable. Restart the app and try organization sign-in again.");
+    if (desktopRemoteAccess || activeEnvironment(environmentsState)) throw new Error("Choose this computer before signing in with your organization.");
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ deferNavigation: true });
     if (!win.webContents.isLoadingMainFrame() && senderIsLocal({ sender: win.webContents })) {
       win.webContents.send("app:open-settings", "organization");
@@ -1821,7 +1832,7 @@ const organizationEntry = createOrganizationEntry({
 function queueOrganizationEntry(link) {
   if (!isOrganizationDeepLink(link)) return false;
   pendingOrganizationEntry = true;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   void deliverOrganizationEntry();
   return true;
 }
@@ -1848,7 +1859,7 @@ async function addServerFromClipboard() {
   try {
     return await connectHostedWorkspace(clipboard.readText());
   } catch (error) {
-    await dialog.showMessageBox({ type: "info", message: "Could not connect workspace", detail: `${error.message}\nYou can also choose Connect hosted workspace to enter an address in Settings.` });
+    await dialog.showMessageBox({ type: "info", message: "Could not connect to the server", detail: `${error.message}\nYou can also choose Connect to a server to enter an address in Settings.` });
     return false;
   }
 }
@@ -1856,7 +1867,7 @@ async function addServerFromClipboard() {
 async function connectHostedWorkspace(input, name) {
   const link = parseHostedWorkspaceLink(input);
   if (!link) {
-    throw new Error("Enter an HTTPS workspace address or a full pairing link. Keep the pairing code after #, not in the URL query.");
+    throw new Error("Enter an HTTPS server address or a full pairing link. Keep the pairing code after #, not in the URL query.");
   }
   const host = new URL(link.origin).host;
   const { response } = await dialog.showMessageBox({
@@ -1974,7 +1985,7 @@ function createWindow({ deferNavigation = false } = {}) {
     // mirrors it over desktop:skin. Keep Windows hidden until that handshake
     // recolors the native caption-button overlay, otherwise a saved light
     // skin still flashes the Midnight-black block on every cold start.
-    show: !waitsForSkinSync,
+    show: !waitsForSkinSync && !startupScreen,
     icon: APP_ICON,
     backgroundColor: "#070707",
     autoHideMenuBar: process.platform !== "darwin",
@@ -1992,6 +2003,13 @@ function createWindow({ deferNavigation = false } = {}) {
     },
   });
   mainWindow = win;
+  win.on("show", () => desktopTray?.windowShown(win));
+  win.on("close", (event) => {
+    if (process.platform === "win32" && !desktopShutdownStarted && desktopTray) {
+      event.preventDefault();
+      desktopTray.hide(win);
+    }
+  });
   win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
   win.webContents.on("page-title-updated", event => {
     if (!desktopRemoteAccess && !activeEnvironment(environmentsState)) return;
@@ -1999,7 +2017,8 @@ function createWindow({ deferNavigation = false } = {}) {
     win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
   });
   attachUpdaterWindow(win);
-  if (waitsForSkinSync) {
+  if (startupScreen) startupScreen.attach(win, { maximized: restored.maximized });
+  else if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
     // process. Normal startup shows from desktop:skin almost immediately;
     // this is only the bounded recovery path.
@@ -2013,7 +2032,7 @@ function createWindow({ deferNavigation = false } = {}) {
   }
   installWindowStatePersistence(win);
   applyUnreadBadge(win);
-  if (restored.maximized) win.maximize();
+  if (restored.maximized && !startupScreen) win.maximize();
   win.once("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -2436,6 +2455,12 @@ ipcMain.handle("stt:voice-typing", localOnly("stt:voice-typing", async (event) =
   win.focus();
   await openWindowsVoiceTyping();
 }));
+ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
+  if (process.platform !== "darwin") return false;
+  requireMainWindowSender(event);
+  relaunchAfterDesktopRemoteChange();
+  return true;
+}));
 ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
@@ -2514,7 +2539,7 @@ function relaunchAfterDesktopRemoteChange() {
     // Electron's default uses its original native argv, not the JS array
     // from which we consumed the one-shot organisation action.
     app.relaunch({ args: process.argv.slice(1) });
-    app.exit(0);
+    app.quit();
   }, 250);
   timer.unref?.();
 }
@@ -2553,7 +2578,7 @@ ipcMain.handle("companion-account:retry", localOnly("companion-account:retry", (
 ipcMain.handle("companion-account:sign-out", localOnly("companion-account:sign-out", () => ensureCompanionAccountService().signOut()));
 
 const workspaceOnly = (handler) => (event, ...args) => {
-  if (!workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin())) throw new Error("Workspace controls are only available in the main desktop window");
+  if (!workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin())) throw new Error("These controls are only available in the main desktop window");
   return handler(event, ...args);
 };
 const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnly(handler));
@@ -2610,7 +2635,7 @@ ipcMain.handle("company-backups:restore", localWorkspaceOnly("company-backups:re
   companyRestoreCommitting = true;
   try {
     const response = await localBackupRequest(serverProc, "/api/workspace-backup/restore", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: input.id, confirmation: "REPLACE" }) });
-    if (!response.ok) throw new Error("The workspace could not be replaced. Check local backup status before trying again.");
+    if (!response.ok) throw new Error("This installation could not be replaced. Check local backup status before trying again.");
     publishCompanyBackupState({ busy: false, pendingRestore: true });
     return await response.json();
   } finally { companyRestoreCommitting = false; }
@@ -2618,7 +2643,7 @@ ipcMain.handle("company-backups:restore", localWorkspaceOnly("company-backups:re
 
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);
-  if (!env) throw new Error("This workspace is no longer connected");
+  if (!env) throw new Error("This server is no longer connected");
   return env;
 };
 ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
@@ -2641,11 +2666,11 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
   const info = await sharingController().identity(env);
   const folders = await validateSharedFolders(input?.folders);
   const detail = [
-    `Workspace: ${env.origin}`,
+    `Server: ${env.origin}`,
     ...folders.map(folder => `${folder.write ? "Read and write" : "Read only"}: ${folder.path}`),
     input?.terminal === true ? "Terminal: UNRESTRICTED commands as your user. Can access files outside the folders above, including credentials." : "Terminal: off",
     input?.computer === true ? "Computer control: can view your screen and operate logged-in apps. Can access information outside the folders above." : "Computer control: off",
-    "Shared content is sent to this hosted workspace and may reach its model provider. Bots from this workspace can use these permissions until you revoke them. Closing the desktop stops access.",
+    "Shared content is sent to this server and may reach its model provider. Bots on this server can use these permissions until you revoke them. Closing the desktop stops access.",
   ].join("\n\n");
   const confirmation = await dialog.showMessageBox(mainWindow, { type: "warning", message: `Allow computer access for ${env.name}?`, detail, buttons: ["Allow access", "Cancel"], defaultId: 1, cancelId: 1 });
   if (confirmation.response !== 0) return null;
@@ -2785,6 +2810,28 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  if (process.platform === "win32") {
+    try {
+      desktopTray = createSystemTray({
+        Tray, Menu, nativeImage, iconPath: APP_ICON,
+        getWindow: () => startupScreen?.window ?? mainWindow,
+        onQuit: () => app.quit(),
+      });
+    } catch (error) {
+      // A missing tray must leave a working close/quit path.
+      slog(`system tray unavailable: ${error?.message ?? error}`);
+    }
+  }
+  startupScreen = createStartupScreen({
+    BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted,
+    onQuit: () => app.quit(),
+    onHide: desktopTray ? (win) => desktopTray.hide(win) : undefined,
+    isHidden: () => desktopTray?.isHidden() ?? false,
+    onShow: (win) => desktopTray?.windowShown(win),
+    onFinished: () => { startupScreen = null; },
+  });
+  await startupScreen.ready;
+  if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
   });
@@ -2988,6 +3035,7 @@ app.whenReady().then(async () => {
   startUpdater();
   refreshApplicationMenu();
   app.on("activate", () => {
+    if (desktopTray?.show()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
@@ -3019,7 +3067,9 @@ process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
   desktopShutdownStarted = true;
+  startupScreen?.dispose();
   companyBackupSchedule?.close();
+  orgLibrary?.close();
   managedDesktop?.close();
   companyBackupController?.abort();
   computerSharing?.close();
@@ -3075,4 +3125,5 @@ function releaseDesktopDataDirLease() {
 // helpers shut down. will-quit is the final Electron lifecycle boundary; the
 // process hook covers app.exit()/fatal exits that bypass it.
 app.on("will-quit", releaseDesktopDataDirLease);
+app.on("will-quit", () => desktopTray?.destroy());
 process.once("exit", releaseDesktopDataDirLease);

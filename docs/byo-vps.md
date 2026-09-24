@@ -38,8 +38,11 @@ App Settings → Connections, nothing else. Every bot action becomes a `docker e
 supplies connection sharing and fail-fast timeouts itself: it runs each VPS command through its own
 `ssh_config` (under `~/.openmausbot/ssh/`) that includes your file first and fills in `ControlMaster`,
 `ControlPersist`, keepalives and a connect timeout wherever your alias leaves them unset. Anything your
-alias sets wins. The block below is still the recommended shape, and it is what your own `ssh` uses outside
-the app:
+alias sets wins. Startup, previews, bot tools and their connection probes use the same settings.
+For long data-directory paths, the app keeps its control socket in a private, user-owned directory
+under `/tmp` to stay within OpenSSH's socket-path limit; the config stays in the app data directory.
+Windows OpenSSH does not support connection sharing, so that platform keeps its normal SSH setup.
+The block below is still the recommended shape, and it is what your own `ssh` uses outside the app:
 
 ```
 Host my-vps
@@ -120,6 +123,12 @@ first. A wait gives up after 30 minutes and names the holder. Container lifecycl
 stop) are still one at a time per container.
 
 ## Troubleshooting
+
+Normal screen refreshes should not abort new turns with “the VPS is being prepared.”
+Turn setup waits for a pending preview, and overlapping preparation requests share the same operation.
+Stop and Delete remain exclusive; they do not race a pending capture or silently recreate its container.
+If a Docker-over-SSH command times out, the app cleans up that command's Docker/SSH processes before
+releasing it. Retry is explicit: potentially mutating commands are never automatically replayed.
 
 Work up the same path the app takes, cheapest signal first:
 

@@ -164,6 +164,23 @@ describe("additive portable team backups", () => {
     expect(store.bot(importedChief.id)).toEqual(importedChief);
   });
 
+  it("carries connector grants in the private backup but lands imported bots grant-less", () => {
+    const { store, routines, chief } = fixture();
+    store.patchBot(chief.id, { connectorTools: { gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_SEND_EMAIL"] } } });
+    const backup = createTeamBackup(store, routines.listRoutines(), "Granted team");
+    expect(backup.bots.find((bot) => bot.key === chief.id)?.connectorTools).toEqual({
+      gmail: { tools: ["GMAIL_SEND_EMAIL"] },
+    });
+    const result = importTeamBackup(store, routines, JSON.parse(JSON.stringify(backup)), selection());
+    const imported = result.bots.find((bot) => bot.name === "Mira 2")!;
+    expect(imported.composio).toBe(false);
+    expect(imported.connectorTools).toEqual({});
+    // the backup format itself rejects grant shapes the store would refuse
+    const tampered = JSON.parse(JSON.stringify(backup)) as { bots: { key: string; connectorTools: unknown }[] };
+    tampered.bots[0].connectorTools = { gmail: { tools: [] } };
+    expect(() => parseTeamBackup(tampered)).toThrow();
+  });
+
   it("keeps first-message title markers armed-once through backup and restore", () => {
     const { store, routines, chief, group } = fixture();
     // rows whose first message already named them, one per record kind

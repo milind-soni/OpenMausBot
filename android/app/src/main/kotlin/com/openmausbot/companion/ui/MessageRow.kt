@@ -88,6 +88,7 @@ import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
+import com.openmausbot.companion.core.webhookContent
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -129,6 +130,10 @@ fun MessageRow(
     val bot = (chat as? Chat.BotChat)?.bot
     val versions = remember(state, message.id) { state.versions(message, chat.threadId) }
     val versionIndex = versions.indexOfFirst { it.id == message.id }
+    // The stand-in for an edit the computer has not answered yet. It has no
+    // server identity, so nothing may react to it or edit it again.
+    val editPending = state.pendingEdits[chat.threadId]
+    val isPendingEdit = editPending?.placeholderId == message.id
     val mine = message.role == Message.Role.USER
 
     Box(
@@ -242,7 +247,7 @@ fun MessageRow(
         }
 
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+            if (!isPendingEdit) Row(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
                 Reactions.CHOICES.forEach { emoji ->
                     Text(
                         text = emoji,
@@ -281,11 +286,11 @@ fun MessageRow(
             // Attachment messages cannot be reconstructed by a text-only edit.
             // The policy also keeps their private transport paths out of the UI.
             val editableText = MessageActions.editableText(message)
-            if (editableText != null && bot != null) {
+            if (editableText != null && bot != null && !isPendingEdit) {
                 HorizontalDivider()
                 DropdownMenuItem(
                     text = { Text("Edit and retry") },
-                    enabled = bot.busy != true,
+                    enabled = bot.busy != true && editPending == null,
                     onClick = {
                         menuOpen = false
                         editText = editableText
@@ -407,6 +412,10 @@ private fun MessageContent(
             CardView(chat, message, haptics)
         }
         Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
+        Message.Kind.COMPACTION -> ReceiptChip(
+            label = message.compaction?.chipText ?: message.text.orEmpty(),
+            detail = message.compaction?.summary ?: message.text.orEmpty(),
+        )
         Message.Kind.SCREEN -> ScreenShot(chat.threadId, message)
         // Turn-audit chip (tool list + reply preview). Desktop shows it only
         // behind a "show tool calls" setting Android doesn't have; hide it.
@@ -439,6 +448,7 @@ private fun TextBubble(
     // Shared attachments are protocol tags in stored user text. They are not
     // prose, and a server-controlled path must never be presented as a link.
     val attached = remember(message.id, message.text) { AttachedMessageContent.parse(message.text.orEmpty()) }
+    val webhook = remember(message) { message.webhookContent }
     // A card brings its own surface, so it drops the bubble — and with it the
     // tail, which is a bubble's chin and not a card's.
     val bubble = card == null
@@ -496,7 +506,9 @@ private fun TextBubble(
             when (card) {
                 is TranscriptCard.Diff -> DiffCard(card)
                 is TranscriptCard.Table -> DataTableCard(card)
-                null -> if (mine) {
+                null -> if (webhook != null) {
+                    WebhookMessageBody(webhook)
+                } else if (mine) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         attached.attachments.forEach { attachment ->
                             SharedAttachmentView(
@@ -748,6 +760,44 @@ private fun ActivityChip(
                 maxLines = 1,
                 color = tint,
             )
+        }
+    }
+}
+
+/**
+ * A quiet chip under a reply for the harness's receipts (the work digest, a
+ * compaction record): one line, and the full text on tap. Port of
+ * `ReceiptChip` in `ios/App/ChatView.swift`.
+ */
+@Composable
+private fun ReceiptChip(label: String, detail: String) {
+    if (label.isEmpty()) return
+    var expanded by remember(label) { mutableStateOf(false) }
+    val haptics = rememberHaptics()
+    Column(
+        modifier = Modifier
+            .padding(start = 4.dp)
+            .heightIn(min = MIN_TOUCH_TARGET)
+            .clickable(role = Role.Button) {
+                haptics.play(TactileAction.TOGGLE_ACTIVITY_RUN)
+                expanded = !expanded
+            }
+            .semantics(mergeDescendants = true) { contentDescription = label },
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(ACTIVITY_DOT)
+                    .background(secondaryTint, CircleShape),
+            )
+            Text(text = label, fontSize = 13.sp, maxLines = 1, color = secondaryTint)
+        }
+        if (expanded && detail.isNotEmpty() && detail != label) {
+            Text(text = detail, fontSize = 12.sp, color = secondaryTint)
         }
     }
 }

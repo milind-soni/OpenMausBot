@@ -7,7 +7,7 @@ import { Download, Loader2 } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { formatTokens, formatUsd, hasFiniteCost } from "@/lib/usage";
+import { formatTokens, formatUsd, hasFiniteCost, headlineTokens } from "@/lib/usage";
 import { Card } from "./SettingsPrimitives";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
@@ -110,7 +110,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
           <span className="truncate text-ink" title={group.label}>{usageGroupLabel(summary.groupBy, group)}</span>
           <span className="text-right tabular-nums text-ink-secondary">{group.turns}</span>
           <span className="text-right tabular-nums text-ink" title={t("usage.history.tokenSplit", { input: formatTokens(group.input), output: formatTokens(group.output), cached: formatTokens(group.cachedInput) })}>
-            {formatTokens(group.input + group.output)}
+            {formatTokens(headlineTokens(group))}
           </span>
           <CostCell group={group} />
           {billable && <span className="text-right tabular-nums text-ink">{money(group.billableUsd)}</span>}
@@ -119,7 +119,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
       <div className={cn(columns, "pt-2.5 text-[13px] font-medium text-ink")}>
         <span>{t("usage.history.total")}</span>
         <span className="text-right tabular-nums">{summary.total.turns}</span>
-        <span className="text-right tabular-nums">{formatTokens(summary.total.input + summary.total.output)}</span>
+        <span className="text-right tabular-nums">{formatTokens(headlineTokens(summary.total))}</span>
         <CostCell group={summary.total} strong />
         {billable && <span className="text-right tabular-nums">{money(summary.total.billableUsd)}</span>}
       </div>

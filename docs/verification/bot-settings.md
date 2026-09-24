@@ -77,7 +77,73 @@ checks Slack → Manage in Admin: the row exists only on a hosted workspace,
 admins and members read the same link, and switching agents during a pending
 load never shows another agent's link.
 
-## Last exercised
+## Creation drafts and defaults
+
+The same isolated fixture also exposes **Configure new bot** and **New bot
+defaults → Edit**. Check that both open immediately, keep a fixed size while
+switching sections, and retain edits between sections. Identity → View full
+must appear above the creation dialog; Escape closes only that inner layer.
+
+In a creation draft, click both random-name buttons repeatedly. Each suggestion
+must replace the editable name, avoid an immediate repeat and existing names,
+and survive switching away from Identity and back. Type a custom name, then
+randomize again. Cancelling must leave the server unchanged. These buttons
+also appear in defaults but not in an existing bot's profile. Dataset provenance
+and licenses are in `src/data/given-names/`; `src/lib/random-bot-name.test.ts`
+checks the pools and selection behavior without a network or model request.
+
+Save defaults containing a title, model, memory topic, skill, and paused
+routine. Read the fixture API to confirm no bot or live routine was created.
+Open a creation draft, confirm inheritance, clear selected values, and cancel:
+the server's bots and defaults must remain unchanged. Reopen and create;
+confirm only the explicitly retained settings and files were applied. Edit
+the existing bot afterward to verify that its settings still save normally.
+Use only the fixture's harmless skills and routines.
+
+Automated coverage:
+
+```sh
+pnpm exec vitest run server/new-bot-defaults.test.ts server/new-bot-defaults.e2e.test.ts src/lib/bot-creation-draft.test.ts src/lib/create-configured-bot.test.ts src/components/NewBotDialog.test.ts
+node --test electron/approval-trusted-mode.node-test.mjs
+```
+
+The HTTP tests launch a fresh temporary server. They cover defaults persistence,
+explicit empty overrides, opt-out, malformed preview requests returning 400,
+removed browser-profile references, strict validation, and rejected untrusted
+privileged creation. The client tests cover Ask/Auto/Full/Custom creation,
+native permission rejection, cleanup, and post-creation activation warnings.
+Browser fixtures do not prove packaged operating-system grants or real model
+execution; those require the native approval verification separately.
+
+Companion connections retain the single-request Create bot flow: they cannot
+read host defaults or patch host settings. `companion/test/proxy.test.ts` checks
+creation succeeds while those routes remain blocked. The dialog tests also
+check that a caller's synchronous exception or rejected promise after creation
+is reported without leaving a retryable creation dialog open.
+
+In the renderer fixture, open **App settings → General → Defaults for new bots → Edit**.
+The full creation dialog retains upstream's **Who can see it** selection for
+browser admins. `scripts/testing/bot-draft-visibility-ui.e2e.test.ts` selects
+**Admins only**, creates a bot, and verifies its stored audience. The initial
+POST carries that audience; it is not widened temporarily during later setup.
+The fixture injects the native select's change event for cross-platform
+headless reliability; it does not verify the operating system's select popup.
+Desktop, companion, and default-template editors do not expose that control.
+
+In the defaults editor:
+Open **Identity → View full**. Three successive Escape presses must close only
+the instruction preview, then the defaults editor, then Settings. Tab navigation
+must remain inside the active editor.
+
+`scripts/testing/bot-tools-ui.e2e.test.ts` holds the creation request in the
+isolated renderer, verifies that choosing a role alone creates nothing, then
+closes and reopens the dialog while saving. Escape and Close remain usable;
+the shared pending state prevents a second creation. Completion must not close
+a newer dialog. A rejected profile save must roll back the partial bot, retain
+the draft, and permit one successful retry. The launcher uses a test-only IPC
+stop request so Windows executes the same orderly cleanup as other platforms.
+
+## Earlier settings verification
 
 The isolated browser run on 2026-09-06 confirmed immediate Identity/Soul
 saves on section changes, SOUL duplication, memory draft retention and

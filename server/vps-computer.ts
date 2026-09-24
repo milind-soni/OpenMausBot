@@ -24,7 +24,8 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { DATA_DIR, isValidSshAlias, vpsSshAlias, type AppConfig } from "./config.ts";
-import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
+import { augmentedPath } from "./env-path.ts";
+import { killCliTree, spawnCli } from "./procs.ts";
 import { prepareVpsSsh } from "./vps-ssh.ts";
 import { loadEnvironmentId } from "./environment.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
@@ -46,7 +47,9 @@ function vpsEnvironmentId(): string {
 // SIGTERM must give ssh + docker time to tear down the remote exec before the
 // SIGKILL escalation; 1s was routinely too short over a WAN round-trip, and an
 // orphaned remote exec keeps the driver socket busy for the next command.
-const COMMAND_TIMEOUT_KILL_GRACE_MS = 5_000;
+const COMMAND_TIMEOUT_TERM_GRACE_MS = 5_000;
+// killCliTree also waits up to one second for the forced group exit.
+const COMMAND_TIMEOUT_KILL_GRACE_MS = COMMAND_TIMEOUT_TERM_GRACE_MS + 1_000;
 
 const CONTAINER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]+$/;
 const CONTAINER_ID = /^[a-f0-9]{12,64}$/i;
@@ -84,17 +87,23 @@ function snapshotVpsConfig(cfg: AppConfig): AppConfig {
 export function vpsLifecycleBusy(): boolean {
   return lifecycleLocks.size > 0;
 }
-// A held lock means a lifecycle mutation (worst case: a 10-minute image
-// build) is running. Waiting it out would wedge Sleep and the screenshot
-// poll behind it, so acquisition fails fast instead.
+// Sleep, remove and preview requests must not queue behind a potentially
+// 10-minute image build. Turn preparation may instead wait through a normal
+// preview, whose bounded duration is accounted for below.
 const LOCK_ACQUIRE_TIMEOUT_MS = 5_000;
 // The panel polls status every 4-6s and the screen poller re-checks it before
 // every frame; each full status is several docker-over-SSH processes. Same
 // pattern as container-computer's screenshotStatusCache, and the same TTL.
 const STATUS_CACHE_TTL_MS = 10_000;
 const statusCache = new Map<string, { status: VpsComputerStatus; expiresAt: number }>();
+const pendingStatuses = new Map<string, Promise<VpsComputerStatus>>();
+const pendingProvisions = new Map<string, Promise<VpsComputerStatus>>();
 const SCREENSHOT_BUDGET_MS = 45_000;
 const SCREENSHOT_CLEANUP_BUDGET_MS = 10_000;
+// Turn preparation may wait for a normal preview to finish; destructive
+// actions retain the short acquisition limit. Overlapping provisions share
+// one operation below, so they never queue behind their own image build.
+const PREPARATION_LOCK_TIMEOUT_MS = SCREENSHOT_BUDGET_MS + LOCK_ACQUIRE_TIMEOUT_MS;
 type VpsScreenshot = { png: string; format: "png" | "jpeg" };
 const pendingScreenshots = new Map<string, Promise<VpsScreenshot>>();
 const viewerConnections = new Map<string, { privateIp: string; password: string }>();
@@ -102,6 +111,13 @@ const desktopTunnels = new Map<
   string,
   { child: ReturnType<typeof spawn>; joinUrl: string; expiry: ReturnType<typeof setTimeout> }
 >();
+
+function invalidateVpsStatus(key: string): void {
+  statusCache.delete(key);
+  // Detach old polls as well: an inspection begun before a mutation must
+  // neither be joined nor republish its old result after that mutation.
+  pendingStatuses.delete(key);
+}
 
 export interface VpsCommandOptions {
   input?: string;
@@ -300,11 +316,10 @@ function tailCollector() {
 
 export function defaultRunner(args: string[], options: VpsCommandOptions = {}): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const command = resolveCliSpawn("docker", args);
     // docker's SSH transport runs the first `ssh` on PATH: the app's shim,
     // which shares one connection across every command of this VPS.
     const ssh = prepareVpsSsh(DATA_DIR, augmentedPath());
-    const child = spawn(command.command, command.args, {
+    const child = spawnCli("docker", args, {
       shell: false,
       env: { ...process.env, PATH: ssh.path },
       stdio: ["pipe", "pipe", "pipe"],
@@ -312,27 +327,31 @@ export function defaultRunner(args: string[], options: VpsCommandOptions = {}): 
     const stdout = tailCollector();
     const stderr = tailCollector();
     let settled = false;
-    let timedOut = false;
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let failure: Error | null = null;
     let timeout: ReturnType<typeof setTimeout>;
     const settle = (finish: () => void) => {
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
-      if (killTimer) clearTimeout(killTimer);
       finish();
     };
-    timeout = setTimeout(() => {
-      if (settled) return;
-      timedOut = true;
-      killTimer = setTimeout(() => {
-        if (settled) return;
-        child.kill("SIGKILL");
-        settle(() => reject(new Error("Docker-over-SSH command timed out")));
-      }, COMMAND_TIMEOUT_KILL_GRACE_MS);
-      killTimer.unref?.();
-      child.kill("SIGTERM");
-    }, options.timeoutMs ?? 120_000);
+    const fail = (error: Error) => {
+      if (settled || failure) return;
+      failure = error;
+      clearTimeout(timeout);
+      // Docker launches ssh, which can retain these pipes after Docker exits.
+      // Only this command's private process group is ours to stop; persistent
+      // SSH masters detach from it and may serve other commands. Hold callers'
+      // lifecycle ownership until the bounded tree cleanup has completed.
+      const cleaned = () => {
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
+        settle(() => reject(error));
+      };
+      void killCliTree(child, COMMAND_TIMEOUT_TERM_GRACE_MS).then(cleaned, cleaned);
+    };
+    timeout = setTimeout(() => fail(new Error("Docker-over-SSH command timed out")), options.timeoutMs ?? 120_000);
     timeout.unref?.();
 
     child.stdout.setEncoding("utf8");
@@ -344,17 +363,13 @@ export function defaultRunner(args: string[], options: VpsCommandOptions = {}): 
       stderr.push(chunk);
     });
     child.stdin.on("error", (error) => {
-      if (timedOut) return;
-      settle(() => reject(new Error(`Docker-over-SSH stdin failed: ${error.message}`)));
+      fail(new Error(`Docker-over-SSH stdin failed: ${error.message}`));
     });
     child.on("error", (error) => {
-      settle(() => reject(new Error(`Docker-over-SSH could not start: ${error.message}`)));
+      fail(new Error(`Docker-over-SSH could not start: ${error.message}`));
     });
     child.on("close", (code, signal) => {
-      if (timedOut) {
-        settle(() => reject(new Error("Docker-over-SSH command timed out")));
-        return;
-      }
+      if (failure) return;
       settle(() => {
         if (code === 0) return resolve({ stdout: stdout.text(), stderr: stderr.text() });
         const detail = stderr.text().trim().slice(-1000);
@@ -364,7 +379,7 @@ export function defaultRunner(args: string[], options: VpsCommandOptions = {}): 
     try {
       child.stdin.end(options.input);
     } catch (error) {
-      settle(() => reject(new Error(`Docker-over-SSH stdin failed: ${error instanceof Error ? error.message : String(error)}`)));
+      fail(new Error(`Docker-over-SSH stdin failed: ${error instanceof Error ? error.message : String(error)}`));
     }
   });
 }
@@ -657,13 +672,24 @@ export async function vpsComputerStatus(
   if (cacheable) {
     // A capture already checks this exact target. Let it finish instead of
     // opening another six SSH connections while its readiness check is cold.
-    await pendingScreenshots.get(key)?.catch(() => {});
+    const capture = pendingScreenshots.get(key);
+    if (capture) await capture.catch(() => {});
     const cached = statusCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return cached.status;
+    const pending = pendingStatuses.get(key);
+    if (pending) return pending;
   }
-  const status = await computeVpsComputerStatus(cfg, botId, runner);
-  if (cacheable) statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
-  return status;
+  const inspection = computeVpsComputerStatus(cfg, botId, runner);
+  if (cacheable) pendingStatuses.set(key, inspection);
+  try {
+    const status = await inspection;
+    if (cacheable && pendingStatuses.get(key) === inspection && !lifecycleLocks.has(key)) {
+      statusCache.set(key, { status, expiresAt: Date.now() + STATUS_CACHE_TTL_MS });
+    }
+    return status;
+  } finally {
+    if (cacheable && pendingStatuses.get(key) === inspection) pendingStatuses.delete(key);
+  }
 }
 
 const VPS_INVENTORY_LIMIT = 256;
@@ -918,8 +944,8 @@ async function prepareVpsImage(alias: string, runner: VpsCommandRunner) {
  * Backoff doubles 0.5s→4s because each poll is a real SSH connection, and
  * between polls only ONE cheap exec (`cua-driver status`) asks whether the
  * driver answers yet — the full multi-invocation status runs again only when
- * that predicate flips, and once more at the deadline, so the returned state
- * is always a complete inspection. */
+ * that predicate flips. Every command, including the diagnostic tail, is
+ * clamped to the readiness phase's deadline and transport cleanup allowance. */
 async function waitForVpsReady(
   cfg: AppConfig,
   botId: string,
@@ -928,9 +954,25 @@ async function waitForVpsReady(
 ): Promise<VpsComputerStatus> {
   const alias = vpsSshAlias(cfg);
   const deadline = Date.now() + budgetMs;
-  let status = await computeVpsComputerStatus(cfg, botId, runner);
+  let budgetExpired = false;
+  const boundedRunner: VpsCommandRunner = async (args, options = {}) => {
+    // Include transport termination in the readiness phase's budget; a
+    // final failed probe or diagnostic tail must not keep its lock past it.
+    const remaining = deadline - Date.now() - COMMAND_TIMEOUT_KILL_GRACE_MS;
+    if (remaining <= 0) {
+      budgetExpired = true;
+      throw new Error("VPS desktop readiness timed out");
+    }
+    try {
+      return await runner(args, { ...options, timeoutMs: Math.min(options.timeoutMs ?? 120_000, remaining) });
+    } catch (error) {
+      if (Date.now() >= deadline - COMMAND_TIMEOUT_KILL_GRACE_MS) budgetExpired = true;
+      throw error;
+    }
+  };
+  let status = await computeVpsComputerStatus(cfg, botId, boundedRunner);
   let delayMs = 500;
-  while (!status.ready && alias && Date.now() < deadline) {
+  while (!status.ready && alias && !budgetExpired && Date.now() < deadline) {
     if (
       !status.daemonUp ||
       !status.image ||
@@ -949,20 +991,28 @@ async function waitForVpsReady(
     });
     delayMs = Math.min(delayMs * 2, 4_000);
     const container = status.container_id ?? status.container_name;
-    const driverAnswers = await runner(
+    const driverAnswers = await boundedRunner(
       vpsDockerArgs(alias, cuaExecArgs(["status", "--socket", CUA_SOCKET], { container })),
       { timeoutMs: 10_000 },
     ).then(
       () => true,
       () => false,
     );
+    if (budgetExpired) break;
     if (!driverAnswers && Date.now() < deadline) continue;
-    status = await computeVpsComputerStatus(cfg, botId, runner);
+    status = await computeVpsComputerStatus(cfg, botId, boundedRunner);
   }
+  if (budgetExpired) return {
+    ...status,
+    ready: false,
+    desktopReady: false,
+    desktop_error: "VPS desktop readiness timed out",
+    problem: "The VPS desktop did not become ready in time — retry when the connection recovers",
+  };
   return status;
 }
 
-async function withVpsLifecycleLock<T>(key: string, operation: () => Promise<T>): Promise<T> {
+async function withVpsLifecycleLock<T>(key: string, operation: () => Promise<T>, acquireTimeoutMs = LOCK_ACQUIRE_TIMEOUT_MS): Promise<T> {
   const previous = lifecycleLocks.get(key);
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
@@ -974,7 +1024,7 @@ async function withVpsLifecycleLock<T>(key: string, operation: () => Promise<T>)
     const acquired = await Promise.race([
       previous.then(() => true),
       new Promise<boolean>((resolve) => {
-        acquireTimer = setTimeout(() => resolve(false), LOCK_ACQUIRE_TIMEOUT_MS);
+        acquireTimer = setTimeout(() => resolve(false), acquireTimeoutMs);
         acquireTimer.unref?.();
       }),
     ]);
@@ -1023,6 +1073,7 @@ export async function removeManagedVpsComputer(
   }
   const key = `${alias}:${containerName}`;
   return withVpsLifecycleLock(key, async () => {
+    invalidateVpsStatus(key);
     const scan = await scanManagedVpsComputers(cfg, owners, runner);
     const inventory = scan.inventory;
     if (!inventory.available) {
@@ -1047,6 +1098,7 @@ export async function removeManagedVpsComputer(
       // and rm must not redirect this explicit removal to the replacement.
       await runner(vpsDockerArgs(alias, ["rm", "-f", containerId]), { timeoutMs: 2 * 60_000 });
     } catch (error) {
+      invalidateVpsStatus(key);
       const detail = (error instanceof Error ? error.message : String(error))
         .replace(/[\r\n\t]+/g, " ")
         .trim()
@@ -1056,7 +1108,7 @@ export async function removeManagedVpsComputer(
         { status: 502 },
       );
     }
-    statusCache.delete(key);
+    invalidateVpsStatus(key);
     viewerConnections.delete(key);
     if (instance.ownerBotId) stopDesktopTunnel(instance.ownerBotId);
     return { removed: true, name: instance.name };
@@ -1073,13 +1125,16 @@ export async function vpsComputerAction(
   const alias = vpsSshAlias(cfg);
   if (!alias) throw Object.assign(new Error("VPS is not configured — add an SSH config alias in App Settings → Connections"), { status: 409 });
   const key = `${alias}:${vpsContainerName(botId)}`;
+  const pending = action === "provision" ? pendingProvisions.get(key) : undefined;
+  if (pending) return pending;
   const operation = async () => {
     // A mutation invalidates every cached poll answer, before and after: the
     // panel must never keep showing the pre-action world for a TTL.
-    statusCache.delete(key);
+    invalidateVpsStatus(key);
     try {
       const before = await computeVpsComputerStatus(cfg, botId, runner);
       if (!before.daemonUp) throw Object.assign(new Error(before.problem ?? "Docker over SSH is not reachable"), { status: 409 });
+      if (action === "provision" && before.ready) return before;
       // A real lifecycle change invalidates the remote endpoint. Provision
       // is also the turn-start idempotency path, so leave an already-running
       // viewer alone when no start/replacement will occur.
@@ -1120,18 +1175,21 @@ export async function vpsComputerAction(
           );
         }
         await run(["rm", "-f", containerRef]);
-        return computeVpsComputerStatus(cfg, botId, runner);
+        return await computeVpsComputerStatus(cfg, botId, runner);
       } else {
         if (before.container !== "running") throw Object.assign(new Error("The VPS container is not running"), { status: 409 });
         assertUsableContainer(before);
         await run(["stop", containerRef]);
       }
-      return action === "stop" ? computeVpsComputerStatus(cfg, botId, runner) : waitForVpsReady(cfg, botId, runner);
+      return await (action === "stop" ? computeVpsComputerStatus(cfg, botId, runner) : waitForVpsReady(cfg, botId, runner));
     } finally {
-      statusCache.delete(key);
+      invalidateVpsStatus(key);
     }
   };
-  return withVpsLifecycleLock(key, operation);
+  const preparation = withVpsLifecycleLock(key, operation, action === "provision" ? PREPARATION_LOCK_TIMEOUT_MS : LOCK_ACQUIRE_TIMEOUT_MS);
+  if (action === "provision") pendingProvisions.set(key, preparation);
+  try { return await preparation; }
+  finally { if (pendingProvisions.get(key) === preparation) pendingProvisions.delete(key); }
 }
 
 /** Auto is intentionally read-only: it can attach only to an existing ready
@@ -1157,7 +1215,7 @@ export async function inspectVpsForAuto(
   cfg = snapshotVpsConfig(cfg);
   const key = vpsLockKey(cfg, botId);
   return key
-    ? withVpsLifecycleLock(key, () => computeVpsComputerStatus(cfg, botId, runner))
+    ? withVpsLifecycleLock(key, () => computeVpsComputerStatus(cfg, botId, runner), PREPARATION_LOCK_TIMEOUT_MS)
     : computeVpsComputerStatus(cfg, botId, runner);
 }
 
@@ -1310,10 +1368,26 @@ export async function vpsComputerScreenshot(
     // poller runs every few seconds, and re-verifying the whole container
     // between frames multiplied every frame's SSH cost.
     const cached = cacheable ? statusCache.get(key) : undefined;
+    const pendingStatus = cacheable ? pendingStatuses.get(key) : undefined;
+    // A poll which started first already owns the inspection. Sharing its
+    // result must not extend this preview's own deadline; the poll remains
+    // independently owned if it is still checking when this preview expires.
+    let statusTimer: ReturnType<typeof setTimeout> | undefined;
     const status =
       cached && cached.expiresAt > Date.now()
         ? cached.status
-        : await computeVpsComputerStatus(cfg, botId, boundedRunner);
+        : pendingStatus
+          ? await Promise.race([
+            pendingStatus,
+            new Promise<never>((_resolve, reject) => {
+              statusTimer = setTimeout(() => {
+                invalidateVpsStatus(key);
+                reject(timeoutError());
+              }, Math.max(0, workDeadline - Date.now()));
+              statusTimer.unref?.();
+            }),
+          ]).finally(() => { if (statusTimer) clearTimeout(statusTimer); })
+          : await computeVpsComputerStatus(cfg, botId, boundedRunner);
     // Status converts transport errors into displayable state. A deadline is
     // still a timeout, not evidence that this container became incompatible.
     if (budgetExpired) {

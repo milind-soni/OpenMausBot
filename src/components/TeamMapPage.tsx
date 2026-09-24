@@ -380,7 +380,7 @@ export function TeamMapPage() {
           void moveBot(move.bot, move.destination).then(() => move.resolve(true), () => move.resolve(false));
         }} />
       <ConfirmDialog open={deletingTeam !== null} title={t("team.deleteTitle", { name: deletingTeam ?? "" })}
-        body={t("team.deleteDescription")}
+        body={t("team.deleteKeepBotsDescription")}
         confirmLabel={t("team.delete")} onCancel={() => setDeletingTeam(null)} onConfirm={() => {
           const name = deletingTeam;
           setDeletingTeam(null);

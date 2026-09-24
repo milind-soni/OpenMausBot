@@ -142,6 +142,59 @@ pnpm --filter @openmausbot/control-plane exec wrangler dev --config wrangler.jso
 
 Do not commit `.dev.vars`.
 
+## Troubleshooting managed HTTPS setup
+
+`endpoint_unavailable` comes from authenticated endpoint provisioning, before
+the desktop starts its connector or a phone connects. A successful `/healthz`
+response only validates Worker configuration; it does **not** check provider
+capacity, API permissions, DNS writes, or tunnel creation. A reachable LAN
+companion on port `8810` also does not prove managed HTTPS is ready.
+
+1. Search Worker logs for the user's **Reference** UUID and
+   `managed endpoint reconcile failed`. The structured `errorCode` is safe to
+   inspect; never log API tokens, connector tokens, or raw provider responses.
+   Historical log queries require Workers Observability access; a live tail
+   cannot recover an older request. Do not claim an exact request was traced
+   from aggregate database counts alone.
+2. Check the scope of failures without exporting account or installation data:
+
+   ```sh
+   pnpm --filter @openmausbot/control-plane exec wrangler d1 execute DB --remote --command "SELECT status, last_error_code, COUNT(*) AS endpoints FROM installation_endpoints GROUP BY status, last_error_code"
+   ```
+
+3. Check **account-wide** undeleted tunnel usage in Cloudflare, not just ready
+   D1 rows. Cloudflare's [documented default limit is 1,000 tunnels per
+   account](https://developers.cloudflare.com/cloudflare-one/account-limits/#cloudflare-tunnel).
+   Pending allocations and tunnels belonging to other services also consume
+   capacity. At the limit, request a capacity increase from Cloudflare. A new
+   desktop release cannot raise the provider's quota. Do not infer the meaning
+   of an API error code from similarly numbered Cloudflare edge error pages.
+4. Review already-requested deletion and revoked-installation cleanup. Do not
+   delete a healthy installation's tunnel, or infer abandonment from a
+   disconnected connector: a sleeping laptop is normal. The existing cleanup
+   path validates ownership before deleting resources.
+5. After the service-side problem is resolved, the user can choose **Retry
+   secure access** without signing out or reinstalling. The desktop retains
+   the installation credential even when endpoint provisioning fails, avoiding
+   unnecessary credential rotations and their one-minute cooldown. Endpoint
+   retries remain limited to 20 per installation per hour.
+
+While provisioning is unavailable, use **Advanced & troubleshooting → Pair on
+this Wi-Fi** on a trusted reachable LAN, or the separate **Tailscale pairing**
+option. These do not depend on managed endpoint provisioning. Do not change
+phone VPN settings to diagnose a failure that happens before phone pairing.
+
+The isolated HTTP recovery fixture exercises healthy service discovery,
+failed endpoint setup, repeated retry, app restoration, and eventual recovery:
+
+```sh
+node --test electron/companion-provisioning.node-test.mjs
+```
+
+Run it from the repository root. It uses synthetic credentials and a loopback
+server, never a real account, cloud tunnel, or the user's desktop data. It
+verifies client recovery, not live Cloudflare availability or iPhone pairing.
+
 ## Production blockers
 
 The checked-in Wrangler file is intentionally non-deployable production

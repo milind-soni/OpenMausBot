@@ -215,8 +215,8 @@ export function VoiceSettings({
                 : provider === "xai"
                   ? ` ${t("voice.grok.sharedKey")}`
                 : provider === "chatterbox"
-                  ? " the Chatterbox server address is shared by the workspace."
-                  : ` the ${cloudProvider?.name ?? "voice provider"} key is shared by the workspace.`}</>}
+                  ? " the Chatterbox server address is shared by this installation."
+                  : ` the ${cloudProvider?.name ?? "voice provider"} key is shared by this installation.`}</>}
       </div>
 
       {localMacClient && (
@@ -391,7 +391,7 @@ export function VoiceSettings({
                   : usesLocalSystem
                     ? "Mac system default"
                     : tts.voice
-                      ? "Workspace default"
+                      ? "Installation default"
                       : "Pick a voice"}
               </option>
               {selectedVoice && !voices.some((voice) => voice.id === selectedVoice) && (

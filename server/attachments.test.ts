@@ -24,15 +24,17 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 });
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
-  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync) };
+  return { ...fs, unlinkSync: vi.fn(fs.unlinkSync), writeFileSync: vi.fn(fs.writeFileSync) };
 });
 const realUnlink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).unlink;
 const realLink = (await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises")).link;
 const realUnlinkSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).unlinkSync;
+const realWriteFileSync = (await vi.importActual<typeof import("node:fs")>("node:fs")).writeFileSync;
 afterEach(() => {
   vi.mocked(unlink).mockReset().mockImplementation(realUnlink);
   vi.mocked(link).mockReset().mockImplementation(realLink);
   vi.mocked(unlinkSync).mockReset().mockImplementation(realUnlinkSync);
+  vi.mocked(writeFileSync).mockReset().mockImplementation(realWriteFileSync);
 });
 
 // The module reads DATA_DIR at import time, so the env var must be set
@@ -53,6 +55,7 @@ const {
   extensionForMime,
   readAttachment,
   sanitizeSharedFileName,
+  saveAudio,
   saveFile,
   saveImage,
   saveImageUpload,
@@ -144,6 +147,67 @@ describe("saveImage", () => {
     for (const value of ["", "short", "../../escape", `${UPLOAD_A}.png`, "00000000-0000-0000-0000-000000000000"]) {
       expect(() => validateAttachmentUploadId(value)).toThrow(/UUID/);
     }
+  });
+});
+
+describe("saveAudio", () => {
+  beforeEach(() => {
+    resetDir();
+  });
+  afterEach(() => {
+    resetDir();
+  });
+
+  it("persists an mp3 under the attachments dir with a generated name", () => {
+    const saved = saveAudio(Buffer.from("mp3-bytes"), "audio/mpeg");
+    expect(saved.path.startsWith(ATTACHMENTS_DIR)).toBe(true);
+    expect(saved.path.endsWith(".mp3")).toBe(true);
+    expect(saved.bytes).toBe(9);
+    expect(saved.mime).toBe("audio/mpeg");
+    if (process.platform !== "win32") expect(statSync(saved.path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(saved.path).toString()).toBe("mp3-bytes");
+    expect(readdirSync(ATTACHMENTS_DIR)).toEqual([saved.path.split(/[\\/]/).pop()!]);
+  });
+
+  it("normalizes mime parameters and casing", () => {
+    const saved = saveAudio(Buffer.from("x"), "Audio/MPEG; charset=binary");
+    expect(saved.mime).toBe("audio/mpeg");
+    expect(saved.path.endsWith(".mp3")).toBe(true);
+  });
+
+  it("rejects other audio mimes, empty bodies, and oversize bodies", () => {
+    expect(() => saveAudio(Buffer.from("x"), "audio/wav")).toThrow(/unsupported audio type/);
+    expect(() => saveAudio(Buffer.alloc(0), "audio/mpeg")).toThrow(/empty/);
+    expect(() => saveAudio(Buffer.alloc(FILE_MAX_BYTES + 1), "audio/mpeg")).toThrow(/exceeds/);
+  });
+
+  it("rejects at the aggregate ceiling without leaving partials and releases its reservation", () => {
+    const referenced = saveImage(Buffer.from("x"), "image/png");
+    truncateSync(referenced.path, ATTACHMENTS_MAX_BYTES);
+    __resetAttachmentAccountingForTests();
+
+    try {
+      saveAudio(Buffer.from("y"), "audio/mpeg");
+      throw new Error("expected quota rejection");
+    } catch (error) {
+      expect(error).toMatchObject({ status: 507 });
+      expect(error).toHaveProperty("message", expect.stringMatching(/storage is full/));
+    }
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+
+    truncateSync(referenced.path, 4);
+    __resetAttachmentAccountingForTests();
+    const note = saveAudio(Buffer.from("note"), "audio/mpeg");
+    expect(statSync(note.path).size).toBe(4);
+  });
+
+  it("cleans up its partial and reservation when the write fails", () => {
+    vi.mocked(writeFileSync).mockImplementationOnce(() => {
+      throw new Error("disk full");
+    });
+    expect(() => saveAudio(Buffer.from("note"), "audio/mpeg")).toThrow(/disk full/);
+    expect(readdirSync(ATTACHMENTS_DIR).every((name) => !name.endsWith(".partial"))).toBe(true);
+    expect(() => saveAudio(Buffer.from("note"), "audio/mpeg")).not.toThrow();
   });
 });
 

@@ -71,6 +71,23 @@ export type RuntimeEvent = RuntimeEventBase &
         usage?: { input: number; output: number; cachedInput?: number };
       }
     | {
+        type: "turn.wait_started";
+        /** The computer resource this turn queued behind (e.g. "computer:box:bx_…"). */
+        resource: string;
+        /** Who held the computer when the wait began, if the holder was known. */
+        holder?: { name: string; task?: string };
+      }
+    | {
+        type: "turn.wait_ended";
+        resource: string;
+        holder?: { name: string; task?: string };
+        /** How long the turn actually waited. */
+        waitedMs: number;
+        /** acquired: the claim landed; stopped: the turn was stopped or
+         * cancelled while waiting; gave_up: the wait ceiling fired. */
+        outcome: "acquired" | "gave_up" | "stopped";
+      }
+    | {
         type: "item.started";
         itemType: "tool" | "reasoning";
         title?: string;
@@ -95,11 +112,21 @@ export type RuntimeEvent = RuntimeEventBase &
         requestType: "permission" | "question";
         tool: string;
         summary: string;
+        /** Complete native shell input and its effective working directory.
+         * Used for exact-command grants; never reconstructed from a display
+         * summary, tool title, or argv. Absent when either value is unknown. */
+        command?: { command: string; cwd: string };
         choices?: string[];
         /** A provider's structured ask (Claude's AskUserQuestion): the whole
          * set of questions, each with its own options, so the card can offer
          * them instead of an Allow/Deny a person cannot answer. */
         questions?: AskQuestion[];
+        /** Where the ask came from: a harness tool call ("tool" — the
+         * default, and what every event before this field implied), or a
+         * block parsed out of model-authored final output ("output", the
+         * turn-held transport). Cards and logs can badge the latter as
+         * agent-composed; untrusted-input rules apply either way. */
+        origin?: "tool" | "output";
         approvalScope?: "local-computer";
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */
@@ -141,4 +168,3 @@ export type RuntimeEvent = RuntimeEventBase &
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
-

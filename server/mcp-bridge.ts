@@ -44,14 +44,14 @@ export interface BridgeLiveness {
   args: string[];
 }
 
-/** Run the liveness command; alive means "exited 0 within the timeout". The
- * probe is its own short-lived process, so it cannot inherit the wedged
- * connection it is diagnosing. */
-export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOUT_MS): Promise<boolean> {
+/** Run the liveness command; alive means "exited 0 within the timeout". A
+ * separate bounded command checks the transport without waiting for an
+ * answer on the possibly wedged MCP stream. */
+export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOUT_MS, env?: NodeJS.ProcessEnv): Promise<boolean> {
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
       shell: false,
-      env: { ...process.env, PATH: augmentedPath() },
+      env: env ?? { ...process.env, PATH: augmentedPath() },
       stdio: ["ignore", "ignore", "ignore"],
     });
     const timer = setTimeout(() => {
@@ -329,7 +329,7 @@ export function runMcpBridge(options: BridgeOptions): void {
     const liveness = options.liveness;
     watchdog = createInactivityWatchdog({
       inactivityMs: BRIDGE_INACTIVITY_MS,
-      probe: () => runLivenessProbe(liveness),
+      probe: () => runLivenessProbe(liveness, PROBE_TIMEOUT_MS, options.env),
       onDead: () => {
         process.stderr.write(
           `${options.label} transport went silent and stopped answering liveness probes; ending the bridge\n`,

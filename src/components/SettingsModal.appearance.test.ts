@@ -10,10 +10,13 @@ const fixture = vi.hoisted(() => ({
   section: "appearance" as AppSettingsSection,
   showThreads: true,
   setShowThreads: vi.fn(),
+  notificationSounds: true,
+  setNotificationSounds: vi.fn(),
   api: vi.fn(),
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
 }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
@@ -23,6 +26,10 @@ vi.mock("@/state/store", async (importOriginal) => ({
 vi.mock("@/lib/thread-preferences", () => ({
   useShowThreads: () => fixture.showThreads,
   setShowThreads: fixture.setShowThreads,
+}));
+vi.mock("@/lib/notification-preferences", () => ({
+  useNotificationSounds: () => fixture.notificationSounds,
+  setNotificationSounds: fixture.setNotificationSounds,
 }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("./SettingsPrimitives", async (importOriginal) => {
@@ -40,6 +47,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   fixture.section = "appearance";
   fixture.showThreads = true;
+  fixture.notificationSounds = true;
   fixture.switches = [];
   vi.stubGlobal("window", {});
   vi.stubGlobal("document", { documentElement: { dataset: {} } });
@@ -78,6 +86,19 @@ describe("Settings → Appearance", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])("mutes notification sounds on this computer only when the switch is %s", (enabled) => {
+    fixture.notificationSounds = enabled;
+    const html = render();
+    expect(html).toContain('aria-label="Notification sounds"');
+    expect(html).toContain("keep the banners but lose the chime");
+    const toggle = fixture.switches.find((props) => props["aria-label"] === "Notification sounds")!;
+    expect(toggle.checked).toBe(enabled);
+    toggle.onClick!({} as never);
+    expect(fixture.setNotificationSounds).toHaveBeenCalledWith(!enabled);
+    expect(fixture.api).not.toHaveBeenCalled();
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+  });
+
   it("leaves non-appearance General settings in place", () => {
     fixture.section = "general";
     const html = render();
@@ -102,6 +123,7 @@ describe("Settings → Appearance", () => {
     expect(html).not.toContain('<option value="backups">');
     expect(html).toContain("Midnight");
     expect(html).toContain('aria-label="Show threads"');
+    expect(html).toContain('aria-label="Notification sounds"');
     expect(html).not.toContain('aria-label="Show tool calls in chat"');
   });
 
@@ -127,10 +149,10 @@ describe("Settings → Appearance", () => {
     fixture.section = "desktopWorkspaces";
     vi.stubGlobal("window", { ogb: { environments: {} } });
     const local = render();
-    expect(local).toContain('<option value="desktopWorkspaces" selected="">Connected workspaces</option>');
-    expect(local).toContain("Workspace address or pairing link");
+    expect(local).toContain('<option value="desktopWorkspaces" selected="">Servers</option>');
+    expect(local).toContain("Server address or pairing link");
     expect(local).toContain("Name (optional)");
-    expect(local).toContain("Your workspaces");
+    expect(local).toContain("Your servers");
     expect(local).toContain("npx openmausbot pair --label");
     fixture.section = "general";
     vi.stubGlobal("window", { ogb: { workspaces: {} } });
@@ -141,7 +163,7 @@ describe("Settings → Appearance", () => {
     fixture.section = "organization";
     vi.stubGlobal("window", { ogb: { organization: {} } });
     const local = render();
-    expect(local).toContain('<option value="organization" selected="">Organisation</option>');
+    expect(local).toContain('<option value="organization" selected="">Organization</option>');
     expect(local).toContain("personal and local models");
     fixture.section = "appearance";
     vi.stubGlobal("window", {});

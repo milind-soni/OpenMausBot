@@ -27,6 +27,7 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var draft = ""
+    @State private var revealedMessageId: String?
     @State private var showingTasks = false
     @State private var showingComputer = false
     @State private var showingPlus = false
@@ -198,6 +199,12 @@ struct ChatView: View {
                                     )
                                 case let .activityRun(items):
                                     ActivityRunChip(items: items, openThread: openThread)
+                                case let .assistantTurn(turn):
+                                    AssistantTurnChip(
+                                        turn: turn, chat: current, openLink: openLink, openThread: openThread,
+                                        revealedMessageId: revealedMessageId,
+                                        scrollToMessage: { proxy.scrollTo($0, anchor: .center) }
+                                    )
                                 }
                             }
                             .id(row.id)
@@ -211,7 +218,8 @@ struct ChatView: View {
                         if let live = session.state.streaming[threadId], !live.isEmpty {
                             StreamingBubble(text: live, reasoning: nil, color: current.color)
                                 .id(Self.liveBubbleId)
-                        } else if let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
+                        } else if activityDetail != ActivityDetail.hidden.rawValue,
+                                  let thinking = session.state.reasoning[threadId], !thinking.isEmpty {
                             // Only while there is no answer yet. Once tokens
                             // of the reply exist, the reasoning is behind us
                             // and showing both is just noise.
@@ -243,7 +251,6 @@ struct ChatView: View {
                     // edge: it sits in the island while that is open and
                     // glides into its header slot when the island lets go.
                     let topInset = IslandGeometry.topInset
-                    let hasIsland = IslandGeometry.hasIsland(topInset: topInset)
                     let islandSide: CGFloat = 220
                     // centred in the part of the square the hardware island does not cover
                     let islandFaceCentre = IslandGeometry.top + IslandGeometry.size.height + (islandSide - IslandGeometry.size.height) / 2
@@ -252,7 +259,7 @@ struct ChatView: View {
                     let faceCentre = headerFaceCentre + (islandFaceCentre - headerFaceCentre) * facePhase
                     ZStack(alignment: .top) {
                         if islandVisible {
-                            IslandShell(expanded: islandExpanded, hasIsland: hasIsland, expandedSize: CGSize(width: islandSide, height: islandSide)) {
+                            IslandShell(expanded: islandExpanded, expandedSize: CGSize(width: islandSide, height: islandSide)) {
                                 Color.clear
                             }
                         }
@@ -316,18 +323,20 @@ struct ChatView: View {
                     guard length > 0 else { return }
                     proxy.scrollTo(Self.liveBubbleId, anchor: .bottom)
                 }
-                .onChange(of: session.focusedMessageId) { _, messageId in
-                    guard let messageId,
-                          messages.contains(where: { $0.id == messageId })
-                    else { return }
-                    withAnimation { proxy.scrollTo(messageId, anchor: .center) }
-                    session.consumeFocus(messageId)
-                }
-                .task {
+                .task(id: session.focusedMessageId) {
                     guard let messageId = session.focusedMessageId,
                           messages.contains(where: { $0.id == messageId })
                     else { return }
-                    proxy.scrollTo(messageId, anchor: .center)
+                    revealedMessageId = messageId
+                    // Materialize the lazy folded row first. Its target bubble
+                    // scrolls itself into view once expansion has laid it out.
+                    let folded = transcript.first { row in
+                        if case let .assistantTurn(turn) = row {
+                            return turn.messages.contains { $0.id == messageId }
+                        }
+                        return false
+                    }
+                    proxy.scrollTo(folded?.id ?? messageId, anchor: .center)
                     session.consumeFocus(messageId)
                 }
             }
@@ -1320,6 +1329,12 @@ struct MessageRow: View {
         session.state.versions(of: message, inThread: chat.threadId)
     }
 
+    /// The stand-in for an edit the computer has not answered yet. It has no
+    /// server identity, so nothing may react to it or edit it again.
+    private var isPendingEdit: Bool {
+        session.state.pendingEdits[chat.threadId]?.placeholderId == message.id
+    }
+
     /// Transport tags contain paths on the paired computer. They belong in
     /// attachment cards, never on the clipboard or in the text-selection UI.
     private var attachedContent: AttachedMessageContent {
@@ -1371,13 +1386,15 @@ struct MessageRow: View {
             }
         }
         .contextMenu {
-            ForEach(Self.reactionChoices, id: \.self) { emoji in
-                Button(emoji) {
-                    Haptics.selection()
-                    Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
+            if !isPendingEdit {
+                ForEach(Self.reactionChoices, id: \.self) { emoji in
+                    Button(emoji) {
+                        Haptics.selection()
+                        Task { await session.react(to: message, in: chat.threadId, emoji: emoji) }
+                    }
                 }
             }
-            let visibleText = attachedContent.text
+            let visibleText = message.webhookContent?.task ?? attachedContent.text
             if !visibleText.isEmpty {
                 Divider()
                 Button("Copy", systemImage: "doc.on.doc") {
@@ -1396,14 +1413,16 @@ struct MessageRow: View {
             // sending its computer-local transport path back as prose.
             if message.role == .user,
                message.kind == .text,
+               message.webhookContent == nil,
                attachedContent.attachments.isEmpty,
+               !isPendingEdit,
                case let .bot(bot) = chat {
                 Divider()
                 Button("Edit and retry", systemImage: "pencil") {
                     editingText = message.text ?? ""
                     showingEdit = true
                 }
-                .disabled(bot.busy == true)
+                .disabled(bot.busy == true || session.state.pendingEdits[chat.threadId] != nil)
             }
         }
         .alert("Edit and retry", isPresented: $showingEdit) {
@@ -1420,6 +1439,8 @@ struct MessageRow: View {
             Text("This creates a new version and continues from there.")
         }
         .sheet(item: $selecting) { SelectableTextSheet(text: $0.text) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("message-\(message.id)")
     }
 
     @ViewBuilder
@@ -1443,8 +1464,15 @@ struct MessageRow: View {
             }
         case .activity:
             ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
+        case .compaction:
+            ReceiptChip(icon: "square.3.layers.3d", label: message.compaction?.chipText ?? message.text ?? "") {
+                selecting = SelectableText(text: message.compaction?.summary ?? message.text ?? "")
+            }
         case .screen:
             ScreenShot(threadId: chat.threadId, message: message)
+        case .digest:
+            // Filtered out of the transcript rows; never drawn.
+            EmptyView()
         case .unknown:
             // A message kind from a newer computer. Almost everything the
             // harness sends carries `text`, so showing it is usually the
@@ -1513,63 +1541,9 @@ struct TextBubble: View {
         return (filename, diff)
     }
 
-    private var parsedTable: (headers: [String], rows: [[String]])? {
-        guard message.role != .user, let source = message.text else { return nil }
-        let lines = source.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        guard lines.count >= 3, lines.allSatisfy({ $0.hasPrefix("|") && $0.hasSuffix("|") }) else {
-            return nil
-        }
-        let headers = Self.tableCells(lines[0])
-        let separators = Self.tableCells(lines[1])
-        guard !headers.isEmpty, separators.count == headers.count,
-              separators.allSatisfy(Self.isTableSeparator) else { return nil }
-        let rows = lines.dropFirst(2).map(Self.tableCells)
-        guard rows.allSatisfy({ $0.count == headers.count }) else { return nil }
-        return (headers, rows)
-    }
-
-    private static func tableCells(_ line: String) -> [String] {
-        var body = line
-        if body.first == "|" { body.removeFirst() }
-        if body.last == "|" { body.removeLast() }
-
-        var cells: [String] = []
-        var cell = ""
-        var escaped = false
-        for character in body {
-            if escaped {
-                if character == "|" {
-                    cell.append(character)
-                } else {
-                    cell.append("\\")
-                    cell.append(character)
-                }
-                escaped = false
-            } else if character == "\\" {
-                escaped = true
-            } else if character == "|" {
-                cells.append(cell.trimmingCharacters(in: .whitespaces))
-                cell = ""
-            } else {
-                cell.append(character)
-            }
-        }
-        if escaped { cell.append("\\") }
-        cells.append(cell.trimmingCharacters(in: .whitespaces))
-        return cells
-    }
-
-    private static func isTableSeparator(_ cell: String) -> Bool {
-        let compact = cell.replacingOccurrences(of: " ", with: "")
-        let core = compact.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-        return core.count >= 3 && core.allSatisfy { $0 == "-" }
-    }
-
     var body: some View {
         let mine = message.role == .user
-        let customCard = parsedDiff != nil || parsedTable != nil
+        let customCard = parsedDiff != nil
         // rooms attribute each line to the member who said it
         let speaker = message.from
         // No face beside the bubble: the bot's face is in the header, and in
@@ -1594,8 +1568,8 @@ struct TextBubble: View {
                 // you did: a message about `**` should show the asterisks.
                 if let diff = parsedDiff {
                     GitPRDiffCardView(filename: diff.filename, diffText: diff.diff)
-                } else if let table = parsedTable {
-                    SQLResultTableView(columns: table.headers, rows: table.rows)
+                } else if let webhook = message.webhookContent {
+                    WebhookMessageBody(content: webhook)
                 } else if mine {
                     let shared = attachedContent
                     ForEach(Array(shared.attachments.enumerated()), id: \.offset) { _, attachment in
@@ -1613,7 +1587,10 @@ struct TextBubble: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
-                    MarkdownText(source: message.text ?? "") { url in
+                    MarkdownText(
+                        source: message.text ?? "",
+                        scrollIdentifier: "message-\(message.id)-scroll"
+                    ) { url in
                         openLink(url, message)
                     }
                         .foregroundStyle(Color.primary)
@@ -1670,6 +1647,39 @@ struct ActivityChip: View {
             } else {
                 receipt
             }
+        }
+    }
+}
+
+/// A quiet capsule under a reply for the harness's receipts (the work
+/// digest, a compaction record): one line, and the full text on tap.
+struct ReceiptChip: View {
+    let icon: String
+    let label: String
+    var open: (() -> Void)? = nil
+
+    var body: some View {
+        if !label.isEmpty {
+            Button {
+                Haptics.selection()
+                open?()
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 11, weight: .medium))
+                    Text(label)
+                        .font(.system(size: 12))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().strokeBorder(.quaternary))
+                .padding(.leading, 2)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(label)
+            .accessibilityHint("Shows the full text")
         }
     }
 }
@@ -2312,7 +2322,7 @@ struct StreamingBubble: View {
             VStack(alignment: .leading, spacing: 4) {
                 if let reasoning, !reasoning.isEmpty, text?.isEmpty != false {
                     AgentThoughtChamberView(
-                        reasoning: String(reasoning.suffix(2_000)),
+                        reasoning: reasoning,
                         botName: "Bot",
                         mascotColor: MausPalette.color(color),
                         isStreaming: true

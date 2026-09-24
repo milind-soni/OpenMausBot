@@ -327,6 +327,23 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       evidence.push({ authority: "existing provider capability", path: "/api/internal/delegate-bot", threadId: turn.threadId, result });
       return result;
     };
+    // The woken delegator's reply echoes the prompt its provider received.
+    // Read it from the conversation, not the run record: a run keeps only
+    // the first 2,000 characters of its output, and the replayed history
+    // ahead of the notice (the teammate's echoed reply now includes its
+    // in-turn context note) runs past that. The notice must be the latest
+    // thing the delegator was told, after the teammate's reply.
+    const expectWokenByCompletion = async (turn: { runId: string; threadId: string }) => {
+      const replies = (await messages(turn.threadId)).filter((message) => message.role === "bot" && message.kind === "text");
+      const reply = String(replies.at(-1)?.text ?? "");
+      // the run recorded this same wake reply
+      expect(reply.startsWith((await runState(turn.runId)).output)).toBe(true);
+      const peerReply = reply.indexOf("@Capacity fixture replied to the delegated task");
+      const notice = reply.lastIndexOf("[A delegated task just completed]");
+      expect(peerReply).toBeGreaterThan(-1);
+      expect(notice).toBeGreaterThan(peerReply);
+      expect(reply.slice(notice)).toMatch(/^\[A delegated task just completed\]\n\nThe task you delegated to @Capacity fixture has finished, and their reply is now in this conversation\.\n\n[^]*Do not re-delegate the same task\.$/);
+    };
     try {
       // One busy thread, one free slot: when the delegator's turn settles
       // and the handoff drains, it must land in the target's standing
@@ -366,9 +383,9 @@ describe("per-bot thread capacity through an isolated HTTP fixture", () => {
       finish(target.threads[1]);
       await expect.poll(async () => (await runState(second.runId))?.status, { timeout: 20_000 }).toBe("completed");
       expect(await busyThreads(target.botId)).toEqual([target.threads[0]]);
-      expect((await runState(second.runId)).output).toContain("[A delegated task just completed]");
+      await expectWokenByCompletion(second);
       await expect.poll(async () => (await runState(first.runId))?.status, { timeout: 15_000 }).toBe("completed");
-      expect((await runState(first.runId)).output).toContain("[A delegated task just completed]");
+      await expectWokenByCompletion(first);
     } finally {
       for (const bot of [target, source]) {
         for (const threadId of await busyThreads(bot.botId)) finish(threadId);

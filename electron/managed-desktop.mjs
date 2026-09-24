@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 import { parseOrganizationBranding } from "./organization-branding.mjs";
+import { libraryCapability, libraryRouteLimits, parseLibraryPointer } from "./org-library.mjs";
 
 const TOKEN = /^omd_[A-Za-z0-9_-]{43}$/;
 const UUID = /^[a-f0-9-]{36}$/;
@@ -12,6 +13,8 @@ const APP_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 const COMPUTERS = ["thisComputer", "localVm", "box", "vps"];
 // Renew on start and whenever fewer than seven days remain; retry hourly.
 const RENEW_WINDOW_MS = 7 * 86400_000, RENEW_RETRY_MS = 60 * 60_000;
+// An unanswered config read (offline at start) is retried this often, for the library capability only.
+const LIBRARY_PROBE_MS = 10 * 60_000;
 export const LICENSE_EXPIRED_CODE = "admin_license_expired";
 // Reject control characters in portal-supplied labels and identities.
 // oxlint-disable-next-line no-control-regex
@@ -67,6 +70,12 @@ export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
       if (pending.get(message.requestId)?.proc === proc && typeof message.ok === "boolean") settle(message.requestId, !message.ok);
       return true;
     },
+    /** The organization library (org-library.mjs), or null to hide the shelf.
+     * The runtime acks before any install work; no runtime means not delivered. */
+    sendLibrary(proc, library) {
+      if (!proc) return library ? Promise.reject(new Error("The local bot runtime is not available.")) : Promise.resolve();
+      return post(proc, { type: "openmausbot:managed-library", library });
+    },
     rejectProcess(proc) { for (const [id, entry] of pending) if (entry.proc === proc) settle(id, true); },
   };
 }
@@ -74,7 +83,7 @@ export function managedPortalOrigin(value) {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash || url.pathname !== "/" ||
       !(url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
-    throw new Error("Enter the exact HTTPS address of your organisation's Admin portal.");
+    throw new Error("Enter the exact HTTPS address of your organization's Admin portal.");
   }
   return url.origin;
 }
@@ -84,7 +93,7 @@ export function managedPortalOrigin(value) {
 export function createManagedDesktopStore({ file, encryption }) {
   let tail = Promise.resolve();
   const available = async () => {
-    if (!(await encryption.available())) throw new Error("Unlock your system keychain before connecting an organisation.");
+    if (!(await encryption.available())) throw new Error("Unlock your system keychain before connecting an organization.");
   };
   return {
     async read() {
@@ -123,7 +132,7 @@ export function createManagedDesktopStore({ file, encryption }) {
 }
 
 export function createManagedDesktopClient({ store, applyConnection, applyPolicy = async () => {}, migrateIdentity = async () => {}, openBrowser, platform, deviceName, appVersion,
-  fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {} }) {
+  fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {}, library = null }) {
   // Resolves once the saved enrollment (and its policy) has been read.
   let markRestored;
   const restored = new Promise(resolve => { markRestored = resolve; });
@@ -136,6 +145,9 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null;
   let generation = 0, timer = null, closed = false, controller = new AbortController(), refreshing = null;
   let branding = parseOrganizationBranding(null);
+  // capabilities.library, from the config renew() reads once per start. Until
+  // an answer for this device arrives it is unknown, and nothing is fetched.
+  let libraryCapableFor = null, libraryCapable = false, lastLibraryProbe = -Infinity;
   const snapshot = () => structuredClone(state);
   const publish = (next) => { state = next; onState(snapshot()); return snapshot(); };
   const stopTimer = () => { if (timer) clearTimeout(timer); timer = null; };
@@ -174,6 +186,36 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       code: typeof data?.error === "string" ? data.error : "request_failed", apiCode: typeof data?.code === "string" ? data.code : undefined, interval: data?.interval });
     return data;
   }
+  /** Raw bytes from a fixed library route, under that route's own cap and
+   * timeout (never the 512 KiB session cap above, which stays as it is). */
+  async function requestBytes(origin, route, { method, body, token, maxBytes, timeoutMs }) {
+    const response = await fetcher(`${origin}${route}`, {
+      method, redirect: "error", credentials: "omit", cache: "no-store",
+      headers: { accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }), authorization: `Bearer ${token}` },
+      ...(body === undefined ? {} : { body }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]),
+    });
+    const cap = response.ok ? maxBytes : Math.min(maxBytes, 16 * 1024), declared = Number(response.headers.get("content-length") ?? NaN);
+    const reader = response.body?.getReader();
+    let size = 0, overflow = Number.isFinite(declared) && declared > cap; const chunks = [];
+    try {
+      if (reader && !overflow) while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        size += value.byteLength; if (size > cap) { overflow = true; break; }
+        chunks.push(value);
+      }
+      if (overflow) await reader?.cancel().catch(() => {});
+    } catch (error) { await reader?.cancel().catch(() => {}); throw error; }
+    finally { reader?.releaseLock(); }
+    if (!response.ok) {
+      let data;
+      try { data = overflow ? undefined : JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { /* not JSON */ }
+      const retryAfter = Number(response.headers.get("retry-after") ?? NaN);
+      throw Object.assign(new Error("The Admin portal could not complete this request."), { status: response.status,
+        apiCode: typeof data?.code === "string" ? data.code : undefined, ...(Number.isFinite(retryAfter) && retryAfter >= 0 ? { retryAfter } : {}) });
+    }
+    if (overflow) throw new Error("The organization library response is too large.");
+    return Buffer.concat(chunks);
+  }
   const validateGrant = value => {
     if (!value || managedPortalOrigin(value.portalOrigin) !== value.portalOrigin || !TOKEN.test(value.token) || !UUID.test(value.deviceId) ||
         !UUID.test(value.organizationId) || !safeText(value.email, 320) || !Number.isSafeInteger(value.expiresAt)) throw new Error("Invalid company connection.");
@@ -201,6 +243,28 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     if (!persisted && next.token !== previous.token) return;
     if (current(stamp) && grant === previous) grant = next;
   };
+  const readConfig = async enrolled => {
+    const info = await request(enrolled.portalOrigin, "/api/public/config");
+    libraryCapableFor = enrolled.deviceId; libraryCapable = libraryCapability(info);
+    return info;
+  };
+  /** The organization library hooks (org-library.mjs) run beside company
+   * access and never hold it up: a failure there changes nothing here. */
+  const libraryIdentity = value => ({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, deviceId: value.deviceId, expiresAt: value.expiresAt });
+  const notifyLibrary = call => {
+    if (!library) return;
+    try { void Promise.resolve(call(library)).catch(() => {}); } catch { /* ignored: see above */ }
+  };
+  /** After a successful session sync: the pointer, but only for an Admin that advertises the library. */
+  async function synchronizeLibrary(stamp, enrolled, pointer) {
+    if (libraryCapableFor !== enrolled.deviceId && now() - lastLibraryProbe >= LIBRARY_PROBE_MS) {
+      lastLibraryProbe = now();
+      await readConfig(enrolled).catch(() => {});
+    }
+    if (!current(stamp) || grant !== enrolled || !connection) return;
+    const capable = libraryCapableFor === enrolled.deviceId ? libraryCapable : null;
+    notifyLibrary(target => target.synchronized({ identity: libraryIdentity(enrolled), capable, pointer: capable ? parseLibraryPointer(pointer) : null, generation: stamp }));
+  }
   const revokeGrant = async previous => {
     try {
       await request(previous.portalOrigin, "/api/desktop/session", { method: "DELETE", body: {}, token: previous.token, signal: AbortSignal.timeout(20_000) });
@@ -214,6 +278,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     const previous = grant ?? issuedGrant ?? cleanupGrant, stamp = reset();
     grant = null; issuedGrant = null; connection = null;
     cleanupGrant = previous; cleanupNeeded = true;
+    notifyLibrary(target => target.clear());
     const operation = (async () => {
       await sendIdentity(previous);
       // These are independent cleanup obligations. A stopped/unresponsive
@@ -238,6 +303,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
   }
   async function endAccess(stamp, message) {
     connection = null; policyLifted = true;
+    notifyLibrary(target => target.clear());
     await sendIdentity(grant);
     await Promise.resolve().then(() => applyPolicy(null)).catch(() => {});
     try { await applyConnection(null); }
@@ -253,7 +319,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     if (!due) return;
     renewalCheckedFor = enrolled.deviceId; lastRenewAttempt = now();
     let info;
-    try { info = await request(enrolled.portalOrigin, "/api/public/config"); } catch { return; }
+    try { info = await readConfig(enrolled); } catch { return; }
     renewalSupported = Number.isSafeInteger(info?.capabilities?.deviceRenewal) && info.capabilities.deviceRenewal >= 1;
     if (!current(stamp) || grant !== enrolled || !renewalSupported) return;
     let result;
@@ -306,6 +372,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       connection = next;
       branding = parseOrganizationBranding(result.branding);
       publish({ ...view("connected"), cloudBackups: Boolean(result.cloudBackups) });
+      if (library) void synchronizeLibrary(stamp, grant, result.library).catch(() => {});
       // Tell Admin promptly which policy this desktop now applies.
       if (renewalSupported && grant.policy && reportedPolicyVersion !== grant.policy.version) {
         const reported = grant.policy.version, enrolled = grant;
@@ -392,13 +459,15 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
       // Restore the organisation's last policy before any network call, and
       // move references to this enrollment's old device-scoped ids.
       if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
+      // The saved library catalog reaches the runtime before any network call too.
+      if (library && grant && grant.expiresAt > now()) await Promise.resolve().then(() => library.restore(libraryIdentity(grant))).catch(() => {});
       markRestored();
       await sendIdentity(grant);
       return refresh();
     },
     async begin(input) {
       if (clearing) throw new Error("Wait for company sign-out to finish before starting another sign-in.");
-      if (closed || grant || issuedGrant || cleanupNeeded) throw new Error("Disconnect your current organisation before connecting another.");
+      if (closed || grant || issuedGrant || cleanupNeeded) throw new Error("Disconnect your current organization before connecting another.");
       const portalOrigin = managedPortalOrigin(input?.portalOrigin);
       if (!safeText(deviceName, 100) || !["darwin", "win32", "linux"].includes(platform)) throw new Error("This desktop platform is not supported.");
       const stamp = reset();
@@ -447,13 +516,32 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     /** Fixed first-party backup API only; this function stays in Electron main. */
     async requestBackup(route, options = {}) {
       if (!/^\/api\/desktop\/backups(?:\/[a-f0-9-]{36}(?:\/(?:complete|abort|download|parts\/[0-9]+))?)?$/.test(route)) throw new Error("Unsupported company backup operation.");
-      if (options.generation !== undefined && options.generation !== generation) throw new Error("Your organisation connection changed during the backup.");
-      if (!grant || !connection || grant.expiresAt <= now()) throw new Error("Reconnect your organisation before using company backups.");
+      if (options.generation !== undefined && options.generation !== generation) throw new Error("Your organization connection changed during the backup.");
+      if (!grant || !connection || grant.expiresAt <= now()) throw new Error("Reconnect your organization before using company backups.");
       const stamp = generation, enrolled = grant;
       const result = await request(enrolled.portalOrigin, route, { method: options.method ?? "GET", body: options.body, token: enrolled.token,
         signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal });
-      if (!current(stamp) || grant !== enrolled || enrolled.expiresAt <= now()) throw new Error("Your organisation connection changed during the backup.");
+      if (!current(stamp) || grant !== enrolled || enrolled.expiresAt <= now()) throw new Error("Your organization connection changed during the backup.");
       return result;
+    },
+    /** Fixed organization library routes only (contract §5.6): the catalog
+     * (256 KiB, 20 s), a release's bytes (4 MiB, 60 s) and the install report
+     * (a JSON body up to 64 KiB). Raw bytes; the caller verifies them. Electron main only. */
+    async fetchLibraryBytes(route, maxBytes, options = {}) {
+      const limits = libraryRouteLimits(route);
+      if (!limits) throw new Error("Unsupported organization library operation.");
+      if (options.generation !== undefined && options.generation !== generation) throw new Error("Your organization connection changed.");
+      if (!grant || !connection || grant.expiresAt <= now()) throw new Error("Reconnect your organization before using its library.");
+      let body;
+      if (limits.method === "POST") {
+        body = JSON.stringify(options.body ?? null);
+        if (Buffer.byteLength(body) > limits.bodyMaxBytes) throw new Error("The organization library report is too large.");
+      }
+      const stamp = generation, enrolled = grant;
+      const bytes = await requestBytes(enrolled.portalOrigin, route, { method: limits.method, body, token: enrolled.token,
+        maxBytes: Math.min(Number.isSafeInteger(maxBytes) && maxBytes > 0 ? maxBytes : limits.maxBytes, limits.maxBytes), timeoutMs: limits.timeoutMs });
+      if (!current(stamp) || grant !== enrolled || !connection || enrolled.expiresAt <= now()) throw new Error("Your organization connection changed.");
+      return bytes;
     },
     close() { closed = true; reset(); },
   };

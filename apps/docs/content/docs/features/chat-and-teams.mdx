@@ -10,13 +10,53 @@ A bot is a durable agent identity. A thread is one conversation with that bot an
 
 Use separate threads when you want fresh context or independent work without duplicating the bot. Messages sent to a busy thread are queued, and supported providers can be steered while they work. Other threads can continue independently. See [Bots, folders, and threads](/docs/features/bots-and-tasks) for limits and shared-resource behavior.
 
+## Token usage
+
+Hover over the usage chip in a bot's chat header to see the totals and the latest message's usage. Input and output are separate:
+
+- **Uncached input** is input the provider did not report as served from its prompt cache.
+- **Cached input** is input the provider reported as served from its prompt cache.
+- **Output** is the generated token count reported by the provider.
+
+Uncached input plus cached input equals total input. If the provider does not report a cache split, the tooltip shows total input and output instead. A missing cache count is not treated as zero.
+
+The compact chip shows cost when the provider reports it. Otherwise, it shows uncached input when known, or total input. Generated output is listed separately in the tooltip and is not added to either input figure.
+
 ## Groups
 
 Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.
 
+When a bot sends the same request to several group members, the group shows one shared message addressed to those members. Each member runs with its own model and permissions and can reply in that conversation. Different assignments remain separate.
+
+### Group token usage
+
+After a group participant finishes a turn, the group header shows the current thread's reported cost, or input tokens when no cost is reported. Hover over the compact badge for uncached input, cached input, and output, plus the latest participant's turn. Switching threads switches these figures too; other group threads and private chats are excluded.
+
+The figures come from the existing usage ledger and survive restarting the app. A missing cache figure is shown as an unknown split, not zero cached input. If some turns omit cost, the dollar amount sums only reported costs.
+
+## Renaming teams
+
+Right-click a named team heading in the sidebar and choose **Rename team**, or use the team's menu on the Team map. Enter the new name and save. Bots (including archived bots), group chats, shared instructions, and an assigned team computer stay together. Existing management access to a populated team follows its new name; an existing team's name cannot be used to merge teams. Finish active work before renaming.
+
+## Deleting a team
+
+To delete a team, right-click its name in the sidebar and choose **Delete team**, or use its **Manage** menu in Team map. The confirmation explains that bots (including archived bots) and group chats move to General with their conversations intact. The team's shared instructions are removed; General's instructions stay unchanged. Stop active work and unassign any team computer first. If moving the team's Chief would conflict with General's Chief, move or change one of those Chiefs before deleting the team.
+
+## Team membership
+
+Every named team keeps an **Add bots** button in the sidebar. Once it has members, the button reads **Add or remove bots**. The dialog lists current members as checked alongside other available bots. Check a bot to move it into the team; uncheck one to move it to General, then save. Conversations stay with the bots. A move that would put two Chiefs of Staff in the same team is refused.
+
+Choose **New bot** inside this dialog to open bot creation for that team. The new bot is created directly in the selected team and appears checked when you return to the membership list. Creating it does not discard your other unsaved checkbox edits.
+
 ## Delegation
 
 Bots can hand work to other bots. Delegated runs carry explicit status back into the parent conversation, including completion, failure, and cancellation.
+
+### Creating a specialist with a chosen model
+
+A Chief of Staff can create a specialist in its own team with `create_bot`. Ask for a particular engine, model and reasoning effort if you want to choose them. The Chief can look up exact available choices with `list_team_setup` and pass `modelSelection` with `instanceId`, `model`, and optionally `effort` or a supported `variant` (not both).
+
+When no model selection is supplied, the new bot uses the workspace's default model selection, including its reasoning effort; it does not copy the Chief's model. An invalid explicit choice is rejected rather than silently replaced. The new bot starts with connected apps and automatic approvals disabled, and existing bots and threads keep their own models. Combined team changes still use the reviewed team-setup flow.
 
 ## Rewind and branches
 

@@ -26,6 +26,8 @@ export interface CatalogProfile {
   skillAuthoring: boolean;
   /** Opt-in computer sharing (server features.sharedComputers). */
   sharedComputers: boolean;
+  /** A voice is actually configured for this bot (tts voiceReady). */
+  voiceNotes: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
 }
@@ -40,6 +42,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     ownThreadCreation: env.OMB_OWN_THREAD_CREATION === "1",
     skillAuthoring: env.OMB_SKILL_AUTHORING_ENABLED === "1",
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
+    voiceNotes: env.OMB_VOICE_NOTES === "1",
     botId: env.OMB_BOT_ID ?? "",
   };
 }
@@ -358,13 +361,17 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "create_bot",
     description:
-      "Create a specialist bot in your section. Only a section's Chief of Staff may use this. The new bot inherits the Chief's engine, starts with connected apps and automatic approvals disabled, and can then receive work through delegate_bot. Create only the smallest useful team (maximum four per turn).",
+      "Create a specialist bot in your section. Chief of Staff only. Omit modelSelection to use the workspace default, or choose exact IDs from list_team_setup. Connected apps and automatic approvals start disabled. Assign work through delegate_bot. Maximum four new bots per turn.",
     inputSchema: {
       type: "object",
       properties: {
         name: { type: "string", description: "Short, unique display name for the specialist." },
         role: { type: "string", description: "The specialist's job title or role." },
         instructions: { type: "string", description: "What this specialist is responsible for and how it should work." },
+        modelSelection: { type: "object", additionalProperties: false, properties: {
+          instanceId: { type: "string" }, model: { type: "string" },
+          effort: { type: "string" }, variant: { type: "string" },
+        }, required: ["instanceId", "model"] },
       },
       required: ["name", "role", "instructions"],
     },
@@ -376,7 +383,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
+    description: "Chief of Staff only: submit all requested specialist creation, profile/model configuration, Chief assignments, and authorized team moves in ONE combined plan. Use exact catalog engine/model IDs from list_team_setup. Combine all fields for each bot; use the same create key or botId to coalesce repeated entries. New teams must be named explicitly in newTeams and have a specialist in this plan; access is granted only to those new teams. Existing unauthorized teams cannot be included. Models change bot defaults for groups/new threads; existing threads and execution permissions stay unchanged. If review is pending, the decision and structured result automatically resume you once; do not ask again, poll, or repeat the proposal." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -390,6 +397,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
             botId: { type: "string", description: "For update: exact existing bot ID from list_team_setup." },
             fields: { type: "object", additionalProperties: false, properties: {
               name: { type: "string", maxLength: 100 }, title: { type: "string", maxLength: 200 },
+              chiefOfStaff: { type: "boolean", description: "Appoint or remove this team's Chief. At most one Chief per team: explicitly demote the current Chief in the same plan when replacing them. Does not grant access to other teams or change execution permissions." },
               description: { type: "string", maxLength: 4000 }, soul: { type: "string", description: "Standing instructions; required with name/title/modelSelection for every new bot." },
               section: { type: "string", maxLength: 60, description: "Exact authorized existing team, or a team explicitly named in newTeams. Empty string means General." },
               modelSelection: { type: "object", additionalProperties: false, properties: {
@@ -476,6 +484,24 @@ const toolDefinitions = (externalRuntime: boolean) => [
         },
       },
       required: ["credential_id"],
+    },
+  },
+  {
+    name: "send_voice_note",
+    description:
+      "Send the user a voice note: a short spoken message synthesized with your configured voice, stored as audio, and attached to your reply when the turn ends. Write the note as speakable words, exactly as it should be said — no lists, links or markdown meant for screens. The same text becomes the note's visible caption and transcript, so the person can read or listen. Use it for warmth, tone or emphasis a written line cannot carry; use ordinary text otherwise.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        text: {
+          type: "string",
+          minLength: 1,
+          maxLength: 1000,
+          description: "The note verbatim: short, speakable text, at most 1000 characters.",
+        },
+      },
+      required: ["text"],
     },
   },
   {
@@ -685,6 +711,10 @@ const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 // so they must not be advertised at all: a model that sees a tool it cannot
 // use spends turns discovering that.
 export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_computer"]);
+// Same capability rule: a bot with no configured voice must never be shown a
+// tool whose every call would end in a setup error. The route behind it
+// refuses regardless; this keeps the catalog honest about what can work.
+const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 // One teamwork path in room turns; keep all unrelated integrations available.
 // Ordinary direct chats use this same bounded coordinator. Goal-owned turns
 // retain their independent loop and cannot start a second coordinator.
@@ -701,10 +731,13 @@ export function availableTools(profile: CatalogProfile) {
   const SHAREABLE_TOOLS = profile.sharedComputers
     ? AUTHORING_TOOLS
     : AUTHORING_TOOLS.filter((tool) => !SHARED_COMPUTER_TOOL_NAMES.has(tool.name));
+  const VOICE_READY_TOOLS = profile.voiceNotes
+    ? SHAREABLE_TOOLS
+    : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
   return profile.externalRuntime
     ? TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
     : profile.coordinating
-    ? SHAREABLE_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
+    ? VOICE_READY_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
       .map(tool => tool.name === "start_thread" ? {
         ...tool,
         description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
@@ -712,5 +745,5 @@ export function availableTools(profile: CatalogProfile) {
           bot_id: { type: "string", enum: [profile.botId], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." },
         } },
       } : tool)
-    : SHAREABLE_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
+    : VOICE_READY_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 }

@@ -2,6 +2,7 @@ package com.openmausbot.companion.ui
 
 import android.os.Build
 import android.view.HapticFeedbackConstants
+import com.openmausbot.companion.core.ActivityDetail
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
@@ -25,6 +26,13 @@ import kotlin.test.assertTrue
  *   than Apple's sound ids.
  */
 class LiveTailTest {
+    @Test
+    fun `hidden reasoning keeps answer tokens and otherwise falls back to busy state`() {
+        assertEquals(TranscriptTail.STREAM, LiveTail.of("Answer", "Thinking", true, ActivityDetail.HIDDEN))
+        assertEquals(TranscriptTail.WORKING, LiveTail.of(null, "Thinking", true, ActivityDetail.HIDDEN))
+        assertEquals(TranscriptTail.NONE, LiveTail.of(null, "Thinking", false, ActivityDetail.HIDDEN))
+    }
+
     @Test
     fun `tokens of the reply win over everything else`() {
         assertEquals(
@@ -403,7 +411,8 @@ class CompanionHapticsTest {
 /**
  * `PlatformBridge.copyToPasteboard` ends every copy with `Haptics.selection()`,
  * unconditionally — so both `Copy Diff` (`GitPRDiffCardView.swift:121`) and
- * `Copy CSV` (`SQLResultTableView.swift:100`) are confirmed by feel. Both cards
+ * Android's Copy CSV are confirmed by feel. iOS no longer has that SQL card
+ * (issue 1707). Both cards
  * hold the same [CardClipboard], which is what stops one of them losing the tick
  * on its own.
  */

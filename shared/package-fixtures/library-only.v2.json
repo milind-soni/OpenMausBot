@@ -1,0 +1,55 @@
+{
+  "format": "openmaus.package",
+  "version": 2,
+  "package": {
+    "id": "sales-skills",
+    "release": "2.0.1",
+    "name": "Sales skills",
+    "tagline": "Skills and a preset bot for any sales team.",
+    "summary": "Two skills and a support preset, without a team.",
+    "category": "Sales",
+    "author": {
+      "name": "Acme Partners"
+    },
+    "license": "Proprietary",
+    "outcomes": [
+      "Consistent answers to objections."
+    ],
+    "setupMinutes": 2,
+    "requirements": {
+      "apps": [],
+      "capabilities": []
+    },
+    "skills": {
+      "version": 1,
+      "entries": [
+        {
+          "name": "objection-handling",
+          "description": "Answer common objections.",
+          "instructions": "---\nname: objection-handling\ndescription: Answer common objections.\n---\n\n# Objections\n\nAcknowledge, clarify, answer.\n"
+        },
+        {
+          "name": "follow-up",
+          "description": "Write a short follow-up email.",
+          "instructions": "---\nname: follow-up\ndescription: Write a short follow-up email.\n---\n\n# Follow-up\n\nThree sentences, one ask.\n"
+        }
+      ]
+    },
+    "presets": [
+      {
+        "key": "support",
+        "name": "Support agent",
+        "bot": {
+          "name": "Sky",
+          "title": "Support",
+          "appearance": {
+            "color": "blue"
+          }
+        },
+        "skills": [
+          "objection-handling"
+        ]
+      }
+    ]
+  }
+}

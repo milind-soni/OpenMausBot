@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { FolderOpen, Plus } from "lucide-react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
+import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
@@ -27,6 +28,7 @@ import type { useBotSettingsDerived } from "./useBotSettingsDerived";
  * PATCH is made directly rather than through updateBot: the server
  * validates the path and a rejected folder must not stick in local state. */
 function WorkingFolder({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
   const { capabilities } = useDesktopCapabilities();
   const home = capabilities.host.homeDir;
   const [draft, setDraft] = useState<string | null>(null);
@@ -61,7 +63,7 @@ function WorkingFolder({ bot }: { bot: Bot }) {
       {canPick ? (
         <div className="mt-3 flex items-center gap-2">
           <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12.5px] text-ink" title={bot.cwd}>
-            {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">Private bot workspace</span>}
+            {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">Private bot folder</span>}
           </div>
           <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
             <FolderOpen size={14} /> Choose…
@@ -83,7 +85,7 @@ function WorkingFolder({ bot }: { bot: Bot }) {
         >
           <input
             className={cn(inputCls, "font-mono text-[12.5px]")}
-            placeholder="Private bot workspace — or an absolute path"
+            placeholder="Private bot folder — or an absolute path"
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
           />
@@ -182,6 +184,7 @@ export function AccessSection({
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
 }) {
+  const { draft } = useBotEditor();
   const { state, dispatch } = useStore();
   const {
     patch,
@@ -404,7 +407,7 @@ export function AccessSection({
         />
       </div>
 
-      <div className="rounded-xl bg-card p-4">
+      {!draft && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Webhooks</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">Inbound triggers wired to this bot.</div>
         {webhooks.length === 0 ? (
@@ -429,9 +432,9 @@ export function AccessSection({
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      <div className="rounded-xl bg-card p-4">
+      {!draft && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Always allowed</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">Tools this bot no longer asks about.</div>
         {alwaysAllow.length === 0 ? (
@@ -453,7 +456,7 @@ export function AccessSection({
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}

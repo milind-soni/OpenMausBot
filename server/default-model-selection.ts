@@ -1,4 +1,4 @@
-import type { EffortLevel, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
+import type { EffortLevel, EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 interface SelectableInstance {
   instanceId: string;
@@ -6,7 +6,7 @@ interface SelectableInstance {
   snapshot: ProviderSnapshot;
   models: ModelCatalog;
   capabilities?: { effortLevels?: readonly EffortLevel[]; modelVariants?: boolean };
-  access?: "subscription" | "custom";
+  access?: EngineAccess;
 }
 
 /** What an enrolled organisation adds to the choice. Both are omitted (or
@@ -63,4 +63,18 @@ export function selectDefaultModelSelection(
     pick = claudeFirst(available);
   }
   return { instanceId: pick?.instanceId ?? "", model: pick?.models.default ?? "" };
+}
+
+/** Complete a new bot's selection with the workspace's new-bot effort. An
+ * explicit effort or model variant is the caller's choice and wins; an engine
+ * that does not offer the level keeps sending none rather than failing turn 1. */
+export function withNewBotEffort(
+  selection: ModelSelection,
+  effort: EffortLevel | undefined,
+  offered: readonly EffortLevel[] | undefined,
+): ModelSelection {
+  if (!effort || selection.effort !== undefined || selection.variant !== undefined || !offered?.includes(effort)) {
+    return selection;
+  }
+  return { ...selection, effort };
 }

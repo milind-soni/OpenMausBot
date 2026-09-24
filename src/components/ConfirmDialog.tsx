@@ -17,6 +17,7 @@ export interface ConfirmDialogProps {
   icon?: ReactNode;
   onCancel: () => void;
   onConfirm: () => void;
+  pending?: boolean;
   /** Stable fallback when a context-menu trigger disappears before opening. */
   returnFocusRef?: RefObject<HTMLElement | null>;
 }
@@ -29,7 +30,8 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   const { open, onCancel, returnFocusRef } = props;
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
-
+  const cancelAction = useRef(onCancel);
+  cancelAction.current = onCancel;
   useEffect(() => {
     if (!open) return;
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -37,12 +39,12 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        onCancel();
+        cancelAction.current();
         return;
       }
       if (event.key === "Tab") {
         const controls = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
-        if (!controls?.length) return;
+        if (!controls?.length) { event.preventDefault(); dialogRef.current?.focus(); return; }
         const first = controls[0]!;
         const last = controls[controls.length - 1]!;
         if (event.shiftKey && document.activeElement === first) {
@@ -60,7 +62,14 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
       const target = opener?.isConnected && opener !== document.body ? opener : returnFocusRef?.current;
       target?.focus();
     };
-  }, [open, onCancel, returnFocusRef]);
+  }, [open, returnFocusRef]);
+
+  // Capture the opener above before moving focus on open or pending changes.
+  useEffect(() => {
+    if (!open) return;
+    if (props.pending) dialogRef.current?.focus();
+    else cancelRef.current?.focus();
+  }, [open, props.pending]);
 
   if (!open) return null;
 
@@ -87,6 +96,7 @@ export function ConfirmDialogCard({
   icon,
   onCancel,
   onConfirm,
+  pending = false,
 }: ConfirmDialogProps & {
   ref?: React.Ref<HTMLDivElement>;
   cancelRef?: React.Ref<HTMLButtonElement>;
@@ -96,7 +106,9 @@ export function ConfirmDialogCard({
     <div
       ref={ref}
       role="alertdialog"
+      tabIndex={-1}
       aria-modal="true"
+      aria-busy={pending}
       aria-labelledby="confirm-dialog-title"
       aria-describedby="confirm-dialog-body"
       className={cn(
@@ -122,6 +134,7 @@ export function ConfirmDialogCard({
           ref={cancelRef}
           type="button"
           onClick={onCancel}
+          disabled={pending}
           className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
         >
           Cancel
@@ -129,6 +142,7 @@ export function ConfirmDialogCard({
         <button
           type="button"
           onClick={onConfirm}
+          disabled={pending}
           className={cn(
             "rounded-xl px-4 py-2 text-[13px] font-medium",
             danger ? "bg-danger text-white hover:brightness-110" : "bg-accent text-white hover:brightness-110",

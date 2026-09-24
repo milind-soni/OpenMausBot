@@ -53,9 +53,11 @@ export function gatedLocalComputer(
 
 type LegacyConnectionDescriptor = {
   mode?: string;
+  socketPath?: unknown;
   mcpCommand?: unknown;
   mcpArgs?: unknown;
   mcpEnv?: unknown;
+  status?: unknown;
 };
 
 type LinuxConnectionDescriptor = Record<string, unknown>;
@@ -108,19 +110,18 @@ function decodeLegacyDescriptor(
   platform: NodeJS.Platform,
 ): LocalComputerConnection | null {
   const supportedPlatform = legacyPlatform(platform);
-  if (!supportedPlatform || !value || value.mode === "unavailable" || typeof value.mcpCommand !== "string") {
+  if (!supportedPlatform || !value ||
+      !(value.mode === "embedded" || (supportedPlatform === "darwin" && value.mode === "standalone")) ||
+      (Object.hasOwn(value, "status") && value.status !== "ready") ||
+      typeof value.socketPath !== "string" || !value.socketPath ||
+      typeof value.mcpCommand !== "string" || !value.mcpCommand.trim()) {
     return null;
   }
-  if (value.mcpArgs !== undefined && !Array.isArray(value.mcpArgs)) return null;
-  if (
-    value.mcpEnv !== undefined &&
-    (!value.mcpEnv || typeof value.mcpEnv !== "object" || Array.isArray(value.mcpEnv))
-  ) {
-    return null;
-  }
-  const args = value.mcpArgs ?? ["mcp"];
+  if (!Array.isArray(value.mcpArgs) || value.mcpArgs[0] !== "mcp") return null;
+  if (!value.mcpEnv || typeof value.mcpEnv !== "object" || Array.isArray(value.mcpEnv)) return null;
+  const args = value.mcpArgs;
   if (!args.every((arg) => typeof arg === "string")) return null;
-  const env = value.mcpEnv ?? {};
+  const env = value.mcpEnv;
   if (!Object.values(env).every((entry) => typeof entry === "string")) return null;
   return {
     command: value.mcpCommand,
@@ -355,6 +356,20 @@ function validateLegacyDescriptorRuntime(
   }
 }
 
+/** An older fallback cannot override a present but unavailable, malformed, or
+ * unreadable descriptor at a more specific location. */
+function firstPresentCuaDescriptor(candidates: string[]): string | null {
+  for (const file of new Set(candidates)) {
+    try {
+      lstatSync(file);
+      return file;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return file;
+    }
+  }
+  return null;
+}
+
 export function readCuaConnection({
   platform = process.platform,
   userData = process.env.OMB_USER_DATA,
@@ -369,26 +384,62 @@ export function readCuaConnection({
   validateLegacyRuntime?: (file: string, platform: NodeJS.Platform) => boolean;
 } = {}): LocalComputerConnection | null {
   const candidates = userData ? [join(userData, "cua-connection.json")] : [];
-  if (platform === "darwin") {
-    // Legacy/dev fallback. Packaged Electron passes its exact userData path.
+  if (platform === "darwin" && !userData) {
+    // Legacy/dev fallback only when Electron did not provide its exact path.
     for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
       candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
     }
   }
 
-  for (const file of new Set(candidates)) {
-    try {
-      const raw = JSON.parse(readFileSync(file, "utf8"));
-      if (platform === "linux") {
-        const decoded = decodeLinuxDescriptor(raw);
-        if (decoded && validateLinuxRuntime(file, raw)) return decoded;
-      } else {
-        const decoded = decodeLegacyDescriptor(raw, platform);
-        if (decoded && validateLegacyRuntime(file, platform)) return decoded;
-      }
-    } catch {
-      // Missing, invalid, tampered, or stale descriptors are unavailable.
+  const file = firstPresentCuaDescriptor(candidates);
+  if (!file) return null;
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    if (platform === "linux") {
+      const decoded = decodeLinuxDescriptor(raw);
+      if (decoded && validateLinuxRuntime(file, raw)) return decoded;
+    } else {
+      const decoded = decodeLegacyDescriptor(raw, platform);
+      if (decoded && validateLegacyRuntime(file, platform)) return decoded;
     }
+  } catch {
+    // Missing, invalid, tampered, or stale descriptors are unavailable.
+  }
+  return null;
+}
+
+/** An unavailable descriptor is diagnostic only. It never becomes a connection
+ * and only a private, well-formed macOS/Windows descriptor may supply text. */
+export function readCuaUnavailableReason({
+  platform = process.platform,
+  userData = process.env.OMB_USER_DATA,
+  home = homedir(),
+}: {
+  platform?: NodeJS.Platform;
+  userData?: string;
+  home?: string;
+} = {}): string | null {
+  if (!legacyPlatform(platform)) return null;
+  const candidates = userData ? [join(userData, "cua-connection.json")] : [];
+  if (platform === "darwin" && !userData) {
+    for (const directory of ["OpenMausBot", "openmausbot", "OpenGrokBot", "opengrokbot"]) {
+      candidates.push(join(home, "Library", "Application Support", directory, "cua-connection.json"));
+    }
+  }
+  const file = firstPresentCuaDescriptor(candidates);
+  if (!file) return null;
+  try {
+    if (validateLegacyDescriptorRuntime(file, platform)) {
+      const raw: unknown = JSON.parse(readFileSync(file, "utf8"));
+      if (raw && typeof raw === "object" && !Array.isArray(raw) &&
+          Object.keys(raw).length === 2 &&
+          (raw as Record<string, unknown>).mode === "unavailable") {
+        const reason = (raw as Record<string, unknown>).reason;
+        if (typeof reason === "string" && reason.trim() && reason.length <= 2_000) return reason.trim();
+      }
+    }
+  } catch {
+    // No usable diagnostic; the caller still refuses computer control.
   }
   return null;
 }

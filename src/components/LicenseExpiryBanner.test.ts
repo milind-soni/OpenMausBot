@@ -18,12 +18,12 @@ describe("license expiry banner", () => {
   it("warns before expiry and says when features stop during the grace period", () => {
     expect(licenseNotice(config({ expiresAt: "2027-01-01", expiresInDays: 12 }))).toEqual({
       tone: "warning",
-      text: "This workspace's enterprise license expires on 2027-01-01 (12 day(s) left). Renew the key to keep enterprise features.",
+      text: "This installation's enterprise license expires on 2027-01-01 (12 day(s) left). Renew the key to keep enterprise features.",
     });
     const grace = licenseNotice(config({ expiresAt: "2027-01-01", expiresInDays: -2, graceEndsAt: "2027-01-08" }));
     expect(grace).toEqual({
       tone: "danger",
-      text: "This workspace's enterprise license expired on 2027-01-01. Enterprise features keep working until 2027-01-08; renew the key before then.",
+      text: "This installation's enterprise license expired on 2027-01-01. Enterprise features keep working until 2027-01-08; renew the key before then.",
     });
     const html = renderToStaticMarkup(createElement(LicenseExpiryBanner, { config: config({ expiresAt: "2027-01-01", expiresInDays: 3 }) }));
     expect(html).toContain('role="status"');
