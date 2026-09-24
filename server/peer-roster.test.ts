@@ -4,6 +4,7 @@ import {
   canAccessTeam,
   PEER_ACCESS_HELP,
   canReachPeer,
+  coordinatorSupervises,
   peerAllowed,
   peerName,
   peerRosterSystemPrompt,
@@ -109,6 +110,43 @@ describe("owner-granted cross-team coordination", () => {
     expect(canAccessTeam({ ...chief, managedSections: "Personal" as unknown as string[] }, "Personal")).toBe(false);
     expect(canAccessTeam({ ...chief, managedSections: [null] as unknown as string[] }, "Personal")).toBe(false);
     expect(canAccessTeam({ ...chief, managedSections: [""] }, undefined)).toBe(true);
+  });
+});
+
+describe("coordinatorSupervises", () => {
+  const coordinator = { chiefOfStaff: true, managedSections: ["Build", "Delivery"] };
+  const buildBot = { section: "Build" };
+  const deliveryBot = { section: " Delivery " };
+  const opsBot = { section: "Ops" };
+  const emptyBot = { section: "" };
+
+  it("returns true when coordinator is Chief of Staff managing the bot's section", () => {
+    expect(coordinatorSupervises(coordinator, buildBot)).toBe(true);
+    expect(coordinatorSupervises(coordinator, deliveryBot)).toBe(true);
+  });
+
+  it("returns false when bot is from an unmanaged section", () => {
+    expect(coordinatorSupervises(coordinator, opsBot)).toBe(false);
+  });
+
+  it("returns false when coordinator is not chiefOfStaff", () => {
+    expect(coordinatorSupervises({ ...coordinator, chiefOfStaff: false }, buildBot)).toBe(false);
+    expect(coordinatorSupervises({ managedSections: ["Build"] }, buildBot)).toBe(false);
+  });
+
+  it("returns false for invalid or empty managedSections", () => {
+    expect(coordinatorSupervises({ chiefOfStaff: true, managedSections: [] }, buildBot)).toBe(false);
+    expect(coordinatorSupervises({ chiefOfStaff: true, managedSections: "Build" as unknown as string[] }, buildBot)).toBe(false);
+    expect(coordinatorSupervises({ chiefOfStaff: true, managedSections: [null] as unknown as string[] }, buildBot)).toBe(false);
+  });
+
+  it("returns false when bot has no section or is missing", () => {
+    expect(coordinatorSupervises(coordinator, emptyBot)).toBe(false);
+    expect(coordinatorSupervises(coordinator, { section: "   " })).toBe(false);
+    expect(coordinatorSupervises(coordinator, {} as { section?: string })).toBe(false);
+    expect(coordinatorSupervises(coordinator, null)).toBe(false);
+    expect(coordinatorSupervises(null, buildBot)).toBe(false);
+    expect(coordinatorSupervises(undefined, buildBot)).toBe(false);
   });
 });
 

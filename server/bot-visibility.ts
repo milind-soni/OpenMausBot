@@ -101,6 +101,52 @@ export function sameAudience(a: unknown, b: unknown): boolean {
   return right.people.every((entry) => set.has(entry));
 }
 
+/** True when everyone who can see `inner` can also see `outer`. Admins see
+ * every bot, so an admins-only audience is inside any other. */
+export function audienceWithin(inner: unknown, outer: unknown): boolean {
+  const small = storedVisibility(inner);
+  const large = storedVisibility(outer);
+  if (large === "everyone" || small === "admins") return true;
+  if (small === "everyone" || large === "admins") return false;
+  return small.people.every((entry) =>
+    large.people.includes(entry) || (!entry.startsWith("@") && large.people.some((other) => other.startsWith("@") && entryMatches(other, entry))));
+}
+
+/** The people who can see both: everyone ∩ X is X, admins ∩ X is admins,
+ * and two lists keep each entry the other also admits. An intersection that
+ * names nobody is admins only. */
+export function intersectAudience(a: unknown, b: unknown): BotVisibility {
+  const left = storedVisibility(a);
+  const right = storedVisibility(b);
+  if (left === "everyone") return right;
+  if (right === "everyone") return left;
+  if (left === "admins" || right === "admins") return "admins";
+  const kept = [
+    ...left.people.filter((entry) => audienceWithin({ people: [entry] }, right)),
+    ...right.people.filter((entry) => audienceWithin({ people: [entry] }, left)),
+  ];
+  const people = [...new Set(kept)];
+  return people.length ? { people } : "admins";
+}
+
+/** The narrowest of several audiences (a room's bots, and its floor). */
+export function narrowestAudience(values: readonly unknown[]): BotVisibility {
+  return values.reduce<BotVisibility>((floor, value) => intersectAudience(floor, value), "everyone");
+}
+
+/** Whether two readings name the same audience. */
+export function audienceEquals(a: unknown, b: unknown): boolean {
+  return sameAudience(a, b);
+}
+
+/** Whether a room's conversation may feed a bot's recall and its brief of
+ * recent work: only when everyone who can see the bot can see every bot in
+ * the room. Otherwise a member chatting with a bot everyone sees would get
+ * back what a restricted bot said in a room they cannot open. */
+export function roomFeeds(memberVisibilities: readonly unknown[], botVisibility: unknown): boolean {
+  return memberVisibilities.every((visibility) => audienceWithin(botVisibility, visibility));
+}
+
 export interface VisibilityBot {
   id: string;
   threadId: string;
@@ -116,6 +162,9 @@ export interface VisibilityGroup {
   memberIds: readonly string[];
   section?: string;
   tasks?: ReadonlyArray<{ threadId: string }>;
+  /** The narrowest audience the room has ever had. A bot leaving never
+   * widens it; only an admin's explicit reset does (server/index.ts). */
+  audienceFloor?: unknown;
 }
 
 export type ThreadOwner = { bot: string; group?: undefined } | { group: string; bot?: undefined };
@@ -142,7 +191,8 @@ export class VisibleSet {
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
   ) {
     this.viewer = viewer;
-    this.everything = viewer.kind === "all" || !bots.some((bot) => isRestricted(bot.visibility));
+    this.everything = viewer.kind === "all" ||
+      (!bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor)));
     this.ownerOf = ownerOf ?? ((threadId) => this.indexedOwner(threadId));
     if (this.everything) return;
     for (const bot of bots) this.bots.set(bot.id, bot);
@@ -160,13 +210,14 @@ export class VisibleSet {
     return seen;
   }
 
-  /** At least one bot, and every bot in it visible. */
+  /** At least one bot, every bot in it visible, and the room's floor — the
+   * narrowest audience it has had — admits the viewer. */
   group(id: string): boolean {
     if (this.everything) return true;
     const group = this.groups.get(id);
     if (!group) return false;
     const members = group.memberIds.filter((member) => this.bots.has(member));
-    return members.length > 0 && members.every((member) => this.bot(member));
+    return members.length > 0 && members.every((member) => this.bot(member)) && viewerSees(this.viewer, group.audienceFloor);
   }
 
   /** The bot or room that owns the thread is visible. An unknown thread is not. */
@@ -295,6 +346,37 @@ export function memberBot<T extends object>(bot: T, visible: VisibleSet): T {
   return { ...rest, ...(peers ? { peers } : {}) } as T;
 }
 
+/** A room as a member receives it: without its audience floor. */
+export function memberGroup<T extends object>(group: T): T {
+  if (!("audienceFloor" in group)) return group;
+  const { audienceFloor: _floor, ...rest } = group as T & { audienceFloor?: unknown };
+  return rest as T;
+}
+
+/** A JSON response as a member receives it: every bot it carries (under
+ * `bot`, or in `bots`, at the top or one level down) through memberBot. */
+export function memberBody(body: unknown, visible: VisibleSet): unknown {
+  if (visible.everything || !body || typeof body !== "object" || Array.isArray(body)) return body;
+  const narrow = (value: unknown, depth: number): unknown => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+    const record = value as Record<string, unknown>;
+    let out: Record<string, unknown> | null = null;
+    for (const [key, child] of Object.entries(record)) {
+      let next = child;
+      if (key === "bot" && child && typeof child === "object" && !Array.isArray(child)) next = memberBot(child, visible);
+      else if (key === "bots" && Array.isArray(child)) {
+        next = child.map((bot) => (bot && typeof bot === "object" ? memberBot(bot as object, visible) : bot));
+      } else if (key === "group" && child && typeof child === "object" && !Array.isArray(child)) next = memberGroup(child);
+      else if (key === "groups" && Array.isArray(child)) {
+        next = child.map((group) => (group && typeof group === "object" ? memberGroup(group as object) : group));
+      } else if (depth > 0 && key !== "messages" && child && typeof child === "object" && !Array.isArray(child)) next = narrow(child, depth - 1);
+      if (next !== child) (out ??= { ...record })[key] = next;
+    }
+    return out ?? record;
+  };
+  return narrow(body, 1);
+}
+
 /** `undefined`: send nothing. Otherwise the payload to send, which is the
  * original object when nothing needed changing (the caller then reuses the
  * shared serialized frame). */
@@ -342,9 +424,9 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       if (!seen.groups.has(id)) {
         seen.groups.add(id);
         const fresh = ctx.freshGroup(id);
-        if (fresh) return { ...payload, group: { ...fresh, ...group } };
+        if (fresh) return { ...payload, group: memberGroup({ ...fresh, ...group }) };
       }
-      return payload;
+      return "audienceFloor" in group ? { ...payload, group: memberGroup(group) } : payload;
     }
     case "group.deleted":
       return seen.groups.delete(str(payload.groupId)) ? payload : undefined;

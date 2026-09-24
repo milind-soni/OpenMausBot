@@ -6,7 +6,7 @@ import { useStore } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 import { Card } from "./SettingsPrimitives";
 import { t } from "@/lib/i18n";
-import { botUsage, cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, sumUsage, usageDetail } from "@/lib/usage";
+import { botUsage, cachedInput, costCaption, formatTokens, formatUsd, hasFiniteCost, headlineTokens, sumUsage, usageDetail } from "@/lib/usage";
 import { UsageHistory } from "./UsageHistory";
 
 export function UsageSection() {
@@ -23,7 +23,7 @@ export function UsageSection() {
     .sort((a, b) => {
       const costOf = (value: number | null | undefined) =>
         hasFiniteCost(value) ? value : Number.NEGATIVE_INFINITY;
-      return costOf(b.usage.costUsd) - costOf(a.usage.costUsd) || b.usage.input + b.usage.output - (a.usage.input + a.usage.output);
+      return costOf(b.usage.costUsd) - costOf(a.usage.costUsd) || headlineTokens(b.usage) - headlineTokens(a.usage);
     });
   const total = sumUsage(rows.map((r) => r.usage));
   const billings = new Set(rows.map((r) => r.billing));
@@ -49,7 +49,7 @@ export function UsageSection() {
               </span>
               <span className="text-right tabular-nums text-ink-secondary">{usage.turns}</span>
               <span className="text-right tabular-nums text-ink" title={usageDetail(usage)}>
-                {formatTokens(usage.input + usage.output)}
+                {formatTokens(headlineTokens(usage))}
               </span>
               <span className="text-right tabular-nums text-ink">{hasFiniteCost(usage.costUsd) ? formatUsd(usage.costUsd) : <span className="text-ink-secondary">—</span>}</span>
             </div>
@@ -57,7 +57,7 @@ export function UsageSection() {
           <div className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-x-5 pt-2.5 text-[13px] font-medium text-ink">
             <span>{t("usage.allBots")}</span>
             <span className="text-right tabular-nums">{total.turns}</span>
-            <span className="text-right tabular-nums" title={usageDetail(total)}>{formatTokens(total.input + total.output)}</span>
+            <span className="text-right tabular-nums" title={usageDetail(total)}>{formatTokens(headlineTokens(total))}</span>
             <span className="text-right tabular-nums">{hasFiniteCost(total.costUsd) ? formatUsd(total.costUsd) : "—"}</span>
           </div>
           {cachedInput(total) > 0 && (

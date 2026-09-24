@@ -43,8 +43,44 @@ export function CompanyBackupSettings() {
     }).catch(() => { /* Fail closed without advertising company features. */ });
     return () => { generation.current++; unsubscribe?.(); };
   }, [organization]);
-  if (!bridge || connection?.status !== "connected" || connection.cloudBackups !== true || !connection.organization?.id || !connection.organization.name?.trim() || !connection.email) return null;
+  if (!bridge || !connection) return null;
+  // Not connected: cloud controls stay hidden, but a paused daily schedule
+  // saved on this computer keeps its status and its off switch.
+  if (connection.status !== "connected" || connection.cloudBackups !== true || !connection.organization?.id || !connection.organization.name?.trim() || !connection.email) return <SavedCompanyBackupSchedule bridge={bridge} />;
   return <ConnectedCompanyBackupSettings key={`${connection.organization.id}:${connection.email}:${connection.deviceId ?? ""}`} connection={connection} bridge={bridge} />;
+}
+
+/** Local only: reads the saved schedule from Electron main, never the cloud. */
+export function SavedCompanyBackupSchedule({ bridge }: { bridge: BackupBridge }) {
+  const [schedule, setSchedule] = useState<CompanyBackupState["schedule"] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const generation = useRef(0);
+  useEffect(() => {
+    const current = ++generation.current;
+    const unsubscribe = bridge.onState(next => { if (current === generation.current) setSchedule(next.schedule ?? null); });
+    void bridge.state().then(next => { if (current === generation.current) setSchedule(next.schedule ?? null); }).catch(() => {});
+    return () => { generation.current++; unsubscribe(); };
+  }, [bridge]);
+  if (!bridge.configureSchedule || !schedule?.enabled) return null;
+  const turnOff = async () => {
+    if (busy || !bridge.configureSchedule) return;
+    const current = generation.current;
+    setBusy(true); setError("");
+    try { const next = await bridge.configureSchedule({ enabled: false }); if (current === generation.current) setSchedule(next.schedule ?? null); }
+    catch { if (current === generation.current) setError(t("companyBackup.scheduleFailed")); }
+    finally { if (current === generation.current) setBusy(false); }
+  };
+  return <Card title={t("companyBackup.title")} subtitle={t("companyBackup.savedSchedule")}>
+    <div className="rounded-lg border border-hairline/40 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[14px] font-medium">{t("companyBackup.daily")}</div>
+        <Switch aria-label={t("companyBackup.daily")} checked disabled={busy} onClick={() => void turnOff()} />
+      </div>
+      <p role="status" className="mt-2 text-[12px] text-ink-secondary">{t(`companyBackup.scheduleStatus.${schedule.status}`)}</p>
+      {error && <p role="alert" className="mt-1 text-[12px] text-danger">{error}</p>}
+    </div>
+  </Card>;
 }
 
 /** A new connection identity remounts this panel, clearing passwords and staged previews. */

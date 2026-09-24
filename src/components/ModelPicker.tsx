@@ -275,15 +275,16 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
     const selected = claude ? selectedInstance?.driverKind === "claudeAgent" : instance.instanceId === selectedInstance?.instanceId;
     const label = claude ? "Claude" : instance.displayName;
     const attention = needsCli(target) || needsSignIn(target) || Boolean(target.snapshot.update);
+    const managedBy = target.policy ? t("policy.managedBy", { organization: target.policy.organizationName }) : undefined;
     return (
       <button
         type="button"
         key={instance.instanceId}
         onClick={() => onSelect(target)}
-        aria-label={label}
+        aria-label={managedBy ? `${label} · ${managedBy}` : label}
         aria-pressed={selected}
-        title={`${label} · ${engineStatus(target)}`}
-        className={cn("relative flex size-9 items-center justify-center rounded-lg", selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60")}
+        title={`${label} · ${managedBy ?? engineStatus(target)}`}
+        className={cn("relative flex size-9 items-center justify-center rounded-lg", selected ? "bg-control ring-1 ring-hairline/50" : "hover:bg-control/60", managedBy && "opacity-40")}
       >
         <InstanceProviderMark instance={target} size={18} />
         {attention && <span className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-warning ring-2 ring-panel" />}
@@ -462,7 +463,7 @@ export function ModelPicker({
   };
 
   const pick = (instance: InstanceInfo, model: string) => {
-    if (bot.busy) return;
+    if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
     const updateBotDefault = !threadId || scope === "bot";
     const profile = state.bots.find((candidate) => candidate.id === bot.id) ?? bot;
@@ -685,7 +686,13 @@ export function ModelPicker({
                   </button>
                 )}
 
-                {blocked ? (
+                {railInstance.policy ? (
+                  // The organisation does not allow this engine: shown, never pickable.
+                  <div data-policy-blocked className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-1 text-[12.5px] leading-relaxed text-ink-secondary">
+                    <p className="font-medium text-ink">{t("policy.managedBy", { organization: railInstance.policy.organizationName })}</p>
+                    <p className="mt-1">{t("policy.modelBlocked", { organization: railInstance.policy.organizationName })}</p>
+                  </div>
+                ) : blocked ? (
                   <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-1">
                     <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} />
                     {railInstance.claudeAccount && needsSignIn(railInstance) && pane !== "custom" && (

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import type { InstanceConfigMap, ModelCatalog, ProviderInstance } from "./contracts.ts";
@@ -12,16 +12,30 @@ const connectionSchema = z.object({
   email: z.string().email().max(320), deviceId: uuid, token: z.string().regex(/^omg_[A-Za-z0-9_-]{43}$/),
   expiresAt: z.number().finite().int().positive(),
   providers: z.array(z.object({ id: z.enum(["anthropic", "openai", "openrouter"]), configured: z.boolean(), models: z.array(model).max(500) }).strict()).max(3),
+  /** The Admin is up but its operator licence lapsed: keep the instances
+   * listed as unavailable instead of treating it as a revocation. */
+  suspended: z.literal("license-expired").optional(),
 }).strict();
 export type ManagedDesktopConnection = z.infer<typeof connectionSchema>;
+/** The saved enrollment's identity (never its token), sent before it is
+ * cleared or when it has already expired, so references to its old
+ * device-scoped ids still move to the stable ids. */
+const identitySchema = z.object({ portalOrigin: z.string().max(2048), organizationId: uuid, email: z.string().email().max(320), deviceId: uuid }).strict();
+const PROVIDER_IDS = ["anthropic", "openai", "openrouter"] as const;
 export interface ManagedDesktopInfo { organizationId: string; organizationName: string }
 interface ManagedDesktopOptions {
   registry: ProviderRegistry; dataDirectory: string; now?: () => number;
   beforeReplace?: (ids: string[]) => void | Promise<void>;
   afterReplace?: (ids: string[]) => void;
+  /** Saved selections, cursors and native homes still using a device-scoped
+   * id from before ids became stable across re-enrolment. */
+  migrate?: (aliases: { from: string; to: string }[]) => void | Promise<void>;
+  /** Availability changed without replacing instances (licence lapse or renewal). */
+  onAvailability?: () => void;
 }
 const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const expiredMessage = "Company access has ended. Reconnect your organization or explicitly choose a personal model; personal billing will not be used automatically.";
+export const LICENSE_EXPIRED_MESSAGE = "Your organisation's OpenMaus Admin licence has expired. Contact your admin.";
 
 /** Validate only messages received over Electron's private utility-parent port.
  * Never expose this input to renderer HTTP or merge it into saved AppConfig.
@@ -40,11 +54,21 @@ export function parseManagedDesktopConnection(raw: unknown, now = Date.now()): M
   return { ...value, portalOrigin: url.origin, email: value.email.toLowerCase(), providers: value.providers.map(provider => ({ ...provider, models: [...new Set(provider.models)] })).sort((a, b) => a.id.localeCompare(b.id)) };
 }
 
-export function companyInstanceId(connection: Pick<ManagedDesktopConnection, "portalOrigin" | "organizationId" | "deviceId">, provider: string): string {
-  // Device identity prevents an old company's native resume cursor from being
-  // inherited by a different enrollment using the same organization/email.
+export function companyInstanceId(connection: Pick<ManagedDesktopConnection, "portalOrigin" | "organizationId" | "email">, provider: string): string {
+  // Stable for one person in one organisation, so re-enrolling this computer
+  // keeps bots' Company model choices and native resume. Another account or
+  // organisation still gets separate ids, homes and cursors.
+  return `company.${signature([connection.portalOrigin, connection.organizationId, connection.email.toLowerCase()]).slice(0, 24)}.${provider}`;
+}
+
+/** The pre-0.1.86 id, which also hashed the enrollment's deviceId. */
+export function legacyCompanyInstanceId(connection: Pick<ManagedDesktopConnection, "portalOrigin" | "organizationId" | "deviceId">, provider: string): string {
   return `company.${signature([connection.portalOrigin, connection.organizationId, connection.deviceId]).slice(0, 24)}.${provider}`;
 }
+/** Everything that decides which native instances exist and what they hold.
+ * Expiry and licence suspension change availability only, never a process. */
+const instanceSignature = (connection: ManagedDesktopConnection | null) =>
+  signature(connection && (({ expiresAt: _expiresAt, suspended: _suspended, ...identity }) => identity)(connection));
 
 export function companyInstanceConfigs(connection: ManagedDesktopConnection, runtimeDirectory: string): InstanceConfigMap {
   const entries: InstanceConfigMap = {};
@@ -93,8 +117,18 @@ export class ManagedDesktopProviders {
   owns(instanceId: string): boolean { return this.known.has(instanceId); }
 
   apply(raw: unknown, force = false): Promise<void> {
-    const connection = parseManagedDesktopConnection(raw, this.now()), nextSignature = signature(connection);
-    if (!force && nextSignature === this.currentSignature) return this.tail;
+    const connection = parseManagedDesktopConnection(raw, this.now()), nextSignature = instanceSignature(connection);
+    if (!force && nextSignature === this.currentSignature) {
+      // A renewal or licence change: same processes, new availability.
+      const previous = this.connection;
+      this.connection = connection;
+      if (connection && previous && (connection.expiresAt !== previous.expiresAt || connection.suspended !== previous.suspended)) {
+        clearTimeout(this.timer);
+        this.scheduleExpiry(this.revision);
+        this.options.onAvailability?.();
+      }
+      return this.tail;
+    }
     this.currentSignature = nextSignature;
     this.connection = connection;
     const revision = ++this.revision;
@@ -109,6 +143,7 @@ export class ManagedDesktopProviders {
       // workspace backups. Device-scoped ids prevent a new enrollment from
       // inheriting another account's native conversation or credentials.
       const directory = this.ensureDirectory(["providers", "company"]);
+      await this.migrateLegacyIds(connection);
       const configs = companyInstanceConfigs(connection, directory);
       for (const [id, entry] of Object.entries(configs)) {
         if (this.options.registry.entries().some(existing => existing.instanceId === id)) throw new Error("Company instance conflicts with an existing account.");
@@ -117,7 +152,9 @@ export class ManagedDesktopProviders {
         }
         this.ids.add(id); this.known.add(id);
       }
-      const active = () => revision === this.revision && connection.expiresAt > this.now();
+      // Read the current grant: renewals and licence changes update it in place.
+      const active = () => revision === this.revision && Boolean(this.connection && this.connection.expiresAt > this.now() && !this.connection.suspended);
+      const unavailable = () => this.connection?.suspended === "license-expired" ? LICENSE_EXPIRED_MESSAGE : expiredMessage;
       await this.options.registry.load(configs, instance => {
         const provider = connection.providers.find(provider => companyInstanceId(connection, provider.id) === instance.instanceId)!;
         const models: ModelCatalog = { default: provider.models[0], options: provider.models.map(id => ({ id, label: `${id} (Company)` })) };
@@ -126,15 +163,15 @@ export class ManagedDesktopProviders {
           refreshModels: async () => {},
           startAuthentication: undefined, getAuthentication: undefined, completeAuthentication: undefined, cancelAuthentication: undefined, signOut: undefined,
           snapshot: async () => {
-            if (!active()) return { state: "unavailable", reason: expiredMessage };
+            if (!active()) return { state: "unavailable", reason: unavailable() };
             const snapshot = await instance.snapshot();
-            if (!active()) return { state: "unavailable", reason: expiredMessage };
+            if (!active()) return { state: "unavailable", reason: unavailable() };
             return { ...snapshot, authenticated: snapshot.state === "available", billing: "metered", account: { email: connection.email, organization: connection.organizationName, method: "api-key" } };
           },
           adapter: {
             ...instance.adapter,
             sendTurn: async input => {
-              if (!active()) throw new Error(expiredMessage);
+              if (!active()) throw new Error(unavailable());
               if (!input.model || !provider.models.includes(input.model)) throw new Error("This model is not enabled by your Company administrator.");
               return instance.adapter.sendTurn(input);
             },
@@ -143,7 +180,7 @@ export class ManagedDesktopProviders {
       });
       if (revision === this.revision) {
         this.options.afterReplace?.([...this.ids]);
-        this.scheduleExpiry(connection, revision);
+        this.scheduleExpiry(revision);
       }
     };
     this.tail = this.tail.catch(() => {}).then(replace).catch(async error => {
@@ -179,13 +216,45 @@ export class ManagedDesktopProviders {
     }
     return directory;
   }
-  private scheduleExpiry(connection: ManagedDesktopConnection, revision: number) {
+  private scheduleExpiry(revision: number) {
+    const expiresAt = this.connection?.expiresAt;
+    if (expiresAt === undefined) return;
     this.timer = setTimeout(() => {
       if (revision !== this.revision) return;
-      if (connection.expiresAt > this.now()) this.scheduleExpiry(connection, revision);
+      if ((this.connection?.expiresAt ?? 0) > this.now()) this.scheduleExpiry(revision);
       else void this.apply(null).catch(() => {});
-    }, Math.min(2_147_483_647, Math.max(1, connection.expiresAt - this.now())));
+    }, Math.min(2_147_483_647, Math.max(1, expiresAt - this.now())));
     this.timer.unref?.();
+  }
+  /** Moves an enrollment's old device-scoped ids to the stable ids: native
+   * homes are renamed only when the stable one does not exist yet, then saved
+   * references follow. Best effort: a failure is logged and never keeps
+   * Company models down. */
+  private async migrateLegacyIds(identity: Pick<ManagedDesktopConnection, "portalOrigin" | "organizationId" | "email" | "deviceId">) {
+    try {
+      const directory = this.ensureDirectory(["providers", "company"]);
+      const aliases = PROVIDER_IDS.map(provider => ({ from: legacyCompanyInstanceId(identity, provider), to: companyInstanceId(identity, provider) }));
+      for (const { from, to } of aliases) {
+        const legacy = join(directory, from), stable = join(directory, to);
+        if (!existsSync(legacy) || existsSync(stable)) continue;
+        const stat = lstatSync(legacy);
+        if (stat.isDirectory() && !stat.isSymbolicLink()) renameSync(legacy, stable);
+      }
+      await this.options.migrate?.(aliases);
+    } catch (error) {
+      console.warn(`[company] could not move saved Company model references to their stable ids: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  /** Migrates a saved enrollment that is being cleared or has expired. */
+  async migrateIdentity(raw: unknown): Promise<void> {
+    const parsed = identitySchema.parse(raw), url = new URL(parsed.portalOrigin);
+    if (url.origin !== parsed.portalOrigin || (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) {
+      throw new Error("Company identity must use an HTTPS origin or loopback fixture.");
+    }
+    const identity = { ...parsed, email: parsed.email.toLowerCase() };
+    const migration = this.tail.catch(() => {}).then(() => this.migrateLegacyIds(identity));
+    this.tail = migration;
+    return migration;
   }
   async close() {
     await this.apply(null, true);

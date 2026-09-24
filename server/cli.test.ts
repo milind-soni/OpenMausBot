@@ -581,15 +581,15 @@ describe("openmausbot access", () => {
       expect(await runAccess({ ...base, accessAction: "remove", email: "her@example.test" }, io)).toBe(0);
       expect(await runAccess({ ...base, accessAction: "remove", email: "her@example.test" }, io)).toBe(1);
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).signIn).toEqual({ admins: [], members: ["@agentada.test"] });
-      // Each change is in the admin activity log, named for the command line.
+      // Each change once more than one person signs in is in the admin
+      // activity log, named for the command line; the first, a lone admin, is not.
       const rows = readAdminActivityRange(dataDir, { from: new Date(Date.now() - 600_000), to: new Date(Date.now() + 600_000) });
       expect(rows.map((row) => [row.action, row.actor.kind, row.changed])).toEqual([
-        ["people.update", "cli", ["signIn.admins"]],
         ["people.update", "cli", ["signIn.members"]],
         ["people.update", "cli", ["signIn.admins", "signIn.members"]],
         ["people.update", "cli", ["signIn.members"]],
       ]);
-      expect(rows[0]!.after).toEqual({ "signIn.admins": ["her@example.test"] });
+      expect(rows[0]!.after).toEqual({ "signIn.members": ["@agentada.test"] });
     } finally {
       await removeTempDir(home);
     }

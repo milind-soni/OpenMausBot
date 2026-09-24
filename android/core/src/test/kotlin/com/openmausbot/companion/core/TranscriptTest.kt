@@ -8,9 +8,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * Expectations read off `parsedDiff` / `parsedTable` / `tableCells` /
- * `isTableSeparator` in `ios/App/ChatView.swift`, `csvField` in
- * `ios/App/Cards/SQLResultTableView.swift`, the 80-line prefix in
+ * Expectations for Android's own diff and table cards. iOS no longer uses
+ * `parsedTable` or the SQL result card; bringing Android across is issue 1707.
+ * The 80-line prefix in
  * `ios/App/Cards/GitPRDiffCardView.swift`, and `reasoning.suffix(2_000)` in
  * `StreamingBubble`. None of them derived from the Kotlin under test.
  *

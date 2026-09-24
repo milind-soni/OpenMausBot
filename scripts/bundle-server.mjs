@@ -126,10 +126,13 @@ await build({
   logLevel: "info",
 });
 
-// The enterprise layer (enterprise/LICENSE; delete the folder for pure OSS)
-// is loaded by path from <root>/enterprise/server/index.{ts,js}. A package
-// or image has no TypeScript runtime, so ship it bundled; the npm package
-// copies this file to enterprise/server/index.js beside the server.
+// The enterprise layer (enterprise/LICENSE; delete the folder for pure OSS).
+// A package or image has no TypeScript runtime, so ship it bundled to
+// dist-server/enterprise/server/index.js, where server/enterprise.ts finds it
+// inside the server root: the Docker image and the packaged desktop carry
+// dist-server/ alone. The npm package also copies it to
+// <package>/enterprise/server/index.js, beside the server. Its own license
+// travels with it either way.
 if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
   await build({
     entryPoints: [join(root, "enterprise", "server", "index.ts")],
@@ -141,6 +144,7 @@ if (existsSync(join(root, "enterprise", "server", "index.ts"))) {
     allowOverwrite: true,
     logLevel: "info",
   });
+  copyFileSync(join(root, "enterprise", "LICENSE"), join(root, "dist-server", "enterprise", "LICENSE"));
 }
 
 // pi-mcp-extension.ts is NOT an OpenMausBot entry point: it is loaded by the

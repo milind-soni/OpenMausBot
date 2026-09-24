@@ -7,9 +7,32 @@ import { parseOrganizationBranding } from "./organization-branding.mjs";
 const TOKEN = /^omd_[A-Za-z0-9_-]{43}$/;
 const UUID = /^[a-f0-9-]{36}$/;
 const PROVIDERS = new Set(["anthropic", "openai", "openrouter"]);
+const ENGINE = /^[A-Za-z][A-Za-z0-9-]{0,63}$/;
+const APP_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
+const COMPUTERS = ["thisComputer", "localVm", "box", "vps"];
+// Renew on start and whenever fewer than seven days remain; retry hourly.
+const RENEW_WINDOW_MS = 7 * 86400_000, RENEW_RETRY_MS = 60 * 60_000;
+export const LICENSE_EXPIRED_CODE = "admin_license_expired";
 // Reject control characters in portal-supplied labels and identities.
 // oxlint-disable-next-line no-control-regex
 const safeText = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
+const licenseExpired = error => error?.status === 503 && error?.apiCode === LICENSE_EXPIRED_CODE;
+
+/** The organisation's desktop policy from GET /api/desktop/session. Unknown
+ * fields are ignored so a newer Admin stays compatible; a malformed known
+ * field rejects the whole object rather than applying half of it. */
+export function parseDesktopPolicy(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { version, companyModelsOnly, allowedEngines, mcp, computers, remoteAccess } = value;
+  const flag = candidate => typeof candidate === "boolean";
+  if (!Number.isSafeInteger(version) || version < 0 || !flag(companyModelsOnly) || !flag(remoteAccess) ||
+      !(allowedEngines === "all" || (Array.isArray(allowedEngines) && allowedEngines.length <= 64 && allowedEngines.every(id => typeof id === "string" && ENGINE.test(id)))) ||
+      !mcp || !flag(mcp.allowCustom) || !Array.isArray(mcp.allowlist) || mcp.allowlist.length > 100 || !mcp.allowlist.every(entry => safeText(entry, 200)) ||
+      !computers || !COMPUTERS.every(key => flag(computers[key]))) return null;
+  return { version, companyModelsOnly, allowedEngines: allowedEngines === "all" ? "all" : [...allowedEngines],
+    mcp: { allowCustom: mcp.allowCustom, allowlist: [...mcp.allowlist] },
+    computers: Object.fromEntries(COMPUTERS.map(key => [key, computers[key]])), remoteAccess };
+}
 /** Replies are correlated to the exact owned utility process, not just an id. */
 export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
   const pending = new Map();
@@ -18,16 +41,25 @@ export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
     pending.delete(id); clearTimeout(entry.timer);
     if (error) entry.reject(new Error("Company models could not be connected to the local runtime.")); else entry.resolve();
   };
+  const post = (proc, message) => new Promise((resolve, reject) => {
+    const requestId = randomUUID();
+    const timer = setTimeout(() => settle(requestId, true), timeoutMs); timer.unref?.();
+    pending.set(requestId, { proc, resolve, reject, timer });
+    try { proc.postMessage({ ...message, requestId }); }
+    catch { settle(requestId, true); }
+  });
   return {
     send(proc, connection) {
       if (!proc) return connection ? Promise.reject(new Error("The local bot runtime is not available.")) : Promise.resolve();
-      return new Promise((resolve, reject) => {
-        const requestId = randomUUID();
-        const timer = setTimeout(() => settle(requestId, true), timeoutMs); timer.unref?.();
-        pending.set(requestId, { proc, resolve, reject, timer });
-        try { proc.postMessage({ type: "openmausbot:managed-desktop", requestId, connection }); }
-        catch { settle(requestId, true); }
-      });
+      return post(proc, { type: "openmausbot:managed-desktop", connection });
+    },
+    /** The runtime has no policy until it starts; its ready hook refreshes. */
+    sendPolicy(proc, policy) {
+      return proc ? post(proc, { type: "openmausbot:managed-desktop-policy", policy }) : Promise.resolve();
+    },
+    /** A saved enrollment's identity (no token) so its old ids can migrate. */
+    sendIdentity(proc, identity) {
+      return proc ? post(proc, { type: "openmausbot:managed-desktop-identity", identity }) : Promise.resolve();
     },
     receive(proc, raw) {
       const message = raw?.data ?? raw;
@@ -90,9 +122,17 @@ export function createManagedDesktopStore({ file, encryption }) {
   };
 }
 
-export function createManagedDesktopClient({ store, applyConnection, openBrowser, platform, deviceName,
+export function createManagedDesktopClient({ store, applyConnection, applyPolicy = async () => {}, migrateIdentity = async () => {}, openBrowser, platform, deviceName, appVersion,
   fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {} }) {
+  // Resolves once the saved enrollment (and its policy) has been read.
+  let markRestored;
+  const restored = new Promise(resolve => { markRestored = resolve; });
   let grant = null, connection = null, pending = null, state = { status: "signed-out" };
+  // Renewal is additive: only an Admin advertising deviceRenewal is asked.
+  let renewalCheckedFor = null, lastRenewAttempt = 0, renewalSupported = false, reportedPolicyVersion = null;
+  // Revocation or expiry lifts the policy with company access, even though the
+  // saved grant stays until the person disconnects.
+  let policyLifted = false;
   let issuedGrant = null, cleanupGrant = null, cleanupNeeded = false, clearing = null;
   let generation = 0, timer = null, closed = false, controller = new AbortController(), refreshing = null;
   let branding = parseOrganizationBranding(null);
@@ -131,13 +171,35 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
     let data;
     try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new Error("The Admin portal returned an invalid response."); }
     if (!response.ok) throw Object.assign(new Error("The Admin portal could not complete this request."), { status: response.status,
-      code: typeof data?.error === "string" ? data.error : "request_failed", interval: data?.interval });
+      code: typeof data?.error === "string" ? data.error : "request_failed", apiCode: typeof data?.code === "string" ? data.code : undefined, interval: data?.interval });
     return data;
   }
   const validateGrant = value => {
     if (!value || managedPortalOrigin(value.portalOrigin) !== value.portalOrigin || !TOKEN.test(value.token) || !UUID.test(value.deviceId) ||
         !UUID.test(value.organizationId) || !safeText(value.email, 320) || !Number.isSafeInteger(value.expiresAt)) throw new Error("Invalid company connection.");
-    return { portalOrigin: value.portalOrigin, token: value.token, deviceId: value.deviceId, organizationId: value.organizationId, email: value.email, expiresAt: value.expiresAt };
+    // The last applied policy is kept with the OS-encrypted grant so it still
+    // holds after an offline restart, until this credential expires.
+    const policy = parseDesktopPolicy(value.policy), organizationName = value.policy?.organizationName;
+    return { portalOrigin: value.portalOrigin, token: value.token, deviceId: value.deviceId, organizationId: value.organizationId, email: value.email, expiresAt: value.expiresAt,
+      ...(policy && safeText(organizationName, 100) ? { policy: { ...policy, organizationName } } : {}) };
+  };
+  /** What the local runtime enforces; never written to config.json. */
+  const policyMessage = value => value?.policy && value.expiresAt > now()
+    ? { ...value.policy, organizationId: value.organizationId, expiresAt: value.expiresAt } : null;
+  const sendPolicy = value => Promise.resolve().then(() => applyPolicy(policyMessage(value))).catch(() => {});
+  /** Lets the runtime move references to this enrollment's old device-scoped
+   * ids before the grant is cleared or after it expired. Never the token. */
+  const sendIdentity = value => value ? Promise.resolve().then(() => migrateIdentity({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, email: value.email, deviceId: value.deviceId })).catch(() => {}) : Promise.resolve();
+  const report = () => ({ platform, ...(typeof appVersion === "string" && APP_VERSION.test(appVersion) ? { appVersion } : {}),
+    ...(grant?.policy ? { policyVersion: grant.policy.version } : {}) });
+  /** Persist a newer grant (renewal, adopted expiry, new policy) before using
+   * it. A rotated token is adopted only once it is safely stored: otherwise a
+   * restart would come back with a token the portal may no longer accept. */
+  const replaceGrant = async (stamp, previous, next) => {
+    let persisted = true;
+    try { await store.write(next); } catch { persisted = false; }
+    if (!persisted && next.token !== previous.token) return;
+    if (current(stamp) && grant === previous) grant = next;
   };
   const revokeGrant = async previous => {
     try {
@@ -153,10 +215,11 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
     grant = null; issuedGrant = null; connection = null;
     cleanupGrant = previous; cleanupNeeded = true;
     const operation = (async () => {
+      await sendIdentity(previous);
       // These are independent cleanup obligations. A stopped/unresponsive
       // runtime must not prevent durable sign-out or portal revocation.
       const [runtime, persisted, revoked] = await Promise.allSettled([
-        Promise.resolve().then(() => applyConnection(null)),
+        Promise.resolve().then(() => Promise.all([applyConnection(null), Promise.resolve().then(() => applyPolicy(null)).catch(() => {})])),
         Promise.resolve().then(() => store.write(null)),
         previous ? revokeGrant(previous) : Promise.resolve(),
       ]);
@@ -174,43 +237,105 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
     return operation;
   }
   async function endAccess(stamp, message) {
-    connection = null;
+    connection = null; policyLifted = true;
+    await sendIdentity(grant);
+    await Promise.resolve().then(() => applyPolicy(null)).catch(() => {});
     try { await applyConnection(null); }
     catch { message += " Quit and reopen OpenMausBot to confirm Company tasks have stopped."; }
     return current(stamp) ? publish({ status: "reauth-required", message }) : snapshot();
+  }
+  /** Renew once per start and when fewer than seven days remain, only when
+   * the Admin advertises it. Same deviceId; a rotated token is stored
+   * OS-encrypted before use. Any failure leaves the current grant in place. */
+  async function renew(stamp) {
+    const enrolled = grant;
+    const due = renewalCheckedFor !== enrolled.deviceId || (enrolled.expiresAt - now() < RENEW_WINDOW_MS && now() - lastRenewAttempt >= RENEW_RETRY_MS);
+    if (!due) return;
+    renewalCheckedFor = enrolled.deviceId; lastRenewAttempt = now();
+    let info;
+    try { info = await request(enrolled.portalOrigin, "/api/public/config"); } catch { return; }
+    renewalSupported = Number.isSafeInteger(info?.capabilities?.deviceRenewal) && info.capabilities.deviceRenewal >= 1;
+    if (!current(stamp) || grant !== enrolled || !renewalSupported) return;
+    let result;
+    try { result = await request(enrolled.portalOrigin, "/api/desktop/session/renew", { method: "POST", body: report(), token: enrolled.token }); }
+    catch (error) { if (licenseExpired(error)) throw error; return; }
+    if (!current(stamp) || grant !== enrolled || result?.device?.id !== enrolled.deviceId || result.device?.organizationId !== enrolled.organizationId ||
+        result.device?.email !== enrolled.email || !Number.isSafeInteger(result.expiresAt) || result.expiresAt < enrolled.expiresAt) return;
+    reportedPolicyVersion = enrolled.policy?.version ?? null;
+    const token = typeof result.accessToken === "string" && TOKEN.test(result.accessToken) ? result.accessToken : enrolled.token;
+    if (result.expiresAt !== enrolled.expiresAt || token !== enrolled.token) await replaceGrant(stamp, enrolled, { ...enrolled, token, expiresAt: result.expiresAt });
   }
   async function synchronize(stamp) {
     if (!grant || !current(stamp)) return snapshot();
     if (grant.expiresAt <= now()) {
       return endAccess(stamp, "Your company sign-in expired. Reconnect to continue using company models and backups.");
     }
+    // A restarted runtime has no policy: restore the saved one before any
+    // network call, which can take a while.
+    if (grant.policy && !policyLifted) await sendPolicy(grant);
+    if (!current(stamp)) return snapshot();
     try {
+      await renew(stamp);
+      if (!grant || !current(stamp)) return snapshot();
       const result = await request(grant.portalOrigin, "/api/desktop/session", { token: grant.token });
       if (!current(stamp)) return snapshot();
+      // A later expiry than ours means a renewal we did not get to save.
       if (result.desktopContractVersion !== 1 || !/^omg_[A-Za-z0-9_-]{43}$/.test(result.modelAccessToken) || result.device?.id !== grant.deviceId || result.device?.organizationId !== grant.organizationId ||
           result.device?.email !== grant.email || result.organization?.id !== grant.organizationId || !safeText(result.organization?.name, 100) ||
-          result.device?.revokedAt !== null || result.device?.expiresAt !== grant.expiresAt || !Array.isArray(result.providers) || result.providers.length > 3 ||
+          result.device?.revokedAt !== null || !Number.isSafeInteger(result.device?.expiresAt) || result.device.expiresAt < grant.expiresAt || !Array.isArray(result.providers) || result.providers.length > 3 ||
           new Set(result.providers.map(row => row.id)).size !== result.providers.length || result.providers.some(row => !PROVIDERS.has(row.id) || typeof row.configured !== "boolean" ||
             !Array.isArray(row.models) || row.models.length > 500 || row.models.some(model => typeof model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._/:+-]{0,199}$/.test(model) || model.includes("::")))) {
         throw Object.assign(new Error("Company connection identity could not be verified."), { status: 401 });
       }
-      const next = { ...grant, token: result.modelAccessToken, organizationName: result.organization.name, providers: result.providers.map(({ id, configured, models }) => ({ id, configured, models })) };
+      // An Admin without policies sends none: nothing is restricted. A policy
+      // that does not parse keeps the last one applied instead of widening.
+      const policy = result.policy === undefined ? null : parseDesktopPolicy(result.policy) ?? grant.policy ?? null;
+      const known = policy ? { ...policy, organizationName: result.organization.name } : undefined;
+      if (result.device.expiresAt !== grant.expiresAt || JSON.stringify(known) !== JSON.stringify(grant.policy)) {
+        const { policy: _previous, ...identity } = grant;
+        await replaceGrant(stamp, grant, { ...identity, expiresAt: result.device.expiresAt, ...(known ? { policy: known } : {}) });
+        if (!current(stamp)) return snapshot();
+      }
+      const { policy: _policy, ...access } = grant;
+      const next = { ...access, token: result.modelAccessToken, organizationName: result.organization.name, providers: result.providers.map(({ id, configured, models }) => ({ id, configured, models })) };
       await applyConnection(next);
+      if (!current(stamp)) return snapshot();
+      policyLifted = false;
+      await sendPolicy(grant);
       if (!current(stamp)) return snapshot();
       connection = next;
       branding = parseOrganizationBranding(result.branding);
       publish({ ...view("connected"), cloudBackups: Boolean(result.cloudBackups) });
+      // Tell Admin promptly which policy this desktop now applies.
+      if (renewalSupported && grant.policy && reportedPolicyVersion !== grant.policy.version) {
+        const reported = grant.policy.version, enrolled = grant;
+        void request(enrolled.portalOrigin, "/api/desktop/heartbeat", { method: "POST", body: report(), token: enrolled.token })
+          .then(() => { if (grant === enrolled) reportedPolicyVersion = reported; }, () => {});
+      }
     } catch (error) {
       if (!current(stamp)) return snapshot();
-      if ([401, 403].includes(error?.status)) {
+      if (licenseExpired(error)) {
+        // The operator's licence lapsed: not a revocation and not a reason to
+        // sign in again. Company models stay listed but unavailable; the last
+        // policy still holds; the heartbeat keeps checking for the renewal.
+        if (connection && connection.expiresAt > now()) {
+          connection = { ...connection, suspended: "license-expired" };
+          await applyConnection(connection).catch(() => {});
+        }
+        await sendPolicy(grant);
+        if (!current(stamp)) return snapshot();
+        publish(view("license-expired"));
+      } else if ([401, 403].includes(error?.status)) {
         return endAccess(stamp, "Company access ended or needs a new sign-in. Your personal and local providers are unchanged.");
+      } else {
+        // The portal is unreachable, not revoking. A server process that restarted
+        // meanwhile has an empty overlay, so re-apply the cached, unexpired grant
+        // rather than leaving Company models missing until the next heartbeat.
+        if (connection && connection.expiresAt > now()) await applyConnection(connection).catch(() => {});
+        await sendPolicy(grant);
+        if (!current(stamp)) return snapshot();
+        publish(view("unavailable", "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly."));
       }
-      // The portal is unreachable, not revoking. A server process that restarted
-      // meanwhile has an empty overlay, so re-apply the cached, unexpired grant
-      // rather than leaving Company models missing until the next heartbeat.
-      if (connection && connection.expiresAt > now()) await applyConnection(connection).catch(() => {});
-      if (!current(stamp)) return snapshot();
-      publish(view("unavailable", "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly."));
     }
     if (current(stamp)) schedule(() => refresh(), Math.max(1000, Math.min(60_000, grant.expiresAt - now())));
     return snapshot();
@@ -262,8 +387,13 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
     state: snapshot,
     async start() {
       const stamp = generation;
-      try { const saved = await store.read(); if (!current(stamp)) return snapshot(); grant = saved ? validateGrant(saved) : null; }
-      catch { return current(stamp) ? publish({ status: "unavailable", message: "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot." }) : snapshot(); }
+      try { const saved = await store.read(); if (!current(stamp)) { markRestored(); return snapshot(); } grant = saved ? validateGrant(saved) : null; }
+      catch { markRestored(); return current(stamp) ? publish({ status: "unavailable", message: "Company sign-in could not be restored. Unlock your system keychain and restart OpenMausBot." }) : snapshot(); }
+      // Restore the organisation's last policy before any network call, and
+      // move references to this enrollment's old device-scoped ids.
+      if (grant?.policy && grant.expiresAt > now()) await sendPolicy(grant);
+      markRestored();
+      await sendIdentity(grant);
       return refresh();
     },
     async begin(input) {
@@ -276,19 +406,30 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
       try {
         const info = await request(portalOrigin, "/api/public/config");
         if (!current(stamp)) return snapshot();
+        if (info.license?.state === "expired") { pending = null; return publish({ status: "signed-out", notice: "license-expired" }); }
         if (info.desktopContractVersion !== 1 || info.capabilities?.desktopEnrollment !== true) throw new Error("Update the Admin portal before connecting this desktop.");
         const result = await request(portalOrigin, "/api/desktop/enrollment", { method: "POST", body: { deviceName, platform } });
         if (!current(stamp)) return snapshot();
         if (!/^[A-Za-z0-9_-]{43}$/.test(result.deviceCode) || !/^[A-HJ-NP-Z2-9]{5}-[A-HJ-NP-Z2-9]{5}$/.test(result.userCode) ||
             result.verificationUriComplete !== `${portalOrigin}/enroll?code=${result.userCode}` || !Number.isSafeInteger(result.expiresIn) || result.expiresIn < 1 || result.expiresIn > 600 ||
             !Number.isSafeInteger(result.interval) || result.interval < 5 || result.interval > 60) throw new Error("Invalid company enrollment response.");
-        pending = { portalOrigin, deviceCode: result.deviceCode, expiresAt: now() + result.expiresIn * 1000, interval: result.interval * 1000 };
+        pending = { portalOrigin, deviceCode: result.deviceCode, expiresAt: now() + result.expiresIn * 1000, interval: result.interval * 1000,
+          verificationUri: result.verificationUriComplete };
         publish({ status: "connecting", enrollment: { userCode: result.userCode, verificationUri: result.verificationUriComplete, expiresAt: pending.expiresAt } });
         await openBrowser(result.verificationUriComplete);
         if (current(stamp)) schedule(poll, pending.interval);
-      } catch {
-        if (current(stamp)) { pending = null; publish({ status: "signed-out", message: "Could not start company sign-in. Check the Admin portal address and your connection." }); }
+      } catch (error) {
+        if (current(stamp)) { pending = null; publish(licenseExpired(error) ? { status: "signed-out", notice: "license-expired" } : { status: "signed-out", message: "Could not start company sign-in. Check the Admin portal address and your connection." }); }
       }
+      return snapshot();
+    },
+    /** Opens this attempt's own validated sign-in page again, for a closed
+     * browser tab. It takes nothing from the renderer, so it can never open
+     * another address, and does nothing once the attempt ends or expires. */
+    async reopen() {
+      const attempt = pending, stamp = generation;
+      if (!attempt?.verificationUri || !current(stamp) || state.status !== "connecting" || attempt.expiresAt <= now()) return snapshot();
+      await openBrowser(attempt.verificationUri);
       return snapshot();
     },
     async cancelEnrollment() {
@@ -298,6 +439,10 @@ export function createManagedDesktopClient({ store, applyConnection, openBrowser
     disconnect: clearConnection,
     /** Main-process only. Never expose this method through the renderer bridge. */
     connection: () => connection ? structuredClone(connection) : null,
+    /** Resolves after start() has read the saved enrollment. */
+    whenRestored: () => restored,
+    /** The organisation's applied policy while the credential lasts, else null. */
+    policy: () => !policyLifted && grant?.policy && grant.expiresAt > now() ? structuredClone(grant.policy) : null,
     backupGeneration: () => generation,
     /** Fixed first-party backup API only; this function stays in Electron main. */
     async requestBackup(route, options = {}) {

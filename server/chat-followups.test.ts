@@ -27,10 +27,11 @@ function storeFor(botId: string, threadId: string): SteerStore & { messages: Mes
 }
 
 describe("durable accepted follow-ups", () => {
-  it("restores bot order, receipt, attachments, reply context and unattended provenance", async () => {
+  it("restores bot order, receipt, attachments, reply context, unattended provenance and who to bill", async () => {
     const text = 'inspect this\n\n<attached-image path="/fixture/picture.png" name="picture.png" />';
     const first = queueSteeredMessage("bot", "thread", text, {
       prompt: `Reply context\n${text}`, replyToId: "reply", sendId: "first", reason: "capacity", unattended: true,
+      sender: { name: "ada@example.test" }, trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" },
     });
     const second = queueSteeredMessage("bot", "thread", "then summarize", { sendId: "second" });
     const cancelled = queueSteeredMessage("bot", "thread", "never run", { sendId: "cancelled" });
@@ -47,9 +48,11 @@ describe("durable accepted follow-ups", () => {
         .toEqual([first.id, second.id]);
     });
     drainSteeredMessages(store, run);
+    // the first waiting line starts the turn, and survived the restart with its sender
     expect(run.mock.calls[0]).toEqual([
       "bot", "thread", `Reply context\n${text}\n\nthen summarize`, store.messages[1],
       ["message-0", "message-1"], true,
+      { trigger: { kind: "user", email: "ada@example.test", label: "Ada's laptop" }, sender: { name: "ada@example.test" }, peerAsk: undefined },
     ]);
     expect(store.messages).toEqual([
       expect.objectContaining({ text, replyToId: "reply", sendId: "first", queueId: first.id }),
@@ -64,7 +67,7 @@ describe("durable accepted follow-ups", () => {
 
   it("restores channel target, mode and API provenance without reviving cancelled messages", async () => {
     const first = queueChannelMessage("group", "old-thread", "continue goal", {
-      mode: "goal", via: "api", replyToId: "reply", sendId: "first",
+      mode: "goal", via: "api", replyToId: "reply", sendId: "first", trigger: { kind: "user", label: "Ada's phone" },
     });
     const second = queueChannelMessage("group", "old-thread", "next", { sendId: "second" });
     const cancelled = queueChannelMessage("group", "old-thread", "drop", { sendId: "cancelled" });
@@ -75,7 +78,7 @@ describe("durable accepted follow-ups", () => {
     drainChannelMessages(() => false, run);
     expect(run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       groupId: "group", threadId: "old-thread", id: first.id, text: "continue goal",
-      mode: "goal", via: "api", replyToId: "reply", sendId: "first",
+      mode: "goal", via: "api", replyToId: "reply", sendId: "first", trigger: { kind: "user", label: "Ada's phone" },
     }));
     expect(journal.chatFollowups().find((row) => row.id === first.id)?.status).toBe("dispatching");
     drainChannelMessages(() => false, run);

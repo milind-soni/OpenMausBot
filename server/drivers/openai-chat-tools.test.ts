@@ -19,7 +19,7 @@ import { OpenAICompatDriver } from "./openai-compat.ts";
 interface ChatRequest {
   messages: Array<{
     role: string;
-    content: string | null;
+    content: string | Array<{ type: string; text?: string; image_url?: { url: string } }> | null;
     reasoning_content?: string;
     reasoning_details?: unknown[];
     tool_call_id?: string;
@@ -152,6 +152,79 @@ async function fixture(script: Script, provider: Provider = "openai-compat", api
     },
   };
 }
+
+describe("OpenAI-compatible computer images", () => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=";
+  it.each(["localComputer", "browser"] as const)("delivers %s screenshots after tool results and preserves approval", async (source) => {
+    const prefix = source === "browser" ? "browser" : "computer";
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [{ ...toolCall(), function: { ...toolCall().function, name: `${prefix}_write` } }] }, "tool_calls")]);
+      else answer(response, "Inspected the fixture screenshot.");
+    });
+    writeFileSync(join(f.directory, "mcp.mjs"), MCP_SCRIPT.replace(
+      'text: "Stored " + args.name + "=" + args.value',
+      `text: "Screenshot captured" }, { type: "image", mimeType: "image/png", data: ${JSON.stringify(png)}`,
+    ));
+    const imagePath = join(f.directory, "input.png");
+    writeFileSync(imagePath, Buffer.from(png, "base64"));
+    await f.start({ integrations: { [source]: f.integrations!.custom!.audit }, images: [{ path: imagePath, mime: "image/png", bytes: Buffer.from(png, "base64").length }] });
+    await f.decide();
+    expect(await f.completed()).toMatchObject({ ok: true });
+    expect(f.effects()).toHaveLength(1);
+    expect(f.requests).toHaveLength(2);
+    expect(f.requests[0].messages.at(-1)?.content).toEqual([
+      { type: "text", text: "Store the synthetic receipt." },
+      { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
+    ]);
+    expect(f.requests[1].messages.at(-2)).toMatchObject({ role: "tool", tool_call_id: "call_write" });
+    expect(f.requests[1].messages.at(-1)).toEqual({ role: "user", content: [
+      { type: "text", text: "Screenshot result from tool call call_write:" },
+      { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
+    ] });
+    expect(f.instance.adapter.capabilities).toMatchObject({ computerMcp: true, localComputerMcp: true, browserMcp: true, nativeImageInput: true });
+  });
+
+  it("keeps every tool response ahead of screenshots in a multiple-call batch", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [
+        toolCall("computer_write", '{"name":"first","value":"done"}', "first"),
+        { ...toolCall("computer_write", '{"name":"second","value":"done"}', "second"), index: 1 },
+      ] }, "tool_calls")]);
+      else answer(response);
+    });
+    writeFileSync(join(f.directory, "mcp.mjs"), MCP_SCRIPT.replace(
+      'text: "Stored " + args.name + "=" + args.value',
+      `text: "Screenshot captured" }, { type: "image", mimeType: "image/png", data: ${JSON.stringify(png)}`,
+    ));
+    const stop = f.instance.adapter.onEvent(event => {
+      if (event.type === "request.opened") void f.instance.adapter.respondToRequest(f.threadId, event.requestId!, { behavior: "allow" });
+    });
+    await f.start({ integrations: { localComputer: f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["localComputer"] } });
+    expect(await f.completed()).toMatchObject({ ok: true });
+    stop();
+    expect(f.effects()).toHaveLength(2);
+    expect(f.requests[1].messages.slice(-3)).toMatchObject([
+      { role: "tool", tool_call_id: "first" },
+      { role: "tool", tool_call_id: "second" },
+      { role: "user", content: [
+        { type: "text", text: "Screenshot result from tool call first:" }, { type: "image_url" },
+        { type: "text", text: "Screenshot result from tool call second:" }, { type: "image_url" },
+      ] },
+    ]);
+  });
+
+  it("does not execute a denied computer action", async () => {
+    const f = await fixture((_body, response, round) => {
+      if (round === 1) sse(response, [chunk({ tool_calls: [{ ...toolCall(), function: { ...toolCall().function, name: "computer_write" } }] }, "tool_calls")]);
+      else answer(response, "The action was denied.");
+    });
+    await f.start({ integrations: { localComputer: f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["localComputer"] } });
+    await f.decide("deny");
+    expect(await f.completed()).toMatchObject({ ok: false });
+    expect(f.effects()).toEqual([]);
+    expect(f.requests[1].messages.at(-1)).toMatchObject({ role: "tool", content: expect.stringContaining("Permission denied") });
+  });
+});
 
 describe.each<Provider>(["openai-compat", "grok", "minimax"])("%s structured tool contract", (provider) => {
   it("handles content:null tool calls when a compatible endpoint returns a JSON completion", async () => {

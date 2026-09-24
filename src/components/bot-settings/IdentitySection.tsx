@@ -6,7 +6,7 @@
 import { useState } from "react";
 import { BookOpen } from "lucide-react";
 
-import type { Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
 import type { MausMotion, MausState } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
@@ -14,32 +14,52 @@ import { BotProfileAvatarCard } from "../BotProfileAvatarCard";
 import { BotInstructionsDialog } from "../BotInstructionsDialog";
 import { Field, inputCls } from "./field";
 import type { BotPatch } from "./useBotSettingsDerived";
+import { useBotEditor } from "./BotEditorContext";
+import { randomBotName } from "@/lib/random-bot-name";
+import { t } from "@/lib/i18n";
 
 export function IdentitySection({
   bot,
   patch,
   activeState,
   mascotMotion,
+  namePlaceholder,
 }: {
   bot: Bot;
   patch: (patch: BotPatch) => void;
   activeState: MausState;
   mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
+  namePlaceholder?: string;
 }) {
   const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const { draft } = useBotEditor();
+  const { state } = useStore();
 
   return (
     <div className="flex flex-col gap-4">
       <BotProfileAvatarCard bot={bot} activeState={activeState} mascotMotion={mascotMotion} onPatch={patch} />
 
-      <Field label="Name">
+      <div>
+        <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <label htmlFor={`bot-name-${bot.id}`} className="text-[13px] text-ink-secondary">Name</label>
+          {draft && <div className="flex flex-wrap gap-1">
+            {(["female", "male"] as const).map(kind => <button
+              key={kind}
+              type="button"
+              className="rounded-md px-2 py-1 text-xs text-ink-secondary hover:bg-control hover:text-ink"
+              onClick={() => patch({ name: randomBotName(kind, bot.name, state.bots.map(existing => existing.name)) })}
+            >{t(kind === "female" ? "newBot.randomFemaleName" : "newBot.randomMaleName")}</button>)}
+          </div>}
+        </div>
         <input
+          id={`bot-name-${bot.id}`}
           className={inputCls}
           maxLength={BOT_PROFILE_LIMITS.name}
           value={bot.name}
+          placeholder={namePlaceholder}
           onChange={(e) => patch({ name: e.target.value })}
         />
-      </Field>
+      </div>
       <Field label="Title">
         <input
           className={inputCls}
@@ -83,7 +103,7 @@ export function IdentitySection({
         </div>
       </div>
 
-      {instructionsOpen && <BotInstructionsDialog bot={bot} onClose={() => setInstructionsOpen(false)} />}
+      {instructionsOpen && <BotInstructionsDialog bot={bot} inline={draft} onClose={() => setInstructionsOpen(false)} />}
     </div>
   );
 }

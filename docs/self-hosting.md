@@ -605,8 +605,10 @@ server-private file (`<data dir>/thread-starters.json`), never sent to clients.
 ### Who can see a bot
 
 On a workspace several people share, an admin can limit who sees a bot:
-**Bot settings → Who can see it** (in the browser, for admins) or
-`PATCH /api/bots/:id` with `visibility`:
+**Bot settings → Who can see it** (in the browser, for admins), or when
+creating it — **New bot** offers the same choice, and `POST /api/bots` and
+`POST /api/teams/import?visibility=…` take it — so a bot for a sensitive job
+is never shown to everyone first. Over the API it is `visibility`:
 
 - `"everyone"` — every signed-in person, the default and today's behaviour;
 - `"admins"` — admin sessions only;
@@ -618,22 +620,40 @@ member who may not see a bot, the server answers the bot, its threads and
 their messages, images, exports, reactions, cards, sends, routines, runs and
 attachments exactly as it answers an id that does not exist (404), and leaves
 the bot out of the bot list, search results, routines, webhooks, the team map
-and the live event stream. When an admin changes a bot's audience, the
-members who lose it get it withdrawn from their open app (a `bot.deleted`
-frame), and those who gain it receive it whole.
+and the live event stream. Every bot a member is sent, by any route, comes
+without its audience list or the ids of teammates they cannot see. When an
+admin changes a bot's audience, every member's open app reconnects and
+reloads exactly what that person may now see (a member who was away and
+resumes from an older point gets the same fresh load); admins' apps are left
+alone.
 
-- **Rooms.** A member sees a room only if it has at least one bot and they
-  can see every bot in it. A room is one shared transcript, so a restricted
-  bot's words there would otherwise reach people who cannot see the bot.
-  Putting a restricted bot in a room therefore narrows that room too. A
-  member cannot create a room with a bot they cannot see.
+- **Rooms.** A room is one shared transcript, so its bots must be visible
+  to the same people: creating a room, adding a bot to one, or scheduling a
+  call between bots that other people see differently is refused with a
+  plain sentence (for admins too). If an admin later restricts a bot that
+  is already in a room, the change is allowed and the room narrows to the
+  people who can see all its bots. A room also keeps the narrowest audience
+  it has ever had (its floor): taking the restricted bot out, deleting it,
+  or widening it again never shows the transcript to more people. A member
+  sees a room only if they can see every bot in it and the floor admits
+  them. Such a room stays out of the recall, recent-work brief and daily
+  memory log of any bot more people can see, and that bot cannot write
+  notes from it into its memory — so a bot everyone sees cannot repeat, in
+  a chat with anyone, what a restricted bot said there. To widen a room, an
+  admin says so explicitly: **Bot settings → Who can see it** lists the
+  rooms visible to fewer people than the bot, each with **Show … to everyone
+  its bots allow** (`PATCH /api/groups/:id` with `{"resetAudience": true}`),
+  which resets the floor to what the room's current bots allow and is
+  recorded in the admin activity log.
 - **Teams.** A team (sidebar section) is listed to a member only when it
   holds a bot or room they can see.
 - **Bots working together.** A bot reaches a teammate (asks, delegations,
   its roster and `list_bots`, @mentions, a Chief's team) only when exactly
   the same people can see both: otherwise one bot's thread could carry the
   other's answers to people who cannot see it. Bots nobody restricted all
-  share "everyone", so nothing changes until an admin restricts one.
+  share "everyone", so nothing changes until an admin restricts one. A bot a
+  Chief creates (directly, or in a reviewed team setup) gets exactly the
+  Chief's audience.
 - **Who sees everything.** Admin sessions, the owner on this machine, and a
   session-less local service (the Slack worker under `service` trust) see
   every bot. A pairing-code device with no email sees only bots everyone
@@ -642,7 +662,9 @@ frame), and those who gain it receive it whole.
   a message in a thread, a bot's picture — is hidden from that member. A
   file nothing uses yet (someone's own upload) is served; its name is random.
 - **Not covered.** Words already quoted into a conversation a member can
-  see (an earlier delegation, a message copied by hand) stay there. A bot's
+  see (an earlier delegation, a message copied by hand, or something a bot
+  wrote into its own memory files with its file tools while it shared a room
+  with a restricted bot) stay there. A bot's
   shell can still read files on the server, as it always could. Slack is
   decided in your organisation's Admin: whoever may message a bot's Slack
   app reaches that bot there.
@@ -760,19 +782,29 @@ start a spreadsheet formula are prefixed with `'`.
 
 ### Admin activity
 
-Every admin change is recorded beside the decision log, in
-`<data dir>/admin-activity/YYYY-MM.ndjson` (0600), and kept for the same
-window (`decisions.retentionDays` / `OMB_DECISION_RETENTION_DAYS`): settings
+On a workspace several people share — a hosted workspace, an email sign-in
+list that names more than one person or a whole `@domain`, or a device paired
+(or a pairing code open) with chat-only access, whether before or after the
+change — every admin change is recorded beside the decision
+log, in `<data dir>/admin-activity/YYYY-MM.ndjson` (0600), and kept for the
+same window (`decisions.retentionDays` / `OMB_DECISION_RETENTION_DAYS`; a
+quiet server prunes on a timer, and pending rows are written out at
+shutdown): settings
 (which keys changed), sign-in lists and people, pairing codes and revoked
 sessions, webhooks, MCP servers, engines and keys, bots created, deleted or
 given different permissions, spend limits and prices, and who can see a bot.
 Each row names who acted — the session's email or device label, `This
 computer` for the owner, `Command line` for `openmausbot` commands such as
 `openmausbot access add` — and the values before and after. Values are
-redacted: anything under a key that names a credential, and every value in a
-headers or environment map, is written as `[hidden]`, so a key change shows
-that the key changed and never the key. The desktop app, which one person
-uses, keeps no such log.
+redacted: anything under a key that names a credential, every value in a
+headers or environment map, the value after a flag such as `--api-key` or
+`-k`, URL parameters such as `?key=`, a token before a URL's host
+(`https://TOKEN@host`), and key-like URL path parts (`/s/<key>/sse`) are
+written as `[hidden]`, so a key change
+shows that the key changed and never the key. Each row covers only what that
+request named or saved, so two admins changing things at the same moment are
+each credited with their own change. The desktop app, and a server one person
+uses, keep no such log.
 
 **Settings → Activity** (admins, in the browser) shows these rows together
 with the cards people answered, filtered by who, what and when, and exports
@@ -795,17 +827,30 @@ which keeps its own activity log.
 ## Spend limits and sell prices (enterprise)
 
 With the `budgets` entitlement, **Settings → Usage → Monthly spend limit**
-caps the workspace: once the month's reported cost reaches it, no bot starts
-a turn, whether a person wrote, a routine fired, a peer asked or a webhook
-arrived, until an admin raises it. The figure is what engines report to the
-ledger: real on your keys, an equivalent on personal subscriptions. A warning
-shows at a configurable percentage.
+caps the workspace: once the month's cost reaches it, no bot starts a turn,
+whether a person wrote, a routine fired, a peer asked or a webhook arrived,
+until an admin raises it. A warning shows at a configurable percentage, and
+admins get one in-app notification the first time each month crosses the
+warning and one when it reaches the limit (a new month or a new limit starts
+over).
+
+The figure is every cost in the usage ledger. Claude reports its own cost
+(real on your keys, an equivalent on personal subscriptions). Codex, the
+OpenAI-compatible/OpenRouter engine, Grok, MiniMax and the ACP engines report
+tokens but no price, so the server books an **estimate** from a built-in list
+of vendor list prices (`server/model-prices.ts`, each entry with its source
+and the date it was read) and marks the row `costSource: "estimated"`. A model
+that is not in the list is unpriced and not counted; Usage says how many
+turns that was. Estimates use each vendor's standard short-context rate, so
+long prompts, cache writes and priority tiers cost more than estimated.
 
 With the `billing` entitlement, **Sell prices** takes your own price per
 million tokens by model id, `driver/model`, or `default`, and History and the
-CSV export gain a **billable** column next to the provider's cost. Both are
-plain settings in `config.json` (`budgets`, `billing`) and through
-`PUT /api/config`.
+CSV export gain a **billable** column next to the provider's cost. For an
+engine that reports no cost, a price you set for that exact model also
+replaces the list price in its estimate; `default` is used only for models
+the list does not know. Both are plain settings in `config.json` (`budgets`,
+`billing`) and through `PUT /api/config`.
 
 ## A bot that also runs outside the server
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OpenMausMobile</string>
+    <string name="app_name">MausBot</string>
     <string name="notification_channel_blocking">Approvals and questions</string>
     <string name="notification_channel_blocking_desc">Time-sensitive prompts that need an answer</string>
     <string name="notification_channel_done">Bot messages</string>

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
+import { openSse } from "./testing/sse.ts";
 
 describe("spend cap and prices through real turns", () => {
   let session: VerificationServer;
@@ -43,9 +44,30 @@ describe("spend cap and prices through real turns", () => {
     const created = await control(["new-bot", "--name", "Cap probe"]);
     const botId = created.bot.id as string;
 
-    for (const text of ["first", "second"]) {
-      expect((await send(botId, text)).status).toBeLessThan(300);
-      expect(JSON.stringify(await control(["wait", "--bot", botId, "--timeout", "30"]))).toContain("settled");
+    // Admins hear about the warning and the cap once each; a chat-only
+    // device's stream carries neither.
+    const opened = (await (await api("/api/auth/pairing", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scopes: ["client"] }) })).json()) as { code: string };
+    const paired = (await (await api("/api/auth/pair", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: opened.code, label: "Member phone" }) })).json()) as { token: string };
+    const adminStream = await openSse(`${session.info.url}/api/events`);
+    const memberStream = await openSse(`${session.info.url}/api/events`, { authorization: `Bearer ${paired.token}` });
+    const spendNotices = (frames: any[]) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.kind === "spend");
+
+    try {
+      for (const text of ["first", "second"]) {
+        expect((await send(botId, text)).status).toBeLessThan(300);
+        expect(JSON.stringify(await control(["wait", "--bot", botId, "--timeout", "30"]))).toContain("settled");
+      }
+      // $0.01 of $0.015 crosses the 50% warning; $0.02 reaches the cap
+      await adminStream.until((frame) => frame.kind === "notify" && frame.notification?.title === "Monthly spend limit reached", 20_000);
+      expect(spendNotices(adminStream.frames).map((frame) => frame.notification)).toEqual([
+        expect.objectContaining({ kind: "spend", botId, title: "Spend is at 67% of the monthly limit", body: expect.stringContaining("$0.01 of $0.015 spent this month") }),
+        expect.objectContaining({ kind: "spend", botId, title: "Monthly spend limit reached" }),
+      ]);
+      expect(memberStream.frames.some((frame) => frame.kind === "notify" && frame.notification?.kind === "done")).toBe(true);
+      expect(spendNotices(memberStream.frames)).toEqual([]);
+    } finally {
+      adminStream.close();
+      memberStream.close();
     }
     const refused = await send(botId, "third");
     expect(refused.status).toBe(409);
@@ -109,6 +131,9 @@ describe("spend cap and prices through real turns", () => {
     expect(capErrors).toHaveLength(1);
     expect(JSON.stringify(page)).not.toContain("retrying once");
     expect(Number(readFileSync(replyState, "utf8"))).toBe(allowedTurns);
+    // The goal settles before the usage ledger's queued write is necessarily visible.
+    await expect.poll(async () => (await (await api("/api/usage")).json() as any).total.turns,
+      { timeout: 10_000 }).toBe(allowedTurns);
     const usage = await (await api("/api/usage")).json() as any;
     expect(usage.total.turns).toBe(allowedTurns);
     expect(usage.budget.exceeded).toBe(true);

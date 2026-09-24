@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 import qrcode from "qrcode-terminal";
 
 import { parseAllowList } from "./account-signin.ts";
-import { appendAdminAction, flushAdminActivity } from "./admin-activity.ts";
+import { appendAdminAction, flushAdminActivity, sharedSignIn } from "./admin-activity.ts";
 import { bindDecisionRetention, decisionRetentionDays } from "./decision-log.ts";
 import { hostedWorkspaceConfigured } from "./enterprise.ts";
 import { resolveLoopbackTrust } from "./request-auth.ts";
@@ -672,7 +672,9 @@ export async function runAccess(options: CliOptions, io: CliIo = defaultIo()): P
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     writeFileAtomic(file, `${JSON.stringify({ ...raw, signIn: next }, null, 2)}\n`, { mode: 0o600 });
     // The same row Settings → People writes, named for the command line,
-    // pruned by the same window the server would use.
+    // pruned by the same window the server would use — kept, like the
+    // server's, only where more than one person signs in.
+    if (!sharedSignIn({ admins, members }) && !sharedSignIn(next) && !hostedWorkspaceConfigured()) return;
     const decisions = raw.decisions && typeof raw.decisions === "object" ? (raw.decisions as { retentionDays?: unknown }).retentionDays : undefined;
     bindDecisionRetention(() => decisionRetentionDays(typeof decisions === "number" ? decisions : undefined));
     const changed = (["admins", "members"] as const).filter((key) => next[key].join(",") !== (key === "admins" ? admins : members).join(","));

@@ -21,7 +21,7 @@ export function supportsApprovalMode(driverKind: string | undefined, mode: Appro
   // engines could never stop asking — not by its own level, and not through
   // a Chief's delegated Full access either.
   return ["codex", "claudeAgent", "antigravityAgent", "cursorAgent", "grokAgent", "opencodeGo", "qwenAgent", "geminiAgent",
-    "openai-compat", "grok", "minimax"].includes(driverKind ?? "");
+    "openai-compat", "grok", "minimax", "mistral"].includes(driverKind ?? "");
 }
 
 /** A Full/Custom grant belongs to one provider's tool semantics. Other

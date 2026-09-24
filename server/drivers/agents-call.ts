@@ -741,11 +741,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         name: botName,
         role,
         instructions,
+        ...(args.modelSelection !== undefined ? { modelSelection: args.modelSelection } : {}),
       }),
     });
     turn.createdThisTurn += 1;
     return {
-      text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}]. Assign work with ${COORDINATING ? "coordinate_bots" : "delegate_bot"}.`,
+      text: `Created @${r.name ?? botName} in ${r.section ?? "General"} [id: ${r.id}].${r.modelSelection ? ` Model: ${JSON.stringify(r.modelSelection)}.` : ""} Assign work with ${COORDINATING ? "coordinate_bots" : "delegate_bot"}.`,
     };
   }
   if (name === "create_room") {

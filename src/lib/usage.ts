@@ -86,6 +86,16 @@ export function cachedKnown(u: Pick<TaskUsage, "cachedInput">): boolean {
   return hasFiniteCost(u.cachedInput);
 }
 
+/** Existing usage pages use a single cache-adjusted total. The chat header
+ * keeps input and output separate through usageChip and usageDetail. */
+export function freshTokens(u: TaskUsage): number {
+  return uncachedInput(u) + u.output;
+}
+
+export function headlineTokens(u: TaskUsage): number {
+  return cachedKnown(u) ? freshTokens(u) : u.input + u.output;
+}
+
 export type ContextTone = "quiet" | "warning" | "danger";
 
 /** The last model call's prompt against the model's window, with the same

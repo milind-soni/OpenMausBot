@@ -25,8 +25,21 @@ describe("usage history table", () => {
     expect(html).toContain("Routine: Morning digest");
     expect(html).toContain("Bot to bot");
     expect(html).toContain("Person");
-    expect(html).toContain("3 turn(s) came from engines that report no price");
+    expect(html).toContain("3 turn(s) used a model with no known price");
     expect(html).toContain("$1.26");
+    expect(html).not.toContain("~");
+  });
+
+  it("marks costs that include an estimate and says how much of the period is estimated", () => {
+    const summary: UsageSummary = {
+      from: "2026-09-01T00:00:00.000Z", to: "2026-09-30T23:59:59.999Z", groupBy: "engine",
+      groups: [group("engine:codex", "codex", { costUsd: 0.8, estimatedUsd: 0.8 }), group("engine:claudeAgent", "claudeAgent", { estimatedUsd: null })],
+      total: group("total", "total", { turns: 6, costUsd: 1.22, estimatedUsd: 0.8 }),
+    };
+    const html = renderToStaticMarkup(createElement(UsageHistoryTable, { summary }));
+    expect(html).toContain("$0.80 of this is estimated");
+    expect(html.match(/>~</g)).toHaveLength(2); // the codex row and the total, not the claude row
+    expect(html).toContain("$0.80 in this period is priced from list prices");
   });
 
   it("says so when the period is empty", () => {

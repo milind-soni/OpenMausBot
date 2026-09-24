@@ -25,6 +25,10 @@ describe("people helpers", () => {
       { entry: "bob@acme.test", role: "member", isDomain: false, lastSeenAt: null, devices: 0, turns: 0, costUsd: null },
       { entry: "@acme.test", role: "member", isDomain: true, lastSeenAt: null, devices: 0, turns: 0, costUsd: null },
     ]);
+    // a month that includes estimated cost is marked as such
+    const estimated = mergePeople({ admins: ["ada@example.test"], members: [] }, [], [{ key: "user:ada@example.test", turns: 2, costUsd: 1.5, estimatedUsd: 0.5 }]);
+    expect(estimated[0]).toMatchObject({ costUsd: 1.5, estimated: true });
+    expect(renderToStaticMarkup(createElement(PeopleTable, { people: estimated, busy: false, onRole() {}, onRemove() {}, onLink() {} }))).toContain("~$1.50");
     expect(lastSeenLabel(null)).toBe("Never");
     expect(lastSeenLabel(Date.now() - 60_000)).toBe("Today");
     expect(lastSeenLabel(Date.parse("2026-09-01T12:00:00Z"), Date.parse("2026-09-10T12:00:00Z"))).toBe("2026-09-01");

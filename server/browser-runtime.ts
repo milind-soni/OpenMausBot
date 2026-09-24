@@ -277,10 +277,44 @@ export class BrowserRuntime {
         // The model sees slimmed schemas and text-only, bounded results; the
         // launch/session parameters OMB owns never reach the engine from a call.
         const request = method === "tools/call" ? stripHarnessOwnedArguments(params) : params;
-        const result = await entry.client.rpc(method, request);
+        let result = await entry.client.rpc(method, request);
         beforeDispatch?.(); // A turn revoked while the tool ran receives no result.
         if (method === "tools/list") return slimBrowserToolList(result);
         const toolName = request && typeof request === "object" && typeof (request as { name?: unknown }).name === "string" ? (request as { name: string }).name : undefined;
+        if (toolName === "agent_browser_open" && result && typeof result === "object" &&
+            (result as { isError?: boolean }).isError !== true) {
+          // Navigation alone does not prove that the requested page loaded.
+          // Observe in the same scoped session, without replaying the action.
+          beforeDispatch?.();
+          if (this.gate(session).owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+          let observation: unknown;
+          try {
+            observation = await entry.client.rpc("tools/call", {
+              name: "agent_browser_snapshot", arguments: { compact: true },
+            });
+          } catch (error) {
+            // A tool-level refusal does not undo the completed navigation.
+            // Transport failures still engage the uncertainty/recovery gate.
+            if (error instanceof TransportError) throw error;
+            observation = { isError: true, content: [] };
+          }
+          beforeDispatch?.();
+          const navigation = result as { content?: unknown[] };
+          const page = observation as { content?: unknown[]; isError?: boolean } | null;
+          const observed = page?.isError !== true && Array.isArray(page?.content) && page.content.some((item) =>
+            item && typeof item === "object" && (item as { type?: unknown }).type === "text" &&
+            typeof (item as { text?: unknown }).text === "string" && (item as { text: string }).text.trim().length > 0);
+          result = {
+            content: [
+              ...(Array.isArray(navigation.content) ? navigation.content : []),
+              { type: "text", text: !observed
+                ? "Navigation returned, but page verification failed. Do not claim the requested page loaded and do not blindly repeat navigation."
+                : "Page observed after navigation. Check this result for redirects, sign-in requirements or page errors before reporting task success:" },
+              ...(Array.isArray(page?.content) ? page.content : []),
+            ],
+            ...(!observed ? { isError: true } : {}),
+          };
+        }
         return shapeBrowserToolResult(result, { toolName, budget: this.options.resultBudget });
       }
       catch (error) {

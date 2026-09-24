@@ -7,8 +7,10 @@ and retained after the bot rules in that block. Removing bot rules does not
 remove the user's native configured rules. Effective configuration and outgoing
 developer blocks are omitted from diagnostic logs. If configuration cannot be
 read, the turn fails before changing native history instead of overwriting
-unknown instructions. Approval/sandbox parameters and permission-profile
-fallback remain unchanged.
+unknown instructions. The turn preserves the complete sandbox returned by native
+start/resume, including network access, writable roots and temporary-directory
+exclusions. Named permission profiles remain the policy selector when supported;
+legacy fallback still uses the configured approval mode.
 Codex 0.147.0 and 0.153.4 retain the original developer message on resume, even
 when configuration changes. Therefore a changed instruction block also needs a
 `thread/inject_items` developer update before the next user turn.
@@ -24,7 +26,25 @@ Removed rules get an explicit developer update and empty native configuration.
 A rejected native resume fails the turn instead of starting an empty thread.
 The existing history and cursor remain available; automatic canonical replay is
 separate work in #759. Unknown native-update methods fail before user submission
-with an upgrade error. Approval and sandbox parameters are unchanged.
+with an upgrade error.
+
+## Sandbox consistency
+
+Run `node --experimental-strip-types scripts/verify-codex-sandbox.mjs` with
+`PROBE_CODEX` set to the native executable when it is not on PATH. This uses the
+production adapter, disposable Codex homes and a loopback synthetic Responses
+endpoint. It does not use account credentials or paid model inference. On Windows
+the fixture configures the native unelevated sandbox in its temporary home.
+
+Ten turns cover start/resume, Ask, Auto, Full, Custom, and network enabled/disabled.
+Each compares the outgoing turn policy with the complete native session policy,
+including an extra writable root and both temporary-directory exclusions. It
+prints its evidence directory. On Windows with Codex 0.154.0 all ten passed;
+unchanged upstream failed the first comparison because it sent only
+`{ type: "workspaceWrite" }`. This verifies protocol consistency, not operating
+system enforcement or model quality. Contract tests additionally reject absent
+or conflicting resolved policies before submitting a user turn, and cover named
+permission profiles and older-server fallback.
 
 ## Checks
 

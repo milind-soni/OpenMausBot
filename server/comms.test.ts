@@ -486,6 +486,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
     "lets a section Chief create a safe operator and delegate work to it",
     async () => {
       const chief = (await api("POST", "/api/bots")).body.bot;
+      const defaultSelection = chief.modelSelection;
       await api("PATCH", `/api/bots/${chief.id}`, {
         name: "Atlas",
         section: "Launch",
@@ -518,7 +519,7 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
         composio: false,
         autoApprove: false,
         approvePeerComms: false,
-        modelSelection: { instanceId: "chiefCreator", model: "fake-model" },
+        modelSelection: defaultSelection,
       });
       expect(operator.chiefOfStaff).toBeFalsy();
       expect(operator.messages.some((message: any) => message.text?.includes("Review the new onboarding flow."))).toBe(true);

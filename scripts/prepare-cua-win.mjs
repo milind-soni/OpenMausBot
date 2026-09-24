@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { build } from "esbuild";
+import { createBackgroundExecutable } from "./cua-windows-background.mjs";
 
 if (process.platform !== "win32" || process.arch !== "x64") throw new Error("prepare-cua-win requires Windows x64");
 
@@ -34,7 +35,7 @@ if (expectedVersion !== release.version) {
 async function binaryVersion(candidate) {
   if (!candidate || !existsSync(candidate)) return null;
   try {
-    const { stdout } = await run(candidate, ["--version"], { timeout: 5000 });
+    const { stdout } = await run(candidate, ["--version"], { timeout: 5000, windowsHide: true });
     return stdout.match(/cua-driver\s+([\d.]+)/)?.[1] ?? null;
   } catch {
     return null;
@@ -66,6 +67,7 @@ async function officialBinary() {
     "Expand-Archive -LiteralPath $env:OMB_CUA_ARCHIVE -DestinationPath $env:OMB_CUA_EXTRACT"], {
     env: { ...process.env, OMB_CUA_ARCHIVE: archive, OMB_CUA_EXTRACT: cache },
     timeout: 60_000,
+    windowsHide: true,
   });
   if ((await binaryVersion(cachedBinary)) !== expectedVersion) {
     throw new Error(`downloaded CUA Driver does not report version ${expectedVersion}`);
@@ -108,6 +110,7 @@ if (!details.isFile()) {
 await rm(stage, { recursive: true, force: true });
 await mkdir(stage, { recursive: true });
 await copyFile(binary, join(stage, "cua-driver.exe"));
+await writeFile(join(stage, "cua-driver-background.exe"), createBackgroundExecutable(await readFile(binary)));
 
 const nativeDir = join(stage, "cua-sdk", "native");
 const winNativePackage = join(dependencyRoot, "@trycua", "cua-driver-win32-x64-msvc");

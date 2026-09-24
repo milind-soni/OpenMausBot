@@ -86,6 +86,12 @@ export function appendAdminAction(dataDir: string, row: Omit<AdminActionRow, "at
   });
 }
 
+/** Delete the months the retention window no longer covers. Never throws.
+ * Writing prunes too; the server also runs this on a timer for quiet days. */
+export function pruneAdminActivity(dataDir: string, days = boundRetentionDays(), now = new Date()): Promise<string[]> {
+  return pruneMonthFiles(join(dataDir, DIR), days, now);
+}
+
 /** Test/shutdown seam: wait for every queued row to reach disk. */
 export async function flushAdminActivity(dataDir: string): Promise<void> {
   await writeQueues.get(dataDir);
@@ -109,13 +115,54 @@ function isSecretName(name: string): boolean {
   return /(?:^|[_.-])keys?$/.test(lower) || /[a-z]Keys?$/.test(name);
 }
 
+/** A command-line flag or URL parameter that names a credential:
+ * `--api-key`, `--token=…`, `?key=`, `&access_token=`, `?sig=`. */
+function isSecretParameter(name: string): boolean {
+  // `-k` is the usual short form of --key (curl-style CLIs and many MCP servers).
+  if (name === "-k" || name === "-K") return true;
+  const bare = name.replace(/^-+/, "");
+  return isSecretName(bare) || /^(?:auth|sig|signature|pass|pwd|code)$/i.test(bare);
+}
+
+/** A path segment that looks like a key rather than a name: it holds a run
+ * of 16 or more letters and digits, mixed (Zapier-style `/s/<key>/sse`, a
+ * Slack hook's last part) — a readable slug like `getting-started-2024` or a
+ * UUID does not. */
+function keyLikeSegment(segment: string): boolean {
+  return (segment.match(/[A-Za-z0-9]{16,}/g) ?? []).some((run) => /\d/.test(run) && /[A-Za-z]/.test(run));
+}
+
+/** In a URL: credentials before the host (`user:pass@`, or a bare token
+ * `TOKEN@`), key-like path segments, and query or fragment values whose
+ * names mark a credential. */
+function maskUrlSecrets(text: string): string {
+  return text.replace(/\b([a-z][\w+.-]*:\/\/)([^\s/?#]*)([^\s?#]*)([^\s]*)/gi, (_all, scheme: string, authority: string, path: string, rest: string) => {
+    const at = authority.lastIndexOf("@");
+    const host = at >= 0 ? `${HIDDEN}@${authority.slice(at + 1)}` : authority;
+    const maskedPath = path.split("/").map((segment) => (keyLikeSegment(segment) ? HIDDEN : segment)).join("/");
+    const maskedRest = rest.replace(/([?&;#])([^=&#\s]+)=([^&#\s]+)/g, (all, separator: string, name: string) => (isSecretParameter(name) ? `${separator}${name}=${HIDDEN}` : all));
+    return `${scheme}${host}${maskedPath}${maskedRest}`;
+  });
+}
+
+/** An argument list: the value after a credential flag, or after its `=`. */
+function maskArgs(items: readonly unknown[]): unknown[] {
+  return items.map((item, index) => {
+    const previous = items[index - 1];
+    if (typeof item !== "string") return item;
+    if (typeof previous === "string" && /^--?[\w-]+$/.test(previous) && isSecretParameter(previous)) return HIDDEN;
+    const inline = /^(--?[\w-]+)=(.+)$/.exec(item);
+    return inline && isSecretParameter(inline[1]!) ? `${inline[1]}=${HIDDEN}` : item;
+  });
+}
+
 function scrub(value: unknown, depth: number, hideAll: boolean): unknown {
   if (value === undefined || value === null || value === "") return value;
   if (hideAll && typeof value !== "object") return HIDDEN;
-  if (typeof value === "string") return redactSecrets(value);
+  if (typeof value === "string") return redactSecrets(maskUrlSecrets(value));
   if (typeof value !== "object") return value;
   if (depth > 6) return "[…]";
-  if (Array.isArray(value)) return value.slice(0, 100).map((item) => scrub(item, depth + 1, hideAll));
+  if (Array.isArray(value)) return maskArgs(value.slice(0, 100)).map((item) => scrub(item, depth + 1, hideAll));
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
     if (isSecretName(key) && child !== undefined && child !== null && child !== "") out[key] = HIDDEN;
@@ -227,14 +274,16 @@ export function botAuditSnapshot(bot: Record<string, unknown> | null | undefined
 }
 
 /** A bot's audited fields that changed: a `visibility.update` row when its
- * audience changed, a `bot.update` row for everything else. */
+ * audience changed, a `bot.update` row for everything else. `only` limits
+ * the comparison to the fields a request named. */
 export function botChangeRows(
   target: { id: string; name?: string },
   before: Record<string, unknown> | null,
   after: Record<string, unknown> | null,
+  only?: readonly string[],
 ): Array<Omit<AdminActionRow, "at" | "actor">> {
   if (!before || !after) return [];
-  const changed = BOT_AUDIT_FIELDS.filter((field) => stable(before[field]) !== stable(after[field]));
+  const changed = BOT_AUDIT_FIELDS.filter((field) => (!only || only.includes(field)) && stable(before[field]) !== stable(after[field]));
   const rows: Array<Omit<AdminActionRow, "at" | "actor">> = [];
   const bot = { kind: "bot", id: target.id, ...(target.name ? { name: target.name } : {}) };
   if (changed.includes("visibility")) {
@@ -248,6 +297,26 @@ export function botChangeRows(
   const rest = changed.filter((field) => field !== "visibility");
   if (rest.length) rows.push({ category: "bot", action: "bot.update", target: bot, changed: rest, before: pick(before, rest), after: pick(after, rest) });
   return rows;
+}
+
+// ── when to record ──────────────────────────────────────────────────────
+
+export interface SignInLists {
+  admins: readonly string[];
+  members: readonly string[];
+}
+
+/** An email sign-in list that lets more than one person in: any member, a
+ * second admin, or a whole @domain. */
+export function sharedSignIn(lists: SignInLists): boolean {
+  return lists.members.length > 0 || lists.admins.length > 1 || [...lists.admins, ...lists.members].some((entry) => entry.trim().startsWith("@"));
+}
+
+/** The sign-in lists in a config.json reading. */
+export function signInListsOf(config: unknown): SignInLists {
+  const signIn = isPlainObject(config) && isPlainObject(config.signIn) ? config.signIn : {};
+  const list = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
+  return { admins: list(signIn.admins), members: list(signIn.members) };
 }
 
 // ── reading ─────────────────────────────────────────────────────────────

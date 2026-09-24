@@ -64,6 +64,15 @@ describe("desktop notifications", () => {
     expect(notices).toHaveLength(0);
   });
 
+  it("shows a spend notice even over the thread it points at, in its own stack", () => {
+    const { notices } = installNotification("granted", true);
+
+    showNotification({ ...frame, kind: "spend", title: "Monthly spend limit reached" }, vi.fn(), "https://avatar.test/a.png", frame.threadId);
+
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.options).toMatchObject({ tag: "openmausbot:spend", icon: undefined });
+  });
+
   it("still alerts a focused app when another task is visible", () => {
     const { notices } = installNotification("granted", true);
 

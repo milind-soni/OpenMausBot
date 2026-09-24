@@ -8,7 +8,8 @@ import { useEffect, useState } from "react";
 import { browserUnavailableReason } from "@/lib/feature-flags";
 import { FolderOpen, Plus } from "lucide-react";
 
-import { api, useStore, type Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
+import { useBotEditor } from "./BotEditorContext";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { mcpServersForBot, useMcpServers } from "@/lib/mcp-servers";
@@ -27,6 +28,7 @@ import type { useBotSettingsDerived } from "./useBotSettingsDerived";
  * PATCH is made directly rather than through updateBot: the server
  * validates the path and a rejected folder must not stick in local state. */
 function WorkingFolder({ bot }: { bot: Bot }) {
+  const { request: api } = useBotEditor();
   const { capabilities } = useDesktopCapabilities();
   const home = capabilities.host.homeDir;
   const [draft, setDraft] = useState<string | null>(null);
@@ -182,6 +184,7 @@ export function AccessSection({
   bot: Bot;
   derived: ReturnType<typeof useBotSettingsDerived>;
 }) {
+  const { draft } = useBotEditor();
   const { state, dispatch } = useStore();
   const {
     patch,
@@ -404,7 +407,7 @@ export function AccessSection({
         />
       </div>
 
-      <div className="rounded-xl bg-card p-4">
+      {!draft && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Webhooks</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">Inbound triggers wired to this bot.</div>
         {webhooks.length === 0 ? (
@@ -429,9 +432,9 @@ export function AccessSection({
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
-      <div className="rounded-xl bg-card p-4">
+      {!draft && <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Always allowed</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">Tools this bot no longer asks about.</div>
         {alwaysAllow.length === 0 ? (
@@ -453,7 +456,7 @@ export function AccessSection({
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}

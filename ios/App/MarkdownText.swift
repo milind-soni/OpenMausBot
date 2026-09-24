@@ -10,7 +10,20 @@
 // typed is shown as you typed it, because markdown you did not intend is
 // worse than markdown you did.
 import SwiftUI
+import UIKit
 import CompanionCore
+
+private struct OptionalIdentifier: ViewModifier {
+    let identifier: String?
+
+    func body(content: Content) -> some View {
+        if let identifier {
+            content.accessibilityIdentifier(identifier)
+        } else {
+            content
+        }
+    }
+}
 
 struct MarkdownText: View {
     let source: String
@@ -19,23 +32,33 @@ struct MarkdownText: View {
     /// layout — a caret bolted on outside would put it on its own line the
     /// moment the reply ends in a list item.
     var caret: Bool = false
+    /// Identifier for the first table's horizontal scroll view. Settled
+    /// bubbles pass `message-<id>-scroll`. Streaming and file preview pass nil.
+    var scrollIdentifier: String? = nil
     var openLink: ((URL) -> OpenURLAction.Result)?
 
     init(
         source: String,
         caret: Bool = false,
+        scrollIdentifier: String? = nil,
         openLink: ((URL) -> OpenURLAction.Result)? = nil
     ) {
         self.source = source
         self.caret = caret
+        self.scrollIdentifier = scrollIdentifier
         self.openLink = openLink
     }
 
     var body: some View {
         let blocks = Markdown.blocks(source)
         VStack(alignment: .leading, spacing: 8) {
+            let firstTable = blocks.firstIndex { if case .table = $0 { return true }; return false }
             ForEach(Array(blocks.enumerated()), id: \.offset) { item in
-                view(for: item.element, tail: caret && item.offset == blocks.count - 1)
+                view(
+                    for: item.element,
+                    tail: caret && item.offset == blocks.count - 1,
+                    scrollIdentifier: item.offset == firstTable ? scrollIdentifier : nil
+                )
             }
         }
         .environment(\.openURL, OpenURLAction { url in
@@ -44,7 +67,7 @@ struct MarkdownText: View {
     }
 
     @ViewBuilder
-    private func view(for block: MarkdownBlock, tail: Bool) -> some View {
+    private func view(for block: MarkdownBlock, tail: Bool, scrollIdentifier: String?) -> some View {
         switch block {
         case let .paragraph(text):
             inline(text, tail: tail)
@@ -64,6 +87,12 @@ struct MarkdownText: View {
 
         case let .ordered(indent, number, text):
             marker("\(number).", indent: indent, text: text, tail: tail)
+
+        case let .task(indent, number, checked, text):
+            taskRow(indent: indent, number: number, checked: checked, text: text, tail: tail)
+
+        case let .table(table):
+            tableView(table, tail: tail, scrollIdentifier: scrollIdentifier)
 
         case let .quote(text):
             HStack(alignment: .top, spacing: 8) {
@@ -102,6 +131,146 @@ struct MarkdownText: View {
         case .rule:
             Divider().padding(.vertical, 2)
         }
+    }
+
+    private func taskRow(indent: Int, number: Int?, checked: Bool, text: String, tail: Bool) -> some View {
+        let state = String(localized: checked ? "completed" : "not completed")
+        let words = renderedInline(text)
+        let label = words.isEmpty ? state : "\(state), \(words)"
+        return HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if let number {
+                Text("\(number).")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Color.secondary)
+                    .frame(minWidth: 16, alignment: .trailing)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: checked ? "checkmark.square.fill" : "square")
+                    .font(.system(size: 17))
+                    .foregroundStyle(Color.secondary)
+                inline(text, tail: tail).font(.system(size: 17))
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+        }
+        .padding(.leading, CGFloat(indent) * 14)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func tableView(_ table: MarkdownTable, tail: Bool, scrollIdentifier: String?) -> some View {
+        let widths = columnWidths(table)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                GridRow {
+                    ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
+                        cell(
+                            header,
+                            width: widths[index],
+                            alignment: table.alignments[index],
+                            weight: .semibold,
+                            tail: tail && table.rows.isEmpty && index == table.headers.count - 1,
+                            identifier: scrollIdentifier.map { "\($0)-cell-0-\(index)" }
+                        )
+                    }
+                }
+                if !table.headers.isEmpty {
+                    Divider().gridCellColumns(table.headers.count)
+                }
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { index, value in
+                            let isLast = rowIndex == table.rows.count - 1 && index == row.count - 1
+                            cell(
+                                value,
+                                width: widths[index],
+                                alignment: table.alignments[index],
+                                weight: .regular,
+                                tail: tail && isLast,
+                                identifier: scrollIdentifier.map { "\($0)-cell-\(rowIndex + 1)-\(index)" }
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .background(alignment: .topLeading) {
+            if let scrollIdentifier {
+                Color.white.opacity(0.001)
+                    .frame(width: 12, height: 12)
+                    .accessibilityIdentifier(scrollIdentifier)
+            }
+        }
+    }
+
+    private func cell(
+        _ text: String,
+        width: CGFloat,
+        alignment: MarkdownTableAlignment,
+        weight: Font.Weight,
+        tail: Bool,
+        identifier: String?
+    ) -> some View {
+        Color.clear
+            .frame(width: tail ? width + caretWidth : width, height: 22)
+            .overlay(alignment: frameAlignment(alignment)) {
+                inline(text, tail: tail)
+                    .font(.system(size: 15, weight: weight))
+                    .lineLimit(1)
+                    .accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(renderedInline(text))
+            .modifier(OptionalIdentifier(identifier: identifier))
+    }
+
+    private func frameAlignment(_ alignment: MarkdownTableAlignment) -> Alignment {
+        switch alignment {
+        case .leading: .leading
+        case .trailing: .trailing
+        case .center: .center
+        }
+    }
+
+    /// Column width is the widest single-line cell, measured on the words
+    /// that are actually drawn. A code span is also measured in monospace,
+    /// which is wider than the proportional font.
+    private func columnWidths(_ table: MarkdownTable) -> [CGFloat] {
+        let headerFont = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        let bodyFont = UIFont.systemFont(ofSize: 15, weight: .regular)
+        return table.headers.indices.map { index in
+            var widest = textWidth(table.headers[index], font: headerFont)
+            for row in table.rows where index < row.count {
+                widest = max(widest, textWidth(row[index], font: bodyFont))
+            }
+            return max(widest + 8, 24)
+        }
+    }
+
+    private var caretWidth: CGFloat {
+        textWidth("\u{2007}▍", font: UIFont.systemFont(ofSize: 15))
+    }
+
+    private func textWidth(_ text: String, font: UIFont) -> CGFloat {
+        let plain = renderedInline(text)
+        var width = ceil((plain as NSString).size(withAttributes: [.font: font]).width)
+        if text.contains("`") {
+            let mono = UIFont.monospacedSystemFont(ofSize: font.pointSize, weight: .regular)
+            width = max(width, ceil((plain as NSString).size(withAttributes: [.font: mono]).width))
+        }
+        return width
+    }
+
+    /// The words VoiceOver should hear, with inline markers removed. The
+    /// visible text still goes through Foundation so emphasis stays styled.
+    private func renderedInline(_ text: String) -> String {
+        if let attributed = try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        ) {
+            return String(attributed.characters)
+        }
+        return text
     }
 
     private func marker(_ symbol: String, indent: Int, text: String, tail: Bool) -> some View {

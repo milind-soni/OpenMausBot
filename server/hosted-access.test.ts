@@ -166,7 +166,7 @@ describe("hosted bridge in the full server", () => {
   });
   it("accepts a portal session, enforces outages/demotion, and issues only current permissions on reauthentication", async () => {
     const cookie = await login();
-    expect((await call("/api/auth/session", { cookie })).body.scopes).toEqual(["admin", "client"]);
+    expect((await call("/api/auth/session", { cookie })).body).toMatchObject({ scopes: ["admin", "client"], hosted: true });
     expect((await call("/", { cookie })).body).toContain("Fixture workspace");
     state("admin", true);
     expect((await call("/api/auth/session", { cookie })).status).toBe(503);
@@ -175,7 +175,7 @@ describe("hosted bridge in the full server", () => {
     state("member");
     expect((await call("/api/auth/session", { cookie })).status).toBe(401);
     const memberCookie = await login();
-    expect((await call("/api/auth/session", { cookie: memberCookie })).body.scopes).toEqual(["client"]);
+    expect((await call("/api/auth/session", { cookie: memberCookie })).body).toMatchObject({ scopes: ["client"], hosted: true });
     expect((await call("/api/auth/sessions", { cookie: memberCookie })).status).toBe(403);
   });
   it("closes an existing quiet event stream within fifteen seconds of remote revocation", async () => {
@@ -299,8 +299,10 @@ describe("hosted bridge in the full server", () => {
     await policyHealth(false);
     await refuseFullTask();
   }, 25_000);
-  it("withdraws hosted readiness immediately when the running server's entitlement expires", async () => {
-    state("admin", false, { expiresAt: new Date(Date.now() + 8_000).toISOString() });
+  it("withdraws hosted readiness the moment the running server's license grace period ends", async () => {
+    // Expired a week ago less eight seconds: still inside the 7-day grace
+    // (server/enterprise.ts LICENSE_GRACE_DAYS), which ends mid-test.
+    state("admin", false, { expiresAt: new Date(Date.now() + 8_000 - 7 * 24 * 60 * 60_000).toISOString() });
     await restart({ OMB_ADMIN_MEMBERSHIP: "portal", OMB_SHARED_WORKSPACE_FULL_ACCESS: "1" });
     expect((await call("/api/health/hosted")).status).toBe(200);
     await policyHealth(true);

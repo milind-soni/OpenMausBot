@@ -23,6 +23,7 @@ const BOSS = "boss@example.test";
 const ADA = "ada@example.test";
 const SECRET = "sk-ant-api03-activity-fixture-secret-0123456789abcdef";
 const MCP_SECRET = "mcp-activity-fixture-secret-value";
+const ARG_SECRET = "acme_live_9f8e7d6c5b4a3f2e1d0c";
 
 let child: ChildProcess;
 let home: string;
@@ -69,6 +70,29 @@ async function start() {
     if (Date.now() > deadline) throw new Error(`server never came up:\n${log}`);
     await new Promise((r) => setTimeout(r, 150));
   }
+}
+
+/** A request whose body is held back until `release()`: the server has
+ * started on it (and taken its "before") while other requests run. */
+function slowRequest(method: string, path: string, body: unknown, as?: string) {
+  const text = new TextEncoder().encode(JSON.stringify(body));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      controller.enqueue(text.slice(0, 2));
+      await gate;
+      controller.enqueue(text.slice(2));
+      controller.close();
+    },
+  });
+  const response = fetch(`${BASE}${path}`, {
+    method,
+    headers: { "content-type": "application/json", ...(as ? { authorization: `Bearer ${tokens[as]}` } : {}) },
+    body: stream,
+    duplex: "half",
+  } as RequestInit);
+  return { release, response };
 }
 
 async function activity(query = "", as = BOSS): Promise<any[]> {
@@ -139,7 +163,7 @@ posixOnly("admin activity log", () => {
   });
 
   it("records MCP servers, webhooks, bots, a bot's audience and sessions", async () => {
-    const mcp = await api("POST", "/api/mcp/servers", { name: "fixture", command: process.execPath, args: ["--version"], env: { FIXTURE_TOKEN: MCP_SECRET } }, BOSS);
+    const mcp = await api("POST", "/api/mcp/servers", { name: "fixture", command: process.execPath, args: ["--version", "--api-key", ARG_SECRET], env: { FIXTURE_TOKEN: MCP_SECRET } }, BOSS);
     expect(mcp.status, JSON.stringify(mcp.body)).toBe(201);
     const bot = await api("POST", "/api/bots", { name: "Audit Owl" }, BOSS);
     expect(bot.status).toBe(201);
@@ -170,6 +194,8 @@ posixOnly("admin activity log", () => {
     expect(audience).toMatchObject({ who: BOSS, target: { kind: "bot", id: botId, name: "Audit Owl" }, before: { visibility: "everyone" }, after: { visibility: { people: [ADA] } } });
     const mcpRow = rows.find((entry) => entry.action === "mcp.update");
     expect(JSON.stringify(mcpRow)).not.toContain(MCP_SECRET);
+    expect(JSON.stringify(mcpRow)).not.toContain(ARG_SECRET);
+    expect(JSON.stringify(mcpRow)).toContain("--api-key");
     expect(JSON.stringify(mcpRow)).toContain("FIXTURE_TOKEN");
     expect(rows.find((entry) => entry.action === "session.revoke")).toMatchObject({ target: { id: oldPhone, name: "Old phone" } });
     expect(rows.find((entry) => entry.action === "pairing.create")).toMatchObject({ after: { label: "Reception iPad", scopes: ["client"] } });
@@ -197,5 +223,66 @@ posixOnly("admin activity log", () => {
     expect(csv.text.split("\n")[0]).toBe("time,type,who,what,action,target,changed,before,after,bot,tool,summary,thread");
     expect(csv.text).toContain("visibility.update");
     expect(csv.text).not.toContain("activity-fixture-secret");
+    expect(csv.text).not.toContain(ARG_SECRET);
+  });
+
+  it("puts each concurrent change down to the admin who made it", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Race Finch" }, BOSS)).body.bot as { id: string };
+    // Boss's request is slow: its body arrives only after the owner on this
+    // machine has made (and finished) a change of their own to the same thing.
+    const slowBot = slowRequest("PATCH", `/api/bots/${bot.id}`, { approvePeerComms: true }, BOSS);
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { composio: false })).status).toBe(200);
+    slowBot.release();
+    expect((await slowBot.response).status).toBe(200);
+    const slowConfig = slowRequest("PUT", "/api/config", { profile: { name: "Race desk" } }, BOSS);
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await api("PUT", "/api/config", { decisions: { retentionDays: 365 } })).status).toBe(200);
+    slowConfig.release();
+    expect((await slowConfig.response).status).toBe(200);
+
+    const rows = (await activity("?what=all")).filter((entry) => entry.type === "admin");
+    const botRows = rows.filter((entry) => entry.action === "bot.update" && entry.target?.id === bot.id);
+    expect(botRows.map((entry) => [entry.who, entry.changed]).sort()).toEqual([
+      [BOSS, ["approvePeerComms"]],
+      ["This computer", ["composio"]],
+    ].sort());
+    const configRows = rows.filter((entry) => entry.action === "config.update" &&
+      (JSON.stringify(entry.after).includes("Race desk") || JSON.stringify(entry.after).includes("365")));
+    expect(configRows.map((entry) => [entry.who, entry.changed]).sort()).toEqual([
+      [BOSS, ["profile.name"]],
+      ["This computer", ["decisions.retentionDays"]],
+    ].sort());
+  });
+
+  it("records only while the workspace is shared, including the change that ends or starts sharing", async () => {
+    // Ada leaves: the change that ends sharing is still recorded…
+    expect((await api("PUT", "/api/config", { signIn: { admins: [BOSS], members: [] } }, BOSS)).status).toBe(200);
+    expect((await activity("?what=people"))[0]).toMatchObject({ who: BOSS, changed: ["signIn.members"] });
+    // (an unused chat-only pairing code from earlier also counts as sharing)
+    for (const pairing of (await api("GET", "/api/auth/pairing", undefined, BOSS)).body.pairings ?? []) {
+      expect((await api("DELETE", `/api/auth/pairing/${pairing.id}`, undefined, BOSS)).status).toBe(200);
+    }
+    // …and after it, a one-person server keeps no admin log.
+    expect((await api("PUT", "/api/config", { profile: { name: "Solo desk" } }, BOSS)).status).toBe(200);
+    expect((await api("POST", "/api/bots", { name: "Solo Wren" }, BOSS)).status).toBe(201);
+    let rows = await activity("?what=all");
+    expect(JSON.stringify(rows)).not.toContain("Solo desk");
+    expect(JSON.stringify(rows)).not.toContain("Solo Wren");
+    expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(false);
+
+    // A chat-only phone makes it shared again: its pairing code is recorded,
+    // and so is signing it out, though that leaves one person again.
+    const opened = await api("POST", "/api/auth/pairing", { label: "Front desk phone", scopes: ["client"] }, BOSS);
+    expect(opened.status).toBe(200);
+    const paired = await api("POST", "/api/auth/pair", { code: opened.body.code, label: "Front desk phone" });
+    expect(paired.status, JSON.stringify(paired.body)).toBe(200);
+    const phone = paired.body.session.id as string;
+    expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(true);
+    expect((await api("DELETE", `/api/auth/sessions/${phone}`, undefined, BOSS)).status).toBe(200);
+    expect((await api("GET", "/api/admin-activity", undefined, BOSS)).body.recording).toBe(false);
+    rows = await activity("?what=session");
+    expect(rows.map((entry) => entry.action)).toEqual(expect.arrayContaining(["pairing.create", "session.revoke"]));
+    expect(rows.find((entry) => entry.action === "session.revoke")).toMatchObject({ who: BOSS, target: { id: phone, name: "Front desk phone" } });
   });
 });

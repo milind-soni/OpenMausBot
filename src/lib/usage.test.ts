@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { botUsage, cachedInput, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, uncachedInput, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
+import { botUsage, cachedInput, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, freshTokens, headlineTokens, uncachedInput, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
 
 describe("usage formatting", () => {
+  it("preserves the cache-adjusted single total for existing usage pages", () => {
+    const usage = { input: 1_900_000, output: 12_000, cachedInput: 1_862_000, costUsd: null, turns: 12 };
+    expect(freshTokens(usage)).toBe(50_000);
+    expect(headlineTokens(usage)).toBe(50_000);
+    expect(headlineTokens({ ...usage, cachedInput: undefined })).toBe(1_912_000);
+  });
   it("keeps output independent of the input headline, including a fully cached turn", () => {
     const usage = { input: 2048, cachedInput: 2048, output: 3, turns: 1, costUsd: null };
     expect(usageChip(usage)).toBe("0 uncached");

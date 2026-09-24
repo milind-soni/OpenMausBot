@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileS
 import { join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterEach, expect, it, vi } from "vitest";
-import { companyInstanceConfigs, companyInstanceId, ManagedDesktopProviders, parseManagedDesktopConnection, type ManagedDesktopConnection } from "./managed-desktop.ts";
+import { companyInstanceConfigs, companyInstanceId, legacyCompanyInstanceId, LICENSE_EXPIRED_MESSAGE, ManagedDesktopProviders, parseManagedDesktopConnection, type ManagedDesktopConnection } from "./managed-desktop.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { makeFakeDriver } from "./testing/fake-driver.ts";
 import { DATA_DIR, instanceConfigs, loadConfig, persistableInstanceConfigs, saveConfig } from "./config.ts";
@@ -12,6 +12,8 @@ import { recordEvents } from "./testing/events.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { excludedWorkspaceAuthPath } from "./workspace-backup-policy.ts";
 import type { ProviderInstance } from "./contracts.ts";
+import { selectDefaultModelSelection } from "./default-model-selection.ts";
+import { Store } from "./store.ts";
 
 const managers: ManagedDesktopProviders[] = [], registries: ProviderRegistry[] = [];
 afterEach(async () => { await Promise.all(managers.splice(0).map(manager => manager.close())); await Promise.all(registries.splice(0).map(registry => registry.disposeAll())); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -19,7 +21,7 @@ function connection(): ManagedDesktopConnection {
   return { portalOrigin: "https://admin.example.test", organizationId: "11111111-1111-4111-8111-111111111111", organizationName: "Fixture Agency", email: "employee@example.test", deviceId: "22222222-2222-4222-8222-222222222222", token: `omg_${randomBytes(32).toString("base64url")}`, expiresAt: Date.now() + 60_000,
     providers: [{ id: "anthropic", configured: true, models: ["claude-fixture"] }, { id: "openai", configured: true, models: ["gpt-fixture"] }, { id: "openrouter", configured: true, models: ["fixture/writer"] }] };
 }
-async function setup(options: { now?: () => number; dataDirectory?: string } = {}) {
+async function setup(options: { now?: () => number; dataDirectory?: string; migrate?: (aliases: { from: string; to: string }[]) => void; onAvailability?: () => void } = {}) {
   const fakes = ["claudeAgent", "codex", "openai-compat"].map(kind => makeFakeDriver({ kind }));
   const registry = new ProviderRegistry(fakes.map(fake => fake.driver), { npmAvailable: () => false }); registries.push(registry);
   await registry.load({ personal: { driver: "claudeAgent" }, local: { driver: "openai-compat" } });
@@ -65,7 +67,7 @@ it("keeps routing and secrets per instance and uses separate device-scoped Claud
   expect(codex.environment).not.toHaveProperty("OPENAI_API_KEY");
 });
 
-it("preserves same-device native sessions across restart in excluded storage, without reusing them for a new enrollment", async () => {
+it("preserves native sessions across restart and re-enrolment of the same person, never for another account", async () => {
   const dataDirectory = join(DATA_DIR, `company-restart-${randomUUID()}`), value = connection();
   const first = await setup({ dataDirectory });
   await first.manager.apply(value);
@@ -79,9 +81,14 @@ it("preserves same-device native sessions across restart in excluded storage, wi
   expect(readFileSync(nativeFile, "utf8")).toContain("original-native-thread");
   expect(companyInstanceConfigs(value, runtimeDirectory)[id].environment?.CODEX_HOME).toBe(join(runtimeDirectory, id, "codex"));
   expect(excludedWorkspaceAuthPath(`providers/company/${id}/codex/fixture-session.json`)).toBe(true);
-  const anotherDevice = { ...value, deviceId: "33333333-3333-4333-8333-333333333333" };
-  await restarted.manager.apply(anotherDevice);
-  const nextId = companyInstanceId(anotherDevice, "openai");
+  // Re-enrolment mints a new deviceId; the same person keeps the same id and home.
+  const reenrolled = { ...value, deviceId: "33333333-3333-4333-8333-333333333333" };
+  await restarted.manager.apply(reenrolled);
+  expect(companyInstanceId(reenrolled, "openai")).toBe(id);
+  expect(readFileSync(nativeFile, "utf8")).toContain("original-native-thread");
+  const anotherAccount = { ...value, email: "colleague@example.test", deviceId: "44444444-4444-4444-8444-444444444444" };
+  await restarted.manager.apply(anotherAccount);
+  const nextId = companyInstanceId(anotherAccount, "openai");
   expect(nextId).not.toBe(id);
   expect(existsSync(join(runtimeDirectory, nextId, "codex", "fixture-session.json"))).toBe(false);
 });
@@ -229,7 +236,7 @@ it("rejects invalid origins, expired tokens, provider collisions and local model
   expect(redactSecretsInText(`A provider echoed ${value.token} here.`)).not.toContain(value.token);
   expect(redactSecretsInText(`A provider echoed omd_${"A".repeat(42)}- here.`)).not.toContain("omd_");
   expect(redactSecretsInText(`A provider echoed omg_${"A".repeat(42)}- here.`)).not.toContain("omg_");
-  expect(companyInstanceId(value, "openai")).not.toBe(companyInstanceId({ ...value, deviceId: "33333333-3333-4333-8333-333333333333" }, "openai"));
+  expect(companyInstanceId(value, "openai")).not.toBe(companyInstanceId({ ...value, email: "colleague@example.test" }, "openai"));
 });
 
 it("runs native Codex with Company Responses routing, isolated home and no OAuth or argv credential fallback", async () => {
@@ -255,4 +262,95 @@ it("runs native Codex with Company Responses routing, isolated home and no OAuth
     expect(spawned.calls.find((call: { method: string }) => call.method === "thread/start").params).toMatchObject({ model: "gpt-fixture", modelProvider: "openmaus_company" });
     await expect(native.adapter.sendTurn({ threadId: "blocked", text: "No fallback", model: "gpt-personal" })).rejects.toThrow("personal billing");
   } finally { await native?.dispose(); }
+});
+
+it("applies a renewal or a lapsed licence in place, without restarting or ending Company conversations", async () => {
+  let now = Date.now();
+  const onAvailability = vi.fn();
+  const { registry, manager, before, fakes } = await setup({ now: () => now, onAvailability }), value = connection();
+  await manager.apply(value);
+  const id = companyInstanceId(value, "anthropic"), company = registry.get(id)!;
+  // Renewal: the same token and processes, a later expiry.
+  const renewed = { ...value, expiresAt: value.expiresAt + 30 * 86400_000 };
+  await manager.apply(renewed);
+  expect(registry.get(id)).toBe(company); expect(before).toHaveBeenCalledTimes(1);
+  expect(fakes.flatMap(fake => fake.disposed)).toEqual([]);
+  now = value.expiresAt + 1000;
+  expect(await company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "claude-fixture" })).toEqual({ turnId: "fake-turn" });
+  // The Admin's licence lapsed: listed, unavailable, never a revocation.
+  await manager.apply({ ...renewed, suspended: "license-expired" });
+  expect(registry.get(id)).toBe(company); expect(before).toHaveBeenCalledTimes(1);
+  expect(await company.snapshot()).toEqual({ state: "unavailable", reason: LICENSE_EXPIRED_MESSAGE });
+  await expect(company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "claude-fixture" })).rejects.toThrow("licence has expired");
+  await manager.apply(renewed);
+  expect(await company.snapshot()).toMatchObject({ authenticated: true });
+  expect(onAvailability).toHaveBeenCalledTimes(3);
+  expect(fakes.flatMap(fake => fake.disposed)).toEqual([]);
+});
+
+it("moves a pre-upgrade device-scoped id, its native home and saved references onto the stable id once", async () => {
+  const dataDirectory = join(DATA_DIR, `company-legacy-${randomUUID()}`), value = connection();
+  const legacy = legacyCompanyInstanceId(value, "openai"), stable = companyInstanceId(value, "openai");
+  expect(legacy).not.toBe(stable);
+  const legacyHome = join(dataDirectory, "providers", "company", legacy, "codex");
+  mkdirSync(legacyHome, { recursive: true }); writeFileSync(join(legacyHome, "fixture-session.json"), "original-native-thread");
+  const migrate = vi.fn();
+  const { registry, manager } = await setup({ dataDirectory, migrate });
+  await manager.apply(value);
+  expect(migrate).toHaveBeenCalledWith(expect.arrayContaining([{ from: legacy, to: stable }]));
+  expect(readFileSync(join(dataDirectory, "providers", "company", stable, "codex", "fixture-session.json"), "utf8")).toBe("original-native-thread");
+  expect(existsSync(join(dataDirectory, "providers", "company", legacy))).toBe(false);
+  expect(registry.get(stable)).not.toBeNull(); expect(registry.get(legacy)).toBeNull();
+});
+
+it("migrates an expired or cleared enrollment by its identity alone, so a later re-enrolment finds its bots", async () => {
+  const dataDirectory = join(DATA_DIR, `company-identity-${randomUUID()}`), expired = connection();
+  const legacy = legacyCompanyInstanceId(expired, "anthropic"), stable = companyInstanceId(expired, "anthropic");
+  const legacyHome = join(dataDirectory, "providers", "company", legacy, "claude");
+  mkdirSync(legacyHome, { recursive: true }); writeFileSync(join(legacyHome, "session.json"), "native-resume");
+  const migrate = vi.fn();
+  const { manager, registry } = await setup({ dataDirectory, migrate });
+  // No live grant: the enrollment expired before this version was installed.
+  await manager.migrateIdentity({ portalOrigin: expired.portalOrigin, organizationId: expired.organizationId, email: "Employee@Example.test", deviceId: expired.deviceId });
+  expect(migrate).toHaveBeenCalledWith(expect.arrayContaining([{ from: legacy, to: stable }]));
+  expect(readFileSync(join(dataDirectory, "providers", "company", stable, "claude", "session.json"), "utf8")).toBe("native-resume");
+  // Re-enrolment as a new device resolves to the same stable id.
+  const reenrolled = { ...expired, deviceId: "55555555-5555-4555-8555-555555555555" };
+  await manager.apply(reenrolled);
+  expect(registry.get(stable)).not.toBeNull();
+  await expect(manager.migrateIdentity({ portalOrigin: "https://admin.example.test", organizationId: expired.organizationId, email: expired.email, deviceId: expired.deviceId, token: "omd_x" })).rejects.toThrow();
+  await expect(manager.migrateIdentity({ portalOrigin: "http://admin.example.test", organizationId: expired.organizationId, email: expired.email, deviceId: expired.deviceId })).rejects.toThrow("HTTPS");
+});
+
+it("keeps Company models available when moving old references fails", async () => {
+  const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const { manager, registry } = await setup({ migrate: () => { throw new Error("bots.json is read-only"); } }), value = connection();
+  await manager.apply(value);
+  expect(registry.get(companyInstanceId(value, "anthropic"))).not.toBeNull();
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not move saved Company model references"));
+});
+
+it("sends new bots to a Company model that can run while enrolled, and disconnecting leaves personal selections untouched", async () => {
+  const store = new Store(() => ({ instanceId: "personal", model: "fake-default" }));
+  const { registry, manager } = await setup({ migrate: aliases => { store.renameInstances(new Map(aliases.map(({ from, to }) => [from, to]))); } });
+  const value = connection(), companyClaude = companyInstanceId(value, "anthropic");
+  const company = (instanceId: string) => manager.owns(instanceId);
+  // The personal Claude CLI is installed but signed out, and the local model server is not running.
+  const described = async (signedIn = false) => (await registry.describe()).map(instance =>
+    instance.instanceId === "personal" && !signedIn ? { ...instance, snapshot: { ...instance.snapshot, authenticated: false } }
+      : instance.instanceId === "local" ? { ...instance, snapshot: { state: "unavailable" as const, reason: "fixture server stopped" } } : instance);
+  const before = selectDefaultModelSelection(await described(), undefined, { company });
+  expect(before.instanceId).toBe("personal");
+  await manager.apply(value);
+  expect(selectDefaultModelSelection(await described(), undefined, { company })).toEqual({ instanceId: companyClaude, model: "claude-fixture" });
+  expect(selectDefaultModelSelection(await described(true), undefined, { company }).instanceId).toBe("personal");
+  const personalBot = store.createBot({ modelSelection: { instanceId: "personal", model: "fake-default" } }, { seedMessages: false });
+  const companyBot = store.createBot({ modelSelection: { instanceId: companyClaude, model: "claude-fixture" } }, { seedMessages: false });
+  await manager.migrateIdentity({ portalOrigin: value.portalOrigin, organizationId: value.organizationId, email: value.email, deviceId: value.deviceId });
+  await manager.apply(null);
+  expect(registry.get(companyClaude)).toBeNull();
+  expect(store.bot(personalBot.id)!.modelSelection).toEqual({ instanceId: "personal", model: "fake-default" });
+  // The Company choice waits for the same person to reconnect; it never falls back to personal billing.
+  expect(store.bot(companyBot.id)!.modelSelection).toEqual({ instanceId: companyClaude, model: "claude-fixture" });
+  expect(selectDefaultModelSelection(await described(), undefined, { company })).toEqual(before);
 });

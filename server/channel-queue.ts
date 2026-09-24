@@ -9,6 +9,7 @@
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
+import type { UsageTrigger } from "./usage-ledger.ts";
 
 interface ChannelQueueItem {
   id: string;
@@ -20,6 +21,8 @@ interface ChannelQueueItem {
   via?: "api";
   /** the person who sent it, so the drained line still names them */
   sender?: ResolvedSender;
+  /** who the ledger books the room turn it starts to, captured when sent */
+  trigger?: UsageTrigger;
 }
 
 interface ChannelQueueEntry {
@@ -54,6 +57,7 @@ export function queueChannelMessage(
     mode?: "chat" | "goal";
     via?: "api";
     sender?: ResolvedSender;
+    trigger?: UsageTrigger;
   } = {},
 ): QueuedChannelMessage {
   const entry = queues.get(threadId) ?? { groupId, items: [] };
@@ -66,6 +70,7 @@ export function queueChannelMessage(
     mode: options.mode ?? "chat",
     via: options.via,
     sender: options.sender,
+    trigger: options.trigger,
   };
   saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
   entry.items.push(item);

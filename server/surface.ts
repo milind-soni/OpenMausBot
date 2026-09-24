@@ -61,10 +61,14 @@ const OFF_NOTE =
  * destination mounts only the built-in browser, Off mounts nothing. A
  * conversation pin — set by the person from the composer, or by the
  * conversation's own first turn on Auto — wins over the bot's default, so a
- * thread never changes place under someone; only Off overrides it. Auto
- * without a pin leaves the computer choice to the dispatch, which then
- * mounts the browser only when no computer was reached. A pin the turn
- * cannot honour is retained and reported instead of being swapped silently. */
+ * thread never changes place under someone; only Off overrides it. An
+ * Auto-recorded pin is the machine's memory, not a person's choice: it yields
+ * when the bot's Works on later changes and no longer matches, while a
+ * person's pin (including legacy pins of unknown origin) keeps winning until
+ * they clear it. Auto without a pin leaves
+ * the computer choice to the dispatch, which then mounts the browser only
+ * when no computer was reached. A pin the turn cannot honour is retained and
+ * reported instead of being swapped silently. */
 export function resolveSurface(input: {
   destination: Destination;
   pinnedSurface?: Surface | null;
@@ -158,6 +162,7 @@ export function surfacePrompt(
   if (opts.canSelect) text += " For a screen task, use select_computer with no arguments when you need to inspect the actual available targets. Choose the requested place from its result; if the user left the place open, use a suitable available target or surface auto instead of asking them to operate the menu. Browser-only work can stay in Browser; when it needs desktop apps or capabilities the current Browser lacks, select an available Local VM without asking the user to switch it manually. Choose before taking actions, and do not repeat actions already completed if the task must continue elsewhere. OpenMausBot can start an existing configured computer and highlight the selected target. If the right tools are already mounted, use them directly. On a pending switch, end this turn: the original request resumes automatically with the new tools, and then you must carry out the task. Only ask for input for a genuine blocker, such as missing setup, required sign-in or an approval. Never silently replace an explicitly requested VM with the host desktop.";
   if (opts.canSelect) text += " If no suitable computer is running but its provider is configured, select_computer can provision one for this computer task; reuse existing resources first. Do not provision merely for ordinary chat or inspection.";
   if (opts.canSelect && !computer && !mounted.browser) text += " No computer or browser tools are mounted yet; select_computer is the way to connect them before screen work, not a reason to claim you already performed it.";
+  if (computer || mounted.browser) text += " For online research, use the selected OpenMausBot browser when a search service is unavailable. A failed tool proves only that this attempt failed, not that every browser is unavailable. Inspect the current page after navigation; report a sign-in page, redirect or error as such. A completed model turn is not proof that the user's task succeeded.";
   return text + (opts.note ?? "");
 }
 

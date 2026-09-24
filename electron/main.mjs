@@ -1,4 +1,4 @@
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -25,6 +25,10 @@ import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { createStartupScreen } from "./startup-screen.mjs";
+import { createSystemTray } from "./system-tray.mjs";
+let startupScreen = null;
+let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
@@ -235,7 +239,7 @@ function queuePackageInstall(rawLink) {
   const packageUrl = packageUrlFromDeepLink(rawLink);
   if (!packageUrl) return false;
   pendingPackageInstallUrl = packageUrl;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const target = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
   deliverPackageInstall(target);
   return true;
@@ -253,7 +257,7 @@ app.on("second-instance", (_event, commandLine) => {
   }
   const packageUrl = packageUrlFromCommandLine(commandLine);
   if (packageUrl) pendingPackageInstallUrl = packageUrl;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const target = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
   deliverPackageInstall(target);
 });
@@ -777,6 +781,10 @@ async function startManagedCompanionConnection({ waitForVerification = true } = 
 }
 
 async function startDesktopCompanion({ waitForHosted = true, remember = true } = {}) {
+  // Every way of turning the companion on (the switch, Tailscale's "Turn on
+  // and check", launch auto-start) passes here.
+  const refusal = managedRemoteAccessRefusal();
+  if (refusal) throw new Error(refusal);
   companionDesiredThisLaunch = true;
   companionLaunchGeneration += 1;
   // Direct LAN comes up first. The hosted endpoint is added in place only
@@ -975,13 +983,23 @@ function ensureManagedDesktop() {
   managedDesktop = createManagedDesktopClient({
     store, platform: process.platform, deviceName: os.hostname().slice(0, 100) || "My computer",
     applyConnection: connection => managedDesktopRelay.send(serverProc, connection),
+    // The organisation's read-only policy overlay; the runtime keeps it in memory.
+    applyPolicy: policy => managedDesktopRelay.sendPolicy(serverProc, policy),
+    migrateIdentity: identity => managedDesktopRelay.sendIdentity(serverProc, identity),
+    appVersion: app.getVersion(),
     openBrowser: url => shell.openExternal(url),
     onState: state => {
-      if (["signed-out", "reauth-required"].includes(state.status) || (state.status === "connected" && !state.cloudBackups)) {
+      // Losing company access (sign-out, expiry, revocation, a lapsed licence)
+      // pauses daily backups; the schedule clears itself only when a different
+      // organisation or account connects. An Admin without backup storage ends it.
+      // license-expired repeats every heartbeat; an upload in flight stops, nothing else changes.
+      if (state.status === "license-expired") companyBackupController?.abort();
+      const lost = ["signed-out", "reauth-required"].includes(state.status), withoutStorage = state.status === "connected" && !state.cloudBackups;
+      if (lost || withoutStorage) {
         companyBackupConfigurationRevision++;
         companyBackupController?.abort();
         preparedCompanyRestore = null;
-        void companyBackupSchedule?.forget().catch(() => {});
+        if (withoutStorage) void companyBackupSchedule?.forget().catch(() => {});
         publishCompanyBackupState({ busy: Boolean(companyBackupController) });
       }
       companyBackupSchedule?.reconcile();
@@ -1024,7 +1042,20 @@ function companyBackupScope() {
   if (desktopShutdownStarted || desktopRemoteAccess || !serverReady || !serverProc || activeEnvironment(environmentsState)) return null;
   const client = managedDesktop, connection = client?.connection(), state = client?.state();
   if (!connection || state?.status !== "connected" || !state.cloudBackups || connection.expiresAt <= Date.now()) return null;
-  return { key: JSON.stringify([connection.portalOrigin, connection.organizationId, connection.email, connection.deviceId, path.resolve(desktopDataDir())]),
+  // One person, one organisation, one data folder: re-enrolling this computer
+  // (a new deviceId) keeps the same daily schedule, and a schedule saved by an
+  // earlier version (whose key included a deviceId) is adopted, not forgotten.
+  const dataDir = path.resolve(desktopDataDir());
+  return { key: JSON.stringify([connection.portalOrigin, connection.organizationId, connection.email, dataDir]),
+    // Any enrollment of this same person, organisation and folder, whatever its
+    // deviceId: a credential that expired before the upgrade still carries over.
+    adopts: saved => {
+      try {
+        const value = JSON.parse(saved);
+        return Array.isArray(value) && value.length === 5 && typeof value[3] === "string" && value[0] === connection.portalOrigin &&
+          value[1] === connection.organizationId && value[2] === connection.email && value[4] === dataDir;
+      } catch { return false; }
+    },
     generation: client.backupGeneration() };
 }
 
@@ -1792,7 +1823,7 @@ const organizationEntry = createOrganizationEntry({
 function queueOrganizationEntry(link) {
   if (!isOrganizationDeepLink(link)) return false;
   pendingOrganizationEntry = true;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   void deliverOrganizationEntry();
   return true;
 }
@@ -1945,7 +1976,7 @@ function createWindow({ deferNavigation = false } = {}) {
     // mirrors it over desktop:skin. Keep Windows hidden until that handshake
     // recolors the native caption-button overlay, otherwise a saved light
     // skin still flashes the Midnight-black block on every cold start.
-    show: !waitsForSkinSync,
+    show: !waitsForSkinSync && !startupScreen,
     icon: APP_ICON,
     backgroundColor: "#070707",
     autoHideMenuBar: process.platform !== "darwin",
@@ -1963,6 +1994,13 @@ function createWindow({ deferNavigation = false } = {}) {
     },
   });
   mainWindow = win;
+  win.on("show", () => desktopTray?.windowShown(win));
+  win.on("close", (event) => {
+    if (process.platform === "win32" && !desktopShutdownStarted && desktopTray) {
+      event.preventDefault();
+      desktopTray.hide(win);
+    }
+  });
   win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
   win.webContents.on("page-title-updated", event => {
     if (!desktopRemoteAccess && !activeEnvironment(environmentsState)) return;
@@ -1970,7 +2008,8 @@ function createWindow({ deferNavigation = false } = {}) {
     win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
   });
   attachUpdaterWindow(win);
-  if (waitsForSkinSync) {
+  if (startupScreen) startupScreen.attach(win, { maximized: restored.maximized });
+  else if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
     // process. Normal startup shows from desktop:skin almost immediately;
     // this is only the bounded recovery path.
@@ -1984,7 +2023,7 @@ function createWindow({ deferNavigation = false } = {}) {
   }
   installWindowStatePersistence(win);
   applyUnreadBadge(win);
-  if (restored.maximized) win.maximize();
+  if (restored.maximized && !startupScreen) win.maximize();
   win.once("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -2400,6 +2439,13 @@ ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pa
   return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${anchor}`);
 }));
 
+ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
+  if (process.platform !== "darwin") return false;
+  requireMainWindowSender(event);
+  relaunchAfterDesktopRemoteChange();
+  return true;
+}));
+
 ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
@@ -2421,6 +2467,13 @@ ipcMain.handle("speech:finish", localOnly("speech:finish", () => {
 // on and off, look at it, open or cancel a pairing window, and remove a
 // device. It cannot reach the sidecar's control port itself.
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
+/** An enrolled organisation can turn remote access off. That refuses turning
+ * the companion on and opening new pairings; it adds no prompt, and phones
+ * that are already paired keep working until someone revokes them. */
+function managedRemoteAccessRefusal() {
+  const policy = managedDesktop?.policy?.();
+  return policy?.remoteAccess === false ? `${policy.organizationName} does not allow remote access to this computer.` : null;
+}
 ipcMain.handle("companion:start", localOnly("companion:start", () => startDesktopCompanion()));
 ipcMain.handle("companion:stop", localOnly("companion:stop", () => stopDesktopCompanion()));
 ipcMain.handle("companion:keep-awake", localOnly("companion:keep-awake", async (_event, enabled) => {
@@ -2436,9 +2489,11 @@ ipcMain.handle("routines:keep-awake", localOnly("routines:keep-awake", async (_e
   return routineWake.poll();
 }));
 ipcMain.handle("companion:refresh-tailscale", localOnly("companion:refresh-tailscale", () => refreshDesktopCompanionTailscale()));
-ipcMain.handle("companion:pairing", localOnly("companion:pairing", (_event, open, expectedToken) =>
-  companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState),
-));
+ipcMain.handle("companion:pairing", localOnly("companion:pairing", (_event, open, expectedToken) => {
+  const refusal = open ? managedRemoteAccessRefusal() : null;
+  if (refusal) throw new Error(refusal);
+  return companionPairing(Boolean(open), expectedToken).then(decorateDesktopCompanionState);
+}));
 ipcMain.handle("companion:cloud-desktop", localOnly("companion:cloud-desktop", (_event, deviceId, allowed) =>
   companionCloudDesktopAccess(deviceId, Boolean(allowed)).then(() => desktopCompanionState()),
 ));
@@ -2469,7 +2524,7 @@ function relaunchAfterDesktopRemoteChange() {
     // Electron's default uses its original native argv, not the JS array
     // from which we consumed the one-shot organisation action.
     app.relaunch({ args: process.argv.slice(1) });
-    app.exit(0);
+    app.quit();
   }, 250);
   timer.unref?.();
 }
@@ -2515,18 +2570,18 @@ const localWorkspaceOnly = (channel, handler) => localOnly(channel, workspaceOnl
 ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));
+// Reopens only the pending attempt's own sign-in page: no renderer input.
+ipcMain.handle("organization:reopen", localWorkspaceOnly("organization:reopen", () => ensureManagedDesktop().reopen()));
 ipcMain.handle("organization:cancel", localWorkspaceOnly("organization:cancel", () => ensureManagedDesktop().cancelEnrollment()));
 ipcMain.handle("organization:refresh", localWorkspaceOnly("organization:refresh", () => ensureManagedDesktop().refresh()));
 ipcMain.handle("organization:disconnect", localWorkspaceOnly("organization:disconnect", () => {
   companyBackupConfigurationRevision++;
   companyBackupController?.abort(); preparedCompanyRestore = null;
   const client = ensureManagedDesktop();
-  // The schedule reports its own failure to forget the stored secret; a file
-  // error there must not present a completed disconnect as failed.
-  return Promise.allSettled([companyBackupSchedule.forget(), client.disconnect()]).then(([, disconnect]) => {
-    if (disconnect.status === "rejected") throw disconnect.reason;
-    return disconnect.value;
-  });
+  // Disconnecting pauses the daily schedule instead of deleting it, so
+  // reconnecting the same organisation as the same person resumes it. Turning
+  // daily backups off in Settings → Backups is what ends it.
+  return client.disconnect();
 }));
 ipcMain.on("company-backups:client-state", receiveCompanyBackupClientState);
 ipcMain.handle("company-backups:configure-schedule", localWorkspaceOnly("company-backups:configure-schedule", async (_event, input) => {
@@ -2740,6 +2795,28 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  if (process.platform === "win32") {
+    try {
+      desktopTray = createSystemTray({
+        Tray, Menu, nativeImage, iconPath: APP_ICON,
+        getWindow: () => startupScreen?.window ?? mainWindow,
+        onQuit: () => app.quit(),
+      });
+    } catch (error) {
+      // A missing tray must leave a working close/quit path.
+      slog(`system tray unavailable: ${error?.message ?? error}`);
+    }
+  }
+  startupScreen = createStartupScreen({
+    BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted,
+    onQuit: () => app.quit(),
+    onHide: desktopTray ? (win) => desktopTray.hide(win) : undefined,
+    isHidden: () => desktopTray?.isHidden() ?? false,
+    onShow: (win) => desktopTray?.windowShown(win),
+    onFinished: () => { startupScreen = null; },
+  });
+  await startupScreen.ready;
+  if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
   });
@@ -2884,7 +2961,10 @@ app.whenReady().then(async () => {
   // (the panel shows the error) rather than retrying; and it never delays
   // the window.
   if (!desktopRemoteAccess && serverReady && companionEnabledAtRest()) {
-    void startDesktopCompanion({ waitForHosted: false, remember: false });
+    // Wait until a saved organisation policy is known: it may turn remote access off.
+    void (managedDesktop?.whenRestored() ?? Promise.resolve())
+      .then(() => startDesktopCompanion({ waitForHosted: false, remember: false }))
+      .catch(error => slog(`companion auto-start skipped: ${error?.message ?? error}`));
   }
   setLocalOrigin(rendererOrigin());
   // Device permissions (microphone, notifications, clipboard) are for the
@@ -2940,6 +3020,7 @@ app.whenReady().then(async () => {
   startUpdater();
   refreshApplicationMenu();
   app.on("activate", () => {
+    if (desktopTray?.show()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
@@ -2971,6 +3052,7 @@ process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
   desktopShutdownStarted = true;
+  startupScreen?.dispose();
   companyBackupSchedule?.close();
   managedDesktop?.close();
   companyBackupController?.abort();
@@ -3027,4 +3109,5 @@ function releaseDesktopDataDirLease() {
 // helpers shut down. will-quit is the final Electron lifecycle boundary; the
 // process hook covers app.exit()/fatal exits that bypass it.
 app.on("will-quit", releaseDesktopDataDirLease);
+app.on("will-quit", () => desktopTray?.destroy());
 process.once("exit", releaseDesktopDataDirLease);

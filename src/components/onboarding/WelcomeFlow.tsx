@@ -8,6 +8,10 @@
 // Nothing here can brick the app: every beat is skippable, Escape skips the
 // whole tour, and completion is written to the workspace config. A failed
 // write still dismisses this visit, but may require retrying on the next launch.
+//
+// A hosted team workspace gets its own short set (a greeting, then the bot):
+// its organisation assigns the models, and nothing there is installed on,
+// granted to or paired with this computer.
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { MausAvatar } from "@/components/Avatar";
 import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
@@ -74,13 +78,16 @@ export function WelcomeFlow({
   reel = true,
   dictation,
   entrance = "arrive",
+  hosted = false,
+  onOpenOrganisation,
 }: {
   /** The seeded bot the exit beat names; null when the roster is empty. */
   bot: Bot | null;
   onDone: () => void;
   /** Replays skip nothing but are tracked separately. */
   replay?: boolean;
-  /** Preview only: open on a given beat. */
+  /** Open on a given beat: the preview, and resuming after the engines beat
+   * sent the person to Settings → Organisation. */
   initialBeat?: BeatId;
   /** Preview only: fill the parent instead of the viewport. */
   embedded?: boolean;
@@ -90,10 +97,14 @@ export function WelcomeFlow({
   dictation?: boolean;
   /** The guide's first motion beat on mount. */
   entrance?: Motion;
+  /** A hosted team workspace: the hosted beat set, no email field. */
+  hosted?: boolean;
+  /** The engines beat's organisation row asks for Settings → Organisation. */
+  onOpenOrganisation?: () => void;
 }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
-  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel });
+  const beats = beatsFor({ dictation: dictation ?? capabilities.dictation.available, reel, hosted });
   const [beat, setBeat] = useState<BeatId>(() => (initialBeat && beats.includes(initialBeat) ? initialBeat : "hello"));
   const [mascot, setMascot] = useState<MausState>(MASCOT_FOR_BEAT[beat]);
   const [motion, setMotion] = useState<{ kind: Motion; key: number }>({ kind: "blink", key: 0 });
@@ -247,9 +258,9 @@ export function WelcomeFlow({
 
         {/* keyed so a beat's rise-in plays once per visit, never on re-render */}
         <div key={beat} className="flex shrink-0 flex-col">
-          {beat === "hello" && <HelloBeat {...beatProps} />}
+          {beat === "hello" && <HelloBeat {...beatProps} hosted={hosted} />}
           {beat === "reel" && <FeatureReel {...beatProps} />}
-          {beat === "engines" && <EnginesBeat {...beatProps} />}
+          {beat === "engines" && <EnginesBeat {...beatProps} hosted={hosted} onOpenOrganisation={onOpenOrganisation} />}
           {beat === "permissions" && <PermissionsBeat {...beatProps} />}
           {beat === "phone" && <PhoneBeat {...beatProps} />}
           {beat === "bot" && (

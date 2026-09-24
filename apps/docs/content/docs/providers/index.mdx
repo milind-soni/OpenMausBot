@@ -26,6 +26,14 @@ OpenMausBot does not proxy every message through its own model account. It start
 
 Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
 
+## Mistral API
+
+Open **Settings → Connections**, save your **Mistral API key**, then choose **Mistral (API)** in a bot's model picker. No CLI installation is needed. The **Test** button checks catalog access without sending a chat message.
+
+The model list refreshes from Mistral's `/v1/models` endpoint, including versioned models and aliases. Archived and non-chat models are excluded. Use **Refresh models** after new models become available to your account; an unsuccessful refresh preserves the previous list. Mistral bills requests to your API account.
+
+For a server deployment, set `MISTRAL_API_KEY` or save `mistral.key` in the server configuration. Advanced users can declare additional `mistral` instances with a `config.model` default and endpoint URL. A saved workspace key is shared by those instances. The connection supports streamed replies and structured tools through the shared chat-completions runtime; it does not launch a local agent CLI or grant filesystem access.
+
 ## Detection
 
 OpenMausBot checks common installation directories and the login shell in the background. Restart the app after installing or authenticating a CLI.
@@ -37,6 +45,19 @@ If detection fails, use **Settings → Engines** to set an explicit executable p
 The model picker groups models by provider and marks defaults. Supported engines can refresh their model catalog from the installed CLI. Changing the model affects future turns; it does not rewrite earlier transcript history.
 
 <ProductScreenshot name="docs-model-picker" alt="The OpenMausBot model picker with several cloud and local engines" caption="Every bot can use a different engine and model." />
+
+## Codex browser tools
+
+Codex bots use the browser and computer selected in OpenMausBot. Desktop-only Codex
+browser/computer features and their bundled plugins are disabled for those bot
+processes, so bots do not select a native desktop connection that is unavailable
+inside the CLI. This does not uninstall plugins or change the standalone Codex app.
+Native web search keeps its configured mode.
+
+After built-in browser navigation, OpenMausBot collects a snapshot in the same
+browser session. A sign-in page or redirect is evidence of where navigation landed,
+not confirmation that the requested task finished. Connection failures retain the
+selected computer/account and do not automatically replay uncertain actions.
 
 ## Multiple Claude accounts
 

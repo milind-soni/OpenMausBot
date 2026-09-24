@@ -70,7 +70,7 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   </article>;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onEditTeam, onDeleteTeam, isEmpty, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [] }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [] }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -400,10 +400,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onEdit
               }}>
                 <button className={menuButton} onClick={() => onEditTeam(section.key)} aria-label={t("team.moveTo", { name: section.name })}><Users size={14} />{t("team.moveTo", { name: section.name })}</button>
                 <button className={menuButton} onClick={() => onInstructions(section.key, section.name)} aria-label={t("team.instructionsEdit", { name: section.name })}><BookOpen size={14} />{t("team.instructions")}</button>
-                {section.key && isEmpty(section.key) && <>
-                  <button className={menuButton} onClick={() => onEditTeam(section.key, true)} aria-label={t("team.renameAria", { name: section.name })}><Pencil size={14} />{t("team.renameEmpty")}</button>
-                  <button className={cn(menuButton, "hover:text-danger")} onClick={() => onDeleteTeam(section.key)} aria-label={t("team.deleteAria", { name: section.name })}><Trash2 size={14} />{t("team.deleteEmpty")}</button>
-                </>}
+                {section.key && <button className={menuButton} onClick={() => onEditTeam(section.key, true)} aria-label={t("team.renameAria", { name: section.name })}><Pencil size={14} />{t("team.rename")}</button>}
+                {section.key && <button className={cn(menuButton, "hover:text-danger")} onClick={() => onDeleteTeam(section.key)} aria-label={t("team.deleteAria", { name: section.name })}><Trash2 size={14} />{t("team.delete")}</button>}
               </div>
             </details>}
           </header>

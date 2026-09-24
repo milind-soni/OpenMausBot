@@ -12,7 +12,7 @@
 // how the bug escaped. The copy is the whole point; do not "simplify" it away.
 import { execFile, spawn } from "node:child_process";
 import assert from "node:assert/strict";
-import { cpSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,6 +62,10 @@ const fixtureEnv = {
   XDG_DATA_HOME: join(home, ".local", "share"),
   OMB_DATA_DIR: join(home, ".openmausbot"),
   OMB_PORT: String(port),
+  // Not a genuine key: enough to make the server look for its enterprise
+  // layer and say whether it found one (checked below), never enough to
+  // unlock anything.
+  OMB_LICENSE_KEY: "omb1.not.real",
   ...(browserBundle ? {
     OMB_RESOURCES_PATH: staging,
     // A global engine on the developer's PATH must not make this test pass.
@@ -139,6 +143,17 @@ writeFileSync(
   ].join("\n"),
 );
 
+// The packaged tree carries the bundled enterprise layer inside the server
+// root (server/enterprise/server/index.js). server/enterprise.ts must find it
+// there, or a licensed install silently runs the open-source edition.
+const layerShipped = existsSync(join(staging, "server", "enterprise", "server", "index.js"));
+let editionReport = null;
+if (listening) {
+  try {
+    editionReport = await (await fetch(`http://127.0.0.1:${port}/api/edition`, { signal: AbortSignal.timeout(5_000) })).json();
+  } catch (error) { editionReport = { error: String(error) }; }
+}
+
 let proxyReport = null;
 try {
   const { stdout } = await promisify(execFile)(process.execPath, [probe], { cwd: staging, env: fixtureEnv });
@@ -212,6 +227,12 @@ if (!listening) {
   process.exit(1);
 }
 
+if (layerShipped && (!editionReport || editionReport.error || String(editionReport.notice ?? "").includes("no enterprise layer exists"))) {
+  console.error("the packaged server ships an enterprise layer but did not find it:");
+  console.error(JSON.stringify(editionReport, null, 2));
+  process.exit(1);
+}
+
 if (!proxyReport || proxyReport.error || proxyReport.missing.length > 0) {
   console.error("spawned proxy paths do not resolve inside the packaged server dir:");
   console.error(JSON.stringify(proxyReport, null, 2));
@@ -245,4 +266,5 @@ const count = Object.keys(proxyReport.resolved).length;
 console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
 console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
 console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");
+if (layerShipped) console.log("packaged server found its enterprise layer inside the server dir ✓");
 if (browserBundle) console.log(`packaged browser discovered without installation; access remains opt-in ✓ ${JSON.stringify(browserReport)}`);

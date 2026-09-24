@@ -1,4 +1,5 @@
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -47,8 +48,8 @@ function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   return {
     dir, receipt, controller, server,
     read: () => JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; path: string; omb: Record<string, string>; calls: Array<{ method: string; params?: { name?: string; arguments?: unknown } }> },
-    async mount() {
-      const session = await mountChatTools({ custom: { audit: server } }, controller.signal);
+    async mount(computerUse = false, localComputer = false) {
+      const session = await mountChatTools(localComputer ? { localComputer: server } : { custom: { audit: server } }, controller.signal, computerUse);
       sessions.push(session);
       return session;
     },
@@ -243,6 +244,44 @@ describe("Chat MCP session", () => {
 });
 
 describe("Chat MCP schema validation", () => {
+  it("retains native unsigned/composition constraints while exposing an object schema", async () => {
+    const f = fixture("", { type: "object", properties: { value: { type: "integer", format: "uint32" } },
+      anyOf: [{ required: ["value"] }], additionalProperties: false });
+    const session = await f.mount(true);
+    expect(session.definitions[0].function.parameters).not.toHaveProperty("anyOf");
+    expect(session.definitions[0].function.description).toContain('"anyOf"');
+    expect(() => session.validate("audit_write", {})).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: -1 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: 2 ** 32 })).toThrow("input schema");
+    expect(() => session.validate("audit_write", { value: 42 })).not.toThrow();
+  });
+
+  it.each([false, true])("carries large images from custom and built-in servers (built-in: %s)", async local => {
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=", "base64");
+    const chunk = Buffer.alloc(2 * 1024 * 1024 + 12);
+    chunk.writeUInt32BE(chunk.length - 12, 0); chunk.write("tEXt", 4); chunk.write("fixture\0", 8);
+    chunk.writeUInt32BE(crc32(chunk.subarray(4, -4)), chunk.length - 4);
+    const data = Buffer.concat([png.subarray(0, -12), chunk, png.subarray(-12)]).toString("base64");
+    const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:process.env.IMAGE}]}); continue; }');
+    f.server.env.IMAGE_FILE = join(f.dir, "image.txt");
+    writeFileSync(f.server.env.IMAGE_FILE, data);
+    writeFileSync(join(f.dir, "fake-mcp.mjs"), readFileSync(join(f.dir, "fake-mcp.mjs"), "utf8").replace('import { writeFileSync }', 'import { writeFileSync, readFileSync }').replace('process.env.IMAGE', 'readFileSync(process.env.IMAGE_FILE,"utf8")'));
+    const session = await f.mount(true, local);
+    const result = await session.execute(local ? "computer_write" : "audit_write", { value: "screenshot" }, f.controller.signal);
+    expect(result).toEqual({ ok: true, text: "Screenshot captured.", images: [{ type: "image_url", image_url: { url: `data:image/png;base64,${data}` } }] });
+  });
+
+  it("keeps a bounded frame limit for image-enabled custom servers", async () => {
+    const f = fixture('if(message.method === "tools/call") { process.stdout.write("x".repeat(32*1024*1024+1)); continue; }');
+    const session = await f.mount(true);
+    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).rejects.toThrow(/frame|limit/i);
+  });
+
+  it("rejects malformed image results without claiming execution success", async () => {
+    const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:"not-base64"}]}); continue; }');
+    const session = await f.mount(true);
+    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).rejects.toThrow("Invalid or oversized MCP image");
+  });
   it.each([
     { type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] },
     { type: "object", properties: { value: { type: "string", enum: ["a"], minLength: 2 } }, required: ["value"] },

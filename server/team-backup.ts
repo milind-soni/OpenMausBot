@@ -2,6 +2,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { botMascotBody } from "../shared/mascot-bodies.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { MAX_TEAM_BACKUP_BYTES, parseTeamBackup, type BackupTask, type TeamBackup } from "../shared/team-backup.ts";
+import type { BotVisibility } from "../shared/wire.ts";
 import type { BotRecord, GroupRecord, Message, Store, TaskRecord } from "./store.ts";
 import type { Routine, RoutineManager } from "./routines.ts";
 import { redactSecretsInText } from "./redact.ts";
@@ -128,7 +129,7 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
 
 /** Import is always additive, including sections and Chiefs. Rollback owns
  * only the fresh records below and cannot touch any pre-existing bot/chat. */
-export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection) {
+export function importTeamBackup(store: Store, routines: RoutineManager, input: unknown, selection: ModelSelection, options: { visibility?: BotVisibility } = {}) {
   const backup = parseTeamBackup(input);
   const bots: BotRecord[] = [];
   const groups: GroupRecord[] = [];
@@ -172,6 +173,8 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
         color: source.color, mascotExpression: source.mascotExpression,
         mascotBody: botMascotBody(source.mascotBody),
         modelSelection: selection, section: sectionFor(source.section),
+        // who may see the imported team is the importing admin's choice
+        ...(options.visibility ? { visibility: options.visibility } : {}),
       }, { seedMessages: false });
       bots.push(bot);
       botIds.set(source.key, bot.id);
@@ -184,7 +187,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       const tasks = source.tasks.map((task, i): TaskRecord => {
         const record: TaskRecord = {
           threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
-          modelSelection: structuredClone(selection), activity: "idle" as const, busy: false, unread: false,
+          modelSelection: structuredClone(bot.modelSelection), activity: "idle" as const, busy: false, unread: false,
           ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
         };
         // Same rule as a message's `from`: the opener is remapped to its

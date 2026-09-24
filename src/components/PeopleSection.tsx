@@ -31,6 +31,8 @@ export interface Person {
   devices: number;
   turns: number;
   costUsd: number | null;
+  /** part of costUsd is estimated from list prices (see Usage → History) */
+  estimated?: boolean;
 }
 
 /** The sign-in page with the invited address filled in; a domain entry gets the plain page. */
@@ -44,7 +46,7 @@ export function inviteLink(base: string, entry: string): string {
 export function mergePeople(
   lists: SignInLists,
   sessions: Array<{ email?: string; lastSeenAt: number }>,
-  usage: Array<{ key: string; turns: number; costUsd: number | null }>,
+  usage: Array<{ key: string; turns: number; costUsd: number | null; estimatedUsd?: number | null }>,
 ): Person[] {
   const people: Person[] = [];
   const seen = new Set<string>();
@@ -62,6 +64,7 @@ export function mergePeople(
       devices: devices.length,
       turns: month?.turns ?? 0,
       costUsd: month?.costUsd ?? null,
+      ...(hasFiniteCost(month?.estimatedUsd) && month.estimatedUsd > 0 ? { estimated: true } : {}),
     });
   };
   for (const entry of lists.admins) add(entry, "admin");
@@ -132,7 +135,7 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
           </span>
           <span className="text-right tabular-nums text-ink-secondary">{person.isDomain ? "—" : lastSeenLabel(person.lastSeenAt)}</span>
           <span className="text-right tabular-nums text-ink" title={t("people.turns", { turns: String(person.turns) })}>
-            {hasFiniteCost(person.costUsd) ? formatUsd(person.costUsd) : "—"}
+            {hasFiniteCost(person.costUsd) ? `${person.estimated ? "~" : ""}${formatUsd(person.costUsd)}` : "—"}
           </span>
           {readOnly ? <span /> : <span className="flex items-center justify-end gap-2 text-[12px]">
             <button type="button" disabled={busy} onClick={() => onLink(person)} aria-label={t("people.link")} title={t("people.link")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><Link2 size={13} /></button>

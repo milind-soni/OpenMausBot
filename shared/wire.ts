@@ -101,6 +101,11 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
+/** Accounting for the currently displayed room thread, across all speakers. */
+export interface GroupThreadUsage extends TaskUsage {
+  lastSpeaker?: { botId: string; name: string };
+}
+
 /** One task = one conversation with its own context, thread and provider
  * session. Wire form: no resumeCursors or lastInstanceId — the harness's
  * own bookkeeping that no client has ever used. */
@@ -479,6 +484,8 @@ export interface GroupTask {
 /** A room as a client may see it: the record plus the computed working
  * flag (publicGroupState). */
 export interface WireGroup {
+  /** Computed from the usage ledger, not stored in groups.json. */
+  usage?: GroupThreadUsage | null;
   id: string;
   /** The active task's thread. Direct-message channels stay single-threaded. */
   threadId: string;
@@ -510,6 +517,10 @@ export interface WireGroup {
   /** New user-created rooms start with setup pending. */
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;
+  /** The narrowest audience this room has ever had (see
+   * server/bot-visibility.ts): a bot leaving never widens who may see the
+   * transcript. Sent to admins only. */
+  audienceFloor?: BotVisibility;
   /** True while any member (or hand-off) is mid-turn. Computed at
    * projection time, never persisted. */
   working: boolean;

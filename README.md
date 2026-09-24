@@ -206,7 +206,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Claude · Codex · Grok** | The agents behind every bot, run through their local CLIs |
 | **Electron** | Desktop shells for macOS, Windows, and Ubuntu |
 | **React + Vite + Tailwind CSS** | The chat app UI and its build |
-| **Box** ([box.ascii.dev](https://box.ascii.dev)) | Each bot's cloud computer |
+| **Box** ([boat.dev](https://boat.dev)) | Each bot's cloud computer |
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
@@ -236,7 +236,7 @@ flowchart LR
     BUS -- "one SSE stream" --> UI
     REG --> CL & CX & GR
     CL & CX & GR -- "permission requests" --> BROKER
-    server -- "Box API" --> BOX[("Cloud computer<br/>box.ascii.dev")]
+    server -- "Box API" --> BOX[("Cloud computer<br/>boat.dev")]
     server -- "Composio Session" --> APPS[("Gmail · Slack · GitHub · …")]
 ```
 
@@ -326,7 +326,7 @@ in the sidebar footer) when you want to enable its integration:
 | Credential | What it enables | Where to get it |
 |---|---|---|
 | Composio project key (`ak_…`) | Connect Gmail, GitHub, Slack, Notion, and other apps to your bots | [OpenMausBot Composio setup](docs/composio.md) |
-| Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.ascii.dev/box/api-keys) |
+| Box API key | Give bots an isolated remote Linux computer with a desktop and terminal | [Box API key guide](https://docs.boat.dev/api-keys) |
 | ElevenLabs key | Read replies aloud, and call your bots | [ElevenLabs API keys](https://elevenlabs.io/app/settings/api-keys) |
 | Fish Audio key | Read replies aloud with Fish Audio voices, and call your bots | [Fish Audio API keys](https://fish.audio/app/api-keys/) |
 

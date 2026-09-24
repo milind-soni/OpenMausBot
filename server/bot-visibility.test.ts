@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  audienceWithin,
+  intersectAudience,
+  narrowestAudience,
   frameForMember,
+  memberBody,
   memberBot,
   noteSeen,
   parseVisibility,
   pathSubject,
+  roomFeeds,
   routineVisible,
   sameAudience,
   SEES_EVERYTHING,
@@ -65,6 +70,41 @@ describe("visibility values", () => {
     // a paired device with no email is only ever shown bots everyone sees
     expect(viewerSees(NOBODY, { people: ["@example.test"] })).toBe(false);
     expect(viewerSees(NOBODY, undefined)).toBe(true);
+  });
+
+  it("knows when one audience sits inside another", () => {
+    expect(audienceWithin({ people: ["ada@example.test"] }, undefined)).toBe(true);
+    expect(audienceWithin(undefined, { people: ["ada@example.test"] })).toBe(false);
+    expect(audienceWithin("admins", { people: ["ada@example.test"] })).toBe(true);
+    expect(audienceWithin({ people: ["ada@example.test"] }, "admins")).toBe(false);
+    expect(audienceWithin({ people: ["ada@example.test"] }, { people: ["ada@example.test", "bob@example.test"] })).toBe(true);
+    expect(audienceWithin({ people: ["ada@example.test", "bob@example.test"] }, { people: ["ada@example.test"] })).toBe(false);
+    expect(audienceWithin({ people: ["ada@example.test"] }, { people: ["@example.test"] })).toBe(true);
+    expect(audienceWithin({ people: ["@example.test"] }, { people: ["ada@example.test"] })).toBe(false);
+    // a room feeds a bot only when everyone who sees the bot sees every bot in it
+    expect(roomFeeds([undefined, { people: ["ada@example.test"] }], undefined)).toBe(false);
+    expect(roomFeeds([undefined, { people: ["ada@example.test"] }], { people: ["ada@example.test"] })).toBe(true);
+    expect(roomFeeds([undefined, undefined], undefined)).toBe(true);
+  });
+
+  it("finds the people two audiences share", () => {
+    expect(intersectAudience(undefined, "admins")).toBe("admins");
+    expect(intersectAudience(undefined, undefined)).toBe("everyone");
+    expect(intersectAudience({ people: ["ada@example.test"] }, undefined)).toEqual({ people: ["ada@example.test"] });
+    expect(intersectAudience({ people: ["ada@example.test", "bob@example.test"] }, { people: ["bob@example.test", "cy@example.test"] })).toEqual({ people: ["bob@example.test"] });
+    expect(intersectAudience({ people: ["@example.test"] }, { people: ["ada@example.test", "eve@other.test"] })).toEqual({ people: ["ada@example.test"] });
+    expect(intersectAudience({ people: ["ada@example.test"] }, { people: ["bob@example.test"] })).toBe("admins");
+    expect(narrowestAudience([undefined, { people: ["ada@example.test", "bob@example.test"] }, { people: ["ada@example.test"] }])).toEqual({ people: ["ada@example.test"] });
+  });
+
+  it("keeps a room at its floor after the bot that set it is gone", () => {
+    const open = bots.map(({ visibility: _v, ...bot }) => bot);
+    const floored = [{ id: "room-old", threadId: "t-room-old", memberIds: ["pub"], audienceFloor: { people: ["ada@example.test"] } }];
+    const bob = new VisibleSet(open, floored, BOB);
+    expect(bob.everything).toBe(false);
+    expect([bob.group("room-old"), bob.thread("t-room-old"), bob.bot("pub")]).toEqual([false, false, true]);
+    expect(new VisibleSet(open, floored, ADA).group("room-old")).toBe(true);
+    expect(roomFeeds([undefined, floored[0]!.audienceFloor], undefined)).toBe(false);
   });
 
   it("compares audiences exactly", () => {
@@ -209,6 +249,26 @@ describe("live frames for a member", () => {
     expect([...state.bots, ...state.groups]).toEqual(["new", "room"]);
     noteSeen({ kind: "bot.deleted", botId: "new" }, state);
     expect(state.bots.size).toBe(0);
+  });
+
+  it("narrows every bot in a JSON answer for a member", () => {
+    const bob = new VisibleSet(bots, groups, BOB);
+    const body = {
+      bot: { id: "corp", visibility: { people: ["@example.test"] }, peers: ["pub", "hr"] },
+      bots: [{ id: "pub", visibility: "everyone" }],
+      result: { bot: { id: "corp", visibility: "admins" } },
+      messages: [{ bot: { visibility: "untouched" } }],
+      ok: true,
+    };
+    expect(memberBody(body, bob)).toEqual({
+      bot: { id: "corp", peers: ["pub"] },
+      bots: [{ id: "pub" }],
+      result: { bot: { id: "corp" } },
+      messages: [{ bot: { visibility: "untouched" } }],
+      ok: true,
+    });
+    const admin = new VisibleSet(bots, groups, SEES_EVERYTHING);
+    expect(memberBody(body, admin)).toBe(body);
   });
 
   it("strips nothing for someone who sees everything", () => {

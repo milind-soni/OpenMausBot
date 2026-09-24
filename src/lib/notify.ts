@@ -39,7 +39,10 @@ export function showNotification(
   visibleThreadId?: string | null,
 ) {
   if (typeof Notification === "undefined") return;
-  if (document.hasFocus() && visibleThreadId === frame.threadId) return;
+  // A spend notice is the workspace's news, not the thread's: it shows even
+  // over the conversation whose turn crossed the line.
+  const spend = frame.kind === "spend";
+  if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
 
   const open = () => {
     window.focus();
@@ -50,6 +53,8 @@ export function showNotification(
     const options: NotificationOptions = {
       body: frame.body,
       ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
+      // its own stack, so a bot's next "finished" never replaces it
+      ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
     };
     new Notification(frame.title, options).onclick = open;
   }

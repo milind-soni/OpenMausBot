@@ -390,6 +390,7 @@ export function EngineSetup({
   className,
   intent = "cloud",
   unframed = false,
+  description: descriptionOverride,
 }: {
   instance: InstanceInfo;
   className?: string;
@@ -397,6 +398,9 @@ export function EngineSetup({
   intent?: "cloud" | "inject";
   /** The containing engine disclosure already supplies the card surface. */
   unframed?: boolean;
+  /** Why this install is needed, when the caller knows better (a Company
+   * model that runs this CLI with the organisation's access). */
+  description?: string;
 }) {
   const install = instance.install;
   const installCommand = installCommandFor(install);
@@ -408,7 +412,7 @@ export function EngineSetup({
   const title = signInOnly
     ? t("engineSetup.signInTitle", { name: instance.displayName })
     : t("engineSetup.installTitle", { name: instance.displayName });
-  const description = signInOnly
+  const description = descriptionOverride ?? (signInOnly
     ? deviceSignIn
       ? t("engineSetup.device.description")
       : pasteSignIn
@@ -424,7 +428,7 @@ export function EngineSetup({
         ? t("engineSetup.managedDesc")
       : signInCommand
         ? t("engineSetup.installDescSignIn")
-        : t("engineSetup.installDesc");
+        : t("engineSetup.installDesc"));
 
   // Some engines are configured elsewhere (for example, a cloud computer
   // token) and intentionally have no install descriptor.

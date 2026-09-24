@@ -101,3 +101,116 @@ decoding, avatar selection/retrieval and removal propagation. Evidence:
 The separate private Admin/native runtime integration also passed with branding
 enabled (`/tmp/omb-desktop-integration-ql2mMS/receipt.json`). Neither test used
 customer accounts or changed the operator's desktop app.
+
+## 2026-09-23 renewal, licence lapse and organisation policy
+
+Unit and node tests only; the Electron smoke above was **not** re-run for this
+change, and no installed app, keychain, production Admin or customer data was
+used.
+
+- `node --test electron/managed-desktop.node-test.mjs`: renewal on start and
+  when fewer than seven days remain, only when Admin advertises
+  `capabilities.deviceRenewal`; same `deviceId`; a rotated token is written to
+  the encrypted record before use; a later session expiry is adopted and an
+  earlier one ends access; an Admin without renewal or policies sees exactly
+  today's requests; 503 `admin_license_expired` becomes `license-expired`
+  (Company instances kept but suspended, no DELETE, no sign-in prompt, keeps
+  polling, recovers); sign-in against an expired Admin says so; the policy is
+  sent to the runtime separately from the model grant, persisted with the
+  encrypted grant, re-applied before any network call after an offline
+  restart, kept when a later policy is malformed, reported back to Admin, and
+  lifted on disconnect, revocation or expiry.
+- `node --test electron/company-backup-schedule.node-test.mjs`: a schedule
+  saved under the old device-scoped key is adopted (not turned off) on upgrade
+  and on re-enrolment; losing the connection pauses it; another organisation
+  or account still clears it.
+- `pnpm vitest run server/managed-policy.test.ts server/managed-desktop.test.ts
+  server/store-rename-instances.test.ts`: refusal sentences, MCP name/address
+  matching, computer-kind mapping, the real `bindTurnComputer` guard from
+  `index.ts`, expiry of the last policy; renewal and licence suspension applied
+  without restarting Company instances; stable Company ids across re-enrolment
+  with the old id's native home and saved selections, cursors and handed
+  records moved once.
+- Mutation checks (each failed its test, then was restored): strict expiry
+  equality on the session response; treating the licence 503 as offline;
+  not restoring the saved policy on start; removing the `bindTurnComputer`
+  guard; replacing instances on a renewal; skipping the legacy-id rename;
+  forgetting instead of adopting a legacy backup key.
+- Against the Admin itself (in the openmaus-cloud `feat/desktop-lifecycle`
+  worktree, disposable fixtures): this client enrolled, reported its version
+  and policy, renewed a week later to now + 30 days with the same device,
+  stayed connected past the original 30 days and showed `license-expired`
+  after the grace period; against the current Admin `main` it made no renewal
+  call, received no policy and kept today's behaviour.
+
+Review fixes (same day, same limits): MCP address entries are parsed as HTTPS
+URLs and matched by whole host labels and path, with tests for the path,
+suffix, credential, scheme, port and bare-wildcard bypasses; an enrollment
+that expired or is being cleared sends its identity (never its token) so its
+old ids and backup key still migrate after a later re-enrolment, and the
+backup key match ignores the deviceId; migration is best effort and logged;
+a disconnected computer still shows a paused daily schedule with its off
+switch, and an overdue backup waits 15 minutes after the connection returns;
+the saved policy is re-sent before any network call; a rotated token is
+adopted only once stored; room turns refuse a disallowed place before
+provisioning, the shared-computer lease honours "this computer", and room LLM
+titles skip a disallowed engine. Turning the companion on is refused inside
+`startDesktopCompanion` itself (switch, Tailscale "Turn on and check" and
+launch auto-start); that Electron main path is checked by inspection only.
+
+
+## 2026-09-23 Company models used after sign-in
+
+Unit, component and node tests only. The Electron smoke above was **not**
+re-run for this change, and no installed app, keychain, production Admin,
+engine account or paid model call was used.
+
+- `pnpm vitest run server/default-model-selection.test.ts`: with no saved
+  default, an enrolled desktop picks an instance that can run now: a
+  signed-in personal engine first (Claude first), then a Company model (Claude
+  first), then today's choice. An installed but signed-out personal Claude
+  therefore no longer wins over a working Company model. Without an enrolment
+  the result is identical to before, including a signed-out Claude beating a
+  signed-in Codex. An engine the organisation's policy refuses (company models
+  only, or an engine allow-list) is never picked, and a refused saved default
+  sends new bots to setup.
+- `pnpm vitest run server/managed-desktop.test.ts`: against the real provider
+  registry with fake engines, new bots land on Company Claude while enrolled
+  and on the personal engine again after disconnect; disconnecting leaves a
+  personal bot's selection untouched and keeps a Company bot's stable id for
+  the next sign-in.
+- `pnpm vitest run src/lib/company-models.test.ts
+  src/components/CompanyModels.test.ts
+  src/components/OrganizationSettings.test.ts`: the connected panel shows each
+  Company engine as ready, blocked by policy, or needing its CLI installed
+  (reusing the engine's own install action, without a personal sign-in). The
+  inline **Use {Company model} for N bots that can't run** button counts only
+  bots whose engine is missing, unavailable, signed out or refused by policy,
+  names them, dispatches nothing until pressed, and then sends the model chip's
+  own `PATCH /api/bots/:id`. Bots on working personal engines (including a
+  signed-out CLI's custom models, and a bot whose selected thread still runs)
+  are never counted; bots with elevated permissions on another engine are
+  listed for their own model chip instead. Disconnecting dispatches nothing.
+- `node --test electron/managed-desktop.node-test.mjs
+  electron/organization-reopen.node-test.mjs`: **Open the sign-in page again**
+  reopens only the pending attempt's validated `/enroll?code=` page, makes no
+  portal request, ignores any renderer argument at the preload, IPC and client
+  layers, answers only the local main window's main frame, and does nothing
+  after approval, cancellation or expiry.
+- Mutation checks (each failed its test, then was restored): no enrolled
+  branch; no policy filter; enrolled rules applied without an enrolment;
+  returning a refused saved default; Company before a working personal engine;
+  ignoring the selected thread; ignoring policy in the switch; ignoring
+  elevated permissions; counting working bots; dispatching at render; opening
+  a renderer-supplied address; reopening after expiry; forwarding IPC
+  arguments; dropping the local-window guard; forwarding preload arguments.
+
+Review fixes (same day, same limits): archived bots are never counted or
+switched; the "Now using …" status names only bots the server kept on the
+Company model after their PATCH settled (none when every PATCH was refused);
+the note now says bots not allowed by the organisation change too; and
+`server/default-model-selection.test.ts` runs `index.ts`'s actual
+`defaultSelection` and `policyModelRefusal` against a synthetic registry,
+enrolment and policy. Mutation checks: counting archived bots, naming every
+requested bot, and dropping the whole context, the enrolment or the policy
+from `index.ts` each failed a test, then was restored.

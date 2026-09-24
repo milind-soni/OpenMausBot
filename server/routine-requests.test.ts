@@ -56,7 +56,7 @@ afterEach(() => {
 
 function harness(
   start = Date.parse("2026-08-28T10:00:00Z"),
-  cloudReady?: () => Promise<{ ready: boolean; reason?: string }>,
+  cloudReady?: (botId: string) => Promise<{ ready: boolean; reason?: string }>,
   canPersist?: (
     botId: string,
     threadId: string,
@@ -891,6 +891,24 @@ describe("RoutineRequestService", () => {
       proposal: createProposal({ runOn: "cloud" }),
     })).rejects.toThrow(/Connect or provision/);
     expect(store.messagesFor("thread-a")).toHaveLength(0);
+  });
+
+  it("checks the executing bot for own, teammate and existing cloud routines", async () => {
+    const checked: string[] = [];
+    const { service, routines } = harness(undefined, async botId => {
+      checked.push(botId);
+      return { ready: botId === "bot-a", reason: "Target model unavailable" };
+    });
+    await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ runOn: "cloud" }) });
+    const peerProposal = createProposal({ runOn: "cloud" });
+    if (peerProposal.action !== "create") throw new Error("Expected create");
+    await expect(service.propose({ botId: "bot-a", threadId: "thread-a", proposal: {
+      ...peerProposal, forBot: { botId: "bot-b", name: "Peer" },
+    } })).rejects.toThrow("Target model unavailable");
+    const routine = routines.create({ botId: "bot-a", name: "Owned cloud", prompt: "Work",
+      runOn: "cloud", enabled: false, schedule: { type: "daily", time: "10:00", weekdays: [1] } });
+    await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: { action: "run_now", routineId: routine.id } });
+    expect(checked).toEqual(["bot-a", "bot-b", "bot-a"]);
   });
 
   it("checks effective cloud destinations while allowing safe moves away and non-running actions", async () => {

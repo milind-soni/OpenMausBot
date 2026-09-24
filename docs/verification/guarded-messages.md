@@ -13,6 +13,13 @@ the exact expected approval mode, and still has that leaf. Omitted
 `expectedApprovalMode` means Ask without automatic or remembered approvals.
 It returns the original receipt for an already accepted matching send.
 
+`capabilities.guardedOnBehalfOf: 1` additionally accepts
+`onBehalfOf: { email?, name? }` (at least one): the person a relay such as the
+Slack worker acts for. The turn is booked to them in the usage ledger instead
+of to this machine. It changes nothing else: not the transcript's sender, not
+permissions. The route stays admin-only, so a member's session cannot name
+someone else.
+
 `capabilities.guardedFullAccess: 1` additionally accepts
 `expectedApprovalMode: "full"` for a task that **already has** Full access.
 It does not grant or change permissions. The exact task, not its bot default,

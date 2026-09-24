@@ -23,6 +23,7 @@ import { companionPairingMode } from "../lib/phone-setup";
 import { ConnectionDetail } from "./ConnectionDetail";
 import { Card, Switch } from "./SettingsPrimitives";
 import { brand } from "../lib/brand";
+import { useStore } from "@/state/store";
 
 export {
   companionAccountActionError,
@@ -137,6 +138,11 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
   const c = usePhoneSetupController(profileEmail);
   const state = c.state;
   const pairingFlow = useRef<HTMLDivElement>(null);
+  // An enrolled organisation can turn remote access off; the desktop refuses
+  // new pairing and turning the companion on. Existing devices are listed as before.
+  const managedPolicy = useStore().state.config?.managedPolicy;
+  const remoteBlocked = managedPolicy?.remoteAccess === false ? t("policy.remoteBlocked", { organization: managedPolicy.organizationName }) : null;
+  const managedBy = managedPolicy?.remoteAccess === false ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : null;
 
   if (!companionBridge()) {
     return (
@@ -177,6 +183,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
 
   return (
     <div className="flex flex-col gap-4">
+      {remoteBlocked && <p role="status" className="text-[13px] leading-relaxed text-ink-secondary">{remoteBlocked}</p>}
       <div ref={pairingFlow} tabIndex={-1} className="scroll-mt-4 focus:outline-none">
         <Card title={pairingCopy.title} subtitle={pairingCopy.subtitle}>
           {(panelStatus || (pairedCount > 0 && c.hostedReady)) && (
@@ -222,7 +229,8 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
         </div>
         {tailscaleStatus.kind === "ready" ? (
           <button
-            disabled={c.busy || c.accountBusy}
+            disabled={c.busy || c.accountBusy || Boolean(managedBy)}
+            title={managedBy ?? undefined}
             onClick={() => {
               c.useTailscale();
               window.requestAnimationFrame(() => {
@@ -236,11 +244,12 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
           </button>
         ) : (
           <button
-            disabled={c.busy || c.accountBusy}
+            disabled={c.busy || c.accountBusy || (Boolean(managedBy) && !state.enabled)}
+            title={managedBy ?? undefined}
             onClick={c.refreshTailscale}
             className="mt-3 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-40"
           >
-            {c.busy ? t("common.checking") : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
+            {c.busy ? t("common.checking") : managedBy && !state.enabled ? managedBy : state.enabled ? t("remote.checkAgain") : t("remote.turnOnAndCheck")}
           </button>
         )}
       </Card>
@@ -311,7 +320,7 @@ export function CompanionSection({ profileEmail = "" }: { profileEmail?: string 
             <Switch
               checked={state.enabled}
               aria-label={t("remote.title")}
-              disabled={c.busy}
+              disabled={c.busy || (Boolean(remoteBlocked) && !state.enabled)}
               onClick={() => void c.act((companion) => (state.enabled ? companion.stop() : companion.start()))}
             />
           </div>

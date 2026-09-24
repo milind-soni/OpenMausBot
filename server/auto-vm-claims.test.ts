@@ -97,4 +97,35 @@ describe("startAutoVmClaim", () => {
     expect(table.get("t1")).toBe(second);
     expect(second.begin).toBeUndefined();
   });
+
+  it("fires the turn's rejection hook once when its claim rejects (issue #1369)", async () => {
+    const table: AutoVmClaimTable = new Map();
+    const onRejected = vi.fn();
+    table.set("t1", {
+      owner: { threadId: "t1", generation: "gen-1" },
+      claim: async () => { throw new Error("the Local VM died"); },
+      onRejected,
+    });
+    startAutoVmClaim(table, "t1", "gen-1");
+    await table.get("t1")!.begin;
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("the Local VM died");
+    // The hook rides the fire-once claim, so a later gate poll can never
+    // surface a second terminal error for the same rejection.
+    startAutoVmClaim(table, "t1", "gen-1");
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("the Local VM died");
+  });
+
+  it("never fires the rejection hook for a claim that lands", async () => {
+    const table: AutoVmClaimTable = new Map();
+    const onRejected = vi.fn();
+    table.set("t1", {
+      owner: { threadId: "t1", generation: "gen-1" },
+      claim: async () => undefined,
+      onRejected,
+    });
+    startAutoVmClaim(table, "t1", "gen-1");
+    await table.get("t1")!.begin;
+    expect(table.get("t1")!.claimed).toBe(true);
+    expect(onRejected).not.toHaveBeenCalled();
+  });
 });

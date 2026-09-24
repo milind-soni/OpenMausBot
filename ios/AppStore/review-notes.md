@@ -30,7 +30,7 @@ specific computer and receives no universal OpenMausBot account credential.
 The reviewer may use any email inbox they control. This optional path uses an
 OpenMausBot-managed Cloudflare Tunnel and does not require Tailscale.
 
-Optional cloud-desktop review requires an ascii.dev Box configured on the
+Optional cloud-desktop review requires a boat.dev Box configured on the
 computer. For the paired phone, enable **Cloud desktop** under **Settings →
 Phone**, open a bot configured for **Cloud box**, choose its computer
 preview on iPhone, and confirm **Open live cloud desktop**. The app requests a

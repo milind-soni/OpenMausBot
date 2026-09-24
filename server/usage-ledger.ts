@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import type { CostSource } from "./model-prices.ts";
 import { billableFor, type PriceList } from "./prices.ts";
 
 /** Who asked for the turn. A person is named by the email they signed in
@@ -32,9 +33,14 @@ export interface UsageRow {
   input: number;
   output: number;
   cachedInput?: number;
-  /** As the engine reported it: real on a metered key, an equivalent on a
-   * subscription, null when the engine reports no price at all. */
+  /** What the turn cost. As the engine reported it (real on a metered key,
+   * an equivalent on a subscription), or, for an engine that reports tokens
+   * but no price, estimated from list prices (server/model-prices.ts) or the
+   * operator's own. Null when neither applies: an unpriced model. */
   costUsd: number | null;
+  /** Where costUsd came from. Absent on rows written before estimates
+   * existed, which read as reported when they carry a cost. */
+  costSource?: CostSource;
   trigger: UsageTrigger;
 }
 
@@ -48,9 +54,11 @@ export interface UsageGroup {
   input: number;
   output: number;
   cachedInput: number;
-  /** Sum of the rows that reported a price; null when none did. */
+  /** Sum of the rows with a cost, reported or estimated; null when none had one. */
   costUsd: number | null;
-  /** Rows in this group that reported no price. */
+  /** The part of costUsd that is an estimate; null when none of it is. */
+  estimatedUsd: number | null;
+  /** Rows in this group with no cost at all (an unpriced model). */
   unpriced: number;
   /** What the operator charges for the group, from the price list; null
    * without a list or when nothing in the group is priced. */
@@ -80,8 +88,17 @@ export function usageFileFor(dataDir: string, at: Date): string {
   return join(dataDir, DIR, `${monthKey(at)}.jsonl`);
 }
 
-/** Append one settled turn. Fire-and-forget; see the module comment. */
-export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): void {
+/** Identifies one row: a thread runs one turn at a time, so a bot cannot
+ * settle two turns on the same thread in the same millisecond. Lets the
+ * spend cap tell a booked row it already counted from memory apart from the
+ * same row read back from the file. */
+export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId">): string {
+  return `${row.at}|${row.threadId}|${row.botId}`;
+}
+
+/** Append one settled turn. Fire-and-forget (see the module comment): the
+ * returned promise never rejects, and says whether the row reached disk. */
+export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): Promise<boolean> {
   const record: UsageRow = {
     ...row,
     at: row.at ?? new Date().toISOString(),
@@ -90,16 +107,22 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
     ...(typeof row.cachedInput === "number" ? { cachedInput: clean(row.cachedInput) } : {}),
     costUsd: finiteOrNull(row.costUsd),
   };
+  // A cost is labelled with where it came from; an unpriced row carries no label.
+  if (record.costUsd === null) delete record.costSource;
+  else record.costSource = row.costSource === "estimated" ? "estimated" : "reported";
   const previous = writeQueues.get(dataDir) ?? Promise.resolve();
-  const queued = previous
-    .then(() => write(dataDir, record))
-    .catch(() => {
+  const attempt = previous.then(() => write(dataDir, record));
+  const queued = attempt.then(
+    () => undefined,
+    () => {
       /* bookkeeping must never take down the turn */
-    });
+    },
+  );
   writeQueues.set(dataDir, queued);
   void queued.finally(() => {
     if (writeQueues.get(dataDir) === queued) writeQueues.delete(dataDir);
   });
+  return attempt.then(() => true, () => false);
 }
 
 async function write(dataDir: string, record: UsageRow): Promise<void> {
@@ -225,7 +248,13 @@ function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: st
 }
 
 function emptyGroup(key: string, label: string): UsageGroup {
-  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, unpriced: 0, billableUsd: null };
+  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, estimatedUsd: null, unpriced: 0, billableUsd: null };
+}
+
+/** Where a row's cost came from, for rows old and new; null when it has none. */
+export function costSourceOf(row: Pick<UsageRow, "costUsd" | "costSource">): CostSource | null {
+  if (finiteOrNull(row.costUsd) === null) return null;
+  return row.costSource === "estimated" ? "estimated" : "reported";
 }
 
 function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
@@ -235,7 +264,10 @@ function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
   group.cachedInput += clean(row.cachedInput);
   const cost = finiteOrNull(row.costUsd);
   if (cost === null) group.unpriced += 1;
-  else group.costUsd = (group.costUsd ?? 0) + cost;
+  else {
+    group.costUsd = (group.costUsd ?? 0) + cost;
+    if (costSourceOf(row) === "estimated") group.estimatedUsd = (group.estimatedUsd ?? 0) + cost;
+  }
   const billable = prices ? billableFor(row, prices) : null;
   if (billable !== null) group.billableUsd = (group.billableUsd ?? 0) + billable;
 }
@@ -277,7 +309,7 @@ export function csvCell(value: string | number | null): string {
 
 /** One line per turn, spreadsheet-ready; a billable column when a price list is given. */
 export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): string {
-  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", ...(prices ? ["billable_usd"] : []), "thread"];
+  const header = ["time", "bot", "model", "engine", "triggered_by", "input_tokens", "output_tokens", "cached_input_tokens", "cost_usd", "cost_source", ...(prices ? ["billable_usd"] : []), "thread"];
   const lines = [header.join(",")];
   for (const row of rows) {
     lines.push([
@@ -290,6 +322,7 @@ export function usageCsv(rows: UsageRow[], prices: PriceList | null = null): str
       clean(row.output),
       clean(row.cachedInput),
       finiteOrNull(row.costUsd),
+      costSourceOf(row),
       ...(prices ? [billableFor(row, prices)] : []),
       row.threadId,
     ].map(csvCell).join(","));
