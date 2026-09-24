@@ -574,7 +574,7 @@
                 "properties": {
                   "hardStopUsd": {
                     "type": "number",
-                    "minimum": 0,
+                    "exclusiveMinimum": 0,
                     "maximum": 100000
                   },
                   "wrapUpUsd": {
@@ -642,7 +642,10 @@
         "additionalProperties": false,
         "properties": {
           "meeting_limits": {
-            "type": "object",
+            "type": [
+              "object",
+              "null"
+            ],
             "additionalProperties": false,
             "description": "Any combination; omitted dimensions are off. Omit for 16/22 replies. Wrap defaults to 70%. Tokens include all input/output and private checks; dollars use OpenRouter token rates.",
             "properties": {
@@ -712,7 +715,7 @@
                 "properties": {
                   "hardStopUsd": {
                     "type": "number",
-                    "minimum": 0,
+                    "exclusiveMinimum": 0,
                     "maximum": 100000
                   },
                   "wrapUpUsd": {

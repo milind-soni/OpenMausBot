@@ -446,7 +446,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
       type: "object",
       additionalProperties: false,
       properties: {
-        meeting_limits: MEETING_LIMITS_SCHEMA,
+        meeting_limits: { ...MEETING_LIMITS_SCHEMA, type: ["object", "null"] },
         response_mode: { type: "string", enum: ["lead", "everyone", "mentions", "dynamic"], description: "Persistent mode; dynamic follows the conversation." },
         lead_bot_id: { type: "string", description: "Leader for lead mode; defaults to you." },
         room_id: { type: "string", description: "The ID of the group room to manage." },

@@ -14,7 +14,7 @@ export const MEETING_LIMITS_SCHEMA = {
       seconds: { type: "integer", minimum: 1, maximum: 604800 }, wrapUpSeconds: { type: "integer", minimum: 0 },
     }, required: ["seconds"] },
     cost: { type: "object", additionalProperties: false, properties: {
-      hardStopUsd: { type: "number", minimum: 0, maximum: 100000 }, wrapUpUsd: { type: "number", minimum: 0 },
+      hardStopUsd: { type: "number", exclusiveMinimum: 0, maximum: 100000 }, wrapUpUsd: { type: "number", minimum: 0 },
     }, required: ["hardStopUsd"] },
   },
 };
