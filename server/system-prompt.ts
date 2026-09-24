@@ -17,16 +17,19 @@ export function userProfileSystemPrompt(profile?: { aboutMe?: string }): string 
 
 /** Sections whose text legitimately differs between two turns of one live
  * conversation: memory, because a bot writes to MEMORY.md mid-conversation,
- * mentions, which describe the message being sent right now, and outstanding
- * teammate work, which settles while the person keeps talking.
+ * mentions, which describe the message being sent right now, outstanding
+ * teammate work, which settles while the person keeps talking, and recent
+ * work, whose relative time labels are recomputed every turn and whose
+ * newest-first list changes as the bot works in other threads.
  *
  * They are reported apart from the rest so a driver that keeps one CLI
  * process per thread can key that process on the stable half. Before this
  * split, saving a memory changed the system prompt, which changed the spawn
  * contract, which relaunched the CLI — and the provider then re-uploaded the
  * entire conversation at the cache-write rate. Mentions did the same on any
- * turn that tagged a bot. */
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding"]);
+ * turn that tagged a bot, and recent work did it on every turn of an active
+ * bot, because its "2h ago" labels drift even when nothing else changed. */
+const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "recent"]);
 
 export function buildSystemPrompt(
   persona: string,

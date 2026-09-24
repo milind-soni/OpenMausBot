@@ -843,6 +843,26 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
     };
   }
+  if (name === "send_voice_note") {
+    if (typeof args.text !== "string" || !args.text.trim()) {
+      return { text: "send_voice_note needs text: the short speakable note, at most 1000 characters.", isError: true };
+    }
+    const text = args.text.trim();
+    if (text.length > 1000) {
+      return { text: `send_voice_note is limited to 1000 characters; this one is ${text.length}. Shorten the note.`, isError: true };
+    }
+    try {
+      await api("/api/internal/voice-note", {
+        method: "POST",
+        body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, text }),
+      });
+      return { text: "Voice note recorded. It will be attached to this turn's reply when the turn ends; the note text is also the visible caption." };
+    } catch (error) {
+      // A missing voice setup is the user's to fix, not a failed turn: hand
+      // the harness's setup guidance straight to the model.
+      return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+    }
+  }
   if (name === "list_routines") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
     const r = await api(`/api/internal/routines?${query.toString()}`);

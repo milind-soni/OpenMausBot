@@ -77,9 +77,9 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
     const response = await localRequest(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal, redirect: "error" });
     if (!response.ok) {
       await discard(response);
-      if (response.status === 401 || response.status === 403) fail("access_changed", "Local workspace access changed. Reopen Backups and try again.");
+      if (response.status === 401 || response.status === 403) fail("access_changed", "Access to this installation changed. Reopen Backups and try again.");
       if (preview && response.status === 400) fail("invalid_archive", "The backup password is incorrect, or the archive is damaged or unsupported. Nothing was restored.");
-      if ([409, 503].includes(response.status)) fail("workspace_busy", "Wait for the local workspace to finish its current work before backing up or restoring.");
+      if ([409, 503].includes(response.status)) fail("workspace_busy", "Wait for this installation to finish its current work before backing up or restoring.");
       fail("local_backup_failed", "The local backup operation could not be completed. Check Backups in the desktop app and try again.");
     }
     if (!response.body) fail("invalid_response", "The local backup service returned an empty response.");
@@ -113,7 +113,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
       }
     }, createWriteStream(file, { flags: "wx", mode: 0o600 }), { signal });
     if (bytes !== expectedBytes) fail("invalid_archive", "The archive download was incomplete.");
-    if (!prefix.subarray(0, MAGIC.length).equals(MAGIC)) fail("invalid_archive", "This is not a supported encrypted workspace backup.");
+    if (!prefix.subarray(0, MAGIC.length).equals(MAGIC)) fail("invalid_archive", "This is not a supported encrypted installation backup.");
     return hash.digest("hex");
   }
   async function storageRequest(url, init) {
@@ -170,7 +170,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
           const started = await portalRequest(CLOUD, { method: "POST", body: { sizeBytes: exported.bytes, sha256, appVersion, unlockKey: password }, signal: operationSignal });
           if (identifier(started?.id)) pendingId = started.id;
           const backup = cloudMetadata(started, "uploading");
-          if (backup.passwordRequired) fail("update_required", "Update your organisation's Admin service to enable passwordless backups.");
+          if (backup.passwordRequired) fail("update_required", "Update your organization's Admin service to enable passwordless backups.");
           if (backup.sizeBytes !== exported.bytes || backup.sha256 !== sha256 || started.partSizeBytes !== PART_BYTES || started.partCount !== Math.ceil(exported.bytes / PART_BYTES)) fail("invalid_response", "The backup service returned an invalid multipart plan.");
           const parts = [];
           report("uploading", 0, exported.bytes);
@@ -229,15 +229,15 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
         let response;
         try { response = await localRequest(`${LOCAL}/upload`, { method: "POST", headers: { "content-type": "application/octet-stream", "content-length": String(backup.sizeBytes) }, body: stream, duplex: "half", signal: operationSignal, redirect: "error" }); }
         finally { stream.destroy(); }
-        if (!response.ok) { await discard(response); fail("local_backup_failed", "The verified archive could not be staged in the local workspace."); }
+        if (!response.ok) { await discard(response); fail("local_backup_failed", "The verified archive could not be staged in this installation."); }
         // The upload receipt is tiny; use the same bounded JSON reader without
         // making another request or retaining an unbounded response body.
         const receipt = await readUploadReceipt(response, operationSignal);
-        if (!identifier(receipt.id)) fail("invalid_response", "The local workspace returned an invalid upload receipt.");
+        if (!identifier(receipt.id)) fail("invalid_response", "This installation returned an invalid upload receipt.");
         await checkSpace(directory, backup.sizeBytes * 2); operationSignal.throwIfAborted();
         const preview = await localJson(`${LOCAL}/preview`, { id: receipt.id, password }, operationSignal, true);
         if (!identifier(preview.id) || !record(preview.summary) || preview.summary.format !== "openmaus.workspace-backup" || preview.summary.version !== 1 ||
-            !identifier(preview.summary.id) || !Number.isSafeInteger(preview.summary.bytes) || preview.summary.bytes < 0 || preview.summary.bytes > MAX_BYTES) fail("invalid_response", "The local workspace returned an invalid restore preview.");
+            !identifier(preview.summary.id) || !Number.isSafeInteger(preview.summary.bytes) || preview.summary.bytes < 0 || preview.summary.bytes > MAX_BYTES) fail("invalid_response", "This installation returned an invalid restore preview.");
         report("ready", backup.sizeBytes, backup.sizeBytes);
         return { id: preview.id, summary: preview.summary };
       });
@@ -246,7 +246,7 @@ export function createCompanyBackups({ localRequest, portalRequest, tempRoot, fe
 }
 
 async function readUploadReceipt(response, signal) {
-  if (!response.body) fail("invalid_response", "The local workspace returned an empty upload receipt.");
+  if (!response.body) fail("invalid_response", "This installation returned an empty upload receipt.");
   const chunks = []; let bytes = 0;
   for await (const chunk of Readable.fromWeb(response.body)) {
     signal.throwIfAborted(); bytes += chunk.length;
@@ -254,5 +254,5 @@ async function readUploadReceipt(response, signal) {
     chunks.push(chunk);
   }
   try { const value = JSON.parse(Buffer.concat(chunks).toString("utf8")); if (record(value)) return value; } catch {}
-  fail("invalid_response", "The local workspace returned an invalid upload receipt.");
+  fail("invalid_response", "This installation returned an invalid upload receipt.");
 }

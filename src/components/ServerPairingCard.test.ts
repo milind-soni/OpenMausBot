@@ -47,7 +47,7 @@ describe("pairing devices from a hosted server's settings", () => {
     const admin = { kind: "session" as const, id: "s", label: "Hosted workspace", scopes: ["admin", "client"], expiresAt: 1 };
     const html = renderToStaticMarkup(createElement(ServerPairingCard, { initialSession: admin, initialPairingCodes: false }));
     expect(html).toContain("data-server-pairing-portal");
-    expect(html).toContain("organisation&#x27;s portal");
+    expect(html).toContain("organization&#x27;s Admin");
     expect(html).not.toContain("Create pairing code");
     expect(html).not.toMatch(/pairing code from|openmausbot pair/);
     expect(html).toContain("Signed-in devices");

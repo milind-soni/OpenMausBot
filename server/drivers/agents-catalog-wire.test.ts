@@ -55,17 +55,20 @@ function profiles(): Record<string, Profile> {
     for (const ownThread of room ? [false, true] : [false]) {
       for (const skills of [false, true]) {
         for (const shared of [false, true]) {
-          const name = [room ? "room" : "direct", ownThread && "own-thread", skills && "skills", shared && "shared"]
-            .filter(Boolean).join("+");
-          all[name] = {
-            family: room ? "room" : "direct",
-            env: {
-              OMB_ROOM_TURN: flag(room),
-              OMB_OWN_THREAD_CREATION: flag(ownThread),
-              OMB_SKILL_AUTHORING_ENABLED: flag(skills),
-              OMB_SHARED_COMPUTERS_ENABLED: flag(shared),
-            },
-          };
+          for (const voice of [false, true]) {
+            const name = [room ? "room" : "direct", ownThread && "own-thread", skills && "skills", shared && "shared", voice && "voice"]
+              .filter(Boolean).join("+");
+            all[name] = {
+              family: room ? "room" : "direct",
+              env: {
+                OMB_ROOM_TURN: flag(room),
+                OMB_OWN_THREAD_CREATION: flag(ownThread),
+                OMB_SKILL_AUTHORING_ENABLED: flag(skills),
+                OMB_SHARED_COMPUTERS_ENABLED: flag(shared),
+                OMB_VOICE_NOTES: flag(voice),
+              },
+            };
+          }
         }
       }
     }
@@ -80,6 +83,7 @@ function profiles(): Record<string, Profile> {
       OMB_OWN_THREAD_CREATION: "1",
       OMB_SKILL_AUTHORING_ENABLED: "1",
       OMB_SHARED_COMPUTERS_ENABLED: "1",
+      OMB_VOICE_NOTES: "1",
     },
   };
   return all;
@@ -89,26 +93,38 @@ const PROFILES = profiles();
 /** The profile of each family that mounts the most: checked in whole, as
  * readable JSON. Every other profile is a by-name subset of one of these and
  * is pinned by tool names, byte count and sha256 in profiles.json. */
-const FULL = { direct: "direct+skills+shared", room: "room+own-thread+skills+shared", external: "external" } as const;
+const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skills+shared+voice", external: "external" } as const;
 
 /** Bytes measured when the budget was last set. A profile may not exceed this
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
  * catalog is the goal, so lock the win in by lowering the number. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "direct": 38_548,
-  "direct+shared": 40_293,
-  "direct+skills": 40_474,
-  "direct+skills+shared": 42_219,
-  "room": 36_566,
-  "room+shared": 38_311,
-  "room+skills": 38_492,
-  "room+skills+shared": 40_237,
-  "room+own-thread": 37_853,
-  "room+own-thread+shared": 39_598,
-  "room+own-thread+skills": 39_779,
-  "room+own-thread+skills+shared": 41_524,
-  "external": 3_030,
-  "external+everything": 3_030,
+  "direct": 38749,
+  "direct+voice": 39490,
+  "direct+shared": 40494,
+  "direct+shared+voice": 41235,
+  "direct+skills": 40675,
+  "direct+skills+voice": 41416,
+  "direct+skills+shared": 42420,
+  "direct+skills+shared+voice": 43161,
+  "room": 36767,
+  "room+voice": 37508,
+  "room+shared": 38512,
+  "room+shared+voice": 39253,
+  "room+skills": 38693,
+  "room+skills+voice": 39434,
+  "room+skills+shared": 40438,
+  "room+skills+shared+voice": 41179,
+  "room+own-thread": 38054,
+  "room+own-thread+voice": 38795,
+  "room+own-thread+shared": 39799,
+  "room+own-thread+shared+voice": 40540,
+  "room+own-thread+skills": 39980,
+  "room+own-thread+skills+voice": 40721,
+  "room+own-thread+skills+shared": 41725,
+  "room+own-thread+skills+shared+voice": 42466,
+  "external": 3030,
+  "external+everything": 3030,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';

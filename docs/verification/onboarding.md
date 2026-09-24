@@ -28,7 +28,7 @@ remain covered by their separate platform recipes, not this browser fixture.
 
 Stop the launcher with Ctrl-C; it owns and removes only its disposable home.
 
-## Organisation row, hosted beats and member note (Sep 23 2026)
+## Organization row, hosted beats and member note (Sep 23 2026)
 
 What each first-run surface depends on, and how it was checked:
 
@@ -36,7 +36,7 @@ What each first-run surface depends on, and how it was checked:
 |---|---|---|
 | Desktop app, own server (full bridge, `remoteClient` present) | The same flow as before, decided without a new request | `src/components/onboarding/WelcomeGate.test.ts`; `HelloBeat`/`EnginesBeat` HTML compared byte for byte with main (no bridge) |
 | Hosted workspace opened inside the desktop app (reduced bridge, no `remoteClient`) | Treated like a browser: the server is asked | `src/components/onboarding/WelcomeGate.test.ts` |
-| Packaged desktop with the organisation bridge | An optional "Using OpenMausBot at work?" row on the engines beat; a signed-in Company engine counts as ready | `src/components/onboarding/beats/OrganisationRow.test.ts`, `src/components/onboarding/beats/EnginesBeat.test.ts` (fake bridge) |
+| Packaged desktop with the organization bridge | An optional "Using OpenMausBot at work?" row on the engines beat; a signed-in Company engine counts as ready | `src/components/onboarding/beats/OrganisationRow.test.ts`, `src/components/onboarding/beats/EnginesBeat.test.ts` (fake bridge) |
 | Browser, admin of a hosted workspace | Greeting (no inputs) and the bot beat only | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/beats/HelloBeat.test.ts`, `src/lib/onboarding.test.ts` |
 | Browser, hosted member (no admin scope) | No welcome flow; one dismissible note kept in browser storage; no first-conversation spotlights | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/FirstConversationTour.test.ts` |
 | Browser, client-scope session on a server that is not hosted | Nothing new: the flow does not open itself (it could not be saved); Settings replay and spotlights as before | `src/components/onboarding/WelcomeGate.test.ts`, `src/lib/onboarding.test.ts` |
@@ -57,6 +57,6 @@ then connecting with the code, then connected. `begin` ran once, with the
 default Admin. Screenshots are in `.omb-scratch/verify-evidence/onboarding/`.
 
 Not covered here: the real Electron preload bridge and a real Admin enrolment
-(see [organisation connection](organization-settings.md), not rerun for this
+(see [organization connection](organization-settings.md), not rerun for this
 change), and a real hosted tenant's browser. The hosted beat set was rendered
 from a temporary preview entry, not reached through a hosted sign-in.

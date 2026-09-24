@@ -12,6 +12,7 @@ import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
 import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
 import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
+import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, MAX_CHAT_TOOL_CALLS, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
@@ -313,14 +314,29 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     }
   };
 
-  const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => [
-    ...(turn.system ? [{ role: "system" as const, content: turn.system }] : []),
-    ...(turn.transcript ?? []).map((message) => ({
-      role: message.role,
-      content: message.text,
-    })),
-    { role: "user", content: options.computerUse ? chatUserContent(turn) : turn.text },
-  ];
+  const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => {
+    // The system message is the head of the resent prefix, so only the
+    // stable half belongs there: a volatile edit must not re-price the
+    // tools, instructions and transcript the provider already cached.
+    // The volatile half rides the newest user message instead, every
+    // turn. Unlike a CLI session, this request is rebuilt from the stored
+    // transcript, which never contains the delivered notes, so tracking a
+    // digest and delivering only on change would leave the model without
+    // its memory on unchanged turns. The newest message is fresh input
+    // on every request anyway.
+    const halves = promptHalves(turn);
+    const note = halves.stable !== null ? volatileContextNote(halves.volatile, false) : "";
+    const userTurn = note ? { ...turn, text: withContextNote(note, turn.text) } : turn;
+    const system = halves.stable ?? turn.system;
+    return [
+      ...(system ? [{ role: "system" as const, content: system }] : []),
+      ...(turn.transcript ?? []).map((message) => ({
+        role: message.role,
+        content: message.text,
+      })),
+      { role: "user", content: options.computerUse ? chatUserContent(userTurn) : userTurn.text },
+    ];
+  };
 
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);

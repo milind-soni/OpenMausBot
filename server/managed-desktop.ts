@@ -35,7 +35,7 @@ interface ManagedDesktopOptions {
 }
 const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const expiredMessage = "Company access has ended. Reconnect your organization or explicitly choose a personal model; personal billing will not be used automatically.";
-export const LICENSE_EXPIRED_MESSAGE = "Your organisation's OpenMaus Admin licence has expired. Contact your admin.";
+export const LICENSE_EXPIRED_MESSAGE = "Your organization's OpenMaus Admin license has expired. Contact your admin.";
 
 /** Validate only messages received over Electron's private utility-parent port.
  * Never expose this input to renderer HTTP or merge it into saved AppConfig.

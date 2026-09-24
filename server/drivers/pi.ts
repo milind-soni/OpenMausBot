@@ -892,6 +892,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         }
       }
 
+      // pi compacts long sessions by summarizing older user messages, and
+      // this driver delivers the prompt as the leading user message: a
+      // receipt-based split would let a compacted session keep running
+      // bare, without its standing instructions. Re-deliver the full prompt
+      // every turn until pi exposes a compaction signal the harness can
+      // watch (its extension API has session_before_compact).
       const message = turn.system ? `${turn.system}\n\n${turn.text}` : turn.text;
       try {
         send({ type: "prompt", message, ...(images.length ? { images } : {}) });

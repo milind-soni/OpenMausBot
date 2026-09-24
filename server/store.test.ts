@@ -168,6 +168,32 @@ describe("Store", () => {
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
+  it("round-trips audio attachments with their metadata through persistence", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const reply = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Voice note attached",
+      attachments: [
+        { kind: "image", path: "/attachments/shot.png", mime: "image/png" },
+        { kind: "audio", path: "/attachments/note.mp3", mime: "audio/mpeg", durationMs: 4200 },
+      ],
+    });
+    expect(reply.attachments?.[1]).toEqual({
+      kind: "audio",
+      path: "/attachments/note.mp3",
+      mime: "audio/mpeg",
+      durationMs: 4200,
+    });
+    const reloaded = new Store(selection);
+    const stored = reloaded.messagesFor(bot.threadId).find((message) => message.id === reply.id);
+    expect(stored?.attachments).toEqual(reply.attachments);
+    const encoded = JSON.stringify(stored);
+    expect(encoded).toContain('"kind":"audio"');
+    expect(encoded).toContain('"durationMs":4200');
+  });
+
   it("keeps surface pin provenance server-private and round-trips it through bots.json", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
@@ -640,6 +666,55 @@ describe("Store", () => {
     store.patchBot(bot.id, { composio: false });
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.composio).toBe(false);
+  });
+
+  it("persists per-bot connector tool grants without touching legacy records", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const legacy = store.createBot();
+    store.patchBot(bot.id, {
+      connectorTools: {
+        gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_GET_MESSAGE", "GMAIL_SEND_EMAIL"] },
+        github: { tools: "*" },
+      },
+    });
+    // the stored form is canonical: duplicates removed, order preserved
+    expect(store.bot(bot.id)?.connectorTools).toEqual({
+      gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_GET_MESSAGE"] },
+      github: { tools: "*" },
+    });
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.connectorTools).toEqual(store.bot(bot.id)?.connectorTools);
+    // a record from before the field existed round-trips unchanged: absent
+    // grants still defer to the legacy composio boolean
+    expect(reloaded.bot(legacy.id)?.connectorTools).toBeUndefined();
+    expect(reloaded.bot(legacy.id)?.composio).toBeUndefined();
+  });
+
+  it("rejects malformed connector tool grants at the store boundary", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const malformed: unknown[] = [
+      "nope",
+      ["gmail"],
+      { Gmail: { tools: "*" } },
+      { "bad slug!": { tools: "*" } },
+      { gmail: { tools: [] } },
+      { gmail: { tools: ["gmail_send_email"] } },
+      { gmail: { tools: ["GMAIL_SEND_EMAIL", 7] } },
+      { gmail: { tools: "*", accountId: "private" } },
+      { gmail: { tools: "GMAIL_SEND_EMAIL" } },
+      { gmail: "*" },
+    ];
+    for (const value of malformed) {
+      expect(() => store.patchBot(bot.id, { connectorTools: value as never })).toThrow(/connectorTools/);
+    }
+    expect(store.bot(bot.id)?.connectorTools).toBeUndefined();
+    // explicit {} grants no tools; undefined returns the bot to legacy behavior
+    store.patchBot(bot.id, { connectorTools: {} });
+    expect(store.bot(bot.id)?.connectorTools).toEqual({});
+    store.patchBot(bot.id, { connectorTools: undefined });
+    expect(store.bot(bot.id)?.connectorTools).toBeUndefined();
   });
 
   it("rotates colors across created bots", () => {

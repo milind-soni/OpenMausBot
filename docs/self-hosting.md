@@ -347,8 +347,8 @@ openmausbot fleet delete acme --yes # add --keep-data to keep the home folder
 Give `init` `--operator USER` (the Unix user your own workspace runs as; the
 user behind `sudo` by default) and it also installs the **fleet agent**: a
 root service on a Unix socket only that user may open. Your workspace then
-shows **Settings → Workspaces** (with the enterprise `admin` feature): create
-a workspace, add or remove who may sign in, suspend, resume, delete, upgrade
+shows **Settings → Installations** (with the enterprise `admin` feature): create
+an installation, add or remove who may sign in, suspend, resume, delete, upgrade
 all, and see each one's spend this month. Every action goes through the
 agent's audit log at `/var/log/openmausbot/fleet.jsonl`.
 
@@ -396,8 +396,8 @@ gets a session cookie (30 days, renewed on use up to 180 days from pairing, revo
 listed and revoked at `GET`/`DELETE /api/auth/sessions` for now; a Settings
 screen follows.
 
-From the **desktop app**, use the workspace dropdown above Search → **Connect
-hosted workspace…**, or **Settings → Connected workspaces**. Enter the server's
+From the **desktop app**, use the server dropdown above Search → **Connect
+to a server…**, or **Settings → Servers**. Enter the server's
 HTTPS address or full pairing link, with an optional name. Custom domains and
 Cloudflare tunnel addresses work; Tailscale is not required. Generate a fresh
 link for each device: `npx openmausbot pair --label "My desktop"` creates an
@@ -415,7 +415,7 @@ the six-digit code from another desktop app, not a self-hosted server's
 Server menu to switch back until the server is updated.
 
 After pairing, **Share this computer?** offers **Choose access** or **Not now**.
-Nothing is shared automatically. In **Settings → Connected workspaces → Computer
+Nothing is shared automatically. In **Settings → Servers → Computer
 access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
 dialog. They can access information outside the selected folders. Share only
@@ -572,7 +572,7 @@ seen, and what each person spent this month. **Invite** adds an address (or
 with the address filled in, and the one-time code still goes to that address.
 Roles change with one click; removing someone stops new sign-ins.
 
-On a hosted workspace whose members your organisation's Admin manages
+On a hosted workspace whose members your organization's Admin manages
 (`OMB_ADMIN_MEMBERSHIP=portal`), this list decides nothing, so Settings →
 People shows, read-only, who has signed in and what they spent, with a
 **Manage people in Admin** link to that workspace in Admin → People. Remote
@@ -666,7 +666,7 @@ alone.
   wrote into its own memory files with its file tools while it shared a room
   with a restricted bot) stay there. A bot's
   shell can still read files on the server, as it always could. Slack is
-  decided in your organisation's Admin: whoever may message a bot's Slack
+  decided in your organization's Admin: whoever may message a bot's Slack
   app reaches that bot there.
 
 The desktop app has no member sessions and does not show this setting;
@@ -821,7 +821,7 @@ curl -H "Authorization: Bearer $TOKEN" -o activity.csv \
 `decisions` (every decision, automatic ones too), or one of `config`,
 `people`, `session`, `webhook`, `mcp`, `engine`, `bot`, `budget`,
 `visibility`; `who` matches part of a name or email; without `from` the list
-starts 30 days ago. Nothing here is sent to your organisation's cloud Admin,
+starts 30 days ago. Nothing here is sent to your organization's cloud Admin,
 which keeps its own activity log.
 
 ## Spend limits and sell prices (enterprise)

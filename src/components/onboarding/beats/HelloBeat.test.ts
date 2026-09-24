@@ -35,7 +35,7 @@ describe("the greeting beat", () => {
     const { html, tree } = render(true);
     expect(html).not.toContain("<input");
     expect(html).not.toContain("let you know when big things ship");
-    expect(html).toContain("shared workspace");
+    expect(html).toContain("shared OpenMausBot");
     expect(html).toContain("nothing to install");
     // Continue moves on; there is nothing to save
     const primary = nodes(tree).find((node) => typeof node.type === "function" && node.props.onClick);
@@ -48,7 +48,7 @@ describe("the greeting beat", () => {
     for (const html of [render().html, render(false).html]) {
       expect(html).toContain("you@example.com");
       expect(html).toContain("let you know when big things ship");
-      expect(html).not.toContain("shared workspace");
+      expect(html).not.toContain("shared OpenMausBot");
     }
   });
 });

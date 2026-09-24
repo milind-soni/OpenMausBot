@@ -59,7 +59,7 @@ export function createCompanyBackupSchedule({ store, scope, run, onState = () =>
     const currentScope = scope(), authority = currentScope ? { ...currentScope } : null;
     if (legacyScope(record, authority)) { try { await adopt(authority); } catch { publish("error", "Daily backups could not be updated. Unlock your system keychain; they will retry in an hour."); arm(); return; } }
     if (authority && authority.key !== record.scope) { await forget(); return; }
-    if (!authority) { awaitingAuthority = true; publish("paused", "Daily backups will resume when this local workspace and company connection are available."); arm(); return; }
+    if (!authority) { awaitingAuthority = true; publish("paused", "Daily backups will resume when this installation and the company connection are available."); arm(); return; }
     if (record.nextBackupAt > now()) { publish("waiting"); arm(); return; }
     const stamp = revision, abort = new AbortController();
     controller = abort;
@@ -83,7 +83,7 @@ export function createCompanyBackupSchedule({ store, scope, run, onState = () =>
         if (!current(stamp)) return;
         publish(abort.signal.aborted || error?.code === "workspace_busy" ? "paused" : "error",
           abort.signal.aborted || error?.code === "workspace_busy"
-            ? "Daily backup postponed. It will retry when the workspace is available."
+            ? "Daily backup postponed. It will retry when this installation is available."
             : "The daily backup did not complete. Check your connection, system keychain and free disk space; it will retry in an hour.");
       }
     })();
@@ -126,16 +126,16 @@ export function createCompanyBackupSchedule({ store, scope, run, onState = () =>
       if (input?.enabled === false && Object.keys(input).length === 1) return forget();
       if (needsClear) throw new Error("Finish turning daily backups off before enabling them again.");
       if (input?.enabled !== true || input.confirmation !== "BACK UP THIS WORKSPACE DAILY" ||
-          Object.keys(input).some(key => !["enabled", "confirmation"].includes(key))) throw new Error("Confirm daily backup of this entire workspace.");
+          Object.keys(input).some(key => !["enabled", "confirmation"].includes(key))) throw new Error("Confirm daily backup of this entire installation.");
       const currentScope = scope(), authority = currentScope ? { ...currentScope } : null;
-      if (!authority) throw new Error("Connect your organisation in the local desktop before enabling daily backups.");
+      if (!authority) throw new Error("Connect your organization in the local desktop before enabling daily backups.");
       const stamp = ++revision;
       stopTimer(); controller?.abort();
       record = { version: 2, scope: authority.key, nextBackupAt: now() + DAY };
       try {
         await store.write({ ...record });
         if (!current(stamp)) return snapshot();
-        if (!sameScope(authority, scope())) { await forget(); throw new Error("The workspace connection changed."); }
+        if (!sameScope(authority, scope())) { await forget(); throw new Error("Your organization connection changed."); }
         started = true; publish("waiting"); arm(); return snapshot();
       } catch (error) {
         if (current(stamp)) { record = null; publish("error", "Daily backups were not enabled. Unlock your system keychain and try again."); }

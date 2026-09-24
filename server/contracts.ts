@@ -131,14 +131,20 @@ export interface SendTurnInput {
   /** Bot persona (name/title/description) as a system prompt. */
   system?: string;
   /** `system` split at the sections that legitimately change mid-conversation
-   * (memory today): `systemStable` is everything else, `systemVolatile` is
+   * (memory, mentions, outstanding teammate work, recent work): `systemStable` is everything else, `systemVolatile` is
    * those sections' text. A driver that keeps one CLI process per thread keys
    * that process on the stable half, so a memory edit no longer respawns the
    * session and makes the provider re-cache the entire prompt; the changed half
    * is delivered inside the next turn instead. Drivers that rebuild their
-   * request every turn ignore both and keep reading `system`. */
+   * request every turn keep only the stable half in their system message and
+   * carry the volatile half inside the newest user message, so the resent
+   * prefix stays byte-identical. */
   systemStable?: string;
   systemVolatile?: string;
+  /** True when this turn's user message tags teammates: the mentions part of
+   * systemVolatile describes this turn even when its text is unchanged from
+   * the previous turn, so digest-based delivery must not suppress the note. */
+  mentionTurn?: boolean;
   /** Coordinated teammate turns may resume a Claude conversation whose
    * earlier system prompt contained a different assignment. Refresh that
    * prompt when the provider supports it; the current brief also arrives

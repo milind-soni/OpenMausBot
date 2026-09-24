@@ -80,16 +80,16 @@ only passes each flag to a CLI that accepts it, so an older CLI keeps working
 — without the controls it predates — and the Engines page shows an update
 notice with the exact command. `claude update` clears it.
 
-## When your organisation manages MCP servers
+## When your organization manages MCP servers
 
-If this computer is connected to an organisation (Settings → Organisation)
+If this computer is connected to an organization (Settings → Organization)
 and its Admin turns off custom MCP servers, only servers whose name or address
-is on the organisation's approved list reach bots. Other configured servers
-stay in your list, marked **Managed by** your organisation, but bots do not
+is on the organization's approved list reach bots. Other configured servers
+stay in your list, marked **Managed by** your organization, but bots do not
 get them, and the "Also use my Claude Code MCP servers" switch has no effect.
 **Paste config** is off, and **Add server** accepts only approved servers.
-Nothing is written to `config.json`; disconnecting the organisation restores
-the list as you configured it. With no organisation connection, none of this
+Nothing is written to `config.json`; disconnecting the organization restores
+the list as you configured it. With no organization connection, none of this
 applies.
 
 Address entries are HTTPS only. The host is compared label by label, where
@@ -98,7 +98,7 @@ Address entries are HTTPS only. The host is compared label by label, where
 and the path separately, where `*` matches anything.
 
 Limits: a personal **Codex** engine also loads MCP servers from your own
-`~/.codex/config.toml`, which OpenMausBot does not filter. An organisation that
+`~/.codex/config.toml`, which OpenMausBot does not filter. An organization that
 must block those can allow only company models, or leave personal Codex off
 its engine list. Company Codex uses its own separate home, without your
 `config.toml`.

@@ -255,7 +255,7 @@ export function BrowserPanel({ bot }: { bot: Bot }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { setRequested(false); }
   };
-  if (admin === false) return <div className="p-5 text-[13px] text-ink-secondary">Only workspace administrators can view or control saved browser sessions.</div>;
+  if (admin === false) return <div className="p-5 text-[13px] text-ink-secondary">Only admins of this installation can view or control saved browser sessions.</div>;
   if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">Enable the browser in this bot’s profile to use it.</div>;
   if (engine?.kind === "engine" && !installing && !engine.installError) return admin === null
     ? <div className="p-5 text-[13px] text-ink-secondary">Loading browser…</div>

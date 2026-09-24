@@ -110,6 +110,10 @@ export function createTeamBackup(store: Store, routines: Routine[], name: string
       section: bot.section, color: bot.color,
       mascotExpression: bot.mascotExpression ?? undefined, mascotBody: bot.mascotBody ?? undefined,
       chiefOfStaff: Boolean(bot.chiefOfStaff), hidden: Boolean(bot.hidden), playbooks: bot.playbooks ?? [],
+      // Grants are workspace-private authority: they travel in this backup
+      // so the team's shape is not lost, but the import below still lands
+      // every bot grant-less — restoring them is a deliberate later choice.
+      ...(bot.connectorTools ? { connectorTools: structuredClone(bot.connectorTools) } : {}),
       memory: memoryFor(bot.id),
       activeTask: bot.threadId, tasks: history(bot),
     })),
@@ -179,7 +183,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       bots.push(bot);
       botIds.set(source.key, bot.id);
       store.patchBot(bot.id, { composio: false, computer: "off", browser: false, approvalMode: "ask", autoApprove: false,
-        hidden: source.hidden, chiefOfStaff: source.chiefOfStaff, playbooks: source.playbooks });
+        connectorTools: {}, hidden: source.hidden, chiefOfStaff: source.chiefOfStaff, playbooks: source.playbooks });
       if (source.memory) restoreMemory(bot.id, source.memory);
     }
     for (const source of backup.bots) {

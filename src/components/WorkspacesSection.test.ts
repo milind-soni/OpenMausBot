@@ -56,6 +56,6 @@ describe("workspaces section", () => {
     expect(html).toContain(">Resume<");
     expect(html).toContain(">Delete<");
     expect(html).toContain('href="https://globex.agentada.cc"');
-    expect(renderToStaticMarkup(createElement(WorkspacesTable, { fleet: { ...fleet, workspaces: [] }, onAct: () => {}, busy: null }))).toContain("No workspaces on agentada.cc yet");
+    expect(renderToStaticMarkup(createElement(WorkspacesTable, { fleet: { ...fleet, workspaces: [] }, onAct: () => {}, busy: null }))).toContain("No installations on agentada.cc yet");
   });
 });

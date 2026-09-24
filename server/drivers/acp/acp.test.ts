@@ -6,6 +6,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
+import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -337,6 +338,41 @@ describe("ACP turns (fake CLI)", () => {
     const nativeLog = readFileSync(join(NATIVE_DIR, "t-acp-native-image.ndjson"), "utf8");
     expect(nativeLog).not.toContain(base64);
     expect(nativeLog).toContain(`[image data: ${base64.length} base64 chars]`);
+  });
+
+  it("delivers the full prompt once per native session and rides volatile changes as notes", async () => {
+    const dump = join(scratch, "acp-prompt-split.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create();
+    // The receipt store is keyed by thread and session id, so a unique thread
+    // keeps the run hermetic against earlier executions of this suite.
+    const threadId = "t-acp-prompt-split-" + randomUUID();
+    const promptOf = () =>
+      (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    const send = async (text: string, volatile: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\n" + volatile,
+        systemStable: "Standing rules.",
+        systemVolatile: volatile,
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return promptOf();
+    };
+
+    // The establishing turn carries the full prompt, exactly as before.
+    expect(await send("first", "Memory: likes quiet hours."))
+      .toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    // The pooled session already carries it: later turns go through bare.
+    expect(await send("second", "Memory: likes quiet hours.")).toBe("second");
+    // A changed volatile half rides the next prompt as a labelled note.
+    expect(await send("third", "Memory: moved to Toronto."))
+      .toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird");
+    // A cleared volatile half is announced once, not silently dropped.
+    expect(await send("fourth", "")).toContain("have been cleared");
+    expect(await send("fifth", "")).toBe("fifth");
   });
 
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {

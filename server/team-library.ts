@@ -1,5 +1,5 @@
 import { parseJson, type JsonValue } from "./schema.ts";
-import { isBotPackage, parseBotPackage, type ParsedBotPackage } from "./bot-package.ts";
+import { isBotPackage, parseBotPackage, parsePackageDocument, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
@@ -156,11 +156,14 @@ export async function fetchTeamCatalog(fetcher: Fetcher = fetch): Promise<TeamCa
   return parseTeamCatalog(await fetchJson(TEAM_LIBRARY_CATALOG_URL, MAX_CATALOG_BYTES, fetcher));
 }
 
-export type ParsedShareableTeam = ParsedTeamManifest | ParsedBotPackage;
+export type ParsedShareableTeam = ParsedTeamManifest | ParsedBotPackage | PackageDocument;
 
 function parseShareable(value: JsonValue | string): ParsedShareableTeam {
   if (typeof value === "string") return parseBotPackage(value);
-  return isBotPackage(value) ? parseBotPackage(value) : parseTeamManifest(value);
+  if (!isBotPackage(value)) return parseTeamManifest(value);
+  // A shared team (v2) is read as a file: it cannot claim a publisher.
+  // Version 1 keeps its original shape for older callers.
+  return (value as { version?: unknown }).version === 1 ? parseBotPackage(value) : parsePackageDocument(value, { trust: "file" });
 }
 
 async function fetchShareable(url: string, fetcher: Fetcher): Promise<ParsedShareableTeam> {

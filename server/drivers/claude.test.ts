@@ -893,6 +893,39 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(sent[1].message.content.endsWith("two")).toBe(true);
   });
 
+  it("redelivers unchanged mention context on every tagged turn", async () => {
+    await create();
+    const dump = join(scratch, "mention.json");
+    const prompts = join(scratch, "mention-prompts.jsonl");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+
+    const send = async (text: string, mentionTurn?: boolean) => {
+      await instance.adapter.sendTurn({
+        threadId: "t-mention",
+        text,
+        system: "You are Testy.\n\nTagged: @Testy",
+        systemStable: "You are Testy.",
+        systemVolatile: "Tagged: @Testy",
+        ...(mentionTurn ? { mentionTurn: true } : {}),
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+    };
+    await send("one");
+    recorder.events.length = 0;
+    await send("two", true);
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    // the mention describes this turn, so the note rides it even though the
+    // volatile half is byte-identical to the one the session launched with
+    const sent = readFileSync(prompts, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    expect(sent).toHaveLength(2);
+    expect(sent[0].message.content).toBe("one");
+    expect(sent[1].message.content).toContain("Tagged: @Testy");
+    expect(sent[1].message.content.endsWith("two")).toBe(true);
+    expect(seen.systemPrompt).toContain("Tagged: @Testy");
+  });
+
   it("still relaunches when the stable half of the prompt changes", async () => {
     await create();
     const dump = join(scratch, "stable.json");

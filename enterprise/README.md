@@ -53,7 +53,7 @@ must not silently fall back to standalone email or pairing credentials.
 |---|---|---|
 | `whitelabel` | product name, tagline, accent colour, logo, favicon and support link from `brand.json` (below) | shipped |
 | `sso` | sign-in through a company identity provider | planned: nothing checks it yet |
-| `admin` | Settings → Workspaces and the optional hosted workspace sign-in adapter | shipped |
+| `admin` | Settings → Installations and the optional hosted workspace sign-in adapter | shipped |
 | `budgets` | one monthly spend limit for the whole workspace, refusing new turns at the cap, with a warning percentage and admin notices (not per bot or per section) | shipped |
 | `billing` | sell prices per model: a billable column in Usage → History and its CSV, and per-model prices that replace list prices in cost estimates | shipped |
 

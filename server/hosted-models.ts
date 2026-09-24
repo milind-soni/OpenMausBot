@@ -25,7 +25,7 @@ export function hostedModelPolicy(dataDirectory: string, env: NodeJS.ProcessEnv 
   if (env.OMB_HOSTED_MODELS === undefined && env.OMB_HOSTED_MODEL_TOKEN === undefined) return null;
   const hosted = hostedWorkspaceConfiguration(env);
   if (!hosted?.portalMembership || env.OMB_DESKTOP_PARENT === "1" || !/^omb_workspace_[A-Za-z0-9_-]{43}$/.test(env.OMB_HOSTED_MODEL_TOKEN ?? "")) {
-    throw new Error("Hosted model access requires complete portal-managed workspace configuration.");
+    throw new Error("Hosted model access requires complete portal-managed configuration.");
   }
   let catalog: HostedCatalog;
   try {

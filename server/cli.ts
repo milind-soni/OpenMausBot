@@ -266,7 +266,7 @@ fleet   many client workspaces on one Linux server, each its own account,
         --dry-run always prints. Install the package permanently first.
         init --operator USER also installs the fleet agent, a root service
         on a Unix socket only USER may open, so the workspace running as
-        USER manages the others from Settings → Workspaces.
+        USER manages the others from Settings → Installations.
 
 --tailscale  serve over your tailnet: Tailscale terminates HTTPS and the
              link uses this machine's MagicDNS name (needs Tailscale signed in
@@ -422,7 +422,7 @@ function startupPreferences(options: CliOptions): NonNullable<AppConfig["cliStar
 async function showPhonePairing(options: CliOptions, origin: string | undefined, log: (line: string) => void): Promise<boolean> {
   const ready = !!origin && await verifyPhoneEndpoint(options.port, origin);
   if (!ready) {
-    log("Phone access is not reachable yet. Your local workspace is ready; no phone pairing code was created.");
+    log("Phone access is not reachable yet. OpenMausBot is ready on this computer; no phone pairing code was created.");
     log("Check the HTTPS connection, then run openmausbot pair again with the same --data-dir and --port.");
     return false;
   }

@@ -448,6 +448,72 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("keeps the system message to the stable half and carries the volatile half in the newest user message", async () => {
+    let sentBody: any = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sentBody = JSON.parse(String(init?.body));
+        return new Response(
+          'data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n",
+          { status: 200, headers: { "content-type": "text/event-stream" } },
+        );
+      }),
+    );
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "test-prompt-split",
+      displayName: "Prompt split",
+      enabled: true,
+      config: { url: "http://localhost:9/v1", apiKeyEnv: "TEST_KEY" },
+      environment: { TEST_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+
+    await inst.adapter.sendTurn({
+      threadId: "thread-prompt-split",
+      text: "hello",
+      system: "Standing rules.\n\nMemory: likes quiet hours.",
+      systemStable: "Standing rules.",
+      systemVolatile: "Memory: likes quiet hours.",
+      transcript: [
+        { role: "user" as const, text: "earlier" },
+        { role: "assistant" as const, text: "answer" },
+      ],
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    // The resent prefix (system + transcript) must stay byte-identical when
+    // the volatile half changes, so only the stable half may sit in the
+    // system message. The volatile half rides the newest user message on
+    // every turn: the stored transcript never contains the delivered
+    // notes, so a model handed nothing would lose its memory.
+    const messages: any[] = sentBody?.messages ?? [];
+    expect(messages[0]).toEqual({ role: "system", content: "Standing rules." });
+    expect(messages.slice(1, 3)).toEqual([
+      { role: "user", content: "earlier" },
+      { role: "assistant", content: "answer" },
+    ]);
+    expect(messages.at(-1)).toEqual({
+      role: "user",
+      content: "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nhello",
+    });
+
+    // A turn without the split keeps the legacy single-block shape.
+    await inst.adapter.sendTurn({
+      threadId: "thread-prompt-split-legacy",
+      text: "bare",
+      system: "Whole block.",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.threadId === "thread-prompt-split-legacy");
+    const legacy: any[] = sentBody?.messages ?? [];
+    expect(legacy[0]).toEqual({ role: "system", content: "Whole block." });
+    expect(legacy.at(-1)).toEqual({ role: "user", content: "bare" });
+    recorder.stop();
+    await inst.dispose();
+  });
+
   it("omits provider routing on non-OpenRouter endpoints even when configured", async () => {
     let sentBody: any = null;
     vi.stubGlobal(

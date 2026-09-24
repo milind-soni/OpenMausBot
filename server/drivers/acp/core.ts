@@ -32,6 +32,8 @@ import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { decodeInjectId } from "../local-inject.ts";
+import { promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
+import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 
 /**
@@ -1576,11 +1578,35 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw error;
             }
             emitSessionStarted();
+            // The stable/volatile split: the full prompt rides only the turn
+            // that establishes - or re-instructs, after a soul edit - this
+            // native session. Later turns go through bare unless the volatile
+            // half changed, so a memory edit neither appends a second copy of
+            // the prompt to the agent's session history nor re-prices the
+            // prefix its provider cached. Receipts are durable because the
+            // native session outlives this process; an un-split turn (a direct
+            // adapter call) keeps the legacy full-prompt shape.
+            const halves = promptHalves(turn);
+            let promptInput = promptTurn;
+            let pendingSplitReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+            if (halves.stable !== null) {
+              const receiptKey = JSON.stringify([threadId, sessionId]);
+              const composed = splitSessionPrompt(
+                halves.stable,
+                halves.volatile,
+                readPromptSplitReceipt(DRIVER_KIND, receiptKey),
+                promptTurn.system,
+                promptTurn.text,
+                Boolean(turn.mentionTurn),
+              );
+              promptInput = { ...promptTurn, system: "", text: composed.text };
+              pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt };
+            }
             const text = support.buildPromptText
-              ? support.buildPromptText(promptTurn)
-              : promptTurn.system
-                ? `${promptTurn.system}\n\n${promptTurn.text}`
-                : promptTurn.text;
+              ? support.buildPromptText(promptInput)
+              : promptInput.system
+                ? `${promptInput.system}\n\n${promptInput.text}`
+                : promptInput.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
               : [];
@@ -1600,7 +1626,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               promptIdleMs,
               `${DRIVER_KIND} went fully silent ${Math.round(promptIdleMs / 1000)} s after the message and the turn was stopped. ` +
                 "Raise OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS if this model legitimately takes longer to answer.",
-            );
+              );
+            if (pendingSplitReceipt) {
+              // session/prompt resolving is the acceptance boundary: a
+              // rejected prompt leaves the receipt unwritten, so the next
+              // turn redelivers what this one never received.
+              writePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key, pendingSplitReceipt.receipt);
+            }
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
             const usage = result?.usage ?? result?._meta ?? {};

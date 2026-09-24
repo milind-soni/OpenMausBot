@@ -27,6 +27,7 @@ import {
   Plus,
   Search,
   Puzzle,
+  Share2,
   Trash2,
   Users,
   X,
@@ -48,6 +49,7 @@ import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
 import { TeamLibraryPanel } from "./TeamLibraryPanel";
+import { ShareTeamDialog } from "./ShareTeamDialog";
 import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
 import { BotPickerList } from "./BotPickerList";
@@ -1518,6 +1520,25 @@ function ArchivedBotsPanel({
   );
 }
 
+/** A named team's context menu: add bots, rename, share the whole team,
+ * delete. Exported for a markup test. */
+export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete }: {
+  onAddBots: () => void;
+  onRename: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+}) {
+  const item = "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised";
+  return (
+    <>
+      <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={14} />{t("team.addBots")}</button>
+      <button type="button" role="menuitem" className={item} onClick={onRename}><Pencil size={14} />{t("team.rename")}</button>
+      <button type="button" role="menuitem" className={item} onClick={onShare}><Share2 size={14} />{t("team.share")}</button>
+      <button type="button" role="menuitem" className={cn(item, "text-danger")} onClick={onDelete}><Trash2 size={14} />{t("team.delete")}</button>
+    </>
+  );
+}
+
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
@@ -1551,6 +1572,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
   const teamDeleteRunning = useRef(false);
   const [moveToTeam, setMoveToTeam] = useState<string | null>(null);
   const [renameTeam, setRenameTeam] = useState<string | null>(null);
+  const [shareTeam, setShareTeam] = useState<string | null>(null);
   const [roomMenu, setRoomMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [plusOpen, setPlusOpen] = useState(false);
@@ -2136,7 +2158,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     onContextMenu={!remoteClient && layoutInteractive && sectionName ? (event) => {
                       event.preventDefault();
                       teamMenuReturn.current = event.currentTarget.querySelector<HTMLElement>("button") ?? event.currentTarget;
-                      setTeamMenu({ name: sectionName, x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 110)) });
+                      setTeamMenu({ name: sectionName, x: Math.max(8, Math.min(event.clientX, window.innerWidth - 230)), y: Math.max(8, Math.min(event.clientY, window.innerHeight - 150)) });
                     } : undefined}
                     collapsed={collapsed}
                     attention={attention}
@@ -2352,12 +2374,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); closeTeamMenu(); return; }
             navigateThreadMenu(event);
           }}>
-          <button type="button" role="menuitem" autoFocus className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
-            onClick={() => { closeTeamMenu(); setMoveToTeam(teamMenu.name); }}><Users size={14} />{t("team.addBots")}</button>
-          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] hover:bg-raised"
-            onClick={() => { closeTeamMenu(); setRenameTeam(teamMenu.name); }}><Pencil size={14} />{t("team.rename")}</button>
-          <button type="button" role="menuitem" className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[13px] text-danger hover:bg-raised"
-            onClick={() => { closeTeamMenu(); setDeletingTeam(teamMenu.name); }}><Trash2 size={14} />{t("team.delete")}</button>
+          <TeamMenuItems
+            onAddBots={() => { closeTeamMenu(); setMoveToTeam(teamMenu.name); }}
+            onRename={() => { closeTeamMenu(); setRenameTeam(teamMenu.name); }}
+            onShare={() => { closeTeamMenu(); setShareTeam(teamMenu.name); }}
+            onDelete={() => { closeTeamMenu(); setDeletingTeam(teamMenu.name); }}
+          />
         </div>
       </div>, document.body)}
       <ConfirmDialog open={deletingTeam !== null} title={t("team.deleteTitle", { name: deletingTeam ?? "" })}
@@ -2374,6 +2396,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
       {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
+      {shareTeam !== null && <ShareTeamDialog team={shareTeam} onClose={() => setShareTeam(null)} />}
       {sectionPicker && (
         <SectionPicker
           current={state.bots.find((b) => b.id === sectionPicker.botId)?.section}
@@ -2433,9 +2456,10 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             setTeamFeedback({
               error: false,
               text:
-                result.members === 1
+                (result.members === 1
                   ? t("sidebar.teamImportedOne")
-                  : t("sidebar.teamImportedMany", { count: result.members }),
+                  : t("sidebar.teamImportedMany", { count: result.members })) +
+                (result.connections ? ` · ${t("sidebar.connectionsToFinish", { count: result.connections })}` : ""),
             });
           }}
         />

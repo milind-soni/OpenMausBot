@@ -140,8 +140,9 @@ export interface Message {
   /** digest messages: what the turn did, rendered in `text` and structured here. */
   digest?: TurnDigest;
   compaction?: import("../../shared/wire").WireMessage["compaction"];
-  /** Provider-generated files attached to this assistant response. */
-  attachments?: Array<{ kind: "image"; path: string; mime: string }>;
+  /** Provider-generated files attached to this assistant response. Kinds the
+   * renderer cannot display yet decode without breaking; only images render. */
+  attachments?: import("../../shared/wire").WireMessage["attachments"];
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;

@@ -47,6 +47,7 @@ describe("buildSystemPrompt", () => {
       { id: "recall", label: "Recall", text: " Search past sessions." },
       { id: "memory", label: "Memory", text: " Your memory: likes tea." },
       { id: "mentions", label: "Mentions", text: mentionPrompt([{ id: "b2", name: "Fig" }]) },
+      { id: "recent", label: "Recent work", text: " Your recent work: today 20:48 you said: \"done\"." },
     ]);
 
     // the whole prompt is unchanged: every section, in order
@@ -54,11 +55,13 @@ describe("buildSystemPrompt", () => {
     expect(built.text).toContain("likes tea");
     expect(built.text).toContain("@Fig");
 
-    // memory and mentions differ between two turns of one live session, so a
-    // driver holding a process open must not key that process on them
+    // memory, mentions, and recent work differ between two turns of one live
+    // session (recent work relabels "2h ago" every turn), so a driver holding
+    // a process open must not key that process on them
     expect(built.stable).toBe("You are Kiwi. Search past sessions.");
     expect(built.volatile).toContain("likes tea");
     expect(built.volatile).toContain("@Fig");
+    expect(built.volatile).toContain("today 20:48");
     expect(built.volatile).not.toContain("Search past sessions");
   });
 

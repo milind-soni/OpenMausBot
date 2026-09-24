@@ -247,6 +247,53 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(threadStart.params).toMatchObject({ model: "gpt-5.6-sol", modelProvider: "openai", developerInstructions: "You are Testy." });
   });
 
+  it("keeps the developer slot stable and delivers volatile context in-turn", async () => {
+    await create({ mode: "resume" });
+    // each turn spawns a fresh app-server whose dump overwrites the file, so
+    // every turn writes its own and the assertions stay per-turn
+    const send = async (dumpName: string, text: string, volatile: string, cursor?: string, mentionTurn?: boolean) => {
+      process.env.FAKE_CODEX_DUMP = join(scratch, dumpName);
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId: "t-prompt-split",
+        text,
+        system: "Stable rules.",
+        systemStable: "Stable rules.",
+        systemVolatile: volatile,
+        ...(cursor ? { resumeCursor: cursor } : {}),
+        ...(mentionTurn ? { mentionTurn: true } : {}),
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return JSON.parse(readFileSync(join(scratch, dumpName), "utf8")).calls as Array<{
+        method: string;
+        params: Record<string, unknown>;
+      }>;
+    };
+    const first = await send("split-1.json", "first", "Memory: likes quiet hours.");
+    // same volatile half on the resumed thread: the turn text goes through bare
+    const second = await send("split-2.json", "second", "Memory: likes quiet hours.", "codex-thread-1");
+    // a changed volatile half rides the next user input as a labelled block
+    const third = await send("split-3.json", "third", "Memory: moved to Toronto.", "codex-thread-1");
+    const threadStarts = first.filter((c) => c.method === "thread/start");
+    expect(threadStarts).toHaveLength(1);
+    expect(threadStarts[0].params.developerInstructions).toBe("Stable rules.");
+    for (const calls of [first, second, third]) {
+      expect(calls.some((c) => c.method === "thread/inject_items")).toBe(false);
+    }
+    const turnText = (calls: typeof first) => {
+      const input = calls.find((c) => c.method === "turn/start")?.params?.input as Array<{ text?: string }> | undefined;
+      return input?.[0]?.text;
+    };
+    expect(turnText(first)).toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: likes quiet hours.\n\nfirst");
+    expect(turnText(second)).toBe("second");
+    expect(turnText(third)).toContain("Memory: moved to Toronto.");
+    expect(turnText(third)).toContain("third");
+    // a tagged turn redelivers the note even when nothing else changed:
+    // the mention describes this turn, not just the last volatile diff
+    const fourth = await send("split-4.json", "fourth", "Memory: moved to Toronto.", "codex-thread-1", true);
+    expect(turnText(fourth)).toContain("Memory: moved to Toronto.");
+    expect(turnText(fourth)).toContain("fourth");
+  });
+
   it("ignores requests received after turn completion", async () => {
     await create({ mode: "late-request" });
     await instance.adapter.sendTurn({ threadId: "t-late-request", text: "finish" });

@@ -230,13 +230,14 @@ export interface ImportedMemberProfile {
  * 1. Allowlist, not blocklist. The returned object is built field by field
  *    from the parsed member, so every privilege-bearing BotRecord field —
  *    approvalMode, autoApprove, alwaysAllow, chiefOfStaff, approvePeerComms, composio,
- *    computer, cloudBackend, cwd — is structurally absent, whatever the
+ *    connectorTools, computer, cloudBackend, cwd — is structurally absent, whatever the
  *    file claimed. parseTeamManifest already drops unknown member keys;
  *    this keeps the guarantee even if the schema grows a field later,
  *    because nothing new can reach a bot record without someone
  *    consciously widening this return type. The caller must still force
- *    composio: false on the created record — that is the one privilege
- *    where *absence* means allowed, so leaving it unset is not safe.
+ *    composio: false (and connectorTools: {}) on the created record —
+ *    composio is the one privilege where *absence* means allowed, so
+ *    leaving it unset is not safe.
  *
  * 2. No name captures. Display names are identity wherever bots address
  *    each other — @mention resolution in rooms, the Chief of Staff roster,

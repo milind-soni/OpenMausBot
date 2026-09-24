@@ -1,6 +1,6 @@
 # Hosted Slack management entry point
 
-Read [the verification entry point](README.md) first. On a hosted organisation
+Read [the verification entry point](README.md) first. On a hosted organization
 workspace, agent settings gain a Slack section with one link, Manage in Admin,
 which opens the configured Admin service's `/slack?workspace=<workspace>&bot=<agent>`
 page in a new tab. That page is where the agent gets its own Slack app. This

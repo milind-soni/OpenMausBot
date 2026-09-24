@@ -5,6 +5,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly; spawnCli
 // resolves it to `node <script>`, so these run everywhere.
+import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -327,6 +328,59 @@ describe("PiDriver turns (fake CLI)", () => {
       | { sessionId: string }
       | undefined;
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+  });
+
+  it("delivers the full prompt on every turn so compaction cannot strand the session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-split-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    // The receipt store is keyed by thread and session file, so a unique
+    // thread keeps the run hermetic against earlier suite executions.
+    const threadId = "t-pi-prompt-split-" + randomUUID();
+    const prompts = () =>
+      readFileSync(dump, "utf8").split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+        .filter((row) => row.prompt).map((row) => row.prompt!.message!);
+    const send = async (text: string, volatile: string, cursor?: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\n" + volatile,
+        systemStable: "Standing rules.",
+        systemVolatile: volatile,
+        ...(cursor ? { resumeCursor: cursor } : {}),
+      });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      const session = recorder.events.find((e) => e.type === "session.started" && e.turnId === turnId) as { sessionId: string };
+      return { message: prompts().at(-1)!, cursor: session.sessionId };
+    };
+
+    // pi summarizes older user messages when it compacts, and the prompt
+    // rides a user message: every turn re-delivers it in full so a
+    // compacted session never loses its standing instructions.
+    const first = await send("first", "Memory: likes quiet hours.");
+    expect(first.message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    const second = await send("second", "Memory: moved to Toronto.", first.cursor);
+    expect(second.message).toBe("Standing rules.\n\nMemory: moved to Toronto.\n\nsecond");
+  });
+
+  it("keeps the full prompt when no session could be established", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-split-error-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("session-error", { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({
+      threadId: "t-pi-prompt-split-error-" + randomUUID(),
+      text: "bare",
+      system: "Standing rules.\n\nMemory: likes quiet hours.",
+      systemStable: "Standing rules.",
+      systemVolatile: "Memory: likes quiet hours.",
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const message = readFileSync(dump, "utf8").split("\n").filter(Boolean)
+      .map((line) => JSON.parse(line) as { prompt?: { message?: string } })
+      .find((row) => row.prompt)?.prompt?.message;
+    // Without a session the prompt is the model's only context.
+    expect(message).toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nbare");
   });
 
   it("fails promptly when the pi process exits before replying", async () => {

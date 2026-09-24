@@ -149,10 +149,10 @@ describe("Settings → Appearance", () => {
     fixture.section = "desktopWorkspaces";
     vi.stubGlobal("window", { ogb: { environments: {} } });
     const local = render();
-    expect(local).toContain('<option value="desktopWorkspaces" selected="">Connected workspaces</option>');
-    expect(local).toContain("Workspace address or pairing link");
+    expect(local).toContain('<option value="desktopWorkspaces" selected="">Servers</option>');
+    expect(local).toContain("Server address or pairing link");
     expect(local).toContain("Name (optional)");
-    expect(local).toContain("Your workspaces");
+    expect(local).toContain("Your servers");
     expect(local).toContain("npx openmausbot pair --label");
     fixture.section = "general";
     vi.stubGlobal("window", { ogb: { workspaces: {} } });
@@ -163,7 +163,7 @@ describe("Settings → Appearance", () => {
     fixture.section = "organization";
     vi.stubGlobal("window", { ogb: { organization: {} } });
     const local = render();
-    expect(local).toContain('<option value="organization" selected="">Organisation</option>');
+    expect(local).toContain('<option value="organization" selected="">Organization</option>');
     expect(local).toContain("personal and local models");
     fixture.section = "appearance";
     vi.stubGlobal("window", {});

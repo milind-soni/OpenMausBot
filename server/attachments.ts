@@ -571,6 +571,55 @@ export function saveImage(bytes: Buffer, mime: string, requestedUploadId?: strin
   }
 }
 
+/** Persist one synthesized audio note. Providers return audio/mpeg buffers;
+ * the same atomic-write and quota discipline as saveImage applies, with a
+ * fixed .mp3 extension because the accepted mime determines it exactly. */
+export function saveAudio(bytes: Buffer, mime: string): SavedAttachment {
+  const normalized = mime.split(";")[0]!.trim().toLowerCase();
+  if (normalized !== "audio/mpeg") {
+    throw Object.assign(new Error("unsupported audio type"), { status: 400 });
+  }
+  if (bytes.byteLength === 0) throw Object.assign(new Error("empty audio"), { status: 400 });
+  if (bytes.byteLength > FILE_MAX_BYTES) {
+    throw Object.assign(new Error(`audio exceeds ${FILE_MAX_BYTES} bytes`), { status: 413 });
+  }
+  ensureAttachmentsDir();
+  const reservation = new AttachmentReservation();
+  reservation.reserve(bytes.byteLength);
+  const id = randomUUID();
+  const name = `${id}.mp3`;
+  const path = join(ATTACHMENTS_DIR, name);
+  const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${id}-${randomUUID()}.partial`);
+  activePartials.add(partialPath);
+  let partialCleanupFailed = false;
+  try {
+    writeFileSync(partialPath, bytes, { mode: 0o600, flag: "wx" });
+    try {
+      linkSync(partialPath, path);
+      addCommittedBytes(bytes.byteLength);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      const saved = readFileSync(path);
+      if (!saved.equals(bytes)) {
+        throw Object.assign(new Error("audio destination already exists with different bytes"), { status: 409 });
+      }
+    }
+    unlinkSync(partialPath);
+    return { path, mime: normalized, bytes: bytes.byteLength };
+  } catch (error) {
+    try {
+      unlinkSync(partialPath);
+    } catch {
+      partialCleanupFailed = true;
+    }
+    throw error;
+  } finally {
+    activePartials.delete(partialPath);
+    if (partialCleanupFailed) invalidateAttachmentAccounting();
+    reservation.release();
+  }
+}
+
 /** HTTP uploads take the same per-ID lock as streamed files. saveImage stays
  * synchronous for generated avatars, while this wrapper prevents an image
  * and a document using the same caller-supplied UUID from committing with

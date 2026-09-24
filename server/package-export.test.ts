@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createBotPackageExport } from "./package-export.ts";
+import { createBotPackageExport, createTeamPackageExport, TEAM_TOO_LARGE_MESSAGE } from "./package-export.ts";
 import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
-import type { BotRecord } from "./store.ts";
+import type { Routine } from "./routines.ts";
+import type { BotRecord, GroupRecord } from "./store.ts";
 
 describe("package export", () => {
   it("preserves the exact cron and timezone through export and import", () => {
@@ -42,6 +43,7 @@ describe("package export", () => {
           resumeCursors: { provider: "secret-session" },
           chiefOfStaff: true,
           composio: true,
+          connectorTools: { gmail: { tools: "*" } },
           cwd: "/private/path",
           approvalMode: "full",
           autoApprove: true,
@@ -163,7 +165,7 @@ describe("package export", () => {
         agents: [{ skills: ["source-check"] }],
       },
     });
-    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|approvalMode|autoApprove|alwaysAllow|nextRunAt/);
+    expect(JSON.stringify(exported)).not.toMatch(/private-id|private-thread|private-engine|secret-model|secret-session|private\/path|private-attachment|approvalMode|autoApprove|alwaysAllow|connectorTools|nextRunAt/);
   });
 
   it.each([
@@ -232,4 +234,165 @@ describe("package export", () => {
     ]);
   });
 
+});
+
+describe("whole-team export (package v2)", () => {
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  const bot = (id: string, name: string, extra: Partial<BotRecord> = {}): BotRecord => ({
+    id, threadId: `thread-${id}`, name, title: `${name} title`, description: `${name} description`,
+    notifications: true, color: "green", unread: false,
+    modelSelection: { instanceId: "private-engine", model: "secret-model" }, resumeCursors: { provider: "secret-session" },
+    createdAt: 1, section: "Sales desk", ...extra,
+  });
+  const room = (id: string, name: string, memberIds: string[], extra: Partial<GroupRecord> = {}): GroupRecord => ({
+    id, threadId: `room-thread-${id}`, name, memberIds, defaultResponder: { kind: "mentions" }, bulletin: "",
+    unread: false, createdAt: 1, section: "Sales desk", ...extra,
+  });
+  const routine = (id: string, name: string, botId: string, extra: Partial<Routine> = {}): Routine => ({
+    id, name, prompt: `${name} prompt`, target: "bot", botId, runOn: "maus", enabled: true,
+    schedule: { type: "daily", time: "09:00", weekdays: [1] }, durationMinutes: 30, nextRunAt: 5, createdAt: 1, updatedAt: 1, ...extra,
+  });
+  const skill = (name: string) => ({
+    name, description: `${name} description`, instructions: `---\nname: ${name}\ndescription: ${name} description\n---\n\n# ${name}\n`,
+  });
+  const fixture = () => {
+    const bots = [
+      bot("lead", "Morgan", { chiefOfStaff: true, soul: "Coordinate the desk.\n", avatarUrl: "/api/attachments/a.png", avatarCrop: "rounded",
+        mcpServers: ["crm", "local-tool", "plain-http"], playbooks: [{ key: "qualify", name: "Qualify", summary: "Check fit", triggers: ["qualify"], instructions: "Ask four questions." }] }),
+      bot("scout", "Scout", { mcpServers: ["crm"] }),
+      bot("hidden", "Archived", { hidden: true }),
+      bot("other", "Elsewhere", { section: "Support" }),
+    ];
+    const groups = [
+      room("desk", "Deal desk", ["lead", "scout", "other", "hidden"], { defaultResponder: { kind: "member", botId: "lead" }, bulletin: "Cite sources." }),
+      room("support-room", "Support room", ["other"], { section: "Support" }),
+      room("dm", "DM", ["lead", "scout"], { dm: true }),
+      room("foreign-only", "Only outsiders", ["other"]),
+    ];
+    const routines = [
+      routine("digest", "Daily digest", "scout", { continuity: true, attachments: [{ id: "a", kind: "file", name: "x.txt", path: "/private/x.txt", size: 1 }] }),
+      routine("review", "Weekly review", "lead", { target: "room-goal", groupId: "desk", enabled: false }),
+      routine("elsewhere", "Support digest", "other"),
+    ];
+    return {
+      team: "Sales desk", authorName: "Mira", bots, groups, routines, published: null,
+      brief: "Quote list prices only.",
+      skillsByBot: new Map([["lead", [skill("pricing")]], ["scout", [skill("pricing"), skill("research")]]]),
+      mcpServers: {
+        crm: { type: "http", url: "https://mcp.example.com/crm", headers: { Authorization: "Bearer real-value-never-shared" }, enabled: true },
+        "local-tool": { command: "npx", args: ["tool"], env: { TOKEN: "x" }, enabled: true },
+        "plain-http": { type: "http", url: "http://mcp.example.com", enabled: true },
+      },
+      avatars: { lead: `data:image/png;base64,${PNG}` },
+    };
+  };
+
+  it("exports only the chosen team, whole, without chat history or authority", () => {
+    const result = createTeamPackageExport(fixture());
+    const pkg = result.document.package;
+    expect(result.document).toMatchObject({ format: "openmaus.package", version: 2 });
+    expect(pkg.agents.map((agent) => agent.key)).toEqual(["morgan", "scout"]);
+    expect(pkg.team).toEqual({ name: "Sales desk", brief: "Quote list prices only.", leader: "morgan" });
+    expect(pkg.agents[0]).toMatchObject({
+      name: "Morgan", soul: "Coordinate the desk.\n", playbooks: ["qualify"], skills: ["pricing"], connections: ["crm"],
+      appearance: { color: "green", avatar: { mime: "image/png", data: PNG, crop: "rounded" } },
+    });
+    expect(pkg.rooms).toEqual([{ key: "deal-desk", name: "Deal desk", members: ["morgan", "scout"], bulletin: "Cite sources.",
+      defaultResponder: { kind: "agent", agent: "morgan" } }]);
+    expect(pkg.routines).toEqual([
+      expect.objectContaining({ key: "daily-digest", agent: "scout", continuity: true, enabledAfterInstall: true }),
+      expect.objectContaining({ key: "weekly-review", agent: "morgan", room: "deal-desk", runOn: "maus", enabledAfterInstall: false }),
+    ]);
+    expect(pkg.connections).toEqual([{ key: "crm", label: "crm", reason: "Used by Morgan, Scout",
+      mcp: { transport: "http", url: "https://mcp.example.com/crm", valueNames: ["Authorization"] } }]);
+    expect(pkg.skills?.entries.map((entry) => entry.name)).toEqual(["pricing", "research"]);
+    const text = JSON.stringify(result.document);
+    expect(text).not.toMatch(/Archived|Elsewhere|Support|Only outsiders|"DM"|real-value-never-shared|secret-model|secret-session|thread-|private\/x\.txt|"seed"/);
+    expect(result.skipped).toEqual([
+      { part: "connections[local-tool]", reason: "stdio_server" },
+      { part: "connections[plain-http]", reason: "insecure_address" },
+      { part: "routines[daily-digest].attachments", reason: "files_not_shared" },
+    ]);
+    expect(result.filename).toBe("sales-desk-1.0.0.openmaus.json");
+  });
+
+  it("adds starter notes only when asked, within the caps", () => {
+    expect(createTeamPackageExport(fixture()).document.package.agents.some((agent) => agent.seed)).toBe(false);
+    const withNotes = createTeamPackageExport({ ...fixture(), memoryByBot: new Map([["lead", [
+      { path: "MEMORY.md", text: "- Prefers short answers.\n" },
+      { path: "memory/pricing.md", text: "List price 49.\n" },
+      { path: "memory/huge.md", text: "x".repeat(300 * 1024) },
+      { path: "memory/empty.md", text: "   " },
+    ]]]) });
+    expect(withNotes.document.package.agents[0]?.seed).toEqual({ memory: { "MEMORY.md": "- Prefers short answers.\n", "memory/pricing.md": "List price 49.\n" } });
+    expect(withNotes.skipped).toContainEqual({ part: 'agents[morgan].seed.memory["memory/huge.md"]', reason: "notes_too_large" });
+  });
+
+  it("removes secrets from text and says where", () => {
+    const input = fixture();
+    input.bots[1] = { ...input.bots[1]!, soul: "Log in with password=hunter2hunter2 first." };
+    const result = createTeamPackageExport(input);
+    expect(result.redacted).toEqual(["agents[scout].soul"]);
+    expect(JSON.stringify(result.document)).not.toContain("hunter2hunter2");
+  });
+
+  it("skips pictures that are too large or not what they claim", () => {
+    const big = new Uint8Array(70 * 1024);
+    big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const tooLarge = createTeamPackageExport({ ...fixture(), avatars: { lead: `data:image/png;base64,${Buffer.from(big).toString("base64")}`, scout: `data:image/webp;base64,${PNG}` } });
+    expect(tooLarge.skipped).toEqual(expect.arrayContaining([
+      { part: "agents[morgan].appearance.avatar", reason: "picture_too_large" },
+      { part: "agents[scout].appearance.avatar", reason: "picture_invalid" },
+    ]));
+    expect(tooLarge.document.package.agents.some((agent) => agent.appearance.avatar)).toBe(false);
+    const gif = createTeamPackageExport({ ...fixture(), avatars: { lead: `data:image/gif;base64,R0lGODlhAQABAAAAACw=` } });
+    expect(gif.skipped).toContainEqual({ part: "agents[morgan].appearance.avatar", reason: "picture_invalid" });
+  });
+
+  it("keeps every key after renaming a bot, a group chat, a routine and the team", () => {
+    const first = createTeamPackageExport(fixture());
+    const renamed = fixture();
+    renamed.team = "Revenue desk";
+    for (const record of [...renamed.bots, ...renamed.groups]) if (record.section === "Sales desk") record.section = "Revenue desk";
+    renamed.bots[0] = { ...renamed.bots[0]!, name: "Morgan Lee" };
+    renamed.groups[0] = { ...renamed.groups[0]!, name: "Pipeline room" };
+    renamed.routines[0] = { ...renamed.routines[0]!, name: "Morning digest" };
+    const second = createTeamPackageExport({ ...renamed, published: first.published });
+    expect(second.document.package.id).toBe("sales-desk");
+    expect(second.document.package.release).toBe("1.0.1");
+    expect(second.document.package.agents.map((agent) => agent.key)).toEqual(["morgan", "scout"]);
+    expect(second.document.package.rooms?.map((room) => room.key)).toEqual(["deal-desk"]);
+    expect(second.document.package.routines?.map((routine) => routine.key)).toEqual(["daily-digest", "weekly-review"]);
+    expect(second.filename).toBe("sales-desk-1.0.1.openmaus.json");
+  });
+
+  it("never gives a new bot a key recorded for one that left", () => {
+    const first = createTeamPackageExport(fixture());
+    const input = fixture();
+    input.bots[1] = { ...input.bots[1]!, section: "Support" };
+    input.bots.push(bot("newcomer", "Scout"));
+    const second = createTeamPackageExport({ ...input, published: first.published });
+    expect(second.document.package.agents.map((agent) => agent.key)).toEqual(["morgan", "scout-2"]);
+    expect(second.published.keys.bots).toMatchObject({ scout: "scout", newcomer: "scout-2" });
+  });
+
+  it("starts from the release a team was installed from", () => {
+    const input = fixture();
+    input.bots = input.bots.map((record) => record.section === "Sales desk" && !record.hidden
+      ? { ...record, installedPackage: { id: "acme-sales", name: "Acme sales", release: "2.4.0", requiredApps: [], agentKey: record.id === "lead" ? "boss" : "finder" } }
+      : record);
+    const result = createTeamPackageExport(input);
+    expect(result.document.package.id).toBe("acme-sales");
+    expect(result.document.package.agents.map((agent) => agent.key)).toEqual(["boss", "finder"]);
+  });
+
+  it("refuses plainly when there is nothing to share, a bad version or too much", () => {
+    expect(() => createTeamPackageExport({ ...fixture(), team: "Empty" })).toThrow("Add a bot to this team before sharing it.");
+    expect(() => createTeamPackageExport({ ...fixture(), release: "one" })).toThrow("Use a version like 1.2.3.");
+    const huge = fixture();
+    huge.skillsByBot = new Map([["lead", Array.from({ length: 17 }, (_, index) => ({
+      ...skill(`big-${index}`), instructions: `---\nname: big-${index}\ndescription: big-${index} description\n---\n${"a".repeat(250_000)}`,
+    }))]]);
+    expect(() => createTeamPackageExport(huge)).toThrow(TEAM_TOO_LARGE_MESSAGE);
+  });
 });

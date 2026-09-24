@@ -67,6 +67,7 @@ import {
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
   readAttachment,
+  saveAudio,
   saveFile,
   saveImage,
   saveImageUpload,
@@ -104,6 +105,7 @@ import {
   vpsAliasResourceChangeError,
 } from "./cloud-backend.ts";
 import * as composio from "./composio.ts";
+import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
@@ -261,6 +263,7 @@ import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPos
 import {
   isProjectEmoji,
   mentionedBots,
+  parseConnectorTools,
   roomResponders,
   sectionKey,
   Store,
@@ -293,7 +296,7 @@ import {
   SESSION_SEARCH_SYSTEM_PROMPT,
   workspaceDir,
 } from "./workspace.ts";
-import { readMemoryTopic } from "./workspace.ts";
+import { listMemoryTopics, readMemoryFile, readMemoryTopic, writeMemoryFile, writeMemoryTopic } from "./workspace.ts";
 import {
   MEMORY_INDEX,
   MemoryStoreError,
@@ -403,9 +406,8 @@ import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfile
 import { fetchBotDirectory, matchDirectoryBots, type MatchedDirectoryBot } from "./bot-directory.ts";
 import { scoutProject, suggestTeam } from "./project-scout.ts";
 import { fetchGithubTeam, fetchLibraryTeam, fetchTeamCatalog } from "./team-library.ts";
-import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageAgentAsMember, parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
-import { createTeamManifest, importedMemberProfile, parseTeamManifest } from "./team-manifest.ts";
-import { takeImportName } from "../shared/import-name.ts";
+import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageSummary, parsePackageDocument, renderBotPackageMarkdown, type PackageDocument } from "./bot-package.ts";
+import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -415,7 +417,9 @@ import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
-import { createBotPackageExport, type ExportablePackageSkill } from "./package-export.ts";
+import { createBotPackageExport, createTeamPackageExport, TeamExportError, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
+import { importPackageDocument, importTeamManifest, PackageImportError, type PackageImportDeps, type PackageImportResult } from "./package-import.ts";
+import { readPublishedTeam, writePublishedTeam } from "./published-teams.ts";
 import { createTeamBackup, importTeamBackup } from "./team-backup.ts";
 import { MAX_TEAM_BACKUP_BYTES } from "../shared/team-backup.ts";
 import { shouldMountLocalComputer } from "./local-routing.ts";
@@ -1611,6 +1615,9 @@ function agentsIntegration(
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
+      // Same capability rule for voice: the tool is offered only when this
+      // bot can actually speak, and the route re-checks on every call.
+      OMB_VOICE_NOTES: tts.voiceReady(cfg, (botForThread(botId, threadId) ?? store.bot(botId))?.voice) ? "1" : "0",
     },
   };
 }
@@ -1675,6 +1682,10 @@ function settleDirectFollowup(generation: string | undefined): void {
 // Keep the exact provider/profile settings that own a running conversation.
 // Selecting another thread or changing a default must not retarget its tools.
 const directTurnBots = new Map<string, BotRecord>();
+/** Prompt bytes for the turn in flight, by thread, until the settled turn
+ * books them next to its token usage: stable bytes ride the cacheable
+ * prefix, volatile bytes are the part that legitimately changes. */
+const turnPromptBytes = new Map<string, { stable: number; volatile: number }>();
 let providerFleetReloading = false;
 const turnResources = new TurnResources();
 const sharedComputerControl = new SharedComputerControl(turnResources, () => store.bots.some(bot => botComputerControlSnapshot(bot.id).held));
@@ -1914,19 +1925,22 @@ async function interruptAllDirectThreads(botId: string): Promise<void> {
 }
 const retiredProviderTurns = new RetiredTurnRegistry();
 const pendingCancelledProviderHandshakes = new PendingTurnCancellations();
-const generatedImagesByTurn = new Map<
-  string,
-  Array<NonNullable<Message["attachments"]>[number]>
->();
+// One parking lot for provider output staged mid-turn and attached when the
+// turn settles: generated images since the beginning, voice notes since #1742.
+// Audio entries carry their transcript until the message they land on; the
+// wire attachment itself has no text field.
+type ParkedTurnAttachment = NonNullable<Message["attachments"]>[number] & { text?: string };
 
-function generatedImageTurnKey(threadId: string, turnId?: string): string {
+const turnAttachmentsByTurn = new Map<string, Array<ParkedTurnAttachment>>();
+
+function turnAttachmentKey(threadId: string, turnId?: string): string {
   return `${threadId}:${turnId ?? "active"}`;
 }
 
-function purgeGeneratedImagesForThread(threadId: string): void {
-  for (const [key, attachments] of generatedImagesByTurn) {
+function purgeTurnAttachmentsForThread(threadId: string): void {
+  for (const [key, attachments] of turnAttachmentsByTurn) {
     if (!key.startsWith(`${threadId}:`)) continue;
-    generatedImagesByTurn.delete(key);
+    turnAttachmentsByTurn.delete(key);
     for (const attachment of attachments) {
       deleteAttachment(attachment.path);
     }
@@ -1943,12 +1957,12 @@ function clearCancelledProviderHandshake(threadId: string, ownerId: string): voi
 
 function retireProviderTurn(turnId: string): void {
   retiredProviderTurns.retire(turnId);
-  // A stopped/replaced turn is never folded again. Delete only image files
-  // that were staged for that exact provider turn so unattached output does
-  // not accumulate invisibly on disk.
-  for (const [key, attachments] of generatedImagesByTurn) {
+  // A stopped/replaced turn is never folded again. Delete only staged files
+  // (images, voice notes) that were parked for that exact provider turn so
+  // unattached output does not accumulate invisibly on disk.
+  for (const [key, attachments] of turnAttachmentsByTurn) {
     if (!key.endsWith(`:${turnId}`)) continue;
-    generatedImagesByTurn.delete(key);
+    turnAttachmentsByTurn.delete(key);
     for (const attachment of attachments) {
       deleteAttachment(attachment.path);
     }
@@ -2428,6 +2442,86 @@ function collectExportSkills(
     if (assigned.length) byBot.set(bot.id, assigned);
   }
   return byBot;
+}
+
+/** Skills on one team's bots for a whole-team share. "all" skips a skill
+ * whose stored SKILL.md changed (listed to the person); an explicit list
+ * refuses instead, because the person asked for that exact skill. */
+function collectTeamSkills(
+  bots: readonly BotRecord[],
+  selection: unknown,
+): { ok: true; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] } | { ok: false; error: string } {
+  const all = selection === undefined || selection === "all";
+  if (!all && (!Array.isArray(selection) || selection.some((name) => typeof name !== "string" || !isSkillName(name)))) {
+    return { ok: false, error: "skills must be \"all\" or a list of skill names" };
+  }
+  const available = [...new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)))].sort();
+  const chosen = new Set(all ? available : selection as string[]);
+  const unknown = [...chosen].find((name) => !available.includes(name));
+  if (unknown) return { ok: false, error: `This team has no skill named "${unknown}"` };
+  const skillsByBot = new Map<string, ExportablePackageSkill[]>();
+  const skipped: TeamExportSkip[] = [];
+  for (const bot of bots) {
+    const assigned: ExportablePackageSkill[] = [];
+    for (const listing of listSkills(bot.id)) {
+      if (!chosen.has(listing.name)) continue;
+      const instructions = readSkillFile(bot.id, listing.name);
+      if (instructions === null) {
+        if (!all) return { ok: false, error: `Skill "${listing.name}" changed or is unavailable and cannot be shared safely` };
+        const part = `skills[${listing.name}]`;
+        if (!skipped.some((skip) => skip.part === part)) skipped.push({ part, reason: "skill_changed" });
+        continue;
+      }
+      assigned.push({
+        name: listing.name,
+        description: listing.description,
+        ...(listing.source ? { source: listing.source } : {}),
+        ...(listing.license ? { license: listing.license } : {}),
+        ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
+        instructions,
+      });
+    }
+    if (assigned.length) skillsByBot.set(bot.id, assigned);
+  }
+  return { ok: true, skillsByBot, skipped, available };
+}
+
+/** A bot's starter notes: MEMORY.md and its topic files. Daily logs never
+ * travel (they are closer to chat history than to notes). */
+function starterNotes(botId: string): Array<{ path: string; text: string }> {
+  const notes: Array<{ path: string; text: string }> = [];
+  const index = readMemoryFile(botId).text;
+  if (index.trim()) notes.push({ path: "MEMORY.md", text: index });
+  for (const topic of listMemoryTopics(botId).sort((a, b) => a.name.localeCompare(b.name))) {
+    const text = readMemoryTopic(botId, topic.name);
+    if (text?.trim()) notes.push({ path: `memory/${topic.name}`, text });
+  }
+  return notes;
+}
+
+/** The importer's view of this installation. Pictures become ordinary local
+ * avatars, connection slots ordinary (switched-off) MCP servers, starter
+ * notes ordinary memory writes. */
+function packageImportDeps(selection: ModelSelection): PackageImportDeps {
+  return {
+    store,
+    routines: routines!,
+    skills: { install: installSkill, setEnabled: setSkillEnabled },
+    memory: { writeIndex: writeMemoryFile, writeTopic: writeMemoryTopic },
+    mcp: { servers: () => cfg.mcpServers ?? {}, refusal: mcpPolicyRefusal, persist: persistMcpServers },
+    sections: { writeBrief: (section, text) => void writeSectionContext(section, text) },
+    images: {
+      save: (bytes, mime) => {
+        const avatarUrl = botAvatarUrlFromStoredPath(saveImage(Buffer.from(bytes), mime).path);
+        if (!avatarUrl) throw new Error("A picture in this package could not be stored");
+        return avatarUrl;
+      },
+    },
+    broadcast: (event) => event.kind === "bot"
+      ? broadcast({ kind: "bot", bot: publicBot(event.bot) })
+      : broadcast({ kind: "group", group: publicGroupState(event.group) }),
+    defaultSelection: () => selection,
+  };
 }
 
 function checkedGroupResponder(value: unknown, memberIds: string[]): GroupDefaultResponder | null {
@@ -5625,10 +5719,10 @@ bus.subscribe((event: RuntimeEvent) => {
         try {
           const decoded = decodeGeneratedImage(event.data);
           const saved = saveImage(decoded.bytes, decoded.mime);
-          const key = generatedImageTurnKey(event.threadId, event.turnId);
-          const current = generatedImagesByTurn.get(key) ?? [];
+          const key = turnAttachmentKey(event.threadId, event.turnId);
+          const current = turnAttachmentsByTurn.get(key) ?? [];
           current.push({ kind: "image", path: saved.path, mime: saved.mime });
-          generatedImagesByTurn.set(key, current);
+          turnAttachmentsByTurn.set(key, current);
         } catch (error) {
           pushMessage({
             role: "bot",
@@ -5903,28 +5997,63 @@ bus.subscribe((event: RuntimeEvent) => {
       // thread nobody types in again (a deleted bot's) is not held forever.
       const internal = isInternalTurn(event.threadId);
       clearInternalTurn(event.threadId);
-      const generatedKey = generatedImageTurnKey(event.threadId, event.turnId);
-      const generated = generatedImagesByTurn.get(generatedKey) ?? [];
-      generatedImagesByTurn.delete(generatedKey);
-      if (generated.length) {
+      const generatedKey = turnAttachmentKey(event.threadId, event.turnId);
+      const generated = turnAttachmentsByTurn.get(generatedKey) ?? [];
+      turnAttachmentsByTurn.delete(generatedKey);
+      // A turn that never completed never lands its half-said note: parked
+      // audio is deleted when the settle is not ok (person stop, provider
+      // failure) rather than posted as if the turn finished (#1742).
+      // Generated images keep their long-standing settle-anyway behavior.
+      for (const attachment of generated) {
+        if (event.ok || attachment.kind !== "audio") continue;
+        deleteAttachment(attachment.path);
+      }
+      const settled = event.ok || !generated.length
+        ? generated
+        : generated.filter((attachment) => attachment.kind !== "audio");
+      if (settled.length) {
         const response = [...store.messagesFor(event.threadId)].reverse().find(
           (message) =>
             message.role === "bot" &&
             message.kind === "text" &&
             message.turnId === completedTurnId,
         );
+        // A voice note's text is its transcript: the visible caption search,
+        // compaction and notifications read (#1740 decision 3).
+        const transcript = settled
+          .filter((attachment) => attachment.kind === "audio" && attachment.text)
+          .map((attachment) => attachment.text!.trim())
+          .filter(Boolean)
+          .join("\n\n");
+        const staged = settled.map((attachment) =>
+          attachment.kind === "audio"
+            ? { kind: "audio" as const, path: attachment.path, mime: attachment.mime }
+            : attachment,
+        );
         if (response) {
           store.patchMessage(event.threadId, response.id, {
-            attachments: [...(response.attachments ?? []), ...generated],
+            attachments: [...(response.attachments ?? []), ...staged],
+            // The note's text is its transcript and stays visible beside a
+            // written epilogue: the wire audio carries no text, so letting
+            // the epilogue replace it would erase what was said (#1740
+            // decision 3).
+            ...(transcript
+              ? {
+                  text: [response.text?.trim(), redactSecretsInText(transcript)]
+                    .filter(Boolean)
+                    .join("\n\n"),
+                }
+              : {}),
           });
         } else {
-          // Some image turns have no textual epilogue. Keep the image as the
-          // terminal assistant response instead of inventing model words.
+          // Some turns have no textual epilogue. Keep the attachment as the
+          // terminal assistant response instead of inventing model words; a
+          // voice note's own text is the visible transcript there.
           pushMessage({
             role: "bot",
             kind: "text",
-            text: "",
-            attachments: generated,
+            text: transcript,
+            attachments: staged,
             turnId: completedTurnId,
           });
         }
@@ -6011,6 +6140,8 @@ bus.subscribe((event: RuntimeEvent) => {
         const measuredSelection = directTurnBots.get(event.threadId)?.modelSelection ?? selection;
         store.patchTask(bot.id, event.threadId, { lastContextModel: Number.isFinite(lastContext?.tokens) && (lastContext?.tokens ?? 0) > 0
           ? `${measuredSelection.instanceId}:${measuredSelection.model}` : undefined });
+        const promptBytes = turnPromptBytes.get(event.threadId);
+        turnPromptBytes.delete(event.threadId);
         bookTurnUsage({
           botId: bot.id,
           botName: bot.name,
@@ -6021,6 +6152,7 @@ bus.subscribe((event: RuntimeEvent) => {
           input: tokens?.input ?? 0,
           output: tokens?.output ?? 0,
           ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
+          ...(promptBytes ? { promptBytes } : {}),
           costUsd: event.cost ?? null,
           trigger: routineRun
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
@@ -6092,6 +6224,8 @@ bus.subscribe((event: RuntimeEvent) => {
         const tokens = event.usage ?? lastReported;
         const speakingBot = store.bot(speaker.botId);
         const selection = speakingBot?.modelSelection;
+        const promptBytes = turnPromptBytes.get(event.threadId);
+        turnPromptBytes.delete(event.threadId);
         bookTurnUsage({
           botId: speaker.botId,
           botName: speaker.name,
@@ -6102,6 +6236,7 @@ bus.subscribe((event: RuntimeEvent) => {
           input: tokens?.input ?? 0,
           output: tokens?.output ?? 0,
           ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
+          ...(promptBytes ? { promptBytes } : {}),
           costUsd: event.cost ?? null,
           trigger: routineRun
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName }
@@ -8129,6 +8264,7 @@ async function startTurn(
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: boundedCoordination && tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : mentionPrompt(tagged) },
       ]);
+      turnPromptBytes.set(threadId, { stable: Buffer.byteLength(prompt.stable), volatile: Buffer.byteLength(prompt.volatile) });
       runningTurnEngines.set(threadId, instance);
       // The prompt carries the soul as saved now. If it changed during setup,
       // decide again from what is actually sent — except on a continuation
@@ -8173,6 +8309,9 @@ async function startTurn(
         system: prompt.text,
         systemStable: prompt.stable,
         systemVolatile: prompt.volatile,
+        // the mentions half describes this turn: identical consecutive tags
+        // must still deliver their note (SendTurnInput.mentionTurn)
+        mentionTurn: tagged.length > 0,
         integrations,
         mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
         cwd,
@@ -8874,7 +9013,7 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           // Deletion removes the thread before a late turn.completed can fold
           // staged provider images into a message, so dispose them here.
           for (const task of store.tasks(bot.id)) {
-            purgeGeneratedImagesForThread(task.threadId);
+            purgeTurnAttachmentsForThread(task.threadId);
             clearTurnDigestState(task.threadId);
             settleDirectFollowup(directTurnGenerationByThread.get(task.threadId));
             directTurnGenerationByThread.delete(task.threadId);
@@ -10024,6 +10163,7 @@ async function runGroupMemberTurn(
     });
     onProviderHandshakeStarted?.();
     providerDispatched = true;
+    turnPromptBytes.set(threadId, { stable: Buffer.byteLength(roomSystem.stable), volatile: Buffer.byteLength(roomSystem.volatile) });
     runningTurnEngines.set(threadId, instance);
     guardTurnDispatch(instance.adapter.sendTurn({
         threadId,
@@ -14272,6 +14412,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         );
         const safeBot = store.patchBot(created.id, {
           composio: false,
+          connectorTools: {},
           autoApprove: false,
           approvePeerComms: false,
         })!;
@@ -14400,6 +14541,43 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         return json(res, 201, { messageId: message.id, label: target.label });
       }
+      if (method === "POST" && path === "/api/internal/voice-note") {
+        const body = await readInternalBody();
+        const text = typeof body.text === "string" ? body.text.trim() : "";
+        if (!text) return json(res, 400, { error: "text required" });
+        if (text.length > 1000) return json(res, 413, { error: "voice notes are limited to 1000 characters" });
+        // Advertisement is presentation only; the capability is re-checked
+        // here so a call that reaches an unconfigured workspace answers with
+        // the setup guidance instead of a provider failure.
+        const voiceBot = botForThread(internalSender.id, internalCapability.threadId) ?? internalSender;
+        try {
+          const audio = await tts.speak(cfg, text, voiceBot.voice);
+          // Synthesis can outlive its turn: a stop or settle during the await
+          // revokes the capability and clears the live turn. Re-check both
+          // before saving so the clip cannot park under the :active fallback
+          // or onto a later turn's key (#1742).
+          requireActiveInternalCapability();
+          const turnId = liveTurnByThread.get(internalCapability.threadId);
+          if (!turnId) {
+            return json(res, 409, { error: "this turn has not started yet or already ended" });
+          }
+          const saved = saveAudio(Buffer.from(audio.bytes), audio.mime);
+          const key = turnAttachmentKey(internalCapability.threadId, turnId);
+          const current = turnAttachmentsByTurn.get(key) ?? [];
+          current.push({ kind: "audio", path: saved.path, mime: saved.mime, text });
+          turnAttachmentsByTurn.set(key, current);
+          return json(res, 201, { attached: true });
+        } catch (error) {
+          // "no voice configured" is a setup state, not a provider failure —
+          // 409 with the hint, exactly like /api/tts/speak.
+          if (error instanceof tts.NoVoiceConfigured) return json(res, 409, { error: error.message });
+          const status = (error as { status?: number }).status;
+          if (typeof status === "number" && status >= 400 && status < 500) {
+            return json(res, status, { error: error instanceof Error ? error.message : "voice note failed" });
+          }
+          throw error;
+        }
+      }
       if (method === "POST" && path === "/api/internal/connectors/mcp") {
         const body = await readInternalBody();
         // Reading a streamed MCP body yields to ordinary settings requests.
@@ -14408,6 +14586,72 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const currentSender = store.bot(internalCapability.botId);
         if (!currentSender || currentSender.composio === false || !composio.configured(cfg)) {
           return json(res, 403, { error: "connected apps are not enabled for this bot" });
+        }
+        // Per-bot tool grants (issue #1736): verdict every tools/call frame
+        // against the calling bot's connectorTools before it reaches
+        // Composio. A bot with no grants record keeps the legacy all-tools
+        // behavior; a grants record makes every unrecognized shape a deny.
+        // Rows are fire-and-forget: a log failure must never take the call
+        // (or its refusal) down with it.
+        const call = connectorCallFromFrame(body);
+        if (call.kind === "unrecognized") {
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId,
+            botId: currentSender.id,
+            botName: currentSender.name,
+            tool: call.invoked,
+            summary: call.reason,
+            decision: "user-denied",
+            source: "connector-scope",
+            rule: "connectorTools",
+          });
+          const refusal = connectorUnrecognizedText(call.invoked, call.reason);
+          res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+          return res.end(JSON.stringify({
+            jsonrpc: "2.0",
+            id: (body as { id?: unknown }).id ?? null,
+            result: { content: [{ type: "text", text: refusal }], isError: true },
+          }));
+        }
+        if (call.kind === "tools") {
+          const verdict = evaluateConnectorTools(call.names, currentSender.connectorTools);
+          if (!verdict.allowed) {
+            for (const denial of verdict.denials) {
+              appendDecision(DATA_DIR, {
+                threadId: internalCapability.threadId,
+                botId: currentSender.id,
+                botName: currentSender.name,
+                tool: denial.tool,
+                summary: denial.service === null
+                  ? "tool name does not name a service"
+                  : denial.onGrantedService
+                    ? "tool is not in this service's grant"
+                    : "service is not granted",
+                decision: "user-denied",
+                source: "connector-scope",
+                rule: denial.service ? "connectorTools." + denial.service : "connectorTools",
+              });
+            }
+            const refusal = connectorRefusalText(verdict.denials);
+            res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+            return res.end(JSON.stringify({
+              jsonrpc: "2.0",
+              id: (body as { id?: unknown }).id ?? null,
+              result: { content: [{ type: "text", text: refusal }], isError: true },
+            }));
+          }
+          // One row per allowed call, naming the first target: the audit
+          // trail reads "which bot ran what", not one row per tool.
+          appendDecision(DATA_DIR, {
+            threadId: internalCapability.threadId,
+            botId: currentSender.id,
+            botName: currentSender.name,
+            tool: call.names[0],
+            summary: ("allowed " + call.names.join(", ")).slice(0, 240),
+            decision: "user-approved",
+            source: "connector-scope",
+            rule: verdict.rule,
+          });
         }
         const upstream = await composio.relayMcp(
           cfg,
@@ -15320,8 +15564,60 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 201, { group: { ...publicGroupState(group), messages: [] } });
     }
     if (method === "POST" && path === "/api/teams/export") {
-      const body = await readBody(req);
+      // Pictures the Share dialog prepared ride this body, so it is larger
+      // than the default JSON limit (the document itself is capped at 4 MB).
+      const body = await readBody(req, 8 * 1024 * 1024);
       const profileName = cfg.profile?.name?.trim();
+      if (body.format === "package" && body.version === 2) {
+        // One team, whole, except its chat history (package format v2).
+        if (typeof body.team !== "string") return json(res, 400, { error: "Choose a team to share." });
+        const team = body.team.trim();
+        if (team && !store.sections.includes(team) && !store.bots.some((bot) => sectionKey(bot.section) === team)) {
+          return json(res, 404, { error: "That team no longer exists." });
+        }
+        const optional = (value: unknown) => (typeof value === "string" ? value : undefined);
+        const teamBots = store.bots.filter((bot) => !bot.hidden && sectionKey(bot.section) === team);
+        const skills = collectTeamSkills(teamBots, body.skills);
+        if (!skills.ok) return json(res, 400, { error: skills.error });
+        const avatars = body.avatars && typeof body.avatars === "object" && !Array.isArray(body.avatars)
+          ? body.avatars as Record<string, unknown>
+          : undefined;
+        try {
+          const exported = createTeamPackageExport({
+            team,
+            name: optional(body.name),
+            tagline: optional(body.tagline),
+            summary: optional(body.summary),
+            release: optional(body.release),
+            notes: optional(body.notes),
+            authorName: profileName,
+            bots: store.bots,
+            groups: store.groups,
+            routines: routines!.listRoutines(),
+            brief: readSectionContext(team)?.text,
+            published: readPublishedTeam(team),
+            skillsByBot: skills.skillsByBot,
+            memoryByBot: body.includeMemory === true ? new Map(teamBots.map((bot) => [bot.id, starterNotes(bot.id)])) : undefined,
+            avatars,
+            mcpServers: cfg.mcpServers ?? {},
+            skipped: skills.skipped,
+          });
+          // A preview (the dialog's live counts) never records keys; saving
+          // the file does, so renaming anything later keeps its identity.
+          if (body.dryRun !== true) writePublishedTeam(team, exported.published);
+          return json(res, 200, {
+            document: exported.document,
+            filename: exported.filename,
+            redacted: exported.redacted,
+            skipped: exported.skipped,
+            summary: packageSummary(exported.document),
+            choices: { skills: skills.available },
+          });
+        } catch (error) {
+          if (error instanceof TeamExportError) return json(res, error.status, { error: error.message });
+          throw error;
+        }
+      }
       const name =
         typeof body.name === "string" && body.name.trim()
           ? body.name.trim()
@@ -15485,165 +15781,52 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 400, { error: error instanceof Error ? error.message : "Backup could not be imported" });
         }
       }
-      let packageDocument: ReturnType<typeof parseBotPackage> | null = null;
+      // Every package (v1 JSON, BotMRR Markdown, v2) is read by the one shared
+      // parser as a FILE: it cannot claim a publisher, and its skills and
+      // routines arrive off. A body field such as `trust` is just an unknown
+      // field of the document and is stripped; only the organization library
+      // module ever imports with trust "org".
+      let packageDocument: PackageDocument | null = null;
       let manifest: ReturnType<typeof parseTeamManifest> | null = null;
       try {
-        if (isBotPackage(body)) packageDocument = parseBotPackage(body);
+        if (isBotPackage(body)) packageDocument = parsePackageDocument(body, { trust: "file" });
         else manifest = parseTeamManifest(body);
       } catch (error) {
         return json(res, 400, { error: error instanceof Error ? error.message : "Invalid bot package" });
       }
-      const pkg = packageDocument?.package;
-      const importName = pkg?.name ?? manifest!.team.name;
-      const sourceMembers = pkg
-        ? pkg.agents.map((agent) => ({ member: packageAgentAsMember(agent), playbookKeys: agent.playbooks ?? [], skillNames: agent.skills ?? [] }))
-        : manifest!.team.members.map((member) => ({ member, playbookKeys: [] as string[], skillNames: [] as string[] }));
-
-      const importedBots: ReturnType<typeof store.createBot>[] = [];
-      const createdGroups: GroupRecord[] = [];
-      const createdRoutineIds: string[] = [];
-      // Names already in use, hidden bots included: an archived bot can be
-      // un-archived later, and a revived duplicate would be just as
-      // ambiguous then.
-      const takenNames = new Set(store.bots.map((bot) => bot.name.trim().toLowerCase()));
-      const memberIds = new Map<string, string>();
-      let group: GroupRecord | undefined;
-      let importSection: string | undefined;
+      const deps = packageImportDeps(await defaultSelection());
+      const options = {
+        mode: importMode as "add" | "project",
+        cwd: projectCwd,
+        room: url.searchParams.get("room") ?? undefined,
+        ...(importVisibility ? { visibility: importVisibility } : {}),
+      };
+      let imported: PackageImportResult;
       try {
-        const selection = await defaultSelection();
-        const existingSections = new Set(
-          [...store.sections, ...store.bots.map((bot) => bot.section), ...store.groups.map((candidate) => candidate.section)]
-            .filter((section): section is string => Boolean(section?.trim()))
-            .map((section) => section.trim().toLowerCase()),
-        );
-        // Every template gets its own section, including legacy teams and
-        // project imports. Never merge into an existing section (or replace
-        // its Chief). Keep the name editable through the 60-character API.
-        importSection = takeImportName(importName, existingSections, 60);
-        const playbookByKey = new Map((pkg?.playbooks ?? []).map((playbook) => [playbook.key, playbook]));
-        const packageSkillByName = new Map((pkg?.skills?.entries ?? []).map((skill) => [skill.name, skill]));
-        for (const source of sourceMembers) {
-          const member = source.member;
-          // importedMemberProfile is the authority boundary: persona fields
-          // only, colliding names numbered. seedMessages: false — an
-          // imported bot must not open by greeting the user as though it
-          // were new. composio: false — a shared persona never starts with
-          // reach into the user's connected apps (absence would mean
-          // allowed); the user can switch it on per bot after reading who
-          // they got.
-          const created = store.createBot(
-            {
-              ...importedMemberProfile(member, takenNames),
-              modelSelection: selection,
-              section: importSection,
-              ...(importVisibility ? { visibility: importVisibility } : {}),
-            },
-            { seedMessages: false },
-          );
-          importedBots.push(created);
-          const installedPlaybooks = source.playbookKeys.flatMap((key) => {
-            const playbook = playbookByKey.get(key);
-            return playbook ? [{ ...playbook }] : [];
-          });
-          store.patchBot(created.id, {
-            composio: false,
-            ...(installedPlaybooks.length ? { playbooks: installedPlaybooks } : {}),
-            ...(pkg
-              ? {
-                  installedPackage: {
-                    id: pkg.id,
-                    name: pkg.name,
-                    release: pkg.release,
-                    requiredApps: pkg.requirements.apps.map((app) => ({ ...app })),
-                  },
-                }
-              : {}),
-          });
-          for (const skillName of source.skillNames) {
-            const skill = packageSkillByName.get(skillName);
-            if (!skill) throw new Error(`Package skill "${skillName}" is unavailable`);
-            const installed = installSkill(created.id, skill.source ?? `package:${pkg!.id}`, [
-              { path: "SKILL.md", content: skill.instructions },
-            ]);
-            if ("error" in installed) {
-              throw new Error(`Package skill "${skillName}" could not be imported: ${installed.error}`);
-            }
-          }
-          memberIds.set(member.key, created.id);
-        }
-
-        // A package is an explicit structure import: its rooms are created
-        // from package-local keys only, then normalized to fresh bot ids.
-        for (const room of pkg?.rooms ?? []) {
-          const ids = room.members.map((key) => memberIds.get(key)!);
-          let created = store.createGroup(room.name, ids, false, importSection);
-          createdGroups.push(created);
-          const defaultResponder = room.defaultResponder.kind === "agent"
-            ? { kind: "member" as const, botId: memberIds.get(room.defaultResponder.agent)! }
-            : { kind: room.defaultResponder.kind } as const;
-          created = store.patchGroup(created.id, {
-            bulletin: room.bulletin ?? "",
-            defaultResponder,
-            setupCompletedAt: Date.now(),
-          }) ?? created;
-        }
-
-        for (const routine of pkg?.routines ?? []) {
-          const created = routines!.create({
-            name: routine.name,
-            prompt: routine.prompt,
-            botId: memberIds.get(routine.agent)!,
-            runOn: routine.runOn,
-            enabled: false,
-            schedule: routine.schedule,
-            durationMinutes: routine.durationMinutes,
-            ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
-            ...(routine.overlap ? { overlap: routine.overlap } : {}),
-          });
-          createdRoutineIds.push(created.id);
-        }
-
-        if (pkg?.chiefOfStaff) {
-          store.setChiefOfStaff(memberIds.get(pkg.chiefOfStaff)!);
-        }
-
-        // The room is created last, so a failure anywhere above leaves no
-        // half-built project behind — the catch below deletes the bots and
-        // there is no room pointing at them.
-        if (!pkg && importMode === "project" && importedBots.length > 0) {
-          const roomName = url.searchParams.get("room")?.trim() || manifest!.team.name;
-          group = store.createGroup(roomName, importedBots.map((bot) => bot.id), false, importSection);
-          createdGroups.push(group);
-          if (projectCwd) {
-            // `cwd` is the folder the room WANTS; the store pins it on the
-            // first turn (pinGroupCwd). Setting the pin here would decide it
-            // before anyone has worked, which is the store's call, not ours.
-            group = store.patchGroup(group.id, { cwd: projectCwd }) ?? group;
-          }
-          broadcast({ kind: "group", group: publicGroupState(group) });
-        }
-
-        const publicBots = importedBots.map((bot) => publicBot(store.bot(bot.id)!));
-        for (const bot of publicBots) broadcast({ kind: "bot", bot });
-
-        return json(res, 201, {
-          name: importName,
-          bots: publicBots,
-          group,
-          groups: createdGroups.map((created) => ({ ...created, messages: [] })),
-          routines: createdRoutineIds.flatMap((id) => routines!.listRoutines().filter((routine) => routine.id === id)),
-        });
+        const result = packageDocument
+          ? importPackageDocument(packageDocument, { ...options, trust: "file" }, deps)
+          : importTeamManifest(manifest!, options, deps);
+        // A file import always gets a fresh install id, so it never reports
+        // "already added"; that answer belongs to the organization library.
+        if (result.alreadyAdded) return json(res, 200, result);
+        imported = result;
       } catch (error) {
-        // A room of deleted members must not survive either — patchGroup can
-        // throw (disk) after createGroup already saved.
-        for (const routineId of createdRoutineIds) routines!.remove(routineId);
-        for (const created of createdGroups) store.deleteGroup(created.id);
-        for (const bot of importedBots) store.deleteBot(bot.id);
-        // Empty teams are now durable too. This import allocated a fresh
-        // identity, so its failed installation must retire that identity.
-        if (importSection && store.sections.includes(importSection)) store.changeEmptySection(importSection, null);
+        if (error instanceof PackageImportError) return json(res, error.status, { error: error.message, code: error.code });
         throw error;
       }
+      return json(res, 201, {
+        name: imported.name,
+        section: imported.section,
+        bots: imported.bots.map((bot) => publicBot(store.bot(bot.id) ?? bot)),
+        group: imported.group,
+        groups: imported.groups.map((created) => ({ ...created, messages: [] })),
+        routines: imported.routines,
+        offeredSkills: imported.offeredSkills,
+        connections: imported.connections,
+        skipped: imported.skipped,
+        brief: imported.brief,
+        notes: imported.notes,
+      });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/setup$/);
     if (m && method === "PATCH") {
@@ -16656,6 +16839,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
+      }
+      // which of those apps' tools this bot may call (connector grants 1/5:
+      // data model only — enforcement lands with slice 2). null returns the
+      // bot to boolean-only legacy behavior; {} means no tools.
+      if (body.connectorTools !== undefined) {
+        if (body.connectorTools === null) {
+          patch.connectorTools = undefined;
+        } else {
+          const parsed = parseConnectorTools(body.connectorTools);
+          if (!parsed.ok) return json(res, 400, { error: parsed.error });
+          patch.connectorTools = parsed.grants;
+        }
       }
       // Queue this bot's direct messages behind outstanding delegated work
       // instead of steering the conversation immediately (#1194).

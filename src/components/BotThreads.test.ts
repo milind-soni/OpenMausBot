@@ -22,8 +22,8 @@ const bot: Bot = {
 
 describe("sidebar bot threads", () => {
   it("hides generated workspace IDs while retaining useful user-chosen folder names", () => {
-    expect(workingFolderLabel("/tmp/fixture/task-workspaces/maus/idle", "maus", "idle")).toBe("Thread workspace");
-    expect(workingFolderLabel("C:\\fixture\\task-workspaces\\maus\\idle\\", "maus", "idle")).toBe("Thread workspace");
+    expect(workingFolderLabel("/tmp/fixture/task-workspaces/maus/idle", "maus", "idle")).toBe("Task folder");
+    expect(workingFolderLabel("C:\\fixture\\task-workspaces\\maus\\idle\\", "maus", "idle")).toBe("Task folder");
     expect(workingFolderLabel("/Users/example/Projects/Website/", "maus", "idle")).toBe("Website");
     expect(workingFolderLabel("/Users/example/task-workspaces/notes", "maus", "idle")).toBe("notes");
   });

@@ -33,6 +33,11 @@ export interface UsageRow {
   input: number;
   output: number;
   cachedInput?: number;
+  /** Bytes of the system prompt the driver was handed, split at the
+   * volatile boundary: stable bytes ride the cacheable prefix, volatile
+   * bytes are re-delivered in the turn that changed them. Present only
+   * when the server assembled a split prompt for the turn. */
+  promptBytes?: { stable: number; volatile: number };
   /** What the turn cost. As the engine reported it (real on a metered key,
    * an equivalent on a subscription), or, for an engine that reports tokens
    * but no price, estimated from list prices (server/model-prices.ts) or the
@@ -80,6 +85,14 @@ const clean = (value: unknown): number =>
 const finiteOrNull = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 
+const promptBytesOf = (value: unknown): { stable: number; volatile: number } | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as { stable?: unknown; volatile?: unknown };
+  return typeof record.stable === "number" && typeof record.volatile === "number"
+    ? { stable: clean(record.stable), volatile: clean(record.volatile) }
+    : null;
+};
+
 function monthKey(at: Date): string {
   return `${at.getUTCFullYear()}-${String(at.getUTCMonth() + 1).padStart(2, "0")}`;
 }
@@ -99,12 +112,15 @@ export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId">): s
 /** Append one settled turn. Fire-and-forget (see the module comment): the
  * returned promise never rejects, and says whether the row reached disk. */
 export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): Promise<boolean> {
+  const { promptBytes: rawPromptBytes, ...rest } = row;
+  const promptBytes = promptBytesOf(rawPromptBytes);
   const record: UsageRow = {
-    ...row,
+    ...rest,
     at: row.at ?? new Date().toISOString(),
     input: clean(row.input),
     output: clean(row.output),
     ...(typeof row.cachedInput === "number" ? { cachedInput: clean(row.cachedInput) } : {}),
+    ...(promptBytes ? { promptBytes } : {}),
     costUsd: finiteOrNull(row.costUsd),
   };
   // A cost is labelled with where it came from; an unpriced row carries no label.
