@@ -1,0 +1,61 @@
+---
+title: Use OpenMausBot at work
+description: Sign in with your organisation to use the AI models your company provides, alongside your own.
+icon: Building2
+---
+
+If your company uses OpenMaus Admin, you can sign the desktop app in to your organisation. Your bots can then use the AI models your company approved. This is optional: OpenMausBot works without any account, and signing in changes nothing you already set up.
+
+<Callout type="info" title="What stays yours">
+  Company models are added alongside your own engines, accounts and local models, which stay available. Connecting does not upload your chat history. Requests you send to a Company model go through your organisation's gateway.
+</Callout>
+
+## Before you start
+
+- Install the desktop app on this computer. See [Installation](./installation.mdx).
+- Ask your administrator to invite your work email address. You sign in with exactly that address.
+
+## Sign in
+
+1. **Start in the app.**
+   - On first run, the **Your engines** step shows "Using OpenMausBot at work? Sign in with your organisation." Choose **Sign in**.
+   - Any time later, open **Settings → Organisation** and choose **Sign in with your organisation**.
+   - A link from your administrator that opens OpenMausBot takes you straight to Settings → Organisation.
+2. **Finish in your browser.** The app opens the Admin sign-in page. Sign in with your invited work address; Admin emails you a six-digit code.
+3. **Check the code.** The page shows a code for this computer. The app shows the same code: in the welcome flow next to "Finish in your browser", and in Settings → Organisation under **Security details**. If they match, approve the connection.
+4. **Back in the app**, the connection completes by itself. The welcome flow shows how many Company models your organisation approved.
+
+The sign-in page is valid for ten minutes. If it expires, start again from the app. To stop a sign-in you started by mistake, choose **Cancel sign-in**.
+
+## Use a Company model
+
+Company models appear in each bot's model picker as **Company · *your organisation* · Claude**, **Codex** or **OpenRouter**. Nothing switches automatically: choose a Company entry for each bot that should use it.
+
+- **Company Claude** and **Company Codex** run through the Claude Code and Codex engines, so that engine must be installed on this computer. Install it the same way as a personal engine (see [Agent engines](../providers/index.mdx)); you do not need to sign in to a personal account or have a personal subscription.
+- **Company OpenRouter** needs nothing extra.
+
+If you only have Company models, the welcome flow's engines step reads "Everything is ready". Your own engines stay listed below it as optional.
+
+## Another Admin address
+
+Most organisations use the standard Admin address. If your administrator gave you a different one:
+
+- In the welcome flow, choose **Other Admin address**. This opens Settings → Organisation.
+- In Settings → Organisation, open **Advanced**, enter the address under **Custom Admin portal URL**, and choose **Sign in to custom Admin**.
+
+## Disconnect
+
+Open **Settings → Organisation**, choose **Disconnect…**, then **Disconnect from organization**. Company models stop on this computer. Your chats, personal accounts and local models remain, and Company turns never switch to your personal billing.
+
+If the app says Company access needs a new sign-in, open Settings → Organisation and follow what it says there.
+
+## If something goes wrong
+
+- **No code arrives.** Codes only go to invited addresses. Check your spam folder and the spelling, or ask your administrator to invite exactly the address you use.
+- **"No company models are available yet."** Your organisation has not approved any models for you. Ask your administrator.
+- **Can't find the Organisation section.** It is in Settings on the packaged desktop app, not in a web browser.
+- **Windows says "Unknown publisher".** See [Installation](./installation.mdx) for the SmartScreen note.
+
+## Hosted team workspaces
+
+Some organisations give you a link to a shared team workspace instead. It runs in your browser, so there is nothing to install. Sign in through the invitation your administrator sent. The first time you open it, a short note explains that bots, chats and files there are shared with your team. Administrators get a short welcome instead, which ends by naming the first bot.

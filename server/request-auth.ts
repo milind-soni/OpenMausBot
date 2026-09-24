@@ -15,8 +15,19 @@ import { isIP } from "node:net";
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
 import { denyReason as companionDenial } from "../companion/src/routes.ts";
 
+/** How much a loopback request without a session is trusted.
+ *
+ * `owner`: the machine's owner (a desktop, a one-person headless server).
+ * `service`: a shared server where every bot's shell is also a loopback
+ * caller, so "local" no longer means "the owner". Loopback may then use
+ * only SERVICE_ALLOW below: health, the Slack worker's guarded routes, the
+ * bot capability routes and the reads those callers need. Every other route,
+ * and every admin change, needs a real session. */
+export type LoopbackTrust = "owner" | "service";
+
 export type RequestAuth =
-  | { kind: "loopback"; scopes: readonly Scope[] }
+  // `trust` is present only when reduced; an owner request looks as it always did.
+  | { kind: "loopback"; scopes: readonly Scope[]; trust?: "service" }
   | { kind: "session"; session: SessionRecord; via: "bearer" | "cookie" | "ticket"; scopes: readonly Scope[] };
 
 export interface RequestAuthResult {
@@ -27,6 +38,89 @@ export interface RequestAuthResult {
 }
 
 const LOOPBACK_SCOPES: readonly Scope[] = ["admin", "client"];
+const SERVICE_SCOPES: readonly Scope[] = ["client"];
+
+/** What a `service`-trust loopback caller may reach, and nothing else:
+ *
+ * - liveness and identity: health, who-am-I, edition and brand;
+ * - the cloud Slack worker (openmaus-cloud server/slack-worker.ts), which
+ *   shares the workspace's network namespace and reads the bot list, a
+ *   thread's messages and a bot's PNG picture, creates a thread, sends
+ *   through the guarded route, watches and stops its exact request,
+ *   withdraws a queued line, and declines a card (the handler refuses any
+ *   other answer from this caller);
+ * - the turn-scoped bot capability routes, whose own bearer token is the
+ *   authorization (checked in the handler), and the test-only capability
+ *   mint that exists only when its private key is set.
+ *
+ * Residual risk, not closed here: a bot's shell is a loopback caller too, so
+ * it can do everything the worker does. It can post into any bot's thread
+ * through the guarded route, including an existing Full-access thread
+ * (`expectedApprovalMode: "full"`), and while the operator's shared Full
+ * access is on it can open new Full-access threads; either way work runs with
+ * Full access and no card, whoever asked the bot. It can also stop a request
+ * and decline a card. It can no longer change settings, keys, instances, MCP
+ * servers, webhooks, sessions, people, budgets or fleet, loosen a bot's
+ * permissions, or approve anything. The planned fix is a relay token that only
+ * the Slack worker holds, so these routes stop answering session-less
+ * loopback at all. */
+export const SERVICE_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: RegExp }> = [
+  { methods: ["GET"], path: /^\/api\/health$/ },
+  { methods: ["GET"], path: /^\/api\/auth\/session$/ },
+  { methods: ["GET"], path: /^\/api\/edition$/ },
+  { methods: ["GET"], path: /^\/api\/brand$/ },
+  { methods: ["GET"], path: /^\/api\/bots$/ },
+  { methods: ["GET"], path: /^\/api\/threads\/[\w-]+\/messages$/ },
+  { methods: ["GET"], path: /^\/api\/attachments\/[\w.-]+$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/tasks$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/messages\/guarded$/ },
+  { methods: ["GET"], path: /^\/api\/bots\/[\w-]+\/requests\/[\w-]+$/ },
+  { methods: ["POST"], path: /^\/api\/bots\/[\w-]+\/requests\/[\w-]+\/interrupt$/ },
+  { methods: ["DELETE"], path: /^\/api\/bots\/[\w-]+\/queue\/[\w-]+$/ },
+  { methods: ["POST"], path: /^\/api\/threads\/[\w-]+\/respond$/ }, // decline only: see the handler
+  { methods: ["GET", "POST", "PUT", "PATCH", "DELETE"], path: /^\/api\/internal\// }, // capability bearer checked in the handler
+  { methods: ["POST"], path: /^\/api\/testing\/internal-capability$/ }, // exists only with its private key
+];
+
+export function serviceAllowed(method: string, path: string): boolean {
+  const upper = method.toUpperCase();
+  return SERVICE_ALLOW.some((rule) => rule.methods.includes(upper) && rule.path.test(path));
+}
+
+/** Pick the loopback trust for this process, and say why for the startup log.
+ *
+ * A packaged desktop keeps `owner`: its mutations already need Electron's
+ * per-launch capability, and only its owner uses the machine. Elsewhere the
+ * operator may set OMB_LOOPBACK_TRUST=owner|service. Without it a hosted
+ * workspace (any OMB_ADMIN_* setting, even an incomplete one) defaults to
+ * `service` — shared-workspace Full access is only honoured there, so it needs
+ * no rule of its own — and a headless self-hosted server keeps `owner`. A
+ * value that is neither fails closed. */
+export function resolveLoopbackTrust(input: {
+  env?: NodeJS.ProcessEnv;
+  desktopManaged: boolean;
+  hostedWorkspace: boolean;
+}): { trust: LoopbackTrust; reason: string; warning?: string } {
+  const raw = (input.env ?? process.env).OMB_LOOPBACK_TRUST;
+  const requested = raw?.trim().toLowerCase();
+  if (input.desktopManaged) {
+    return { trust: "owner", reason: "desktop app", ...(raw !== undefined ? { warning: "OMB_LOOPBACK_TRUST is ignored in the desktop app" } : {}) };
+  }
+  if (requested === "owner" || requested === "service") {
+    return {
+      trust: requested,
+      reason: "OMB_LOOPBACK_TRUST",
+      ...(requested === "owner" && input.hostedWorkspace
+        ? { warning: "OMB_LOOPBACK_TRUST=owner on a shared workspace: every bot's shell can change settings and approve cards as the owner" }
+        : {}),
+    };
+  }
+  if (raw !== undefined && requested !== "") {
+    return { trust: "service", reason: "OMB_LOOPBACK_TRUST", warning: `OMB_LOOPBACK_TRUST="${raw.replace(/[^\w.-]/g, "").slice(0, 40)}" is not owner or service; using service` };
+  }
+  if (input.hostedWorkspace) return { trust: "service", reason: "hosted workspace" };
+  return { trust: "owner", reason: "self-hosted default" };
+}
 
 export function isLoopbackHost(host: string | undefined): boolean {
   if (!host) return false;
@@ -299,7 +393,19 @@ export interface ResolveOptions {
   /** Feature gates that decide whether a client-scoped route exists at all.
    * Absent means off, so an ungated build refuses like one without it. */
   features?: { sharedComputers?: boolean };
+  /** See LoopbackTrust. Absent is `owner`, the historical behaviour. Ignored
+   * while a desktop capability is in force (loopbackMutationToken). */
+  loopbackTrust?: LoopbackTrust;
+  /** Under `service`: a per-launch secret the `openmausbot serve` process
+   * that started this server handed it over the child's stdin (never the
+   * environment, which the server's other children could read). It lets that
+   * CLI, and nothing else, mint and list pairing codes. */
+  cliOwnerToken?: string;
 }
+
+const CLI_OWNER_HEADER = "x-openmausbot-cli-owner";
+/** The only routes the serving CLI's secret opens: its pairing code. */
+const CLI_OWNER_ROUTE = /^\/api\/auth\/pairing$/;
 
 const DESKTOP_OWNER_HEADER = "x-openmausbot-desktop-owner";
 
@@ -393,6 +499,21 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
       !secureTokenMatch(headerValue(req.headers[DESKTOP_OWNER_HEADER]), options.loopbackMutationToken)
     ) {
       return deny(403, "forbidden: this change must come from the desktop app or a paired device");
+    }
+    if (options.loopbackMutationToken === undefined && options.loopbackTrust === "service") {
+      // The CLI that started this server may still print a pairing code.
+      if (
+        options.cliOwnerToken && CLI_OWNER_ROUTE.test(path) && ["GET", "POST"].includes(method.toUpperCase()) &&
+        secureTokenMatch(headerValue(req.headers[CLI_OWNER_HEADER]), options.cliOwnerToken)
+      ) {
+        return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
+      }
+      // On a shared server "local" includes every bot's shell. Default deny:
+      // only the service routes, never an admin change, without a session.
+      if (!serviceAllowed(method, path)) {
+        return deny(403, "forbidden: on this shared server a local request without a session may only use the service routes; sign in to change settings, people or access");
+      }
+      return { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" };
     }
     return { auth: { kind: "loopback", scopes: LOOPBACK_SCOPES }, status: 401, error: "" };
   }

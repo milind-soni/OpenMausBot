@@ -70,6 +70,9 @@ async function restart(grants: Grants) {
       OMB_ENTERPRISE_DIR: layer, OMB_LICENSE_KEY: "fixture-only",
       OMB_ADMIN_URL: "https://admin.example.test", OMB_ADMIN_WORKSPACE: "fixture",
       OMB_PUBLIC_URL: "https://fixture.example.test", OMB_ADMIN_MEMBERSHIP: "portal",
+      // This fixture drives the model policy over loopback; the hosted
+      // loopback default (service trust) is covered in hosted-access.test.ts.
+      OMB_LOOPBACK_TRUST: "owner",
       OMB_HOSTED_MODELS: JSON.stringify(grants), OMB_HOSTED_MODEL_TOKEN: TOKEN,
       OMB_HOSTED_CLAUDE_CLI: join(ROOT, "server/testing/fake-claude-cli.ts"),
       OMB_HOSTED_CODEX_CLI: join(ROOT, "server/testing/fake-codex-app-server.ts"),

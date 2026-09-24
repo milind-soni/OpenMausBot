@@ -170,6 +170,12 @@ public struct CommChip: Codable, Hashable, Sendable {
 public struct Message: Codable, Hashable, Identifiable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case text, options, activity, screen, secret
+        /// The harness's receipt of a settled turn: "[digest] · tools: … ·
+        /// reply: …". Desktop shows it only behind "show tool calls"; it is
+        /// a log line, not something anyone said, so the phone never draws,
+        /// previews, or speaks it. Named so it cannot fall into `unknown`,
+        /// which draws whatever text a message carries.
+        case digest
         /// A kind this build has never heard of.
         ///
         /// Not decorative. `kind` is not optional, so without this a single

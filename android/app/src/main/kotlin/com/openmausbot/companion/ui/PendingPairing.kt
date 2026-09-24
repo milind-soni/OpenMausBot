@@ -391,8 +391,8 @@ internal object PairingCopy {
             "trusted Wi-Fi network or a tailnet; OpenMausBot does not encrypt " +
             "local Wi-Fi traffic."
 
-    /** `PairingView.swift`: "Enter the 6-digit code shown on your desktop:". */
-    const val ENTER_CODE: String = "Enter the 6-digit code shown on your desktop:"
+    /** Both the desktop companion and headless server show pairing codes. */
+    const val ENTER_CODE: String = "Enter the pairing code shown on your computer or server:"
 
     /**
      * No iOS counterpart: SwiftUI's `@State` dies with the process, so iOS never

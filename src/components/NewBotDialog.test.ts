@@ -1,98 +1,127 @@
-import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode, type RefObject } from "react";
+import { Children, createElement, isValidElement, type EffectCallback, type ReactElement, type ReactNode, type KeyboardEvent } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), creating: false, error: null as string | null }));
-vi.mock("react", async (importOriginal) => {
+const fixture = vi.hoisted(() => ({ effects: [] as EffectCallback[], dispatch: vi.fn(), api: vi.fn(), create: vi.fn(), ready: false, hook: 0, admin: false }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
+vi.mock("react", async importOriginal => {
   const react = await importOriginal<typeof import("react")>();
-  return { ...react,
-    useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
-    useState: (initial: unknown) => react.useState(fixture.error ?? initial),
-  };
+  return { ...react, useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); }, useState: (initial: unknown) => {
+    const state = react.useState(initial);
+    const index = fixture.hook++;
+    if (fixture.ready && index === 1) {
+      const draft = state[0] as { bot: { name: string }; patch: (patch: { name: string }) => void };
+      if (draft.bot.name !== "Fixture") draft.patch({ name: "Fixture" });
+    }
+    return fixture.ready && index === 3 ? [true, state[1]] : state;
+  } };
 });
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { botCreationPending: fixture.creating }, dispatch: fixture.dispatch }) }));
-vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-import { NewBotDialog } from "./NewBotDialog";
+vi.mock("@/lib/create-configured-bot", async importOriginal => ({
+  ...await importOriginal<typeof import("@/lib/create-configured-bot")>(), createConfiguredBot: fixture.create,
+}));
+vi.mock("@/state/store", async importOriginal => {
+  const store = await importOriginal<typeof import("@/state/store")>();
+  return { ...store, api: fixture.api, BotEditorStore: () => null, useStore: () => ({ state: store.initialState, dispatch: fixture.dispatch }) };
+});
+import { LocalNewBotDialog as NewBotDialog, CompanionNewBotDialog, NewBotDialog as RoutedNewBotDialog } from "./NewBotDialog";
 
-type Node = ReactElement<{ children?: ReactNode; role?: string; "aria-label"?: string; onClick?: () => void; ref?: RefObject<HTMLDivElement | null>; disabled?: boolean }>;
+type Node = ReactElement<{ children?: ReactNode; role?: string; "aria-label"?: string; onClick?: () => void; onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void; disabled?: boolean }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
   const node = value as Node;
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
-function render() {
+function render(defaultsMode = false, onCreated?: () => void | Promise<void>) {
   let tree!: ReturnType<typeof NewBotDialog>;
-  function Capture() { tree = NewBotDialog(); return tree; }
+  function Capture() { fixture.hook = 0; tree = NewBotDialog({ defaultsMode, onCreated }); return tree; }
   const html = renderToStaticMarkup(createElement(Capture));
   return { html, nodes: nodes(tree) };
 }
-beforeEach(() => { fixture.effects = []; fixture.dispatch.mockReset(); fixture.creating = false; fixture.error = null; });
+beforeEach(() => {
+  fixture.effects = []; fixture.dispatch.mockReset(); fixture.api.mockReset();
+  fixture.ready = false; fixture.admin = false; fixture.create.mockReset();
+  fixture.api.mockReturnValue(new Promise(() => {}));
+});
 afterEach(() => vi.unstubAllGlobals());
 
-describe("new bot role dialog", () => {
-  it("waits for creation before closing the current dialog", () => {
-    const { nodes } = render();
-    const blank = nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
-    blank.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledOnce();
-    const action = fixture.dispatch.mock.calls[0][0];
-    expect(action).toMatchObject({ type: "newBot", onCreated: expect.any(Function), onError: expect.any(Function) });
-    action.onCreated();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleNewBot", open: false });
+describe("bot draft dialog", () => {
+  it("preserves upstream audience selection for browser admins before creation", () => {
+    fixture.admin = true;
+    vi.stubGlobal("window", {});
+    expect(render().html).toContain("Who can see it");
+    expect(render().html).toContain("Admins only");
+    expect(render(true).html).not.toContain("Who can see it");
+    fixture.admin = false;
+    expect(render().html).not.toContain("Who can see it");
+    fixture.admin = true;
+    vi.stubGlobal("window", { ogb: {} });
+    expect(render().html).not.toContain("Who can see it");
+  });
+  it.each([false, true])("closes after a successful creation when its caller fails (async=%s)", async asyncFailure => {
+    fixture.ready = true;
+    const bot = { id: "created", name: "Fixture" };
+    fixture.create.mockResolvedValue({ bot, warnings: [] });
+    const failed = () => { throw new Error("Caller failed"); };
+    const result = render(false, asyncFailure ? async () => failed() : failed);
+    result.nodes.filter(node => node.type === "button").at(-1)!.props.onClick!();
+    await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleNewBot", open: false }));
+    expect(fixture.create).toHaveBeenCalledTimes(1);
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "botAdded", bot, preserveSelection: false });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "error", message: "Caller failed" });
+  });
+  it("keeps initial backward keyboard navigation inside the companion dialog", () => {
+    let tree!: ReturnType<typeof CompanionNewBotDialog>;
+    function Capture() { tree = CompanionNewBotDialog(); return tree; }
+    renderToStaticMarkup(createElement(Capture));
+    const first = { focus: vi.fn() }, last = { focus: vi.fn() };
+    const root = { querySelectorAll: () => [first, last] };
+    vi.stubGlobal("document", { activeElement: root });
+    const preventDefault = vi.fn();
+    nodes(tree).find(node => node.props.role === "dialog")!.props.onKeyDown!({
+      key: "Tab", shiftKey: true, currentTarget: root, preventDefault,
+    } as unknown as KeyboardEvent<HTMLDivElement>);
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(last.focus).toHaveBeenCalledOnce();
+    expect(first.focus).not.toHaveBeenCalled();
+  });
+  it("keeps companion creation on its permitted single-request path", () => {
+    vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
+    const routed = RoutedNewBotDialog();
+    expect(routed.type).toBe(CompanionNewBotDialog);
+    let tree!: ReturnType<typeof CompanionNewBotDialog>;
+    function Capture() { tree = CompanionNewBotDialog(); return tree; }
+    const html = renderToStaticMarkup(createElement(Capture));
+    expect(html).toContain("Create bot");
+    const create = nodes(tree).filter(node => node.type === "button").at(-1)!;
+    create.props.onClick!();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newBot", onCreated: expect.any(Function) });
+    expect(fixture.api).not.toHaveBeenCalled();
+  });
+  it("opens immediately with all sections and no creation request", () => {
+    const result = render();
+    expect(result.html).toContain('role="dialog"');
+    for (const section of ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice &amp; alerts"]) {
+      expect(result.html).toContain(section);
+    }
+    fixture.effects[0]();
+    expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bot-defaults");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    const submit = result.nodes.find(node => node.type === "button" && node.props.disabled)!;
+    expect(submit.props.disabled).toBe(true);
   });
 
-  it("leaves a failed POST open for retry and makes pending controls unavailable", () => {
-    const { nodes } = render();
-    const blank = nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
-    blank.props.onClick!();
-    fixture.dispatch.mock.calls[0][0].onError("Creation failed");
-    expect(fixture.dispatch).toHaveBeenCalledOnce();
-    blank.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledTimes(2);
-    fixture.creating = true;
-    const pending = render();
-    expect(pending.html).toContain('aria-busy="true"');
-    expect(pending.nodes.filter((node) => node.type === "button" && node.props["aria-label"] !== "Close").every((node) => node.props.disabled)).toBe(true);
-    // A remounted picker gets pending from the store, not its local state.
-    const pendingBlank = pending.nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
-    pendingBlank.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenCalledTimes(2);
-    const close = pending.nodes.find((node) => node.type === "button" && node.props["aria-label"] === "Close")!;
-    expect(close.props.disabled).not.toBe(true);
-    close.props.onClick!();
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleNewBot", open: false });
-    fixture.creating = false;
-    fixture.error = "Creation failed";
-    expect(render().html).toContain('role="alert"');
+  it("can cancel a loading draft without creating or deleting a bot", () => {
+    const result = render();
+    result.nodes.find(node => node.type === "button" && node.props["aria-label"] === "Close")!.props.onClick!();
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "toggleNewBot", open: false });
+    expect(fixture.api).not.toHaveBeenCalled();
   });
 
-  it("traps Tab, restores focus, and ignores callbacks after unmount", () => {
-    let keydown!: (event: KeyboardEvent) => void;
-    const doc = { activeElement: null as unknown };
-    class Control { isConnected = true; focus() { doc.activeElement = this; } }
-    const opener = new Control();
-    const first = new Control();
-    const last = new Control();
-    doc.activeElement = opener;
-    vi.stubGlobal("HTMLElement", Control);
-    vi.stubGlobal("document", doc);
-    vi.stubGlobal("window", { addEventListener: (_name: string, callback: typeof keydown) => { keydown = callback; }, removeEventListener: vi.fn() });
-    const rendered = render();
-    const dialog = rendered.nodes.find((node) => node.props.role === "dialog")!;
-    dialog.props.ref!.current = { querySelector: () => first, querySelectorAll: () => [first, last], contains: (element: unknown) => element === first || element === last } as unknown as HTMLDivElement;
-    const cleanup = fixture.effects[0]();
-    expect(doc.activeElement).toBe(first);
-    keydown({ key: "Tab", shiftKey: true, preventDefault: vi.fn() } as unknown as KeyboardEvent);
-    expect(doc.activeElement).toBe(last);
-    keydown({ key: "Tab", shiftKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent);
-    expect(doc.activeElement).toBe(first);
-    const blank = rendered.nodes.find((node) => node.type === "button" && renderToStaticMarkup(node).includes("Blank bot"))!;
-    blank.props.onClick!();
-    keydown({ key: "Escape", preventDefault: vi.fn() } as unknown as KeyboardEvent);
-    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleNewBot", open: false });
-    cleanup?.();
-    expect(doc.activeElement).toBe(opener);
-    fixture.dispatch.mock.calls[0][0].onCreated();
-    expect(fixture.dispatch).toHaveBeenCalledTimes(2);
+  it("uses the same section editor for default templates", () => {
+    const result = render(true);
+    expect(result.html).toContain("Defaults for new bots");
+    expect(result.html).toContain("Save defaults");
+    expect(result.html).not.toContain(">Create bot<");
   });
 });

@@ -31,7 +31,10 @@ Start OpenMausBot, then configure the MCP client to run:
 
 Packaged desktop builds require a paired session for tools that create,
 change, send, switch, interrupt, or run anything. Read-only tools work on
-loopback without one. To authorize an external MCP client:
+loopback without one. A hosted or shared server with service loopback trust
+([self-hosting](self-hosting.md#loopback-trust-owner-or-service)) needs a
+session for almost every tool, reads included. To authorize an external MCP
+client:
 
 1. In OpenMausBot, open **Settings → Phone → Set up a phone** and reveal the
    one-time pairing code.

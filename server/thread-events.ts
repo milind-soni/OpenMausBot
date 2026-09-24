@@ -146,6 +146,11 @@ const stringOrMissing = (value: unknown) => value === undefined || typeof value 
 const stringOrNullOrMissing = (value: unknown) => value === undefined || value === null || typeof value === "string";
 const numberOrNullOrMissing = (value: unknown) => value === undefined || value === null || typeof value === "number";
 const stringsOrMissing = (value: unknown) => value === undefined || (Array.isArray(value) && value.every((item) => typeof item === "string"));
+/** A computer holder as the wait events carry it: a name, and the holding
+ * thread's title when one was known. */
+const computerHolderOrMissing = (value: unknown) =>
+  value === undefined ||
+  (isRecord(value) && typeof value.name === "string" && stringOrMissing(value.task));
 /** A replayed structured ask. Only the shape the card actually reads is
  * required; the rest is optional and simply absent on an older event. */
 const askQuestionsOrMissing = (value: unknown) =>
@@ -197,6 +202,17 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
         stringsOrMissing(value.denials) &&
         (value.usage === undefined ||
           (isRecord(value.usage) && typeof value.usage.input === "number" && typeof value.usage.output === "number"))
+      );
+    case "turn.wait_started":
+      return typeof value.resource === "string" && computerHolderOrMissing(value.holder);
+    case "turn.wait_ended":
+      return (
+        typeof value.resource === "string" &&
+        computerHolderOrMissing(value.holder) &&
+        typeof value.waitedMs === "number" &&
+        Number.isFinite(value.waitedMs) &&
+        value.waitedMs >= 0 &&
+        (value.outcome === "acquired" || value.outcome === "gave_up" || value.outcome === "stopped")
       );
     case "item.started":
       return (value.itemType === "tool" || value.itemType === "reasoning") && stringOrMissing(value.title);

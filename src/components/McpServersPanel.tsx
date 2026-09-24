@@ -38,7 +38,9 @@ interface RemoteMcpListing {
   headerKeys: string[];
   enabled: boolean;
 }
-export type McpServerListing = StdioMcpListing | RemoteMcpListing;
+/** managedBy: the enrolled organisation has not approved this server, so it
+ * stays configured but never reaches bots. */
+export type McpServerListing = (StdioMcpListing | RemoteMcpListing) & { managedBy?: string };
 
 export function isRemoteMcpListing(server: McpServerListing): server is RemoteMcpListing {
   return "url" in server;
@@ -149,6 +151,10 @@ function draftFor(server: McpServerListing): McpDraft {
 }
 
 export function McpServersPanel() {
+  const { state: store } = useStore();
+  // While enrolled with custom servers off, only approved servers can be added.
+  const policy = store.config?.managedPolicy;
+  const restricted = Boolean(policy && !policy.mcp.allowCustom);
   const [servers, setServers] = useState<McpServerListing[] | null>(null);
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [draft, setDraft] = useState<McpDraft>(EMPTY_DRAFT);
@@ -358,7 +364,8 @@ export function McpServersPanel() {
             </button>
             <button
               type="button"
-              disabled={busy !== null}
+              disabled={busy !== null || restricted}
+              title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
               onClick={() => {
                 setImportOpen((open) => !open);
                 setError(null);
@@ -370,7 +377,8 @@ export function McpServersPanel() {
             </button>
             <button
               type="button"
-              disabled={busy !== null}
+              disabled={busy !== null || (restricted && !policy?.mcp.allowlist.length)}
+              title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
               onClick={() => {
                 setEditing("new");
                 setDraft(EMPTY_DRAFT);
@@ -384,6 +392,7 @@ export function McpServersPanel() {
           </div>
         </div>
 
+        {restricted && policy && <p role="status" className="mt-3 text-[12.5px] leading-relaxed text-ink-secondary">{t("policy.mcpRestricted", { organization: policy.organizationName })}</p>}
         <ClaudeMcpSwitch />
 
         {importOpen && (
@@ -576,7 +585,9 @@ export function McpServersPanel() {
                       <div className="flex items-center gap-2">
                         <span className="truncate text-[14px] font-medium text-ink">{server.name}</span>
                         <span className={cn("rounded-full px-2 py-0.5 text-[10.5px]", server.enabled ? "bg-success/10 text-success" : "bg-raised text-ink-secondary")}>{t(server.enabled ? "mcp.badge.on" : "mcp.badge.off")}</span>
+                        {server.managedBy && <span className="rounded-full bg-raised px-2 py-0.5 text-[10.5px] text-ink-secondary">{t("policy.managedBy", { organization: server.managedBy })}</span>}
                       </div>
+                      {server.managedBy && <div className="mt-1 text-[11.5px] text-ink-secondary">{t("policy.mcpBlocked", { organization: server.managedBy })}</div>}
                       <div className="mt-1 truncate font-mono text-[11.5px] text-ink-secondary">{isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}</div>
                       {isRemoteMcpListing(server)
                         ? server.headerKeys.length > 0 && <div className="mt-1 truncate text-[11px] text-ink-secondary">{t("mcp.headersSaved", { keys: server.headerKeys.join(", ") })}</div>

@@ -18,6 +18,33 @@ describe("summarizeRuntime", () => {
     expect(summarizeRuntime({ ...base, type: "runtime.error", message: "boom", setup: true }).summary).toBe("setup: boom");
   });
 
+  it("labels computer waits and their outcomes", () => {
+    expect(summarizeRuntime({ ...base, type: "turn.wait_started", resource: "computer:box:bx_1", holder: { name: "Ada", task: "Refill" } })).toEqual({
+      summary: "waiting for computer — Ada (Refill)",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_started", resource: "computer:host" })).toEqual({
+      summary: "waiting for computer — holder unknown",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 2_500, outcome: "acquired" })).toEqual({
+      summary: "computer acquired after 3s",
+      tone: "boundary",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 2_500, outcome: "stopped" })).toEqual({
+      summary: "computer wait stopped after 3s",
+      tone: "plain",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 120_000, outcome: "gave_up" })).toEqual({
+      summary: "computer wait gave up after 120s",
+      tone: "error",
+    });
+    expect(summarizeRuntime({ ...base, type: "turn.wait_ended", resource: "computer:host", waitedMs: 800, outcome: "acquired" })).toEqual({
+      summary: "computer acquired after under a second",
+      tone: "boundary",
+    });
+  });
+
   it("clips long assistant text to one line", () => {
     const text = "line one\nline two ".repeat(30);
     const { summary } = summarizeRuntime({ ...base, type: "item.completed", itemType: "assistant_text", text });

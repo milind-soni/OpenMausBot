@@ -17,6 +17,7 @@ import { CustomAcpDriver } from "./acp/custom.ts";
 import { HermesAgentDriver } from "./acp/hermes.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { PiDriver } from "./pi.ts";
+import { MistralDriver } from "./mistral.ts";
 import { MinimaxDriver } from "./minimax.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
@@ -37,4 +38,5 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   AntigravityDriver,
   BoxAgentDriver,
   MinimaxDriver,
+  MistralDriver,
 ];

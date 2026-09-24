@@ -523,7 +523,7 @@ describe("pairing", () => {
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser" }]);
     }
     function expectAdminConfig(config: any) {
-      expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid" });
+      expect(config.profile).toEqual({ name: "Updated fixture", email: "updated-private@example.invalid", aboutMe: "" });
       expect(config.vps).toEqual({ configured: true, sshAlias: "fixture-private-host" });
       expect(config.browserProfiles).toEqual([{ id: "fixture", name: "Fixture browser", partitionId: "fixture-private-partition" }]);
     }

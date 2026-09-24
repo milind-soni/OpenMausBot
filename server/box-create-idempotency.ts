@@ -82,7 +82,7 @@ function recoveryStateError(detail: string, cause?: unknown): Error & { status: 
   return Object.assign(
     new Error(
       `Cloud computer creation is paused because its recovery state is ${detail}. `
-      + "Check ascii.dev for an unnamed Box before repairing OpenMausBot's local state.",
+      + "Check boat.dev for an unnamed Box before repairing OpenMausBot's local state.",
     ),
     { status: 503, cause },
   );
@@ -375,7 +375,7 @@ export function beginBoxCreate(botId: string, requestBody: string): BoxCreateAtt
         // Once the provider forgets the idempotency key, retrying it (or using
         // a new key) may create a second billable Box. Absence cannot be
         // inferred from a lost response, so stop for manual reconciliation.
-        throw recoveryStateError("older than ascii.dev's 24-hour retry window");
+        throw recoveryStateError("older than boat.dev's 24-hour retry window");
       }
       return { request: { ...pending }, startedNow: false };
     }
@@ -394,7 +394,7 @@ export function beginBoxCreate(botId: string, requestBody: string): BoxCreateAtt
 
 /** Persist the returned identity before the caller attempts to rename it. */
 export function rememberCreatedBox(request: BoxCreateRequest, boxId: string): BoxCreateRequest {
-  if (!BOX_ID.test(boxId)) throw new Error("ascii.dev returned an invalid cloud computer id");
+  if (!BOX_ID.test(boxId)) throw new Error("boat.dev returned an invalid cloud computer id");
   return withJournalLock((requests) => {
     const current = requests.find((candidate) => (
       candidate.botId === request.botId

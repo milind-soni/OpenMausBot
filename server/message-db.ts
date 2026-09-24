@@ -18,6 +18,7 @@ import { DATA_DIR } from "./config.ts";
 import { peerProvenanceAuthor } from "./peer-provenance.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
+import type { UsageTrigger } from "./usage-ledger.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
 
@@ -226,6 +227,9 @@ export interface FollowupPayload {
   /** Who queued these words. Absent on the owner's own sends and on every
    * row written before this existed; both read as the profile name. */
   sender?: ResolvedSender;
+  /** Who the usage ledger books the turn these words start to. Absent on
+   * rows written before this existed. */
+  trigger?: UsageTrigger;
 }
 export type FollowupStatus = "pending" | "dispatching" | "interrupted" | "cancelled";
 export interface ChatFollowup {
@@ -508,6 +512,15 @@ export interface SearchHit {
   matchLength: number;
   /** room messages: which member said it */
   from?: string;
+}
+
+/** Every thread whose stored messages mention `fragment` anywhere (an
+ * attachment's file name, say). A scan, like search; used only to decide
+ * whether a member on a workspace with a restricted bot may fetch a file. */
+export function threadsReferencing(fragment: string): string[] {
+  if (!fragment) return [];
+  const rows = db().prepare("SELECT DISTINCT thread_id FROM messages WHERE instr(json, ?) > 0").all(fragment) as Array<{ thread_id: string }>;
+  return rows.map((row) => row.thread_id);
 }
 
 /** Case-insensitive substring search over text messages, newest first.

@@ -78,6 +78,18 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
       if (e.denials?.length) parts.push(`${e.denials.length} denied`);
       return { summary: parts.join(" · "), tone: e.ok ? "boundary" : "error" };
     }
+    case "turn.wait_started":
+      return {
+        summary: `waiting for computer — ${e.holder ? `${e.holder.name}${e.holder.task ? ` (${e.holder.task})` : ""}` : "holder unknown"}`,
+        tone: "plain",
+      };
+    case "turn.wait_ended": {
+      const seconds = Math.round(e.waitedMs / 1000);
+      const waited = e.waitedMs < 1_000 ? "under a second" : `${seconds}s`;
+      if (e.outcome === "acquired") return { summary: `computer acquired after ${waited}`, tone: "boundary" };
+      if (e.outcome === "gave_up") return { summary: `computer wait gave up after ${waited}`, tone: "error" };
+      return { summary: `computer wait stopped after ${waited}`, tone: "plain" };
+    }
     case "item.started":
       return { summary: `${e.itemType}${e.title ? `: ${clip(oneLine(e.title))}` : " started"}`, tone: "plain" };
     case "item.updated":

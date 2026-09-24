@@ -1,3 +1,4 @@
+import { cloudRunner } from "@/lib/remote-desktop";
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the box on open (idempotent) and preview
 // via SSE frames or a ~4s screenshot poll. macOS local mode keeps the legacy
@@ -451,13 +452,13 @@ export function ComputerPanel({
   const vpsSupported = Boolean(computerToolSupported && selectedInstance?.driverKind !== "boxAgent");
   const cloudSupported = cloudBackend === "vps"
     ? vpsSupported
-    : state.instances.some((instance) => instance.driverKind === "boxAgent");
+    : Boolean(cloudRunner(state.instances, bot.modelSelection.instanceId));
   const botRoutines = state.routines
     .filter((routine) => routine.botId === bot.id)
     .sort((a, b) => Number(b.enabled) - Number(a.enabled) || (a.nextRunAt ?? Infinity) - (b.nextRunAt ?? Infinity));
   const cloudRoutineReady = Boolean(
     state.config?.box.configured &&
-      state.instances.some((instance) => instance.driverKind === "boxAgent" && instance.snapshot.state === "available"),
+      cloudRunner(state.instances, bot.modelSelection.instanceId)?.snapshot.state === "available",
   );
   const activeRoutineRun = state.routineRuns.find(
     (run) => run.botId === bot.id && ["queued", "running", "waiting"].includes(run.status),
@@ -1688,12 +1689,16 @@ export function ComputerPanel({
               ["off", "vm.dest.off", "computer.dest.offDesc", Power],
             ] as const).map(([mode, labelKey, descriptionKey, Icon]) => {
                 const selected = mode === null ? !profileBot.computer : profileBot.computer === mode;
-                const disabled =
+                // A place the enrolled organisation disallows is not offered.
+                const managedPolicy = state.config?.managedPolicy;
+                const managedKind = mode === "local" ? "thisComputer" : mode === "vm" ? "localVm" : mode === "cloud" ? (profileBot.cloudBackend === "vps" ? "vps" : "box") : null;
+                const managedBy = managedPolicy && managedKind && !managedPolicy.computers[managedKind] ? t("policy.managedBy", { organization: managedPolicy.organizationName }) : undefined;
+                const disabled = Boolean(managedBy) ||
                   (mode === "cloud" && !cloudSupported) ||
                   (mode === "vm" && !vmSupported) ||
                   (mode === "local" && !localSelectable) ||
                   (mode === "browser" && !browserSelectable);
-                const unavailableTitle =
+                const unavailableTitle = managedBy ?? (
                   mode === "vm" && !vmSupported
                     ? t("computer.unavailableVm")
                     : mode === "cloud" && !cloudSupported
@@ -1702,7 +1707,7 @@ export function ComputerPanel({
                         ? localDisabledReason ?? t("computer.unavailableLocal")
                         : mode === "browser"
                           ? browserSelectable ? t("computer.browserOnlyTitle") : browserDisabledReason
-                          : undefined;
+                          : undefined);
                 return (
               <button
                 key={mode ?? "auto"}
@@ -1735,7 +1740,7 @@ export function ComputerPanel({
                   <span>{t(labelKey)}</span>
                 </span>
                 <span className="mt-1.5 block text-[11px] leading-4 text-ink-secondary">
-                  {disabled ? t("computer.unavailableHere") : t(descriptionKey)}
+                  {managedBy ?? (disabled ? t("computer.unavailableHere") : t(descriptionKey))}
                 </span>
               </button>
                 );

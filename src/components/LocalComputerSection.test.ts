@@ -292,8 +292,8 @@ describe("cloud computer inventory UI", () => {
     expect(disconnected).toContain("Box is not connected");
     expect(disconnected).not.toContain("No OpenMaus-managed cloud computers found");
 
-    const unavailable = renderCard({ unavailableReason: "ascii.dev is unavailable" });
-    expect(unavailable).toContain("ascii.dev is unavailable");
+    const unavailable = renderCard({ unavailableReason: "boat.dev is unavailable" });
+    expect(unavailable).toContain("boat.dev is unavailable");
     expect(unavailable).not.toContain("No OpenMaus-managed cloud computers found");
 
     const endpointFailure = renderCard({ configured: null, unavailableReason: "Computer inventory could not load" });

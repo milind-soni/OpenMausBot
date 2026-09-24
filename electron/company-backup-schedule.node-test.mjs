@@ -172,3 +172,44 @@ test("clock rollback never causes an early snapshot or an unbounded timer", asyn
   assert.equal(f.calls.length, 0);
   assert([...f.timers.values()].every(timer => timer.delay <= DAY && timer.delay >= 1000));
 });
+
+// Mirrors electron/main.mjs companyBackupScope: any deviceId, same person, organisation and folder.
+const scopeFor = (org = "org", generation = 1) => ({ key: JSON.stringify(["portal", org, "email", "workspace"]), generation,
+  adopts: saved => { try { const v = JSON.parse(saved); return Array.isArray(v) && v.length === 5 && v[0] === "portal" && v[1] === org && v[2] === "email" && v[4] === "workspace"; } catch { return false; } } });
+const legacyKey = device => JSON.stringify(["portal", "org", "email", device, "workspace"]);
+
+test("a schedule saved under an old device-scoped key survives the upgrade, even for an enrollment that has since expired", async () => {
+  // Saved by v0.1.85 for device D1; D1 then expired and this computer re-enrolled as D2.
+  const f = fixture({ version: 2, scope: legacyKey("device-1"), nextBackupAt: 1_800_000_000_000 + HOUR });
+  f.scope = scopeFor();
+  const state = await f.scheduler.start();
+  assert.equal(state.enabled, true); assert.equal(state.status, "waiting");
+  assert.equal(f.saved.scope, scopeFor().key, "the saved key is rewritten, not forgotten");
+  // Losing the connection only pauses it.
+  f.scope = null; f.scheduler.reconcile();
+  assert.equal(f.scheduler.state().enabled, true);
+  // A different organisation or account still clears it.
+  f.scope = scopeFor("other-org", 3);
+  f.scheduler.reconcile(); await turn(); await turn();
+  assert.equal(f.saved, null); assert.equal(f.scheduler.state().enabled, false);
+});
+
+test("reconcile adopts an old key of the same person through the write queue", async () => {
+  const f = fixture(); f.scope = { key: legacyKey("device-1"), generation: 1 };
+  await f.scheduler.start(); await f.scheduler.configure(ENABLE);
+  assert.equal(f.saved.scope, legacyKey("device-1"));
+  f.scope = scopeFor("org", 2);
+  f.scheduler.reconcile(); await turn(); await turn();
+  assert.equal(f.saved.scope, scopeFor().key); assert.equal(f.scheduler.state().enabled, true);
+});
+
+test("an overdue backup waits after the company connection returns instead of uploading at once", async () => {
+  const f = fixture({ version: 2, scope: scopeFor().key, nextBackupAt: 1_800_000_000_000 - DAY });
+  f.scope = null;
+  await f.scheduler.start();
+  assert.equal(f.scheduler.state().status, "paused");
+  f.scope = scopeFor(); f.scheduler.reconcile();
+  const [, timer] = [...f.timers][0];
+  assert.ok(timer.delay >= 15 * 60_000, `delay ${timer.delay}`);
+  assert.equal(f.calls.length, 0);
+});

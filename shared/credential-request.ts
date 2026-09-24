@@ -14,7 +14,7 @@ export const CREDENTIAL_TARGETS = {
     label: "Box API key",
     description: "Gives bots an isolated cloud computer when Box is selected.",
     placeholder: "Paste your Box API key",
-    helpUrl: "https://docs.ascii.dev/box/api-keys",
+    helpUrl: "https://docs.boat.dev/api-keys",
   },
   opencodeGoApiKey: {
     label: "OpenCode API key",

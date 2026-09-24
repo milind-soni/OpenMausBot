@@ -26,6 +26,19 @@ import { openLiveEvents, type LiveEventSourceLike, type LiveEventsPlatform } fro
 import type { ModelVariantState, RuntimeEvent } from "../../shared/runtime-events";
 import type { RoutineRun } from "../lib/routines";
 
+describe("partial profile save responses", () => {
+  it.each([true, false])("preserves independently saved fields with about-me response first: %s", aboutFirst => {
+    const config = { ...initialState.config, profile: { name: "Old", email: "old@example.invalid", aboutMe: "Old biography" } } as NonNullable<AppState["config"]>;
+    const about: Action = { type: "profileSaved", profile: { aboutMe: "New biography" } };
+    const identity: Action = { type: "profileSaved", profile: { name: "New", email: "new@example.invalid" } };
+    const first = reducer({ ...initialState, config }, aboutFirst ? about : identity);
+    const last = reducer(first, aboutFirst ? identity : about);
+    expect(last.config?.profile).toEqual({ name: "New", email: "new@example.invalid", aboutMe: "New biography" });
+    expect(reducer(last, { type: "profileSaved", profile: { aboutMe: "" } }).config?.profile)
+      .toEqual({ name: "New", email: "new@example.invalid", aboutMe: "" });
+  });
+});
+
 describe("screen frame ownership", () => {
   it("retains the source thread so a sibling's frame cannot masquerade as the selected screen", () => {
     const first = reducer(initialState, { type: "screenFrame", botId: "bot", threadId: "vm-thread", png: "vm", mime: "image/png" });
@@ -1312,6 +1325,19 @@ describe("section Chiefs", () => {
     chiefOfStaff,
   });
 
+  it("atomically removes a deleted team and its assignments before SSE arrives", () => {
+    const member = { ...bot("member", "Delivery"), messages: [] };
+    const other = { ...bot("other", "Personal"), messages: [] };
+    const group = { id: "group", threadId: "thread", section: "Delivery", name: "Review", memberIds: [], defaultResponder: { kind: "mentions" }, createdAt: 1, bulletin: "", messages: [], unread: false } satisfies Group;
+    const next = reducer({ ...initialState, bots: [member, other], groups: [group], sections: ["Delivery", "Personal"] },
+      { type: "sectionDeleted", section: "Delivery", sections: ["Personal"] });
+    expect(next.sections).toEqual(["Personal"]);
+    expect(next.bots[0].section).toBeUndefined();
+    expect(next.groups[0].section).toBeUndefined();
+    expect(next.bots[0].messages).toBe(member.messages);
+    expect(next.bots[1]).toBe(other);
+  });
+
   it("clears previous membership when a complete bot frame moves it to General", () => {
     const current = { ...bot("moved", "Delivery"), messages: [] };
     const { section: _oldSection, ...announcement } = current;
@@ -1998,6 +2024,34 @@ describe("live config frames", () => {
     expect(status.edition).toEqual(frame.edition);
     expect(status.budgets).toEqual(frame.budgets);
     expect(status.billing).toEqual(frame.billing);
+  });
+
+  it("keeps saved provider keys and the fleet flag after a config SSE frame lands after a save's own response", () => {
+    const saved = reducer(initialState, {
+      type: "configStatus",
+      config: configStatusFromFrame({ ...baseFrame, openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" } }),
+    });
+    const frame: ConfigStatusFrame = {
+      ...baseFrame,
+      anthropic: { configured: true },
+      mistral: { configured: true },
+      openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
+      fleet: { available: true },
+    };
+    const state = reducer(saved, { type: "configStatus", config: configStatusFromFrame(frame) });
+    expect(state.config).toMatchObject({
+      anthropic: { configured: true },
+      mistral: { configured: true },
+      openaiCompat: { configured: true, url: "http://127.0.0.1:1/v1" },
+      fleet: { available: true },
+    });
+  });
+
+  it("carries the organisation's read-only desktop policy through a config frame", () => {
+    const managedPolicy = { organizationName: "Fixture Agency", version: 2, companyModelsOnly: true, allowedEngines: ["codex"],
+      mcp: { allowCustom: false, allowlist: ["github"] }, computers: { thisComputer: false, localVm: true, box: true, vps: true }, remoteAccess: false };
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy }).managedPolicy).toEqual(managedPolicy);
+    expect(configStatusFromFrame({ ...baseFrame, managedPolicy: null }).managedPolicy).toBeNull();
   });
 
   it("keeps edition, budgets and billing in state.config after a config SSE frame lands", () => {

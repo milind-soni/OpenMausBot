@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ManagedDesktopState } from "../../electron/managed-desktop.mjs";
 import { activeLocale, t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { CompanyModels } from "./CompanyModels";
 
 const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
 const DEFAULT_PORTAL_ORIGIN = "https://admin.openmausbot.com";
@@ -74,7 +75,10 @@ export function OrganizationSettings() {
   if (!bridge) return <p className="text-[13px] text-ink-secondary">{t("organization.desktopOnly")}</p>;
   // Unavailable can still hold a saved grant; let the person clear it before
   // reconnecting even while the Admin portal or local runtime is offline.
-  const enrolled = connection?.status === "connected" || connection?.status === "reauth-required" || connection?.status === "unavailable";
+  const enrolled = connection?.status === "connected" || connection?.status === "reauth-required" || connection?.status === "unavailable" || connection?.status === "license-expired";
+  // A lapsed Admin licence is the organisation's billing matter, not a sign-in
+  // problem: say so, keep the connection, and offer no reconnect loop.
+  const licenseExpired = connection?.status === "license-expired" || connection?.notice === "license-expired";
   const expiry = connection?.enrollment?.expiresAt ?? connection?.expiresAt;
   const date = typeof expiry === "number" && Number.isFinite(expiry) ? new Date(expiry) : null;
   const dateLabel = date && Number.isFinite(date.getTime())
@@ -84,6 +88,7 @@ export function OrganizationSettings() {
     <Card title={t("settings.section.organization")} subtitle={t("organization.privacy")}>
       {!connection && <p role="status" className="text-[13px] text-ink-secondary">{error || t("organization.loading")}</p>}
       {connection?.message && <p role="status" className="mb-3 text-[13px] text-ink-secondary">{connection.message}</p>}
+      {licenseExpired && <p role="alert" className="mb-3 text-[13px] text-ink">{t("organization.licenseExpired")}</p>}
       {connection?.status === "signed-out" && <div className="flex flex-col gap-3">
         <p className="text-[13px] text-ink-secondary">{t("organization.signInHelp")}</p>
         <button type="button" disabled={busy} onClick={() => void perform(() => bridge.begin({ portalOrigin: DEFAULT_PORTAL_ORIGIN }))}
@@ -112,18 +117,24 @@ export function OrganizationSettings() {
           <div className="mt-3">{t("organization.code")}</div>
           <code dir="ltr" className="mt-1 block w-fit select-all rounded-lg bg-inset px-3 py-2 text-base tracking-widest text-ink">{connection.enrollment.userCode}</code>
         </details>}
-        <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.cancelEnrollment())}>{t("organization.cancel")}</button>
+        <div className="flex flex-wrap gap-2">
+          {/* A closed browser tab: reopen this attempt's own page, nothing else. */}
+          {connection.enrollment && bridge.reopen && <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.reopen!())}>{t("organization.reopen")}</button>}
+          <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.cancelEnrollment())}>{t("organization.cancel")}</button>
+        </div>
       </div>}
       {enrolled && <div className="flex flex-col gap-3">
         <div>{connection.branding?.logo && <img src={connection.branding.logo} alt="Organization logo" className="mb-2 size-12 rounded-lg object-contain" />}<div className="break-words text-[15px] font-medium text-ink">{connection.organization?.name}</div>
           <div className="break-all text-[13px] text-ink-secondary">{connection.email}</div></div>
-        {connection.status === "reauth-required" ? <p role="alert" className="text-[13px] text-ink-secondary">{t("organization.reauth")}</p> : connection.status === "connected" ? <>
+        {connection.status === "reauth-required" ? <p role="alert" className="text-[13px] text-ink-secondary">{t("organization.reauth")}</p> : connection.status === "license-expired" ? <>
+          {connection.providers?.some((provider) => provider.configured && provider.models.length > 0) && <ul className="divide-y divide-hairline/40">{connection.providers.filter((provider) => provider.configured && provider.models.length > 0).map((provider) => <li key={provider.id} className="flex flex-wrap justify-between gap-2 py-2 text-[13px]">
+            <span className="text-ink">{providerNames[provider.id] ?? provider.id}</span>
+            <span className="text-ink-secondary">{t("organization.companyModelsUnavailable")}</span>
+          </li>)}</ul>}
+        </> : connection.status === "connected" ? <>
           <p className="text-[13px] text-ink-secondary">{t("organization.modelHelp")}</p>
           {connection.providers?.some((provider) => provider.configured && provider.models.length > 0) ?
-            <ul className="divide-y divide-hairline/40">{connection.providers.map((provider) => <li key={provider.id} className="flex flex-wrap justify-between gap-2 py-2 text-[13px]">
-              <span className="text-ink">{providerNames[provider.id] ?? provider.id}</span>
-              <span className="text-ink-secondary">{provider.configured ? t("organization.modelCount", { count: provider.models.length }) : t("organization.notConfigured")}</span>
-            </li>)}</ul> : <p className="text-[13px] text-ink-secondary">{t("organization.noModels")}</p>}
+            <CompanyModels providers={connection.providers} /> : <p className="text-[13px] text-ink-secondary">{t("organization.noModels")}</p>}
         </> : null}
         {confirmDisconnect ? <div role="group" aria-label={t("organization.disconnectTitle")} className="rounded-lg border border-hairline/40 p-3">
           <p className="text-[13px] text-ink">{t("organization.disconnectWarning")}</p>

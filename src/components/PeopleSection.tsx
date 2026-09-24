@@ -3,18 +3,24 @@
 // what each person spent this month, and an invite link that opens the
 // sign-in page with their address filled in. The link is convenience, not
 // a second door: the one-time code still goes to the address itself.
+//
+// On a workspace whose members the organisation's Admin decides (portal
+// membership), this list decides nothing, so the section turns read-only:
+// who has signed in, what they spent, and a link to Admin → People.
 import { useCallback, useEffect, useState } from "react";
-import { Check, Copy, Link2, Loader2, Plus, RefreshCw } from "lucide-react";
+import { Check, Copy, ExternalLink, Link2, Loader2, Plus, RefreshCw } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
+import { readMembership, type Membership } from "../lib/membership";
 import { readSessionState, type SessionState } from "../lib/session";
 import { canPairDevices } from "./ServerPairingCard";
 import { normalizeAccessEntry, withEntry, withoutEntry, type SignInLists } from "./SignInAccessCard";
 import { Card } from "./SettingsPrimitives";
 
 export type Role = "admin" | "member";
+
 
 export interface Person {
   entry: string;
@@ -25,6 +31,8 @@ export interface Person {
   devices: number;
   turns: number;
   costUsd: number | null;
+  /** part of costUsd is estimated from list prices (see Usage → History) */
+  estimated?: boolean;
 }
 
 /** The sign-in page with the invited address filled in; a domain entry gets the plain page. */
@@ -38,7 +46,7 @@ export function inviteLink(base: string, entry: string): string {
 export function mergePeople(
   lists: SignInLists,
   sessions: Array<{ email?: string; lastSeenAt: number }>,
-  usage: Array<{ key: string; turns: number; costUsd: number | null }>,
+  usage: Array<{ key: string; turns: number; costUsd: number | null; estimatedUsd?: number | null }>,
 ): Person[] {
   const people: Person[] = [];
   const seen = new Set<string>();
@@ -56,11 +64,37 @@ export function mergePeople(
       devices: devices.length,
       turns: month?.turns ?? 0,
       costUsd: month?.costUsd ?? null,
+      ...(hasFiniteCost(month?.estimatedUsd) && month.estimatedUsd > 0 ? { estimated: true } : {}),
     });
   };
   for (const entry of lists.admins) add(entry, "admin");
   for (const entry of lists.members) add(entry, "member");
   return people;
+}
+
+/** One row per address that has signed in, for a workspace whose members
+ * Admin manages: role from what their sessions may do, nothing to edit. */
+export function peopleFromSessions(
+  sessions: Array<{ email?: string; lastSeenAt: number; scopes?: string[] }>,
+  usage: Array<{ key: string; turns: number; costUsd: number | null }>,
+): Person[] {
+  const byEmail = new Map<string, Array<{ lastSeenAt: number; scopes?: string[] }>>();
+  for (const session of sessions) {
+    const email = session.email?.trim().toLowerCase();
+    if (email) byEmail.set(email, [...(byEmail.get(email) ?? []), session]);
+  }
+  return [...byEmail.entries()].map(([entry, devices]) => {
+    const month = usage.find((group) => group.key === `user:${entry}`);
+    return {
+      entry,
+      role: devices.some((device) => device.scopes?.includes("admin")) ? "admin" : "member",
+      isDomain: false,
+      lastSeenAt: Math.max(...devices.map((device) => device.lastSeenAt)),
+      devices: devices.length,
+      turns: month?.turns ?? 0,
+      costUsd: month?.costUsd ?? null,
+    } satisfies Person;
+  }).sort((a, b) => (a.role === b.role ? a.entry.localeCompare(b.entry) : a.role === "admin" ? -1 : 1));
 }
 
 export function lastSeenLabel(lastSeenAt: number | null, now = Date.now()): string {
@@ -70,14 +104,16 @@ export function lastSeenLabel(lastSeenAt: number | null, now = Date.now()): stri
 }
 
 /** The table alone, so it renders the same from a fetch or a fixture. */
-export function PeopleTable({ people, busy, onRole, onRemove, onLink }: {
+export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly = false }: {
   people: Person[];
   busy: boolean;
   onRole: (person: Person, role: Role) => void;
   onRemove: (person: Person) => void;
   onLink: (person: Person) => void;
+  /** Admin decides membership: show the rows, offer nothing to change. */
+  readOnly?: boolean;
 }) {
-  if (people.length === 0) return <p className="text-[13px] text-ink-secondary">{t("people.empty")}</p>;
+  if (people.length === 0) return <p className="text-[13px] text-ink-secondary">{t(readOnly ? "people.portal.empty" : "people.empty")}</p>;
   const columns = "grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-x-4";
   return (
     <div className="flex flex-col">
@@ -99,15 +135,15 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink }: {
           </span>
           <span className="text-right tabular-nums text-ink-secondary">{person.isDomain ? "—" : lastSeenLabel(person.lastSeenAt)}</span>
           <span className="text-right tabular-nums text-ink" title={t("people.turns", { turns: String(person.turns) })}>
-            {hasFiniteCost(person.costUsd) ? formatUsd(person.costUsd) : "—"}
+            {hasFiniteCost(person.costUsd) ? `${person.estimated ? "~" : ""}${formatUsd(person.costUsd)}` : "—"}
           </span>
-          <span className="flex items-center justify-end gap-2 text-[12px]">
+          {readOnly ? <span /> : <span className="flex items-center justify-end gap-2 text-[12px]">
             <button type="button" disabled={busy} onClick={() => onLink(person)} aria-label={t("people.link")} title={t("people.link")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><Link2 size={13} /></button>
             <button type="button" disabled={busy} onClick={() => onRole(person, person.role === "admin" ? "member" : "admin")} className="text-ink-secondary hover:text-ink disabled:opacity-50">
               {person.role === "admin" ? t("people.makeMember") : t("people.makeAdmin")}
             </button>
             <button type="button" disabled={busy} onClick={() => onRemove(person)} className="text-danger hover:underline disabled:opacity-50">{t("people.remove")}</button>
-          </span>
+          </span>}
         </div>
       ))}
     </div>
@@ -143,8 +179,36 @@ export function CopyLink({ link }: { link: string }) {
   );
 }
 
+/** Portal membership: this server's list decides nothing, so say where
+ * people are managed and show, read-only, who has signed in here. */
+export function PortalPeople({ peopleUrl, people }: { peopleUrl: string | null; people: Person[] }) {
+  const noop = () => {};
+  return (
+    <Card title={t("people.title")} subtitle={t("people.portal.subtitle")}>
+      <div data-people-portal className="flex flex-col gap-3 text-[13px] leading-relaxed text-ink-secondary">
+        <p>{t("people.portal.managed")}</p>
+        {peopleUrl && (
+          <a
+            href={peopleUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex w-fit items-center gap-2 rounded-lg bg-control px-3 py-2 font-medium text-ink hover:bg-control/70"
+          >
+            {t("people.portal.open")} <ExternalLink size={14} aria-hidden="true" />
+          </a>
+        )}
+      </div>
+      <div className="mt-4">
+        <PeopleTable people={people} busy={false} readOnly onRole={noop} onRemove={noop} onLink={noop} />
+      </div>
+      <p className="mt-3 text-[11.5px] leading-relaxed text-ink-secondary">{t("people.portal.note")}</p>
+    </Card>
+  );
+}
+
 export function PeopleSection() {
   const [session, setSession] = useState<SessionState | null>(null);
+  const [membership, setMembership] = useState<Membership | null>(null);
   const [lists, setLists] = useState<SignInLists | null>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [base, setBase] = useState<string>(typeof window !== "undefined" ? window.location.origin : "");
@@ -171,8 +235,12 @@ export function PeopleSection() {
         admins: Array.isArray(config?.signIn?.admins) ? config.signIn.admins : [],
         members: Array.isArray(config?.signIn?.members) ? config.signIn.members : [],
       };
+      const authority = readMembership(config);
+      setMembership(authority);
       setLists(current);
-      setPeople(mergePeople(current, Array.isArray(sessions?.sessions) ? sessions.sessions : [], Array.isArray(usage?.groups) ? usage.groups : []));
+      const signedIn = Array.isArray(sessions?.sessions) ? sessions.sessions : [];
+      const spent = Array.isArray(usage?.groups) ? usage.groups : [];
+      setPeople(authority.authority === "portal" ? peopleFromSessions(signedIn, spent) : mergePeople(current, signedIn, spent));
       if (typeof domain?.publicUrl === "string" && domain.publicUrl) setBase(domain.publicUrl);
       setEmailOffered(environment?.capabilities?.emailSignIn === true ? true : environment ? false : null);
     } catch (cause) {
@@ -215,9 +283,10 @@ export function PeopleSection() {
   };
 
   if (!canPairDevices(session)) return null;
+  if (membership?.authority === "portal") return <PortalPeople peopleUrl={membership.peopleUrl} people={people} />;
   return (
     <Card title={t("people.title")} subtitle={t("people.subtitle")}>
-      {emailOffered === false && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[12.5px] text-ink-secondary">{t("people.notHosted")}</p>}
+      {emailOffered === false && <p className="mb-3 rounded-lg border border-warning/25 bg-warning/5 px-3 py-2 text-[12.5px] text-ink-secondary">{t(membership?.pairingCodes === false ? "people.portalSignIn" : "people.notHosted")}</p>}
       <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void invite(); }}>
         <input
           value={draft}

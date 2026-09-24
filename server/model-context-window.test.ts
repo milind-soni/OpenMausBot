@@ -4,6 +4,15 @@ import { modelContextWindow } from "./model-context-window.ts";
 describe("model context window fallback", () => {
   it("knows the common families and stays silent otherwise", () => {
     expect(modelContextWindow("claude-sonnet-5")).toBe(200_000);
+    expect(modelContextWindow("claude-opus-5")).toBe(200_000);
+    expect(modelContextWindow("claude-opus-5-5")).toBe(1_000_000);
+    expect(modelContextWindow("claude-opus-5.5")).toBe(1_000_000);
+    expect(modelContextWindow("openrouter/anthropic/claude-opus-5-5")).toBe(1_000_000);
+    expect(modelContextWindow("anthropic.claude-opus-5-5")).toBe(1_000_000);
+    expect(modelContextWindow("claude-opus-5-50")).toBe(200_000);
+    expect(modelContextWindow("claude-opus-5-5-local")).toBe(200_000);
+    expect(modelContextWindow("claude-opus-5-5garbage")).toBe(200_000);
+    expect(modelContextWindow("omlx::claude-opus-5-5")).toBe(200_000);
     expect(modelContextWindow("claude-opus-5[1m]")).toBe(1_000_000);
     expect(modelContextWindow("gpt-5.6-sol")).toBe(272_000);
     expect(modelContextWindow("gpt-4.1-mini")).toBe(1_000_000);

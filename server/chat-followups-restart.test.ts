@@ -25,7 +25,10 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
   };
   // A second person on a paired device. What they queue must still be theirs
   // after the wait, the crash and the restart: the name rides the durable row.
-  const PAIRED = { name: "Safari on Mac" };
+  // `id` is the opaque person key the server derives from the session; a row
+  // written straight to the database below keeps the older name-only shape.
+  const PAIRED = { name: "Safari on Mac", id: expect.stringMatching(/^p_[\w-]{22}$/) };
+  const PAIRED_ROW = { name: "Safari on Mac" };
   let pairedToken = "";
   const asPairedPerson = async (path: string, body: unknown) => {
     const response = await fetch(`${url}${path}`, {
@@ -183,7 +186,7 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
       const claim = crashed.prepare(
         "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, 'bot', ?, ?, NULL, 'dispatching', ?)",
       );
-      claim.run("claimed_before_append_named", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed, never appended", sender: PAIRED }));
+      claim.run("claimed_before_append_named", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed, never appended", sender: PAIRED_ROW }));
       claim.run("claimed_before_append_legacy", unappended.id, unappended.threadId, JSON.stringify({ text: "Claimed by an older build" }));
       crashed.prepare("UPDATE messages SET json = json_set(json, '$.text', '') WHERE thread_id = ? AND id = ?")
         .run(lost.threadId, lostTarget.message.id);
@@ -198,7 +201,7 @@ it("survives a real server crash: queued sends keep receipts, cancellation and u
       sendId: body.sendId, queueId: queued.queueId, replyToId, text, sender: PAIRED,
     });
     expect((await messages(unappended.threadId)).filter((message) => message.role === "user").map((message) => [message.queueId, message.text, message.sender])).toEqual([
-      ["claimed_before_append_named", "Claimed, never appended", PAIRED],
+      ["claimed_before_append_named", "Claimed, never appended", PAIRED_ROW],
       ["claimed_before_append_legacy", "Claimed by an older build", undefined],
     ]);
     await expect.poll(async () => (await messages(lost.threadId)).some((message) => message.tool?.name?.includes("queued channel message could not start")), { timeout: 15_000 }).toBe(true);

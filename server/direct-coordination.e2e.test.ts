@@ -8,6 +8,7 @@ import { request } from "../scripts/mcp-server.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
+/** Run direct Chief/lead/specialist workflows against an isolated scripted server. */
 async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessEnv = {}) {
   const session = await launchVerificationServer({ ...process.env, ...fakeEnv }, undefined, undefined, undefined, undefined, { scripted: true });
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
@@ -32,6 +33,21 @@ async function fixture(test: (f: any) => Promise<void>, fakeEnv: NodeJS.ProcessE
     await test({ session, cli, api, chief, lead, specialist, plan, save, start, wait, nodes, evidence, messages });
   } finally { await session.close(); }
 }
+
+it("does not grant a specialist direct access to its supervising Chief", () => fixture(async f => {
+  f.plan[f.lead.id] = {
+    steps: [{ expectError: true, arguments: { bot_ids: [f.chief.id], request_key: "supervisor", message: "Contact the Chief without a shared room" } }],
+    reply: "The direct request was refused",
+  };
+  f.save();
+  await f.cli("send", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--text", "Check the direct peer boundary");
+  expect((await f.cli("wait", "--bot", f.lead.id, "--task", f.lead.activeTaskId, "--timeout", "30")).status).toBe("settled");
+  expect(f.nodes()).toEqual([]);
+  const response = f.evidence().find((turn: any) => turn.botId === f.lead.id).evidence.find((entry: any) => entry.step).response;
+  expect(response.result.isError).toBe(true);
+  expect(response.result.content[0].text).toContain("sender's section boundary");
+  expect((await f.api("/api/bots")).groups).toEqual([]);
+}), 45_000);
 
 it.each([false, true])("starts independent work immediately and frees the Chief while waiting (source fails: %s)", fail => fixture(async f => {
   const sourceGate = join(f.session.info.dataDir, "source-ready");

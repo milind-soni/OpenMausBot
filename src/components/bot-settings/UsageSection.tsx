@@ -8,7 +8,7 @@
 // section's entire content it would otherwise leave the panel blank, so a
 // short placeholder line is added for that case.
 import { useStore, type Bot } from "@/state/store";
-import { botUsage, costCaption, formatTokens, formatUsd, hasFiniteCost } from "@/lib/usage";
+import { botUsage, costCaption, formatTokens, formatUsd, hasFiniteCost, headlineTokens, usageDetail } from "@/lib/usage";
 
 export function UsageSection({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
@@ -43,9 +43,9 @@ export function UsageSection({ bot }: { bot: Bot }) {
           <div className="text-[11.5px] uppercase tracking-wide text-ink-secondary">Tokens</div>
           <div
             className="mt-0.5 tabular-nums text-ink"
-            title={`${formatTokens(usage.input)} in · ${formatTokens(usage.output)} out`}
+            title={usageDetail(usage)}
           >
-            {formatTokens(usage.input + usage.output)}
+            {formatTokens(headlineTokens(usage))}
           </div>
         </div>
         <div>

@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedDesktopBridge, ManagedDesktopState } from "../../electron/managed-desktop.mjs";
 import { setLocale } from "@/lib/i18n";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], updating: false }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], updating: false,
+  store: { bots: [] as unknown[], instances: [] as unknown[], dispatch: (() => {}) as (action: unknown) => void, flushBotPatches: (async () => null) as (botId: string) => Promise<unknown> } }));
 vi.mock("react", async (original) => ({ ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
     const index = fixture.index++;
@@ -23,12 +24,19 @@ vi.mock("react", async (original) => ({ ...await original<typeof import("react")
   },
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
+// The connected panel reads bots and engines for its Company models section.
+vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(),
+  useStore: () => ({ state: { bots: fixture.store.bots, instances: fixture.store.instances }, dispatch: fixture.store.dispatch, flushBotPatches: fixture.store.flushBotPatches }),
+}));
 import { OrganizationSettings } from "./OrganizationSettings";
+import { CompanyModels } from "./CompanyModels";
 
 type Node = ReactElement<{ children?: ReactNode; disabled?: boolean; value?: string; onChange?: (event: unknown) => void; onSubmit?: (event: unknown) => void; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] {
   if (!isValidElement(value)) return [];
   const node = value as Node;
+  // Walk into the Company models section so its inline action is reachable.
+  if (node.type === CompanyModels) return [node, ...nodes(CompanyModels(node.props as Parameters<typeof CompanyModels>[0]))];
   return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
 }
 function render() {
@@ -50,10 +58,12 @@ let push: (state: ManagedDesktopState) => void;
 let unsubscribe = vi.fn<() => void>();
 beforeEach(() => {
   fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.updating = false;
+  fixture.store = { bots: [], instances: [], dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) };
   unsubscribe = vi.fn(); push = () => {};
   bridge = {
     settingsOpened: vi.fn().mockResolvedValue(true),
     state: vi.fn().mockResolvedValue({ status: "signed-out" }), begin: vi.fn().mockResolvedValue(connecting),
+    reopen: vi.fn().mockResolvedValue(connecting),
     cancelEnrollment: vi.fn().mockResolvedValue({ status: "signed-out" }), refresh: vi.fn().mockResolvedValue(connected),
     disconnect: vi.fn().mockResolvedValue({ status: "signed-out" }),
     onState: vi.fn(callback => { push = callback; return unsubscribe; }),
@@ -148,6 +158,57 @@ describe("optional desktop Organisation settings", () => {
     expect(button("Refresh")).toBeUndefined();
     button("Disconnect…").props.onClick!(); button("Disconnect from organization").props.onClick!(); await flush();
     expect(render().html).toContain("Sign in with your organisation");
+  });
+
+  it("reopens only the pending sign-in page, with nothing supplied by the panel", async () => {
+    await ready(connecting);
+    const reopen = () => button("Open the sign-in page again");
+    reopen().props.onClick!(); reopen().props.onClick!(); await flush();
+    expect(bridge.reopen).toHaveBeenCalledOnce();
+    expect(bridge.reopen).toHaveBeenCalledWith();
+    expect(bridge.begin).not.toHaveBeenCalled();
+    expect(render().html).toContain("Finish signing in through your browser");
+    delete bridge.reopen;
+    expect(reopen()).toBeUndefined();
+    expect(button("Cancel sign-in")).toBeDefined();
+  });
+
+  it("switches only bots that cannot run, and disconnecting leaves personal selections untouched", async () => {
+    const managed = { organizationId: "fixture-org", organizationName: "Fixture Company" };
+    fixture.store.instances = [
+      { instanceId: "personal", driverKind: "codex", displayName: "Codex", snapshot: { state: "available", authenticated: true }, models: { default: "gpt", options: [] } },
+      { instanceId: "company.fixture.anthropic", driverKind: "claudeAgent", displayName: "Company · Fixture Company · Claude", readOnly: true, managed,
+        snapshot: { state: "available", authenticated: true }, models: { default: "model-a", options: [] } },
+    ];
+    const bot = (id: string, instanceId: string) => ({ id, threadId: `${id}-thread`, name: id, modelSelection: { instanceId, model: "saved" } });
+    fixture.store.bots = [bot("personal-bot", "personal"), bot("stuck-bot", "missing")];
+    await ready(connected);
+    expect(fixture.store.dispatch).not.toHaveBeenCalled();
+    button("Use Company · Fixture Company · Claude for 1 bot that can’t run").props.onClick!(); await flush();
+    expect(fixture.store.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "setModel", botId: "stuck-bot", selection: { instanceId: "company.fixture.anthropic", model: "model-a" } });
+    button("Disconnect…").props.onClick!(); button("Disconnect from organization").props.onClick!(); await flush();
+    expect(bridge.disconnect).toHaveBeenCalledOnce();
+    // Disconnecting changes no bot: the only model change is the one clicked above.
+    expect(fixture.store.dispatch).toHaveBeenCalledOnce();
+    expect(fixture.store.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ botId: "personal-bot" }));
+  });
+
+  it("explains a lapsed Admin licence without a sign-in loop and shows Company models unavailable", async () => {
+    await ready({ ...connected, status: "license-expired" });
+    const html = render().html;
+    expect(html).toContain("Your organisation&#x27;s OpenMaus Admin licence has expired. Contact your admin.");
+    expect(html).not.toContain("Disconnect below, then sign in again");
+    expect(html).not.toContain("Sign in with your organisation");
+    expect(html).toContain("Unavailable until the licence is renewed");
+    expect(html).not.toContain("Approved models:");
+    expect(button("Refresh")).toBeDefined(); expect(button("Disconnect…")).toBeDefined();
+  });
+
+  it("says so when a sign-in finds the Admin licence expired", async () => {
+    await ready({ status: "signed-out", notice: "license-expired" });
+    const html = render().html;
+    expect(html).toContain("licence has expired. Contact your admin.");
+    expect(html).toContain("Sign in with your organisation");
   });
 
   it("keeps newer broadcast state when an initial snapshot or action resolves late", async () => {

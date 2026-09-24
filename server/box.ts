@@ -1,4 +1,4 @@
-// Box (box.ascii.dev) provider — the bot's cloud computer. Ported from
+// Box (boat.dev) provider — the bot's cloud computer. Ported from
 // agentcal-api src/providers/box.js, reshaped per-bot instead of
 // per-customer: every bot gets one persistent box (deterministic name),
 // stop pauses billing while the disk survives, and Join always mints a
@@ -217,7 +217,7 @@ function boxDeletionOperation(
 
 function deletionBlockedError(boxId: string): Error & { status: number } {
   return Object.assign(
-    new Error(`ascii.dev accepted deletion of ${boxId}, but the deletion operation is blocked — check ascii.dev and retry`),
+    new Error(`boat.dev accepted deletion of ${boxId}, but the deletion operation is blocked — check boat.dev and retry`),
     { status: 409 },
   );
 }
@@ -286,7 +286,7 @@ async function reconcileRecordedBoxDeletion(
   }
   if (inspected.identity.name !== record.name) {
     throw Object.assign(
-      new Error("A cloud computer being deleted no longer has its remembered name — repair it in ascii.dev before continuing"),
+      new Error("A cloud computer being deleted no longer has its remembered name — repair it in boat.dev before continuing"),
       { status: 503 },
     );
   }
@@ -358,7 +358,7 @@ async function confirmAcceptedBoxDeletion(
       return "confirmed";
     }
     throw Object.assign(
-      new Error(`ascii.dev returned an invalid deletion receipt for ${record.boxId}; its deletion fence was kept`),
+      new Error(`boat.dev returned an invalid deletion receipt for ${record.boxId}; its deletion fence was kept`),
       { status: 503 },
     );
   }
@@ -384,7 +384,7 @@ async function requestRecordedBoxDeletion(
     });
   } catch (error) {
     throw Object.assign(
-      new Error("Could not confirm whether ascii.dev accepted the delete. The computer was kept fenced; retry Delete to reconcile it"),
+      new Error("Could not confirm whether boat.dev accepted the delete. The computer was kept fenced; retry Delete to reconcile it"),
       { status: 503, cause: error },
     );
   }
@@ -425,12 +425,12 @@ export async function boxNameMatchesBot(botId: string, name: string): Promise<bo
   return name === await boxNameFor(botId) || name === legacyBoxNameFor(botId);
 }
 
-export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000 } = {}) {
+export async function runCommand(cfg: AppConfig, boxId: string, command: string, { timeoutMs = 120_000, signal }: { timeoutMs?: number; signal?: AbortSignal } = {}) {
   assertBoxNotDeleting(boxId);
   const res = await boxFetch(cfg, `/boxes/${boxId}/commands`, {
     method: "POST",
     body: JSON.stringify({ command }),
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs),
   });
   const body: any = await res.json().catch(() => null);
   return {
@@ -486,11 +486,11 @@ const boxIdCache = new Map<string, string>();
 
 function boxInventoryProblem(status: number, body: any): string {
   if (status === 401 || status === 403) {
-    return "ascii.dev rejected the Box API key — update it in Settings → Connections";
+    return "boat.dev rejected the Box API key — update it in Settings → Connections";
   }
-  if (status === 429) return "ascii.dev is rate-limiting this account — wait a minute and refresh";
+  if (status === 429) return "boat.dev is rate-limiting this account — wait a minute and refresh";
   const message = typeof body?.message === "string" ? body.message.trim() : "";
-  return message ? `ascii.dev could not list cloud computers: ${message}` : `ascii.dev could not list cloud computers (${status})`;
+  return message ? `boat.dev could not list cloud computers: ${message}` : `boat.dev could not list cloud computers (${status})`;
 }
 
 function safeBoxState(value: unknown): string {
@@ -512,7 +512,7 @@ async function listBoxPages(
     try {
       listed = await boxJson(cfg, path, { signal: AbortSignal.timeout(20_000) });
     } catch {
-      return { ok: false, problem: "Could not reach ascii.dev to list cloud computers — check your connection and refresh" };
+      return { ok: false, problem: "Could not reach boat.dev to list cloud computers — check your connection and refresh" };
     }
     if (!listed.ok || !Array.isArray(listed.body?.boxes)) {
       return { ok: false, problem: boxInventoryProblem(listed.status, listed.body), credentialRejected: listed.status === 401 || listed.status === 403 };
@@ -522,16 +522,16 @@ async function listBoxPages(
     const next = listed.body?.pageInfo?.nextCursor;
     if (next === undefined || next === null || next === "") return { ok: true, boxes };
     if (typeof next !== "string" || next.length > 4_096) {
-      return { ok: false, problem: "ascii.dev returned an invalid cloud computer page cursor" };
+      return { ok: false, problem: "boat.dev returned an invalid cloud computer page cursor" };
     }
     if (seenCursors.has(next)) {
-      return { ok: false, problem: "ascii.dev repeated a cloud computer page cursor — refresh and try again" };
+      return { ok: false, problem: "boat.dev repeated a cloud computer page cursor — refresh and try again" };
     }
     seenCursors.add(next);
     cursor = next;
   }
 
-  return { ok: false, problem: "ascii.dev returned too many cloud computer pages — narrow the account inventory and refresh" };
+  return { ok: false, problem: "boat.dev returned too many cloud computer pages — narrow the account inventory and refresh" };
 }
 
 /**
@@ -597,12 +597,12 @@ export async function listManagedBoxes(
 
       const matchingRows = candidates.filter((candidate) => candidate?.id === recovery.boxId);
       if (matchingRows.length > 1) {
-        return invalidInventory("ascii.dev returned a conflicting id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+        return invalidInventory("boat.dev returned a conflicting id for an OpenMaus-managed cloud computer — refresh or repair it in boat.dev");
       }
       if (matchingRows.length === 1) {
         const listedName = typeof matchingRows[0]?.name === "string" ? matchingRows[0].name : "";
         if (listedName !== namedOwner.currentName && listedName !== namedOwner.legacyName) {
-          return invalidInventory("A remembered cloud computer no longer has its OpenMausBot owner name — repair it in ascii.dev before continuing");
+          return invalidInventory("A remembered cloud computer no longer has its OpenMausBot owner name — repair it in boat.dev before continuing");
         }
         continue;
       }
@@ -621,7 +621,7 @@ export async function listManagedBoxes(
         inspected.identity.name !== namedOwner.currentName
         && inspected.identity.name !== namedOwner.legacyName
       ) {
-        return invalidInventory("A remembered cloud computer no longer has its OpenMausBot owner name — repair it in ascii.dev before continuing");
+        return invalidInventory("A remembered cloud computer no longer has its OpenMausBot owner name — repair it in boat.dev before continuing");
       }
       const directCandidate = {
         id: inspected.identity.boxId,
@@ -653,11 +653,11 @@ export async function listManagedBoxes(
 
       const matchingRows = candidates.filter((candidate) => candidate?.id === deletion.boxId);
       if (matchingRows.length > 1) {
-        return invalidInventory("ascii.dev returned a conflicting id for a cloud computer being deleted");
+        return invalidInventory("boat.dev returned a conflicting id for a cloud computer being deleted");
       }
       if (matchingRows.length === 1) {
         if (matchingRows[0]?.name !== deletion.name) {
-          return invalidInventory("A cloud computer being deleted no longer has its remembered name — repair it in ascii.dev before continuing");
+          return invalidInventory("A cloud computer being deleted no longer has its remembered name — repair it in boat.dev before continuing");
         }
         if (getBoxDeletion(deletion.boxId)?.phase === "accepted") {
           matchingRows[0] = { ...matchingRows[0], state: "removing" };
@@ -701,11 +701,11 @@ export async function listManagedBoxes(
     if (!owner) continue;
     const boxId = typeof candidate.id === "string" ? candidate.id : "";
     if (!BOX_ID.test(boxId)) {
-      return invalidInventory("ascii.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      return invalidInventory("boat.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in boat.dev");
     }
     const existing = ownedBoxByBot.get(owner.botId);
     if (existing && existing !== boxId) {
-      return invalidInventory("ascii.dev returned conflicting cloud computers for one OpenMaus bot — repair them in ascii.dev before continuing");
+      return invalidInventory("boat.dev returned conflicting cloud computers for one OpenMaus bot — repair them in boat.dev before continuing");
     }
     ownedBoxByBot.set(owner.botId, boxId);
   }
@@ -726,7 +726,7 @@ export async function listManagedBoxes(
     } else if (LEGACY_MANAGED_BOX_NAME.test(name)) {
       // Pre-scope names have no installation provenance. A live local bot is
       // the only safe ownership proof; unmatched legacy rows stay provider-
-      // managed until the person handles them in ascii.dev directly.
+      // managed until the person handles them in boat.dev directly.
       owner = ownerByLegacyName.get(name) ?? null;
       if (!owner) continue;
       legacyOwner = true;
@@ -737,16 +737,16 @@ export async function listManagedBoxes(
     // deterministic name), silently skipping a malformed/duplicated identity
     // could let bot deletion mistake provider corruption for absence.
     if (!BOX_ID.test(boxId)) {
-      return invalidInventory("ascii.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      return invalidInventory("boat.dev returned an invalid id for an OpenMaus-managed cloud computer — refresh or repair it in boat.dev");
     }
     if ((boxIdCounts.get(boxId) ?? 0) !== 1 || seenBoxIds.has(boxId)) {
-      return invalidInventory("ascii.dev returned a conflicting id for an OpenMaus-managed cloud computer — refresh or repair it in ascii.dev");
+      return invalidInventory("boat.dev returned a conflicting id for an OpenMaus-managed cloud computer — refresh or repair it in boat.dev");
     }
     if (legacyOwner && owner && options.adoptLegacy !== false) {
       try {
         adoptResolvedBox(owner.botId, boxId);
       } catch {
-        return invalidInventory("OpenMausBot could not safely remember this legacy cloud computer's owner — repair it in ascii.dev before continuing");
+        return invalidInventory("OpenMausBot could not safely remember this legacy cloud computer's owner — repair it in boat.dev before continuing");
       }
     }
     seenBoxIds.add(boxId);
@@ -783,7 +783,7 @@ export async function inspectBoxIdentity(cfg: AppConfig, boxId: string): Promise
     return {
       available: false,
       identity: null,
-      problem: "Could not reach ascii.dev to verify a remembered cloud computer",
+      problem: "Could not reach boat.dev to verify a remembered cloud computer",
     };
   }
   if (inspected.status === 404 || inspected.status === 410) {
@@ -796,7 +796,7 @@ export async function inspectBoxIdentity(cfg: AppConfig, boxId: string): Promise
   const returnedId = typeof candidate?.id === "string" ? candidate.id : "";
   const name = typeof candidate?.name === "string" ? candidate.name : "";
   if (returnedId !== boxId || name.length === 0 || name.length > 100 || /[\r\n]/.test(name)) {
-    return { available: false, identity: null, problem: "ascii.dev returned an invalid cloud computer identity" };
+    return { available: false, identity: null, problem: "boat.dev returned an invalid cloud computer identity" };
   }
   return { available: true, identity: { boxId, name, state: safeBoxState(candidate.state) }, problem: null };
 }
@@ -849,7 +849,7 @@ const QUIESCE_BROWSER = [
 async function stopBox(cfg: AppConfig, boxId: string): Promise<void> {
   assertBoxNotDeleting(boxId);
   // Browser shutdown is best-effort, but the provider stop is not: Settings
-  // must never say a computer is sleeping when ascii.dev rejected the action.
+  // must never say a computer is sleeping when boat.dev rejected the action.
   await runCommand(cfg, boxId, QUIESCE_BROWSER, { timeoutMs: 5_000 }).catch(() => null);
   const stopped = await boxJson(cfg, `/boxes/${boxId}/stop`, { method: "POST" });
   if (!stopped.ok) throw Object.assign(new Error(boxErrorMessage(stopped.status, "box sleep", stopped.body)), { status: stopped.status });
@@ -889,7 +889,7 @@ export async function sleepManagedBox(
 }
 
 /** Permanent Settings action. The caller must echo the exact freshly-listed
- * machine name as well as its id; ascii.dev independently requires the id in
+ * machine name as well as its id; boat.dev independently requires the id in
  * its confirmation header. */
 export async function deleteManagedBox(
   cfg: AppConfig,
@@ -952,7 +952,7 @@ export async function findBox(cfg: AppConfig, botId: string) {
     const directBox = direct?.body?.box;
     if (direct?.ok && directBox?.id === cachedId && directBox.state !== "error") return directBox;
     if (direct?.ok && directBox?.id !== cachedId) {
-      throw Object.assign(new Error("ascii.dev returned an invalid cloud computer identity"), { status: 503 });
+      throw Object.assign(new Error("boat.dev returned an invalid cloud computer identity"), { status: 503 });
     }
     boxIdCache.delete(botId); // gone or broken — fall back to the listing
   }
@@ -966,7 +966,7 @@ export async function findBox(cfg: AppConfig, botId: string) {
   // discoverable only for this exact local bot id.
   const expected = listed.boxes.filter((candidate: any) => candidate?.name === name || candidate?.name === legacyName);
   if (expected.some((candidate: any) => !BOX_ID.test(candidate?.id))) {
-    throw Object.assign(new Error("ascii.dev returned an invalid cloud computer identity"), { status: 503 });
+    throw Object.assign(new Error("boat.dev returned an invalid cloud computer identity"), { status: 503 });
   }
   const found = expected.find((candidate: any) => candidate.name === name && candidate.state !== "error")
     ?? expected.find((candidate: any) => candidate.name === legacyName && candidate.state !== "error")
@@ -974,7 +974,7 @@ export async function findBox(cfg: AppConfig, botId: string) {
   if (found) {
     const duplicateId = listed.boxes.filter((candidate: any) => candidate?.id === found.id).length !== 1;
     if (duplicateId) {
-      throw Object.assign(new Error("ascii.dev returned a conflicting cloud computer identity"), { status: 503 });
+      throw Object.assign(new Error("boat.dev returned a conflicting cloud computer identity"), { status: 503 });
     }
     if (found.name === legacyName) adoptResolvedBox(botId, found.id);
     boxIdCache.set(botId, found.id);
@@ -1011,13 +1011,13 @@ export async function verifyToken(token: string): Promise<{ ok: true } | { ok: f
       return {
         ok: false,
         message: token.startsWith("box_")
-          ? "ascii.dev rejected that token — it may have been revoked or expired. Copy a fresh one from your ascii.dev account."
-          : "That doesn't look like a box API key: they start with box_. Copy the API key from your ascii.dev account (an account or session token won't work here).",
+          ? "boat.dev rejected that token — it may have been revoked or expired. Copy a fresh one from your boat.dev account."
+          : "That doesn't look like a box API key: they start with box_. Copy the API key from your boat.dev account (an account or session token won't work here).",
       };
     }
-    return { ok: false, message: `ascii.dev returned ${res.status} for that token — try again in a moment.` };
+    return { ok: false, message: `boat.dev returned ${res.status} for that token — try again in a moment.` };
   } catch {
-    return { ok: false, message: "Couldn't reach ascii.dev to check that token — check your connection and retry." };
+    return { ok: false, message: "Couldn't reach boat.dev to check that token — check your connection and retry." };
   }
 }
 
@@ -1030,18 +1030,18 @@ export function boxErrorMessage(status: number, what: string, body?: any): strin
   const link = typeof body?.error?.details?.billingUrl === "string" ? body.error.details.billingUrl : "";
   if (status === 402) {
     // e.g. "Start the $20/month Box plan to create sandboxes."
-    return [theirs || "ascii.dev needs a paid Box plan before it will create a computer.", link].filter(Boolean).join(" ");
+    return [theirs || "boat.dev needs a paid Box plan before it will create a computer.", link].filter(Boolean).join(" ");
   }
   if (status === 401 || status === 403) {
-    return "your box token was rejected by ascii.dev — open App Settings and paste a current token (it starts with box_)";
+    return "your box token was rejected by boat.dev — open App Settings and paste a current token (it starts with box_)";
   }
   if (status === 429) {
-    return theirs || "ascii.dev is rate-limiting this account — wait a minute and try again";
+    return theirs || "boat.dev is rate-limiting this account — wait a minute and try again";
   }
   return theirs ? `${what} failed: ${theirs}` : `${what} failed (${status})`;
 }
 
-/** ascii.dev trial accounts reject the normal eight-hour auto-stop with a
+/** boat.dev trial accounts reject the normal eight-hour auto-stop with a
  * structured `trial_auto_stop_required` refusal. Retry that one condition
  * once at the provider's advertised maximum (or the documented two-hour
  * trial ceiling). Other create failures must retain their original error. */
@@ -1069,7 +1069,7 @@ function idempotentCreateInProgress(result: Awaited<ReturnType<typeof boxJson>>)
 
 /** The keys this OpenMausBot already holds, as the environment its bots'
  * agents read on the box. The box is created with `noEnv: true`, so the
- * ascii.dev account's own logins never land in the guest: the box has exactly
+ * boat.dev account's own logins never land in the guest: the box has exactly
  * these and nothing else (see "Whose keys" in the Box integrated-agents docs). */
 export function boxCredentialEnv(cfg: AppConfig, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const out: Record<string, string> = {};
@@ -1139,7 +1139,7 @@ async function requestBoxCreate(cfg: AppConfig, botId: string, ttlSeconds: numbe
         body: wireBody,
       });
     } catch (error) {
-      // A dropped response is ambiguous: ascii.dev may already have created
+      // A dropped response is ambiguous: boat.dev may already have created
       // the Box. One retry with the same key recovers it safely.
       if (ambiguousRetries++ === 0) continue;
       throw error;
@@ -1232,7 +1232,7 @@ export async function provisionBox(cfg: AppConfig, botId: string, _botName: stri
       assertBotBoxNotDeleting(botId);
       // Provider-side backstop: archives itself (billing pauses, disk
       // survives) if every stop path dies. Trial accounts get one narrower
-      // retry when ascii.dev reports their shorter TTL ceiling.
+      // retry when boat.dev reports their shorter TTL ceiling.
       const createRes = await createBox(cfg, botId, credentialEnv);
       if (!createRes.ok || !createRes.body?.box?.id) {
         throw new Error(boxErrorMessage(createRes.status, "box create", createRes.body));
@@ -1276,14 +1276,14 @@ export async function provisionBox(cfg: AppConfig, botId: string, _botName: stri
       });
     } catch (cleanupError) {
       const cleanupMessage = cleanupError instanceof Error ? cleanupError.message : String(cleanupError);
-      throw new Error(`${originalMessage}. The new computer's deletion was not confirmed: ${cleanupMessage}. Check box ${box.id} in ascii.dev.`);
+      throw new Error(`${originalMessage}. The new computer's deletion was not confirmed: ${cleanupMessage}. Check box ${box.id} in boat.dev.`);
     }
     if (cleanupConfirmation === "confirmed") throw error;
     boxIdCache.delete(botId);
     throw Object.assign(
       new Error(
-        `${originalMessage}. ascii.dev accepted deletion of the new computer, but it is still pending; `
-        + `its recovery record was kept, along with its deletion fence. Check box ${box.id} in ascii.dev.`,
+        `${originalMessage}. boat.dev accepted deletion of the new computer, but it is still pending; `
+        + `its recovery record was kept, along with its deletion fence. Check box ${box.id} in boat.dev.`,
         { cause: error },
       ),
       { status: 503 },
@@ -1366,16 +1366,16 @@ export const PANEL_FRAME_QUALITY = 85;
 const PANEL_FRAME_FFMPEG_Q = 3;
 
 /** The shell that captures one panel frame on the box. Exported for tests. */
-export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FRAME_QUALITY } = {}): string {
+export function panelShotCommand({ width = PANEL_FRAME_WIDTH, quality = PANEL_FRAME_QUALITY, framePath = PANEL_PATH, nativeSize = false } = {}): string {
   return [
     "export DISPLAY=${DISPLAY:-:0}",
-    `f=${PANEL_PATH}`,
+    `f=${shellQuote(framePath)}`,
     // a stale frame must not pass `test -s` when every capture tool fails
     'rm -f "$f"',
     'w=$(xdotool getdisplaygeometry 2>/dev/null | cut -d" " -f1)',
     'case "$w" in ""|*[!0-9]*) w=0;; esac',
     `scrot -o -p -q ${quality} "$f" 2>/dev/null || import -window root -quality ${quality} "$f" 2>/dev/null || ffmpeg -y -f x11grab -draw_mouse 1 -i "$DISPLAY" -frames:v 1 -q:v ${PANEL_FRAME_FFMPEG_Q} "$f" >/dev/null 2>&1`,
-    `if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`,
+    ...(nativeSize ? [] : [`if [ "$w" -gt ${width} ] 2>/dev/null && command -v convert >/dev/null 2>&1; then convert "$f" -resize ${width}x -quality ${quality} "$f" 2>/dev/null || true; fi`]),
     'test -s "$f" && echo captured',
   ].join("; ");
 }
@@ -1389,11 +1389,11 @@ const FRAME_TOO_LARGE = "the box frame exceeds the 8 MB limit";
 
 /** Read a file off the box as base64 — raw artifact bytes when the API
  * supports it (33% less transfer, no JSON envelope), else the files API. */
-async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Promise<string | null> {
+async function readFileBase64(cfg: AppConfig, boxId: string, path: string, signal?: AbortSignal): Promise<string | null> {
   let bytes: Buffer | null = null;
   let tooLarge = false;
   try {
-    const res = await boxFetch(cfg, `/boxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`);
+    const res = await boxFetch(cfg, `/boxes/${boxId}/artifacts?path=${encodeURIComponent(path)}`, { signal });
     if (res.ok) {
       const declaredLength = res.headers.get("content-length");
       if (declaredLength !== null && Number(declaredLength) > MAX_FRAME_BYTES) tooLarge = true;
@@ -1406,7 +1406,8 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
     throw new Error(FRAME_TOO_LARGE);
   }
   if (bytes?.length) return bytes.toString("base64");
-  const { ok, body } = await boxJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`);
+  signal?.throwIfAborted();
+  const { ok, body } = await boxJson(cfg, `/boxes/${boxId}/files?path=${encodeURIComponent(path)}&encoding=base64`, { signal });
   const content = body?.content;
   if (ok && typeof content === "string" && content) {
     if (Buffer.byteLength(content, "base64") > MAX_FRAME_BYTES) throw new Error(FRAME_TOO_LARGE);
@@ -1417,7 +1418,7 @@ async function readFileBase64(cfg: AppConfig, boxId: string, path: string): Prom
 
 /** `knownBoxId` skips box resolution entirely — the screen poller holds
  * the id for the whole turn and must not re-resolve it every frame. */
-export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: string) {
+export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: string, options?: { signal?: AbortSignal; nativeSize?: boolean }) {
   cfg = snapshotBoxConfig(cfg);
   let boxId = knownBoxId;
   if (!boxId) {
@@ -1426,11 +1427,13 @@ export async function screenshotBox(cfg: AppConfig, botId: string, knownBoxId?: 
     if (!READY.has(box.state)) throw new Error(`box is ${box.state}`);
     boxId = box.id as string;
   }
-  const out = await runCommand(cfg, boxId, SHOT_CMD, { timeoutMs: 60_000 });
+  const framePath = options?.nativeSize ? PANEL_PATH + ".model.jpg" : PANEL_PATH;
+  const out = await runCommand(cfg, boxId, options?.nativeSize ? panelShotCommand({ framePath, nativeSize: true }) : SHOT_CMD,
+    { timeoutMs: 60_000, signal: options?.signal });
   if (!/captured/.test(out.stdout)) {
     throw new Error(out.stderr.slice(0, 200) || "screen capture failed on the box");
   }
-  const data = await readFileBase64(cfg, boxId, PANEL_PATH);
+  const data = await readFileBase64(cfg, boxId, framePath, options?.signal);
   if (!data) throw new Error("could not read the frame back from the box");
   return { png: data, format: "jpeg" };
 }

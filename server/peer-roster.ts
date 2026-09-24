@@ -4,6 +4,7 @@
 // caps, one sanitizer, and one reachability rule to audit rather than two
 // that drift.
 
+import { sameAudience } from "./bot-visibility.ts";
 import type { BotActivity } from "./store.ts";
 
 export interface RosterMember {
@@ -25,6 +26,8 @@ export interface RosterMember {
   /** What the harness last saw the bot doing. `busy` alone cannot tell a
    * bot mid-task from one parked on the user's approval card. */
   activity?: BotActivity;
+  /** Who may see the bot on a shared workspace (server/bot-visibility.ts). */
+  visibility?: unknown;
 }
 
 const sectionKey = (section?: string): string => section?.trim() || "";
@@ -42,6 +45,22 @@ export function canAccessTeam(
   return target === sectionKey(from.section) || Boolean(from.chiefOfStaff &&
     Array.isArray(from.managedSections) && from.managedSections.some(value =>
       typeof value === "string" && sectionKey(value) === target));
+}
+
+/** Returns whether `coordinator` is an authorized Chief of Staff supervising `bot`'s section. */
+export function coordinatorSupervises(
+  coordinator: Pick<RosterMember, "chiefOfStaff" | "managedSections"> | null | undefined,
+  bot: Pick<RosterMember, "section"> | null | undefined,
+): boolean {
+  if (!coordinator?.chiefOfStaff || !bot) return false;
+  const target = sectionKey(bot.section);
+  if (!target) return false;
+  return Boolean(
+    Array.isArray(coordinator.managedSections) &&
+    coordinator.managedSections.some((value) =>
+      typeof value === "string" && sectionKey(value) === target,
+    ),
+  );
 }
 
 export type PeerStatus = "available" | "working" | "waiting-on-user" | "not-responding" | "unavailable";
@@ -87,11 +106,22 @@ export function peerStatusWords(status: PeerStatus): string {
  * written by an older build) falls back to the unset rule rather than
  * throwing mid-turn: the list is operator-owned local state, so degrading to
  * the documented default is safer than failing a turn. */
-export const peerAllowed = (from: { peers?: string[] }, targetId: string): boolean =>
-  !Array.isArray(from.peers) || from.peers.includes(targetId);
+export const peerAllowed = (
+  from: { peers?: string[]; visibility?: unknown },
+  target: string | { id: string; visibility?: unknown },
+): boolean => {
+  const targetId = typeof target === "string" ? target : target.id;
+  if (Array.isArray(from.peers) && !from.peers.includes(targetId)) return false;
+  // Given the record, also require the same audience: a teammate that other
+  // people can see would carry this bot's words, or bring back a restricted
+  // bot's answers, to people who cannot see the other (bot-visibility.ts).
+  // Bots nobody restricted all share "everyone", so this changes nothing
+  // until an admin restricts one.
+  return typeof target === "string" || sameAudience(from.visibility, target.visibility);
+};
 
 export function canReachPeer(from: RosterMember, target: RosterMember): boolean {
-  return from.id !== target.id && !target.hidden && canAccessTeam(from, target.section) && peerAllowed(from, target.id);
+  return from.id !== target.id && !target.hidden && canAccessTeam(from, target.section) && peerAllowed(from, target);
 }
 
 /** The peers a bot can both see and reach right now. The roster, list_bots

@@ -11,7 +11,8 @@ export interface EnvironmentDescriptor {
 }
 
 export type SessionState =
-  | { kind: "loopback" }
+  // `service`: a shared server that does not treat this machine as its owner
+  | { kind: "loopback"; trust?: "service" }
   | { kind: "session"; id: string; label: string; scopes: string[]; expiresAt: number }
   | { kind: "unauthenticated"; error: string }
   | { kind: "unreachable"; error: string };
@@ -40,7 +41,23 @@ export async function readSessionState(fetchImpl: typeof fetch = fetch): Promise
       expiresAt: typeof record.expiresAt === "number" ? record.expiresAt : 0,
     };
   }
-  return { kind: "loopback" };
+  return record.trust === "service" ? { kind: "loopback", trust: "service" } : { kind: "loopback" };
+}
+
+/** Why the pair page shows on this machine: the server trusts local
+ * requests only as a service (OMB_LOOPBACK_TRUST=service, or a hosted
+ * workspace), so an SSH tunnel is not the owner and must sign in. */
+export const SERVICE_TRUST_REASON = "This server does not treat this computer as its owner. Sign in or pair this browser to continue.";
+
+/** A connection that can use the app: a session, or the owner on this machine. */
+export function isConnected(state: SessionState | null): boolean {
+  return state?.kind === "session" || (state?.kind === "loopback" && state.trust !== "service");
+}
+
+/** The owner on this machine or an admin session: who may manage the server. */
+export function isOwnerOrAdmin(state: SessionState | null): boolean {
+  if (!state) return false;
+  return state.kind === "loopback" ? state.trust !== "service" : state.kind === "session" && state.scopes.includes("admin");
 }
 
 /** Pull `#code=…` off the URL and out of history, the way a pairing link is meant to be consumed. */

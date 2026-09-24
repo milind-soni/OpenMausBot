@@ -31,6 +31,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { Composer } from "./Composer";
 import { ChatFindBar } from "./ChatFindBar";
 import { GroupTaskPicker } from "./TaskPicker";
+import { GroupUsageChip } from "./GroupUsageChip";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
@@ -1211,6 +1212,7 @@ export function GroupView({ group }: { group: Group }) {
             isGroup
           />
           <GroupCallButton group={group} members={members} />
+          <GroupUsageChip usage={group.usage} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
           {!remoteClient && !setupPending && !group.dm && <><DefaultResponderSelect group={group} members={members} /><MeetingLimitsButton group={group} /></>}
           {group.dm || remoteClient ? (

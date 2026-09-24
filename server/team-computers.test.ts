@@ -16,6 +16,18 @@ const fixture = () => {
 afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
 
 describe("named team computer ownership", () => {
+  it("renames the team label without changing computer identity or merging assignments", () => {
+    const { registry, file, environmentId } = fixture();
+    const a = registry.create("Desktop A");
+    const b = registry.create("Desktop B");
+    registry.assign(a.id, "Research");
+    registry.assign(b.id, "Delivery");
+    expect(() => registry.renameSection("Research", "Delivery")).toThrow(/already has/);
+    expect(registry.renameSection("Research", "Studio")).toBe(true);
+    expect(registry.forSection("Research")).toBeUndefined();
+    expect(new TeamComputers(file, environmentId).forSection("Studio")).toMatchObject({ id: a.id, name: a.name });
+    expect(registry.forSection("Delivery")?.id).toBe(b.id);
+  });
   it("persists unassigned identities before provisioning and retries without a second owner", () => {
     const { registry, file, environmentId } = fixture();
     const requestId = randomUUID();

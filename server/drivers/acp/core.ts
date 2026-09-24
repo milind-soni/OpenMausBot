@@ -430,6 +430,17 @@ function sessionOperationKey(toolCall: any): string | null {
   }));
 }
 
+/** The banner an ACP CLI prints for `--version`. Hermes writes its whole banner
+ *  to stderr with an empty stdout, so an stdout-only read reports a perfectly
+ *  good install as "CLI not found". Prefer stdout; fall back to the first
+ *  stderr line; null when both are empty. */
+export function versionFromProbe(stdout: string | undefined, stderr: string | undefined): string | null {
+  const out = (stdout ?? "").trim();
+  if (out) return out;
+  const err = (stderr ?? "").trim().split(/\r\n|\n|\r/, 1)[0]?.trim() ?? "";
+  return err || null;
+}
+
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   const DRIVER_KIND = support.driverKind;
   const SOURCE = support.nativeSource;
@@ -1636,8 +1647,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
         const version = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout) =>
-            resolve(err ? null : stdout.trim()),
+          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) =>
+            resolve(err ? null : versionFromProbe(stdout, stderr)),
           );
         });
         if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };

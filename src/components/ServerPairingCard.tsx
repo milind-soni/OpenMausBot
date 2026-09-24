@@ -3,7 +3,8 @@ import { QRCodeSVG } from "qrcode.react";
 
 import { t } from "@/lib/i18n";
 import { api } from "@/state/store";
-import { readSessionState, type SessionState } from "../lib/session";
+import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
+import { readMembership } from "../lib/membership";
 import { Card } from "./SettingsPrimitives";
 
 /** What the server hands out for a new device (POST /api/auth/pairing). */
@@ -27,8 +28,7 @@ export interface PairedDevice {
 /** The server's owner on its own machine, or an admin session, may pair
  * devices; a chat-only session must not even see the offer. */
 export function canPairDevices(state: SessionState | null): boolean {
-  if (!state) return false;
-  return state.kind === "loopback" || (state.kind === "session" && state.scopes.includes("admin"));
+  return isOwnerOrAdmin(state);
 }
 
 /** A session that may see the card but not act: say why, instead of showing
@@ -61,8 +61,11 @@ const quiet = "rounded-md border border-line px-3 py-1.5 text-[13px] text-ink ho
  * desktop app connected to a hosted workspace, whose requests reach that
  * server with the paired session — the only place its phones can be
  * paired from (MOCA-84). `canPairDevices` decides who may act. */
-export function ServerPairingCard({ initialSession = null }: { initialSession?: SessionState | null }) {
+export function ServerPairingCard({ initialSession = null, initialPairingCodes = true }: { initialSession?: SessionState | null; initialPairingCodes?: boolean }) {
   const [session, setSession] = useState<SessionState | null>(initialSession);
+  // A hosted workspace refuses pairing codes: people sign in through the
+  // organisation's portal. Offer only the signed-in devices there.
+  const [pairingCodes, setPairingCodes] = useState(initialPairingCodes);
   const [scope, setScope] = useState<"admin" | "client">("admin");
   const [offer, setOffer] = useState<PairingOffer | null>(null);
   const [devices, setDevices] = useState<PairedDevice[]>([]);
@@ -86,6 +89,9 @@ export function ServerPairingCard({ initialSession = null }: { initialSession?: 
     void readSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void loadDevices();
+      if (state.kind === "loopback" || state.kind === "session") {
+        void api("/api/config").then((config) => setPairingCodes(readMembership(config).pairingCodes)).catch(() => {});
+      }
     });
   }, []);
 
@@ -98,8 +104,8 @@ export function ServerPairingCard({ initialSession = null }: { initialSession?: 
   if (!canPairDevices(session)) {
     if (pairingBlockedReason(session) !== "chat-only") return null;
     return (
-      <Card title={t("remote.serverPairing.title")} subtitle={t("remote.serverPairing.subtitle")}>
-        <p data-server-pairing-chat-only className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.chatOnly")}</p>
+      <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
+        <p data-server-pairing-chat-only className="mt-3 text-[13px] text-ink-secondary">{t(pairingCodes ? "remote.serverPairing.chatOnly" : "remote.serverPairing.portalChatOnly")}</p>
       </Card>
     );
   }
@@ -141,8 +147,8 @@ export function ServerPairingCard({ initialSession = null }: { initialSession?: 
   }
 
   return (
-    <Card title={t("remote.serverPairing.title")} subtitle={t("remote.serverPairing.subtitle")}>
-      <div className="mt-3 flex flex-wrap items-center gap-3">
+    <Card title={t("remote.serverPairing.title")} subtitle={t(pairingCodes ? "remote.serverPairing.subtitle" : "remote.serverPairing.portalSubtitle")}>
+      {pairingCodes ? <div className="mt-3 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1.5 text-[13px] text-ink">
           <input type="radio" name="server-pairing-scope" checked={scope === "admin"} onChange={() => setScope("admin")} />
           {t("remote.serverPairing.scope.admin")}
@@ -154,8 +160,8 @@ export function ServerPairingCard({ initialSession = null }: { initialSession?: 
         <button type="button" onClick={() => void create()} disabled={busy} className={button}>
           {busy ? t("remote.serverPairing.creating") : t("remote.serverPairing.create")}
         </button>
-      </div>
-      {offer ? (
+      </div> : <p data-server-pairing-portal className="mt-3 text-[13px] text-ink-secondary">{t("remote.serverPairing.portal")}</p>}
+      {pairingCodes && offer ? (
         <div className="mt-4 rounded-lg border border-line bg-surface p-4">
           {expired ? (
             <p className="text-[13px] text-ink-secondary">{t("remote.serverPairing.expired")}</p>
@@ -184,7 +190,7 @@ export function ServerPairingCard({ initialSession = null }: { initialSession?: 
           )}
         </div>
       ) : null}
-      <div className="mt-5 text-[13px] font-medium text-ink">{t("remote.serverPairing.devices")}</div>
+      <div className="mt-5 text-[13px] font-medium text-ink">{t(pairingCodes ? "remote.serverPairing.devices" : "remote.serverPairing.portalDevices")}</div>
       {devices.length === 0 ? (
         <p className="mt-1 text-[12.5px] text-ink-secondary">{t("remote.serverPairing.noDevices")}</p>
       ) : (

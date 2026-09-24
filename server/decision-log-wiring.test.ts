@@ -275,4 +275,20 @@ posixOnly("authorization decisions are logged", () => {
     expect((await api("GET", "/api/decisions?limit=0")).status).toBe(400);
     expect((await api("GET", "/api/decisions?limit=nope")).status).toBe(400);
   });
+
+  it("GET /api/decisions.csv exports a date range, one line per row, from the month files", async () => {
+    const all = (await api("GET", "/api/decisions")).body.decisions as DecisionRow[];
+    const today = new Date().toISOString().slice(0, 10);
+    const res = await fetch(`${BASE}/api/decisions.csv?from=${today}&to=${today}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/^text\/csv/);
+    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="decisions-${today}-${today}.csv"`);
+    const lines = (await res.text()).trim().split("\n");
+    expect(lines[0]).toBe("time,decision,source,bot,tool,summary,rule,unattended,answered_by,thread,request");
+    expect(lines).toHaveLength(all.length + 1);
+    // the owner answered the cards above from loopback
+    expect(lines.some((line) => line.includes(",user-approved,user,") && line.includes(",This computer,"))).toBe(true);
+    expect((await fetch(`${BASE}/api/decisions.csv?from=2026-13-01`)).status).toBe(400);
+    expect((await fetch(`${BASE}/api/decisions.csv?from=2025-01-01&to=2026-09-01`)).status).toBe(400);
+  });
 });

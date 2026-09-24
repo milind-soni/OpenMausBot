@@ -259,7 +259,7 @@ describe("Codex server-owned device authentication", () => {
   });
 
   it("can cancel while the initial account check is still starting", async () => {
-    const controller = create("status-hang");
+    const controller = create("status-hang", { startupTimeoutMs: 1000 });
     const starting = controller.start();
     const rejection = expect(starting).rejects.toThrow("cancelled");
     // Wait out a slow first spawn exactly as long as the controller's own

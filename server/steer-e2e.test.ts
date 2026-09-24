@@ -41,7 +41,8 @@ posixOnly("mid-turn steering e2e", () => {
   /** Pair a second device the way a teammate does, and send as them. A
    * queue is a delay, never a change of author: their words must still be
    * theirs when they finally reach the transcript. */
-  const PAIRED = { name: "Safari on Mac" };
+  // `id` is the opaque person key the server derives from the session.
+  const PAIRED = { name: "Safari on Mac", id: expect.stringMatching(/^p_[\w-]{22}$/) };
   const asPairedPerson = async () => {
     const opened = await api("POST", "/api/auth/pairing", {});
     expect(opened.status).toBe(200);

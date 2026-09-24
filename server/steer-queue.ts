@@ -21,6 +21,7 @@ import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
+import type { UsageTrigger } from "./usage-ledger.ts";
 
 /** The slice of Store this module needs — narrow so tests can fake it. */
 export interface SteerStore {
@@ -48,8 +49,14 @@ interface QueueEntry {
     /** The person who sent the words: a queue is a delay, not a change of
      * author, so the drained line names them like an immediate send would. */
     sender?: ResolvedSender;
+    /** Who the usage ledger books the turn these words start to, captured
+     * when they were sent. Absent on rows queued before this existed. */
+    trigger?: UsageTrigger;
   }>;
 }
+
+/** The first waiting line of a drained batch: the one that starts the turn. */
+export type SteerQueueHead = Pick<QueueEntry["items"][number], "trigger" | "sender" | "peerAsk">;
 
 const queues = new Map<string, QueueEntry>(); // threadId → waiting sends
 
@@ -103,7 +110,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -120,6 +127,7 @@ export function queueSteeredMessage(
     unattended: options.unattended,
     peerAsk: options.peerAsk,
     sender: options.sender,
+    trigger: options.trigger,
   };
   saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
   entry.items.push(item);
@@ -165,6 +173,7 @@ export function drainSteeredMessages(
     userMessage: Message,
     excludeIds: string[],
     unattended: boolean,
+    head: SteerQueueHead,
   ) => void | Promise<void>,
   isBlocked?: (botId: string, threadId: string) => boolean,
 ): void {
@@ -220,6 +229,8 @@ export function drainSteeredMessages(
       // one unattended line makes the whole drained turn unattended: a
       // person's words in the same queue cannot re-attend a bot's own
       entry.items.some((item) => item.unattended === true),
+      // the first waiting line is the one that starts this turn
+      { trigger: entry.items[0].trigger, sender: entry.items[0].sender, peerAsk: entry.items[0].peerAsk },
     );
     void Promise.resolve(running).then(
       () => settleChatFollowups(ids, null),

@@ -21,7 +21,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useEffect: (effect: EffectCallback) => { fixture.effects.push(effect); },
 }));
 vi.mock("@/state/store", () => ({ api: vi.fn() }));
-import { CompanyBackupSettings, ConnectedCompanyBackupSettings } from "./CompanyBackupSettings";
+import { CompanyBackupSettings, ConnectedCompanyBackupSettings, SavedCompanyBackupSchedule } from "./CompanyBackupSettings";
 
 type BackupBridge = NonNullable<NonNullable<Window["ogb"]>["companyBackups"]>;
 type Node = ReactElement<{
@@ -155,6 +155,25 @@ describe("optional Company cloud backup settings", () => {
     expect(render(true).html).toBe("");
     expect(bridge.state).not.toHaveBeenCalled(); expect(bridge.list).not.toHaveBeenCalled();
     expect(bridge.onState).not.toHaveBeenCalled();
+  });
+
+  it("keeps a paused daily schedule visible, with its off switch, while disconnected, without any cloud request", async () => {
+    vi.mocked(organization.state).mockResolvedValue({ status: "signed-out" });
+    vi.mocked(bridge.state).mockResolvedValue({ busy: false, schedule: { enabled: true, status: "paused" } });
+    await readyOuter({ status: "signed-out" });
+    render(true); effects(); await flush();
+    const html = render(true).html;
+    expect(html).toContain("Daily company backups are paused until this computer reconnects");
+    expect(html).toContain("Waiting for the local workspace and company connection to be ready.");
+    expect(bridge.list).not.toHaveBeenCalled();
+    // The schedule row itself: render it directly to reach its switch.
+    const saved = () => { fixture.index = 0; fixture.effects = []; const tree = SavedCompanyBackupSchedule({ bridge }); return nodes(tree); };
+    fixture.values = [];
+    saved(); effects(); await flush();
+    const toggle = saved().find(node => node.props["aria-label"] === "Daily backups")!;
+    toggle.props.onClick!(); await flush();
+    expect(bridge.configureSchedule).toHaveBeenCalledExactlyOnceWith({ enabled: false });
+    expect(saved()).toEqual([]);
   });
 
   it("waits for the eligible organization before loading backup state and scopes its child to that identity", async () => {
