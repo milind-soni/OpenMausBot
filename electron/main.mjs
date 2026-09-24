@@ -9,6 +9,11 @@ import { registerProjectsIpc } from "./projects.mjs";
 
 app.name = "Gerer Build Studio";
 
+// One instance per user: a second copy would start a second harness server
+// against the same ~/.gbs and both would overwrite each other's files.
+const hasInstanceLock = app.requestSingleInstanceLock();
+if (!hasInstanceLock) app.quit();
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // 127.0.0.1 explicitly — vite binds IPv4; a bare "localhost" here can
 // resolve to ::1 and paint a black window
@@ -26,16 +31,19 @@ let serverProc = null;
 let serverReady = true;
 
 // The packaged app has no terminal: everything about the server child's life
-// goes to ~/Library/Logs/Gerer Build Studio/server.log (Console.app-visible),
-// which is also why stdio is piped, not inherited — under a Finder launch
-// the parent's stdio leads nowhere and a failed boot is otherwise undiagnosable.
-const LOG_DIR = path.join(app.getPath("home"), "Library", "Logs", "Gerer Build Studio");
+// goes to server.log in the platform log dir (macOS: ~/Library/Logs/Gerer
+// Build Studio, Console.app-visible; Windows: %APPDATA%\Gerer Build
+// Studio\logs), which is also why stdio is piped, not inherited — under a
+// Finder launch the parent's stdio leads nowhere and a failed boot is
+// otherwise undiagnosable.
+// resolved lazily: the logs path is only reliable once Electron has set up
+const logDir = () => app.getPath("logs");
 let logStream = null;
 function slog(line) {
   try {
     if (!logStream) {
-      fs.mkdirSync(LOG_DIR, { recursive: true });
-      logStream = fs.createWriteStream(path.join(LOG_DIR, "server.log"), { flags: "a" });
+      fs.mkdirSync(logDir(), { recursive: true });
+      logStream = fs.createWriteStream(path.join(logDir(), "server.log"), { flags: "a" });
     }
     logStream.write(`[${new Date().toISOString()}] ${line}\n`);
   } catch {
@@ -103,11 +111,34 @@ async function startServerPackaged() {
   return false;
 }
 
-const ERROR_PAGE =
-  "data:text/html;charset=utf-8," +
-  encodeURIComponent(
-    `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui"><div style="text-align:center;max-width:360px"><div style="font-size:40px">🐭</div><h2 style="font-weight:600;margin:12px 0 6px">Couldn't start the bot server</h2><p style="color:#fcfcfc99;line-height:1.5">Something else is using its ports. Quit and reopen Gerer Build Studio — if it keeps happening, restart your Mac.</p></div></body>`,
+function escapeHtml(text) {
+  return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+function errorPage() {
+  const logFile = escapeHtml(path.join(logDir(), "server.log"));
+  return (
+    "data:text/html;charset=utf-8," +
+    encodeURIComponent(
+      `<body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#070707;color:#fcfcfc;font:15px -apple-system,system-ui,'Segoe UI',sans-serif"><div style="text-align:center;max-width:420px"><h2 style="font-weight:600;margin:0 0 8px">Couldn't start the Gerer Build Studio server</h2><p style="color:#fcfcfc99;line-height:1.5">Another program may be using its ports (8899, 18899, 28899). Quit and reopen Gerer Build Studio. If it keeps happening, restart your computer.</p><p style="color:#fcfcfc66;font-size:12px;line-height:1.5;word-break:break-all">Details: ${logFile}</p></div></body>`,
+    )
   );
+}
+
+// Links the app hands to the OS. Anything else (file:, smb:, custom app
+// schemes) could launch local programs, so it is dropped.
+function openExternalSafely(url) {
+  try {
+    const { protocol } = new URL(url);
+    if (protocol === "https:" || protocol === "http:" || protocol === "mailto:") void shell.openExternal(url);
+  } catch {
+    /* not a URL */
+  }
+}
+
+// webContents ids of the mobile-preview <webview> guests — the only ones the
+// renderer may ask to screenshot
+const previewGuestIds = new Set();
 
 async function loadDevUrl(win, url) {
   for (let i = 0; i < 40; i++) {
@@ -151,8 +182,21 @@ function createWindow() {
   });
 
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    openExternalSafely(url);
     return { action: "deny" };
+  });
+
+  // The window only ever shows the app. A link or redirect that would
+  // navigate it elsewhere opens in the browser instead.
+  const appOrigin = new URL(app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : DEV_URL).origin;
+  win.webContents.on("will-navigate", (event, url) => {
+    let origin = null;
+    try {
+      origin = new URL(url).origin;
+    } catch {}
+    if (origin === appOrigin) return;
+    event.preventDefault();
+    openExternalSafely(url);
   });
 
   // Mobile preview panel hardening: force guest webPreferences before
@@ -169,6 +213,9 @@ function createWindow() {
   });
 
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
+    const guestId = guestWebContents.id;
+    previewGuestIds.add(guestId);
+    guestWebContents.once("destroyed", () => previewGuestIds.delete(guestId));
     guestWebContents.setWindowOpenHandler(() => ({ action: "deny" }));
     guestWebContents.on("will-navigate", (navEvent, url) => {
       if (!/^https?:/i.test(url)) navEvent.preventDefault();
@@ -176,7 +223,7 @@ function createWindow() {
   });
 
   if (app.isPackaged) {
-    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : ERROR_PAGE);
+    win.loadURL(serverReady ? `http://127.0.0.1:${SERVER_PORT}` : errorPage());
   } else {
     loadDevUrl(win, DEV_URL);
   }
@@ -198,6 +245,7 @@ ipcMain.handle("screen:frame", async () => {
 // content beyond the current viewport (Page.captureScreenshot with
 // captureBeyondViewport), since capturePage() can only see what's rendered.
 ipcMain.handle("webview:screenshot", async (_event, { webContentsId, fullPage }) => {
+  if (!previewGuestIds.has(webContentsId)) return null;
   const wc = webContents.fromId(webContentsId);
   if (!wc) return null;
   if (!fullPage) {
@@ -251,6 +299,11 @@ ipcMain.handle("perm:request-mic", async () => {
 // macOS never re-prompts a denied permission — the only path is System
 // Settings; deep-link straight to the right privacy pane.
 ipcMain.handle("perm:open-settings", (_event, pane) => {
+  if (process.platform === "win32") {
+    const winPanes = { mic: "ms-settings:privacy-microphone", speech: "ms-settings:privacy-speech" };
+    return winPanes[pane] ? shell.openExternal(winPanes[pane]) : undefined;
+  }
+  if (process.platform !== "darwin") return undefined;
   const panes = {
     mic: "Privacy_Microphone",
     screen: "Privacy_ScreenCapture",
@@ -267,7 +320,15 @@ ipcMain.handle("speech:start", (event) => {
 });
 ipcMain.handle("speech:stop", () => stopSpeech());
 
+app.on("second-instance", () => {
+  const [win] = BrowserWindow.getAllWindows();
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
+
 app.whenReady().then(async () => {
+  if (!hasInstanceLock) return;
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
   // getDisplayMedia in the renderer → this handler → ScreenCaptureKit, all
   // inside the app's own processes — the one capture path macOS reliably
@@ -288,7 +349,8 @@ app.whenReady().then(async () => {
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
   // failure — computer use degrades to "unavailable", the rest still works.
-  startCua().catch((e) => console.error("[cua] start failed:", e));
+  // The CUA driver is macOS-only.
+  if (process.platform === "darwin") startCua().catch((e) => console.error("[cua] start failed:", e));
   if (app.isPackaged) serverReady = await startServerPackaged();
   const win = createWindow();
   // in-app auto-update (packaged only) — checks GitHub releases, downloads on
@@ -305,14 +367,32 @@ app.on("window-all-closed", () => {
 
 // EMBEDDING.md lifecycle rule: defer the first quit until the embedded
 // daemon's async cleanup completes — it can't run after the host exits.
+// The harness server gets the same courtesy: it flushes and stops its agent
+// processes on SIGTERM, so wait (briefly) for it to exit before quitting.
+function stopServer() {
+  const proc = serverProc;
+  serverProc = null;
+  if (!proc) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 3000);
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    try {
+      proc.kill();
+    } catch {
+      clearTimeout(timer);
+      resolve();
+    }
+  });
+}
+
 let cuaCleanedUp = false;
 app.on("before-quit", (e) => {
   if (cuaCleanedUp) return;
   e.preventDefault();
-  try {
-    serverProc?.kill();
-  } catch {}
-  stopCua().finally(() => {
+  Promise.allSettled([stopServer(), stopCua()]).finally(() => {
     cuaCleanedUp = true;
     app.quit();
   });
