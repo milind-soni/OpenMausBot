@@ -98,6 +98,7 @@ class ChatPreferencesTest {
 
     @Test
     fun quickRepliesRoundTripAndDistinguishEmptyListFromEmptyStore() {
+        assertEquals(emptyList(), QuickReply.DEFAULTS)
         val mine = listOf(
             QuickReply(title = "Deploy", prompt = "Deploy to staging", icon = "send"),
             QuickReply(title = "Logs", prompt = "Show logs", icon = "document"),

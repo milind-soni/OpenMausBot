@@ -43,8 +43,8 @@ class ChatPreferences(
 
     fun setQuickReplies(replies: List<QuickReply>) {
         // An encoded empty list is meaningful: it hides the chip row. Do not
-        // turn it into an absent key, which QuickReply.decode correctly treats
-        // as a first-run default.
+        // turn it into an absent key, which QuickReply.decode treats as a
+        // first-run preference.
         val encoded = QuickReply.encode(replies)
         if (_quickReplies.value == replies && prefs.getString(QUICK_REPLIES, null) == encoded) return
         prefs.edit().putString(QUICK_REPLIES, encoded).commit()

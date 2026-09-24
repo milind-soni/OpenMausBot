@@ -27,12 +27,9 @@ data class QuickReply(
     val icon: String,
 ) {
     companion object {
-        val DEFAULTS: List<QuickReply> = listOf(
-            QuickReply("default.diff", "Show diff", "Show latest git diff", "diff"),
-            QuickReply("default.tests", "Run tests", "Run all automated tests", "tests"),
-            QuickReply("default.explain", "Explain steps", "Explain the changes in detail", "explain"),
-            QuickReply("default.next", "What's next?", "What should we do next?", "next"),
-        )
+        // Generic actions are opt-in, so the chat does not suggest irrelevant
+        // prompts in conversations that have no related workspace.
+        val DEFAULTS: List<QuickReply> = emptyList()
 
         val ICON_CHOICES: List<String> = listOf(
             "next", "diff", "tests", "explain", "build", "bug", "document", "terminal",
@@ -43,8 +40,8 @@ data class QuickReply(
             runCatching { CompanionJson.encodeToString(replies) }.getOrDefault("")
 
         /**
-         * An empty or corrupt store falls back to defaults. An encoded empty list is a deliberate
-         * choice and remains empty.
+         * An empty or corrupt store falls back to the empty default. An encoded empty list
+         * is also a deliberate choice and remains empty.
          */
         fun decode(json: String): List<QuickReply> {
             if (json.isEmpty()) return DEFAULTS

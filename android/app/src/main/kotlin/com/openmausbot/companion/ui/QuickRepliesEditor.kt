@@ -140,7 +140,7 @@ fun QuickRepliesEditor(
         AlertDialog(
             onDismissRequest = { confirmReset = false },
             title = { Text("Reset quick replies?") },
-            text = { Text("This restores the four chips the app came with and discards your own.") },
+            text = { Text("This removes all quick replies. You can add your own later.") },
             confirmButton = {
                 TextButton(
                     onClick = {

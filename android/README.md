@@ -9,6 +9,10 @@ running OpenMausBot, then read and answer from the phone.
 - Two modules: `:core` (protocol, ported from `ios/Sources/CompanionCore`) and
   `:app` (Compose UI, Android platform)
 
+Quick replies are empty by default. To add your own shortcuts, open
+**Settings → Chat → Quick replies** in the Android app. Existing custom
+shortcuts remain stored on that phone; resetting clears the row.
+
 ## Build and test
 
 Requires **JDK 17** and an Android SDK. Gradle arrives through the wrapper, so
