@@ -4,7 +4,7 @@ created: 2026-09-24
 updated: 2026-09-24
 scope: release signing and telemetry
 owner: unassigned
-related: [review--release-distribution-ownership.md]
+related: [done--release-distribution-ownership.md]
 ---
 
 # Sign distributable installers and gate telemetry behind consent

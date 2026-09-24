@@ -5,7 +5,7 @@ updated: 2026-09-24
 scope: first-run UX audit and onboarding friction
 owner: Z
 related:
-  - docs/dev/fixes/review--projects-screen.md
+  - docs/dev/fixes/done--projects-screen.md
   - docs/dev/product-copy--onboarding-auth-sync-updates.md
   - docs/dev/plans/implementation--browser-add-project.md
 ---
