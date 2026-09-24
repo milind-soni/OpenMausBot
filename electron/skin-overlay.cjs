@@ -16,6 +16,8 @@ const SKIN_CHROME = Object.freeze({
   linen: Object.freeze({ color: "#eceff3", symbolColor: "#59616c" }),
   dusk: Object.freeze({ color: "#121014", symbolColor: "#b9afbd" }),
   daylight: Object.freeze({ color: "#fcfcfc", symbolColor: "#575757" }),
+  chatgpt: Object.freeze({ color: "#ffffff", symbolColor: "#62676e" }),
+  custom: Object.freeze({ color: "#ffffff", symbolColor: "#62676e" }),
 });
 
 const DEFAULT_SKIN = "midnight";

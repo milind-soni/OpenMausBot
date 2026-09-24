@@ -303,6 +303,7 @@ const Transcript = memo(function Transcript({
                   className={cn(
                     "w-fit max-w-[min(42rem,78%)] rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed",
                     !user && m.id === emergingId && "turn-answer",
+                    !user && "assistant-message",
                     user ? "chat-text whitespace-pre-wrap bg-bubble-user text-ink" : "bg-card text-ink",
                   )}
                   title={new Date(m.at).toLocaleString()}

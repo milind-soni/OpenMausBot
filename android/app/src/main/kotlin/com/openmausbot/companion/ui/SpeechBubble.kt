@@ -194,8 +194,13 @@ private const val QUARTER = 90f
  */
 object BubbleColor {
     /** What you said. The mascot palette's blue, not the system's. */
-    val mine: Color = Color(MausPalette.argb("blue"))
-    val mineText: Color = Color.White
+    val defaultMine: Color = Color(MausPalette.argb("blue"))
+    val defaultMineText: Color = Color.White
+    val mine: Color
+        @Composable get() = LocalThemeColors.current["bubble-user"]?.let(::themeColor)
+            ?: defaultMine
+    val mineText: Color
+        @Composable get() = LocalThemeColors.current["bubble-user-ink"]?.let(::themeColor) ?: defaultMineText
 
     private val theirsDark = Color(0xFF262629)
     private val theirsLight = Color(0xFFE9E9EB)
@@ -207,5 +212,6 @@ object BubbleColor {
      */
     val theirs: Color
         @Composable get() =
-            if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) theirsDark else theirsLight
+            LocalThemeColors.current["card"]?.let(::themeColor)
+                ?: if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) theirsDark else theirsLight
 }

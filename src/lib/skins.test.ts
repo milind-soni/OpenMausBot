@@ -4,8 +4,8 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { SKINS, SKIN_IDS, DEFAULT_SKIN } from "./skins";
+import { describe, expect, it, vi } from "vitest";
+import { SKINS, SKIN_IDS, DEFAULT_SKIN, colorsFromSkin, readCustomTheme, saveCustomTheme, applySkin } from "./skins";
 
 const css = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), "../styles.css"),
@@ -43,7 +43,7 @@ describe("skins", () => {
   it("selects a code-only light or dark palette in every nearest skin", () => {
     for (const id of SKIN_IDS) {
       const body = css.match(new RegExp(`\\[data-skin="${id}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-      const scheme = ["atelier", "lagoon", "linen", "daylight"].includes(id) ? "light" : "dark";
+      const scheme = ["atelier", "lagoon", "linen", "daylight", "chatgpt", "custom"].includes(id) ? "light" : "dark";
       expect(body).toContain(`--code-color-scheme: ${scheme};`);
     }
     expect(css).toMatch(/\.chat-md \.shiki\s*\{\s*color-scheme:\s*var\(--code-color-scheme\);\s*\}/);
@@ -54,6 +54,48 @@ describe("skins", () => {
     for (const skin of SKINS) {
       expect(skin.name.length).toBeGreaterThan(0);
       expect(skin.tagline.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps a copied preset's geometry and readable dark user bubble", () => {
+    const properties = new Map<string, string>();
+    const data = new Map<string, string>();
+    const root = {
+      dataset: {} as Record<string, string>,
+      style: {
+        setProperty: (key: string, value: string) => properties.set(key, value),
+        removeProperty: (key: string) => properties.delete(key),
+      },
+    };
+    vi.stubGlobal("document", {
+      documentElement: root,
+      body: { appendChild: () => undefined },
+      createElement: () => ({ dataset: {} as Record<string, string>, style: {}, remove: () => undefined }),
+    });
+    vi.stubGlobal("getComputedStyle", (element: { dataset: { skin: string } }) => ({
+      getPropertyValue: (name: string) => {
+        const body = css.match(new RegExp(`\\[data-skin="${element.dataset.skin}"\\]\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+        return body.match(new RegExp(`${name}:\\s*([^;]+);`))?.[1]?.trim() ?? "";
+      },
+    }));
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+    });
+    vi.stubGlobal("window", {});
+    try {
+      const daylight = colorsFromSkin("daylight");
+      saveCustomTheme(daylight);
+      expect(readCustomTheme()?.fontSans).toBe(daylight.fontSans);
+      expect(properties.get("--font-sans")).toBe(daylight.fontSans);
+      expect(properties.get("--radius-lg")).toBe(daylight.radiusLg);
+      expect(properties.get("--radius-xl")).toBe(daylight.radiusXl);
+      expect(root.dataset.invertedUserBubble).toBe("true");
+      applySkin("midnight");
+      expect(root.dataset.invertedUserBubble).toBe("false");
+      expect(properties.has("--font-sans")).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 });

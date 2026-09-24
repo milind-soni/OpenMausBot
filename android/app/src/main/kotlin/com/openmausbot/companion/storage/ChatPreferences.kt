@@ -6,6 +6,8 @@ import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.QuickReply
+import com.openmausbot.companion.core.CompanionJson
+import com.openmausbot.companion.ui.PresetThemes
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +34,30 @@ class ChatPreferences(
 
     private val _quickReplies = MutableStateFlow(QuickReply.decode(prefs.getString(QUICK_REPLIES, "").orEmpty()))
     val quickReplies: StateFlow<List<QuickReply>> = _quickReplies.asStateFlow()
+
+    private val _themeId = MutableStateFlow(prefs.getString(THEME_ID, "system")
+        ?.takeIf { it == "system" || it == "custom" || it in PresetThemes.colors } ?: "system")
+    val themeId: StateFlow<String> = _themeId.asStateFlow()
+
+    private val _customColors = MutableStateFlow(runCatching {
+        CompanionJson.decodeFromString<Map<String, String>>(prefs.getString(CUSTOM_COLORS, "{}") ?: "{}")
+    }.getOrDefault(emptyMap()))
+    val customColors: StateFlow<Map<String, String>> = _customColors.asStateFlow()
+
+    fun setTheme(id: String) {
+        require(id == "system" || id == "custom" || id in PresetThemes.colors)
+        prefs.edit().putString(THEME_ID, id).commit()
+        _themeId.value = id
+    }
+
+    fun setCustomColors(colors: Map<String, String>) {
+        require(PresetThemes.colorRoles.all { role ->
+            colors[role]?.matches(Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")) == true || colors[role] == "transparent"
+        })
+        prefs.edit().putString(CUSTOM_COLORS, CompanionJson.encodeToString(colors)).putString(THEME_ID, "custom").commit()
+        _customColors.value = colors
+        _themeId.value = "custom"
+    }
 
     fun setActivityDetail(detail: ActivityDetail) {
         if (_activityDetail.value == detail && prefs.contains(ACTIVITY_DETAIL)) return
@@ -82,6 +108,8 @@ class ChatPreferences(
         const val FILE = "$NAME.xml"
         private const val ACTIVITY_DETAIL = "companion.prefs.activityDetail"
         private const val QUICK_REPLIES = "companion.prefs.quickReplies"
+        private const val THEME_ID = "companion.prefs.themeId"
+        private const val CUSTOM_COLORS = "companion.prefs.customColors"
 
         private fun threadKey(connectionId: String, botId: String): String =
             "thread.last-opened.${connectionId.length}:$connectionId$botId"

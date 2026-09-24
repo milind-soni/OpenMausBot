@@ -224,7 +224,7 @@ const __APP_VERSION__: string;
       /** Opens an http(s) link in the user's default browser. */
       openExternal?(url: string): Promise<boolean>;
       /** Recolor the native window chrome for a skin; absent on older builds. */
-      applySkin?(skin: string): Promise<boolean>;
+      applySkin?(skin: string | { id: "custom"; color: string }): Promise<boolean>;
       /** The renderer-drawn Windows caption buttons; absent outside the
        * frameless Windows shell (macOS/Linux/browser keep native chrome). */
       windowControls?: {

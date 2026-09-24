@@ -152,6 +152,9 @@ for (const [id, tokens] of skins) {
   const unmeasurable = [];
   let measured = 0;
   for (const [fg, bg, min] of PAIRS) {
+    // The screenshot-inspired ChatGPT theme intentionally makes the bot's
+    // message surface identical to the white page: assistant text is unboxed.
+    if ((id === "chatgpt" || id === "custom") && fg === "--color-card" && bg === "--color-app") continue;
     // A pair we cannot measure is reported, never silently skipped: an
     // unmeasured pair used to be counted as a passing one.
     if (!tokens[fg] || !tokens[bg]) {
@@ -191,31 +194,33 @@ for (const [id, tokens] of skins) {
   if (skinFailed) failed = true;
 }
 
-// The inverted Daylight bubble has its own inherited context: the editor,
-// labels, quotes and file chips explicitly use these tokens, not parent color.
-const daylightBubble = {
-  ...skins.get("daylight"),
-  ...declarations(css.match(/@scope \(\[data-skin="daylight"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{([^}]*)\}/)?.[1] ?? ""),
-};
-for (const [fg, bg] of [
-  ["--color-ink", "--color-bubble-user"],
-  ["--color-ink-secondary", "--color-bubble-user"],
-  ["--color-ink", "--color-raised"],
-  ["--color-ink-secondary", "--color-raised-hover"],
-  ["--color-ink-secondary", "--color-inset"],
-  ["--color-accent", "--color-inset"],
-  ["--color-accent-text", "--color-bubble-user"],
-  ["--color-ink", "--color-control"],
-  ["--color-accent-ink", "--color-accent"],
-  ["--color-danger-ink", "--color-danger"],
-  ["--color-success-ink", "--color-success"],
-]) {
-  const ratio = contrast(daylightBubble[fg] ?? "", daylightBubble[bg] ?? "");
-  if (ratio === null || ratio < 4.5) {
-    failed = true;
-    console.log(`✗ daylight bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+// Light palettes with dark user bubbles have an inherited context for editors,
+// quotes and attachments. Check each preset that activates that context.
+const invertedBubble = declarations(css.match(/@scope \(\[data-inverted-user-bubble="true"\]\) to \(\[data-skin\]\)\s*\{\s*\.bg-bubble-user\s*\{([^}]*)\}/)?.[1] ?? "");
+let bubbleFailed = false;
+for (const id of ["daylight", "chatgpt", "custom"]) {
+  const palette = { ...skins.get(id), ...invertedBubble };
+  for (const [fg, bg] of [
+    ["--color-ink", "--color-bubble-user"],
+    ["--color-ink-secondary", "--color-bubble-user"],
+    ["--color-ink", "--color-raised"],
+    ["--color-ink-secondary", "--color-raised-hover"],
+    ["--color-ink-secondary", "--color-inset"],
+    ["--color-accent", "--color-inset"],
+    ["--color-accent-text", "--color-bubble-user"],
+    ["--color-ink", "--color-control"],
+    ["--color-accent-ink", "--color-accent"],
+    ["--color-danger-ink", "--color-danger"],
+    ["--color-success-ink", "--color-success"],
+  ]) {
+    const ratio = contrast(palette[fg] ?? "", palette[bg] ?? "");
+    if (ratio === null || ratio < 4.5) {
+      failed = true;
+      bubbleFailed = true;
+      console.log(`✗ ${id} bubble — ${fg} on ${bg}: ${ratio?.toFixed(2) ?? "unmeasurable"}:1 (needs 4.5:1)`);
+    }
   }
 }
 
-if (!failed) console.log("✓ daylight bubble — editor, controls and paired fills above 4.5:1");
+if (!bubbleFailed) console.log("✓ inverted user bubbles — editor, controls and paired fills above 4.5:1");
 process.exit(failed ? 1 : 0);

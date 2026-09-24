@@ -2334,9 +2334,12 @@ ipcMain.handle("desktop:save-file", localOnly("desktop:save-file", async (event,
 // itself (titleBarStyle hidden, no native overlay). Keep syncing the window
 // background so a light skin never flashes the Midnight-black cold start.
 ipcMain.handle("desktop:skin", (event, skin) => {
-  if (!isKnownSkin(skin)) return false;
+  const id = typeof skin === "object" && skin !== null ? skin.id : skin;
+  if (!isKnownSkin(id)) return false;
   try {
-    const { color } = skinChrome(skin);
+    const { color: fallback } = skinChrome(id);
+    const color = id === "custom" && typeof skin?.color === "string" && /^#[0-9a-fA-F]{6}$/.test(skin.color)
+      ? skin.color : fallback;
     const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
     if (win && !win.isDestroyed()) {
       try { win.setBackgroundColor(color); } catch {}

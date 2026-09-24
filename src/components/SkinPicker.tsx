@@ -4,9 +4,9 @@
 // `[data-skin]` rather than `:root[data-skin]` — any element can open a skin
 // context for its own subtree, so the miniature styles itself and can never
 // drift from what picking it actually does.
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { Check } from "lucide-react";
-import { SKINS, applySkin, readSkin, type SkinId } from "@/lib/skins";
+import { COLOR_ROLES, SKINS, applySkin, colorsFromSkin, readCustomTheme, readSkin, saveCustomTheme, type CustomTheme, type SkinId } from "@/lib/skins";
 import { cn } from "@/lib/cn";
 
 /**
@@ -15,10 +15,16 @@ import { cn } from "@/lib/cn";
  * accent on purpose — a skin is mostly judged by where its colour lands, and a
  * single dot was too small to judge.
  */
-function Miniature({ skin }: { skin: SkinId }) {
+function Miniature({ skin, custom }: { skin: SkinId; custom?: CustomTheme }) {
   return (
     <div
       data-skin={skin}
+      style={skin === "custom" && custom ? {
+        ...Object.fromEntries(COLOR_ROLES.map((role) => [`--color-${role}`, custom[role]])),
+        "--font-sans": custom.fontSans,
+        "--radius-lg": custom.radiusLg,
+        "--radius-xl": custom.radiusXl,
+      } as CSSProperties : undefined}
       aria-hidden="true"
       className="flex h-[78px] w-full overflow-hidden rounded-lg bg-app ring-1 ring-hairline/60"
     >
@@ -72,10 +78,20 @@ export function SkinPicker() {
   const [active, setActive] = useState<SkinId>(
     () => (document.documentElement.dataset.skin as SkinId) || readSkin(),
   );
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<CustomTheme>(() => readCustomTheme() ?? colorsFromSkin("chatgpt"));
+  const [base, setBase] = useState<Exclude<SkinId, "custom">>("chatgpt");
+
+  function chooseSkin(id: SkinId) {
+    if (id === "custom" && !readCustomTheme()) saveCustomTheme(draft);
+    else applySkin(id);
+    setActive(id);
+  }
 
   return (
     // Four columns keep each miniature useful while allowing the collection
     // to grow into a second row; Settings already scrolls on short windows.
+    <div>
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {SKINS.map((skin) => {
         const selected = skin.id === active;
@@ -84,8 +100,7 @@ export function SkinPicker() {
             key={skin.id}
             type="button"
             onClick={() => {
-              applySkin(skin.id);
-              setActive(skin.id);
+              chooseSkin(skin.id);
             }}
             aria-pressed={selected}
             className={cn(
@@ -95,7 +110,7 @@ export function SkinPicker() {
                 : "border-hairline/60 hover:border-hairline hover:bg-control/50",
             )}
           >
-            <Miniature skin={skin.id} />
+            <Miniature skin={skin.id} custom={draft} />
             <div className="flex items-start gap-1.5 px-0.5 pb-0.5">
               <div className="min-w-0 flex-1">
                 <div className="text-[13px] font-medium text-ink">{skin.name}</div>
@@ -108,6 +123,46 @@ export function SkinPicker() {
           </button>
         );
       })}
+    </div>
+    <button type="button" className="mt-4 rounded-lg border border-hairline px-3 py-2 text-sm text-ink hover:bg-raised" onClick={() => setEditing(!editing)}>
+      {editing ? "Close custom theme editor" : "Edit custom theme"}
+    </button>
+    {editing && <div className="mt-3 rounded-xl border border-hairline bg-card p-4 text-ink">
+      <p className="mb-3 text-sm text-ink-secondary">Choose every color. Start from any preset, then save your own version.</p>
+      <label className="mb-3 block text-sm">Start from{" "}
+        <select className="rounded-md border border-hairline bg-inset px-2 py-1 text-ink" value={base}
+          onChange={(event) => {
+            const id = event.target.value as Exclude<SkinId, "custom">;
+            setBase(id);
+            setDraft(colorsFromSkin(id));
+          }}>
+          {SKINS.filter((skin) => skin.id !== "custom").map((skin) => <option key={skin.id} value={skin.id}>{skin.name}</option>)}
+        </select>
+      </label>
+      <label className="mb-3 block text-sm">Chat layout{" "}
+        <select className="rounded-md border border-hairline bg-inset px-2 py-1 text-ink"
+          value={draft.layout ?? "standard"}
+          onChange={(event) => setDraft({ ...draft, layout: event.target.value as "standard" | "chatgpt" })}>
+          <option value="standard">Standard bubbles</option>
+          <option value="chatgpt">ChatGPT-style assistant text</option>
+        </select>
+      </label>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {COLOR_ROLES.map((role) => <label key={role} className="flex items-center gap-2 text-xs">
+          <input type="color" aria-label={`${role} color`} value={draft[role].startsWith("#") ? draft[role].slice(0, 7) : "#000000"}
+            onChange={(event) => setDraft({ ...draft, [role]: event.target.value })} />
+          <span className="min-w-0 flex-1">{role.replaceAll("-", " ")}</span>
+          <input className="w-[88px] rounded border border-hairline bg-inset px-1.5 py-1 font-mono text-xs text-ink"
+            aria-label={`${role} hex`} value={draft[role]}
+            onChange={(event) => setDraft({ ...draft, [role]: event.target.value })} />
+        </label>)}
+      </div>
+      <button type="button" className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm text-white disabled:opacity-50"
+        disabled={!COLOR_ROLES.every((role) => draft[role] === "transparent" || /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(draft[role]))}
+        onClick={() => { saveCustomTheme(draft); setActive("custom"); }}>
+        Save and use custom theme
+      </button>
+    </div>}
     </div>
   );
 }

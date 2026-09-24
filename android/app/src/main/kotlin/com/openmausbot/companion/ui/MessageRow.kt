@@ -467,15 +467,18 @@ private fun TextBubble(
                 .weight(1f, fill = false)
                 .widthIn(max = 640.dp)
                 // Room for the tail below, so the next row does not sit on it.
-                .padding(bottom = if (bubble && endsRun) SpeechBubble.tailDrop() else 0.dp)
+                .padding(bottom = if (bubble && endsRun && LocalThemeId.current != "chatgpt") SpeechBubble.tailDrop() else 0.dp)
                 .then(
                     if (bubble) {
                         Modifier
                             .background(
-                                if (mine) BubbleColor.mine else BubbleColor.theirs,
-                                SpeechBubbleShape.of(tail),
+                                if (mine) BubbleColor.mine else if (LocalThemeId.current == "chatgpt") Color.Transparent else BubbleColor.theirs,
+                                if (LocalThemeId.current == "chatgpt") androidx.compose.foundation.shape.RoundedCornerShape(22.dp) else SpeechBubbleShape.of(tail),
                             )
-                            .padding(horizontal = 15.dp, vertical = 11.dp)
+                            .padding(
+                                horizontal = if (LocalThemeId.current == "chatgpt" && !mine) 0.dp else 15.dp,
+                                vertical = if (LocalThemeId.current == "chatgpt" && !mine) 0.dp else 11.dp,
+                            )
                     } else {
                         Modifier
                     },

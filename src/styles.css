@@ -165,6 +165,7 @@
   --color-ink-secondary: #fcfcfc99;
   --color-accent: #1084fe;
   --color-accent-border: #459ffe;
+  --color-focus: #459ffe;
   --color-accent-text: #7fc0ff;
   --color-accent-ink: #ffffff;
   --color-bubble-user: #5a5a5a;
@@ -544,6 +545,87 @@
     "Segoe UI", system-ui, sans-serif;
   --radius-lg: 8px;
   --radius-xl: 14px;
+}
+
+/* Based on the user's Codex light screenshot: a pale cyan navigation area,
+   white conversation canvas, unobtrusive assistant text and black user pills. */
+[data-skin="chatgpt"] {
+  --code-color-scheme: light;
+  --color-app: #ffffff;
+  --color-panel: #e7f8f9;
+  --color-raised: #e2f3f6;
+  --color-raised-hover: #dceff2;
+  --color-composer: #ffffff;
+  --color-composer-ring: #e5e7eb;
+  --color-card: #ffffff;
+  --color-menu: #ffffff;
+  --color-inset: #f5f7f8;
+  --color-control: #d8e9ec;
+  --color-hairline: #c6ced2;
+  --color-ink: #292c32;
+  --color-ink-secondary: #62676e;
+  --color-accent: #2563eb;
+  --color-accent-border: #3b82f6;
+  --color-accent-text: #1d4ed8;
+  --color-accent-ink: #ffffff;
+  --color-focus: #2563eb;
+  --color-bubble-user: #000000;
+  --color-bubble-user-ink: #ffffff;
+  --color-success: #16845a;
+  --color-success-ink: #ffffff;
+  --color-danger: #bd3342;
+  --color-danger-ink: #ffffff;
+  --color-warning: #986400;
+  --color-scrollbar: #bfc7ca;
+  --color-maus-line: #34383e;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 14px;
+}
+
+/* Saved custom colors are applied as inline variables before the first paint.
+   These two values keep native window chrome coherent if the saved data is
+   missing or corrupt; all other roles fall back to the base theme. */
+[data-skin="custom"] {
+  --code-color-scheme: light;
+  --color-app: #ffffff;
+  --color-panel: #e7f8f9;
+  --color-raised: #e2f3f6;
+  --color-raised-hover: #dceff2;
+  --color-composer: #ffffff;
+  --color-composer-ring: #e5e7eb;
+  --color-card: #ffffff;
+  --color-menu: #ffffff;
+  --color-inset: #f5f7f8;
+  --color-control: #d8e9ec;
+  --color-hairline: #c6ced2;
+  --color-ink: #292c32;
+  --color-ink-secondary: #62676e;
+  --color-accent: #2563eb;
+  --color-accent-border: #3b82f6;
+  --color-accent-text: #1d4ed8;
+  --color-accent-ink: #ffffff;
+  --color-focus: #2563eb;
+  --color-bubble-user: #000000;
+  --color-bubble-user-ink: #ffffff;
+  --color-success: #16845a;
+  --color-success-ink: #ffffff;
+  --color-danger: #bd3342;
+  --color-danger-ink: #ffffff;
+  --color-warning: #986400;
+  --color-scrollbar: #bfc7ca;
+  --color-maus-line: #34383e;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --radius-lg: 8px;
+  --radius-xl: 14px;
+}
+
+/* ChatGPT's assistant text sits directly on the conversation canvas. */
+[data-chat-layout="chatgpt"] .assistant-message,
+[data-chat-layout="chatgpt"] .chat-text.bg-card {
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* Shiki emits both palettes so cached blocks follow the nearest skin without
@@ -1324,11 +1406,10 @@ body {
   color: var(--color-bubble-user-ink);
 }
 
-/* Daylight's inverted bubble is a dark surface, including its editor,
-   quoted replies and attachment controls. Keep their normal semantic tokens
-   together; overriding only the parent's color leaves explicit child ink dark.
-   Stop at a nested skin so the picker previews retain their own palettes. */
-@scope ([data-skin="daylight"]) to ([data-skin]) {
+/* Light themes with a dark user bubble need light semantic colors inside the
+   bubble too: quotes, edits and attachments set their own text tokens. This
+   also applies to custom palettes that reproduce Daylight or ChatGPT. */
+@scope ([data-inverted-user-bubble="true"]) to ([data-skin]) {
   .bg-bubble-user {
     --color-ink: #fcfcfc;
     --color-ink-secondary: #c4c4c4;

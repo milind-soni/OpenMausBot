@@ -6,6 +6,7 @@ export const WORKSPACE_BACKUP_CLIENT_KEYS = [
   "omb-draft-send-ids",
   "omb-draft-channel-modes",
   "omb-skin",
+  "omb-custom-theme",
   "omb-show-threads",
   "openmausbot.sidebarDensity",
   "openmausbot.sidebarCollapsedSections.v1",

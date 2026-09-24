@@ -94,6 +94,7 @@ fun SettingsScreen(
     var pendingComputerRemoval by remember { mutableStateOf<Connection?>(null) }
     var choosingActivity by remember { mutableStateOf(false) }
     var editingQuickReplies by remember { mutableStateOf(false) }
+    var editingTheme by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -207,6 +208,11 @@ fun SettingsScreen(
                     onClick = environment.notifications::act,
                 )
                 Footnote(SettingsPolicy.NOTIFICATIONS_FOOTER)
+            }
+
+            SettingsSection("Appearance") {
+                val themeId by environment.chatPreferences.themeId.collectAsState()
+                SettingsButton("Theme: ${themeId.replaceFirstChar(Char::uppercase)}") { editingTheme = true }
             }
 
             SettingsSection("Background connection") {
@@ -417,6 +423,7 @@ fun SettingsScreen(
             onDismiss = { editingQuickReplies = false },
         )
     }
+    if (editingTheme) ThemeEditor(environment.chatPreferences) { editingTheme = false }
 }
 
 @Composable

@@ -8,6 +8,7 @@ import com.openmausbot.companion.ui.bot
 import com.openmausbot.companion.ui.room
 import com.openmausbot.companion.core.ActivityDetail
 import com.openmausbot.companion.core.QuickReply
+import com.openmausbot.companion.ui.PresetThemes
 import kotlin.test.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -51,6 +52,19 @@ class ChatPreferencesTest {
         store(name).setQuickReplies(replies)
 
         assertEquals(replies, store(name).quickReplies.value)
+    }
+
+    @Test
+    fun `all preset themes and custom colors survive relaunch`() {
+        val name = "chat-theme-persistence"
+        for (id in PresetThemes.colors.keys) {
+            store(name).setTheme(id)
+            assertEquals(id, store(name).themeId.value)
+        }
+        val custom = PresetThemes.colors.getValue("chatgpt") + ("bubble-user" to "#334455")
+        store(name).setCustomColors(custom)
+        assertEquals("custom", store(name).themeId.value)
+        assertEquals("#334455", store(name).customColors.value["bubble-user"])
     }
 
     @Test

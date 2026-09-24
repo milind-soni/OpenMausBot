@@ -91,8 +91,8 @@ class SpeechBubbleTest {
     @Test
     fun `what you said is filled with the mascot palette's blue, not the system's`() {
         // `BubbleColor.mine = MausPalette.color("blue")`, and `mineText = .white`.
-        assertEquals(0xFF377FE6.toInt(), BubbleColor.mine.toArgb())
-        assertEquals(0xFFFFFFFF.toInt(), BubbleColor.mineText.toArgb())
+        assertEquals(0xFF377FE6.toInt(), BubbleColor.defaultMine.toArgb())
+        assertEquals(0xFFFFFFFF.toInt(), BubbleColor.defaultMineText.toArgb())
     }
 
     private companion object {

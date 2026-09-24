@@ -49,6 +49,8 @@ jobs:
         run: pnpm i18n:check
       - run: pnpm typecheck
       - run: pnpm lint
+      - name: Check Android theme parity
+        run: pnpm check:android-skins
       - run: pnpm check:electron
       - name: production UI build
         run: pnpm exec vite build

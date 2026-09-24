@@ -62,6 +62,8 @@ fun CompanionRoot(
     onPendingTargetConsumed: (NotificationTarget) -> Unit,
 ) {
     val environment = LocalCompanion.current
+    val themeId by environment.chatPreferences.themeId.collectAsState()
+    val customColors by environment.chatPreferences.customColors.collectAsState()
     val session = environment.session
     val onboarding = environment.onboarding
     val scope = rememberCoroutineScope()
@@ -192,7 +194,10 @@ fun CompanionRoot(
         tapCoordinator.onPending(session, target, onPendingTargetConsumed)
     }
 
-    CompanionTheme {
+    CompanionTheme(
+        palette = if (themeId == "custom") customColors else PresetThemes.colors[themeId],
+        themeId = if (themeId == "custom" && customColors["chat-layout"] == "chatgpt") "chatgpt" else themeId,
+    ) {
         // One place for system insets: the app draws edge to edge, and every
         // screen wants the same answer — keep content clear of the status bar,
         // the gesture bar, and the keyboard.

@@ -6,7 +6,10 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDirection
 
@@ -29,6 +32,46 @@ private val DarkColors = darkColorScheme(
     onPrimary = Color.White,
     secondary = Green,
 )
+
+val LocalThemeColors = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
+val LocalThemeId = staticCompositionLocalOf { "system" }
+
+fun themeColor(value: String): Color = when {
+    value == "transparent" -> Color.Transparent
+    value.matches(Regex("#[0-9a-fA-F]{6}")) -> Color(android.graphics.Color.parseColor(value))
+    value.matches(Regex("#[0-9a-fA-F]{8}")) -> {
+        // CSS alpha is last; Android's parser expects alpha first.
+        Color(android.graphics.Color.parseColor("#${value.takeLast(2)}${value.substring(1, 7)}"))
+    }
+    else -> Color.Unspecified
+}
+
+private fun colorsFor(palette: Map<String, String>, dark: Boolean) =
+    (if (dark) DarkColors else LightColors).copy(
+        primary = themeColor(palette.getValue("accent")),
+        onPrimary = themeColor(palette.getValue("accent-ink")),
+        primaryContainer = themeColor(palette.getValue("raised")),
+        onPrimaryContainer = themeColor(palette.getValue("ink")),
+        secondary = themeColor(palette.getValue("accent")),
+        onSecondary = themeColor(palette.getValue("accent-ink")),
+        secondaryContainer = themeColor(palette.getValue("control")),
+        onSecondaryContainer = themeColor(palette.getValue("ink")),
+        tertiary = themeColor(palette.getValue("warning")),
+        background = themeColor(palette.getValue("app")),
+        onBackground = themeColor(palette.getValue("ink")),
+        surface = themeColor(palette.getValue("app")),
+        onSurface = themeColor(palette.getValue("ink")),
+        surfaceVariant = themeColor(palette.getValue("card")),
+        onSurfaceVariant = themeColor(palette.getValue("ink-secondary")),
+        surfaceContainer = themeColor(palette.getValue("card")),
+        surfaceContainerLow = themeColor(palette.getValue("panel")),
+        surfaceContainerHigh = themeColor(palette.getValue("raised")),
+        surfaceContainerHighest = themeColor(palette.getValue("raised-hover")),
+        outline = themeColor(palette.getValue("hairline")),
+        outlineVariant = themeColor(palette.getValue("hairline")),
+        error = themeColor(palette.getValue("danger")),
+        onError = themeColor(palette.getValue("danger-ink")),
+    )
 
 /**
  * Reading direction comes from the words, not from the locale's layout.
@@ -110,13 +153,22 @@ private val ContentDirectedTypography: Typography = Typography().run {
 @Composable
 fun CompanionTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    palette: Map<String, String>? = null,
+    themeId: String = "system",
     content: @Composable () -> Unit,
 ) {
-    MaterialTheme(
-        colorScheme = if (darkTheme) DarkColors else LightColors,
-        typography = ContentDirectedTypography,
-        content = content,
-    )
+    val selected = palette?.takeIf { colors -> PresetThemes.colorRoles.all(colors::containsKey) }
+    val dark = selected?.let { themeColor(it.getValue("app")).luminance() < 0.5f } ?: darkTheme
+    CompositionLocalProvider(
+        LocalThemeColors provides (selected ?: emptyMap()),
+        LocalThemeId provides themeId,
+    ) {
+        MaterialTheme(
+            colorScheme = selected?.let { colorsFor(it, dark) } ?: if (dark) DarkColors else LightColors,
+            typography = ContentDirectedTypography,
+            content = content,
+        )
+    }
 }
 
 /** SwiftUI's `Color.secondary` — the muted foreground everything quiet uses. */
