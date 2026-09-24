@@ -1,5 +1,5 @@
 ---
-status: review
+status: done
 created: 2026-08-15
 updated: 2026-08-15
 scope: per-agent and per-room Tasks side panel
@@ -19,23 +19,23 @@ Add a "Tasks" panel to bot chats (tasks assigned to that bot) and rooms (tasks i
 
 ## 2. Room → project linking
 
-- [?] **Add `projectId` to `GroupRecord`/`patchGroup`** — `server/store.ts`.
-- [?] **Accept `projectId` in `PATCH /api/groups/:id`** — `server/index.ts`, validated as string or null.
-- [?] **Add `projectId` to client `Group` type + `patchGroup` action** — `src/state/store.tsx`.
+- [x] **Add `projectId` to `GroupRecord`/`patchGroup`** — `server/store.ts`.
+- [x] **Accept `projectId` in `PATCH /api/groups/:id`** — `server/index.ts`, validated as string or null.
+- [x] **Add `projectId` to client `Group` type + `patchGroup` action** — `src/state/store.tsx`.
 
 ## 3. `TasksPanel` component
 
-- [?] **Build `src/components/TasksPanel.tsx`** — read-only task list (status, priority, due date, tags), reusing `STATUS_ICONS`/`STATUS_LABELS`/`PRIORITY_STYLES` (now exported from `TaskBoardScreen.tsx`). Clicking a task opens the full Task Board.
+- [x] **Build `src/components/TasksPanel.tsx`** — read-only task list (status, priority, due date, tags), reusing `STATUS_ICONS`/`STATUS_LABELS`/`PRIORITY_STYLES` (now exported from `TaskBoardScreen.tsx`). Clicking a task opens the full Task Board.
 
 ## 4. Wire into chat and room views
 
-- [?] **`ChatView.tsx`**: Tasks button + rail/drawer panel, filtered by `assigneeBotId === bot.id`.
-- [?] **`GroupView.tsx`**: Tasks button + rail/drawer panel, filtered by `projectId === group.projectId`; project picker (`state.taskProjects`) shown in the panel header.
+- [x] **`ChatView.tsx`**: Tasks button + rail/drawer panel, filtered by `assigneeBotId === bot.id`.
+- [x] **`GroupView.tsx`**: Tasks button + rail/drawer panel, filtered by `projectId === group.projectId`; project picker (`state.taskProjects`) shown in the panel header.
 
 ## 5. Tests
 
-- [?] **Server test for `PATCH /api/groups/:id` projectId** — `server/index.test.ts`: sets, persists, clears, and rejects an invalid type.
-- [?] **`pnpm typecheck`, `pnpm test` (236/236), `pnpm build`** all pass.
+- [x] **Server test for `PATCH /api/groups/:id` projectId** — `server/index.test.ts`: sets, persists, clears, and rejects an invalid type.
+- [x] **`pnpm typecheck`, `pnpm test` (236/236), `pnpm build`** all pass.
 
 ## Manual verification
 
