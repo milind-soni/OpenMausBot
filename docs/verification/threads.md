@@ -76,6 +76,26 @@ switching and Stop can be exercised without a real provider or account.
     Reload and send a new message: the old conversation must not return.
     A running thread must still require Stop before deletion. Deleting a
     conversation does not delete generated project files.
+15. Use a non-selected idle thread's menu → **Snooze → Until new activity**.
+    It should fold out of the normal list, remain searchable, and expose
+    **Stop snoozing** in its menu. Wake it and clear the search: the row
+    returns. Timed snoozes also return when due without a new server snapshot.
+    Pinned, selected, unread, queued, and working threads remain reachable.
+    Snooze is a display preference, not a pause or cancellation of work.
+16. Open **Active Threads** while a channel is working. Its entry should name
+    the channel and open that channel's exact thread, not a member's direct
+    chat. Direct-chat and channel activity can appear together.
+17. In compact/quiet rows, idle message previews disappear but working,
+    approval, teammate-wait, and queued status remain. One-thread bots and
+    channels have no duplicate child row until search makes it useful;
+    **New thread** stays on the owner row and **All threads** in the header.
+
+The snooze menu → hidden row → search → Stop snoozing flow and a working
+channel's Active Threads → channel-composer navigation passed on 2026-09-24
+in a disposable full-app Chromium fixture. HTTP tests exercise timestamp
+validation, explicit-null wake, persistence, and activity-sentinel clearing.
+Timer unit checks cover distant deadlines and render/effect expiry races.
+These checks do not prove native mobile UI or operating-system notifications.
 
 The last-thread walkthrough passed on 2026-09-13 in this disposable fixture:
 Miso completed a fake-provider turn, its only thread was deleted through the

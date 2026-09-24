@@ -117,6 +117,12 @@ export type RuntimeEvent = RuntimeEventBase &
          * set of questions, each with its own options, so the card can offer
          * them instead of an Allow/Deny a person cannot answer. */
         questions?: AskQuestion[];
+        /** Where the ask came from: a harness tool call ("tool" — the
+         * default, and what every event before this field implied), or a
+         * block parsed out of model-authored final output ("output", the
+         * turn-held transport). Cards and logs can badge the latter as
+         * agent-composed; untrusted-input rules apply either way. */
+        origin?: "tool" | "output";
         approvalScope?: "local-computer";
         /** Provider asks to widen its configured sandbox. Only explicit Full
          * access may answer this automatically; Auto/remembered grants may not. */
@@ -158,4 +164,3 @@ export type RuntimeEvent = RuntimeEventBase &
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
-

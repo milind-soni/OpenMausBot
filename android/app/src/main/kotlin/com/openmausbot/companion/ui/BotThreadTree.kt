@@ -63,8 +63,10 @@ internal fun BotThreadTree(
 ) {
     val searching = query.isNotBlank()
     val isExpanded = searching || expanded
+    val now = rememberSnoozeNow(bot.tasks.orEmpty())
     val groups = bot.threadGroups(
         matching = if (bot.name.contains(query, ignoreCase = true)) "" else query,
+        now = now,
         queuedThreadIds = queuedThreadIds,
     )
     val count = bot.threadGroups(queuedThreadIds = queuedThreadIds).sumOf { it.tasks.size }
@@ -114,7 +116,7 @@ internal fun BotThreadTree(
             groups.forEach { group ->
                 val folder = group.project
                 if (folder == null) {
-                    ThreadLinks(group.tasks, bot, queuedThreadIds, onOpen)
+                    ThreadLinks(group.tasks, bot, now, queuedThreadIds, onOpen)
                 } else {
                     val key = "${bot.id}:${folder.id}"
                     val folderExpanded = searching || key !in collapsedFolders
@@ -143,7 +145,7 @@ internal fun BotThreadTree(
                         )
                     }
                     if (folderExpanded) {
-                        Column(Modifier.padding(start = 8.dp)) { ThreadLinks(group.tasks, bot, queuedThreadIds, onOpen) }
+                        Column(Modifier.padding(start = 8.dp)) { ThreadLinks(group.tasks, bot, now, queuedThreadIds, onOpen) }
                     }
                 }
             }
@@ -155,6 +157,7 @@ internal fun BotThreadTree(
 private fun ThreadLinks(
     tasks: List<BotTask>,
     bot: Bot,
+    now: Long,
     queuedThreadIds: Set<String>,
     onOpen: (Chat) -> Unit,
 ) {
@@ -163,6 +166,7 @@ private fun ThreadLinks(
         if (projected != null) {
             BotThreadRow(
                 task,
+                now = now,
                 queued = task.threadId in queuedThreadIds,
                 modifier = Modifier
                     .testTag("thread.${task.threadId}")

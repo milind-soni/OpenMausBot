@@ -60,6 +60,7 @@ import type {
 import { newEventId, newId } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
+import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
@@ -923,6 +924,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
           const summary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool).slice(0, 200);
+          // One structured question beside the flat choices: the richer card
+          // renders from it while older clients keep answering through
+          // `choices`. Built once here so the emit and the answer path can
+          // never disagree. parseAskQuestions enforces the shared caps.
+          const questionChoices = isQuestion
+            ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
+            : [];
+          const askQuestions = isQuestion && questionChoices.length
+            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices }] }) ?? undefined
+            : undefined;
           const requestId = newId();
           const finish = (
             behavior: string,
@@ -934,8 +945,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             clearTimeout(timer);
             const want = behavior === "allow" ? "allow" : "reject";
             const forSession = want === "allow" && always === true && !isQuestion && !current.controlsHost;
+            // A structured card replies in the Q:/A: block format; recover the
+            // picked label from it so exact-match keeps working. Flat clients
+            // send the bare label, which the single-question fallback inside
+            // questionAnswersByQuestion already returns unchanged.
+            const picked = askQuestions
+              ? questionAnswersByQuestion(message ?? "", askQuestions)[askQuestions[0]!.question] ?? message
+              : message;
             const named = isQuestion && behavior === "answer"
-              ? options.filter((option) => option.optionId === message || option.name?.trim() === message)
+              ? options.filter((option) => option.optionId === picked || parseChoices([option.name], 1)?.[0] === picked)
               : [];
             const optionId = behavior === "cancel"
               ? null
@@ -979,9 +997,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             requestType: isQuestion ? "question" : "permission",
             tool,
             summary,
-            choices: isQuestion
-              ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
-              : undefined,
+            choices: askQuestions?.[0]?.options.map(option => option.label) ?? (isQuestion ? questionChoices : undefined),
+            ...(askQuestions ? { questions: askQuestions } : {}),
             approvalScope: current.controlsHost ? "local-computer" : undefined,
             // the driver can honor a session-wide allow either way
             allowSession: !isQuestion && !current.controlsHost ? true : undefined,

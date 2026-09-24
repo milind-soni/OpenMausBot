@@ -207,6 +207,10 @@ if (!enabled) console.log("skipping team lifecycle UI e2e: set OMB_UI_E2E=1 to i
     await expect.poll(async () => (await ui("eval", "--js", "window.teamDeleteRequests")).result).toBe(2);
     await ui("eval", "--js", "window.releaseTeamDelete(); true");
     await expect.poll(async () => (await api("/api/bots?messages=0")).sections.includes("Launch")).toBe(false);
+    // The server commits before the pending DELETE response reaches React.
+    // Finish this UI action before the next fixture client creates a section;
+    // otherwise its SSE update can race the previous response's section list.
+    await expect.poll(snapshot).not.toContain('alertdialog "Delete Launch team?"');
 
     // Section management is available where the section lives, without
     // requiring the team map. Cancel and Escape must leave its brief intact.

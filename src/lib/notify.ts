@@ -2,6 +2,7 @@
 // The server decides *whether* something is worth an interruption (it owns
 // the per-bot toggle); this only decides how to show it here.
 import type { Notification } from "../../shared/notification";
+import { notificationSoundsEnabled } from "./notification-preferences";
 
 export type NotifyFrame = Notification;
 
@@ -55,6 +56,9 @@ export function showNotification(
       ...buildNotificationOptions({ id: frame.botId, avatarUrl }),
       // its own stack, so a bot's next "finished" never replaces it
       ...(spend ? { tag: "openmausbot:spend", icon: undefined } : {}),
+      // The banner still lands; only the platform's alert sound is held
+      // back, which is what a person on a call with the bot asked for.
+      ...(notificationSoundsEnabled() ? {} : { silent: true }),
     };
     new Notification(frame.title, options).onclick = open;
   }

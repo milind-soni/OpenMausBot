@@ -46,6 +46,28 @@ final class ChatPreferencesTests: XCTestCase {
         XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a", "d"])
     }
 
+    // The digest and compaction receipts are the harness talking about the
+    // tool calls: hidden with them, but never folded into a run of them.
+
+    func testHiddenDropsDigestAndCompactionReceiptsToo() {
+        let messages = [text("a"), activity("b"), digest("c"), text("d"), compaction("e")]
+        XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a", "d"])
+    }
+
+    func testReducedKeepsACompactionAsItsOwnRowAndBreaksTheRun() {
+        let messages = [activity("a"), activity("b"), compaction("c"), activity("d"), activity("e")]
+        let rows = transcriptRows(messages, detail: .reduced)
+        XCTAssertEqual(rows.map(\.id), ["run.a", "c", "run.d"])
+        XCTAssertEqual(rows[1].kind, .compaction)
+    }
+
+    private func compaction(_ id: String, at: Double = 1) -> Message {
+        var message = Message(id: id, role: .bot, kind: .compaction, at: at)
+        message.text = "[compaction] summary"
+        message.compaction = Compaction(summary: "summary", tokensBefore: 10)
+        return message
+    }
+
     func testHiddenDropsFailedActivityToo() {
         let messages = [text("a"), activity("b", ok: false)]
         XCTAssertEqual(transcriptRows(messages, detail: .hidden).map(\.id), ["a"])

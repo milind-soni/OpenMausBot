@@ -105,6 +105,56 @@ describe("createOpenAIChatRuntime tool approvals", () => {
   it("answers for the person under Full access, so no card is raised", async () => {
     expect(await cardRaisedFor("full")).toBe(false);
   }, 20_000);
+
+  it("still holds an ask_user card for a person under Full access and returns the reply verbatim", async () => {
+    const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
+      + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))
+      + '}}]}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n\n';
+    const finalBody = 'data: {"choices":[{"index":0,"delta":{"content":"Shipped."}}]}\n\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return new Response(bodies.length === 1 ? askBody : finalBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent((event) => events.push(event));
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi", approvalMode: "full" });
+    const opened = await vi.waitFor(() => {
+      const found = events.find((event) => event.type === "request.opened");
+      if (!found) throw new Error("waiting for the question card");
+      return found;
+    }, { timeout: 10_000 });
+    expect(opened).toMatchObject({
+      requestType: "question", tool: "ask_user", summary: "Ship the fixture?",
+      questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }],
+      choices: ["Yes", "No"],
+    });
+    expect(bodies[0]).toContain('"ask_user"');
+    const reply = "The user answered your questions.\n\nQ: Ship the fixture?\nA: Yes";
+    expect(await instance.adapter.respondToRequest("thread", opened.requestId!, { behavior: "answer", message: reply })).toBe("answered");
+    await vi.waitFor(() => {
+      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
+    }, { timeout: 10_000 });
+    await instance.dispose();
+    // Full access answered every permission on this turn; it must not have
+    // touched the question, and no permission card may stand in for it.
+    expect(events.filter((event) => event.type === "request.opened")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "request.resolved")).toEqual([
+      expect.objectContaining({ behavior: "answer", source: "user" }),
+    ]);
+    const toolMessage = JSON.parse(bodies[1]!).messages.at(-1);
+    expect(toolMessage).toMatchObject({ role: "tool", tool_call_id: "ask1" });
+    expect(JSON.parse(toolMessage.content)).toEqual({ ok: true, result: reply });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+  }, 20_000);
 });
 
 describe("createOpenAIChatRuntime stream termination", () => {

@@ -48,3 +48,18 @@ delete control coexists with the context menu and does not replace or nest insid
 the collapse button. Server safeguards still reject deletion during active work,
 with an assigned team computer, or when moving the Chief would conflict with
 General's Chief; see [Teams](teams.md) for those lifecycle checks.
+
+## Activity, quieter rows, and notification preference
+
+Use the full-app [threads fixture](threads.md) for channel activity, search,
+and snooze interactions. Compact/quiet rows must retain live status and
+keyboard-accessible owner-row New thread/New folder controls. The matching
+sole thread must still appear during search even when its normal tree is hidden.
+
+In Settings → Appearance, **Notification sounds** controls the operating
+system alert sound on this computer only; it does not disable notification
+banners or the bot's own notification setting. `src/lib/notification-preferences.test.ts`
+and `src/lib/notify.test.ts` cover persisted preferences, blocked storage, cross-window
+reads after Settings unmounts, and the silent flag sent to the desktop bridge.
+Actual operating-system sound delivery requires a native Electron smoke test;
+the isolated browser cannot prove it.

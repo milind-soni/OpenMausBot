@@ -6,7 +6,7 @@
 //
 //   FAKE_CODEX_MODE   happy (default) | approval | resume | stream | windows-command |
 //                     mcp-elicitation | mcp-app-approval | mcp-form | permissions-approval | question |
-//                     multi-question | empty-question | malformed-question | config-profile |
+//                     multi-question | mixed-question | empty-question | malformed-question | config-profile |
 //                     config-profile-unsupported | config-read-error | image |
 //                     logged-in-stdout | logged-out | unauthorized | late-request
 //   FAKE_CODEX_LAUNCH_CRASHES  die at turn/start (before ack) with transient stderr,
@@ -663,8 +663,15 @@ process.stdin.on("data", (chunk) => {
               },
             },
           });
-        } else if (mode === "question" || mode === "multi-question" || mode === "empty-question" || mode === "malformed-question") {
-          // one card per ask: a single question vs a bundled pair vs none vs a malformed shape
+        } else if (
+          mode === "question" ||
+          mode === "multi-question" ||
+          mode === "mixed-question" ||
+          mode === "empty-question" ||
+          mode === "malformed-question"
+        ) {
+          // one card per ask: a single question vs a bundled pair vs a
+          // broken-plus-valid pair vs none vs a malformed shape
           out({
             jsonrpc: "2.0",
             id: 101,
@@ -678,6 +685,11 @@ process.stdin.on("data", (chunk) => {
                     question: "Ship today?",
                     options: ["Yes", "No", "Maybe", "Later", "Soon", "Never"].map((label) => ({ label })),
                   }]
+                : mode === "mixed-question"
+                ? [
+                    { id: "q-broken", question: "   ", options: [{ label: "Broken choice" }] },
+                    { id: "q-review", question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] },
+                  ]
                 : mode === "empty-question"
                 ? []
                 : [

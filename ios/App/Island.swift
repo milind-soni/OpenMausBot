@@ -3,21 +3,18 @@
 // alive inside it — and shrinks back into the island when it is done.
 //
 // Apps cannot draw inside the real island, so this is the same trick X
-// uses: a black rounded square whose collapsed state hides behind the
-// island (or, on phones without one, disappears into the top edge). The
-// mascot engine does the rest — it already morphs every state and
-// expression, which is what makes the square worth growing.
+// uses: a black rounded square that grows out of the island. The mascot
+// engine does the rest — it already morphs every state and expression,
+// which is what makes the square worth growing.
 import SwiftUI
 import CompanionCore
 
 /// The hardware island's frame, in points from the top of the screen, on the
-/// phones that have one. Used to hide the collapsed pill behind it.
+/// phones that have one. The expanded square is anchored here so it grows
+/// out of the island; nothing is drawn over the island while collapsed.
 enum IslandGeometry {
     static let size = CGSize(width: 126, height: 37)
     static let top: CGFloat = 11
-
-    /// True on Dynamic Island phones: their top safe-area inset is 59.
-    static func hasIsland(topInset: CGFloat) -> Bool { topInset >= 54 }
 
     /// The window's top safe-area inset — the one number that places
     /// anything relative to the screen's top edge.
@@ -31,7 +28,6 @@ enum IslandGeometry {
 /// The island shape, collapsed or expanded, with whatever is inside it.
 struct IslandShell<Content: View>: View {
     let expanded: Bool
-    let hasIsland: Bool
     var expandedSize = CGSize(width: 250, height: 330)
     @ViewBuilder let content: () -> Content
 
@@ -54,9 +50,15 @@ struct IslandShell<Content: View>: View {
         }
         .frame(width: size.width, height: size.height)
         .clipShape(RoundedRectangle(cornerRadius: expanded ? 56 : IslandGeometry.size.height / 2, style: .continuous))
-        // collapsed and no hardware island to hide behind: be gone entirely
-        .opacity(expanded || hasIsland ? 1 : 0)
-        .scaleEffect(expanded || hasIsland ? 1 : 0.6, anchor: .top)
+        // Collapsed: gone entirely, island or not. The hardware island is
+        // not one shape — idle pill, and wider and shorter with a Live
+        // Activity in its compact presentation — so a fixed black pill
+        // parked behind it peeks out as soon as the system's shape is not
+        // the one this app hardcoded. Invisible when collapsed never peeks;
+        // the square still grows out of the island because it is anchored
+        // there and animates in with the same spring as its size.
+        .opacity(expanded ? 1 : 0)
+        .scaleEffect(expanded ? 1 : 0.6, anchor: .top)
         .padding(.top, IslandGeometry.top)
         .shadow(color: .black.opacity(expanded ? 0.45 : 0), radius: 28, y: 12)
         .ignoresSafeArea(edges: .top)
@@ -67,7 +69,6 @@ struct IslandShell<Content: View>: View {
 /// face, the question, and the answers. Tap the face to open the chat.
 struct NeedsYouIsland: View {
     let update: ChatUpdate?
-    let hasIsland: Bool
     let open: (Chat) -> Void
     @EnvironmentObject private var session: Session
     @State private var shown: ChatUpdate?
@@ -88,7 +89,7 @@ struct NeedsYouIsland: View {
                     .ignoresSafeArea()
                     .onTapGesture { dismiss() }
             }
-            IslandShell(expanded: expanded, hasIsland: hasIsland) {
+            IslandShell(expanded: expanded) {
                 if let shown {
                     VStack(spacing: 10) {
                         // The hardware island covers the first 37pt of the

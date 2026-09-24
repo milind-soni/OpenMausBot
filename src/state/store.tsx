@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame, GroupThreadUsage } from "../../shared/wire";
+import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -308,6 +308,10 @@ export interface Task {
    * under show-all and search, and back the moment it needs them again;
    * absent = never archived. Syncs like every other task field. */
   archivedAt?: number;
+  /** when the person snoozed this thread: 0 = until new activity (the
+   * server clears it on the first wake), a future epoch ms = until then
+   * (the server drops it from reads once past); absent = awake */
+  snoozedUntil?: number;
 }
 
 /** The bot that opened a thread on itself or a teammate. */
@@ -468,6 +472,7 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
   resetApprovalToAsk?: boolean;
   projectId?: string | null;
   archivedAt?: number | null;
+  snoozedUntil?: number | null;
   /** null = follow the bot's Works on again */
   surface?: Task["surface"] | null;
   /** false clears the pin */
@@ -475,10 +480,11 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, surface, pinned, ...fields } = patch;
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
     ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
+    ...(snoozedUntil === undefined ? {} : { snoozedUntil: snoozedUntil ?? undefined }),
     ...(surface === undefined ? {} : { surface: surface ?? undefined }),
     ...(pinned === undefined ? {} : { pinned: pinned ? true : undefined }) };
 }
@@ -880,7 +886,7 @@ export interface AppState {
   } | null;
   /** Queued follow-up lines waiting for drain; keyed by threadId.
    * Each entry is identified by the server queueId, not by text. */
-  pendingQueued: Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>>;
+  pendingQueued: Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>>;
   /** queueIds whose drain frame beat the POST continuation. One-shot and
    * bounded to a short event window so other clients cannot grow it forever. */
   consumedQueueIds: Record<string, true>;
@@ -1042,13 +1048,13 @@ export type Action =
       threadId?: string;
       onError?: () => void;
     }
-  | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: "capacity" }
+  | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
   | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string }
   | { type: "steerQueued"; botId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
   | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string }
   | { type: "steerGroupQueued"; groupId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
-  | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string }
+  | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
   // scrollback: ask the server for the page before the oldest message held
@@ -1096,7 +1102,9 @@ export type Action =
   | { type: "botPatched"; bot: BotAnnouncement }
   | { type: "messageAdded"; threadId: string; message: Message }
   | { type: "messagePatched"; threadId: string; message: Message }
-  | { type: "optimisticMessageRemoved"; threadId: string; sendId: string }
+  /** `restoreLeafId` puts back the branch an optimistic edit replaced; a
+   * plain send falls back to the removed row's parent. */
+  | { type: "optimisticMessageRemoved"; threadId: string; sendId: string; restoreLeafId?: string | null }
   | { type: "screenFrame"; botId: string; threadId?: string; png: string; mime: string }
   | { type: "provisioning"; botId: string; on: boolean }
   | { type: "computerControl"; botId: string; held: boolean; helpReason: string | null }
@@ -1750,7 +1758,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ...current,
           messages: current.messages.filter((message) => message.id !== id),
           activeLeafId: current.activeLeafId === id
-            ? (optimistic.parentId ?? null)
+            ? (action.restoreLeafId !== undefined ? action.restoreLeafId : (optimistic.parentId ?? null))
             : current.activeLeafId,
         }));
         const task = bot.tasks?.find((candidate) => candidate.threadId === action.threadId);
@@ -2109,8 +2117,31 @@ export function reducer(state: AppState, action: Action): AppState {
         activeLeafId: message.id,
       })), threadId, message.at);
     }
-    case "editMessage":
-      return withMascotMotion(state, action.botId, "working");
+    case "editMessage": {
+      // The edit replaces its message on screen the moment it is submitted:
+      // an optimistic sibling becomes the leaf, which hides the old question
+      // and its old answer. The server's fork carries the same sendId and
+      // takes this row's place; a failed request restores the old branch.
+      const animated = withMascotMotion(state, action.botId, "working");
+      if (!action.sendId) return animated;
+      const bot = animated.bots.find((candidate) => candidate.id === action.botId);
+      const threadId = action.threadId ?? bot?.threadId;
+      if (!bot || threadId !== bot.threadId) return animated;
+      if (bot.messages.some((message) => message.sendId === action.sendId)) return animated;
+      const source = bot.messages.find((message) => message.id === action.messageId);
+      if (!source || source.role !== "user" || source.kind !== "text") return animated;
+      const message = optimisticUserMessage(
+        action.text.trim(),
+        action.sendId,
+        source.replyToId,
+        source.parentId ?? null,
+      );
+      return updateBot(animated, bot.id, (current) => ({
+        ...current,
+        messages: [...current.messages, message],
+        activeLeafId: message.id,
+      }));
+    }
     case "deleteTask":
     case "newGroupTask":
     case "switchGroupTask":
@@ -2784,7 +2815,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (action.type === "botPatched") action = { ...action, bot: withTaskWrites(action.bot) };
       // One identity drives the optimistic row, HTTP retry protection, and
       // canonical SSE reconciliation. Callers may omit it; the store may not.
-      if ((action.type === "send" || action.type === "sendGroup") && !action.sendId) {
+      if ((action.type === "send" || action.type === "sendGroup" || action.type === "editMessage") && !action.sendId) {
         action = { ...action, sendId: crypto.randomUUID() };
       }
       const botBeforeUpdate =
@@ -2795,6 +2826,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         action.type === "send"
           ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)
           : undefined;
+      // the branch an edit replaces on screen, restored if the edit fails
+      const leafBeforeEdit =
+        action.type === "editMessage"
+          ? stateRef.current.bots.find((candidate) => candidate.id === action.botId)?.activeLeafId ?? null
+          : null;
       const executionBotsBeforeAction = (() => {
         if (action.type === "editMessage" || action.type === "answerCard") {
           const bot = stateRef.current.bots.find((candidate) => candidate.id === action.botId);
@@ -2990,7 +3026,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   threadId: body.threadId,
                   queueId: body.queueId,
                   text: action.text,
-                  reason: body.reason === "capacity" ? "capacity" : undefined,
+                  reason: body.reason === "capacity" || body.reason === "group-turn" ? body.reason : undefined,
                 });
               }
             })
@@ -3003,14 +3039,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           break;
         }
-        case "editMessage":
-          void waitForExecutionSettings(executionBotsBeforeAction, action.threadId)
+        case "editMessage": {
+          const threadId =
+            action.threadId ?? stateRef.current.bots.find((bot) => bot.id === action.botId)?.threadId;
+          const sendId = action.sendId ?? crypto.randomUUID();
+          void waitForExecutionSettings(executionBotsBeforeAction, threadId)
             .then(() => api(`/api/bots/${action.botId}/messages/${action.messageId}/edit`, {
               method: "POST",
-              body: JSON.stringify({ text: action.text, threadId: action.threadId }),
+              body: JSON.stringify({ text: action.text.trim(), threadId, sendId }),
             }))
-            .catch(showError);
+            .then((body) => {
+              // the POST may beat its SSE frames; fold the fork either way
+              if (body?.message && threadId) {
+                rawDispatch({ type: "messageAdded", threadId, message: body.message });
+              }
+            })
+            .catch((error) => {
+              if (threadId) {
+                rawDispatch({ type: "optimisticMessageRemoved", threadId, sendId, restoreLeafId: leafBeforeEdit });
+              }
+              showError(error);
+            });
           break;
+        }
         case "switchBranch":
           api(`/api/bots/${action.botId}/active-branch`, {
             method: "POST",

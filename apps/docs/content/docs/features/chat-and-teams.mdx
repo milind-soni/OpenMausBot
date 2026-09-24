@@ -10,6 +10,18 @@ A bot is a durable agent identity. A thread is one conversation with that bot an
 
 Use separate threads when you want fresh context or independent work without duplicating the bot. Messages sent to a busy thread are queued, and supported providers can be steered while they work. Other threads can continue independently. See [Bots, folders, and threads](/docs/features/bots-and-tasks) for limits and shared-resource behavior.
 
+## Token usage
+
+Hover over the usage chip in a bot's chat header to see the totals and the latest message's usage. Input and output are separate:
+
+- **Uncached input** is input the provider did not report as served from its prompt cache.
+- **Cached input** is input the provider reported as served from its prompt cache.
+- **Output** is the generated token count reported by the provider.
+
+Uncached input plus cached input equals total input. If the provider does not report a cache split, the tooltip shows total input and output instead. A missing cache count is not treated as zero.
+
+The compact chip shows cost when the provider reports it. Otherwise, it shows uncached input when known, or total input. Generated output is listed separately in the tooltip and is not added to either input figure.
+
 ## Groups
 
 Groups bring several bots into one conversation. Each participant keeps its own provider state. Group timeouts prevent a participant from blocking the whole group indefinitely. Existing channels and their thread histories remain intact; the new label does not change turn-taking or delegation.

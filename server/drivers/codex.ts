@@ -42,6 +42,7 @@ import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
+import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
@@ -162,7 +163,6 @@ export function managedCodexArgs(config: NonNullable<CodexConfig["managed"]>): s
   ];
 }
 
-const QUESTION_TIMEOUT_NOTE = "No answer was given — use your best judgment.";
 const DENY_TIMEOUT_NOTE =
   "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
 
@@ -930,23 +930,22 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           }
           return;
         }
-        // One ask card carries one question honestly: its choices would come
-        // from the first question alone and its one reply (including the
-        // timeout note) would be copied into every question id (#1237).
-        // Refuse the bundled call with a teaching error instead of
-        // fabricating per-question answers.
-        if (isQuestion && (!Array.isArray(params.questions) || params.questions.length !== 1)) {
-          const bundled = Array.isArray(params.questions) && params.questions.length > 1;
+        // The whole set rides one card, answered per id: the protocol pairs
+        // each question with its own id, and the card's single reply is
+        // mapped back block by block (or as the flat single-question
+        // fallback). The only refusal left is an ask with nothing answerable
+        // — #1237 is closed: a bundle no longer copies one answer into
+        // every id.
+        const protocolQuestions = isQuestion ? parseProtocolAskQuestions(params.questions) : null;
+        if (isQuestion && !protocolQuestions) {
           send({
             jsonrpc: "2.0",
             id: msg.id,
             error: {
               code: -32602,
-              message: bundled
-                ? `ask supports one question per call; this request bundled ${params.questions.length}. Split it into separate asks, one question each.`
-                : Array.isArray(params.questions)
-                ? "ask supports one question per call; this request sent none."
-                : "ask supports one question per call; params.questions must be an array with exactly one question.",
+              message: Array.isArray(params.questions)
+                ? "ask needs at least one answerable question — a string id and question text each; this request sent none."
+                : "ask needs params.questions to be an array of questions, each with a string id and question text.",
             },
           });
           return;
@@ -989,22 +988,36 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
             ? (mcpAppApproval?.summary ?? (typeof params.message === "string" ? params.message : "MCP access requested"))
             : typeof params.command === "string"
             ? params.command
+            : protocolQuestions
+              ? protocolQuestions.map(({ question }) => question.question).join(" · ")
             : Array.isArray(params.questions)
               ? params.questions.map((q: any) => q.question ?? q.header).filter(Boolean).join(" · ")
               : typeof params.reason === "string"
                 ? params.reason
                 : tool;
-        const choices = isQuestion
-          ? (params.questions?.[0]?.options ?? []).map((o: any) => o.label).slice(0, 5)
-          : undefined;
+        // Flat choices only when one non-multiselect question can actually
+        // be answered by a bare reply; a bundle's first-question buttons
+        // would be an unusable lie for flat clients.
+        const choices =
+          isQuestion && protocolQuestions ? questionChoices(protocolQuestions.map(({ question }) => question)) : undefined;
         const finish = (behavior: "allow" | "deny" | "answer", message?: string, source: "user" | "timeout" | "system" = "user") => {
           if (!asks.delete(requestId)) return;
           clearTimeout(timer);
           if (isQuestion) {
-            const answers: Record<string, { answers: string[] }> = {};
-            for (const q of Array.isArray(params.questions) ? params.questions : []) {
-              answers[q.id] = { answers: [message || QUESTION_TIMEOUT_NOTE] };
-            }
+            // Only the person's reply is filed: Q:/A: blocks mapped to the
+            // id that asked them, or the flat fallback for a single
+            // question. Timeout and turn teardown send empty answers so
+            // every id reads unanswered — system notes never occupy the
+            // slot the model reads as the person's words (the rule
+            // permission-proxy already follows).
+            const mapped =
+              behavior === "answer" && source === "user" && typeof message === "string"
+                ? questionAnswersById(message, protocolQuestions ?? [])
+                : {};
+            // Null prototype so an opaque id like __proto__ becomes a real
+            // answer key instead of hitting the inherited setter.
+            const answers: Record<string, { answers: string[] }> = Object.create(null);
+            for (const [id, answer] of Object.entries(mapped)) answers[id] = { answers: [answer] };
             send({ jsonrpc: "2.0", id: msg.id, result: { answers } });
           } else {
             send({
@@ -1016,7 +1029,10 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           emit({ ...base(threadId, turnId), type: "request.resolved", requestId, behavior, source });
         };
         const timer = setTimeout(
-          () => (isQuestion ? finish("answer", QUESTION_TIMEOUT_NOTE, "timeout") : finish("deny", DENY_TIMEOUT_NOTE, "timeout")),
+          // A timed-out question resolves as denied, not answered: the card
+          // closes with no reply (answers stay empty either way), and the
+          // resolve event must not claim an answer that never happened.
+          () => finish("deny", isQuestion ? undefined : DENY_TIMEOUT_NOTE, "timeout"),
           15 * 60_000,
         );
         timer.unref?.();
@@ -1029,6 +1045,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           tool,
           summary,
           choices,
+          ...(protocolQuestions ? { questions: protocolQuestions.map((pair) => pair.question) } : {}),
           approvalScope: controlsHost ? "local-computer" : undefined,
           requiresExplicitApproval: isAdditionalPermission || undefined,
         });

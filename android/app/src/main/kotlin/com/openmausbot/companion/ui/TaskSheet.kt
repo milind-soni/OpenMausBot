@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.DialogProperties
+import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.Session
@@ -47,6 +49,7 @@ import com.openmausbot.companion.core.ChatTarget
 import com.openmausbot.companion.core.target
 import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.BotThreadGroup
+import com.openmausbot.companion.core.isSnoozed
 import com.openmausbot.companion.core.threadGroups
 import com.openmausbot.companion.core.isArchived
 
@@ -59,7 +62,13 @@ import com.openmausbot.companion.core.isArchived
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> Unit, onDeletedCurrent: () -> Unit = {}) {
+fun TaskSheet(
+    chat: Chat,
+    onDismiss: () -> Unit,
+    onSelectTask: (ChatTarget) -> Unit,
+    onDeletedCurrent: () -> Unit = {},
+    nowMillis: () -> Long = System::currentTimeMillis,
+) {
     val session = LocalCompanion.current.session
     val scope = rememberCoroutineScope()
     val state by session.state.collectAsState()
@@ -82,6 +91,9 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
     var renaming by remember { mutableStateOf<BotTask?>(null) }
     var title by remember { mutableStateOf("") }
     var pendingDelete by remember { mutableStateOf<BotTask?>(null) }
+    // The thread, not the snapshot the bell was tapped on: resolved live
+    // below, so a task that started working over SSE still gates the dialog.
+    var pendingSnooze by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
@@ -134,6 +146,10 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
             if (!ok) failed()
         }
     }
+
+    // A timed snooze can end while the sheet is open; the rows and the Stop
+    // snoozing offer must notice without waiting for the next snapshot.
+    val now = rememberSnoozeNow(groups.flatMap { it.tasks })
 
     BasicAlertDialog(
         onDismissRequest = { if (!saving) onDismiss() },
@@ -221,6 +237,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                 task = task,
                                 chat = current,
                                 enabled = !saving,
+                                now = now,
                                 queued = task.threadId in state.queuedThreadIds,
                                 onSwitch = {
                                     saving = true
@@ -238,6 +255,11 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                     title = task.title
                                     error = null
                                     renaming = task
+                                },
+                                onSnooze = if (current is Chat.BotChat) {
+                                    { error = null; pendingSnooze = task.threadId }
+                                } else {
+                                    null
                                 },
                                 onDelete = { error = null; pendingDelete = task },
                                 onArchive = (current as? Chat.BotChat)?.let { archiveHandler },
@@ -260,6 +282,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                 task = task,
                                 chat = current,
                                 enabled = !saving,
+                                now = now,
                                 queued = task.threadId in state.queuedThreadIds,
                                 onSwitch = {
                                     saving = true
@@ -278,6 +301,7 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
                                     error = null
                                     renaming = task
                                 },
+                                onSnooze = null,
                                 onDelete = { error = null; pendingDelete = task },
                                 onArchive = (current as? Chat.BotChat)?.let { archiveHandler },
                                 onPin = pinHandler,
@@ -348,16 +372,95 @@ fun TaskSheet(chat: Chat, onDismiss: () -> Unit, onSelectTask: (ChatTarget) -> U
             dismissButton = { TextButton(enabled = !saving, onClick = { pendingDelete = null; error = null }) { Text("Cancel") } },
         )
     }
+
+    pendingSnooze?.let { threadId ->
+        // Resolved from the live record, never the tapped snapshot: a task
+        // that started working over SSE disables the actions, and one deleted
+        // underneath closes the dialog.
+        val task = snoozeTarget((current as? Chat.BotChat)?.bot, threadId) ?: return@let
+        val working = TaskRules.isWorking(task)
+        AlertDialog(
+            onDismissRequest = { if (!saving) pendingSnooze = null },
+            title = { Text("Snooze ${TaskRules.title(task)}") },
+            text = {
+                Column {
+                    error?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
+                    if (working) {
+                        Text("Stop this thread before snoozing it.", color = secondaryTint)
+                    } else {
+                        SnoozeRules.presets.forEach { preset ->
+                            TextButton(
+                                enabled = !saving,
+                                onClick = {
+                                    val bot = (current as? Chat.BotChat)?.bot ?: return@TextButton
+                                    // Re-resolved at click time — the composition can be a frame
+                                    // behind the update that started this thread working, and the
+                                    // PATCH has no server-side working check to catch it.
+                                    val live = snoozeTarget(bot, threadId) ?: return@TextButton
+                                    if (TaskRules.isWorking(live)) return@TextButton
+                                    saving = true
+                                    error = null
+                                    val until = preset.until(nowMillis())
+                                    scope.launch {
+                                        val snoozed = session.snoozeTask(live, bot, until)
+                                        saving = false
+                                        if (snoozed) pendingSnooze = null else failed()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(preset.label) }
+                        }
+                        if (task.isSnoozed(now)) {
+                            TextButton(
+                                enabled = !saving,
+                                onClick = {
+                                    val bot = (current as? Chat.BotChat)?.bot ?: return@TextButton
+                                    val live = snoozeTarget(bot, threadId) ?: return@TextButton
+                                    if (TaskRules.isWorking(live)) return@TextButton
+                                    saving = true
+                                    error = null
+                                    scope.launch {
+                                        val woken = session.snoozeTask(live, bot, null)
+                                        saving = false
+                                        if (woken) pendingSnooze = null else failed()
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(SnoozeRules.STOP_SNOOZING) }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(enabled = !saving, onClick = { pendingSnooze = null; error = null }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
+
+/**
+ * The live task behind an open snooze dialog, resolved from the bot's current
+ * task list rather than the snapshot the bell was tapped on. A deleted thread
+ * resolves to nothing and closes the dialog; a routine run was never a row.
+ */
+internal fun snoozeTarget(bot: Bot?, threadId: String): BotTask? =
+    bot?.tasks.orEmpty().firstOrNull { it.threadId == threadId && it.routineRunId == null }
 
 @Composable
 private fun TaskRow(
     task: BotTask,
     chat: Chat,
     enabled: Boolean,
+    now: Long,
     queued: Boolean,
     onSwitch: () -> Unit,
     onRename: () -> Unit,
+    onSnooze: (() -> Unit)?,
     onDelete: () -> Unit,
     onArchive: ((BotTask) -> Unit)? = null,
     onPin: (BotTask) -> Unit,
@@ -375,7 +478,7 @@ private fun TaskRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        BotThreadRow(task, selected = current, modifier = Modifier.weight(1f), queued = queued)
+        BotThreadRow(task, selected = current, modifier = Modifier.weight(1f), now = now, queued = queued)
 
         val pinLabel = if (task.pinned == true) "Unpin" else "Pin"
         Text(
@@ -412,6 +515,19 @@ private fun TaskRow(
                 .clickable(enabled = enabled && TaskRules.canRename(chat), onClick = onRename)
                 .padding(14.dp),
         )
+
+        if (onSnooze != null) {
+            Icon(
+                imageVector = Icons.Filled.Notifications,
+                contentDescription = "Snooze ${TaskRules.title(task)}",
+                tint = if (enabled && !TaskRules.isWorking(task)) secondaryTint
+                else secondaryTint.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable(enabled = enabled && !TaskRules.isWorking(task), onClick = onSnooze)
+                    .padding(14.dp),
+            )
+        }
 
         Icon(
             imageVector = Icons.Filled.Delete,

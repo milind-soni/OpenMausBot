@@ -16,7 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { DATA_DIR } from "./config.ts";
 import { peerProvenanceAuthor } from "./peer-provenance.ts";
-import type { ResolvedSender } from "../shared/wire.ts";
+import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
@@ -219,7 +219,7 @@ export interface FollowupPayload {
   prompt?: string;
   replyToId?: string;
   sendId?: string;
-  reason?: "capacity";
+  reason?: SteerQueueReason;
   unattended?: boolean;
   peerAsk?: Message["peerAsk"];
   mode?: "chat" | "goal";

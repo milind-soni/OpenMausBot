@@ -77,6 +77,11 @@ describe("QuestionCard", () => {
     expect(markup).not.toContain(">Deny<");
   });
 
+  it("badges an agent-composed ask, and only one", () => {
+    expect(render(message({ questionRequest: { ...questionRequest, origin: "output" } }))).toContain("Agent-composed question");
+    expect(render(message())).not.toContain("Agent-composed question");
+  });
+
   it("gives every question a tab and offers free text as well", () => {
     const markup = render(message());
     expect(markup).toContain("Model");

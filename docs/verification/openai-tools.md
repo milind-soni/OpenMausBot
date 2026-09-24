@@ -125,8 +125,12 @@ setting for OpenAI-compatible, Grok API, and MiniMax API instances, refuses
 changes while the instance is busy, and stores `config.tools` on that instance.
 Set `tools` back to `true` to enable discovery and execution. This affects all
 bots using the instance; use separate configured instances for models with
-different tool support. A model response or HTTP error never silently disables
-tools. No fallback replays a requested operation without its tools.
+different tool support. Configured MCP tools are never silently disabled.
+An otherwise plain turn initially offers the built-in question tool; only an
+explicit unsupported-tools HTTP 400/422 rejection permits one retry without
+that optional tool. Authentication, schema and network failures do not trigger
+this downgrade, nor does a response after any tool call. The next turn offers
+questions again. No fallback replays a requested operation without its tools.
 
 Cloud routine readiness uses the executing bot’s selected runner (including a
 thread’s model override at dispatch), rather than any available cloud engine.
@@ -138,3 +142,7 @@ the bot’s own Box; a missing assigned team computer requires explicit repair.
 Run `pnpm exec vitest run server/routine-requests.test.ts server/openai-box.e2e.test.ts`
 for target selection and the isolated direct/group/scheduled bridge fixture,
 including credentials removed after scheduling and a Box outage at dispatch.
+The fixture also holds the Box readiness response: the execution stays busy,
+`wait` cannot report it settled, and Stop prevents dispatch when the response
+arrives. Readiness is part of generation-owned setup, not an untracked wait
+before turn admission.
