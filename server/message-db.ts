@@ -381,6 +381,42 @@ export function readThreadTail(threadId: string, legacyFile: string, limit: numb
   return importLegacy(threadId, legacyFile);
 }
 
+/** Read only the newest part of the active branch. The recursive query follows
+ * parent IDs in SQLite, so a cold history read never hydrates every message
+ * or includes an abandoned branch. Pre-branching rows had no parentId; for
+ * those alone, the preceding row is their parent. */
+export function readActivePathTail(threadId: string, legacyFile: string, limit: number): { messages: Message[]; hasMore: boolean } {
+  const database = db();
+  if (!database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId)) importLegacy(threadId, legacyFile);
+  const rows = database.prepare(`
+    WITH RECURSIVE path(id, json, parent_id, depth) AS (
+      SELECT m.id, m.json,
+        CASE WHEN json_type(m.json, '$.parentId') IS NULL THEN
+          (SELECT p.id FROM messages p WHERE p.thread_id = m.thread_id AND p.rowid < m.rowid ORDER BY p.rowid DESC LIMIT 1)
+        ELSE json_extract(m.json, '$.parentId') END, 1
+      FROM messages m WHERE m.thread_id = ? AND m.id = COALESCE(
+        (SELECT active_leaf_id FROM thread_state WHERE thread_id = ?),
+        (SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1))
+      UNION ALL
+      SELECT m.id, m.json,
+        CASE WHEN json_type(m.json, '$.parentId') IS NULL THEN
+          (SELECT p.id FROM messages p WHERE p.thread_id = m.thread_id AND p.rowid < m.rowid ORDER BY p.rowid DESC LIMIT 1)
+        ELSE json_extract(m.json, '$.parentId') END, path.depth + 1
+      FROM path JOIN messages m ON m.thread_id = ? AND m.id = path.parent_id
+      WHERE path.depth <= ?
+    )
+    SELECT json FROM path ORDER BY depth DESC
+  `).all(threadId, threadId, threadId, threadId, limit) as Array<{ json: string }>;
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.shift();
+  return { messages: rows.map(rowToMessage), hasMore };
+}
+
+export function latestThreadMessageAt(threadId: string): number {
+  const row = db().prepare("SELECT at FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | undefined;
+  return row?.at ?? 0;
+}
+
 function importLegacy(threadId: string, legacyFile: string): ThreadRows {
   let messages: Message[] = [];
   let activeLeafId: string | null = null;

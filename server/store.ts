@@ -1304,6 +1304,14 @@ export class Store {
     return path.reverse();
   }
 
+  activePathTail(threadId: string, limit: number): { messages: Message[]; hasMore: boolean } {
+    return mdb.readActivePathTail(threadId, messagesFile(threadId), limit);
+  }
+
+  latestThreadMessageAt(threadId: string): number {
+    return mdb.latestThreadMessageAt(threadId);
+  }
+
   /** Mark the last assistant text on the active branch as this turn's final
    * visible answer. If a provider ends after commentary without emitting a
    * separate answer, that commentary remains visible as the safe fallback. */

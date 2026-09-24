@@ -18,6 +18,7 @@ import { closeMessageDb,
   removeMemoryFile,
   readThread,
   readThreadTail,
+  readActivePathTail,
   recallMessages,
   searchMessages,
   setActiveLeaf,
@@ -77,6 +78,22 @@ describe("message-db", () => {
     const imported = readThread("t3", legacy("t3"));
     expect(imported.messages).toHaveLength(2);
     expect(imported.activeLeafId).toBeNull(); // Store derives the tail
+  });
+
+  it("reads a bounded active path from a cold large thread without materializing abandoned branches", () => {
+    let parent: string | null = null;
+    for (let i = 0; i < 4_000; i++) {
+      const id = `m${i}`;
+      insertMessage("large", msg(id, `step ${i}`, { parentId: parent }));
+      parent = id;
+    }
+    insertMessage("large", msg("abandoned", "Do not replay", { parentId: "m3997" }));
+    setActiveLeaf("large", "m3999");
+    closeMessageDb();
+    const tail = readActivePathTail("large", legacy("large"), 12);
+    expect(tail.hasMore).toBe(true);
+    expect(tail.messages.map(message => message.id)).toEqual(Array.from({ length: 12 }, (_, i) => `m${3988 + i}`));
+    expect(tail.messages.some(message => message.id === "abandoned")).toBe(false);
   });
 
   it("migrates known legacy transcripts at Store startup so search sees unopened tasks", () => {

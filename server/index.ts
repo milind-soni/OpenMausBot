@@ -889,7 +889,8 @@ function sharedHistorySources(bot: BotRecord) {
   return {
     groups: store.groups.filter((group) => !group.memberIds.includes(bot.id) || roomFeedsBot(group, bot)),
     taskByThread: (botId: string, threadId: string) => store.taskByThread(botId, threadId),
-    activePath: (threadId: string) => store.activePath(threadId),
+    activePathTail: (threadId: string, limit: number) => store.activePathTail(threadId, limit),
+    latestThreadMessageAt: (threadId: string) => store.latestThreadMessageAt(threadId),
   };
 }
 
