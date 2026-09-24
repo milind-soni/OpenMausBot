@@ -40,6 +40,8 @@ export interface OptionCardData {
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
+  requestType?: "permission" | "question";
+  autoApproved?: boolean;
 }
 
 export interface Message {

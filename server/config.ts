@@ -27,6 +27,9 @@ export interface AppConfig {
   profile?: { name?: string; email?: string };
   /** Global setting for automatic bot-to-bot handoffs across multi-agent rooms. Defaults to true. */
   autoHandoffs?: boolean;
+  /** UI-side idle approval of permission cards; questions are never automatic. */
+  autoApprovePermissions?: boolean;
+  autoApproveDelaySeconds?: number;
   instances?: InstanceConfigMap;
 }
 
@@ -53,6 +56,10 @@ export function loadConfig(): AppConfig {
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
   cfg.trello = { key: process.env.TRELLO_API_KEY, ...cfg.trello };
   cfg.autoHandoffs = cfg.autoHandoffs ?? true;
+  cfg.autoApprovePermissions = typeof cfg.autoApprovePermissions === "boolean" ? cfg.autoApprovePermissions : true;
+  const approvalDelay = cfg.autoApproveDelaySeconds;
+  cfg.autoApproveDelaySeconds = typeof approvalDelay === "number" && Number.isInteger(approvalDelay) && approvalDelay >= 1 && approvalDelay <= 120
+    ? approvalDelay : 10;
   return cfg;
 }
 
@@ -68,6 +75,10 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   }
   if (typeof patch.autoHandoffs === "boolean") {
     disk.autoHandoffs = patch.autoHandoffs;
+  }
+  if (typeof patch.autoApprovePermissions === "boolean") disk.autoApprovePermissions = patch.autoApprovePermissions;
+  if (Number.isInteger(patch.autoApproveDelaySeconds) && patch.autoApproveDelaySeconds! >= 1 && patch.autoApproveDelaySeconds! <= 120) {
+    disk.autoApproveDelaySeconds = patch.autoApproveDelaySeconds;
   }
   if (patch.instances && typeof patch.instances === "object") {
     const diskInstances = { ...((disk.instances as InstanceConfigMap) ?? {}) };

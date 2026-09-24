@@ -172,16 +172,31 @@ posixOnly("room activity runtime", () => {
     );
     expect(prompt.message.from.botId).toBe(alpha.id);
     expect(prompt.message.card.options).toEqual(["Allow", "Deny"]);
+    expect(prompt.message.card.requestType).toBe("permission");
+
+    const settings = await api("GET", "/api/config");
+    expect(settings.body).toMatchObject({ autoApprovePermissions: true, autoApproveDelaySeconds: 10 });
 
     const response = await api("POST", `/api/bots/${alpha.id}/respond`, {
       requestId: approval.event.requestId,
       behavior: "allow",
       threadId: group.threadId,
+      autoApproved: true,
     });
     expect(response.status).toBe(200);
-    await waitForFrame(
+    const resolved = await waitForFrame(
       (frame) => frame.kind === "runtime" && frame.event.type === "request.resolved" && frame.event.requestId === approval.event.requestId,
       "resolved room approval",
+    );
+    expect(resolved.event.source).toBe("auto");
+    const settledCard = await waitForFrame(
+      (frame) => frame.kind === "message.patch" && frame.message.id === prompt.message.id,
+      "auto-approved card",
+    );
+    expect(settledCard.message.card).toMatchObject({ answered: "Allow", autoApproved: true, dismissed: false });
+    await waitForFrame(
+      (frame) => frame.kind === "message" && frame.message.kind === "activity" && frame.message.tool?.name === "Permission auto-approved",
+      "room auto-approval activity",
     );
 
     await waitForFrame(
@@ -191,12 +206,20 @@ posixOnly("room activity runtime", () => {
 
     const secondStart = frames.length;
     expect((await api("POST", `/api/groups/${group.id}/messages`, { text: "@Alpha run another check" })).status).toBe(202);
-    await waitForFrame(
+    const secondApproval = await waitForFrame(
       (frame) => frame.kind === "runtime" && frame.event.type === "request.opened" && frame.event.threadId === group.threadId,
       "second room approval request",
       12_000,
       secondStart,
     );
+    expect((await api("PUT", "/api/config", { autoApprovePermissions: false, autoApproveDelaySeconds: 5 })).body)
+      .toMatchObject({ autoApprovePermissions: false, autoApproveDelaySeconds: 5 });
+    expect((await api("POST", `/api/bots/${alpha.id}/respond`, {
+      requestId: secondApproval.event.requestId,
+      behavior: "allow",
+      threadId: group.threadId,
+      autoApproved: true,
+    })).status).toBe(409);
     expect((await api("POST", `/api/groups/${group.id}/activities/${alpha.id}/stop`)).status).toBe(200);
     const stopped = await waitForFrame(
       (frame) => frame.kind === "runtime" && frame.event.type === "turn.completed" && frame.event.threadId === group.threadId,

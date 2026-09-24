@@ -539,6 +539,39 @@ function SystemSection() {
   const updaterState = useUpdaterState();
   const updater = window.gbs?.updater;
   const [usageAnalytics, setUsageAnalytics] = useState(usageAnalyticsEnabled);
+  const autoApprovePermissions = state.config?.autoApprovePermissions ?? true;
+  const autoApproveDelaySeconds = state.config?.autoApproveDelaySeconds ?? 10;
+  const [approvalDelay, setApprovalDelay] = useState(String(autoApproveDelaySeconds));
+  const [savingApproval, setSavingApproval] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+
+  useEffect(() => setApprovalDelay(String(autoApproveDelaySeconds)), [autoApproveDelaySeconds]);
+
+  const saveApproval = async (patch: { autoApprovePermissions?: boolean; autoApproveDelaySeconds?: number }) => {
+    setSavingApproval(true);
+    setApprovalError("");
+    const previous = state.config;
+    if (previous) dispatch({ type: "configStatus", config: { ...previous, ...patch } });
+    try {
+      const config = await api("/api/config", { method: "PUT", body: JSON.stringify(patch) });
+      dispatch({ type: "configStatus", config });
+    } catch (error) {
+      if (previous) dispatch({ type: "configStatus", config: previous });
+      setApprovalError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSavingApproval(false);
+    }
+  };
+
+  const saveApprovalDelay = () => {
+    const next = Number(approvalDelay);
+    if (!Number.isInteger(next) || next < 1 || next > 120) {
+      setApprovalError("Choose a delay from 1 to 120 seconds.");
+      setApprovalDelay(String(autoApproveDelaySeconds));
+      return;
+    }
+    if (next !== autoApproveDelaySeconds) void saveApproval({ autoApproveDelaySeconds: next });
+  };
 
   const autoHandoffs = state.config?.autoHandoffs ?? true;
   const [togglingAutoHandoffs, setTogglingAutoHandoffs] = useState(false);
@@ -579,6 +612,44 @@ function SystemSection() {
 
   return (
     <div className="space-y-6">
+      <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-[16px] font-semibold text-ink">Auto-approve permission cards</h2>
+            <p className="mt-1 text-[13px] text-ink-secondary">
+              Allow pending actions after no activity in the app, including file changes and commands. Questions always wait for your answer.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Auto-approve permission cards"
+            aria-checked={autoApprovePermissions}
+            disabled={savingApproval}
+            onClick={() => void saveApproval({ autoApprovePermissions: !autoApprovePermissions })}
+            className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50", autoApprovePermissions ? "bg-accent" : "bg-raised")}
+          >
+            <span className={cn("absolute top-1 size-4 rounded-full bg-white transition-transform", autoApprovePermissions ? "translate-x-5" : "translate-x-1")} />
+          </button>
+        </div>
+        <label className="mt-4 flex items-center gap-2 text-[13px] text-ink-secondary">
+          Approve after
+          <input
+            type="number"
+            min={1}
+            max={120}
+            value={approvalDelay}
+            disabled={savingApproval}
+            onChange={(event) => setApprovalDelay(event.target.value)}
+            onBlur={saveApprovalDelay}
+            onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+            className="w-20 rounded-lg border border-hairline/60 bg-inset px-2 py-1 text-ink focus:border-accent focus:outline-none"
+          />
+          seconds of inactivity
+        </label>
+        {approvalError && <p role="alert" className="mt-2 text-[12px] text-danger">{approvalError}</p>}
+      </div>
+
       <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
         <div className="flex items-center justify-between gap-4">
           <div>

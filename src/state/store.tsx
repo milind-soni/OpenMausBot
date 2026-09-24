@@ -14,6 +14,7 @@ import {
 } from "react";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import { clearRoomActivity, foldRoomActivity, type RoomActivityState } from "@/lib/roomActivity";
+import { pendingPermissions, PermissionAutoApproveClock, type PermissionCountdown } from "@/lib/permissionAutoApprove";
 import type { TaskProject, TaskRecord } from "@/lib/taskBoard";
 
 export type { MausColor } from "@/lib/mascot";
@@ -36,6 +37,8 @@ export interface OptionCardData {
   dismissed?: boolean;
   /** Present when this card is a live provider ask (approval/question). */
   requestId?: string;
+  requestType?: "permission" | "question";
+  autoApproved?: boolean;
 }
 
 export interface Message {
@@ -146,6 +149,8 @@ export interface ConfigStatus {
   profile?: { name: string; email: string };
   /** Global setting for automatic bot-to-bot handoffs across multi-agent rooms */
   autoHandoffs?: boolean;
+  autoApprovePermissions?: boolean;
+  autoApproveDelaySeconds?: number;
 }
 
 /** One row of GET /api/instances — the model picker's data. */
@@ -221,7 +226,7 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string; attachments?: Attachment[] }
   | { type: "switchBranch"; botId: string; messageId: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
-  | { type: "answerCard"; botId: string; threadId?: string; messageId: string; answer: string }
+  | { type: "answerCard"; botId: string; threadId?: string; messageId: string; answer: string; autoApproved?: boolean }
   | { type: "dismissCard"; botId: string; threadId?: string; messageId: string }
   | { type: "newBot" }
   | { type: "botAdded"; bot: Bot }
@@ -714,6 +719,15 @@ export function useStreaming() {
 
 const RoomActivityContext = createContext<RoomActivityState>({});
 
+const PermissionAutoApproveContext = createContext<{
+  countdown: PermissionCountdown;
+  cancel: (key: string) => void;
+}>({ countdown: {}, cancel: () => {} });
+
+export function usePermissionAutoApprove() {
+  return useContext(PermissionAutoApproveContext);
+}
+
 export function useRoomActivity(threadId: string) {
   return useContext(RoomActivityContext)[threadId] ?? {};
 }
@@ -732,6 +746,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // only StreamContext consumers
   const [stream, setStream] = useState<StreamState>(EMPTY_STREAM);
   const [roomActivity, setRoomActivity] = useState<RoomActivityState>({});
+  const [permissionCountdown, setPermissionCountdown] = useState<PermissionCountdown>({});
+  const permissionClock = useRef<PermissionAutoApproveClock | null>(null);
   const deltaBuffer = useRef(new Map<string, { text: string; reasoning: string }>());
   const deltaFlush = useRef<number | null>(null);
   const clearStream = (threadId: string) => {
@@ -797,6 +813,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           })
           .catch(showError);
         return;
+      }
+      if (action.type === "answerCard" && action.autoApproved) {
+        const owner = action.threadId
+          ? stateRef.current.groups.find((group) => group.threadId === action.threadId)
+          : stateRef.current.bots.find((bot) => bot.id === action.botId);
+        const card = owner?.messages.find((message) => message.id === action.messageId)?.card;
+        if (stateRef.current.config?.autoApprovePermissions === false || card?.requestType !== "permission" || !card.requestId || card.answered || card.dismissed) return;
+        api(`/api/bots/${action.botId}/respond`, {
+          method: "POST",
+          body: JSON.stringify({ requestId: card.requestId, behavior: "allow", threadId: action.threadId, autoApproved: true }),
+        }).catch((error) => {
+          permissionClock.current?.cancel(`${action.threadId ?? action.botId}:${action.messageId}`);
+          showError(error);
+        });
+        return;
+      }
+      if (action.type === "answerCard" || action.type === "dismissCard") {
+        const owner = action.threadId
+          ? stateRef.current.groups.find((group) => group.threadId === action.threadId)
+          : stateRef.current.bots.find((bot) => bot.id === action.botId);
+        if (owner) permissionClock.current?.cancel(`${action.threadId ?? action.botId}:${action.messageId}`);
       }
       rawDispatch(action);
       switch (action.type) {
@@ -972,6 +1009,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return wrapped;
   }, []);
 
+  if (!permissionClock.current) {
+    permissionClock.current = new PermissionAutoApproveClock(
+      (card) => dispatch({ type: "answerCard", botId: card.botId, threadId: card.threadId, messageId: card.messageId, answer: "Allow", autoApproved: true }),
+      setPermissionCountdown,
+    );
+  }
+
+  useEffect(() => {
+    permissionClock.current?.configure(state.config !== null && (state.config.autoApprovePermissions ?? true), state.config?.autoApproveDelaySeconds ?? 10);
+    permissionClock.current?.sync(pendingPermissions(state));
+  }, [state.bots, state.groups, state.config]);
+
+  useEffect(() => {
+    const activity = () => permissionClock.current?.activity();
+    for (const event of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart", "touchmove"]) {
+      window.addEventListener(event, activity, true);
+    }
+    const interval = window.setInterval(() => permissionClock.current?.tick(), 250);
+    return () => {
+      window.clearInterval(interval);
+      for (const event of ["keydown", "pointerdown", "pointermove", "wheel", "touchstart", "touchmove"]) {
+        window.removeEventListener(event, activity, true);
+      }
+    };
+  }, []);
+
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
     let alive = true;
@@ -1108,7 +1171,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: { xai: frame.xai, composio: frame.composio, box: frame.box, trello: frame.trello, profile: frame.profile },
+            config: { xai: frame.xai, composio: frame.composio, box: frame.box, trello: frame.trello, profile: frame.profile,
+              autoHandoffs: frame.autoHandoffs, autoApprovePermissions: frame.autoApprovePermissions, autoApproveDelaySeconds: frame.autoApproveDelaySeconds },
           });
           api("/api/instances")
             .then(({ instances }) => rawDispatch({ type: "instances", instances }))
@@ -1127,7 +1191,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   return (
     <StoreContext.Provider value={value}>
       <StreamContext.Provider value={stream}>
-        <RoomActivityContext.Provider value={roomActivity}>{children}</RoomActivityContext.Provider>
+        <RoomActivityContext.Provider value={roomActivity}>
+          <PermissionAutoApproveContext.Provider value={{ countdown: permissionCountdown, cancel: (key) => permissionClock.current?.cancel(key) }}>
+            {children}
+          </PermissionAutoApproveContext.Provider>
+        </RoomActivityContext.Provider>
       </StreamContext.Provider>
     </StoreContext.Provider>
   );

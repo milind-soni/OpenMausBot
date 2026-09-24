@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X } from "lucide-react";
-import { useStore, type Message } from "@/state/store";
+import { usePermissionAutoApprove, useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
 const LETTERS = ["A", "B", "C", "D", "E", "F"];
@@ -15,12 +15,17 @@ export function OptionCard({
   message: Message;
 }) {
   const { dispatch } = useStore();
+  const { countdown, cancel } = usePermissionAutoApprove();
   const [custom, setCustom] = useState("");
   const card = message.card;
   if (!card || card.dismissed) return null;
+  const timerKey = `${threadId ?? botId}:${message.id}`;
+  const timer = countdown[timerKey];
+  const isPermission = card.requestType === "permission";
 
   const answer = (text: string) => {
     if (!text.trim()) return;
+    cancel(timerKey);
     dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim() });
   };
 
@@ -36,21 +41,35 @@ export function OptionCard({
         <button
           type="button"
           aria-label="Dismiss prompt"
-          onClick={() =>
-            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id })
-          }
+          onClick={() => {
+            cancel(timerKey);
+            dispatch({ type: "dismissCard", botId, threadId, messageId: message.id });
+          }}
           className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
         >
           <X size={16} />
         </button>
       </div>
 
+      {card.autoApproved ? (
+        <div className="mt-3 text-[12px] font-medium text-success">Auto-approved after inactivity</div>
+      ) : isPermission && !card.answered && timer?.remaining !== undefined ? (
+        <div className="mt-3 flex items-center justify-between gap-3 text-[12px] text-ink-secondary">
+          <span>Auto-approving in {timer.remaining}s</span>
+          <button type="button" onClick={() => cancel(timerKey)} className="font-medium text-accent hover:underline">Cancel auto-approve</button>
+        </div>
+      ) : isPermission && !card.answered && timer?.cancelled ? (
+        <div className="mt-3 text-[12px] text-ink-secondary">Auto-approve cancelled. Choose Allow or Deny.</div>
+      ) : isPermission && !card.answered && timer?.firing ? (
+        <div className="mt-3 text-[12px] text-ink-secondary">Auto-approving…</div>
+      ) : null}
+
       <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
         {card.options.map((opt, i) => (
           <button
             type="button"
             key={opt}
-            disabled={!!card.answered}
+            disabled={!!card.answered || !!timer?.firing}
             onClick={() => answer(opt)}
             className={cn(
               "flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] text-ink",
@@ -68,7 +87,7 @@ export function OptionCard({
         ))}
       </div>
 
-      {!card.answered && (
+      {!card.answered && !isPermission && (
         <input
           value={custom}
           onChange={(e) => setCustom(e.target.value)}

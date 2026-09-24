@@ -28,6 +28,12 @@ describe("foldRoomActivity", () => {
     expect(state["room-1"]["bot-1"].status).toBe("running");
   });
 
+  it("labels automatic approval in room activity", () => {
+    let state = foldRoomActivity({}, frame("bot-1", { type: "request.opened", requestId: "ask-1", summary: "Run deployment?" }));
+    state = foldRoomActivity(state, frame("bot-1", { type: "request.resolved", requestId: "ask-1", source: "auto" }));
+    expect(state["room-1"]["bot-1"].entries[0]).toMatchObject({ title: "Run deployment? — Auto-approved", status: "completed" });
+  });
+
   it("settles a waiting approval when its turn is cancelled", () => {
     let state = foldRoomActivity({}, frame("bot-1", { type: "request.opened", requestId: "ask-1", summary: "Run deployment?" }));
 

@@ -29,6 +29,10 @@ export function loadConfig() {
     cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
     cfg.trello = { key: process.env.TRELLO_API_KEY, ...cfg.trello };
     cfg.autoHandoffs = cfg.autoHandoffs ?? true;
+    cfg.autoApprovePermissions = typeof cfg.autoApprovePermissions === "boolean" ? cfg.autoApprovePermissions : true;
+    const approvalDelay = cfg.autoApproveDelaySeconds;
+    cfg.autoApproveDelaySeconds = typeof approvalDelay === "number" && Number.isInteger(approvalDelay) && approvalDelay >= 1 && approvalDelay <= 120
+        ? approvalDelay : 10;
     return cfg;
 }
 /** Merge a partial config into ~/.gbs/config.json (secrets never
@@ -43,6 +47,11 @@ export function saveConfig(patch) {
     }
     if (typeof patch.autoHandoffs === "boolean") {
         disk.autoHandoffs = patch.autoHandoffs;
+    }
+    if (typeof patch.autoApprovePermissions === "boolean")
+        disk.autoApprovePermissions = patch.autoApprovePermissions;
+    if (Number.isInteger(patch.autoApproveDelaySeconds) && patch.autoApproveDelaySeconds >= 1 && patch.autoApproveDelaySeconds <= 120) {
+        disk.autoApproveDelaySeconds = patch.autoApproveDelaySeconds;
     }
     if (patch.instances && typeof patch.instances === "object") {
         const diskInstances = { ...(disk.instances ?? {}) };

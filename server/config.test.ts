@@ -6,6 +6,11 @@ import { describe, expect, it } from "vitest";
 import { loadConfig, saveConfig } from "./config.ts";
 
 describe("saveConfig instances merge", () => {
+  it("defaults idle permission approval on at ten seconds and persists preferences", () => {
+    expect(loadConfig()).toMatchObject({ autoApprovePermissions: true, autoApproveDelaySeconds: 10 });
+    saveConfig({ autoApprovePermissions: false, autoApproveDelaySeconds: 25 });
+    expect(loadConfig()).toMatchObject({ autoApprovePermissions: false, autoApproveDelaySeconds: 25 });
+  });
   it("writes a brand-new instances entry", () => {
     saveConfig({ instances: { claude: { driver: "claudeAgent", config: { permissionMode: "bypassPermissions" } } } });
     const cfg = loadConfig();

@@ -154,6 +154,8 @@ function deleteThreadLogs(threadId) {
 // and every client view are projections of it.
 const toolMessageByItem = new Map(); // itemId -> messageId
 const askMessageByRequest = new Map(); // requestId -> messageId
+const autoApprovedRequests = new Set();
+const requestKey = (threadId, requestId) => `${threadId}:${requestId}`;
 // Group threads: the fold needs to know WHO is talking — the turn engine
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map();
@@ -163,7 +165,9 @@ bus.subscribe((event) => {
     if (!bot && !group)
         return;
     const speaker = group ? groupSpeakers.get(event.threadId) : undefined;
-    broadcast({ kind: "runtime", event, botId: bot?.id ?? speaker?.botId });
+    const autoApproved = event.type === "request.resolved" && event.behavior === "allow" && Boolean(event.requestId)
+        ? autoApprovedRequests.delete(requestKey(event.threadId, event.requestId)) : false;
+    broadcast({ kind: "runtime", event: autoApproved ? { ...event, source: "auto" } : event, botId: bot?.id ?? speaker?.botId });
     const pushMessage = (m) => {
         const message = store.appendMessage(event.threadId, group && m.role === "bot" ? { ...m, from: speaker } : m);
         broadcast({ kind: "message", threadId: event.threadId, message });
@@ -213,8 +217,9 @@ bus.subscribe((event) => {
                 card: {
                     title: permission ? "Approval needed" : "Your bot has a question",
                     subtitle: event.summary,
-                    options: event.choices?.length ? event.choices : permission ? ["Allow", "Deny"] : [],
+                    options: permission ? ["Allow", "Deny"] : event.choices ?? [],
                     requestId: event.requestId,
+                    requestType: event.requestType,
                 },
             });
             if (event.requestId)
@@ -227,10 +232,12 @@ bus.subscribe((event) => {
                 const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
                 if (existing?.card && !existing.card.answered) {
                     const patched = store.patchMessage(event.threadId, messageId, {
-                        card: { ...existing.card, answered: event.behavior, dismissed: event.source !== "user" },
+                        card: { ...existing.card, answered: autoApproved ? "Allow" : event.behavior, autoApproved, dismissed: !autoApproved && event.source !== "user" },
                     });
                     if (patched)
                         broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
+                    if (autoApproved && group)
+                        pushMessage({ role: "bot", kind: "activity", tool: { name: "Permission auto-approved" } });
                 }
                 if (event.requestId)
                     askMessageByRequest.delete(event.requestId);
@@ -816,6 +823,8 @@ function configStatus() {
         // not a secret — the sidebar shows it
         profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
         autoHandoffs: cfg.autoHandoffs ?? true,
+        autoApprovePermissions: cfg.autoApprovePermissions ?? true,
+        autoApproveDelaySeconds: cfg.autoApproveDelaySeconds ?? 10,
     };
 }
 function trelloCreds() {
@@ -1539,10 +1548,27 @@ const server = createServer(async (req, res) => {
                     return json(res, 403, { error: "agent is not awaiting input in that room" });
                 }
             }
-            await instance.adapter.respondToRequest(requestedThreadId, String(body.requestId), {
-                behavior: body.behavior,
-                message: body.message,
-            });
+            const requestId = String(body.requestId);
+            const autoApproved = body.autoApproved === true;
+            const autoKey = requestKey(requestedThreadId, requestId);
+            if (autoApproved) {
+                const pending = store.messagesFor(requestedThreadId).find((message) => message.card?.requestId === requestId);
+                if (cfg.autoApprovePermissions === false || body.behavior !== "allow" || pending?.card?.requestType !== "permission" || pending.card.answered || pending.card.dismissed) {
+                    return json(res, 409, { error: "That permission card is not available for auto-approval." });
+                }
+                autoApprovedRequests.add(autoKey);
+            }
+            try {
+                await instance.adapter.respondToRequest(requestedThreadId, requestId, {
+                    behavior: body.behavior,
+                    message: body.message,
+                });
+            }
+            catch (error) {
+                if (autoApproved)
+                    autoApprovedRequests.delete(autoKey);
+                throw error;
+            }
             return json(res, 200, { ok: true });
         }
         m = path.match(/^\/api\/bots\/([\w-]+)\/interrupt$/);
@@ -1642,13 +1668,24 @@ const server = createServer(async (req, res) => {
             }
             if (typeof body.autoHandoffs === "boolean")
                 patch.autoHandoffs = body.autoHandoffs;
+            if (body.autoApprovePermissions !== undefined) {
+                if (typeof body.autoApprovePermissions !== "boolean")
+                    return json(res, 400, { error: "autoApprovePermissions must be a boolean" });
+                patch.autoApprovePermissions = body.autoApprovePermissions;
+            }
+            if (body.autoApproveDelaySeconds !== undefined) {
+                if (!Number.isInteger(body.autoApproveDelaySeconds) || body.autoApproveDelaySeconds < 1 || body.autoApproveDelaySeconds > 120) {
+                    return json(res, 400, { error: "autoApproveDelaySeconds must be an integer from 1 to 120" });
+                }
+                patch.autoApproveDelaySeconds = body.autoApproveDelaySeconds;
+            }
             if (!Object.keys(patch).length)
                 return json(res, 400, { error: "nothing to save" });
             saveConfig(patch);
             Object.assign(cfg, loadConfig());
             // provider keys change the fleet; a profile, Trello, or autoHandoffs edit must not
             // kill in-flight turns with a pointless reload
-            if (Object.keys(patch).some((k) => k !== "profile" && k !== "trello" && k !== "autoHandoffs"))
+            if (Object.keys(patch).some((k) => !["profile", "trello", "autoHandoffs", "autoApprovePermissions", "autoApproveDelaySeconds"].includes(k)))
                 await reloadProviders();
             const status = configStatus();
             broadcast({ kind: "config", ...status });

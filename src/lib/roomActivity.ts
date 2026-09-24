@@ -34,6 +34,7 @@ interface RuntimeEventLike {
   turnId?: string;
   itemId?: string;
   requestId?: string;
+  source?: string;
   itemType?: string;
   title?: string;
   tool?: string;
@@ -139,7 +140,12 @@ export function foldRoomActivity(
         ...current,
         status: "running",
         updatedAt: at,
-        entries: upsertEntry(current.entries, { ...entry, status: "completed", updatedAt: at }),
+        entries: upsertEntry(current.entries, {
+          ...entry,
+          title: event.source === "auto" ? `${entry.title} — Auto-approved` : entry.title,
+          status: "completed",
+          updatedAt: at,
+        }),
       };
       break;
     }
