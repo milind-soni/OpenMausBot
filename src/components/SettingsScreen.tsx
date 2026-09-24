@@ -311,6 +311,14 @@ function ModelsSection() {
   const instances = state.instances ?? [];
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
+  const [refreshingModels, setRefreshingModels] = useState(false);
+  const refreshModels = () => {
+    setRefreshingModels(true);
+    api("/api/instances?refresh=1")
+      .then(({ instances }) => dispatch({ type: "instances", instances }))
+      .catch(() => {})
+      .finally(() => setRefreshingModels(false));
+  };
 
   const setAutoApprove = (instanceId: string, autoApprove: boolean) => {
     if (pendingId) return;
@@ -333,9 +341,14 @@ function ModelsSection() {
                 Live drivers detected by the local harness server on your machine.
               </p>
             </div>
-            <span className="rounded-full bg-raised px-3 py-1 text-[12px] font-medium text-ink">
-              {instances.filter((i) => i.snapshot.state === "available").length} / {instances.length} available
-            </span>
+            <div className="flex items-center gap-2">
+              <button onClick={refreshModels} disabled={refreshingModels} className="flex items-center gap-1 rounded-full bg-raised px-3 py-1 text-[12px] text-ink disabled:opacity-50">
+                <RefreshCw size={12} className={refreshingModels ? "animate-spin" : ""} /> Refresh models
+              </button>
+              <span className="rounded-full bg-raised px-3 py-1 text-[12px] font-medium text-ink">
+                {instances.filter((i) => i.snapshot.state === "available").length} / {instances.length} available
+              </span>
+            </div>
           </div>
         </div>
 
@@ -441,11 +454,24 @@ function ModelsSection() {
                     </div>
                   )}
 
+                  {inst.models.status !== "ready" && (
+                    <div className="mt-3 text-[12px] text-warning">
+                      {inst.models.status === "stale" ? "Showing last known models; refresh failed." :
+                        inst.models.status === "unverified" ? "This provider does not expose a verified model list." :
+                          inst.models.error ?? "Model list unavailable."}
+                    </div>
+                  )}
+
                   {inst.models.options.length > 0 && (
                     <div className="mt-3.5 border-t border-hairline/40 pt-3">
                       <div className="text-[11px] font-medium uppercase tracking-wider text-ink-secondary">
                         Available Models
                       </div>
+                      {inst.models.refreshedAt && (
+                        <div className="mt-1 text-[11px] text-ink-secondary">
+                          Refreshed {new Date(inst.models.refreshedAt).toLocaleTimeString()} from {inst.models.source}
+                        </div>
+                      )}
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {inst.models.options.map((m) => (
                           <span

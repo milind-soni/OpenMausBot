@@ -39,4 +39,10 @@ Provider references: [Codex app-server](https://github.com/openai/codex/blob/mai
 
 ## Approval
 
-Status: awaiting user approval
+Status: approved by the user on 2026-09-24
+
+## Implementation notes
+
+- The installed Codex, Claude Code, and Antigravity CLIs were queried without inference turns. Their live catalogs returned GPT-6, current Claude aliases, and Gemini 3.8 models respectively.
+- The current `ascii.dev/api/box/v1` integration has no verified model-list response. Current [Boat API documentation](https://docs.boat.dev/api/v1) describes `GET /provider-models` on its newer service, but the present integration cannot safely treat that as the legacy box catalog. The computer provider therefore exposes the known `sonnet` alias with an unverified status until its API is migrated and tested.
+- Gemini ACP discovery is covered with a protocol fake because Gemini CLI is not installed on this development machine. If an installed Gemini CLI omits model metadata, the app shows a discovery error instead of a stale list.

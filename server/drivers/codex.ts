@@ -25,6 +25,7 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { augmentedPath } from "../env-path.ts";
 import { appendNative } from "./native.ts";
+import { discoverCodexModels } from "../model-discovery.ts";
 
 const DRIVER_KIND = "codex";
 
@@ -414,6 +415,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       displayName: input.displayName,
       enabled: input.enabled,
       models: MODELS,
+      discoverModels: () => discoverCodexModels(config.cli),
       snapshot,
       adapter: {
         provider: DRIVER_KIND,

@@ -23,6 +23,10 @@ if (argv.includes("--version")) {
   console.log("fake-acp 1.0.0");
   process.exit(0);
 }
+if (argv.includes("models")) {
+  process.stdout.write("Default model: grok-4.6\n\nAvailable models:\n * grok-4.6 (default)\n - grok-4.5\n - fake-model\n - fake-acp-model\n");
+  process.exit(0);
+}
 if (process.env.FAKE_ACP_DUMP) {
   writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify({ argv, env: process.env }, null, 2));
 }

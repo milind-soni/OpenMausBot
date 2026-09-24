@@ -21,6 +21,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { discoverAcpModels } from "../../model-discovery.ts";
 
 // Prefer an explicit key method, then personal OAuth, then Vertex — but fall
 // back to whatever the CLI advertises so a new method id still works.
@@ -36,6 +37,7 @@ const support: AcpSupport = {
       { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
     ],
   },
+  discoverModels: (config, environment) => discoverAcpModels(config.cli, ["--experimental-acp"], environment),
   defaultCli: "gemini",
   nativeSource: "gemini.acp",
   loginNote: "Gemini CLI is not signed in — run `gemini` once to log in, or set GEMINI_API_KEY",

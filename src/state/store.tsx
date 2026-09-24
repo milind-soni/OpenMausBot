@@ -85,6 +85,7 @@ export interface Group {
 export interface ModelSelection {
   instanceId: string;
   model: string;
+  label?: string;
 }
 
 export interface Bot {
@@ -158,7 +159,14 @@ export interface InstanceInfo {
     authenticated?: boolean;
     version?: string | null;
   };
-  models: { default: string; options: Array<{ id: string; label: string }> };
+  models: {
+    default: string;
+    options: Array<{ id: string; label: string }>;
+    status?: "ready" | "stale" | "unverified" | "error";
+    source?: string;
+    refreshedAt?: string;
+    error?: string;
+  };
   /** null when the driver has no configurable permission mode. */
   autoApprove: boolean | null;
 }
@@ -982,6 +990,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .catch(() => {});
     };
     loadAll();
+    const modelRefresh = window.setInterval(() => {
+      api("/api/instances?refresh=1")
+        .then(({ instances }) => alive && rawDispatch({ type: "instances", instances }))
+        .catch(() => {});
+    }, 60_000);
 
     const es = new EventSource("/api/events");
     es.onopen = () => {
@@ -1105,6 +1118,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return () => {
       alive = false;
+      window.clearInterval(modelRefresh);
       es.close();
     };
   }, []);

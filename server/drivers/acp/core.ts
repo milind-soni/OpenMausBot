@@ -42,6 +42,7 @@ export interface AcpSupport {
   driverKind: string;
   displayName: string;
   models: { default: string; options: Array<{ id: string; label: string }> };
+  discoverModels?(config: AcpConfig, environment: Record<string, string>): Promise<{ default: string; options: Array<{ id: string; label: string }> }>;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
   /** Native-protocol log label, e.g. "grok.acp". */
@@ -482,6 +483,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         displayName: input.displayName,
         enabled: input.enabled,
         models: support.models,
+        discoverModels: support.discoverModels ? () => support.discoverModels!(config, input.environment) : undefined,
         snapshot,
         adapter: {
           provider: DRIVER_KIND,

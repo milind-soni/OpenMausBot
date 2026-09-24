@@ -75,6 +75,49 @@ describe("ProviderRegistry", () => {
     expect(described.snapshot).toMatchObject({ state: "unavailable", reason: "provider probe exploded" });
   });
 
+  it("refreshes added and removed models and marks failed refreshes stale", async () => {
+    let options = [{ id: "new", label: "New" }, { id: "old", label: "Old" }];
+    let fail = false;
+    let calls = 0;
+    const fake = makeFakeDriver({ discoverModels: async () => {
+      calls++;
+      if (fail) throw new Error("offline");
+      return { default: options[0].id, options };
+    } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const first = await registry.modelCatalog("a");
+    expect(first).toMatchObject({ status: "ready", default: "new" });
+    options = [{ id: "later", label: "Later" }];
+    expect((await registry.modelCatalog("a")).options).toHaveLength(2);
+    const refreshed = await registry.modelCatalog("a", true);
+    expect(refreshed.options.map((m) => m.id)).toEqual(["later"]);
+    expect(calls).toBe(2);
+    fail = true;
+    const stale = await registry.modelCatalog("a", true);
+    expect(stale).toMatchObject({ status: "stale", error: "offline" });
+    expect(stale.options.map((m) => m.id)).toEqual(["later"]);
+  });
+
+  it("shares one in-flight discovery across simultaneous picker requests", async () => {
+    let finish!: (value: { default: string; options: Array<{ id: string; label: string }> }) => void;
+    let calls = 0;
+    const fake = makeFakeDriver({ discoverModels: () => {
+      calls++;
+      return new Promise((resolve) => { finish = resolve; });
+    } });
+    const registry = new ProviderRegistry([fake.driver]);
+    await registry.load({ a: { driver: "fake" } });
+    const first = registry.modelCatalog("a", true);
+    const second = registry.modelCatalog("a", true);
+    expect(calls).toBe(1);
+    finish({ default: "model-1", options: [{ id: "model-1", label: "Model 1" }] });
+    expect(await Promise.all([first, second])).toEqual([
+      expect.objectContaining({ default: "model-1" }),
+      expect.objectContaining({ default: "model-1" }),
+    ]);
+  });
+
   it("disposeAll disposes every live instance and empties the registry", async () => {
     const fake = makeFakeDriver();
     const registry = new ProviderRegistry([fake.driver]);

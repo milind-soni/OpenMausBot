@@ -2,19 +2,20 @@
 // Routing is by exact instanceId only — an entry is never inferred from a
 // driver kind, and unavailable instances render disabled with the reason.
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
-import { useStore, type Bot, type InstanceInfo } from "@/state/store";
+import { Check, ChevronDown, RefreshCw } from "lucide-react";
+import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
 import { ProviderMark } from "./ProviderIcons";
 import { cn } from "@/lib/cn";
 
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  return instance?.models.options.find((o) => o.id === model)?.label ?? model;
+function modelLabel(instance: InstanceInfo | undefined, model: string, savedLabel?: string): string {
+  return instance?.models.options.find((o) => o.id === model)?.label ?? savedLabel ?? model;
 }
 
 export function ModelPicker({ bot, className }: { bot: Bot; className?: string }) {
   const { state, dispatch } = useStore();
   const [open, setOpen] = useState(false);
   const [railId, setRailId] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const selection = bot.modelSelection;
@@ -22,6 +23,15 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
   const railInstance =
     state.instances.find((i) => i.instanceId === (railId ?? selection.instanceId)) ??
     state.instances[0];
+  const retired = active?.models.status === "ready" && !active.models.options.some((o) => o.id === selection.model);
+
+  const refresh = () => {
+    setRefreshing(true);
+    api("/api/instances?refresh=1")
+      .then(({ instances }) => dispatch({ type: "instances", instances }))
+      .catch(() => {})
+      .finally(() => setRefreshing(false));
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -38,7 +48,10 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
   }, [open]);
 
   const pick = (instance: InstanceInfo, model: string) => {
-    dispatch({ type: "setModel", botId: bot.id, selection: { instanceId: instance.instanceId, model } });
+    dispatch({ type: "setModel", botId: bot.id, selection: {
+      instanceId: instance.instanceId, model,
+      label: instance.models.options.find((o) => o.id === model)?.label,
+    } });
     setOpen(false);
   };
 
@@ -48,12 +61,13 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
         onClick={() => {
           setRailId(selection.instanceId);
           setOpen((o) => !o);
+          if (!open) refresh();
         }}
         className="flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 py-1 pl-2 pr-2.5 text-[13px] text-ink hover:bg-raised"
-        title={active ? `${active.displayName} · ${modelLabel(active, selection.model)}` : selection.model}
+        title={active ? `${active.displayName} · ${modelLabel(active, selection.model, selection.label)}` : selection.model}
       >
         {active && <ProviderMark driverKind={active.driverKind} size={14} />}
-        <span className="max-w-[160px] truncate">{modelLabel(active, selection.model)}</span>
+        <span className="max-w-[160px] truncate">{modelLabel(active, selection.model, selection.label)}{retired ? " (retired)" : ""}</span>
         <ChevronDown size={14} className="text-ink-secondary" />
       </button>
 
@@ -92,14 +106,29 @@ export function ModelPicker({ bot, className }: { bot: Bot; className?: string }
           <div className="min-w-0 flex-1 p-2">
             {railInstance ? (
               <>
-                <div className="px-2 pb-1 pt-1">
-                  <div className="text-[13px] font-semibold text-ink">{railInstance.displayName}</div>
-                  <div className="truncate text-[11px] text-ink-secondary">
-                    {railInstance.snapshot.state === "available"
-                      ? (railInstance.snapshot.version ?? "ready")
-                      : (railInstance.snapshot.reason ?? "unavailable")}
+                <div className="flex items-start justify-between gap-2 px-2 pb-1 pt-1">
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-ink">{railInstance.displayName}</div>
+                    <div className="truncate text-[11px] text-ink-secondary">
+                      {railInstance.snapshot.state === "available"
+                        ? (railInstance.snapshot.version ?? "ready")
+                        : (railInstance.snapshot.reason ?? "unavailable")}
+                    </div>
                   </div>
+                  <button onClick={refresh} disabled={refreshing} title="Refresh models" className="rounded p-1 text-ink-secondary hover:bg-raised disabled:opacity-50">
+                    <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+                  </button>
                 </div>
+                {railInstance.models.status !== "ready" && (
+                  <div className="px-2 py-1 text-[11px] text-warning">
+                    {railInstance.models.status === "stale" ? "Last known models; refresh failed" :
+                      railInstance.models.status === "unverified" ? "Provider model list unavailable" :
+                      railInstance.models.error ?? "Model list unavailable"}
+                  </div>
+                )}
+                {selection.instanceId === railInstance.instanceId && retired && (
+                  <div className="px-2 py-1 text-[11px] text-warning">Selected model is no longer offered. Choose another.</div>
+                )}
                 {railInstance.models.options.map((option) => {
                   const current =
                     selection.instanceId === railInstance.instanceId && selection.model === option.id;

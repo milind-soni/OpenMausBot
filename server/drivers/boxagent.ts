@@ -26,11 +26,9 @@ const DRIVER_KIND = "boxAgent";
 const BOX_API = "https://ascii.dev/api/box/v1";
 
 const MODELS = {
-  default: "claude-fable-5",
+  default: "sonnet",
   options: [
-    { id: "claude-fable-5", label: "Claude Fable 5 · on the box" },
-    { id: "sonnet", label: "Claude Sonnet · on the box" },
-    { id: "gpt-5.4", label: "GPT-5.4 (Codex) · on the box" },
+    { id: "sonnet", label: "Claude Sonnet · on the box (provider alias)" },
   ],
 };
 

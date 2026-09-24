@@ -118,11 +118,12 @@ function askBotAndWait(targetBotId: string, message: string, depth: number): Pro
 // default selection for new bots: first available instance, claude preferred
 async function defaultSelection() {
   const described = await registry.describe();
-  const available = described.filter((d) => d.snapshot.state === "available");
+  const available = described.filter((d) => d.snapshot.state === "available" && d.models.options.length > 0);
   const pick = available.find((d) => d.driverKind === "claudeAgent") ?? available[0] ?? described[0];
-  return { instanceId: pick?.instanceId ?? "claude", model: pick?.models.default || "claude-sonnet-5" };
+  const model = pick?.models.default || "default";
+  return { instanceId: pick?.instanceId ?? "claude", model, label: pick?.models.options.find((option) => option.id === model)?.label };
 }
-let bootSelection = { instanceId: "claude", model: "claude-sonnet-5" };
+let bootSelection = { instanceId: "claude", model: "default" };
 const store = new Store(() => bootSelection);
 const taskStore = new TaskStore(DATA_DIR);
 const trelloLinks = new TrelloLinkStore(DATA_DIR);
@@ -418,6 +419,11 @@ async function startTurn(
     );
   }
 
+  const currentCatalog = await registry.modelCatalog(bot.modelSelection.instanceId);
+  if (currentCatalog.status === "ready" && !currentCatalog.options.some((model) => model.id === bot.modelSelection.model)) {
+    throw Object.assign(new Error(`model "${bot.modelSelection.model}" is no longer available — choose a current model`), { status: 409 });
+  }
+
   // an edit hands us its already-branched user message; a plain send appends
   let userMessage = opts?.userMessage;
   if (!userMessage) {
@@ -657,6 +663,16 @@ async function runGroupMemberTurn(
     return;
   }
 
+  const groupCatalog = await registry.modelCatalog(bot.modelSelection.instanceId);
+  if (groupCatalog.status === "ready" && !groupCatalog.options.some((model) => model.id === bot.modelSelection.model)) {
+    const failure = store.appendMessage(group.threadId, {
+      role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color },
+      tool: { name: `error: ${bot.name}'s selected model was retired; choose another model`, ok: false },
+    });
+    broadcast({ kind: "message", threadId: group.threadId, message: failure });
+    return;
+  }
+
   startQueuedResponder(group.id, bot.id);
   groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
 
@@ -716,7 +732,7 @@ async function runGroupMemberTurn(
         });
     }, GROUP_TURN_TIMEOUT_MS);
     instance.adapter
-      .sendTurn({ threadId: group.threadId, text, system, cwd: projectContext.cwd })
+      .sendTurn({ threadId: group.threadId, text, system, model: bot.modelSelection.model, cwd: projectContext.cwd })
       .catch((err) => {
         const failure = store.appendMessage(group.threadId, {
           role: "bot",
@@ -1492,7 +1508,7 @@ const server = createServer(async (req, res) => {
 
     // ── provider instances (model picker) ──
     if (method === "GET" && path === "/api/instances") {
-      return json(res, 200, { instances: await registry.describe() });
+      return json(res, 200, { instances: await registry.describe(url.searchParams.get("refresh") === "1") });
     }
 
     // ── per-instance auto-approve permission toggle (Settings → Models) ──

@@ -13,6 +13,10 @@ if (argv.includes("--version")) {
   console.log("1.1.12");
   process.exit(0);
 }
+if (argv.includes("models")) {
+  process.stdout.write("Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\ngemini-3.7-flash-low\tGemini 3.7 Flash (Low)\n");
+  process.exit(0);
+}
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 const CONV = "conv-fake-123";

@@ -29,6 +29,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import { discoverClaudeModels } from "../model-discovery.ts";
 
 const DRIVER_KIND = "claudeAgent";
 
@@ -484,6 +485,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       displayName: input.displayName,
       enabled: input.enabled,
       models: MODELS,
+      discoverModels: () => discoverClaudeModels(config.cli),
       snapshot,
       adapter: {
         provider: DRIVER_KIND,

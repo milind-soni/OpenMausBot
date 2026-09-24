@@ -68,6 +68,17 @@ posixOnly("Antigravity turns (fake CLI)", () => {
     await instance?.dispose();
   });
 
+  it("discovers the current model list from agy", async () => {
+    await create();
+    expect(await instance.discoverModels?.()).toEqual({
+      default: "gemini-3.8-flash-high",
+      options: [
+        { id: "gemini-3.8-flash-high", label: "Gemini 3.8 Flash (High)" },
+        { id: "gemini-3.7-flash-low", label: "Gemini 3.7 Flash (Low)" },
+      ],
+    });
+  });
+
   it("normalizes a full print-mode turn into the canonical event sequence", async () => {
     await create();
     const { turnId } = await instance.adapter.sendTurn({ threadId: "t-happy", text: "hi", model: "gemini-3.1-pro-high" });

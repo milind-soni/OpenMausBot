@@ -24,7 +24,18 @@ const argAfter = (flag: string): string | null => {
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
 let stdin = "";
-process.stdin.on("data", (c) => (stdin += c));
+process.stdin.on("data", (c) => {
+  stdin += c;
+  for (const line of String(c).split("\n")) {
+    try {
+      const message = JSON.parse(line);
+      if (message.type === "control_request" && message.request?.subtype === "initialize") {
+        const models = JSON.parse(process.env.FAKE_CLAUDE_MODELS ?? '[{"value":"default","displayName":"Default"},{"value":"sonnet","displayName":"Claude Sonnet"}]');
+        out({ type: "control_response", response: { request_id: message.request_id, subtype: "success", response: { models } } });
+      }
+    } catch { /* ordinary streaming prompt */ }
+  }
+});
 process.stdin.on("end", () => {
   let prompt: unknown = null;
   try {

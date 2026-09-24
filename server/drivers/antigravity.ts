@@ -29,6 +29,7 @@ import type {
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { appendNative } from "./native.ts";
+import { cliText, parseTabModels } from "../model-discovery.ts";
 
 const DRIVER_KIND = "antigravityAgent";
 
@@ -332,6 +333,7 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
       displayName: input.displayName,
       enabled: input.enabled,
       models: MODELS,
+      discoverModels: async () => parseTabModels(await cliText(config.cli, ["models"], input.environment)),
       snapshot,
       adapter: {
         provider: DRIVER_KIND,

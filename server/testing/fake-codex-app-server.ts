@@ -67,6 +67,17 @@ process.stdin.on("data", (chunk) => {
       case "initialize":
         out({ jsonrpc: "2.0", id: msg.id, result: { ok: true } });
         break;
+      case "model/list": {
+        const second = msg.params?.cursor === "next-page";
+        const models = JSON.parse(second
+          ? (process.env.FAKE_CODEX_MODELS_PAGE_2 ?? "[]")
+          : (process.env.FAKE_CODEX_MODELS ?? '[{"model":"gpt-new","displayName":"GPT New","isDefault":true}]'));
+        out({ jsonrpc: "2.0", id: msg.id, result: {
+          data: models,
+          nextCursor: !second && process.env.FAKE_CODEX_MODELS_PAGE_2 ? "next-page" : null,
+        } });
+        break;
+      }
       case "thread/resume":
         if (mode === "resume") {
           out({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId } } });

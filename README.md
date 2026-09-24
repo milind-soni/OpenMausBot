@@ -58,7 +58,10 @@ already have:
 ### 🧠 Pick a brain per bot
 
 A model picker with a provider rail — Claude and Codex models side by side, defaults marked, unavailable
-providers dimmed with the reason. Switch a bot's model mid-conversation.
+providers dimmed with the reason. The app refreshes model lists from each installed CLI or configured API
+when the picker opens and once a minute while the UI is open. Retired selections are flagged before the next
+turn. The computer-backed provider has no verified model-list endpoint, so it shows a provider alias with an
+unverified-catalog notice. Switch a bot's model mid-conversation.
 
 <img src="docs/screenshots/model-picker.png" alt="Model picker with provider rail" width="100%">
 

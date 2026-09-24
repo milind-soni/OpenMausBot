@@ -16,6 +16,7 @@ export type TurnId = string;
 export interface ModelSelection {
   instanceId: InstanceId;
   model: string;
+  label?: string;
 }
 
 // ── instance configuration envelope ────────────────────────────────────
@@ -169,6 +170,13 @@ export interface ModelCatalog {
   options: Array<{ id: string; label: string }>;
 }
 
+export interface DiscoveredModelCatalog extends ModelCatalog {
+  status: "ready" | "stale" | "unverified" | "error";
+  source: string;
+  refreshedAt?: string;
+  error?: string;
+}
+
 export interface DriverCreateInput<Config> {
   instanceId: InstanceId;
   displayName: string | undefined;
@@ -185,6 +193,8 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
+  /** Fetch selectable models using this instance's CLI login or API credentials. */
+  discoverModels?(): Promise<ModelCatalog>;
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */
   generateText?(prompt: string): Promise<string>;
   dispose(): Promise<void>;

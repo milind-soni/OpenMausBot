@@ -58,6 +58,17 @@ posixOnly("conversation branching e2e (fake ACP fleet)", () => {
   const getBot = async (id: string) =>
     (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
 
+  it("rejects a retired model before adding the user's message", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, {
+      modelSelection: { instanceId: "happy", model: "grok-retired" },
+    });
+    const sent = await api("POST", `/api/bots/${created.id}/messages`, { text: "should not send" });
+    expect(sent.status).toBe(409);
+    expect(sent.body.error).toMatch(/no longer available/);
+    expect((await getBot(created.id)).messages.some((message: Msg) => message.text === "should not send")).toBe(false);
+  });
+
   const waitFor = async (predicate: () => Promise<boolean>, what: string, ms = 25_000) => {
     const deadline = Date.now() + ms;
     while (!(await predicate())) {

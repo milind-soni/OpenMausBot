@@ -16,6 +16,7 @@ export interface FakeDriverOptions {
   failCreate?: string;
   /** snapshot() rejects with this message (describe-downgrade path). */
   failSnapshot?: string;
+  discoverModels?: () => Promise<{ default: string; options: Array<{ id: string; label: string }> }>;
 }
 
 export interface FakeDriverHandle {
@@ -56,6 +57,7 @@ export function makeFakeDriver(opts: FakeDriverOptions = {}): FakeDriverHandle {
           displayName: input.displayName,
           enabled: input.enabled,
           models: handle.driver.models,
+          discoverModels: opts.discoverModels,
           snapshot: async (): Promise<ProviderSnapshot> => {
             if (opts.failSnapshot) throw new Error(opts.failSnapshot);
             return { state: "available", version: "0.0.0-fake" };
