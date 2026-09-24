@@ -657,14 +657,32 @@ it("stops a waiting source without reaching into the teammate already working", 
 }), 60_000);
 
 it("deleting the waiting source cancels its tree and never recreates the deleted conversation", () => fixture(async f => {
-  f.plan[f.lead.id] = { delayMs: 5000, reply: "Must not return to a deleted task" };
+  // The teammate holds its reply until the source is gone, however slowly
+  // the runner settles the Chief's own turn.
+  const childGate = join(f.session.info.dataDir, "child-ready");
+  f.plan[f.lead.id] = { gateFile: childGate, reply: "Must not return to a deleted task" };
   await f.start();
   await expect.poll(() => f.nodes().find((node: any) => node.parentId)?.status, { timeout: 15_000 }).toBe("running");
+  // The teammate starts before the Chief's own turn ends, and a running task
+  // cannot be deleted (409). The source is "waiting" only once that turn has
+  // settled and its conversation is parked on the teammate.
+  await expect.poll(async () => {
+    const waiting = (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.chief.id);
+    return !waiting.busy && waiting.tasks.find((task: any) => task.threadId === f.chief.activeTaskId)?.waitingForTeammates;
+  }, { timeout: 30_000 }).toBe(true);
   await f.api(`/api/bots/${f.chief.id}/tasks/${f.chief.activeTaskId}`, {}, "DELETE");
   await expect.poll(() => f.nodes().every((node: any) => node.status === "cancelled")).toBe(true);
+  // Release the teammate: whatever it still produces must not bring the
+  // deleted conversation back.
+  writeFileSync(childGate, "finish after the source was deleted");
+  await expect.poll(async () => (await f.api("/api/bots?messages=0")).bots.find((bot: any) => bot.id === f.lead.id).busy, { timeout: 15_000 }).toBe(false);
+  expect(f.nodes().every((node: any) => node.status === "cancelled")).toBe(true);
   const chief = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.chief.id);
   expect(chief.tasks.some((task: any) => task.threadId === f.chief.activeTaskId)).toBe(false);
   expect(await f.messages(chief.threadId)).toEqual([]);
+  for (const task of chief.tasks) {
+    expect((await f.messages(task.threadId)).some((message: any) => message.text?.includes("Must not return to a deleted task"))).toBe(false);
+  }
 }), 45_000);
 
 it("withholds direct results when the owner's cross-team grant is revoked", () => fixture(async f => {

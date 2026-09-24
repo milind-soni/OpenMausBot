@@ -260,17 +260,28 @@ it("offers the results again when the return turn fails before the provider acts
 it("offers the results again when the person stops the return turn before the provider acts on it", () => fixture(async (f) => {
   await warmUp(f);
   f.plan[f.lead.id] = { reply: "STOPPED_RETURN_RESULT" };
-  f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "never sent", gateFile: f.gate("return") }, { reply: "Recovered" }] };
+  // The return turn holds on a gate that never opens: only the person's Stop
+  // ends it, so it can never answer.
+  f.plan[f.chief.id] = { turns: [{}, f.delegate("build", [f.lead], "Build the export"), { reply: "never sent", gateFile: f.gate("return") }] };
   await f.send("Please have Engineering build the export.");
   await expect.poll(() => f.nodes().find((node: any) => node.botId === f.lead.id)?.status, { timeout: 20_000 }).toBe("completed");
   await expect.poll(() => f.nodes().find((node: any) => !node.parentId)?.status, { timeout: 20_000 }).toBe("running");
   await f.api(`/api/bots/${f.chief.id}/interrupt`, { threadId: f.thread });
   await f.wait();
-  f.open(f.gate("return"));
 
+  // Whether the stopped fixture records a turn of its own depends on the
+  // order the platform tears its process tree down in: when its MCP child
+  // dies first, the fixture fails and records that turn before it is killed.
+  // Indexing the next reply past it made the following turn race that
+  // teardown, so name the next reply explicitly (like the restart test below).
+  f.plan[f.chief.id] = { reply: "Recovered", resumeReply: "Recovered" };
   await f.send("What did Engineering find?");
   await f.wait();
-  expect(count(f.prompt(f.turns().at(-1)), "STOPPED_RETURN_RESULT")).toBe(1);
+  const next = f.turns().filter((turn: any) => f.prompt(turn).includes("What did Engineering find?")).at(-1);
+  expect(count(f.prompt(next), "STOPPED_RETURN_RESULT")).toBe(1);
+  const replies = (await f.messages()).map((message: any) => message.text);
+  expect(replies).toContain("Recovered");
+  expect(replies).not.toContain("never sent");
 }), 60_000);
 
 it("rebuilds a rejected resume with each result exactly once", () => fixture(async (f) => {
