@@ -14,6 +14,10 @@ import { mergeLocalInject } from "./local-inject.ts";
 export const STATIC_CODEX_MODELS: ModelCatalog = {
   default: "gpt-5.6-sol",
   options: [
+    // Only used when live discovery fails; these rows do not establish account access.
+    { id: "gpt-6-astra", label: "GPT-6 Astra (availability unverified)" },
+    { id: "gpt-6-sol", label: "GPT-6 Sol (availability unverified)" },
+    { id: "gpt-6-luna", label: "GPT-6 Luna (availability unverified)" },
     { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
     { id: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
     { id: "gpt-5.6-luna", label: "GPT-5.6 Luna" },

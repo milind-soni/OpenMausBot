@@ -44,12 +44,11 @@ import { codexAccountEmail } from "./codex-identity.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
 import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
+import { codexVersionBehind, readLatestCodexRelease } from "./codex-release.ts";
 
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
 const DRIVER_KIND = "codex";
-const ASTRA_MODEL_ID = "gpt-6-astra";
-const ASTRA_MIN_CODEX_VERSION = [0, 153, 1] as const;
 
 class CodexRpcError extends Error {
   code: unknown;
@@ -66,23 +65,6 @@ function missingNativeCodexThread(error: unknown, cursor: string): boolean {
   // not evidence that the native history was lost. Unknown versions fail closed.
   return error instanceof CodexRpcError && error.code === -32600 &&
     error.message === `no rollout found for thread id ${cursor}`;
-}
-
-/** Whether an installed Codex predates the release that exposes GPT-6 Astra
- * through app-server. Unknown version formats stay quiet: a bad guess should
- * never nag someone whose custom build may already support the model. */
-export function codexPredatesAstra(version: string): boolean {
-  const value = version.trim();
-  const match = /\bcodex-cli\s+v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9a-z.-]+)?(?![\d.])\b/i.exec(value)
-    ?? /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9a-z.-]+)?$/i.exec(value);
-  if (!match) return false;
-  const installed = match.slice(1, 4).map(Number);
-  for (let i = 0; i < ASTRA_MIN_CODEX_VERSION.length; i += 1) {
-    if (installed[i] !== ASTRA_MIN_CODEX_VERSION[i]) {
-      return installed[i] < ASTRA_MIN_CODEX_VERSION[i];
-    }
-  }
-  return false;
 }
 
 /** Ask the configured executable to update itself. This matters when the user
@@ -104,18 +86,12 @@ export function codexUpdateCommand(cli: string, platform: NodeJS.Platform = proc
   return platform === "win32" ? `& ${command} update` : `${command} update`;
 }
 
-function codexAstraUpdate(
-  version: string,
-  models: typeof STATIC_CODEX_MODELS,
-  cli: string,
-): ProviderSnapshot["update"] | undefined {
-  if (models.options.some((model) => model.id === ASTRA_MODEL_ID) || !codexPredatesAstra(version)) {
-    return undefined;
-  }
+async function codexReleaseUpdate(version: string, cli: string): Promise<ProviderSnapshot["update"] | undefined> {
+  const latest = await readLatestCodexRelease();
+  if (!latest || !codexVersionBehind(version, latest)) return undefined;
   return {
-    title: "Update Codex for GPT-6 Astra",
-    message:
-      "This Codex version predates Astra support. Update it, then refresh models. Astra must also be available to your signed-in ChatGPT account.",
+    title: `Update Codex to ${latest}`,
+    message: `A newer stable Codex CLI is available (installed: ${version}). Update it, then refresh models. Model availability also depends on your signed-in account.`,
     command: codexUpdateCommand(cli),
   };
 }
@@ -1648,7 +1624,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       version,
       authenticated,
       ...(email ? { account: { email } } : {}),
-      update: codexAstraUpdate(version, models, config.cli),
+      update: await codexReleaseUpdate(version, config.cli),
       billing: "subscription",
     };
   };

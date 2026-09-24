@@ -18,11 +18,15 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
   CodexDriver,
   codexNativeIncomingLogMessage,
-  codexPredatesAstra,
   codexUpdateCommand,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import * as procs from "../procs.ts";
+
+vi.mock("./codex-release.ts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./codex-release.ts")>(),
+  readLatestCodexRelease: async () => "0.156.1",
+}));
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-codex-app-server.ts");
 
@@ -1837,44 +1841,33 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
-  it("offers the exact Astra update command without blocking older Codex models", async () => {
+  it("offers the exact stable release update command without blocking older Codex models", async () => {
     process.env.FAKE_CODEX_VERSION = "codex-cli 0.152.1";
     await create();
 
     await expect(instance.snapshot()).resolves.toMatchObject({
       state: "available",
       update: {
-        title: "Update Codex for GPT-6 Astra",
+        title: "Update Codex to 0.156.1",
         command: codexUpdateCommand(FAKE_CLI),
       },
     });
   });
 
-  it("does not show an Astra update prompt for a supported Codex version", async () => {
-    process.env.FAKE_CODEX_VERSION = "codex-cli 0.153.1";
+  it("does not show an update prompt for the current stable version", async () => {
+    process.env.FAKE_CODEX_VERSION = "codex-cli 0.156.1";
     await create();
 
     expect((await instance.snapshot()).update).toBeUndefined();
   });
 
-  it("trusts a live Astra catalog even when the bundled CLI version predates the documented release", async () => {
+  it("offers newer releases even when Astra is already available", async () => {
     process.env.FAKE_CODEX_VERSION = "codex-cli 0.153.0";
     process.env.FAKE_CODEX_ASTRA = "1";
     await create();
 
     expect(instance.models.options.map((model) => model.id)).toContain("gpt-6-astra");
-    expect((await instance.snapshot()).update).toBeUndefined();
-  });
-
-  it("compares Codex versions conservatively", () => {
-    expect(codexPredatesAstra("codex-cli 0.152.1")).toBe(true);
-    expect(codexPredatesAstra("codex-cli 0.153.0")).toBe(true);
-    expect(codexPredatesAstra("codex-cli 0.153.1")).toBe(false);
-    expect(codexPredatesAstra("codex-cli 1.0.0-beta.1")).toBe(false);
-    expect(codexPredatesAstra("wrapper 0.1.0 using codex-cli 0.153.3")).toBe(false);
-    expect(codexPredatesAstra("wrapper 1.0.0 using codex-cli 0.151.0")).toBe(true);
-    expect(codexPredatesAstra("codex-cli 0.152.1.4")).toBe(false);
-    expect(codexPredatesAstra("custom nightly")).toBe(false);
+    expect((await instance.snapshot()).update?.title).toBe("Update Codex to 0.156.1");
   });
 
   it("updates the selected Codex executable instead of installing a second copy", () => {
