@@ -21,6 +21,7 @@ import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
 import { readRegisteredProjects, resolveProjectContext } from "./projects.ts";
+import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.ts";
 import {
   resolveTaskContext,
   TaskConflictError,
@@ -33,6 +34,9 @@ import {
 } from "./tasks.ts";
 
 const PORT = Number(process.env.GBS_PORT || 8899);
+// Loopback only unless the operator explicitly opts into LAN exposure — the
+// API drives agents that edit files and run commands (see request-guard.ts).
+const HOST = process.env.GBS_HOST || "127.0.0.1";
 const STATIC_DIR = process.env.GBS_STATIC_DIR || null;
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -991,24 +995,58 @@ async function reloadProviders() {
 }
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────
+// Packaged UI only (Vite dev needs inline scripts for HMR). Scripts and API
+// traffic stay on this origin; images may be remote (app logos, favicons).
+const UI_SECURITY_HEADERS = {
+  "content-security-policy": [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com",
+    "frame-src 'self' http: https:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; "),
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "no-referrer",
+};
+
 function json(res: ServerResponse, status: number, body: unknown) {
   const data = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json" });
   res.end(data);
 }
 
+function httpError(status: number, message: string) {
+  return Object.assign(new Error(message), { status });
+}
+
 function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     let data = "";
+    let tooLarge = false;
     req.on("data", (c) => {
+      if (tooLarge) return;
       data += c;
-      if (data.length > 1_000_000) reject(new Error("body too large"));
+      if (data.length > 1_000_000) {
+        tooLarge = true;
+        reject(httpError(413, "body too large"));
+        // stop buffering; the 413 is written before the socket goes away
+        req.pause();
+      }
     });
     req.on("end", () => {
+      if (tooLarge) return;
+      if (data && !isJsonContentType(req.headers)) return reject(httpError(415, "request body must be application/json"));
       try {
         resolve(data ? JSON.parse(data) : {});
       } catch {
-        reject(new Error("invalid JSON body"));
+        reject(httpError(400, "invalid JSON body"));
       }
     });
     req.on("error", reject);
@@ -1020,6 +1058,10 @@ const server = createServer(async (req, res) => {
   const path = url.pathname;
   const method = req.method ?? "GET";
   try {
+    if (path.startsWith("/api/")) {
+      const refused = rejectUntrustedRequest(req.headers, { allowAnyHost: !isLoopbackHostname(HOST) });
+      if (refused) return json(res, 403, { error: refused });
+    }
     // ── internal peer-agent comms (localhost + shared token only) ──────
     // The agents-proxy (spawned inside a bot's agent process) calls these to
     // discover peers and hand a message to one. Not part of the public API.
@@ -1713,13 +1755,14 @@ const server = createServer(async (req, res) => {
       const file = join(STATIC_DIR, safe);
       try {
         const data = readFileSync(file);
-        res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+        const type = MIME[extname(file)] ?? "application/octet-stream";
+        res.writeHead(200, { "content-type": type, ...(type.startsWith("text/html") ? UI_SECURITY_HEADERS : {}) });
         return res.end(data);
       } catch {
         // SPA fallback
         try {
           const data = readFileSync(join(STATIC_DIR, "index.html"));
-          res.writeHead(200, { "content-type": "text/html" });
+          res.writeHead(200, { "content-type": "text/html", ...UI_SECURITY_HEADERS });
           return res.end(data);
         } catch {
           /* fall through to 404 */
@@ -1736,8 +1779,6 @@ const server = createServer(async (req, res) => {
     });
   }
 });
-
-const HOST = process.env.GBS_HOST || process.env.HOST || "0.0.0.0";
 
 server.listen(PORT, HOST, () => {
   console.log(`gerer-build-studio server on http://${HOST}:${PORT}`);

@@ -4,6 +4,7 @@
 // suite is deterministic with or without agent CLIs installed — and pins
 // the shadow-instance behavior end to end while it's at it.
 import { spawn, type ChildProcess } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -503,6 +504,36 @@ describe("harness HTTP API", () => {
     const res = await api("GET", "/api/definitely-not-a-route");
     expect(res.status).toBe(404);
     expect(res.body.error).toContain("/api/definitely-not-a-route");
+  });
+  it("refuses cross-origin, foreign-Host, and non-JSON requests", async () => {
+    const crossOrigin = await fetch(`${BASE}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", origin: "https://evil.example" },
+      body: JSON.stringify({ profile: { name: "pwned" } }),
+    });
+    expect(crossOrigin.status).toBe(403);
+
+    const textPlain = await fetch(`${BASE}/api/config`, {
+      method: "PUT",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ profile: { name: "pwned" } }),
+    });
+    expect(textPlain.status).toBe(415);
+    expect((await api("GET", "/api/config")).body.profile.name).not.toBe("pwned");
+
+    // DNS rebinding: a loopback connection carrying an attacker's hostname
+    const rebindStatus = await new Promise<number>((resolve, reject) => {
+      const req = httpRequest(
+        { host: "127.0.0.1", port: PORT, path: "/api/bots", headers: { host: `rebind.evil.example:${PORT}` } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode ?? 0);
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(rebindStatus).toBe(403);
   });
 });
 
