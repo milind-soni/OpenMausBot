@@ -1380,7 +1380,18 @@
       "engines.icon.formatError": "cac21e64a1b0dc3a421bd88e8d23ce185c76a2c4c78f465873f0f3cbcf928500",
       "engines.icon.sizeError": "4ad3162859ca86617999a6ee558f3095de4bb527dd28cb1b837032010a67d5db",
       "engines.icon.invalidError": "57ce920ff252ec0e89155c21acbb2d755994b17dc776dee89e61e31137876b9b",
-      "engines.icon.dimensionError": "d437467fed2405ebedf3d892c484ec1f2d024d7def8b953fd7d561c1ca3f324b"
+      "engines.icon.dimensionError": "d437467fed2405ebedf3d892c484ec1f2d024d7def8b953fd7d561c1ca3f324b",
+      "newBot.defaults": "8dae021ad71ce77832497c747c9af35228afdd9ee764d1720e2fcca2213481ce",
+      "newBot.sections": "96aaf01d33821a759e2717373f35baed07ac0f97cd51b3604ba7518fa49892fc",
+      "newBot.saveDefaults": "a91af2a1efd13b3acf835b14b69569aa57f45f39fe9daf4c246a06b5b2c482b8",
+      "newBot.create": "b23572a60492be71fc1ea5ba2ff20c60227c79d78d2da189e7ce7759ce9cfafd",
+      "newBot.startingRole": "15991e2e341d9d99002bc1b742002f570055fdd98c3fcb0bce45bf9fbccbd46a",
+      "newBot.customSettings": "4229eea49bd9ea3a8927c12ac696e16a43ff2f3a2ccb020a00f8f2c91b53ba28",
+      "newBot.randomName": "f34ba9fc922c5020df9669b51d955d501ce9a0f0914045839795bfa96715bb4e",
+      "newBot.edit": "464c4ffd019e1e9691dcf0537c797353ef2b1c1d4833d3d463e5b74ae4547344",
+      "newBot.loading": "e71a13459ccdcc885ea1f141d67fe1a6a6fd78e70d584abdf05324561b2b4309",
+      "newBot.randomFemaleName": "2b67fc9d54f33b8cd239035188c2f9b65f4523dc11e5d90bf284d8821bb0750c",
+      "newBot.randomMaleName": "752337a9d91f9b876d0ac8dea4a413fc72906ed34aed7b3b4f562ce23a972379"
     },
     "es": {
       "noEngines.title": "af88855a5f80377de709995229ba3907df9e8fb3b940fbf7c0d9cbe6eea54afe",

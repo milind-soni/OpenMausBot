@@ -26,14 +26,18 @@ import { RemoteComputerSection } from "./RemoteComputerSection";
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 import { OrganizationSettings } from "./OrganizationSettings";
 import { Card, SettingRow, Switch } from "./SettingsPrimitives";
+import { effortLabel } from "./ModelPicker";
+import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { shortcutLabel } from "./ShortcutHint";
 import { UsageSection } from "./UsageSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
+import { AboutMeSettings } from "./AboutMeSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
 import { ThreadCleanupSettings } from "./ThreadCleanupSettings";
+import { DefaultBotSettings } from "./NewBotDialog";
 import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
 import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
@@ -49,12 +53,12 @@ const SECTIONS: Array<{
   icon: typeof User;
   keywords: string[];
 }> = [
-  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size"] },
+  { id: "general", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size"] },
   { id: "desktopWorkspaces", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "connect", "pair", "switch", "local"] },
   { id: "organization", labelKey: "settings.section.organization", icon: Building2, keywords: ["company", "organization", "sign in", "enroll", "managed", "models", "disconnect"] },
   { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "display"] },
   { id: "experimental", labelKey: "settings.section.experimental", icon: FlaskConical, keywords: ["early", "preview", "learn", "skill", "authoring", "browser", "profiles"] },
-  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "vps"] },
+  { id: "connections", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "composio", "box", "xai", "mistral", "vps"] },
   { id: "engines", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "claude", "grok", "providers", "cli"] },
   { id: "companion", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "computer", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop"] },
@@ -70,7 +74,7 @@ function sectionMatches(section: (typeof SECTIONS)[number], query: string): bool
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-/** Name + email, persisted to /api/config {profile} on blur. */
+/** Name and email save on blur; shared context has its own autosave. */
 function ProfileFields() {
   const { state, dispatch } = useStore();
   const [name, setName] = useState(state.config?.profile?.name ?? "");
@@ -86,8 +90,10 @@ function ProfileFields() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ profile: { name: name.trim(), email: email.trim().toLowerCase() } }),
     })
-      .then((r) => r.json())
-      .then((config) => dispatch({ type: "configStatus", config }))
+      .then((r) => { if (!r.ok) throw new Error("Profile save failed"); return r.json(); })
+      .then((config: ConfigStatus) => {
+        if (config.profile) dispatch({ type: "profileSaved", profile: { name: config.profile.name, email: config.profile.email } });
+      })
       .catch(() => {});
   };
 
@@ -105,6 +111,7 @@ function ProfileFields() {
         placeholder="you@example.com"
         className={inputClass}
       />
+      <AboutMeSettings />
     </div>
   );
 }
@@ -176,6 +183,55 @@ function UpdatesRow() {
  * matters more than the switch: people who cannot see the scope assume the
  * worst, and the worst — conversation text — is exactly what this never
  * sends (autocapture is off; see lib/analytics.ts). */
+/** The effort every new bot starts with. The server skips a level the new
+ * bot's engine does not offer, and a bot's own choice always wins. */
+function NewBotEffortRow() {
+  const { state, dispatch } = useStore();
+  const current = state.config?.newBots?.effort ?? "";
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const save = async (value: string) => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", {
+        method: "PATCH",
+        body: JSON.stringify({ newBots: { effort: isEffortLevel(value) ? value : null } }),
+      });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.newBotEffort.error"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <SettingRow
+      title={t("settings.newBotEffort.title")}
+      subtitle={t("settings.newBotEffort.subtitle")}
+      message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    >
+      <select
+        value={current}
+        disabled={saving}
+        aria-label={t("settings.newBotEffort.aria")}
+        onChange={(event) => void save(event.target.value)}
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
+      >
+        <option value="">{t("settings.newBotEffort.default")}</option>
+        {EFFORT_LEVELS.map((level) => (
+          <option key={level} value={level}>
+            {effortLabel(level)}
+          </option>
+        ))}
+      </select>
+    </SettingRow>
+  );
+}
+
 function AnalyticsRow() {
   const [on, setOn] = useState(analyticsEnabled);
   return (
@@ -511,6 +567,9 @@ export function SettingsModal() {
     else dialog?.focus();
 
     const onKey = (event: KeyboardEvent) => {
+      // A child editor owns Escape and its focus trap, including while saving.
+      if (event.defaultPrevented || (dialog && [...dialog.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')]
+        .some(child => child.getClientRects().length))) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "toggleAppSettings", open: false });
@@ -639,12 +698,14 @@ export function SettingsModal() {
             {section === "organization" && window.ogb?.organization && !remoteActive && <OrganizationSettings />}
             {section === "general" && (
               <>
-                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.subtitle")}>
+                <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
                   <ProfileFields />
                 </Card>
                 <div>
                   <LanguageRow />
+                  <NewBotEffortRow />
                   <AnalyticsRow />
+                  <DefaultBotSettings />
                 </div>
                 <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
                   <RoomTurnTimeoutSettings />
@@ -695,6 +756,7 @@ export function SettingsModal() {
                   <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
                   <OpenAiCompatUrl />
                   <ApiKeyRow section="xai" testProvider="xai" />
+                  <ApiKeyRow section="mistral" testProvider="mistral" />
                   <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
                   <ApiKeyRow section="box" />
                   <VpsConnection />

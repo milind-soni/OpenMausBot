@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { computerFreeText, computerStillBusyText, computerWaitEndedText, computerWaitingText } from "./computer-wait.ts";
+import {
+  computerFreeAfterText,
+  computerStillBusyText,
+  computerStoppedWaitingText,
+  computerWaitDuration,
+  computerWaitingText,
+} from "./computer-wait.ts";
 
 describe("computer wait wording", () => {
   it("reads as a queue position behind a named turn, never as an error", () => {
@@ -17,9 +23,26 @@ describe("computer wait wording", () => {
     }
   });
 
-  it("settles the same chip with what happened", () => {
-    expect(computerFreeText()).toBe("Computer free — continuing");
-    expect(computerWaitEndedText()).toBe("Stopped waiting for the computer");
+  it("resolves with a history line beside the untouched waiting chip", () => {
+    expect(computerFreeAfterText({ name: "TCPR operator", task: "TCPR 3 hour capacity refill" }, 65_000)).toBe(
+      "Computer free — continuing after waiting 1 minute (TCPR operator · TCPR 3 hour capacity refill held it)",
+    );
+    expect(computerFreeAfterText({ name: "Engineering Room" }, 90_000)).toBe(
+      "Computer free — continuing after waiting 2 minutes (Engineering Room held it)",
+    );
+    expect(computerFreeAfterText(undefined, 4_000)).toBe("Computer free — continuing after waiting 4 seconds");
+    expect(computerStoppedWaitingText({ name: "Ada", task: "Refill" }, 2_500)).toBe(
+      "Stopped waiting for the computer after 3 seconds — Ada is running Refill.",
+    );
+    expect(computerStoppedWaitingText(null, 800)).toBe("Stopped waiting for the computer after under a second.");
+  });
+
+  it("phrases a wait duration honestly at every scale", () => {
+    expect(computerWaitDuration(0)).toBe("under a second");
+    expect(computerWaitDuration(999)).toBe("under a second");
+    expect(computerWaitDuration(1_000)).toBe("1 second");
+    expect(computerWaitDuration(59_499)).toBe("59 seconds");
+    expect(computerWaitDuration(90_000)).toBe("2 minutes");
   });
 
   it("names the holder and a way out when the wait gives up", () => {

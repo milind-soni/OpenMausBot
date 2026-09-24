@@ -1377,5 +1377,16 @@
   "engines.icon.formatError": "Lade ein PNG-, JPEG- oder WebP-Bild hoch.",
   "engines.icon.sizeError": "Anbietersymbole dürfen höchstens 128 KB groß sein.",
   "engines.icon.invalidError": "Lade ein vollständiges PNG-, JPEG- oder WebP-Bild mit höchstens 128 KB und {dimension} × {dimension} Pixeln hoch.",
-  "engines.icon.dimensionError": "Anbietersymbole dürfen höchstens {dimension} × {dimension} Pixel groß sein."
+  "engines.icon.dimensionError": "Anbietersymbole dürfen höchstens {dimension} × {dimension} Pixel groß sein.",
+  "newBot.defaults": "Standard für neue Bots",
+  "newBot.sections": "Bot-Einstellungen",
+  "newBot.saveDefaults": "Standard speichern",
+  "newBot.create": "Bot erstellen",
+  "newBot.startingRole": "Rollenvorlage",
+  "newBot.customSettings": "Eigene Einstellungen",
+  "newBot.randomName": "Zufälliger Name",
+  "newBot.edit": "Bearbeiten",
+  "newBot.loading": "Einstellungen werden geladen…",
+  "newBot.randomFemaleName": "Zufälliger weiblicher Name",
+  "newBot.randomMaleName": "Zufälliger männlicher Name"
 }

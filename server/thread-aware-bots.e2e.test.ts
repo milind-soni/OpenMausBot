@@ -374,7 +374,7 @@ describe("coordinate_bots on a teammate", () => {
       const before = await botState(qa.id);
       expect(before.threadId).toBe(qa.threadId);
       for (const [index, thread] of opened.entries()) {
-        expect(thread.status).toBe("queued");
+        expect(index < capacity ? ["queued", "running"] : ["queued"]).toContain(thread.status);
         expect(before.tasks.find((task: any) => task.threadId === thread.threadId)).toMatchObject({
           openedBy: { botId: pm.id, name: "Pam" },
         });

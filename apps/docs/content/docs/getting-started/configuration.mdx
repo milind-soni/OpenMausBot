@@ -6,6 +6,14 @@ icon: Settings
 
 Most users configure OpenMausBot from the app. The packaged desktop validates credentials before saving them and stores supported secrets with the operating system's secure storage.
 
+## Shared user profile
+
+Open **Settings → General → Profile → About me** to save information you want every bot to know, such as your preferences, background, or working hours. It saves automatically and shows **Saved** when the server confirms the update. The question mark beside the field explains where it is shared.
+
+The text is included in the instructions for subsequent private-chat and group-chat turns, across model providers. Existing bots receive it too; an already running turn keeps the instructions it started with. Clear the field to stop including it in future prompts. Clearing does not erase information already present in conversation history.
+
+This is workspace-wide context, not a private note for a single bot. It is stored in the workspace configuration and sent to the model provider with bot requests. Use credential settings for secrets. The field accepts up to 24,000 characters.
+
 ## Engine discovery
 
 OpenMausBot checks the inherited process path, common install locations, and the login shell. If an engine is installed somewhere unusual, open **Settings → Engines** and choose its executable explicitly.

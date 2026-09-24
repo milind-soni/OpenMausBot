@@ -1205,6 +1205,20 @@ data class BotOverview(
     val recent: List<BotOverviewRecent> = emptyList(),
 )
 
+/** Native server sessions returned by POST /api/auth/pair. */
+@Serializable
+data class ServerPairResponse(
+    val token: String,
+    val session: ServerSession,
+    val environment: ServerEnvironment,
+)
+
+@Serializable
+data class ServerSession(val id: String, val label: String, val scopes: List<String>)
+
+@Serializable
+data class ServerEnvironment(val environmentId: String, val label: String)
+
 /** Unknown attachment kinds remain decodable and are not rendered. */
 @Serializable
 data class MessageImageAttachment(

@@ -45,6 +45,7 @@ Use only mapped, tested commands:
 - [Bot setup, model scope, and file continuity](bot-continuity.md)
 - [Reviewed Chief team setup and scoped deletion](team-setup.md)
 - [Full Access without duplicate approvals](full-access.md)
+- [Peer approval denial, expiry, and cancellation](peer-approvals.md)
 - [Waiting for an occupied desktop](computer-wait.md)
 - [Chat UI, driven headlessly](chat-ui.md)
 - [Welcome flow and guided tour](onboarding.md)
@@ -54,6 +55,7 @@ Use only mapped, tested commands:
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
 - [Codex bot instructions](codex-instructions.md)
+- [Codex browser routing and native search](codex-browser-routing.md)
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
@@ -80,6 +82,9 @@ entry only after the shared control surface can really drive it.
 
 The [desktop server connection smoke](desktop-server-connection.md) mounts the
 real Settings connection component in disposable Electron windows.
+
+The [loading screen and tray smoke](startup-tray.md) checks the startup close
+button, hidden handoff, tray restore, and Quit in a disposable Electron profile.
 
 The [optional organisation connection smoke](organization-settings.md) checks
 the real Settings panel and production desktop client against a synthetic
@@ -153,6 +158,9 @@ stream closure and fallback through disposable HTTP endpoints.
 
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
+
+The [Android server pairing checks](android-server-pairing.md) cover server QR
+confirmation, manual codes, retries and saved-server identity validation.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.

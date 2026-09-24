@@ -597,12 +597,14 @@ createServer(socket => socket.end()).listen(port, '127.0.0.1');
           "Waiting for its turn on this computer — TCPR operator is running Queue check. Starts automatically when that finishes.",
         ), "the wait chip naming the holder");
 
-        // both turns finish; the wait settles as free-and-continuing or as
-        // stopped, depending on which turn ended first — never as an error
+        // both turns finish; the wait resolves as free-and-continuing or as
+        // stopped (with the duration it waited), depending on which turn
+        // ended first — never as an error, and never by erasing the wait
         writeFileSync(gateFile, "open");
         await until(async () => (await botById(bot.id))?.busy === false, "both turns settling");
         const settled = await activities(refill.threadId);
-        expect(settled.some((name) => name === "Computer free — continuing" || name === "Stopped waiting for the computer")).toBe(true);
+        expect(settled.some((name) =>
+          name.startsWith("Computer free — continuing after ") || name.startsWith("Stopped waiting for the computer after "))).toBe(true);
         expect(settled.join("|")).not.toMatch(/still busy|error/i);
         // the last thread out clears the claim: the alias can move again
         expect((await api("PUT", "/api/config", { vps: { sshAlias: "production-vps" } })).status).toBe(200);

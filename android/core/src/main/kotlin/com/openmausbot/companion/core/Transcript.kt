@@ -4,10 +4,10 @@ import java.text.BreakIterator
 import java.util.Locale
 
 /**
- * The two shapes a bot reply can be *entirely*, and the cut the reasoning
- * chamber shows — the pure half of `ios/App/ChatView.swift`'s `parsedDiff` /
- * `parsedTable`, `ios/App/Cards/SQLResultTableView.swift`'s `csvField`, and the
- * `reasoning.suffix(2_000)` `StreamingBubble` hands the thought chamber.
+ * The two shapes a bot reply can be *entirely* on Android, and the cut the
+ * reasoning chamber shows. iOS no longer turns a whole-message pipe table into
+ * a SQL card; matching that is issue 1707. This file still owns Android's
+ * all-or-nothing gate, its CSV quoting, and the reasoning suffix.
  *
  * The gates are deliberately all-or-nothing. A reply that *contains* a patch or
  * a table is still a reply: turning it into a card would hide the sentences
@@ -175,8 +175,9 @@ object TranscriptCards {
 }
 
 /**
- * RFC 4180 quoting, as `csvField` in `ios/App/Cards/SQLResultTableView.swift`
- * does it: a field is left alone unless it carries a separator, a quote or a
+ * RFC 4180 quoting. Android keeps this helper; the iOS SQL card is gone and
+ * the phone now draws a markdown table (issue 1707). A field is left alone
+ * unless it carries a separator, a quote or a
  * line break, and a quote inside a quoted field is doubled. Getting this wrong
  * does not look wrong — it looks like a spreadsheet with the columns shifted.
  */

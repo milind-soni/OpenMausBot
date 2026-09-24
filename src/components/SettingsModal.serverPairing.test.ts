@@ -11,6 +11,7 @@ import { SettingsModal } from "./SettingsModal";
 // being paired against. MOCA-84 then found the remote-client case needs it
 // too. These tests pin the card as always offered; the server decides who may act.
 const fixture = vi.hoisted(() => ({ section: "companion" as AppSettingsSection }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),

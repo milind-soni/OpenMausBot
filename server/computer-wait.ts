@@ -15,8 +15,18 @@ export interface ComputerHolder {
   task?: string;
 }
 
-/** Whole minutes, or seconds under one minute, for the give-up notice. */
-const minutes = (ms: number): string => ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`;
+/** Whole minutes, or seconds under one minute, singular at exactly one. */
+const minutes = (ms: number): string => {
+  const value = ms >= 60_000 ? Math.round(ms / 60_000) : Math.round(ms / 1000);
+  const unit = ms >= 60_000 ? "minute" : "second";
+  return `${value} ${unit}${value === 1 ? "" : "s"}`;
+};
+
+/** How long a wait lasted, for the resolution line: waits under a second
+ * are honest about being over in a blink instead of claiming "0 seconds". */
+export function computerWaitDuration(ms: number): string {
+  return ms < 1_000 ? "under a second" : minutes(ms);
+}
 
 const holderPhrase = (holder: ComputerHolder): string =>
   holder.task ? `${holder.name} is running ${holder.task}` : `${holder.name} is using it`;
@@ -27,15 +37,19 @@ export function computerWaitingText(holder?: ComputerHolder | null): string {
   return `Waiting for its turn on this computer — ${holderPhrase(holder)}. Starts automatically when that finishes.`;
 }
 
-/** The same chip once the wait landed and this turn holds the desktop. */
-export function computerFreeText(): string {
-  return "Computer free — continuing";
+/** The resolution appended once the wait landed and this turn holds the
+ * desktop: how long it waited, and who held it. The waiting chip stays as
+ * written — this line is the history beside it, not its replacement. */
+export function computerFreeAfterText(holder: ComputerHolder | null | undefined, waitedMs: number): string {
+  const who = holder ? ` (${holder.task ? `${holder.name} · ${holder.task}` : holder.name} held it)` : "";
+  return `Computer free — continuing after waiting ${computerWaitDuration(waitedMs)}${who}`;
 }
 
-/** The same chip when the wait ended without the desktop: the turn was
- * stopped, or the claim was abandoned. */
-export function computerWaitEndedText(): string {
-  return "Stopped waiting for the computer";
+/** The resolution appended when the wait ended because the turn was stopped
+ * or its claim was cancelled. */
+export function computerStoppedWaitingText(holder: ComputerHolder | null | undefined, waitedMs: number): string {
+  const who = holder ? ` — ${holderPhrase(holder)}` : "";
+  return `Stopped waiting for the computer after ${computerWaitDuration(waitedMs)}${who}.`;
 }
 
 /** The error after the wait ceiling: still names who holds it, and says

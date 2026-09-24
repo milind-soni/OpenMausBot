@@ -23,6 +23,7 @@ import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { Switch } from "../SettingsPrimitives";
 import { ManagedTeamsSettings } from "./ManagedTeamsSettings";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
+import { useBotEditor } from "./BotEditorContext";
 
 export function PermissionsSection({
   bot,
@@ -33,6 +34,7 @@ export function PermissionsSection({
 }) {
   const { patch, engine, canCoordinate, approvalMode, trustedModesAvailable, sectionName, currentChief } = derived;
   const { state, dispatch } = useStore();
+  const { draft } = useBotEditor();
   const [localAutoWarning, setLocalAutoWarning] = useState<string | null>(null);
   const [fullAccessTarget, setFullAccessTarget] = useState<string | null>(null);
   const [allThreads, setAllThreads] = useState(true);
@@ -122,8 +124,7 @@ export function PermissionsSection({
       <div className="rounded-xl bg-card p-4">
         <div className="text-[15px] font-medium text-ink">Approval level</div>
         <div className="mt-0.5 text-[13px] text-ink-secondary">
-          Default for new threads, routines and delegated work. When enabling Full access,
-          you can also apply it to every existing thread.
+          {draft ? "Default for the new bot's threads, routines and delegated work." : "Default for new threads, routines and delegated work. When enabling Full access, you can also apply it to every existing thread."}
         </div>
         <div className="mt-3">
           <ApprovalModeSelector
@@ -138,7 +139,7 @@ export function PermissionsSection({
             trustedModesAvailable={trustedModesAvailable}
           />
         </div>
-        {approvalMode === "full" && trustedModesAvailable && <button
+        {!draft && approvalMode === "full" && trustedModesAvailable && <button
           type="button" disabled={Boolean(bot.busy)}
           className="mt-3 text-[13px] text-accent hover:underline disabled:opacity-40"
           onClick={() => { setAllThreads(true); setFullAccessTarget(bot.id); }}
@@ -158,7 +159,7 @@ export function PermissionsSection({
       <FullAccessWarning
         open={fullAccessTarget !== null}
         allThreads={allThreads}
-        onAllThreadsChange={setAllThreads}
+        onAllThreadsChange={draft ? undefined : setAllThreads}
         onCancel={() => setFullAccessTarget(null)}
         onConfirm={() => {
           const target = fullAccessTarget;

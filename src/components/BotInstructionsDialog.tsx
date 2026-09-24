@@ -6,7 +6,7 @@ import { BotAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 
-export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () => void }) {
+export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: Bot; onClose: () => void; inline?: boolean }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -50,7 +50,7 @@ export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () 
     };
   }, [close]);
 
-  return createPortal(
+  const content = (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && close()}
@@ -115,7 +115,7 @@ export function BotInstructionsDialog({ bot, onClose }: { bot: Bot; onClose: () 
           </button>
         </footer>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
+  return inline ? content : createPortal(content, document.body);
 }

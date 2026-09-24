@@ -6,9 +6,17 @@ icon: Power
 
 The Electron app starts a local harness and serves the interface from the same machine. The normal port is `8799`. If another process already owns it, packaged builds may select a fallback port automatically.
 
+## Loading screen and system tray
+
+A loading screen appears while the desktop workspace starts. It gives way to the main window after the interface mounts.
+
+On Windows, **X** hides OpenMausBot to the system tray, including during startup. Bots and scheduled routines can continue running. To reopen it, click its tray icon (which Windows may place behind the **Show hidden icons** arrow), choose **Open OpenMaus Bot** from the tray menu, or launch OpenMausBot again. To exit completely, right-click the tray icon and choose **Quit OpenMaus Bot**.
+
+Closing the loading screen on macOS or Linux quits startup. Their existing main-window close behavior is unchanged.
+
 ## App opens but never becomes ready
 
-1. Quit every OpenMausBot window.
+1. Quit OpenMausBot. On Windows, use **Quit OpenMaus Bot** in the system tray; closing the window only hides it.
 2. Confirm no old OpenMausBot process remains.
 3. Start the app once and wait for the local harness.
 4. If it still fails, inspect the desktop log.

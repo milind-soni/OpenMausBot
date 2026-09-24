@@ -161,6 +161,7 @@ func previewText(of message: Message) -> String {
         return message.secret?.label ?? message.text ?? "Credential required"
     case .activity: return message.tool?.name ?? ""
     case .screen: return "Screenshot"
+    case .digest: return ""
     case .unknown: return message.text ?? ""
     }
 }
@@ -171,6 +172,9 @@ func previewText(of message: Message) -> String {
 /// the successful noise, and losing the one chip that says something went
 /// wrong would make `reduced` a worse default than `full`.
 public func transcriptRows(_ messages: [Message], detail: ActivityDetail) -> [TranscriptRow] {
+    // A digest is a receipt of the turn, not part of the conversation, at
+    // every level of detail.
+    let messages = messages.filter { $0.kind != .digest }
     switch detail {
     case .full:
         return messages.map(TranscriptRow.message)

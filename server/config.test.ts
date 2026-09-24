@@ -42,6 +42,14 @@ import { customMcpServers,
 } from "./config.ts";
 
 describe("configuration boundaries", () => {
+  it("accepts shared user context, including clearing, without reloading providers", () => {
+    const profile = { aboutMe: "I prefer short answers.\nMy time zone is Europe/Berlin." };
+    expect(parseConfigPatch({ profile })).toEqual({ profile });
+    expect(parseStoredConfig({ profile })).toEqual({ profile });
+    expect(parseConfigPatch({ profile: { aboutMe: "" } })).toEqual({ profile: { aboutMe: "" } });
+    expect(providerReloadKeys({ profile })).toEqual([]);
+    expect(() => parseConfigPatch({ profile: { aboutMe: "x".repeat(24_001) } })).toThrow();
+  });
   it("validates context budgets and keeps changes independent of provider reload", () => {
     const context = { autoCompact: false, compactAt: 0.7, rebuildBytes: 32_000 };
     expect(parseStoredConfig({ context })).toEqual({ context });
@@ -147,6 +155,14 @@ describe("configuration boundaries", () => {
     const expected = { defaultModelSelection: { instanceId: "codex", model: "chosen-model", effort: "high" } };
     expect(parseStoredConfig(input)).toEqual(expected);
     expect(parseConfigPatch(input)).toEqual(expected);
+  });
+
+  it("accepts a new-bot effort default and clears it with null", () => {
+    expect(parseStoredConfig({ newBots: { effort: "medium" } })).toEqual({ newBots: { effort: "medium" } });
+    expect(parseConfigPatch({ newBots: { effort: "medium" } })).toEqual({ newBots: { effort: "medium" } });
+    expect(parseConfigPatch({ newBots: { effort: null } })).toEqual({ newBots: { effort: null } });
+    expect(() => parseConfigPatch({ newBots: { effort: "turbo" } })).toThrow("newBots");
+    expect(() => parseConfigPatch({ newBots: { approvalMode: "full" } })).toThrow("newBots");
   });
 
   it("round-trips an opaque model variant without converting omission to none", () => {
@@ -589,6 +605,17 @@ describe("saving the newer sections", () => {
 });
 
 describe("default fleet", () => {
+  it("adds Mistral to product fleets and scopes its saved credential to Mistral", () => {
+    const map = instanceConfigs({ mistral: { key: "mistral-fixture" }, instances: { codex: { driver: "codex" } } });
+    expect(map.mistral).toEqual({ driver: "mistral", environment: { MISTRAL_API_KEY: "mistral-fixture" } });
+    expect(map.codex.environment).toEqual({});
+    expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("mistral");
+    expect(parseConfigPatch({ mistral: { key: "" } })).toEqual({ mistral: { key: "" } });
+    const env = { MISTRAL_API_KEY: "mistral-fixture", KEEP: "yes" };
+    stripWorkspaceCredentialEnv(env);
+    expect(env).toEqual({ KEEP: "yes" });
+  });
+
   it("ships Qwen and Hermes as custom-only engines", () => {
     const map = instanceConfigs({});
     expect(map.qwen).toEqual({ driver: "qwenAgent", environment: {} });
@@ -1028,6 +1055,30 @@ describe("credential env preference", () => {
     expect(loadConfig().defaultModelSelection).toEqual(replacement);
     expect(loadConfig().profile).toEqual({ name: "Ada", email: "ada@example.com" });
     expect(loadConfig().instances).toEqual(existing.instances);
+  });
+
+  it("rejects oversized default model changes before writing the template", () => {
+    saveConfig({ newBotDefaults: { profile: { modelSelection: { instanceId: "codex", model: "valid" } }, memory: {}, skills: [], routines: [] } });
+    const path = join(DATA_DIR, "config.json");
+    const before = readFileSync(path, "utf8");
+    for (const selection of [{ instanceId: "x".repeat(201), model: "valid" }, { instanceId: "codex", model: "x".repeat(501) }]) {
+      expect(() => saveConfig({ defaultModelSelection: selection })).toThrow();
+      expect(readFileSync(path, "utf8")).toBe(before);
+      expect(loadConfig().newBotDefaults?.profile.modelSelection?.model).toBe("valid");
+    }
+  });
+
+  it("rejects a valid model selection that would overflow the complete defaults template", () => {
+    const defaults = { profile: { modelSelection: { instanceId: "codex", model: "valid" } },
+      memory: { "memory/a.md": "a".repeat(225_000), "memory/b.md": "b".repeat(225_000),
+        "memory/c.md": "c".repeat(225_000), "memory/d.md": "" }, skills: [], routines: [] };
+    defaults.memory["memory/d.md"] = "d".repeat(899_990 - Buffer.byteLength(JSON.stringify(defaults), "utf8"));
+    saveConfig({ newBotDefaults: defaults });
+    const path = join(DATA_DIR, "config.json");
+    const before = readFileSync(path, "utf8");
+    expect(() => saveConfig({ defaultModelSelection: { instanceId: "codex", model: "m".repeat(500) } })).toThrow("900 KB");
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(loadConfig().newBotDefaults).toEqual(defaults);
   });
 
   it("replaces instance membership and known settings while preserving retained extension fields", () => {

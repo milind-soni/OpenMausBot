@@ -10,7 +10,8 @@ import type {
 import { newEventId, newId } from "../contracts.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { toolDetailPreview } from "../tool-summary.ts";
-import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatToolSessionError, mountChatTools, type ChatToolDefinition, type ChatToolSession, type ChatToolResult } from "./chat-mcp-tools.ts";
+import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent, type ChatContentPart } from "./chat-images.ts";
 import { createChatToolApproval } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, MAX_CHAT_TOOL_CALLS, object, type ChatToolCall } from "./openai-chat-protocol.ts";
 import { appendNative } from "./native.ts";
@@ -18,7 +19,7 @@ import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS }
 
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | null;
+  content: string | ChatContentPart[] | null;
   tool_calls?: ChatToolCall[];
   tool_call_id?: string;
   reasoning_content?: string;
@@ -87,12 +88,15 @@ interface RuntimeOptions<Config> {
   refreshModels?: () => Promise<void>;
   generateModel?: () => string;
   reasoning?: boolean;
+  contentText?: (content: unknown) => string;
   billing?: "metered";
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
   retryScale?: number;
   /** Explicit text-only mode for endpoints/models that cannot accept tools. */
   tools?: boolean;
+  /** Opt-in structured images and harness-authorized computer/browser MCP. */
+  computerUse?: boolean;
 }
 
 const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
@@ -160,6 +164,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         typeof part === "string" ? safeCaptureText(part) : part)), `${options.apiUrl}/chat/completions`);
       const response = await fetch(`${options.apiUrl}/chat/completions`, {
         method: "POST",
+        ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
         body: JSON.stringify(body),
         signal: activeSignal,
@@ -190,7 +195,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         capture?.patch({ usage: promptUsage(json.usage) });
         capture?.finish("completed");
         return {
-          text: typeof message?.content === "string" ? message.content : "",
+          text: options.contentText ? options.contentText(message?.content) : typeof message?.content === "string" ? message.content : "",
           reasoning: options.reasoning && typeof reasoning === "string"
             ? reasoning
             : "",
@@ -248,7 +253,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const reasoningDelta = options.reasoning && typeof reasoningPart === "string"
           ? reasoningPart
           : "";
-        const contentDelta = typeof delta?.content === "string" ? delta.content : "";
+        const contentDelta = options.contentText ? options.contentText(delta?.content) : typeof delta?.content === "string" ? delta.content : "";
         if (reasoningDelta) {
           reasoning += reasoningDelta;
           onDelta?.(reasoningDelta, "reasoning_text");
@@ -310,18 +315,21 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       role: message.role,
       content: message.text,
     })),
-    { role: "user", content: turn.text },
+    { role: "user", content: options.computerUse ? chatUserContent(turn) : turn.text },
   ];
 
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
+    if (options.computerUse && (turn.images?.length || turn.integrations?.computer || turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
 
     const turnId = newId();
     const abort = new AbortController();
     const messages = messagesFor(turn);
+    const retainImages = chatImageBudget();
+    for (const message of messages) retainImages(message.content);
     const model = turn.model || options.models().default;
-    const secrets = [options.apiKey];
+    const secrets = [options.apiKey, turn.integrations?.computer?.token, turn.integrations?.computer?.control?.token].filter((value): value is string => Boolean(value));
     for (const integration of Object.values(turn.integrations ?? {})) {
       const entries = object(integration);
       const specs = entries && "command" in entries ? [entries] : Object.values(entries ?? {}).map(object);
@@ -370,7 +378,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const denials: string[] = [];
       const seenCalls = new Set<string>();
       try {
-        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal);
+        tools = await mountChatTools(options.tools === false ? undefined : turn.integrations, abort.signal, options.computerUse);
         for (let round = 0; round < 16; round++) {
           abort.signal.throwIfAborted();
           native("out", options.nativeLog.outgoing(turn, messages, model));
@@ -450,9 +458,10 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             ...(completion.protocolReasoning ? { reasoning_content: completion.protocolReasoning } : {}),
             ...(completion.protocolReasoningDetails.length ? { reasoning_details: completion.protocolReasoningDetails } : {}),
           });
+          const screenshotParts: ChatContentPart[] = [];
           for (const call of completion.toolCalls) {
             abort.signal.throwIfAborted();
-            let result: { text: string; ok: boolean };
+            let result: ChatToolResult;
             let started = false;
             let fatal: Error | undefined;
             try {
@@ -476,6 +485,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               started = true;
               if (allowed) {
                 result = await tools.execute(call.function.name, args as Record<string, unknown>, abort.signal);
+                if (result.images?.length) {
+                  try {
+                    assertImageTransport(options.apiUrl);
+                    retainImages(result.images);
+                  } catch (error) {
+                    throw new ChatToolSessionError(asError(error).message);
+                  }
+                }
               } else {
                 denials.push(call.function.name);
                 result = { ok: false, text: "Permission denied or expired; the tool was not executed." };
@@ -492,9 +509,11 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             emit({ ...base(turn.threadId, turnId), type: "item.completed", itemType: "tool", itemId: call.id, ok: result.ok, output });
             if (!result.ok) toolFailed = true;
             messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ ok: result.ok, result: text }) });
+            screenshotParts.push(...chatToolImages(call.id, result.images));
             abort.signal.throwIfAborted();
             if (fatal) throw fatal;
           }
+          if (screenshotParts.length) messages.push({ role: "user", content: screenshotParts });
         }
         if (!ok) throw new ChatProtocolError("model-call limit reached before a final response");
       } catch (value) {
@@ -539,7 +558,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       : { state: "unavailable", reason: options.unavailableReason },
     adapter: {
       provider: options.driverKind,
-      capabilities: { sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false },
+      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false, cloudComputerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
+        browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
+        sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false },
       sendTurn,
       interruptTurn: async (threadId, turnId) => {
         const turn = active.get(threadId);

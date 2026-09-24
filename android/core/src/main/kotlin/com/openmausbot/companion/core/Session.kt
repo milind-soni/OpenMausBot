@@ -210,6 +210,8 @@ class Session(
         awaitRestored()
         gate.withLock {
             if (pairingInFlight) throw PairingInProgressException()
+            // An unsafe address has not submitted the code. Let the user correct it and retry.
+            if (PairingInvite.normalizedServerCode(credential) != null) connection.requireServerTransport()
             if (isQrCredential(credential) && credential in spentQrCredentials) {
                 _actionError.value = SPENT_QR_MESSAGE
                 clearInviteIfCredential(credential)
@@ -229,35 +231,25 @@ class Session(
                 } else {
                     connection
                 }
-                val outcome = try {
-                    pairFn(invited, credential, deviceName, pairRequestId)
+                val (pairedConnection, pairedToken) = try {
+                    redeemPairing(invited, credential, deviceName, pairRequestId)
                 } catch (error: Throwable) {
                     if (error is kotlinx.coroutines.CancellationException) throw error
-                    val routeFailure = error is PairingRouteError
+                    val routeFailure = error is PairingRouteError || error is ServerPairingRetryError
                     if (qr && !routeFailure) burnQrCredential(credential)
                     _actionError.value = if (qr && !routeFailure) qrFailureMessage(error) else error.message
                     throw error
                 }
                 if (qr) burnQrCredential(credential)
-
-                val paired = outcome.response
-                // Route dialing may change the active endpoint, but neither it nor the response may
-                // replace the policy captured from the user's original selection.
-                var stored = outcome.connection.copy(
-                    allowedRouteKinds = invited.allowedRouteKinds,
-                    allowedLocalRouteURLs = invited.allowedLocalRouteURLs,
-                )
-                if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
-                stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
-                val winner = outcome.connection.activeEndpoint
-                    ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
-                stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
+                var stored = pairedConnection
+                val winner = stored.activeEndpoint
+                    ?: CompanionEndpoint.direct(stored.host, stored.port, priority = 10_000)
                 registry.matchingConnection(stored)?.let { existing -> stored = stored.copy(id = existing.id) }
                 val firstPairing = registry.connections.isEmpty()
                 val updatedRegistry = registry.upsert(stored)
 
                 try {
-                    tokenStore.save(stored.id, paired.token)
+                    tokenStore.save(stored.id, pairedToken)
                     // The education marker goes down before the connection
                     // becomes restorable. A process that stops between the two
                     // leaves an orphan marker, which the router ignores while
@@ -279,11 +271,11 @@ class Session(
                 registry = updatedRegistry
                 _connections.value = registry.connections
                 _connection.value = stored
-                token = paired.token
+                token = pairedToken
                 // The route that just redeemed leads this session; later launches return to the
                 // desktop's security-prioritized typed order.
                 rotation = CandidateRotation(liveRoutes(stored, winner))
-                client = clientFactory(stored, paired.token)
+                client = clientFactory(stored, pairedToken)
                 _state.value = CompanionState()
                 _restoreState.value = RestoreState.Ready
                 _pairingRequested.value = false
@@ -292,6 +284,46 @@ class Session(
             }
         }
         connect()
+    }
+
+    private suspend fun redeemPairing(
+        invited: Connection,
+        credential: String,
+        deviceName: String,
+        requestId: String,
+    ): Pair<Connection, String> {
+        val serverCode = PairingInvite.normalizedServerCode(credential)
+        if (serverCode != null) {
+            val descriptor: ServerEnvironment
+            val paired: ServerPairResponse
+            try {
+                descriptor = CompanionClient(invited, null, httpClient).environment()
+                paired = CompanionClient.pairWithServer(invited, serverCode, deviceName, requestId, httpClient)
+            } catch (error: java.io.IOException) {
+                if (error is APIError.Status && error.code < 500 && error.code != 429) throw error
+                throw ServerPairingRetryError(error)
+            }
+            check(paired.environment.environmentId == descriptor.environmentId) {
+                "The server changed while pairing. Scan a new code and try again."
+            }
+            return invited.copy(
+                name = paired.environment.label.ifEmpty { invited.name },
+                serverEnvironmentId = paired.environment.environmentId,
+                serverScopes = paired.session.scopes,
+            ) to paired.token
+        }
+        val outcome = pairFn(invited, credential, deviceName, requestId)
+        val paired = outcome.response
+        var stored = outcome.connection.copy(
+            allowedRouteKinds = invited.allowedRouteKinds,
+            allowedLocalRouteURLs = invited.allowedLocalRouteURLs,
+        )
+        if (paired.serverName.isNotEmpty()) stored = stored.copy(name = paired.serverName)
+        stored = stored.applyingPairingAdvertisement(paired.hosts, paired.endpoints)
+        val winner = outcome.connection.activeEndpoint
+            ?: CompanionEndpoint.direct(outcome.connection.host, outcome.connection.port, priority = 10_000)
+        stored = winner?.let(stored::promoting) ?: stored.promoting(stored.host)
+        return stored to paired.token
     }
 
     suspend fun pair(
@@ -792,6 +824,13 @@ class Session(
             _status.value = Status.Connecting
             var receivedHello = false
             try {
+                activeClient.connection.serverEnvironmentId?.let { expected ->
+                    // Fail closed before sending the bearer if the address serves a new workspace.
+                    if (activeClient.environment().environmentId != expected) {
+                        _status.value = Status.Unauthorized
+                        return
+                    }
+                }
                 eventsFn(activeClient, _state.value.cursor, screenWatchers > 0)
                     .collect { frame ->
                         currentCoroutineContext().ensureActive()
@@ -981,6 +1020,7 @@ class Session(
      * would be decorative.
      */
     private fun refreshConnectionMetadata(source: CompanionClient) {
+        if (source.connection.pairedWithServer) return
         val connectionId = _connection.value?.id ?: return
         val workingEndpoint = rotation.currentEndpoint ?: source.connection.activeEndpoint
         endpointRefreshJob?.cancel()

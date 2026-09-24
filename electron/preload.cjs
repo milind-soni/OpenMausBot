@@ -178,6 +178,8 @@ const bridge = {
   permRequestMic: () => ipcRenderer.invoke("perm:request-mic"),
   /** Opens System Settings on the given privacy pane: mic|screen|speech. */
   permOpenSettings: (pane) => ipcRenderer.invoke("perm:open-settings", pane),
+  /** Relaunch the local macOS app after a permission grant. */
+  relaunch: () => ipcRenderer.invoke("desktop:relaunch"),
 
   /** Copies an engine install command and opens a blank terminal. Resolves
    * false if no terminal could be launched; the clipboard still has it. */

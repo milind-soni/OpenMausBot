@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame } from "../../shared/wire";
+import type { BotVisibility, CloudBackend, EffortLevel, ServerFrame, GroupThreadUsage } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
 import type { MausColor, MausMotion } from "@/lib/mascot";
@@ -203,6 +203,7 @@ export type GroupDefaultResponder =
 
 /** A room: several bots + you in one shared thread. */
 export interface Group {
+  usage?: GroupThreadUsage | null;
   id: string;
   threadId: string;
   name: string;
@@ -556,6 +557,7 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 /** GET /api/config — configured flags only; secrets are never echoed. */
 export interface ConfigStatus {
   xai?: { configured: boolean };
+  mistral?: { configured: boolean };
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
   /** what this server is entitled to; Settings shows only what works here.
@@ -574,6 +576,8 @@ export interface ConfigStatus {
   box: { configured: boolean };
   vps: { configured: boolean; sshAlias: string };
   rooms: { turnTimeoutMinutes: number };
+  /** Workspace defaults for new bots; absent effort = no level is sent. */
+  newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   localVm: { mode: "shared" | "per-bot"; maxInstances: number };
   opencodeGo?: { configured: boolean };
@@ -601,7 +605,7 @@ export interface ConfigStatus {
     customKeyConfigured?: boolean;
   };
   /** who's using the app — collected in onboarding, shown in the sidebar */
-  profile?: { name: string; email: string };
+  profile?: { name: string; email: string; aboutMe?: string };
   /** UI language override; "" (or absent) follows the system language. */
   language?: string;
   /** Opt-in flags. Absent means off. */
@@ -652,12 +656,13 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
   return {
     xai: frame.xai,
+    mistral: frame.mistral,
     anthropic: frame.anthropic,
     openaiCompat: frame.openaiCompat,
     fleet: frame.fleet,
@@ -733,6 +738,7 @@ export interface InstanceInfo {
   };
   models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[] }> };
   capabilities?: {
+    cloudComputerMcp?: boolean;
     computerMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
@@ -748,7 +754,7 @@ export interface InstanceInfo {
     approvalReview?: boolean;
   };
   /** `custom` agents sit below the rail divider — no subscription catalog. */
-  access?: "subscription" | "custom";
+  access?: "subscription" | "custom" | "api";
   /** `signOut`: the browser may remove the stored sign-in to switch accounts. */
   authentication?: { method: "device-code" | "paste-code" | "browser"; signOut?: boolean };
   install?: EngineInstall;
@@ -978,6 +984,7 @@ export type Action =
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "sections"; sections: string[] }
+  | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
   | { type: "showTeamMap" }
   | { type: "showChat" }
@@ -1024,6 +1031,7 @@ export type Action =
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
   | { type: "instances"; instances: InstanceInfo[] }
   | { type: "configStatus"; config: ConfigStatus }
+  | { type: "profileSaved"; profile: Partial<NonNullable<ConfigStatus["profile"]>> }
   | { type: "select"; id: string }
   | {
       type: "send";
@@ -1073,14 +1081,14 @@ export type Action =
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
   | { type: "deleteTask"; botId: string; threadId: string }
-  | { type: "newBot"; role?: BotRole; visibility?: BotVisibility; onCreated?: () => void; onError?: (message: string) => void }
+  | { type: "newBot"; role?: BotRole; visibility?: BotVisibility; section?: string; preserveSelection?: boolean; onCreated?: (bot: Bot) => void; onError?: (message: string) => void }
   | { type: "botCreationPending"; on: boolean }
   | { type: "updateTask"; botId: string; threadId: string; patch: TaskUpdatePatch }
   | { type: "createProject"; botId: string; name: string; emoji?: string | null; onCreated?: (project: BotProject) => void; onError?: (message: string) => void }
   | { type: "updateProject"; botId: string; projectId: string; patch: ProjectUpdatePatch; onSaved?: () => void; onError?: (message: string) => void }
   | { type: "deleteProject"; botId: string; projectId: string; onDeleted?: () => void; onError?: (message: string) => void }
   | { type: "reorderProjects"; botId: string; projectIds: string[]; onSaved?: () => void; onError?: (message: string) => void }
-  | { type: "botAdded"; bot: Bot }
+  | { type: "botAdded"; bot: Bot; preserveSelection?: boolean }
   | { type: "deleteBot"; botId: string }
   | { type: "botDeletionPending"; botId: string; on: boolean }
   | { type: "duplicateBot"; botId: string }
@@ -1382,6 +1390,12 @@ export function reducer(state: AppState, action: Action): AppState {
         groups: state.groups.map((group) => (group.threadId === action.threadId ? prepend(group) : group)),
       };
     }
+    case "sectionDeleted":
+      return {
+        ...state, sections: action.sections,
+        bots: state.bots.map(bot => bot.section === action.section ? { ...bot, section: undefined } : bot),
+        groups: state.groups.map(group => group.section === action.section ? { ...group, section: undefined } : group),
+      };
     case "sections":
       return { ...state, sections: action.sections };
     case "botQueues":
@@ -1485,6 +1499,11 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, instances: action.instances };
     case "configStatus":
       return { ...state, config: action.config };
+    case "profileSaved":
+      return state.config ? {
+        ...state,
+        config: { ...state.config, profile: { name: "", email: "", ...state.config.profile, ...action.profile } },
+      } : state;
     case "select": {
       if (state.groups.some((g) => g.id === action.id)) {
         return {
@@ -1536,8 +1555,7 @@ export function reducer(state: AppState, action: Action): AppState {
         // An HTTP create/import response and its SSE broadcast can race. Fold
         // both paths without ever showing the same bot twice.
         bots: [action.bot, ...state.bots.filter((bot) => bot.id !== action.bot.id)],
-        activeView: "chat",
-        selectedId: action.bot.id,
+        ...(action.preserveSelection ? {} : { activeView: "chat" as const, selectedId: action.bot.id }),
       }, action.bot.id, "arrive");
     case "deleteBot": {
       const bots = state.bots.filter((b) => b.id !== action.botId);
@@ -2262,9 +2280,10 @@ export class ApiError extends Error {
 /** Keep the created bot reachable even when applying its optional preset fails.
  * A restricted `visibility` rides the create itself, so the bot is never
  * announced to people who should not see it. */
-export async function createBotWithRole(role?: BotRole, request: typeof api = api, visibility?: BotVisibility): Promise<{ bot: Bot; profileError?: string }> {
+export async function createBotWithRole(role?: BotRole, request: typeof api = api, visibility?: BotVisibility, section?: string): Promise<{ bot: Bot; profileError?: string }> {
   const restricted = visibility && visibility !== "everyone" ? { visibility } : {};
-  const fields = { ...(role ? { name: role.name, title: role.title, description: role.description } : {}), ...restricted };
+  const fields = { ...(role ? { name: role.name, title: role.title, description: role.description } : {}), ...restricted,
+    ...(section !== undefined ? { section } : {}) };
   const { bot } = await request("/api/bots", {
     method: "POST",
     ...(Object.keys(fields).length ? { body: JSON.stringify(fields) } : {}),
@@ -3093,10 +3112,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (creatingBot) break;
           creatingBot = true;
           rawDispatch({ type: "botCreationPending", on: true });
-          void createBotWithRole(action.role, api, action.visibility)
+          void createBotWithRole(action.role, api, action.visibility, action.section)
             .then(({ bot, profileError }) => {
-              rawDispatch({ type: "botAdded", bot });
-              action.onCreated?.();
+              rawDispatch({ type: "botAdded", bot, preserveSelection: action.preserveSelection });
+              action.onCreated?.(bot);
               if (profileError) {
                 showError(t("newBot.profileFailed", { error: profileError }));
                 rawDispatch({ type: "toggleSettings", open: true, section: "soul" });
@@ -3800,6 +3819,11 @@ export function useStore() {
   const ctx = useContext(StoreContext);
   if (!ctx) throw new Error("useStore outside provider");
   return ctx;
+}
+
+/** Scoped state for an unsaved editor. The parent workspace remains intact. */
+export function BotEditorStore({ value, children }: { value: ReturnType<typeof useStore>; children: ReactNode }) {
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 export function formatTime(at: number) {

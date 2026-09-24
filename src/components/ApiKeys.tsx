@@ -8,9 +8,9 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai" | "mistral";
 /** Sections whose key can be tried against the provider from the server. */
-export type TestableProvider = "anthropic" | "openaiCompat" | "xai";
+export type TestableProvider = "anthropic" | "openaiCompat" | "xai" | "mistral";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -24,6 +24,7 @@ const SECTIONS: Record<
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   anthropic: { body: (v) => ({ anthropic: { key: v } }), flag: (c) => c.anthropic?.configured ?? false },
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
+  mistral: { body: (v) => ({ mistral: { key: v } }), flag: (c) => c.mistral?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
 
@@ -61,7 +62,7 @@ const CREDENTIALS: Record<
     labelKey: "keys.box.label",
     placeholderKey: "keys.box.placeholder",
     descriptionKey: "keys.box.desc",
-    href: "https://docs.ascii.dev/box/api-keys",
+    href: "https://docs.boat.dev/api-keys",
     linkLabelKey: "keys.box.link",
     optional: true,
     warningKey: "keys.box.warning",
@@ -88,6 +89,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.openaiCompat.desc",
     href: "https://openrouter.ai/keys",
     linkLabelKey: "keys.openaiCompat.link",
+    optional: true,
+  },
+  mistral: {
+    labelKey: "keys.mistral.label",
+    placeholderKey: "keys.mistral.placeholder",
+    descriptionKey: "keys.mistral.desc",
+    href: "https://console.mistral.ai/api-keys",
+    linkLabelKey: "keys.mistral.link",
     optional: true,
   },
   xai: {

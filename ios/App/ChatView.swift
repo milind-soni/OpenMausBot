@@ -1420,6 +1420,8 @@ struct MessageRow: View {
             Text("This creates a new version and continues from there.")
         }
         .sheet(item: $selecting) { SelectableTextSheet(text: $0.text) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("message-\(message.id)")
     }
 
     @ViewBuilder
@@ -1445,6 +1447,9 @@ struct MessageRow: View {
             ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
         case .screen:
             ScreenShot(threadId: chat.threadId, message: message)
+        case .digest:
+            // Filtered out of the transcript rows; never drawn.
+            EmptyView()
         case .unknown:
             // A message kind from a newer computer. Almost everything the
             // harness sends carries `text`, so showing it is usually the
@@ -1513,63 +1518,9 @@ struct TextBubble: View {
         return (filename, diff)
     }
 
-    private var parsedTable: (headers: [String], rows: [[String]])? {
-        guard message.role != .user, let source = message.text else { return nil }
-        let lines = source.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        guard lines.count >= 3, lines.allSatisfy({ $0.hasPrefix("|") && $0.hasSuffix("|") }) else {
-            return nil
-        }
-        let headers = Self.tableCells(lines[0])
-        let separators = Self.tableCells(lines[1])
-        guard !headers.isEmpty, separators.count == headers.count,
-              separators.allSatisfy(Self.isTableSeparator) else { return nil }
-        let rows = lines.dropFirst(2).map(Self.tableCells)
-        guard rows.allSatisfy({ $0.count == headers.count }) else { return nil }
-        return (headers, rows)
-    }
-
-    private static func tableCells(_ line: String) -> [String] {
-        var body = line
-        if body.first == "|" { body.removeFirst() }
-        if body.last == "|" { body.removeLast() }
-
-        var cells: [String] = []
-        var cell = ""
-        var escaped = false
-        for character in body {
-            if escaped {
-                if character == "|" {
-                    cell.append(character)
-                } else {
-                    cell.append("\\")
-                    cell.append(character)
-                }
-                escaped = false
-            } else if character == "\\" {
-                escaped = true
-            } else if character == "|" {
-                cells.append(cell.trimmingCharacters(in: .whitespaces))
-                cell = ""
-            } else {
-                cell.append(character)
-            }
-        }
-        if escaped { cell.append("\\") }
-        cells.append(cell.trimmingCharacters(in: .whitespaces))
-        return cells
-    }
-
-    private static func isTableSeparator(_ cell: String) -> Bool {
-        let compact = cell.replacingOccurrences(of: " ", with: "")
-        let core = compact.trimmingCharacters(in: CharacterSet(charactersIn: ":"))
-        return core.count >= 3 && core.allSatisfy { $0 == "-" }
-    }
-
     var body: some View {
         let mine = message.role == .user
-        let customCard = parsedDiff != nil || parsedTable != nil
+        let customCard = parsedDiff != nil
         // rooms attribute each line to the member who said it
         let speaker = message.from
         // No face beside the bubble: the bot's face is in the header, and in
@@ -1594,8 +1545,6 @@ struct TextBubble: View {
                 // you did: a message about `**` should show the asterisks.
                 if let diff = parsedDiff {
                     GitPRDiffCardView(filename: diff.filename, diffText: diff.diff)
-                } else if let table = parsedTable {
-                    SQLResultTableView(columns: table.headers, rows: table.rows)
                 } else if mine {
                     let shared = attachedContent
                     ForEach(Array(shared.attachments.enumerated()), id: \.offset) { _, attachment in
@@ -1613,7 +1562,10 @@ struct TextBubble: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
-                    MarkdownText(source: message.text ?? "") { url in
+                    MarkdownText(
+                        source: message.text ?? "",
+                        scrollIdentifier: "message-\(message.id)-scroll"
+                    ) { url in
                         openLink(url, message)
                     }
                         .foregroundStyle(Color.primary)

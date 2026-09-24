@@ -48,6 +48,8 @@ current permission level cancels the entire proposal; setup never silently
 downgrades or elevates execution permissions. New specialists use Ask and
 start with connected apps disabled. Existing peer allowlists remain in force.
 
+Leadership setup accepts `fields.chiefOfStaff` for new or existing bots. Test promotion in an authorized team, explicit replacement in one batch, denial, a conflicting or newly elected Chief, peer restrictions and loss of scope while the card is open. A demotion removes additional managed-team grants; a promotion does not copy the requesting Chief's grants. Verify reload and a failed `bots.json` write leave roles, grants, and the receipt consistent. `list_team_setup` includes current Chief assignments.
+
 For deletion, ask separately:
 
 > Delete Patch. Show me the deletion confirmation first.

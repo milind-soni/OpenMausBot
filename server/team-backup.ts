@@ -187,7 +187,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       const tasks = source.tasks.map((task, i): TaskRecord => {
         const record: TaskRecord = {
           threadId: i === 0 ? bot.threadId : newId(), title: task.title, createdAt: task.createdAt, resumeCursors: {},
-          modelSelection: structuredClone(selection), activity: "idle" as const, busy: false, unread: false,
+          modelSelection: structuredClone(bot.modelSelection), activity: "idle" as const, busy: false, unread: false,
           ...(task.titleFromFirstMessage ? { titleFromFirstMessage: true } : {}),
         };
         // Same rule as a message's `from`: the opener is remapped to its

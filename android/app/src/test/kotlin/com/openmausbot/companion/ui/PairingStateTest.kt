@@ -722,11 +722,10 @@ class PairingConfirmationTest {
     }
 
     @Test
-    fun `the six-digit step asks for the code the desktop is showing`() {
-        // `PairingView.swift`: "Enter the 6-digit code shown on your desktop:".
+    fun `manual pairing asks for the desktop or server code`() {
         val notice = PairingCopy.ENTER_CODE
-        assertTrue(notice.contains("6-digit code"), notice)
-        assertTrue(notice.contains("desktop"), notice)
+        assertTrue(notice.contains("pairing code"), notice)
+        assertTrue(notice.contains("computer or server"), notice)
     }
 
     @Test

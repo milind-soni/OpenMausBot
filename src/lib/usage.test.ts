@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { botUsage, cachedInput, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, freshTokens, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
+import { botUsage, cachedInput, headlineTokens, contextChip, contextDetail, contextShare, costCaption, formatTaskTokens, formatTokens, formatUsd, freshTokens, lastTurnDetail, sumUsage, usageChip, usageDetail } from "./usage";
 
 describe("usage formatting", () => {
   it("formats token counts compactly", () => {
@@ -94,6 +94,16 @@ describe("usage formatting", () => {
     expect(costCaption("subscription")).toMatch(/not billed/);
     expect(costCaption("metered")).toMatch(/API key/);
     expect(costCaption(undefined)).toMatch(/reported/);
+  });
+
+  it("headlines the tokens actually bought, not the thread re-read every turn", () => {
+    // The usage screens summed `input` per turn, and `input` includes cache
+    // reads — so the same system prompt was counted once per message and a
+    // five-message thread read as ~228k "used" when almost none was new.
+    const longThread = { input: 1_900_000, output: 12_000, cachedInput: 1_862_000, costUsd: null, turns: 12 };
+    expect(headlineTokens(longThread)).toBe(50_000);
+    // an engine that never reported a cached share has only the raw total
+    expect(headlineTokens({ input: 1_900_000, output: 12_000, costUsd: null, turns: 12 })).toBe(1_912_000);
   });
 
   it("headlines cost, else new tokens when the cached share is known, else every token", () => {

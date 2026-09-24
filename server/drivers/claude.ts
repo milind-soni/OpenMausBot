@@ -6,7 +6,7 @@
 //
 // Integrations become MCP servers on the CLI:
 //   - Composio Sessions (connected apps → tools) over streamable HTTP
-//   - the bot's cloud computer (box.ascii.dev) via server/computer-proxy.ts
+//   - the bot's cloud computer (boat.dev) via server/computer-proxy.ts
 //     — screenshot/exec/open_url, the CUA-on-the-box bridge
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";

@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   switches: [] as ComponentProps<typeof Switch>[],
 }));
+vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),

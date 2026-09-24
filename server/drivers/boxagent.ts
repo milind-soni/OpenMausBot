@@ -1,5 +1,5 @@
 // Box agent driver — the purest form of the idea: the turn runs ON the
-// bot's own cloud computer (box.ascii.dev), not on this machine. Uses the
+// bot's own cloud computer (boat.dev), not on this machine. Uses the
 // Box substrate's native agent facility:
 //   POST /boxes/{id}/prompt   {provider: codex|claude-code, model, prompt}
 //   GET  /boxes/{id}/prompts/{promptId}    run status
@@ -35,7 +35,7 @@ const MODELS = {
   ],
 };
 
-/** The box runs every harness ascii.dev ships (claude-code, codex, pi, opencode,
+/** The box runs every harness boat.dev ships (claude-code, codex, pi, opencode,
  * prime-agent, kimi). Which one a model id belongs to comes from the public
  * catalog, `GET /api/provider-models` at the API root: an object keyed by
  * harness, each with its `models`. A bot that arrives here from another engine

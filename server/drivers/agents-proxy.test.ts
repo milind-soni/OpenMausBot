@@ -270,7 +270,7 @@ beforeAll(async () => {
       req.on("end", () => {
         lastCreateBody = JSON.parse(data);
         res.writeHead(201, { "content-type": "application/json" });
-        res.end(JSON.stringify({ id: "bot-designer", name: "Pixel", section: "Work" }));
+        res.end(JSON.stringify({ id: "bot-designer", name: "Pixel", section: "Work", modelSelection: lastCreateBody.modelSelection }));
       });
       return;
     }
@@ -997,6 +997,15 @@ describe("agents-proxy MCP surface", () => {
       role: "Product designer",
       instructions: "Design and review the user experience.",
     });
+  });
+
+  it("passes an explicit specialist model selection intact and reports the applied model", async () => {
+    const modelSelection = { instanceId: "codex", model: "catalog-model", effort: "low" };
+    const result = await callTool("create_bot", {
+      name: "Pixel", role: "Designer", instructions: "Design interfaces.", modelSelection,
+    });
+    expect(lastCreateBody.modelSelection).toEqual(modelSelection);
+    expect(result.result.content[0].text).toContain(JSON.stringify(modelSelection));
   });
 
   it("lets a Chief create a group room and manage members through the harness", async () => {

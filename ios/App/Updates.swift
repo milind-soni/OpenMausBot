@@ -98,13 +98,14 @@ extension CompanionState {
     }
 
     private func lastLine(threadId: String) -> String {
-        guard let last = visibleTranscript(forThread: threadId).last else { return "" }
+        guard let last = visibleTranscript(forThread: threadId).last(where: { $0.kind != .digest }) else { return "" }
         switch last.kind {
         case .text, .unknown: return last.text ?? ""
         case .options: return last.card?.title ?? ""
         case .secret: return last.secret?.label ?? last.text ?? "Credential required"
         case .activity: return last.tool?.name ?? ""
         case .screen: return "Screenshot"
+        case .digest: return ""
         }
     }
 }

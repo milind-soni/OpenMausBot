@@ -188,3 +188,9 @@ describe("surface parsing", () => {
     expect(surfaceOfComputerKind(null)).toBeNull();
   });
 });
+
+
+it("does not instruct use of a selected browser when no surface is mounted", () => {
+  expect(surfacePrompt({ computer: null, browser: false }, { canSelect: true })).not.toContain("For online research");
+  expect(surfacePrompt({ computer: null, browser: true })).toContain("For online research");
+});

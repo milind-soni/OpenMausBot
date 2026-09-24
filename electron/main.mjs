@@ -1,4 +1,4 @@
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, ipcMain, Menu, nativeImage, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess } from "electron";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -25,6 +25,10 @@ import { createServerSupervisor } from "./server-supervisor.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
 import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLink, organizationRestartIntent, withOrganizationRestartIntent, withoutOrganizationRestartIntent } from "./organization-entry.mjs";
 import { windowChromeOptions } from "./window-chrome.mjs";
+import { createStartupScreen } from "./startup-screen.mjs";
+import { createSystemTray } from "./system-tray.mjs";
+let startupScreen = null;
+let desktopTray = null;
 import { collisionFreeDownloadPath, defaultSaveName, withSavableFile } from "./save-file.mjs";
 import { desktopViewerPermissionAllowed } from "./desktop-viewer-permissions.mjs";
 import { appPermissionAllowed, externalWebUrl } from "./app-permissions.mjs";
@@ -235,7 +239,7 @@ function queuePackageInstall(rawLink) {
   const packageUrl = packageUrlFromDeepLink(rawLink);
   if (!packageUrl) return false;
   pendingPackageInstallUrl = packageUrl;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const target = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
   deliverPackageInstall(target);
   return true;
@@ -253,7 +257,7 @@ app.on("second-instance", (_event, commandLine) => {
   }
   const packageUrl = packageUrlFromCommandLine(commandLine);
   if (packageUrl) pendingPackageInstallUrl = packageUrl;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   const target = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
   deliverPackageInstall(target);
 });
@@ -1819,7 +1823,7 @@ const organizationEntry = createOrganizationEntry({
 function queueOrganizationEntry(link) {
   if (!isOrganizationDeepLink(link)) return false;
   pendingOrganizationEntry = true;
-  activateExistingWindow(BrowserWindow.getAllWindows());
+  if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows());
   void deliverOrganizationEntry();
   return true;
 }
@@ -1972,7 +1976,7 @@ function createWindow({ deferNavigation = false } = {}) {
     // mirrors it over desktop:skin. Keep Windows hidden until that handshake
     // recolors the native caption-button overlay, otherwise a saved light
     // skin still flashes the Midnight-black block on every cold start.
-    show: !waitsForSkinSync,
+    show: !waitsForSkinSync && !startupScreen,
     icon: APP_ICON,
     backgroundColor: "#070707",
     autoHideMenuBar: process.platform !== "darwin",
@@ -1990,6 +1994,13 @@ function createWindow({ deferNavigation = false } = {}) {
     },
   });
   mainWindow = win;
+  win.on("show", () => desktopTray?.windowShown(win));
+  win.on("close", (event) => {
+    if (process.platform === "win32" && !desktopShutdownStarted && desktopTray) {
+      event.preventDefault();
+      desktopTray.hide(win);
+    }
+  });
   win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
   win.webContents.on("page-title-updated", event => {
     if (!desktopRemoteAccess && !activeEnvironment(environmentsState)) return;
@@ -1997,7 +2008,8 @@ function createWindow({ deferNavigation = false } = {}) {
     win.setTitle(workspaceWindowTitle(environmentsState, desktopRemoteAccess));
   });
   attachUpdaterWindow(win);
-  if (waitsForSkinSync) {
+  if (startupScreen) startupScreen.attach(win, { maximized: restored.maximized });
+  else if (waitsForSkinSync) {
     // A broken renderer or preload must not strand the app as an invisible
     // process. Normal startup shows from desktop:skin almost immediately;
     // this is only the bounded recovery path.
@@ -2011,7 +2023,7 @@ function createWindow({ deferNavigation = false } = {}) {
   }
   installWindowStatePersistence(win);
   applyUnreadBadge(win);
-  if (restored.maximized) win.maximize();
+  if (restored.maximized && !startupScreen) win.maximize();
   win.once("closed", () => {
     if (mainWindow === win) mainWindow = null;
   });
@@ -2427,6 +2439,13 @@ ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pa
   return shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${anchor}`);
 }));
 
+ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
+  if (process.platform !== "darwin") return false;
+  requireMainWindowSender(event);
+  relaunchAfterDesktopRemoteChange();
+  return true;
+}));
+
 ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
@@ -2505,7 +2524,7 @@ function relaunchAfterDesktopRemoteChange() {
     // Electron's default uses its original native argv, not the JS array
     // from which we consumed the one-shot organisation action.
     app.relaunch({ args: process.argv.slice(1) });
-    app.exit(0);
+    app.quit();
   }, 250);
   timer.unref?.();
 }
@@ -2776,6 +2795,28 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  if (process.platform === "win32") {
+    try {
+      desktopTray = createSystemTray({
+        Tray, Menu, nativeImage, iconPath: APP_ICON,
+        getWindow: () => startupScreen?.window ?? mainWindow,
+        onQuit: () => app.quit(),
+      });
+    } catch (error) {
+      // A missing tray must leave a working close/quit path.
+      slog(`system tray unavailable: ${error?.message ?? error}`);
+    }
+  }
+  startupScreen = createStartupScreen({
+    BrowserWindow, iconPath: APP_ICON, isQuitting: () => desktopShutdownStarted,
+    onQuit: () => app.quit(),
+    onHide: desktopTray ? (win) => desktopTray.hide(win) : undefined,
+    isHidden: () => desktopTray?.isHidden() ?? false,
+    onShow: (win) => desktopTray?.windowShown(win),
+    onFinished: () => { startupScreen = null; },
+  });
+  await startupScreen.ready;
+  if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     item.setSavePath(collisionFreeDownloadPath(app.getPath("downloads"), item.getFilename()));
   });
@@ -2979,6 +3020,7 @@ app.whenReady().then(async () => {
   startUpdater();
   refreshApplicationMenu();
   app.on("activate", () => {
+    if (desktopTray?.show()) return;
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
@@ -3010,6 +3052,7 @@ process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
   desktopShutdownStarted = true;
+  startupScreen?.dispose();
   companyBackupSchedule?.close();
   managedDesktop?.close();
   companyBackupController?.abort();
@@ -3066,4 +3109,5 @@ function releaseDesktopDataDirLease() {
 // helpers shut down. will-quit is the final Electron lifecycle boundary; the
 // process hook covers app.exit()/fatal exits that bypass it.
 app.on("will-quit", releaseDesktopDataDirLease);
+app.on("will-quit", () => desktopTray?.destroy());
 process.once("exit", releaseDesktopDataDirLease);

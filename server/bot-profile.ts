@@ -34,7 +34,7 @@ export const BOT_PROFILE_PATCH_FIELDS = [
   "speakReplies",
 ] as const;
 
-const profilePatchSchema = z.object({
+export const profilePatchSchema = z.object({
   name: z
     .string({ error: "name must be a string" })
     .max(BOT_PROFILE_LIMITS.name, { error: "name must be at most 100 characters" })
