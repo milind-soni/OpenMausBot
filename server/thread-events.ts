@@ -228,7 +228,10 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
         typeof value.tool === "string" &&
         typeof value.summary === "string" &&
         stringsOrMissing(value.choices) &&
-        askQuestionsOrMissing(value.questions)
+        askQuestionsOrMissing(value.questions) &&
+        // Required fields only: events recorded before origin exists replay
+        // unchanged, and a value other than the two documented marks is not.
+        (value.origin === undefined || value.origin === "tool" || value.origin === "output")
       );
     case "request.resolved":
       return (

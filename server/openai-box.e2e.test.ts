@@ -8,11 +8,24 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
   const commands: string[] = [];
   let nativePrompts = 0;
   let boxOffline = false;
+  let boxReadsGate: { entered: boolean; resumed: Promise<void>; release: () => void } | undefined;
+  const pauseBoxReads = () => {
+    let release!: () => void;
+    const resumed = new Promise<void>(resolve => { release = resolve; });
+    const gate = { entered: false, resumed, release };
+    boxReadsGate = gate;
+    return gate;
+  };
   const upstream = createServer(async (req, res) => {
     const path = new URL(req.url ?? "/", "http://fixture").pathname;
     let raw = ""; for await (const part of req) raw += part;
     const body = raw ? JSON.parse(raw) : {};
     res.setHeader("content-type", "application/json");
+    const gate = boxReadsGate;
+    if (gate && req.method === "GET" && path.startsWith("/boxes")) {
+      gate.entered = true;
+      await gate.resumed;
+    }
     if (path === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "chosen-vision-model" }, { id: "other-default" }] }));
     if (path === "/v1/chat/completions") {
       requests.push(body);
@@ -90,13 +103,23 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
     const { routine } = await api("POST", "/api/routines", { name: "Cloud fixture", botId: bot.id,
       prompt: "Inspect the assigned cloud desktop.", runOn: "cloud", enabled: false,
       schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
+    const readiness = pauseBoxReads();
     const { run } = await api("POST", `/api/routines/${routine.id}/run`, {});
     let routineThread = "";
     await expect.poll(async () => {
       routineThread = (await api("GET", "/api/routines")).runs.find((entry: any) => entry.id === run.id)?.threadId ?? "";
       return routineThread;
     }, { timeout: 15_000 }).not.toBe("");
+    await expect.poll(() => readiness.entered).toBe(true);
     const destination = ["--bot", bot.id, "--task", routineThread];
+    // A published execution owns its task before network readiness finishes.
+    // Otherwise wait reports a completed turn while setup is still in flight.
+    const preparing = (await api("GET", "/api/bots")).bots.find((item: any) => item.id === bot.id)
+      .tasks.find((task: any) => task.threadId === routineThread);
+    expect(preparing).toMatchObject({ busy: true, activity: "working" });
+    expect((await control(["wait", ...destination, "--timeout", "1"])).status).toBe("timed-out");
+    boxReadsGate = undefined;
+    readiness.release();
     const waiting = await control(["wait", ...destination, "--timeout", "20"]);
     expect(waiting.status, JSON.stringify(waiting)).toBe("needs-user");
     const routineMessages = await api("GET", `/api/threads/${routineThread}/messages?limit=30`);
@@ -108,6 +131,25 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
     expect(requests.slice(beforeRoutine).every(request => request.model === "chosen-vision-model")).toBe(true);
     expect(nativePrompts).toBe(0);
     expect(commands.some(command => command.includes(".model.jpg"))).toBe(true);
+    // Stop during readiness must revoke this generation before any late
+    // network response can provision a computer or dispatch the model.
+    const cancelledReadiness = pauseBoxReads();
+    const beforeCancel = requests.length;
+    const { run: cancelled } = await api("POST", `/api/routines/${routine.id}/run`, {});
+    let cancelledThread = "";
+    await expect.poll(async () => {
+      cancelledThread = (await api("GET", "/api/routines")).runs.find((entry: any) => entry.id === cancelled.id)?.threadId ?? "";
+      return cancelledThread;
+    }, { timeout: 15_000 }).not.toBe("");
+    await expect.poll(() => cancelledReadiness.entered).toBe(true);
+    expect((await api("POST", `/api/routine-runs/${cancelled.id}/cancel`, {})).run.status).toBe("cancelled");
+    boxReadsGate = undefined;
+    cancelledReadiness.release();
+    const stopped = await control(["wait", "--bot", bot.id, "--task", cancelledThread, "--timeout", "20"]);
+    expect(stopped.status).toBe("settled");
+    expect(requests).toHaveLength(beforeCancel);
+    const cancelledMessages = await api("GET", `/api/threads/${cancelledThread}/messages?limit=30`);
+    expect(cancelledMessages.messages.some((message: any) => message.card?.requestId)).toBe(false);
     // Readiness is checked again at dispatch, after the routine was created.
     // An available native Box runner must not mask the selected engine's missing key.
     const expectBlockedRun = async (reason: RegExp) => {
@@ -126,6 +168,7 @@ it("keeps the selected API model for direct, group and scheduled Box turns and p
     boxOffline = true;
     await expectBlockedRun(/cloud computer could not be checked/i);
   } finally {
+    boxReadsGate?.release();
     await fixture.close(); upstream.closeAllConnections();
     await new Promise<void>(resolve => upstream.close(() => resolve()));
   }

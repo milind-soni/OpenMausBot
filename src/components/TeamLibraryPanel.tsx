@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   BookOpen,
   CalendarClock,
+  NotebookPen,
   Check,
   Compass,
   Crown,
@@ -18,6 +19,7 @@ import {
   MessageSquare,
   Plug,
   Search,
+  Share2,
   UploadCloud,
   Users,
   X,
@@ -25,6 +27,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { ShareTeamDialog } from "./ShareTeamDialog";
 import { MAX_TEAM_BACKUP_BYTES, TEAM_BACKUP_EXCLUSIONS } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
 const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
@@ -53,10 +56,12 @@ interface TeamCatalog {
 export interface TeamImportResult {
   name: string;
   members: number;
+  /** Connection slots created switched off, waiting for their values. */
+  connections?: number;
 }
 
 type ImportSource = "library" | "file" | "github";
-type TeamTab = "explore" | "import" | "scout";
+type TeamTab = "explore" | "import" | "scout" | "share";
 
 /** the scout endpoint's answer, as far as this panel renders it — the
  * manifest itself stays opaque and goes back to the server verbatim */
@@ -100,11 +105,112 @@ async function openExternal(url: string): Promise<void> {
   if (opened) opened.opener = null;
 }
 
+/** Teams that can be shared: named teams first, in sidebar order, then
+ * General; only teams with at least one visible bot. Pure, for tests. */
+export function shareableTeamList(sections: readonly string[], bots: ReadonlyArray<Pick<Bot, "section" | "hidden">>): Array<{ name: string; bots: number }> {
+  const counts = new Map<string, number>();
+  for (const bot of bots) {
+    if (bot.hidden) continue;
+    const team = bot.section?.trim() ?? "";
+    counts.set(team, (counts.get(team) ?? 0) + 1);
+  }
+  const order = [...new Set([...sections.map((section) => section.trim()).filter(Boolean), ...counts.keys()])]
+    .filter((name) => name !== "");
+  return [...order, ""].flatMap((name) => (counts.get(name) ? [{ name, bots: counts.get(name)! }] : []));
+}
+
 function TeamGlyph({ index }: { index: number }) {
   return (
     <div className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
       <Users size={20} />
     </div>
+  );
+}
+
+/** Everything an import will add, before anything is added. Pure, for tests. */
+export function TeamImportDetails({ pending, importedNames }: { pending: PendingTeamImport; importedNames: string[] }) {
+  return (
+    <>
+      {pending.description && (
+        <p className="max-w-2xl text-[13.5px] leading-relaxed text-ink-secondary">{pending.description}</p>
+      )}
+      {pending.brief && (
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+          <div className="font-medium text-ink">{t("teamImport.brief")}</div>
+          <p className="mt-1 line-clamp-4 whitespace-pre-wrap break-words">{pending.brief}</p>
+        </div>
+      )}
+      {Boolean(pending.warnings?.length) && <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+        <div className="mb-2 font-medium text-ink">Backup notes</div>
+        {pending.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
+      </div>}
+      {(pending.kind === "package" || pending.kind === "backup") && (
+        <div className="mt-5 flex flex-wrap gap-2 text-[11.5px] text-ink-secondary">
+          {pending.chiefOfStaff && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Crown size={13} />{pending.chiefOfStaff} leads</span>}
+          <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{pending.rooms} {pending.rooms === 1 ? "group chat" : "group chats"}</span>
+          <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><BookOpen size={13} />{pending.playbooks} playbooks</span>
+          <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><CalendarClock size={13} />{pending.version === 2 ? t("teamImport.routinesPaused", { count: pending.routines }) : `${pending.routines} paused routines`}</span>
+          {pending.kind === "package" && pending.version !== 2 && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Plug size={13} />{pending.apps.length} connections</span>}
+          {Boolean(pending.connections?.length) && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Plug size={13} />{t("teamImport.connections", { count: pending.connections?.length ?? 0 })}</span>}
+          {Boolean(pending.notes) && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><NotebookPen size={13} />{t("teamImport.notes", { count: pending.notes ?? 0 })}</span>}
+          {Boolean(pending.presets?.length) && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Users size={13} />{t("teamImport.presets", { count: pending.presets?.length ?? 0 })}</span>}
+        </div>
+      )}
+      {Boolean(pending.skills?.length) && (
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+          <div className="font-medium text-ink">{pending.version === 2 ? t("teamImport.skillsOff") : "Included skills — disabled on import"}</div>
+          <p className="mt-1 break-words">{pending.skills?.join(", ")}</p>
+          <p className="mt-1">{pending.version === 2 ? t("teamImport.skillsReview") : "Review each skill in its bot profile before enabling it. Imported instructions do not run automatically."}</p>
+        </div>
+      )}
+      {Boolean(pending.offeredSkills?.length) && (
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+          <div className="font-medium text-ink">{t("teamImport.offeredSkills")}</div>
+          <p className="mt-1 break-words">{pending.offeredSkills?.join(", ")}</p>
+        </div>
+      )}
+      {Boolean(pending.connections?.length) && (
+        <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
+          <div className="font-medium text-ink">{t("teamImport.connections", { count: pending.connections?.length ?? 0 })}</div>
+          <ul className="mt-1">
+            {pending.connections?.map((connection, index) => (
+              <li key={`${connection.label}-${index}`} className="truncate">{connection.label} · {connection.url}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="mt-6 text-[12px] font-medium text-ink-secondary">Team members</div>
+      <div className="mt-2 grid grid-cols-1 gap-x-10 md:grid-cols-2">
+        {pending.members.map((member, index) => (
+          <div key={`${member.name}-${index}`} className="flex min-h-[72px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
+            {pending.pictures?.[index]
+              ? <img src={pending.pictures[index]!} alt="" className="size-9 shrink-0 rounded-lg object-cover" />
+              : (
+                <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
+                  {member.name.slice(0, 1).toUpperCase()}
+                </div>
+              )}
+            <div className="min-w-0">
+              <div className="truncate text-[14px] font-medium text-ink">{importedNames[index]}</div>
+              {importedNames[index] !== member.name && <div className="text-[11.5px] text-ink-secondary">New copy of {member.name}</div>}
+              <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{member.title || "General assistant"}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-6 flex items-start gap-2.5 rounded-xl bg-raised/45 px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
+        <Check size={15} className="mt-0.5 shrink-0 text-success" />
+        <p>
+          {pending.kind === "backup"
+            ? `${TEAM_BACKUP_EXCLUSIONS} ${pending.archivedBots ? `${pending.archivedBots} archived bots will remain archived.` : ""}`
+            : pending.version === 2
+            ? t("teamImport.sharedTeamSafety")
+            : pending.kind === "package"
+            ? "Bots, Chief of Staff, group chats, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
+            : "Only roles and appearance are loaded. Your conversations, account connections, permissions, and computer access stay private."}
+        </p>
+      </div>
+    </>
   );
 }
 
@@ -146,12 +252,15 @@ export function TeamLibraryPanel({
   const [pickedDirectory, setPickedDirectory] = useState<Set<string>>(new Set());
   const [roomName, setRoomName] = useState("");
   const [creating, setCreating] = useState(false);
+  // The team being shared; its dialog sits above this panel.
+  const [sharing, setSharing] = useState<string | null>(null);
   // monotonically increasing scout token: a late response from an older
   // scout (including its lazy directory call) must never overwrite state
   // that belongs to a newer one
   const scoutRequest = useRef(0);
 
   const currentBotCount = state.bots.filter((bot) => !bot.hidden).length;
+  const shareableTeams = shareableTeamList(state.sections ?? [], state.bots);
   const takenNames = new Set(state.bots.map((bot) => bot.name.trim().toLowerCase()));
   const importedNames = pending?.members.map((member) => takeImportName(member.name, takenNames)) ?? [];
 
@@ -179,6 +288,8 @@ export function TeamLibraryPanel({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // The Share team dialog above this panel owns the keyboard while open.
+      if (sharing !== null) return;
       if (event.key === "Escape" && !importing) {
         event.preventDefault();
         event.stopPropagation();
@@ -206,7 +317,7 @@ export function TeamLibraryPanel({
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [importing, onClose, pending]);
+  }, [importing, onClose, pending, sharing]);
 
   const previewManifest = (preview: PendingTeamImport, nextSource: ImportSource) => {
     setPending(preview);
@@ -285,6 +396,7 @@ export function TeamLibraryPanel({
         bots: Bot[];
         groups?: Group[];
         routines?: Routine[];
+        connections?: unknown[];
       };
       for (const bot of response.bots) dispatch({ type: "botAdded", bot });
       for (const group of response.groups ?? []) dispatch({ type: "groupPatched", group });
@@ -295,6 +407,7 @@ export function TeamLibraryPanel({
       onImported({
         name: pending.name,
         members: response.bots.length,
+        ...(response.connections?.length ? { connections: response.connections.length } : {}),
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -439,7 +552,9 @@ export function TeamLibraryPanel({
                   ? pending.kind === "backup"
                     ? `${pending.members.length} ${pending.members.length === 1 ? "bot" : "bots"} · ${pending.conversations} ${pending.conversations === 1 ? "conversation" : "conversations"} · portable backup`
                     : pending.kind === "package"
-                    ? `${pending.members.length} bots · portable Markdown playbook`
+                    ? pending.version === 2
+                      ? t("teamImport.sharedTeam", { count: pending.members.length })
+                      : `${pending.members.length} bots · portable Markdown playbook`
                     : `${pending.members.length} ready-to-load bots`
                   : "Start with a complete playbook or bring your own."}
             </p>
@@ -470,54 +585,7 @@ export function TeamLibraryPanel({
         {pending ? (
           <>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-6 sm:px-8">
-              {pending.description && (
-                <p className="max-w-2xl text-[13.5px] leading-relaxed text-ink-secondary">{pending.description}</p>
-              )}
-              {Boolean(pending.warnings?.length) && <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
-                <div className="mb-2 font-medium text-ink">Backup notes</div>
-                {pending.warnings?.map((warning, index) => <p key={index}>{warning}</p>)}
-              </div>}
-              {(pending.kind === "package" || pending.kind === "backup") && (
-                <div className="mt-5 flex flex-wrap gap-2 text-[11.5px] text-ink-secondary">
-                  {pending.chiefOfStaff && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Crown size={13} />{pending.chiefOfStaff} leads</span>}
-                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><MessageSquare size={13} />{pending.rooms} {pending.rooms === 1 ? "group chat" : "group chats"}</span>
-                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><BookOpen size={13} />{pending.playbooks} playbooks</span>
-                  <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><CalendarClock size={13} />{pending.routines} paused routines</span>
-                  {pending.kind === "package" && <span className="flex items-center gap-1.5 rounded-full bg-raised px-3 py-1.5"><Plug size={13} />{pending.apps.length} connections</span>}
-                </div>
-              )}
-              {Boolean(pending.skills?.length) && (
-                <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-[12.5px] text-ink-secondary">
-                  <div className="font-medium text-ink">Included skills — disabled on import</div>
-                  <p className="mt-1 break-words">{pending.skills?.join(", ")}</p>
-                  <p className="mt-1">Review each skill in its bot profile before enabling it. Imported instructions do not run automatically.</p>
-                </div>
-              )}
-              <div className="mt-6 text-[12px] font-medium text-ink-secondary">Team members</div>
-              <div className="mt-2 grid grid-cols-1 gap-x-10 md:grid-cols-2">
-                {pending.members.map((member, index) => (
-                  <div key={`${member.name}-${index}`} className="flex min-h-[72px] items-center gap-3 border-b border-hairline/35 px-1 py-3">
-                    <div className={cn("flex size-9 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold", TEAM_GLYPHS[index % TEAM_GLYPHS.length])}>
-                      {member.name.slice(0, 1).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate text-[14px] font-medium text-ink">{importedNames[index]}</div>
-                      {importedNames[index] !== member.name && <div className="text-[11.5px] text-ink-secondary">New copy of {member.name}</div>}
-                      <div className="mt-0.5 truncate text-[12.5px] text-ink-secondary">{member.title || "General assistant"}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 flex items-start gap-2.5 rounded-xl bg-raised/45 px-4 py-3 text-[12.5px] leading-relaxed text-ink-secondary">
-                <Check size={15} className="mt-0.5 shrink-0 text-success" />
-                <p>
-                  {pending.kind === "backup"
-                    ? `${TEAM_BACKUP_EXCLUSIONS} ${pending.archivedBots ? `${pending.archivedBots} archived bots will remain archived.` : ""}`
-                    : pending.kind === "package"
-                    ? "Bots, Chief of Staff, group chats, and reviewed playbooks are loaded. Suggested routines arrive paused, and connected apps stay off until you approve them. Conversations, credentials, permissions, and computer access stay private."
-                    : "Only roles and appearance are loaded. Your conversations, account connections, permissions, and computer access stay private."}
-                </p>
-              </div>
+              <TeamImportDetails pending={pending} importedNames={importedNames} />
               {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
             </div>
 
@@ -526,7 +594,7 @@ export function TeamLibraryPanel({
                 Your {currentBotCount > 0 ? `${currentBotCount} existing ${currentBotCount === 1 ? "bot and its" : "bots and their"}` : "existing"} conversations stay unchanged.
                 {" "}{pending.kind === "backup"
                   ? t("teamImport.backupCopies")
-                  : t("teamImport.newSection", { name: pending.name })}
+                  : t("teamImport.newSection", { name: pending.teamName ?? pending.name })}
               </div>
               <button
                 onClick={() => void importTeam()}
@@ -585,6 +653,20 @@ export function TeamLibraryPanel({
                   )}
                 >
                   From a folder
+                </button>
+                <button
+                  role="tab"
+                  aria-selected={tab === "share"}
+                  onClick={() => {
+                    setTab("share");
+                    setError("");
+                  }}
+                  className={cn(
+                    "rounded-lg px-4 py-2 text-[13.5px] transition-colors",
+                    tab === "share" ? "bg-card text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
+                  )}
+                >
+                  {t("teamLibrary.shareTab")}
                 </button>
               </div>
               {tab === "explore" && (
@@ -718,6 +800,35 @@ export function TeamLibraryPanel({
                     </div>
                   </div>
                   {error && <div role="alert" className="mt-4 rounded-lg bg-danger/10 px-3 py-2 text-[12.5px] text-danger">{error}</div>}
+                </div>
+              )}
+
+              {tab === "share" && (
+                <div>
+                  <p className="max-w-2xl text-[12.5px] leading-relaxed text-ink-secondary">{t("teamLibrary.shareIntro")}</p>
+                  {shareableTeams.length === 0 ? (
+                    <p className="mt-6 text-[13px] text-ink-secondary">{t("teamLibrary.shareEmpty")}</p>
+                  ) : (
+                    <div className="mt-4 grid grid-cols-1 gap-x-10 md:grid-cols-2">
+                      {shareableTeams.map((team, index) => (
+                        <article key={team.name || "general"} className="flex min-h-[84px] items-center gap-3 border-b border-hairline/35 px-1 py-4">
+                          <TeamGlyph index={index} />
+                          <div className="min-w-0 flex-1">
+                            <h3 className="truncate text-[14px] font-medium text-ink">{team.name || t("teamLibrary.general")}</h3>
+                            <p className="mt-0.5 text-[12.5px] text-ink-secondary">{t("teamLibrary.shareBots", { count: team.bots })}</p>
+                          </div>
+                          <button
+                            onClick={() => setSharing(team.name)}
+                            aria-label={t("teamLibrary.shareTeamAria", { name: team.name || t("teamLibrary.general") })}
+                            className="flex items-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[12.5px] text-ink hover:bg-raised-hover"
+                          >
+                            <Share2 size={13} />
+                            {t("teamLibrary.shareTeam")}
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -866,6 +977,7 @@ export function TeamLibraryPanel({
           </>
         )}
       </div>
+      {sharing !== null && <ShareTeamDialog team={sharing} onClose={() => setSharing(null)} />}
     </div>,
     document.body,
   );

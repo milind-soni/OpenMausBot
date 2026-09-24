@@ -1,0 +1,9 @@
+{
+  "kind": "runtime",
+  "event": {
+    "type": "content.delta",
+    "threadId": "preview-gmail",
+    "delta": "Reviewing the next build",
+    "streamKind": "reasoning_text"
+  }
+}

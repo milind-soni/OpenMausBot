@@ -115,7 +115,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     await mount();
     const html = render().html;
     expect(html).toContain("Using OpenMausBot at work?");
-    expect(html).toContain("Sign in with your organisation.");
+    expect(html).toContain("Sign in with your organization.");
     expect(html).toContain("Other Admin address");
     expect(bridge.begin).not.toHaveBeenCalled();
     expect(bridge.settingsOpened).not.toHaveBeenCalled();
@@ -178,7 +178,7 @@ describe("organisation sign-in row in the welcome flow", () => {
     expect(html).toContain("Fixture Company");
     expect(html).toContain("Fixture reason");
     expect(button("Sign in")).toBeUndefined();
-    button("Organisation settings")!.props.onClick!();
+    button("Organization settings")!.props.onClick!();
     expect(onOpenSettings).toHaveBeenCalledOnce();
   });
 

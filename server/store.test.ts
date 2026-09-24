@@ -168,6 +168,32 @@ describe("Store", () => {
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
   });
 
+  it("round-trips audio attachments with their metadata through persistence", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const reply = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "text",
+      text: "Voice note attached",
+      attachments: [
+        { kind: "image", path: "/attachments/shot.png", mime: "image/png" },
+        { kind: "audio", path: "/attachments/note.mp3", mime: "audio/mpeg", durationMs: 4200 },
+      ],
+    });
+    expect(reply.attachments?.[1]).toEqual({
+      kind: "audio",
+      path: "/attachments/note.mp3",
+      mime: "audio/mpeg",
+      durationMs: 4200,
+    });
+    const reloaded = new Store(selection);
+    const stored = reloaded.messagesFor(bot.threadId).find((message) => message.id === reply.id);
+    expect(stored?.attachments).toEqual(reply.attachments);
+    const encoded = JSON.stringify(stored);
+    expect(encoded).toContain('"kind":"audio"');
+    expect(encoded).toContain('"durationMs":4200');
+  });
+
   it("keeps surface pin provenance server-private and round-trips it through bots.json", () => {
     const store = new Store(selection);
     const bot = store.createBot({}, { seedMessages: false });
@@ -454,6 +480,48 @@ describe("Store", () => {
     expect(store.messagesFor(bot.threadId).find((m) => m.id === ask.id)?.card?.dismissed).toBeUndefined();
   });
 
+  it("persists a structured question card with its origin and answer across restart", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const secret = "sk-ant-" + "b".repeat(90);
+    const ask = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: {
+        title: "Your bot has a question",
+        subtitle: `Ship the release using ${secret}?`,
+        options: ["Ship now", "Wait"],
+        requestId: "req-q",
+        questionRequest: {
+          version: 1,
+          origin: "output",
+          questions: [{
+            question: `Ship the release using ${secret}?`,
+            header: "Release",
+            options: [{ label: "Ship now", description: `uses ${secret}` }],
+          }],
+        },
+      },
+    });
+    store.patchMessage(bot.threadId, ask.id, {
+      card: {
+        ...ask.card!,
+        answered: "answer",
+        answeredText: "The user answered your questions.\n\nQ: Ship the release?\nA: Ship now",
+      },
+    });
+
+    const reloaded = new Store(selection);
+    const restored = reloaded.messagesFor(bot.threadId).find((m) => m.id === ask.id)?.card;
+    expect(restored?.requestId).toBe("req-q");
+    expect(restored?.questionRequest?.origin).toBe("output");
+    expect(restored?.questionRequest?.questions[0]?.header).toBe("Release");
+    expect(restored?.answeredText).toContain("A: Ship now");
+    // the question payload sits behind the same redaction boundary as the
+    // subtitle: a key the model echoed into its own ask never survives disk
+    expect(JSON.stringify(restored)).not.toContain(secret);
+  });
+
   it("does not dismiss an open options card for bot-authored messages", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -598,6 +666,55 @@ describe("Store", () => {
     store.patchBot(bot.id, { composio: false });
     const reloaded = new Store(selection);
     expect(reloaded.bot(bot.id)?.composio).toBe(false);
+  });
+
+  it("persists per-bot connector tool grants without touching legacy records", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const legacy = store.createBot();
+    store.patchBot(bot.id, {
+      connectorTools: {
+        gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_GET_MESSAGE", "GMAIL_SEND_EMAIL"] },
+        github: { tools: "*" },
+      },
+    });
+    // the stored form is canonical: duplicates removed, order preserved
+    expect(store.bot(bot.id)?.connectorTools).toEqual({
+      gmail: { tools: ["GMAIL_SEND_EMAIL", "GMAIL_GET_MESSAGE"] },
+      github: { tools: "*" },
+    });
+    const reloaded = new Store(selection);
+    expect(reloaded.bot(bot.id)?.connectorTools).toEqual(store.bot(bot.id)?.connectorTools);
+    // a record from before the field existed round-trips unchanged: absent
+    // grants still defer to the legacy composio boolean
+    expect(reloaded.bot(legacy.id)?.connectorTools).toBeUndefined();
+    expect(reloaded.bot(legacy.id)?.composio).toBeUndefined();
+  });
+
+  it("rejects malformed connector tool grants at the store boundary", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const malformed: unknown[] = [
+      "nope",
+      ["gmail"],
+      { Gmail: { tools: "*" } },
+      { "bad slug!": { tools: "*" } },
+      { gmail: { tools: [] } },
+      { gmail: { tools: ["gmail_send_email"] } },
+      { gmail: { tools: ["GMAIL_SEND_EMAIL", 7] } },
+      { gmail: { tools: "*", accountId: "private" } },
+      { gmail: { tools: "GMAIL_SEND_EMAIL" } },
+      { gmail: "*" },
+    ];
+    for (const value of malformed) {
+      expect(() => store.patchBot(bot.id, { connectorTools: value as never })).toThrow(/connectorTools/);
+    }
+    expect(store.bot(bot.id)?.connectorTools).toBeUndefined();
+    // explicit {} grants no tools; undefined returns the bot to legacy behavior
+    store.patchBot(bot.id, { connectorTools: {} });
+    expect(store.bot(bot.id)?.connectorTools).toEqual({});
+    store.patchBot(bot.id, { connectorTools: undefined });
+    expect(store.bot(bot.id)?.connectorTools).toBeUndefined();
   });
 
   it("rotates colors across created bots", () => {
@@ -1208,6 +1325,27 @@ describe("Store", () => {
     expect(store.branchMessage(bot.threadId, "nope", "x")).toBeNull();
   });
 
+  it("branchMessage tells clients to show the fork, keeping the edit's sendId", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const original = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "v1" });
+    store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer to v1" });
+    const changes: Array<{ type: string; activeLeafId?: string; messageId?: string }> = [];
+    store.onChange((change) => {
+      if (change.type === "message") changes.push({ type: "message", messageId: change.message.id });
+      if (change.type === "thread") changes.push({ type: "thread", activeLeafId: change.activeLeafId });
+    });
+
+    const edited = store.branchMessage(bot.threadId, original.id, "v2", "edit-send-id")!;
+    expect(edited.sendId).toBe("edit-send-id");
+    // a fork is a sibling, not a child of the visible leaf, so the message
+    // frame alone never moves a client's leaf: the thread frame must follow
+    expect(changes).toEqual([
+      { type: "message", messageId: edited.id },
+      { type: "thread", activeLeafId: edited.id },
+    ]);
+  });
+
   it("setActiveLeaf switches branches and descends to the newest leaf", () => {
     const store = new Store(selection);
     const bot = store.createBot();
@@ -1364,11 +1502,13 @@ describe("Store change stream", () => {
     store.branchMessage(bot.threadId, first.id, "b");
     store.setActiveLeaf(bot.threadId, first.id);
     store.toggleReaction(bot.threadId, first.id, "👍", "user");
-    // branchMessage emits message THEN thread (the fork moves the leaf);
-    // setActiveLeaf emits thread; a reaction is a patch
+    // branchMessage emits message THEN thread (the fork moves the leaf to the
+    // new message); setActiveLeaf emits thread naming the version switched to;
+    // a reaction is a patch. Both leaf ids are asserted exactly: a frame that
+    // merely carries "some leaf" is what let the old branch keep rendering.
     expect(events.map((e) => e.type)).toEqual(["message.patch", "message", "thread", "thread", "message.patch"]);
     expect(events[2]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: (events[1] as any).message.id });
-    expect(events[3]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: expect.any(String) });
+    expect(events[3]).toMatchObject({ type: "thread", threadId: bot.threadId, activeLeafId: first.id });
   });
 
   it("announces screen frames whose pixels are pruned", () => {

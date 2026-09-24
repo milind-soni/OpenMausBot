@@ -20,8 +20,8 @@ class GeneratedImageTest {
 
     @Test
     fun imageOnlyReplyIgnoresFutureKindsAndDuplicatePaths() {
-        val source = """{"id":"reply","role":"bot","kind":"text","at":1,"attachments":[{"kind":"video"},{"kind":"image","path":"/tmp/screen 100%.png","mime":"image/png"},{"kind":"image","path":"/tmp/screen 100%.png"},{"kind":"image","path":" "}]}"""
-        val message = Json.decodeFromString<Message>(source)
+        val source = """{"id":"reply","role":"bot","kind":"text","at":1,"attachments":[{"kind":"video"},{"kind":"audio","path":"/tmp/note.mp3","mime":"audio/mpeg","durationMs":4200},{"kind":"image","path":"/tmp/screen 100%.png","mime":"image/png"},{"kind":"image","path":"/tmp/screen 100%.png"},{"kind":"image","path":" "}]}"""
+        val message = CompanionJson.decodeFromString<Message>(source)
         assertEquals(listOf(DisplayedMessageAttachment(DisplayedMessageAttachment.Kind.IMAGE, "screen 100%.png", "/tmp/screen 100%.png")), message.generatedImages)
         val state = CompanionState().apply(Frame.Message("thread", message.copy(attachments = null)))
             .apply(Frame.MessagePatch("thread", message))

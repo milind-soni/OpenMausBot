@@ -240,13 +240,15 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     const api = fixtureApi(info.url);
     const evaluate = async (js: string) => (await ui("eval", info.ui, "--js", js)).result;
     const timerText = () => evaluate(`document.querySelector('.turn-presence .tabular-nums')?.textContent ?? null`);
-    const selectThread = (threadId: string) => evaluate(`document.querySelector('[data-sidebar-thread-row="${threadId}"]')?.click(); true`);
-    const isCurrent = (threadId: string) => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${threadId}"][aria-current="page"]'))`);
     const botsState = () => api("GET", "/api/bots");
     const groupState = async () => (await botsState()).groups.find((row: any) => row.id === groupId);
 
-    // Pepper's own 1:1 thread is the away destination.
-    const soloThread = (await botsState()).bots.find((bot: any) => bot.id === info.botId).threadId;
+    // Pepper's own 1:1 thread is the away destination. With a single thread
+    // there is no thread list: the bot row itself is that conversation, and
+    // the same holds for a one-thread room.
+    const selectRow = (selector: string) => evaluate(`document.querySelector('${selector}')?.click(); true`);
+    const isCurrentRow = (selector: string) => evaluate(`Boolean(document.querySelector('${selector}[aria-current="page"]'))`);
+    const soloRow = `[data-sidebar-bot-row="${info.botId}"]`;
     // A one-member group with setup completed at creation, so the composer is
     // live at once and plain messages route to Pepper, the default responder,
     // whose engine is the same hang-mode fake.
@@ -257,12 +259,10 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     })).group;
     const groupId = group.id;
 
-    // Ensure both lists are open, regardless of the current selection.
-    await expandThreads(info.ui, "Pepper");
-    await expandThreads(info.ui, "Timer group");
-    await waitUntil(() => evaluate(`Boolean(document.querySelector('[data-sidebar-thread-row="${group.threadId}"]'))`), 10_000, "the group's sidebar thread row to appear");
-    await selectThread(group.threadId);
-    await waitUntil(() => isCurrent(group.threadId), 10_000, "the group to become current");
+    const groupRow = `[data-sidebar-group-row="${groupId}"]`;
+    await waitUntil(() => evaluate(`Boolean(document.querySelector('${groupRow}'))`), 10_000, "the group's sidebar row to appear");
+    await selectRow(groupRow);
+    await waitUntil(() => isCurrentRow(groupRow), 10_000, "the group to become current");
 
     // The group's composer sends; the hang-mode engine holds the member's turn.
     await ui("type", info.ui, "--name", "Message Timer group", "--text", "hello group");
@@ -286,11 +286,11 @@ describe("the thinking timer stays anchored across a thread switch", () => {
     expect(elapsedSeconds(beforeSwitch)).toBeGreaterThanOrEqual(Math.floor((Date.now() - stamp) / 1000) - 2);
 
     // Switch to Pepper's 1:1 thread, dwell, and come back to the group.
-    await selectThread(soloThread);
-    await waitUntil(() => isCurrent(soloThread), 10_000, "the 1:1 thread to become current");
+    await selectRow(soloRow);
+    await waitUntil(() => isCurrentRow(soloRow), 10_000, "the 1:1 thread to become current");
     await new Promise((done) => setTimeout(done, 3_000));
-    await selectThread(group.threadId);
-    await waitUntil(() => isCurrent(group.threadId), 10_000, "the group to become current again");
+    await selectRow(groupRow);
+    await waitUntil(() => isCurrentRow(groupRow), 10_000, "the group to become current again");
 
     // The readout resumes from the claim — a restart would show single
     // digits after a 13+ second turn.

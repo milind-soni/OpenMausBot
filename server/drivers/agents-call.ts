@@ -389,6 +389,22 @@ function recallSpeaker(hit: Json): string {
   return hit.role === "user" ? "user" : "you";
 }
 
+/** When a recalled line was said, on the machine's own clock. `toISOString()`
+ * answers in UTC, which disagrees with every other day the bot is shown: a
+ * bare `since`/`until` date is read as local midnight (recent-work.ts
+ * parseSince), the recent-work brief's times are local (whenLabel), and the
+ * daily memory logs are named after the local day. East of UTC a message
+ * from this morning was being dated yesterday — so a search for today's work
+ * came back stamped with the wrong date. */
+function recallWhen(at: unknown, dateOnly: boolean): string {
+  if (typeof at !== "number" || !Number.isFinite(at)) return "";
+  const said = new Date(at);
+  if (!Number.isFinite(said.getTime())) return "";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const day = `${said.getFullYear()}-${pad(said.getMonth() + 1)}-${pad(said.getDate())}`;
+  return dateOnly ? day : `${day} ${pad(said.getHours())}:${pad(said.getMinutes())}`;
+}
+
 export async function callTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   // The names this body has always used, so it reads (and diffs) as it did
   // when these were the proxy's module-level constants.
@@ -834,6 +850,26 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       text: `A secure ${r.label ?? CREDENTIAL_TARGETS[credentialId].label} request is ready. The desktop app and a freshly QR-paired mobile app show its secure entry card; older mobile pairings explain how to pair again or finish on the computer. End this turn; OpenMausBot will resume the task after the user saves or declines. Never ask them to paste the key into chat.`,
     };
   }
+  if (name === "send_voice_note") {
+    if (typeof args.text !== "string" || !args.text.trim()) {
+      return { text: "send_voice_note needs text: the short speakable note, at most 1000 characters.", isError: true };
+    }
+    const text = args.text.trim();
+    if (text.length > 1000) {
+      return { text: `send_voice_note is limited to 1000 characters; this one is ${text.length}. Shorten the note.`, isError: true };
+    }
+    try {
+      await api("/api/internal/voice-note", {
+        method: "POST",
+        body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, text }),
+      });
+      return { text: "Voice note recorded. It will be attached to this turn's reply when the turn ends; the note text is also the visible caption." };
+    } catch (error) {
+      // A missing voice setup is the user's to fix, not a failed turn: hand
+      // the harness's setup guidance straight to the model.
+      return { text: `Voice note not sent: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+    }
+  }
   if (name === "list_routines") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
     const r = await api(`/api/internal/routines?${query.toString()}`);
@@ -1012,7 +1048,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     }
     const lines = hits.map((hit) => {
       // a listing by time shows the time; a search by words keeps the date
-      const when = typeof hit.at === "number" ? new Date(hit.at).toISOString().slice(0, q ? 10 : 16).replace("T", " ") : "";
+      const when = recallWhen(hit.at, Boolean(q));
       const task = typeof hit.task === "string" && hit.task ? `task "${hit.task}"` : "an earlier task";
       const where = hit.current
         ? "this conversation"
@@ -1044,7 +1080,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     } catch (error) {
       return { text: `Couldn't read that message: ${error instanceof Error ? error.message : String(error)}. Use ids from a session_search hit.`, isError: true };
     }
-    const when = typeof r.at === "number" ? new Date(r.at).toISOString().slice(0, 10) : "";
+    const when = recallWhen(r.at, true);
     const readTask = typeof r.task === "string" && r.task ? `task "${r.task}"` : "an earlier task";
     const where = threadId === THREAD_ID ? "this conversation" : r.crossed ? `${readTask}, private to this user` : readTask;
     const note = r.crossed

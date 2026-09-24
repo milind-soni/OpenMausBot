@@ -60,6 +60,7 @@ Use only mapped, tested commands:
 - [Codex helper event isolation](codex-helpers.md)
 - [Qwen model route selection](qwen-models.md)
 - [Team backups](team-backups.md)
+- [Sharing a whole team](team-sharing.md)
 - [Teams and shared instructions](teams.md)
 - [Full workspace backups](workspace-backups.md)
 - [Optional company cloud backups](company-backups.md)
@@ -87,7 +88,7 @@ real Settings connection component in disposable Electron windows.
 The [loading screen and tray smoke](startup-tray.md) checks the startup close
 button, hidden handoff, tray restore, and Quit in a disposable Electron profile.
 
-The [optional organisation connection smoke](organization-settings.md) checks
+The [optional organization connection smoke](organization-settings.md) checks
 the real Settings panel and production desktop client against a synthetic
 Admin server, including cancellation, revocation and unchanged normal startup.
 
@@ -157,11 +158,17 @@ search and draft isolation using disposable simulators and an offline fixture.
 The [Android stream recovery checks](android-stream-recovery.md) exercise early
 stream closure and fallback through disposable HTTP endpoints.
 
+The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
+Hidden activity, and compact webhook messages using bundled offline data.
+
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
 
 The [Android server pairing checks](android-server-pairing.md) cover server QR
 confirmation, manual codes, retries and saved-server identity validation.
+
+The [Android transcript checks](android-transcript.md) cover completed-turn
+folds, Hidden reasoning, and compact webhook messages through real Compose UI.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.

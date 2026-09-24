@@ -6,6 +6,7 @@
 //
 // The fake CLI is a shebang script Windows cannot exec directly —
 // resolveCliSpawn turns it into `node <script>`, so these run everywhere.
+import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -232,6 +233,7 @@ describe("ACP turns (fake CLI)", () => {
     delete process.env.FAKE_ACP_LOAD_ERROR;
     delete process.env.FAKE_ACP_ALLOW_ALWAYS;
     delete process.env.FAKE_ACP_PERMISSION_ANSWER;
+    delete process.env.FAKE_ACP_QUESTION_OPTIONS;
     delete process.env.XAI_API_KEY;
     delete process.env.OPENCODE_API_KEY;
     delete process.env.CURSOR_API_KEY;
@@ -336,6 +338,41 @@ describe("ACP turns (fake CLI)", () => {
     const nativeLog = readFileSync(join(NATIVE_DIR, "t-acp-native-image.ndjson"), "utf8");
     expect(nativeLog).not.toContain(base64);
     expect(nativeLog).toContain(`[image data: ${base64.length} base64 chars]`);
+  });
+
+  it("delivers the full prompt once per native session and rides volatile changes as notes", async () => {
+    const dump = join(scratch, "acp-prompt-split.json");
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create();
+    // The receipt store is keyed by thread and session id, so a unique thread
+    // keeps the run hermetic against earlier executions of this suite.
+    const threadId = "t-acp-prompt-split-" + randomUUID();
+    const promptOf = () =>
+      (JSON.parse(readFileSync(dump + ".prompt.json", "utf8")) as Array<{ type: string; text: string }>)[0]?.text;
+    const send = async (text: string, volatile: string) => {
+      const { turnId } = await instance.adapter.sendTurn({
+        threadId,
+        text,
+        system: "Standing rules.\n\n" + volatile,
+        systemStable: "Standing rules.",
+        systemVolatile: volatile,
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      return promptOf();
+    };
+
+    // The establishing turn carries the full prompt, exactly as before.
+    expect(await send("first", "Memory: likes quiet hours."))
+      .toBe("Standing rules.\n\nMemory: likes quiet hours.\n\nfirst");
+    // The pooled session already carries it: later turns go through bare.
+    expect(await send("second", "Memory: likes quiet hours.")).toBe("second");
+    // A changed volatile half rides the next prompt as a labelled note.
+    expect(await send("third", "Memory: moved to Toronto."))
+      .toBe("Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:\n\nMemory: moved to Toronto.\n\nthird");
+    // A cleared volatile half is announced once, not silently dropped.
+    expect(await send("fourth", "")).toContain("have been cleared");
+    expect(await send("fifth", "")).toBe("fifth");
   });
 
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
@@ -716,6 +753,76 @@ describe("ACP turns (fake CLI)", () => {
     });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it("emits a structured question beside the flat choices", async () => {
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-shape", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Which color?",
+      choices: ["Blue", "Green"],
+      questions: [{ question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] }],
+    });
+  });
+
+  it("answers a structured card reply by recovering the picked option", async () => {
+    const answer = join(scratch, "question-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-answer", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // Exactly what the tabbed QuestionCard submits: one Q:/A: block for the
+    // single question, not a bare option label.
+    const outcome = await instance.adapter.respondToRequest("t-question-answer", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Which color?\nA: Green",
+    });
+    expect(outcome).toBe("answered");
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("green-id");
+  });
+
+  it("cancels a question whose answer matches no offered option", async () => {
+    const answer = join(scratch, "question-cancel.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-question-cancel", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-question-cancel", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "Purple",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "deny", source: "system" });
+    expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
+      message: expect.stringContaining("matching answer"),
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe("cancelled");
+  });
+
+  it.each([false, true])("maps capped labels back to their option id, refusing collisions (%s)", async collision => {
+    const label = "Green ".repeat(30);
+    const answer = join(scratch, "long-question-answer.txt");
+    process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
+    process.env.FAKE_ACP_QUESTION_OPTIONS = JSON.stringify([
+      { optionId: "green-id", kind: "allow_once", name: label },
+      { optionId: "other-id", kind: "allow_once", name: collision ? label + "other" : "Blue" },
+    ]);
+    await create(GrokAgentDriver, "question");
+    await instance.adapter.sendTurn({ threadId: "t-long-question", text: "go" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    expect(opened).toMatchObject({ choices: expect.arrayContaining([label.trim().slice(0, 120).trim()]) });
+    await instance.adapter.respondToRequest("t-long-question", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: `The user answered your questions.\n\nQ: Which color?\nA: ${label.trim().slice(0, 120)}`,
+    });
+    await recorder.until(e => e.type === "turn.completed");
+    expect(readFileSync(answer, "utf8")).toBe(collision ? "cancelled" : "green-id");
   });
 
   it("per-bot Ask surfaces permissions from a legacy full-auto instance", async () => {

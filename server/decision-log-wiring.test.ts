@@ -125,6 +125,11 @@ posixOnly("authorization decisions are logged", () => {
             environment: { FAKE_ACP_MODE: "permission" },
             config: { cli: FAKE_CLI, fullAuto: false },
           },
+          grokq: {
+            driver: "grokAgent",
+            environment: { FAKE_ACP_MODE: "question" },
+            config: { cli: FAKE_CLI, fullAuto: false },
+          },
         },
       }),
     );
@@ -226,6 +231,45 @@ posixOnly("authorization decisions are logged", () => {
       const user = await waitForDecision((r) => r.decision === "user-denied" && r.requestId === requestId);
       expect(user, "the denial never reached the decision log").not.toBeNull();
       expect(user!.source).toBe("user");
+    },
+    90_000,
+  );
+
+  it(
+    "a question card carries its questions and logs the row without an origin",
+    async () => {
+      // the same fake ACP CLI in question mode: the request is an ask, not a
+      // permission, so the card must arrive structured and the row must say
+      // a person owes the answer. A tool-call ask has no origin to record —
+      // only the BoxAgent transport ever sets one.
+      const created = await api("POST", "/api/bots");
+      expect(created.status).toBe(201);
+      const patched = await api("PATCH", `/api/bots/${created.body.bot.id}`, {
+        name: "Queried",
+        modelSelection: { instanceId: "grokq", model: "fake-model" },
+      });
+      expect(patched.status).toBe(200);
+      const bot = patched.body.bot ?? created.body.bot;
+      expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "ask me" })).status).toBe(202);
+
+      const card = await waitForBotCard(bot.id);
+      expect(card, "no question card ever appeared").not.toBeNull();
+      // a question, not a permission: no tool on the card, the choices as
+      // options. (The structured questionRequest payload itself arrives with
+      // the ACP normalization change, which stacks independently of this one.)
+      expect(card.card.tool).toBeUndefined();
+      expect(card.card.options).toContain("Blue");
+      expect(card.card.questionRequest?.origin).toBeUndefined();
+
+      const row = await waitForDecision((r) => r.decision === "card-shown" && r.botId === bot.id);
+      expect(row, "the question card never reached the decision log").not.toBeNull();
+      expect(row!.source).toBe("question");
+      expect(row!.origin).toBeUndefined();
+
+      const requestId = card.card.requestId as string;
+      const answered = await api("POST", `/api/bots/${bot.id}/respond`, { requestId, behavior: "answer", message: "Blue" });
+      expect(answered.status).toBe(200);
+      expect(answered.body.outcome).toBe("answered");
     },
     90_000,
   );

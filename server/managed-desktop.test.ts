@@ -281,7 +281,7 @@ it("applies a renewal or a lapsed licence in place, without restarting or ending
   await manager.apply({ ...renewed, suspended: "license-expired" });
   expect(registry.get(id)).toBe(company); expect(before).toHaveBeenCalledTimes(1);
   expect(await company.snapshot()).toEqual({ state: "unavailable", reason: LICENSE_EXPIRED_MESSAGE });
-  await expect(company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "claude-fixture" })).rejects.toThrow("licence has expired");
+  await expect(company.adapter.sendTurn({ threadId: "company", text: "Fixture", model: "claude-fixture" })).rejects.toThrow("license has expired");
   await manager.apply(renewed);
   expect(await company.snapshot()).toMatchObject({ authenticated: true });
   expect(onAvailability).toHaveBeenCalledTimes(3);

@@ -55,7 +55,7 @@ describe("buildApplicationMenu", () => {
     const onOrganizationSignIn = vi.fn();
     const template = build(platform, { onOrganizationSignIn });
     const item = template.find(entry => entry.label === "Server").submenu.find(entry => entry.id === "organization-sign-in");
-    expect(item.label).toBe("Sign in with organisation…");
+    expect(item.label).toBe("Sign in with your organization…");
     item.click();
     expect(onOrganizationSignIn).toHaveBeenCalledOnce();
   });

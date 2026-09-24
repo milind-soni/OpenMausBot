@@ -167,7 +167,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-images-preview") ? "ImagePreview" : (arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview"),
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -200,6 +200,52 @@ final class Session: ObservableObject {
                 client = CompanionClient(connection: preview, token: "image-fixture-token", session: URLSession(configuration: config))
             }
             state.hydrate(fleet)
+            if arguments.contains("-chat-focus-preview") {
+                // Put the requested reply several screens inside the fold.
+                var messages = state.messages["preview-gmail"] ?? []
+                if let index = messages.firstIndex(where: { $0.id == "progress2" }) {
+                    var parent = "progress"
+                    let narration = (1...12).map { number -> Message in
+                        var step = messages[index]
+                        step.id = "preview-long-\(number)"
+                        step.at = 1789088401000 + Double(number)
+                        step.text = String(repeating: "Inspecting the dependency graph for step \(number). ", count: 8)
+                        step.turnId = "preview-turn"
+                        step.parentId = parent
+                        parent = step.id
+                        return step
+                    }
+                    messages[index].parentId = parent
+                    messages.insert(contentsOf: narration, at: index)
+                    state.messages["preview-gmail"] = messages
+                }
+                focusedMessageId = "progress2"
+            }
+            if arguments.contains("-chat-compaction-preview"),
+               var receipt = state.messages["preview-gmail"]?.last {
+                receipt.id = "preview-compaction"
+                receipt.kind = .compaction
+                receipt.at = 1789088405000
+                receipt.turnId = nil
+                receipt.turnTerminal = nil
+                receipt.parentId = "answer"
+                receipt.compaction = Compaction(summary: "Earlier context preserved for the next turn.", tokensBefore: 12345)
+                state.apply(.message(threadId: "preview-gmail", message: receipt))
+                var digest = receipt
+                digest.id = "preview-digest"
+                digest.kind = .digest
+                digest.compaction = nil
+                digest.at = 1789088406000
+                digest.parentId = receipt.id
+                digest.text = "Digest must stay hidden"
+                state.apply(.message(threadId: "preview-gmail", message: digest))
+            }
+            if arguments.contains("-chat-reasoning-preview"),
+               let frameURL = Bundle.main.url(forResource: "ChatReasoningPreview", withExtension: "json"),
+               let frameData = try? Data(contentsOf: frameURL),
+               let frame = try? JSONDecoder().decode(Frame.self, from: frameData) {
+                state.apply(frame)
+            }
             if arguments.contains("-threads-preview"),
                let pagesURL = Bundle.main.url(forResource: "ThreadPreviewPages", withExtension: "json"),
                let pagesData = try? Data(contentsOf: pagesURL),
@@ -1649,6 +1695,17 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription; return false }
     }
 
+    /// Snooze or wake a bot thread. Desktop parity: bots only — group
+    /// threads have no snooze on the wire either.
+    func snoozeTask(_ task: BotTask, for bot: Bot, snoozedUntil: Double?) async -> Bool {
+        guard let client else { return false }
+        do {
+            try await client.snoozeTask(botId: bot.id, threadId: task.threadId, snoozedUntil: snoozedUntil)
+            await refresh()
+            return true
+        } catch { actionError = error.localizedDescription; return false }
+    }
+
     @discardableResult
     func setTaskPinned(_ task: BotTask, pinned: Bool, in chat: Chat) async -> Bool {
         guard let client else { return false }
@@ -2080,8 +2137,31 @@ final class Session: ObservableObject {
         } catch { actionError = error.localizedDescription }
     }
 
+    /// Edit and retry. The edited text replaces the old message on screen
+    /// the moment it is sent, hiding the old answer, and the computer's fork
+    /// takes over as soon as either its response or its stream frames land.
+    /// A failed edit simply drops the stand-in, so the old branch returns.
     func edit(_ message: Message, for bot: Bot, text: String) async {
-        await perform { try await $0.edit(botId: bot.id, messageId: message.id, text: text, threadId: bot.threadId) }
+        guard client != nil else { return }
+        let threadId = bot.threadId
+        let connectionId = connection?.id
+        let pending = PendingEdit(sourceId: message.id, text: text, baseLeafId: state.bot(forThread: threadId)?.activeLeafId)
+        state.pendingEdits[threadId] = pending
+        defer {
+            if state.pendingEdits[threadId] == pending { state.pendingEdits[threadId] = nil }
+        }
+        await perform {
+            let fork = try await $0.edit(
+                botId: bot.id,
+                messageId: message.id,
+                text: text,
+                threadId: threadId,
+                sendId: pending.requestId
+            )
+            if let fork, self.connection?.id == connectionId {
+                self.state.adoptEdit(fork, inThread: threadId, expectedPending: pending)
+            }
+        }
     }
 
     func switchVersion(to message: Message, for bot: Bot) async {

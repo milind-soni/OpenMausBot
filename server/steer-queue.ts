@@ -19,7 +19,7 @@
 
 import { newId } from "./contracts.ts";
 import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
-import type { ResolvedSender } from "../shared/wire.ts";
+import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { BotRecord, Message } from "./store.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
 
@@ -40,7 +40,7 @@ interface QueueEntry {
     prompt: string;
     replyToId?: string;
     sendId?: string;
-    reason?: "capacity";
+    reason?: SteerQueueReason;
     /** The words were queued by a bot already running unattended (a
      * thread it opened on itself). The drained turn must inherit that:
      * a queue is a delay, not a person sitting down at the keyboard. */
@@ -87,7 +87,7 @@ const changed = () => {
 
 /** Public pending chips only: never expose provider prompts or reply context. */
 export function queuedSteerSnapshot(ownsThread: (botId: string, threadId: string) => boolean):
-  Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>> {
+  Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>> {
   return Object.fromEntries([...queues]
     .filter(([threadId, entry]) => ownsThread(entry.botId, threadId))
     .map(([threadId, entry]) => [threadId, entry.items.map((item) => ({
@@ -110,7 +110,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: "capacity"; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; sender?: ResolvedSender; trigger?: UsageTrigger } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -136,14 +136,15 @@ export function queueSteeredMessage(
   return { id };
 }
 
-/** Where a thread stands among this bot's threads waiting for a free slot:
+/** Where a thread stands among this bot's threads waiting for the bot to
+ * become available (a full slot list or an active room turn):
  * 1 for the next to start. The drain visits queues in insertion order, so
  * insertion order is the line. Null when nothing of this bot's is waiting
  * on that thread. */
 export function queuedThreadPosition(botId: string, threadId: string): number | null {
   let position = 0;
   for (const [candidate, entry] of queues) {
-    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity")) continue;
+    if (entry.botId !== botId || !entry.items.some((item) => item.reason === "capacity" || item.reason === "group-turn")) continue;
     position += 1;
     if (candidate === threadId) return position;
   }
@@ -244,7 +245,7 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string; reason?: "capacity" } | null {
+): { id: string; text: string; replyToId?: string; reason?: SteerQueueReason } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);

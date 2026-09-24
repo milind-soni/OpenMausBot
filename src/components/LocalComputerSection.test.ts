@@ -75,7 +75,7 @@ describe("computer inventory request wiring", () => {
     expect(request).toBeNull();
     expect(confirm).toHaveBeenCalledOnce();
     expect(confirm).toHaveBeenCalledWith(
-      "Delete Research's Local VM? Its durable workspace files will remain.",
+      "Delete Research's Local VM? Files in its durable folder will remain.",
     );
   });
 

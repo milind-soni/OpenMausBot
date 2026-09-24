@@ -74,7 +74,7 @@ export function managedPortalOrigin(value) {
   const url = new URL(value);
   if (url.username || url.password || url.search || url.hash || url.pathname !== "/" ||
       !(url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)))) {
-    throw new Error("Enter the exact HTTPS address of your organisation's Admin portal.");
+    throw new Error("Enter the exact HTTPS address of your organization's Admin portal.");
   }
   return url.origin;
 }
@@ -84,7 +84,7 @@ export function managedPortalOrigin(value) {
 export function createManagedDesktopStore({ file, encryption }) {
   let tail = Promise.resolve();
   const available = async () => {
-    if (!(await encryption.available())) throw new Error("Unlock your system keychain before connecting an organisation.");
+    if (!(await encryption.available())) throw new Error("Unlock your system keychain before connecting an organization.");
   };
   return {
     async read() {
@@ -398,7 +398,7 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     },
     async begin(input) {
       if (clearing) throw new Error("Wait for company sign-out to finish before starting another sign-in.");
-      if (closed || grant || issuedGrant || cleanupNeeded) throw new Error("Disconnect your current organisation before connecting another.");
+      if (closed || grant || issuedGrant || cleanupNeeded) throw new Error("Disconnect your current organization before connecting another.");
       const portalOrigin = managedPortalOrigin(input?.portalOrigin);
       if (!safeText(deviceName, 100) || !["darwin", "win32", "linux"].includes(platform)) throw new Error("This desktop platform is not supported.");
       const stamp = reset();
@@ -447,12 +447,12 @@ export function createManagedDesktopClient({ store, applyConnection, applyPolicy
     /** Fixed first-party backup API only; this function stays in Electron main. */
     async requestBackup(route, options = {}) {
       if (!/^\/api\/desktop\/backups(?:\/[a-f0-9-]{36}(?:\/(?:complete|abort|download|parts\/[0-9]+))?)?$/.test(route)) throw new Error("Unsupported company backup operation.");
-      if (options.generation !== undefined && options.generation !== generation) throw new Error("Your organisation connection changed during the backup.");
-      if (!grant || !connection || grant.expiresAt <= now()) throw new Error("Reconnect your organisation before using company backups.");
+      if (options.generation !== undefined && options.generation !== generation) throw new Error("Your organization connection changed during the backup.");
+      if (!grant || !connection || grant.expiresAt <= now()) throw new Error("Reconnect your organization before using company backups.");
       const stamp = generation, enrolled = grant;
       const result = await request(enrolled.portalOrigin, route, { method: options.method ?? "GET", body: options.body, token: enrolled.token,
         signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal });
-      if (!current(stamp) || grant !== enrolled || enrolled.expiresAt <= now()) throw new Error("Your organisation connection changed during the backup.");
+      if (!current(stamp) || grant !== enrolled || enrolled.expiresAt <= now()) throw new Error("Your organization connection changed during the backup.");
       return result;
     },
     close() { closed = true; reset(); },

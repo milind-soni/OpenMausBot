@@ -30,8 +30,8 @@ export function buildApplicationMenu({ environments, activeId, onSwitch, onAddFr
         click: () => onSwitch(e.id),
       })),
       { type: "separator" },
-      { id: "organization-sign-in", label: "Sign in with organisation…", click: onOrganizationSignIn },
-      { label: "Connect hosted workspace…", click: onConnect },
+      { id: "organization-sign-in", label: "Sign in with your organization…", click: onOrganizationSignIn },
+      { label: "Connect to a server…", click: onConnect },
       { label: "Add Server from Copied Pairing Link…", click: () => onAddFromClipboard() },
       {
         label: active ? `Forget “${active.name}”` : "Forget Server",

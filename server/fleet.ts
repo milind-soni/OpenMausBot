@@ -325,7 +325,7 @@ export function initPlan(input: { domain: string; node: string; script: string; 
     ...(input.operator ? [{ kind: "run" as const, argv: ["systemctl", "enable", "--now", "openmausbot-fleet.service"], why: `start the fleet agent for ${input.operator}` }] : []),
     { kind: "run", argv: ["systemctl", "reload", "caddy"], why: "start serving the workspaces folder" },
     { kind: "note", text: `point *.${registry.domain} at this server (a wildcard A/AAAA record); each workspace gets its own certificate when created` },
-    ...(input.operator ? [{ kind: "note" as const, text: `the workspace running as ${input.operator} can now manage workspaces from Settings → Workspaces` }] : []),
+    ...(input.operator ? [{ kind: "note" as const, text: `the installation running as ${input.operator} can now manage installations from Settings → Installations` }] : []),
   ];
   return { steps, registry };
 }

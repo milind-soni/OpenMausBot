@@ -135,6 +135,11 @@ export interface WireTask {
   /** Epoch ms of the newest message, or createdAt when the thread has none.
    * Server-derived. Clients must not write it. */
   updatedAt?: number;
+  /** When the person snoozed this thread. 0 means "until new activity" and
+   * the store clears it the moment the thread wakes; a future epoch ms means
+   * "until then" and reads treat an expired value as absent, so no timer or
+   * migration is ever needed. Absent = not snoozed. */
+  snoozedUntil?: number;
   /** Defaults are copied when a task is created. */
   modelSelection?: ModelSelection;
   approvalMode?: ApprovalMode;
@@ -177,13 +182,41 @@ export interface InstalledPlaybook {
 }
 
 /** Listing provenance and connector intent retained for package details
- * and future re-export. It never means the apps are authorized. */
+ * and future re-export. It never means the apps are authorized. Every field
+ * after requiredApps is additive and optional: older records have none. */
 export interface InstalledPackageMetadata {
   id: string;
   name: string;
   release: string;
   requiredApps: Array<{ slug: string; label: string; reason: string; optional?: boolean }>;
+  /** Where it came from; absent on older records means "file". */
+  source?: "file" | "org";
+  /** file: a random id per import; org: derived from the organization and package. */
+  installId?: string;
+  /** This bot's key in the package, so a re-export keeps its identity. */
+  agentKey?: string;
+  /** Set when the bot was created from a package preset. */
+  presetKey?: string;
+  /** What the package suggested. Never applied: imported bots start on Ask. */
+  suggestedApproval?: "ask" | "auto";
+  /** org only */
+  publisher?: { organizationId: string; slug: string; name: string };
+  /** org only: "<publisher slug>/<package id>" */
+  ref?: string;
+  /** org only: the release bytes that were applied */
+  sha256?: string;
 }
+
+/** One service's connector tool grant: `"*"` widens to every tool on the
+ * service, an explicit list names exact tools. */
+export interface ConnectorToolGrant {
+  tools: "*" | string[];
+}
+
+/** Lowercased Composio service slug, e.g. `gmail`. */
+export const CONNECTOR_SLUG_PATTERN = /^[a-z0-9][a-z0-9_-]{0,80}$/;
+/** Composio tool names are upper-snake, e.g. `GMAIL_SEND_EMAIL`. */
+export const CONNECTOR_TOOL_NAME_PATTERN = /^[A-Z][A-Z0-9_]{0,127}$/;
 
 /** A bot as a client may see it. Wire form: no provider session
  * bookkeeping (resumeCursors), no elevation journal (approvalGrant), no
@@ -259,6 +292,11 @@ export interface WireBot {
   peers?: string[];
   /** Whether this bot may use the workspace's connected apps. */
   composio?: boolean;
+  /** Which connected-app tools this bot may call, by service slug. Absent
+   * defers to the legacy `composio` boolean above (unset/true = every tool,
+   * false = none); an explicit `{}` grants no tools. Grants never travel in
+   * shareable exports and imported bots always land with none. */
+  connectorTools?: Record<string, ConnectorToolGrant>;
   /** Whether this bot gets the app's built-in browser. */
   browser?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
@@ -321,7 +359,10 @@ export interface WireMessage {
   };
   /** Durable provider output stored by the harness; renderers receive only
    * the allowlisted /api/attachments URL. */
-  attachments?: Array<{ kind: "image"; path: string; mime: string }>;
+  attachments?: Array<
+    | { kind: "image"; path: string; mime: string }
+    | { kind: "audio"; path: string; mime: string; durationMs?: number }
+  >;
   card?: OptionCardData;
   connector?: ConnectorCardData;
   secret?: SecretRequestCardData;
@@ -537,9 +578,13 @@ export interface WireGroup {
 // the app consumes, payload typed by the shape that actually goes over the
 // wire. Transport-owned frames (hello, ping) stay in src/lib/live-events.
 
+/** Why a steer-queue entry waits: a shared thread slot, or the bot's room
+ * turn (which runs one at a time per bot). */
+export type SteerQueueReason = "capacity" | "group-turn";
+
 /** Pending steer-queue chips, as `queuedSteerSnapshot` emits them and the
  * `bot.queued` frame carries them: threadId → queued items. */
-export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: "capacity" }>>;
+export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>>;
 
 export type ServerFrame =
   | { kind: "sections"; sections: string[] }

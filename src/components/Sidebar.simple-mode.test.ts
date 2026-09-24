@@ -145,17 +145,36 @@ describe("bot-first sidebar", () => {
     expect(disabled).toContain("Move to team");
   });
 
+  it("reveals a matching sole thread when searching a bot", () => {
+    const single = { ...bot, projects: [], tasks: [bot.tasks![0]], unread: false };
+    const markup = renderToStaticMarkup(createElement(BotListItem, {
+      bot: single, density: "comfortable", query: "last selected", onMenu: vi.fn(),
+    }));
+    expect(markup).toContain('data-sidebar-thread-row="last-selected"');
+  });
+
   it("does not change group collaboration histories or creation", () => {
     fixture.showThreads = false;
     const group: Group = {
       id: "group", name: "Planning", threadId: "group-thread", memberIds: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 0, messages: [],
-      tasks: [{ threadId: "group-thread", title: "Group conversation", createdAt: 1 }],
+      tasks: [{ threadId: "group-thread", title: "Group conversation", createdAt: 1 }, { threadId: "group-earlier", title: "Earlier planning", createdAt: 0 }],
     };
     fixture.state.selectedId = group.id;
     const markup = renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }));
     expect(markup).toContain('data-sidebar-thread-row="group-thread"');
-    expect(markup).toContain("New thread");
+    // New thread is an icon on the room row, disabled while the room works
+    expect(markup).toContain('aria-label="New thread"');
     expect(markup).toContain('aria-label="Collapse Planning threads"');
+    const working = renderToStaticMarkup(createElement(GroupListItem, { group: { ...group, working: true }, density: "comfortable", onMenu: vi.fn() }));
+    expect(working).toMatch(/<button type="button" disabled="" aria-label="New thread"/);
+    // a room with one thread is that thread: no disclosure, no duplicate row
+    const single = renderToStaticMarkup(createElement(GroupListItem, { group: { ...group, tasks: [group.tasks![0]] }, density: "comfortable", onMenu: vi.fn() }));
+    expect(single).not.toContain("Planning threads");
+    expect(single).not.toContain('data-sidebar-thread-row=');
+    const searched = renderToStaticMarkup(createElement(GroupListItem, {
+      group: { ...group, tasks: [group.tasks![0]] }, density: "comfortable", query: "conversation", onMenu: vi.fn(),
+    }));
+    expect(searched).toContain('data-sidebar-thread-row="group-thread"');
   });
 });
 

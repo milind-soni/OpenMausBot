@@ -58,6 +58,15 @@ describe("usage ledger files", () => {
     expect(rows[1]).not.toHaveProperty("costSource");
   });
 
+  it("carries the prompt byte split when present and drops malformed values", async () => {
+    appendUsage(dataDir, row({ at: "2026-09-03T10:00:00.000Z", promptBytes: { stable: 21_396, volatile: 8_102 } }));
+    appendUsage(dataDir, row({ at: "2026-09-03T11:00:00.000Z", promptBytes: { stable: -4, volatile: "big" } as unknown as { stable: number; volatile: number } }));
+    await flushUsageLedger(dataDir);
+    const rows = readUsage(dataDir, { from: new Date("2026-09-01T00:00:00Z"), to: new Date("2026-09-30T23:59:59Z") });
+    expect(rows[0]!.promptBytes).toEqual({ stable: 21_396, volatile: 8_102 });
+    expect(rows[1]).not.toHaveProperty("promptBytes");
+  });
+
   it("stores an estimate as such, and drops a label that has no cost behind it", async () => {
     appendUsage(dataDir, row({ at: "2026-09-03T10:00:00.000Z", costUsd: 0.25, costSource: "estimated" }));
     appendUsage(dataDir, row({ at: "2026-09-03T11:00:00.000Z", costUsd: null, costSource: "estimated" }));

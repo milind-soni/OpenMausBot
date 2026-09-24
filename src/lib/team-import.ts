@@ -1,5 +1,6 @@
 import { parse as parseYaml } from "yaml";
 import { parseTeamBackup, TEAM_BACKUP_CONTENTS } from "../../shared/team-backup";
+import { NEWER_PACKAGE_MESSAGE, PACKAGE_VERSION, parsePackageDocument, type PackageDocument } from "../../shared/package-format";
 
 export interface PendingTeamImport {
   manifest: unknown;
@@ -16,6 +17,22 @@ export interface PendingTeamImport {
   conversations?: number;
   archivedBots?: number;
   warnings?: string[];
+  /** Package version (packages only). v2 adds everything below. */
+  version?: number;
+  /** The team the import creates (numbered if the name is taken). */
+  teamName?: string;
+  /** The team's shared instructions. */
+  brief?: string;
+  /** Per member, a data URL for the bot's picture, or null. */
+  pictures?: Array<string | null>;
+  /** Skills offered by the package but not added to any bot. */
+  offeredSkills?: string[];
+  /** Connection slots: address and the number of values to fill in. */
+  connections?: Array<{ label: string; url: string; values: number }>;
+  /** Starter note files across all bots. */
+  notes?: number;
+  /** Preset bot names (not added by this version). */
+  presets?: string[];
 }
 
 /** Small client-side preview only; the server remains the trust boundary. */
@@ -90,7 +107,43 @@ function markdownPackage(markdown: string): unknown {
   return { format: "openmaus.package", version: 1, package: pkg };
 }
 
+/** A v2 file is read with the same parser the server imports with, so the
+ * preview already names any problem in the file's own words. */
+function sharedTeamPreview(document: PackageDocument, manifest: unknown): PendingTeamImport {
+  const pkg = document.package;
+  if (!pkg.agents.length) throw new Error("This package has no bots. Add it from your organization's shelf, or update OpenMausBot.");
+  const referenced = new Set(pkg.agents.flatMap((agent) => agent.skills ?? []));
+  const leader = pkg.team?.leader ? pkg.agents.find((agent) => agent.key === pkg.team?.leader)?.name : undefined;
+  return {
+    manifest,
+    kind: "package",
+    version: 2,
+    name: pkg.name,
+    teamName: pkg.team?.name ?? pkg.name,
+    description: pkg.summary,
+    members: pkg.agents.map((agent) => ({ name: agent.name, title: agent.title ?? "" })),
+    ...(leader ? { chiefOfStaff: leader } : {}),
+    ...(pkg.team?.brief?.trim() ? { brief: pkg.team.brief } : {}),
+    pictures: pkg.agents.map((agent) => agent.appearance.avatar
+      ? `data:${agent.appearance.avatar.mime};base64,${agent.appearance.avatar.data}`
+      : null),
+    rooms: pkg.rooms?.length ?? 0,
+    playbooks: pkg.playbooks?.length ?? 0,
+    routines: pkg.routines?.length ?? 0,
+    apps: pkg.requirements.apps.map((app) => ({ label: app.label, optional: app.optional === true })),
+    skills: (pkg.skills?.entries ?? []).filter((skill) => referenced.has(skill.name)).map((skill) => skill.name),
+    offeredSkills: (pkg.skills?.entries ?? []).filter((skill) => !referenced.has(skill.name)).map((skill) => skill.name),
+    connections: (pkg.connections ?? []).map((connection) => ({
+      label: connection.label, url: connection.mcp.url, values: connection.mcp.valueNames.length,
+    })),
+    notes: pkg.agents.reduce((total, agent) => total + Object.keys(agent.seed?.memory ?? {}).length, 0),
+    presets: (pkg.presets ?? []).map((preset) => preset.name),
+  };
+}
+
 function packagePreview(root: Record<string, unknown>, manifest: unknown): PendingTeamImport {
+  if (typeof root.version === "number" && root.version > PACKAGE_VERSION) throw new Error(NEWER_PACKAGE_MESSAGE);
+  if (root.version === PACKAGE_VERSION) return sharedTeamPreview(parsePackageDocument(manifest), manifest);
   if (root.version !== 1) throw new Error(`BotMRR playbook version ${String(root.version)} is not supported.`);
   if (!root.package || typeof root.package !== "object" || Array.isArray(root.package)) {
     throw new Error("This playbook is missing its team definition.");
@@ -127,6 +180,7 @@ function packagePreview(root: Record<string, unknown>, manifest: unknown): Pendi
   return {
     manifest,
     kind: "package",
+    version: 1,
     name: pkg.name.trim(),
     description: typeof pkg.summary === "string" ? pkg.summary.trim() : "",
     members,

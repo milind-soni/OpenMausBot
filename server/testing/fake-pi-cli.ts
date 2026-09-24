@@ -5,7 +5,8 @@
 // / set_model, and streams a scripted turn in response to `prompt`. Failure
 // modes mirror how the real CLI misbehaves:
 //
-//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | turn-error | no-models | exit-early
+//   FAKE_PI_MODE   happy (default) | tooluse | permission | interleave | question-select | question-input
+//                  | turn-error | no-models | exit-early
 //   FAKE_PI_MODELS comma-separated provider/model pairs (default "ollama-cloud/glm-5.2,openai/gpt-4o")
 //   FAKE_PI_DUMP   path to append {argv, env} JSON, so a test can assert argv shape
 //                  and env hygiene (no leaked secrets into the pi child).
@@ -124,6 +125,25 @@ const streamPermissionTurn = () => {
   // wait for the answer before finishing
 };
 
+// question-select: a select ask that is genuinely a question — named
+// options the driver must surface as choices + a structured question.
+const streamQuestionSelectTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "extension_ui_request", id: "ask-select", method: "select", title: "Which color?",
+    options: process.env.FAKE_PI_QUESTION_OPTIONS ? JSON.parse(process.env.FAKE_PI_QUESTION_OPTIONS) : ["Blue", "Green"] });
+  // wait for the answer before finishing
+};
+
+// question-input: a free-text ask — no options, the typed answer returns
+// verbatim.
+const streamQuestionInputTurn = () => {
+  send({ type: "agent_start" });
+  send({ type: "turn_start" });
+  send({ type: "extension_ui_request", id: "ask-input", method: "input", title: "Which city?" });
+  // wait for the answer before finishing
+};
+
 /** Scripted text → tool → text → tool → text turn for order-contract tests. */
 const streamInterleaveTurn = () => {
   send({ type: "agent_start" });
@@ -178,11 +198,19 @@ function handle(cmd: any) {
       });
       return;
     case "new_session":
+      if (mode === "session-error") {
+        send({ type: "response", command: "new_session", success: false, error: "fake pi: session unavailable" });
+        return;
+      }
       sessionCounter += 1;
       currentSessionFile = `/fake/pi-session-${sessionCounter}.json`;
       send({ type: "response", command: "new_session", success: true, data: { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile } });
       return;
     case "switch_session":
+      if (mode === "session-error") {
+        send({ type: "response", command: "switch_session", success: false, error: "fake pi: session unavailable" });
+        return;
+      }
       currentSessionFile = cmd.sessionPath ?? currentSessionFile;
       send({ type: "response", command: "switch_session", success: true, data: { sessionId: "s-resumed", sessionFile: currentSessionFile } });
       return;
@@ -223,12 +251,22 @@ function handle(cmd: any) {
       send({ type: "response", command: "prompt", success: true });
       if (mode === "tooluse") streamToolTurn();
       else if (mode === "permission") streamPermissionTurn();
+      else if (mode === "question-select") streamQuestionSelectTurn();
+      else if (mode === "question-input") streamQuestionInputTurn();
       else if (mode === "interleave") streamInterleaveTurn();
       else if (mode === "turn-error") streamErrorTurn();
       else streamTurn();
       return;
     case "extension_ui_response":
+      if (process.env.FAKE_PI_DUMP) {
+        try {
+          appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ uiResponse: cmd }) + "\n");
+        } catch {
+          /* never let dumping break a run */
+        }
+      }
       if (cmd.id === "ask-1") finishPermissionTurn();
+      else if (cmd.id === "ask-select" || cmd.id === "ask-input") finishPermissionTurn();
       return;
     case "abort":
       send({ type: "turn_end", message: { stopReason: "cancelled", usage: { input: 0, output: 0 } }, usage: { input: 0, output: 0 } });

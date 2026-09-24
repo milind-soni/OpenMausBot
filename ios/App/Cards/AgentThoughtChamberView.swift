@@ -22,18 +22,15 @@ public struct AgentThoughtChamberView: View {
         self.isStreaming = isStreaming
     }
     
-    private var steps: [String] {
-        reasoning.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-    }
-    
     public var body: some View {
         let isDark = colorScheme == .dark
+        let window = ReasoningWindow(reasoning)
         
         VStack(alignment: .leading, spacing: 6) {
-            headerButton(isDark: isDark)
+            headerButton(isDark: isDark, total: window.total)
             
             if isExpanded {
-                expandedContent(isDark: isDark)
+                expandedContent(isDark: isDark, steps: window.steps)
             }
         }
         .padding(6)
@@ -60,7 +57,7 @@ public struct AgentThoughtChamberView: View {
     }
     
     @ViewBuilder
-    private func headerButton(isDark: Bool) -> some View {
+    private func headerButton(isDark: Bool, total: Int) -> some View {
         Button {
             withAnimation(.spring(response: 0.35, dampingFraction: 0.72)) {
                 isExpanded.toggle()
@@ -85,7 +82,7 @@ public struct AgentThoughtChamberView: View {
                 
                 Spacer()
                 
-                Text("\(steps.count) \(steps.count == 1 ? "step" : "steps")")
+                Text("\(total) \(total == 1 ? "step" : "steps")")
                     .font(.system(size: 9.5, weight: .medium, design: .monospaced))
                     .foregroundColor(isDark ? Color(hex: "#94A3B8") : Color(hex: "#64748B"))
                 
@@ -102,16 +99,26 @@ public struct AgentThoughtChamberView: View {
     }
     
     @ViewBuilder
-    private func expandedContent(isDark: Bool) -> some View {
+    private func expandedContent(isDark: Bool, steps: [ReasoningWindow.Step]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(steps.enumerated()), id: \.offset) { idx, step in
-                        stepRow(index: idx, step: step, isDark: isDark)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(steps) { step in
+                            stepRow(number: step.number, step: step.text, isDark: isDark)
+                        }
                     }
                 }
+                .frame(maxHeight: 160)
+                // While the bot thinks, the newest step is the news: start at
+                // the bottom and keep following as steps arrive, the way the
+                // reply bubble follows its own text.
+                .defaultScrollAnchor(.bottom)
+                .onChange(of: reasoning) { _, _ in
+                    guard isStreaming, let newest = steps.last else { return }
+                    withAnimation { proxy.scrollTo(newest.number, anchor: .bottom) }
+                }
             }
-            .frame(maxHeight: 160)
         }
         .padding(10)
         .background(isDark ? Color.black.opacity(0.35) : Color.white.opacity(0.85))
@@ -124,9 +131,9 @@ public struct AgentThoughtChamberView: View {
     }
     
     @ViewBuilder
-    private func stepRow(index: Int, step: String, isDark: Bool) -> some View {
+    private func stepRow(number: Int, step: String, isDark: Bool) -> some View {
         HStack(alignment: .top, spacing: 6) {
-            Text(String(index + 1) + ".")
+            Text(String(number) + ".")
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(mascotColor)
             

@@ -106,8 +106,7 @@ struct ChatListView: View {
             .overlay(alignment: .top) {
                 if CompanionLayout.supportsIslandPresentation {
                     NeedsYouIsland(
-                        update: session.state.updates.first { $0.kind == .needsYou },
-                        hasIsland: IslandGeometry.hasIsland(topInset: geo.safeAreaInsets.top)
+                        update: session.state.updates.first { $0.kind == .needsYou }
                     ) { chat in path.append(chat) }
                 }
             }

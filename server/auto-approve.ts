@@ -68,7 +68,7 @@ export function delegationInheritsFullAccess(input: {
 // the permission path in permission-proxy). Approving it there does not
 // produce an answer: the CLI runs the tool with none and the model is told
 // "The user did not answer the questions." — a question silently lost.
-const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user"]);
+const ASKS_A_PERSON = new Set(["askuserquestion", "ask_user", "omb-ask"]);
 
 /** Why a permission request landed where it did — the decision log's "which
  * rule". `full-access` is the one auto-approval; `native-approval` is a card

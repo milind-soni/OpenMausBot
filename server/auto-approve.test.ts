@@ -111,6 +111,7 @@ describe("tools that ask a person", () => {
     for (const mode of modes) {
       expect(autoVerdict(mode, "ask_user").approve, mode).toBeNull();
       expect(autoVerdict(mode, "mcp__ogb__ask_user").approve, mode).toBeNull();
+      expect(autoVerdict(mode, "omb-ask").approve, mode).toBeNull();
     }
   });
 

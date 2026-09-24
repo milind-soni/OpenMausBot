@@ -32,6 +32,8 @@ import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { decodeInjectId } from "../local-inject.ts";
+import { promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
+import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
 
 /**
@@ -60,6 +62,7 @@ import type {
 import { newEventId, newId } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
+import { parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
@@ -923,6 +926,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
           const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
           const summary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool).slice(0, 200);
+          // One structured question beside the flat choices: the richer card
+          // renders from it while older clients keep answering through
+          // `choices`. Built once here so the emit and the answer path can
+          // never disagree. parseAskQuestions enforces the shared caps.
+          const questionChoices = isQuestion
+            ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
+            : [];
+          const askQuestions = isQuestion && questionChoices.length
+            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices }] }) ?? undefined
+            : undefined;
           const requestId = newId();
           const finish = (
             behavior: string,
@@ -934,8 +947,15 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             clearTimeout(timer);
             const want = behavior === "allow" ? "allow" : "reject";
             const forSession = want === "allow" && always === true && !isQuestion && !current.controlsHost;
+            // A structured card replies in the Q:/A: block format; recover the
+            // picked label from it so exact-match keeps working. Flat clients
+            // send the bare label, which the single-question fallback inside
+            // questionAnswersByQuestion already returns unchanged.
+            const picked = askQuestions
+              ? questionAnswersByQuestion(message ?? "", askQuestions)[askQuestions[0]!.question] ?? message
+              : message;
             const named = isQuestion && behavior === "answer"
-              ? options.filter((option) => option.optionId === message || option.name?.trim() === message)
+              ? options.filter((option) => option.optionId === picked || parseChoices([option.name], 1)?.[0] === picked)
               : [];
             const optionId = behavior === "cancel"
               ? null
@@ -979,9 +999,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             requestType: isQuestion ? "question" : "permission",
             tool,
             summary,
-            choices: isQuestion
-              ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
-              : undefined,
+            choices: askQuestions?.[0]?.options.map(option => option.label) ?? (isQuestion ? questionChoices : undefined),
+            ...(askQuestions ? { questions: askQuestions } : {}),
             approvalScope: current.controlsHost ? "local-computer" : undefined,
             // the driver can honor a session-wide allow either way
             allowSession: !isQuestion && !current.controlsHost ? true : undefined,
@@ -1559,11 +1578,35 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw error;
             }
             emitSessionStarted();
+            // The stable/volatile split: the full prompt rides only the turn
+            // that establishes - or re-instructs, after a soul edit - this
+            // native session. Later turns go through bare unless the volatile
+            // half changed, so a memory edit neither appends a second copy of
+            // the prompt to the agent's session history nor re-prices the
+            // prefix its provider cached. Receipts are durable because the
+            // native session outlives this process; an un-split turn (a direct
+            // adapter call) keeps the legacy full-prompt shape.
+            const halves = promptHalves(turn);
+            let promptInput = promptTurn;
+            let pendingSplitReceipt: { key: string; receipt: PromptSplitReceipt } | null = null;
+            if (halves.stable !== null) {
+              const receiptKey = JSON.stringify([threadId, sessionId]);
+              const composed = splitSessionPrompt(
+                halves.stable,
+                halves.volatile,
+                readPromptSplitReceipt(DRIVER_KIND, receiptKey),
+                promptTurn.system,
+                promptTurn.text,
+                Boolean(turn.mentionTurn),
+              );
+              promptInput = { ...promptTurn, system: "", text: composed.text };
+              pendingSplitReceipt = { key: receiptKey, receipt: composed.receipt };
+            }
             const text = support.buildPromptText
-              ? support.buildPromptText(promptTurn)
-              : promptTurn.system
-                ? `${promptTurn.system}\n\n${promptTurn.text}`
-                : promptTurn.text;
+              ? support.buildPromptText(promptInput)
+              : promptInput.system
+                ? `${promptInput.system}\n\n${promptInput.text}`
+                : promptInput.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
               : [];
@@ -1583,7 +1626,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               promptIdleMs,
               `${DRIVER_KIND} went fully silent ${Math.round(promptIdleMs / 1000)} s after the message and the turn was stopped. ` +
                 "Raise OPENMAUS_ACP_PROMPT_IDLE_TIMEOUT_MS if this model legitimately takes longer to answer.",
-            );
+              );
+            if (pendingSplitReceipt) {
+              // session/prompt resolving is the acceptance boundary: a
+              // rejected prompt leaves the receipt unwritten, so the next
+              // turn redelivers what this one never received.
+              writePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key, pendingSplitReceipt.receipt);
+            }
             // opencode 1.18.18 reports usage at the result root; grok and
             // gemini put it under _meta. Read both rather than lose the count.
             const usage = result?.usage ?? result?._meta ?? {};

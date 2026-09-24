@@ -196,7 +196,7 @@ test("concurrent links share one confirmation and stale confirmations cannot cha
   assert.equal(entry.request(), first);
   h.state.environments = { ...h.state.environments, activeId: "local" };
   decide(true);
-  await assert.rejects(first, /workspace changed/);
+  await assert.rejects(first, /selected server changed/);
   assert.deepEqual(h.calls, []);
 });
 

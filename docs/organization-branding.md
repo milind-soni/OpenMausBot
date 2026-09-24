@@ -4,7 +4,7 @@ An organization administrator can upload a logo and up to 24 shared bot icons
 in Admin → Branding. Use PNG, JPEG or WebP, up to 5 MB per upload. Admin resizes
 the images before saving; the normalized collection is limited to 128 KiB.
 
-Members connect through Settings → Organisation as usual. The logo appears
+Members connect through Settings → Organization as usual. The logo appears
 in the sidebar and Organization settings. Shared icons appear in each bot's
 avatar customization alongside the normal upload and mascot options.
 

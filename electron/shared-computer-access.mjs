@@ -176,16 +176,16 @@ export async function executeSharedOperation(grant, operation, signal, cua) {
   signal.throwIfAborted();
   if (grant.enabled !== true) throw new Error("Computer sharing is off");
   if (operation.action === "run_command") {
-    if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this workspace");
+    if (grant.terminal !== true) throw new Error("Terminal access is not enabled for this server");
     return sharedCommand(operation.command, grant.folders[0]?.path ?? process.env.HOME ?? process.env.USERPROFILE, signal);
   }
   if (["computer_tools", "computer_call"].includes(operation.action)) {
-    if (grant.computer !== true) throw new Error("Computer control is not enabled for this workspace");
+    if (grant.computer !== true) throw new Error("Computer control is not enabled for this server");
     return (await cua()).call(operation, signal);
   }
   if (!["list_files", "read_file", "write_file"].includes(operation.action)) throw new Error("Unsupported shared-computer operation");
   const folder = grant.folders.find(entry => entry.id === operation.folder_id);
-  if (!folder) throw new Error("This folder has not been shared with this workspace");
+  if (!folder) throw new Error("This folder has not been shared with this server");
   const target = await sharedPath(folder, operation.path);
   const protectedRoots = await protectedIdentities(grant.protectedPaths);
   await assertOutsideProtected(protectedRoots, target);

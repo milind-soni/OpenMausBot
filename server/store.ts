@@ -30,9 +30,10 @@ import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-
 import type { HandedState } from "./delta-context.ts";
 import type {
   BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
-  OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
+  ConnectorToolGrant, OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
+import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "../shared/wire.ts";
 // Re-exported under their historical names so server-side importers keep working.
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
@@ -109,7 +110,7 @@ export function toWireTask(task: TaskRecord): WireTask {
 const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
-  "routineRunId", "surface", "surfaceSource", "appliedCompactionId", "contextFloor", "lastContextModel",
+  "routineRunId", "surface", "surfaceSource", "snoozedUntil", "appliedCompactionId", "contextFloor", "lastContextModel",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
@@ -381,6 +382,59 @@ export type BotWirePrivateKeys = "resumeCursors" | "tasks" | "avatarUrl" | "appr
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
 export const botWireProjectionIsExact: BotWireProjectionIsExact = true;
+
+/** Upper bounds keep a grants patch from becoming a persistence blob; they
+ * sit far above any real service's tool count. */
+export const CONNECTOR_SLUGS_MAX = 64;
+export const CONNECTOR_TOOLS_PER_SERVICE_MAX = 500;
+
+/** Validate and normalize a connectorTools value at the one boundary every
+ * writer shares (patchBot). Returns a canonical copy: slugs checked against
+ * the service pattern, tool lists deduplicated in order, `"*"` kept as-is.
+ * The legacy clear stays a JSON null at the API edge; here callers pass
+ * undefined to return a bot to boolean-only behavior. */
+export function parseConnectorTools(value: unknown): { ok: true; grants: Record<string, ConnectorToolGrant> } | { ok: false; error: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { ok: false, error: "connectorTools must be an object of service slugs to tool grants" };
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length > CONNECTOR_SLUGS_MAX) {
+    return { ok: false, error: `connectorTools may name at most ${CONNECTOR_SLUGS_MAX} services` };
+  }
+  const grants: Record<string, ConnectorToolGrant> = {};
+  for (const [slug, grant] of entries) {
+    if (!CONNECTOR_SLUG_PATTERN.test(slug)) {
+      return { ok: false, error: `connectorTools service slugs must be lowercase slugs (got "${slug}")` };
+    }
+    if (!grant || typeof grant !== "object" || Array.isArray(grant)) {
+      return { ok: false, error: `connectorTools.${slug} must be a grant like { tools: "*" } or { tools: ["TOOL_NAME"] }` };
+    }
+    const keys = Object.keys(grant);
+    if (keys.length !== 1 || keys[0] !== "tools") {
+      return { ok: false, error: `connectorTools.${slug} accepts only a tools field` };
+    }
+    const tools = (grant as { tools: unknown }).tools;
+    if (tools === "*") {
+      grants[slug] = { tools: "*" };
+      continue;
+    }
+    if (!Array.isArray(tools) || tools.length === 0) {
+      return { ok: false, error: `connectorTools.${slug}.tools must be "*" or a non-empty list of tool names (use {} to grant no tools)` };
+    }
+    if (tools.length > CONNECTOR_TOOLS_PER_SERVICE_MAX) {
+      return { ok: false, error: `connectorTools.${slug}.tools may list at most ${CONNECTOR_TOOLS_PER_SERVICE_MAX} tools` };
+    }
+    const names: string[] = [];
+    for (const tool of tools) {
+      if (typeof tool !== "string" || !CONNECTOR_TOOL_NAME_PATTERN.test(tool)) {
+        return { ok: false, error: `connectorTools.${slug}.tools names must be Composio tool names like GMAIL_SEND_EMAIL` };
+      }
+      if (!names.includes(tool)) names.push(tool);
+    }
+    grants[slug] = { tools: names };
+  }
+  return { ok: true, grants };
+}
 
 const BOTS_FILE = join(DATA_DIR, "bots.json");
 const GROUPS_FILE = join(DATA_DIR, "groups.json");
@@ -1500,8 +1554,10 @@ export class Store {
   }
 
   /** Fork the conversation: a new user message that replaces `sourceId`
-   * (same parent, new text) and becomes the active leaf. */
-  branchMessage(threadId: string, sourceId: string, text: string): Message | null {
+   * (same parent, new text) and becomes the active leaf. `sendId` is the
+   * client's identity for this edit, so its instant bubble reconciles onto
+   * the canonical message and a network retry cannot fork twice. */
+  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string): Message | null {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);
     if (!source) return null;
@@ -1513,6 +1569,7 @@ export class Store {
       text,
       parentId: source.parentId ?? null,
       replyToId: source.replyToId,
+      ...(sendId ? { sendId } : {}),
     };
     t.messages.push(full);
     t.activeLeafId = full.id;
@@ -1763,6 +1820,15 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
+    // Grants are the one field whose shape every writer must share, so the
+    // store normalizes them itself: API patches arrive pre-validated, import
+    // paths pass {}, and an internal caller that skips the parser still
+    // lands canonical data or stops here.
+    if (patch.connectorTools !== undefined) {
+      const parsed = parseConnectorTools(patch.connectorTools);
+      if (!parsed.ok) throw new Error(parsed.error);
+      patch = { ...patch, connectorTools: parsed.grants };
+    }
     // Runtime revocations must become effective in memory even when disk is
     // unavailable. Profile edits use the separate atomic path below.
     Object.assign(bot, patch);
@@ -1925,6 +1991,13 @@ export class Store {
     task.busy = busy;
     if (busy && !wasBusy) task.turnStartedAt = Date.now();
     else if (!busy) delete task.turnStartedAt;
+    // Reaching here means the thread just did something — exactly the
+    // "activity" an until-activity snooze waits for, including settling
+    // back to idle after a turn. Persist the wake like any task change.
+    if (task.snoozedUntil === 0) {
+      task.snoozedUntil = undefined;
+      this.saveBots();
+    }
     this.refreshBotActivity(bot);
     this.emit({ type: "bot", botId });
     return bot;
@@ -2242,6 +2315,11 @@ export class Store {
         Object.assign(task, { [key]: structuredClone(patch[key]) });
       }
     }
+    // "Until new activity" ends the moment the thread has something new for
+    // the person, and every unread wake funnels through patchTask — so this
+    // one hook is the whole activity alarm. A time-based snooze is left to
+    // its clock: attention overrides it on screen without clearing it.
+    if (task.snoozedUntil === 0 && patch.unread === true) task.snoozedUntil = undefined;
     if (typeof patch.title === "string") task.title = patch.title.trim().slice(0, 80) || UNTITLED_THREAD;
     if (Object.prototype.hasOwnProperty.call(patch, "pinned") && task.pinned !== true) delete task.pinned;
     if (bot.threadId === threadId) this.mirrorActiveTask(bot, task);

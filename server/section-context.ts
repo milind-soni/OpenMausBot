@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
+import { renamePublishedTeam } from "./published-teams.ts";
 
 export const SECTION_CONTEXT_MAX_BYTES = 24_000;
 export const SECTION_CONTEXTS_FILE = join(DATA_DIR, "section-contexts.json");
@@ -108,6 +109,14 @@ export function changeEmptySection(name: string, nextName: string | null): void 
   delete data.contexts[name];
   if (nextName !== null && context) data.contexts[nextName] = context;
   saveFile(data);
+  // Every team rename and removal funnels through here, so the team's
+  // published package id and keys follow it (published-teams.ts). The team
+  // itself is already renamed; a failure here costs only key stability.
+  try {
+    renamePublishedTeam(name, nextName);
+  } catch (error) {
+    console.warn(`[teams] Could not move the shared-package record for this team: ${(error as Error).message}`);
+  }
 }
 
 export function readSectionContext(section?: string | null): SectionContextRecord | null {
