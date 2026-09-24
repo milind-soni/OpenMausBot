@@ -9,6 +9,9 @@ function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
     externalRuntime: false,
     coordinating: false,
     sharedComputers: false,
+    teamRouting: false,
+    teamRouteEndpoint: "",
+    teamRouteToken: "",
     client: {
       api: async () => ({}),
       apiResponse: async () => ({ ok: true, status: 200, body: {} }),

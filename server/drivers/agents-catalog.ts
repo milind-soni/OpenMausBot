@@ -31,6 +31,8 @@ export interface CatalogProfile {
   voiceNotes: boolean;
   /** Written into start_thread's schema in a coordinating turn. */
   botId: string;
+  /** Optional Jack Control Plane Jev advisory; exposed only to the configured Chief. */
+  teamRouting: boolean;
 }
 
 /** The profile a spawned proxy was given. Everything is off unless the
@@ -45,6 +47,10 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     sharedComputers: env.OMB_SHARED_COMPUTERS_ENABLED === "1",
     voiceNotes: env.OMB_VOICE_NOTES === "1",
     botId: env.OMB_BOT_ID ?? "",
+    teamRouting: env.OMB_TEAM_ROUTE_ENABLED === "1" &&
+      Boolean(env.OMB_TEAM_ROUTE_ENDPOINT?.trim()) && Boolean(env.OMB_TEAM_ROUTE_TOKEN?.trim()) &&
+      env.OMB_IS_CHIEF_OF_STAFF === "1" && env.OMB_TURN_DEPTH === "0" &&
+      env.OMB_EXTERNAL_RUNTIME !== "1",
   };
 }
 
@@ -257,6 +263,42 @@ const toolDefinitions = (externalRuntime: boolean) => [
     description:
       "List the other bots (agents) you may contact in your own team and any additional teams the owner has explicitly allowed you to coordinate, with their team, model and current status. Call this to discover exact teammate IDs before assigning work or requesting advice through your available coordination tools.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "suggest_team_task_owner",
+    description:
+      "Ask Jev for an advisory match between a fixed task category and reachable OpenMausBot teammates. First call list_bots and use only its current ids. Supply no task text, customer data, conversation excerpts or secrets. The result never assigns work: show it to Jack and wait for Jack's explicit confirmation before using the normal OpenMausBot team-assignment tool.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        task_type: {
+          type: "string",
+          enum: ["engineering", "product_ux", "operations", "sales_marketing", "finance_owners", "booking_guests", "qa_audit", "coordination", "other"],
+          description: "One fixed category only; never put task details here.",
+        },
+        eligible_owners: {
+          type: "array",
+          minItems: 1,
+          maxItems: 12,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              id: { type: "string", minLength: 1, maxLength: 64, description: "Exact reachable teammate id from list_bots." },
+              role: {
+                type: "string",
+                enum: ["engineering", "product_ux", "operations", "sales_marketing", "finance_owners", "booking_guests", "qa_audit", "coordination", "other"],
+                description: "Closest fixed specialty for this teammate's listed role.",
+              },
+            },
+            required: ["id", "role"],
+          },
+          description: "Only reachable teammate ids and fixed role categories; no names, task text, or other fields.",
+        },
+      },
+      required: ["task_type", "eligible_owners"],
+    },
   },
   {
     name: "list_rooms",
@@ -816,6 +858,7 @@ const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
+const TEAM_ROUTE_TOOL_NAMES = new Set(["suggest_team_task_owner"]);
 
 /** The tools one turn is shown, exactly as tools/list serializes them. */
 export function availableTools(profile: CatalogProfile) {
@@ -832,10 +875,13 @@ export function availableTools(profile: CatalogProfile) {
   const VOICE_READY_TOOLS = profile.voiceNotes
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
+  const TEAM_ROUTE_READY_TOOLS = profile.teamRouting
+    ? VOICE_READY_TOOLS
+    : VOICE_READY_TOOLS.filter((tool) => !TEAM_ROUTE_TOOL_NAMES.has(tool.name));
   return profile.externalRuntime
     ? BOT_SCOPED_TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
     : profile.coordinating
-    ? VOICE_READY_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
+    ? TEAM_ROUTE_READY_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
       .map(tool => tool.name === "start_thread" ? {
         ...tool,
         description: "Open a separate job on yourself with its own history and run, without switching the person's selected conversation. Use only when the user requests independent jobs (for example one review per pull request). Give a short specific title and complete instructions; you can open at most five per turn. This is not a teammate handoff: use coordinate_bots for teammates and their automatic replies. Self-opened jobs cannot recursively open more jobs. If refused, do not retry; explain what remains.",
@@ -843,5 +889,5 @@ export function availableTools(profile: CatalogProfile) {
           bot_id: { type: "string", enum: [profile.botId], description: "Leave out, or use your own bot ID. For teammates use coordinate_bots." },
         } },
       } : tool)
-    : VOICE_READY_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
+    : TEAM_ROUTE_READY_TOOLS.filter(tool => !ROOM_ONLY_TOOLS.has(tool.name));
 }

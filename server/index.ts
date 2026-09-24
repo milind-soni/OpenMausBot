@@ -110,6 +110,7 @@ import {
 import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
+import { teamRouteSettingsForTurn } from "./team-route-config.ts";
 import { canAccessTeam, canReachPeer, coordinatorSupervises, livePeerRoster, livePeerRosterBlock, peerAllowed, peerName, peerRosterSystemPrompt, peerStatus, peerStatusWords, reachablePeers, resolveTeammate, roomPeerRosterSystemPrompt, roomRosterLine, PEER_ACCESS_HELP } from "./peer-roster.ts";
 import { openMausStatusSystemPrompt } from "./openmaus-status-capsule.ts";
 import {
@@ -1650,6 +1651,7 @@ function agentsIntegration(
   roomHandoffId?: string,
   roomCoordination = false,
   ownThreadCreation = false,
+  teamRoute?: { endpoint: string; token: string },
 ) {
   const token = mintInternalCapability({
     botId,
@@ -1677,6 +1679,12 @@ function agentsIntegration(
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      ...(teamRoute ? {
+        OMB_TEAM_ROUTE_ENABLED: "1",
+        OMB_TEAM_ROUTE_ENDPOINT: teamRoute.endpoint,
+        OMB_TEAM_ROUTE_TOKEN: teamRoute.token,
+        OMB_IS_CHIEF_OF_STAFF: "1",
+      } : {}),
       // The shared-computer tools are advertised only while the workspace
       // gate is on; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
@@ -8397,6 +8405,9 @@ async function startTurn(
       // resolution: a bot is never told about — or nudged toward — a peer
       // that ask_bot and delegate_bot would then refuse.
       const sectionPeers = reachablePeers(store.bots, bot);
+      const teamRoute = teamRouteSettingsForTurn(
+        agentsMounted && bot.chiefOfStaff === true && commsDepth === 0 && boundedCoordination && !opts?.coordination,
+      );
       if (agentsMounted) {
         // Only a direct human request can create separate self-owned jobs.
         // Coordinated children and self-opened jobs stay inside their scope;
@@ -8405,7 +8416,7 @@ async function startTurn(
           ? store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")
           : userMessage;
         const ownThreadCreation = boundedCoordination && !opts?.coordination && Boolean(origin && !origin.peerAsk);
-        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination, ownThreadCreation);
+        integrations.agents = agentsIntegration(bot.id, threadId, commsDepth, skillAuthoring, dispatchClaimId, opts?.coordination?.id, boundedCoordination, ownThreadCreation, teamRoute);
       }
       if (instance.adapter.capabilities.hooks === true && hooksEnabled()) {
         integrations.hooks = hooksIntegration(bot.id, threadId, dispatchClaimId);
@@ -8426,6 +8437,7 @@ async function startTurn(
             Boolean(integrations.agents),
             openMausStatusSystemPrompt(),
             boundedCoordination,
+            Boolean(teamRoute),
           )
         : integrations.agents && sectionPeers.length > 0
           // Ordinary bots could always CALL the peer tools; until now the
