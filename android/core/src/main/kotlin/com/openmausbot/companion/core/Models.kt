@@ -334,7 +334,22 @@ data class BotTask(
      * still checks the clock, because a live stream never refreshes one.
      */
     val snoozedUntil: Double? = null,
+    /** The computer's accounting for this thread; absent on older hosts. */
+    val usage: TaskUsage? = null,
 )
+
+@Serializable
+data class TaskUsage(
+    val input: Long,
+    val output: Long,
+    val cachedInput: Long? = null,
+    val costUsd: Double? = null,
+    val turns: Int = 0,
+    val context: TaskContextUsage? = null,
+)
+
+@Serializable
+data class TaskContextUsage(val tokens: Long, val window: Long? = null)
 
 /** The time the thread list sorts and stamps by. */
 val BotTask.listStamp: Double

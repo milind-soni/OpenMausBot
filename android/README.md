@@ -9,6 +9,10 @@ running OpenMausBot, then read and answer from the phone.
 - Two modules: `:core` (protocol, ported from `ios/Sources/CompanionCore`) and
   `:app` (Compose UI, Android platform)
 
+For a bot's current thread, open its thread picker to see token usage reported
+by the paired computer. Cached and uncached input are shown separately when
+the provider reports a cache split; cost and context appear only when known.
+
 ## Build and test
 
 Requires **JDK 17** and an Android SDK. Gradle arrives through the wrapper, so

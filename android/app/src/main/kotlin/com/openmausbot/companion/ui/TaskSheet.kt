@@ -218,6 +218,10 @@ fun TaskSheet(
                     color = secondaryTint,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                 )
+                if (current is Chat.BotChat) {
+                    current.bot.tasks?.firstOrNull { it.threadId == current.threadId }
+                        ?.usage?.let { TaskUsagePanel(it) }
+                }
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                 }
