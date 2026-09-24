@@ -29,7 +29,7 @@ export function diagnosticHeaders(headers: Headers): Record<string, string> {
   return out;
 }
 function shallowEnough(value: unknown, depth = 0): unknown {
-  if (depth > 10) return "[nested content omitted]";
+  if (depth > 32) return "[nested content omitted]";
   if (Array.isArray(value)) return value.map(item => shallowEnough(item, depth + 1));
   if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shallowEnough(v, depth + 1)]));
   return value;
