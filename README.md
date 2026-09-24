@@ -281,8 +281,9 @@ file only your user account can read), and the harness server only listens on `1
 only accepts requests from the app itself. Set `GBS_HOST` if you really do want it reachable
 from your network.
 
-Release builds send no analytics. A build made with `VITE_POSTHOG_TOKEN` set sends anonymous
-usage events and clicks to that PostHog project. It never records typed text.
+Release builds send no analytics. In a build made with `VITE_POSTHOG_TOKEN` set, you can enable
+Usage Analytics in Settings → System & Updates. It is off by default. When enabled, it sends
+anonymous usage events and clicks to that PostHog project. It never records typed text or your email.
 
 ## License
 

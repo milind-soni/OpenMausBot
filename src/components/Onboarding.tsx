@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, AlertTriangle, Loader2, Mic } from "lucide-react";
 import { MausAvatar } from "./Avatar";
-import { identifyEmail, setEmailGateDone, track } from "@/lib/analytics";
+import { setEmailGateDone, track } from "@/lib/analytics";
 
 // Three-step first-run onboarding: who you are (email), what's installed
 // (live engine checks from the harness), what the app may use (TCC).
@@ -57,9 +57,7 @@ export function Onboarding({ onDone }: { onDone: () => void }) {
 
   const saveProfile = (_mode: "auth" | "local" = "local") => {
     setIsSubmitting(true);
-    if (validEmail) {
-      identifyEmail(email.trim().toLowerCase());
-    }
+    track("profile_saved", { hasEmail: validEmail });
     setEmailGateDone("submitted");
     const cleanName = sanitizedLocalName || (validEmail ? email.trim().split("@")[0]! : "User");
     void fetch("/api/config", {

@@ -29,6 +29,7 @@ import { cn } from "@/lib/cn";
 import { InitialsAvatar } from "./Avatar";
 import { ApiKeyRow } from "./ApiKeys";
 import { useUpdaterState } from "@/lib/updater";
+import { analyticsEnabled, setUsageAnalyticsEnabled, usageAnalyticsEnabled } from "@/lib/analytics";
 
 export type SettingsTab = "profile" | "connections" | "models" | "system";
 
@@ -137,7 +138,7 @@ function ProfileSection() {
           <div>
             <h3 className="text-[14px] font-medium text-ink">Local Privacy</h3>
             <p className="mt-1 text-[13px] leading-relaxed text-ink-secondary">
-              Gerer Build Studio stores all your profiles, bot threads, and configurations locally on your machine. Your personal identity is never uploaded to telemetry trackers or external registries.
+              Gerer Build Studio stores your profiles, bot threads, and configurations locally. Usage analytics is off until you enable it in System settings.
             </p>
           </div>
         </div>
@@ -537,6 +538,7 @@ function SystemSection() {
   const { state, dispatch } = useStore();
   const updaterState = useUpdaterState();
   const updater = window.gbs?.updater;
+  const [usageAnalytics, setUsageAnalytics] = useState(usageAnalyticsEnabled);
 
   const autoHandoffs = state.config?.autoHandoffs ?? true;
   const [togglingAutoHandoffs, setTogglingAutoHandoffs] = useState(false);
@@ -577,6 +579,39 @@ function SystemSection() {
 
   return (
     <div className="space-y-6">
+      <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-[16px] font-semibold text-ink">Usage Analytics</h2>
+            <p className="mt-1 text-[13px] text-ink-secondary">
+              {analyticsEnabled
+                ? "Share usage events to help improve Gerer Build Studio. Off by default; you can change this anytime."
+                : "Unavailable in this build because no analytics project is configured."}
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-label="Usage Analytics"
+            aria-checked={usageAnalytics}
+            disabled={!analyticsEnabled}
+            onClick={() => {
+              const next = !usageAnalytics;
+              if (setUsageAnalyticsEnabled(next)) setUsageAnalytics(next);
+            }}
+            className={cn(
+              "relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              usageAnalytics ? "bg-accent" : "bg-raised"
+            )}
+          >
+            <span className={cn(
+              "absolute top-1 size-4 rounded-full bg-white transition-transform",
+              usageAnalytics ? "translate-x-5" : "translate-x-1"
+            )} />
+          </button>
+        </div>
+      </div>
+
       {/* Auto Handoffs Card */}
       <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
         <div className="flex items-center justify-between gap-4">

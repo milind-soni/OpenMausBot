@@ -48,4 +48,4 @@ Once a Developer ID certificate is installed:
 
 ## Analytics
 
-Release builds send no analytics. To enable PostHog, build with `VITE_POSTHOG_TOKEN=phc_…` set to a project we own, and update the Privacy section of `README.md`.
+Release builds send no analytics. To offer opt-in PostHog analytics, build with `VITE_POSTHOG_TOKEN=phc_…` set to a project we own. Users must then enable Usage Analytics in Settings → System & Updates; consent defaults to off. Check the Privacy section of `README.md` before release.
