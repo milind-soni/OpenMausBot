@@ -18,6 +18,7 @@ import { augmentedPath } from "../env-path.js";
 import { brokerSocketPath, execCli, killCliTree, spawnCli } from "../procs.js";
 import { newEventId, newId } from "../contracts.js";
 import { appendNative } from "./native.js";
+import { discoverClaudeModels } from "../model-discovery.js";
 const DRIVER_KIND = "claudeAgent";
 // model catalog ported from upstream packages/contracts/src/model.ts
 const MODELS = {
@@ -446,6 +447,7 @@ export const ClaudeDriver = {
             displayName: input.displayName,
             enabled: input.enabled,
             models: MODELS,
+            discoverModels: () => discoverClaudeModels(config.cli),
             snapshot,
             adapter: {
                 provider: DRIVER_KIND,

@@ -18,8 +18,12 @@ import { EventBus } from "./harness/bus.js";
 import { ProviderRegistry } from "./harness/registry.js";
 import { automaticHandoffBots, mentionedBots, Store } from "./store.js";
 import { readRegisteredProjects, resolveProjectContext } from "./projects.js";
+import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.js";
 import { resolveTaskContext, TaskConflictError, TaskStore, } from "./tasks.js";
 const PORT = Number(process.env.GBS_PORT || 8899);
+// Loopback only unless the operator explicitly opts into LAN exposure — the
+// API drives agents that edit files and run commands (see request-guard.ts).
+const HOST = process.env.GBS_HOST || "127.0.0.1";
 const STATIC_DIR = process.env.GBS_STATIC_DIR || null;
 const MIME = {
     ".html": "text/html",
@@ -101,11 +105,12 @@ function askBotAndWait(targetBotId, message, depth) {
 // default selection for new bots: first available instance, claude preferred
 async function defaultSelection() {
     const described = await registry.describe();
-    const available = described.filter((d) => d.snapshot.state === "available");
+    const available = described.filter((d) => d.snapshot.state === "available" && d.models.options.length > 0);
     const pick = available.find((d) => d.driverKind === "claudeAgent") ?? available[0] ?? described[0];
-    return { instanceId: pick?.instanceId ?? "claude", model: pick?.models.default || "claude-sonnet-5" };
+    const model = pick?.models.default || "default";
+    return { instanceId: pick?.instanceId ?? "claude", model, label: pick?.models.options.find((option) => option.id === model)?.label };
 }
-let bootSelection = { instanceId: "claude", model: "claude-sonnet-5" };
+let bootSelection = { instanceId: "claude", model: "default" };
 const store = new Store(() => bootSelection);
 const taskStore = new TaskStore(DATA_DIR);
 const trelloLinks = new TrelloLinkStore(DATA_DIR);
@@ -383,7 +388,43 @@ function formatAttachmentContext(attachments) {
     }
     return lines.join("\n");
 }
-// ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
+/** Connected apps and the bot's computer (cloud box or this machine) — shared
+ * by 1:1 and room turns so the two paths can't drift apart. */
+async function computerAndAppIntegrations(bot, driverKind) {
+    const integrations = {};
+    if (cfg.composio?.key)
+        integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
+    const wants = bot.computer; // 'cloud' | 'local' | 'off' | undefined(auto)
+    if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
+        let b = await box.findBox(cfg, bot.id).catch(() => null);
+        // the Computer driver runs ON the box — provision it on first use
+        if (!b && driverKind === "boxAgent") {
+            broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
+            await box.provisionBox(cfg, bot.id, bot.name);
+            b = await box.findBox(cfg, bot.id).catch(() => null);
+        }
+        if (b)
+            integrations.computer = { boxId: b.id, token: cfg.box.token };
+    }
+    // local computer (this Mac) via the Electron-hosted cua-driver: the
+    // Electron main process owns the daemon (TCC attribution) and writes
+    // its spawn contract to cua-connection.json; the harness only reads it
+    if (!integrations.computer && wants !== "off" && wants !== "cloud") {
+        const cua = readCuaConnection();
+        if (cua)
+            integrations.localComputer = cua;
+    }
+    return integrations;
+}
+function computerPromptHint(integrations, driverKind) {
+    if (integrations.computer && driverKind !== "boxAgent") {
+        return "You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps.";
+    }
+    if (integrations.localComputer) {
+        return "You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully.";
+    }
+    return "";
+}
 async function startTurn(botId, text, opts) {
     const bot = store.bot(botId);
     if (!bot)
@@ -394,6 +435,10 @@ async function startTurn(botId, text, opts) {
     const instance = registry.get(bot.modelSelection.instanceId);
     if (!instance) {
         throw Object.assign(new Error(`provider instance "${bot.modelSelection.instanceId}" is unavailable — pick another model in settings`), { status: 409 });
+    }
+    const currentCatalog = await registry.modelCatalog(bot.modelSelection.instanceId);
+    if (currentCatalog.status === "ready" && !currentCatalog.options.some((model) => model.id === bot.modelSelection.model)) {
+        throw Object.assign(new Error(`model "${bot.modelSelection.model}" is no longer available — choose a current model`), { status: 409 });
     }
     // an edit hands us its already-branched user message; a plain send appends
     let userMessage = opts?.userMessage;
@@ -449,29 +494,8 @@ async function startTurn(botId, text, opts) {
     broadcast({ kind: "bot", bot: store.bot(bot.id) });
     void (async () => {
         try {
-            const integrations = {};
-            if (cfg.composio?.key)
-                integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
-            const wants = bot.computer; // 'cloud' | 'local' | 'off' | undefined(auto)
-            if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
-                let b = await box.findBox(cfg, bot.id).catch(() => null);
-                // the Computer driver runs ON the box — provision it on first use
-                if (!b && instance.driverKind === "boxAgent") {
-                    broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-                    await box.provisionBox(cfg, bot.id, bot.name);
-                    b = await box.findBox(cfg, bot.id).catch(() => null);
-                }
-                if (b)
-                    integrations.computer = { boxId: b.id, token: cfg.box.token };
-            }
-            // local computer (this Mac) via the Electron-hosted cua-driver: the
-            // Electron main process owns the daemon (TCC attribution) and writes
-            // its spawn contract to cua-connection.json; the harness only reads it
-            if (!integrations.computer && wants !== "off" && wants !== "cloud") {
-                const cua = readCuaConnection();
-                if (cua)
-                    integrations.localComputer = cua;
-            }
+            const integrations = await computerAndAppIntegrations(bot, instance.driverKind);
+            const computerHint = computerPromptHint(integrations, instance.driverKind);
             // peer-agent comms: give a user-initiated turn the list_bots/ask_bot
             // tools. A comms-invoked turn (depth ≥ cap) gets none — hard recursion
             // stop, so the user's tokens can't be burned by a bot-to-bot loop.
@@ -502,11 +526,7 @@ async function startTurn(botId, text, opts) {
                     (projectContext.system ? `\n\n${projectContext.system}` : "") +
                     (taskContext.system ? `\n\n${taskContext.system}` : "") +
                     composioPrompt +
-                    (integrations.computer && instance.driverKind !== "boxAgent"
-                        ? " You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
-                        : integrations.localComputer
-                            ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
-                            : "") +
+                    (computerHint ? ` ${computerHint}` : "") +
                     (integrations.agents
                         ? ` You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
                         : "") +
@@ -625,6 +645,15 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
         broadcast({ kind: "message", threadId: group.threadId, message: failure });
         return;
     }
+    const groupCatalog = await registry.modelCatalog(bot.modelSelection.instanceId);
+    if (groupCatalog.status === "ready" && !groupCatalog.options.some((model) => model.id === bot.modelSelection.model)) {
+        const failure = store.appendMessage(group.threadId, {
+            role: "bot", kind: "activity", from: { botId: bot.id, name: bot.name, color: bot.color },
+            tool: { name: `error: ${bot.name}'s selected model was retired; choose another model`, ok: false },
+        });
+        broadcast({ kind: "message", threadId: group.threadId, message: failure });
+        return;
+    }
     startQueuedResponder(group.id, bot.id);
     groupSpeakers.set(group.threadId, { botId: bot.id, name: bot.name, color: bot.color });
     const roster = group.memberIds
@@ -636,25 +665,7 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
         .reverse()
         .find((message) => message.role === "user" && message.kind === "text");
     const latestUserText = latestUserMessage?.text ?? "";
-    const integrations = {};
-    if (cfg.composio?.key)
-        integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
-    const wants = bot.computer;
-    if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
-        let b = await box.findBox(cfg, bot.id).catch(() => null);
-        if (!b && instance.driverKind === "boxAgent") {
-            broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-            await box.provisionBox(cfg, bot.id, bot.name);
-            b = await box.findBox(cfg, bot.id).catch(() => null);
-        }
-        if (b)
-            integrations.computer = { boxId: b.id, token: cfg.box.token };
-    }
-    if (!integrations.computer && wants !== "off" && wants !== "cloud") {
-        const cua = readCuaConnection();
-        if (cua)
-            integrations.localComputer = cua;
-    }
+    const integrations = await computerAndAppIntegrations(bot, instance.driverKind);
     const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
     const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
     const taskContext = resolveTaskContext([latestUserText, group.bulletin, bot.description], taskStore.list());
@@ -668,11 +679,7 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
         projectContext.system,
         taskContext.system,
         composioPrompt.trim(),
-        integrations.computer && instance.driverKind !== "boxAgent"
-            ? "You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
-            : integrations.localComputer
-                ? "You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
-                : "",
+        computerPromptHint(integrations, instance.driverKind),
         `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     ]
         .filter(Boolean)
@@ -714,7 +721,7 @@ spoken = new Set(), epoch = groupQueueEpoch.get(groupId) ?? 0) {
             });
         }, GROUP_TURN_TIMEOUT_MS);
         instance.adapter
-            .sendTurn({ threadId: group.threadId, text, system, cwd: projectContext.cwd, integrations })
+            .sendTurn({ threadId: group.threadId, text, system, model: bot.modelSelection.model, cwd: projectContext.cwd, integrations })
             .catch((err) => {
             const failure = store.appendMessage(group.threadId, {
                 role: "bot",
@@ -936,25 +943,59 @@ async function reloadProviders() {
     bus.attach(registry.instances());
 }
 // ── HTTP plumbing ─────────────────────────────────────────────────────
+// Packaged UI only (Vite dev needs inline scripts for HMR). Scripts and API
+// traffic stay on this origin; images may be remote (app logos, favicons).
+const UI_SECURITY_HEADERS = {
+    "content-security-policy": [
+        "default-src 'self'",
+        "script-src 'self'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self' https://us.i.posthog.com https://us-assets.i.posthog.com",
+        "frame-src 'self' http: https:",
+        "object-src 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+    ].join("; "),
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+};
 function json(res, status, body) {
     const data = JSON.stringify(body);
     res.writeHead(status, { "content-type": "application/json" });
     res.end(data);
 }
+function httpError(status, message) {
+    return Object.assign(new Error(message), { status });
+}
 function readBody(req) {
     return new Promise((resolve, reject) => {
         let data = "";
+        let tooLarge = false;
         req.on("data", (c) => {
+            if (tooLarge)
+                return;
             data += c;
-            if (data.length > 1_000_000)
-                reject(new Error("body too large"));
+            if (data.length > 1_000_000) {
+                tooLarge = true;
+                reject(httpError(413, "body too large"));
+                // stop buffering; the 413 is written before the socket goes away
+                req.pause();
+            }
         });
         req.on("end", () => {
+            if (tooLarge)
+                return;
+            if (data && !isJsonContentType(req.headers))
+                return reject(httpError(415, "request body must be application/json"));
             try {
                 resolve(data ? JSON.parse(data) : {});
             }
             catch {
-                reject(new Error("invalid JSON body"));
+                reject(httpError(400, "invalid JSON body"));
             }
         });
         req.on("error", reject);
@@ -965,6 +1006,11 @@ const server = createServer(async (req, res) => {
     const path = url.pathname;
     const method = req.method ?? "GET";
     try {
+        if (path.startsWith("/api/")) {
+            const refused = rejectUntrustedRequest(req.headers, { allowAnyHost: !isLoopbackHostname(HOST) });
+            if (refused)
+                return json(res, 403, { error: refused });
+        }
         // ── internal peer-agent comms (localhost + shared token only) ──────
         // The agents-proxy (spawned inside a bot's agent process) calls these to
         // discover peers and hand a message to one. Not part of the public API.
@@ -1512,7 +1558,7 @@ const server = createServer(async (req, res) => {
         }
         // ── provider instances (model picker) ──
         if (method === "GET" && path === "/api/instances") {
-            return json(res, 200, { instances: await registry.describe() });
+            return json(res, 200, { instances: await registry.describe(url.searchParams.get("refresh") === "1") });
         }
         // ── per-instance auto-approve permission toggle (Settings → Models) ──
         m = path.match(/^\/api\/instances\/([\w-]+)$/);
@@ -1695,14 +1741,15 @@ const server = createServer(async (req, res) => {
             const file = join(STATIC_DIR, safe);
             try {
                 const data = readFileSync(file);
-                res.writeHead(200, { "content-type": MIME[extname(file)] ?? "application/octet-stream" });
+                const type = MIME[extname(file)] ?? "application/octet-stream";
+                res.writeHead(200, { "content-type": type, ...(type.startsWith("text/html") ? UI_SECURITY_HEADERS : {}) });
                 return res.end(data);
             }
             catch {
                 // SPA fallback
                 try {
                     const data = readFileSync(join(STATIC_DIR, "index.html"));
-                    res.writeHead(200, { "content-type": "text/html" });
+                    res.writeHead(200, { "content-type": "text/html", ...UI_SECURITY_HEADERS });
                     return res.end(data);
                 }
                 catch {
@@ -1720,7 +1767,6 @@ const server = createServer(async (req, res) => {
         });
     }
 });
-const HOST = process.env.GBS_HOST || process.env.HOST || "0.0.0.0";
 server.listen(PORT, HOST, () => {
     console.log(`gerer-build-studio server on http://${HOST}:${PORT}`);
 });

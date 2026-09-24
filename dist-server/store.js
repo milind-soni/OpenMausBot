@@ -2,7 +2,8 @@
 // thread→instance binding and per-instance resume cursors — upstream's
 // ProviderSessionDirectory, recipe step 6: persist the binding from day
 // one). messages-<threadId>.json holds the folded transcript.
-import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
+import { readJsonFile, writeJsonAtomic } from "./json-file.js";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { newId } from "./contracts.js";
@@ -62,18 +63,8 @@ export class Store {
     constructor(defaultSelection) {
         this.defaultSelection = defaultSelection;
         mkdirSync(DATA_DIR, { recursive: true });
-        try {
-            this.bots = JSON.parse(readFileSync(BOTS_FILE, "utf8"));
-        }
-        catch {
-            this.bots = [];
-        }
-        try {
-            this.groups = JSON.parse(readFileSync(GROUPS_FILE, "utf8"));
-        }
-        catch {
-            this.groups = [];
-        }
+        this.bots = readJsonFile(BOTS_FILE, []);
+        this.groups = readJsonFile(GROUPS_FILE, []);
         // busy never survives a restart — no turn does either
         for (const b of this.bots)
             b.busy = false;
@@ -84,10 +75,10 @@ export class Store {
         }
     }
     saveBots() {
-        writeFileSync(BOTS_FILE, JSON.stringify(this.bots, null, 2));
+        writeJsonAtomic(BOTS_FILE, this.bots);
     }
     saveGroups() {
-        writeFileSync(GROUPS_FILE, JSON.stringify(this.groups.map(({ busyBotId, queuedBotIds, ...g }) => g), null, 2));
+        writeJsonAtomic(GROUPS_FILE, this.groups.map(({ busyBotId, queuedBotIds, ...g }) => g));
     }
     // ── groups ────────────────────────────────────────────────────────────
     group(id) {
@@ -155,17 +146,12 @@ export class Store {
             return t;
         let messages = [];
         let activeLeafId = null;
-        try {
-            const raw = JSON.parse(readFileSync(messagesFile(threadId), "utf8"));
-            if (Array.isArray(raw))
-                messages = raw; // pre-branching flat file
-            else {
-                messages = raw.messages ?? [];
-                activeLeafId = raw.activeLeafId ?? null;
-            }
-        }
-        catch {
-            /* fresh thread */
+        const raw = readJsonFile(messagesFile(threadId), null);
+        if (Array.isArray(raw))
+            messages = raw; // pre-branching flat file
+        else if (raw) {
+            messages = raw.messages ?? [];
+            activeLeafId = raw.activeLeafId ?? null;
         }
         // legacy rows carry no parentId — chain them in array order
         let prev = null;
@@ -182,7 +168,7 @@ export class Store {
     }
     saveThread(threadId) {
         const t = this.thread(threadId);
-        writeFileSync(messagesFile(threadId), JSON.stringify({ activeLeafId: t.activeLeafId, messages: t.messages }, null, 2));
+        writeJsonAtomic(messagesFile(threadId), { activeLeafId: t.activeLeafId, messages: t.messages });
     }
     messagesFor(threadId) {
         return this.thread(threadId).messages;

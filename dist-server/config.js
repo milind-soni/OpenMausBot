@@ -3,7 +3,8 @@
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 // `instances.<id>` entries are hand-editable but also written by the app
 // itself (e.g. the Settings permission toggle), via saveConfig's per-id merge.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { readJsonFile, restrictToOwner, writeJsonAtomic } from "./json-file.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 // GBS_DATA_DIR isolates test/soak rigs from the user's real fleet. The dir
@@ -18,13 +19,11 @@ export function ensureDirs() {
         mkdirSync(dir, { recursive: true });
 }
 export function loadConfig() {
-    let cfg = {};
-    try {
-        cfg = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
-    }
-    catch {
-        /* first run — env fallbacks below */
-    }
+    const p = join(DATA_DIR, "config.json");
+    // holds API keys — older builds wrote it world-readable
+    restrictToOwner(p);
+    // first run (or a corrupt file, which is kept aside) — env fallbacks below
+    const cfg = readJsonFile(p, {});
     cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
     cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
     cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
@@ -36,13 +35,7 @@ export function loadConfig() {
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(patch) {
     const p = join(DATA_DIR, "config.json");
-    let disk = {};
-    try {
-        disk = JSON.parse(readFileSync(p, "utf8"));
-    }
-    catch {
-        /* first write */
-    }
+    const disk = readJsonFile(p, {});
     for (const key of ["xai", "composio", "box", "trello", "profile"]) {
         if (patch[key] && typeof patch[key] === "object") {
             disk[key] = { ...disk[key], ...patch[key] };
@@ -59,7 +52,7 @@ export function saveConfig(patch) {
         disk.instances = diskInstances;
     }
     mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(p, JSON.stringify(disk, null, 2));
+    writeJsonAtomic(p, disk);
 }
 // Default fleet: one instance per built-in driver (upstream
 // defaultInstanceIdForDriver — instanceId defaults to the driver kind).

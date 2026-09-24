@@ -1,5 +1,6 @@
 import { newEventId, newId } from "../contracts.js";
 import { appendNative } from "./native.js";
+import { catalog } from "../model-discovery.js";
 const DRIVER_KIND = "grok";
 const DEFAULT_URL = "https://api.x.ai/v1";
 const MODELS = {
@@ -167,6 +168,18 @@ export const GrokDriver = {
             displayName: input.displayName,
             enabled: input.enabled,
             models: MODELS,
+            discoverModels: async () => {
+                if (!apiKey)
+                    throw new Error("xAI API key is not configured");
+                const response = await fetch(`${config.url}/language-models`, {
+                    headers: { authorization: `Bearer ${apiKey}` },
+                    signal: AbortSignal.timeout(12_000),
+                });
+                if (!response.ok)
+                    throw new Error(`xAI model discovery HTTP ${response.status}`);
+                const payload = await response.json();
+                return catalog((Array.isArray(payload.models) ? payload.models : []).filter((m) => typeof m.id === "string" && (!Array.isArray(m.output_modalities) || m.output_modalities.includes("text"))).map((m) => ({ id: m.id, label: m.id })));
+            },
             snapshot,
             adapter: {
                 provider: DRIVER_KIND,

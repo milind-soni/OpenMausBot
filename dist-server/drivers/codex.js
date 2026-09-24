@@ -14,6 +14,7 @@ import { execCli, killCliTree, spawnCli } from "../procs.js";
 import { newEventId, newId } from "../contracts.js";
 import { augmentedPath } from "../env-path.js";
 import { appendNative } from "./native.js";
+import { discoverCodexModels } from "../model-discovery.js";
 const DRIVER_KIND = "codex";
 // catalog ported from upstream packages/contracts/src/model.ts
 const MODELS = {
@@ -379,6 +380,7 @@ export const CodexDriver = {
             displayName: input.displayName,
             enabled: input.enabled,
             models: MODELS,
+            discoverModels: () => discoverCodexModels(config.cli),
             snapshot,
             adapter: {
                 provider: DRIVER_KIND,

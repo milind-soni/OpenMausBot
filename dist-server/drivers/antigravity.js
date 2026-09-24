@@ -17,6 +17,7 @@ import { DATA_DIR } from "../config.js";
 import { augmentedPath } from "../env-path.js";
 import { newEventId, newId } from "../contracts.js";
 import { appendNative } from "./native.js";
+import { cliText, parseTabModels } from "../model-discovery.js";
 const DRIVER_KIND = "antigravityAgent";
 // model catalog from `agy models` (agy 1.1.12)
 const MODELS = {
@@ -300,6 +301,7 @@ export const AntigravityDriver = {
             displayName: input.displayName,
             enabled: input.enabled,
             models: MODELS,
+            discoverModels: async () => parseTabModels(await cliText(config.cli, ["models"], input.environment)),
             snapshot,
             adapter: {
                 provider: DRIVER_KIND,

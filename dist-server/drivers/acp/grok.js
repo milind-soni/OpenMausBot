@@ -7,6 +7,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createAcpDriver } from "./core.js";
+import { cliText, parseGrokModels } from "../../model-discovery.js";
 const support = {
     driverKind: "grokAgent",
     displayName: "Grok",
@@ -21,6 +22,7 @@ const support = {
             { id: "grok-4.5", label: "Grok 4.5" },
         ],
     },
+    discoverModels: async (config, environment) => parseGrokModels(await cliText(config.cli, ["models"], { ...environment, XAI_API_KEY: undefined })),
     defaultCli: "grok",
     nativeSource: "grok.acp",
     loginNote: "Grok CLI is not signed in — run `grok login` in a terminal",

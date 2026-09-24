@@ -425,6 +425,7 @@ export function createAcpDriver(support) {
                 displayName: input.displayName,
                 enabled: input.enabled,
                 models: support.models,
+                discoverModels: support.discoverModels ? () => support.discoverModels(config, input.environment) : undefined,
                 snapshot,
                 adapter: {
                     provider: DRIVER_KIND,
