@@ -11,6 +11,7 @@
 // agents-catalog-wire.test.ts: change a description or a schema on purpose,
 // then update the goldens there.
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
+import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
 /** Which tools a turn is shown. The harness decides each of these when it
@@ -187,6 +188,27 @@ const PROPOSAL_OUTCOME = " Read the result: granted Full Access may apply the ch
 /** Every tool, in the order it is listed. Four peer tools are worded
  * differently for an external runtime, which may poll inside one process. */
 const toolDefinitions = (externalRuntime: boolean) => [
+  {
+    name: "create_options_card",
+    description:
+      "Show the person a native card with 2-6 choices in this Watcher conversation. The card is passive: a click returns the selected words as a reply and never authorizes or performs an external action. Use it for Watcher's review and draft-selection steps, then wait for the person's response.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", minLength: 1, maxLength: OPTIONS_CARD_LIMITS.title },
+        subtitle: { type: "string", minLength: 1, maxLength: OPTIONS_CARD_LIMITS.subtitle },
+        options: {
+          type: "array",
+          minItems: OPTIONS_CARD_LIMITS.minOptions,
+          maxItems: OPTIONS_CARD_LIMITS.maxOptions,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1, maxLength: OPTIONS_CARD_LIMITS.option },
+        },
+      },
+      required: ["title", "subtitle", "options"],
+    },
+  },
   {
     name: "tool_result_read",
     description: "Read a missing portion of an oversized agents-tool result using the saved id and next offset from its notice. Returns at most 16,000 characters, only from this bot in this conversation. Use only when the preview is insufficient; do not load every page by default. Results expire after one hour, on app restart, or under cache pressure. This never reruns the original action.",
@@ -721,13 +743,17 @@ const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 const ROOM_ONLY_TOOLS = new Set(["list_room_targets", "coordinate_bots"]);
 const ROOM_REPLACED_TOOLS = new Set(["ask_bot", "delegate_bot", "check_delegation", "wait_delegation", "start_thread", "send_to_thread", "wait_thread"]);
 const EXTERNAL_TOOL_NAMES = new Set(["list_bots", "ask_bot", "delegate_bot", "check_delegation", "wait_delegation"]);
+const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 /** The tools one turn is shown, exactly as tools/list serializes them. */
 export function availableTools(profile: CatalogProfile) {
   const TOOLS = toolDefinitions(profile.externalRuntime);
-  const AUTHORING_TOOLS = profile.skillAuthoring
+  const BOT_SCOPED_TOOLS = profile.botId === WATCHER_OPTIONS_CARD_BOT_ID
     ? TOOLS
-    : TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
+    : TOOLS.filter((tool) => !WATCHER_TOOL_NAMES.has(tool.name));
+  const AUTHORING_TOOLS = profile.skillAuthoring
+    ? BOT_SCOPED_TOOLS
+    : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
   const SHAREABLE_TOOLS = profile.sharedComputers
     ? AUTHORING_TOOLS
     : AUTHORING_TOOLS.filter((tool) => !SHARED_COMPUTER_TOOL_NAMES.has(tool.name));
@@ -735,7 +761,7 @@ export function availableTools(profile: CatalogProfile) {
     ? SHAREABLE_TOOLS
     : SHAREABLE_TOOLS.filter((tool) => !VOICE_TOOL_NAMES.has(tool.name));
   return profile.externalRuntime
-    ? TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
+    ? BOT_SCOPED_TOOLS.filter(tool => EXTERNAL_TOOL_NAMES.has(tool.name))
     : profile.coordinating
     ? VOICE_READY_TOOLS.filter(tool => !ROOM_REPLACED_TOOLS.has(tool.name) || (tool.name === "start_thread" && profile.ownThreadCreation))
       .map(tool => tool.name === "start_thread" ? {

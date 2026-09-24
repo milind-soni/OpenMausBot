@@ -400,6 +400,7 @@ import {
 import { createScreenFrameSource, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { RoutineRequestService } from "./routine-requests.ts";
+import { createOptionsCard } from "./options-card.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
@@ -13150,6 +13151,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const result = toolResults.read(internalCapability, id, offset);
         return result ? json(res, 200, result) : json(res, 404, { error: "Saved result unavailable in this bot's conversation, expired, or offset out of range. Do not repeat an action to retrieve its output." });
+      }
+      if (method === "POST" && path === "/api/internal/options-card") {
+        if (!connectorThread(internalSender.id, internalCapability.threadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        const body = await readInternalBody();
+        requireActiveInternalCapability();
+        const result = createOptionsCard({
+          store,
+          bot: internalSender,
+          threadId: internalCapability.threadId,
+          input: body,
+        });
+        return result.ok
+          ? json(res, 201, { messageId: result.messageId })
+          : json(res, result.status, { error: result.error });
       }
       // Notes written from a room fewer people can see than this bot would
       // carry that room's words to everyone who can see the bot.
