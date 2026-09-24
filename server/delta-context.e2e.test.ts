@@ -49,9 +49,12 @@ async function fixture(test: (f: any) => Promise<void>, options: { env?: NodeJS.
         `if (mode) process.env[${JSON.stringify(name === "codex" ? "FAKE_CODEX_MODE" : "FAKE_CLAUDE_MODE")}] = mode;`,
         "let botId = null;",
         'try { for (const s of Object.values(JSON.parse(readFileSync(after("--mcp-config"), "utf8")).mcpServers ?? {})) botId = s?.env?.OMB_BOT_ID ?? botId; } catch {}',
-        `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
+        `if (after("--resume") || after("--session-id")) appendFileSync(${JSON.stringify(launchesPath)}, JSON.stringify({ botId, pid: process.pid, resume: after("--resume"), sessionId: after("--session-id"), mode: process.env.FAKE_CLAUDE_MODE ?? "happy" }) + "\\n");`,
         `else if (argv[0] === "app-server") appendFileSync(${JSON.stringify(codexLaunchesPath)}, JSON.stringify({ botId: process.env.OMB_BOT_ID ?? null }) + "\\n");`,
         `if (botId) process.env.FAKE_CLAUDE_PROMPTS = ${JSON.stringify(join(dataDir, "consumed-"))} + botId + ".jsonl";`,
+        // A crashed fixture server must not leave a gated fake provider (or
+        // its stdio MCP child) alive after its temporary home is removed.
+        'process.stdin.on("end", () => process.exit(0));',
         `if (after("--resume") && modes.holdresume) { while (!existsSync(${JSON.stringify(join(dataDir, "resume-hold.gate"))})) await new Promise((r) => setTimeout(r, 20)); }`,
         `await import(${JSON.stringify(pathToFileURL(join(process.cwd(), "server", "testing", fake)).href)});`,
       ].join("\n"), { mode: 0o700 });
@@ -788,22 +791,29 @@ it("offers the results again when the provider reports an API error instead of a
 it("does not hand the model a queued follow-up that a restart recovered with an unknown outcome", () => fixture(async (f) => {
   await f.api("/api/config", { threads: { maxConcurrentPerBot: 1 } }, "PATCH");
   const other = (await f.api(`/api/bots/${f.chief.id}/tasks`, { title: "Second conversation" })).task.threadId;
-  const answered = { reply: "Answered" };
-  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }, answered, answered] };
+  f.plan[f.chief.id] = { turns: [{ reply: "Noted." }, { reply: "Held", gateFile: f.gate("hold") }, { reply: "never", gateFile: f.gate("never") }] };
   await f.send("Warm up.", other);
   await f.wait(other);
   await f.send("Hold the only slot.");
   await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(2);
   expect((await f.send("RECOVERED_FOLLOWUP deploy it", other)).queued).toBe(true);
   f.open(f.gate("hold"));
-  await expect.poll(() => f.launches().length, { timeout: 15_000 }).toBe(3);
+  await expect.poll(() => f.consumed(), { timeout: 15_000 }).toBe(3);
+  const interruptedPid = f.launches().at(-1).pid;
   await f.restart(() => {}, "SIGKILL");
+  await expect.poll(() => {
+    try { process.kill(interruptedPid, 0); return true; } catch { return false; }
+  }, { timeout: 5_000 }).toBe(false);
   await expect.poll(async () => (await f.messages(other)).some((m: any) => m.kind === "activity" && m.tool?.name?.includes("Review the result")), { timeout: 20_000 }).toBe(true);
   expect((await f.messages(other)).filter((m: any) => m.role === "user" && m.text?.includes("RECOVERED_FOLLOWUP"))).toHaveLength(1);
 
+  // The crashed turn never completes its evidence record. Select the next
+  // reply explicitly instead of indexing back into that turn's closed gate.
+  f.plan[f.chief.id] = { reply: "Answered" };
   await f.send("Anything new?", other);
   await f.wait(other);
   const next = f.turns().filter((turn: any) => f.prompt(turn).includes("Anything new?")).at(-1);
+  expect(next).toBeDefined();
   expect(f.launches().at(-1).resume).not.toBeNull();
   expect(f.prompt(next)).not.toContain("RECOVERED_FOLLOWUP");
 }), 90_000);

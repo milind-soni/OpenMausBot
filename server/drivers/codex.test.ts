@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ProviderInstance } from "../contracts.ts";
+import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { NATIVE_DIR } from "../config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
@@ -1203,7 +1203,10 @@ describe("CodexDriver turns (fake app-server)", () => {
     process.env.FAKE_CODEX_DUMP = dump;
 
     await instance.adapter.sendTurn({ threadId: "t-approve", text: "clean up" });
-    const opened = await recorder.until((e) => e.type === "request.opened");
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<
+      RuntimeEvent,
+      { type: "request.opened" }
+    >;
     expect(opened).toMatchObject({ requestType: "permission", tool: "shell", summary: "rm -rf scratch" });
 
     await instance.adapter.respondToRequest("t-approve", opened.requestId!, { behavior: "allow" });
@@ -1227,7 +1230,9 @@ describe("CodexDriver turns (fake app-server)", () => {
       tool: "ask_user",
       summary: "Ship today?",
       // six options offered; the card keeps its five-row ceiling
-      choices: ["Yes", "No", "Maybe", "Later", "Soon"],
+      choices: ["Yes", "No", "Maybe", "Later", "Soon", "Never"],
+      // the structured question rides the card beside the flat choices
+      questions: [{ question: "Ship today?", options: ["Yes", "No", "Maybe", "Later", "Soon", "Never"].map((label) => ({ label })) }],
     });
 
     await instance.adapter.respondToRequest("t-question-single", opened.requestId!, { behavior: "answer", message: "Yes" });
@@ -1240,20 +1245,88 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
-  it("refuses a bundled multi-question ask instead of copying one answer into every question (#1237)", async () => {
+  it("opens one card for a bundled ask and maps a block reply per question id (#1237)", async () => {
     await create({ mode: "multi-question" });
     const dump = join(scratch, "question-multi.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
     await instance.adapter.sendTurn({ threadId: "t-question-multi", text: "ask me twice" });
-    await recorder.until((e) => e.type === "turn.completed");
+    const opened = (await recorder.until((e) => e.type === "request.opened")) as Extract<
+      RuntimeEvent,
+      { type: "request.opened" }
+    >;
+    expect(opened).toMatchObject({
+      requestType: "question",
+      tool: "ask_user",
+      summary: "Ship today? · Who reviews?",
+      questions: [
+        { question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] },
+        { question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] },
+      ],
+    });
+    // a bundle exposes no flat choices: a bare reply cannot say which
+    // question it answers
+    expect(opened.choices).toBeUndefined();
+    expect(recorder.events.filter((e) => e.type === "request.opened")).toHaveLength(1);
 
-    // no card may open: one card cannot carry two questions honestly
-    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
-    const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
-    expect(decision.error.code).toBe(-32602);
-    expect(decision.error.message).toContain("one question");
-    expect(decision.error.message).toContain("2");
+    await instance.adapter.respondToRequest("t-question-multi", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes\n\nQ: Who reviews?\nA: Ada",
+    });
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "answer", source: "user" });
+
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-ship": { answers: ["Yes"] }, "q-review": { answers: ["Ada"] } },
+    });
+  });
+
+  it("answers only the question ids a partial block reply covers", async () => {
+    await create({ mode: "multi-question" });
+    const dump = join(scratch, "question-partial.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-partial", text: "ask me twice" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+
+    await instance.adapter.respondToRequest("t-question-partial", opened.requestId!, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Ship today?\nA: Yes",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    // the unanswered id is absent, not filled with a note or a guess
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-ship": { answers: ["Yes"] } },
+    });
+  });
+
+  it("builds the card from the questions that parsed, not the raw entries", async () => {
+    await create({ mode: "mixed-question" });
+    const dump = join(scratch, "question-mixed.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-question-mixed", text: "ask me" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    // the entry with blank question text is skipped before the card is
+    // built, so summary and choices describe the question that is actually
+    // answerable, not the rejected entry
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Who reviews?",
+      choices: ["Ada", "Lin"],
+      questions: [{ question: "Who reviews?", options: [{ label: "Ada" }, { label: "Lin" }] }],
+    });
+
+    await instance.adapter.respondToRequest("t-question-mixed", opened.requestId!, {
+      behavior: "answer",
+      message: "Q: Who reviews?\nA: First paragraph\n\nsecond paragraph",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    // the multi-paragraph answer travels whole
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({
+      answers: { "q-review": { answers: ["First paragraph\n\nsecond paragraph"] } },
+    });
   });
 
   it("refuses an empty ask instead of opening a card with nothing to answer", async () => {
@@ -1283,15 +1356,15 @@ describe("CodexDriver turns (fake app-server)", () => {
     expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     const decision = JSON.parse(readFileSync(dump, "utf8")).decision;
     expect(decision.error.code).toBe(-32602);
-    expect(decision.error.message).toContain("must be an array");
+    expect(decision.error.message).toContain("array of questions");
   });
 
-  it("maps a timed-out ask to the timeout note for its one question", async () => {
+  it("times out an ask with empty answers and a timeout-sourced resolve", async () => {
     // Hold the ask reply without completing the turn: a completed turn
     // starts the driver's child-reap loop, whose 25ms setTimeout poll would
     // freeze on the fake clock and strand the teardown.
     process.env.FAKE_CODEX_ASK_HOLD = "1";
-    await create({ mode: "question" });
+    await create({ mode: "multi-question" });
     const dump = join(scratch, "question-timeout.json");
     process.env.FAKE_CODEX_DUMP = dump;
 
@@ -1302,7 +1375,7 @@ describe("CodexDriver turns (fake app-server)", () => {
       await vi.advanceTimersByTimeAsync(15 * 60_000);
 
       const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
-      expect(resolved).toMatchObject({ behavior: "answer", source: "timeout" });
+      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
     } finally {
       vi.useRealTimers();
     }
@@ -1320,9 +1393,8 @@ describe("CodexDriver turns (fake app-server)", () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     }
-    expect(decision).toEqual({
-      answers: { "q-ship": { answers: ["No answer was given — use your best judgment."] } },
-    });
+    // nobody answered, so every id reads unanswered — no note filed as words
+    expect(decision).toEqual({ answers: {} });
   });
 
   it("answers Codex 0.149 MCP elicitation with the MCP result shape", async () => {

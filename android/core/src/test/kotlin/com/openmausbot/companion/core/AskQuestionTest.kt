@@ -94,6 +94,21 @@ class AskQuestionTest {
     }
 
     @Test
+    fun `decodes an agent-composed ask and tolerates unknown fields`() {
+        // Origin rides on the wire only for the BoxAgent transport; a
+        // tool-call ask leaves it unset, and fields we do not know yet must
+        // never fail the transcript decode.
+        val composed = card(
+            """{"title":"t","subtitle":"s","options":[],"requestId":"r",
+               "questionRequest":{"version":1,"origin":"output","futureField":true,
+               "questions":[{"question":"Ship the release?","options":[{"label":"Ship now"}]}]}}""",
+        )
+        assertEquals("output", composed.questionRequest?.origin)
+        assertEquals("Ship now", composed.questions[0].options[0].label)
+        assertEquals(null, card().questionRequest?.origin)
+    }
+
+    @Test
     fun `formats the answer the model will read`() {
         val answer = AskQuestionAnswer.format(
             card().questions,

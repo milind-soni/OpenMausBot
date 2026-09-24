@@ -23,6 +23,40 @@ class ChatPreferencesTest {
         tool = ToolActivity(name = "run", ok = ok),
     )
 
+    private fun digest(id: String, at: Double = 1.0): Message = Message(
+        id = id,
+        role = Message.Role.BOT,
+        kind = Message.Kind.DIGEST,
+        at = at,
+        text = "[digest] Bash ×2",
+    )
+
+    private fun compaction(id: String, at: Double = 1.0): Message = Message(
+        id = id,
+        role = Message.Role.BOT,
+        kind = Message.Kind.COMPACTION,
+        at = at,
+        text = "[compaction] summary",
+        compaction = Compaction(summary = "summary", tokensBefore = 10),
+    )
+
+    // The digest and compaction receipts are the harness talking about the
+    // tool calls: hidden with them, but never folded into a run of them.
+
+    @Test
+    fun hiddenDropsDigestAndCompactionReceiptsToo() {
+        val messages = listOf(text("a"), activity("b"), digest("c"), text("d"), compaction("e"))
+        assertEquals(listOf("a", "d"), transcriptRows(messages, ActivityDetail.HIDDEN).map { it.id })
+    }
+
+    @Test
+    fun reducedKeepsACompactionAsItsOwnRowAndBreaksTheRun() {
+        val messages = listOf(activity("a"), activity("b"), compaction("c"), activity("d"), activity("e"))
+        val rows = transcriptRows(messages, ActivityDetail.REDUCED)
+        assertEquals(listOf("run.a", "c", "run.d"), rows.map { it.id })
+        assertEquals(Message.Kind.COMPACTION, rows[1].kind)
+    }
+
     @Test
     fun fullKeepsEveryMessageAndHiddenDropsEveryActivity() {
         val messages = listOf(text("a"), activity("b"), activity("c", ok = false), text("d"))

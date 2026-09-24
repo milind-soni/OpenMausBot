@@ -199,6 +199,82 @@ class StoreTest {
         assertEquals(listOf("root", "fork", "tail"), state.visibleTranscript(bot.threadId).map(Message::id))
     }
 
+    /** root → question → old answer, with the old answer visible. */
+    private fun editableConversation(): Pair<CompanionState, String> {
+        val hydrated = hydrated()
+        val threadId = hydrated.bots.first().threadId
+        val root = message("root", 1.0, "Ready").copy(role = Message.Role.BOT)
+        val question = message("q1", 2.0, "first try").copy(parentId = root.id)
+        val answer = message("a1", 3.0, "old answer").copy(role = Message.Role.BOT, parentId = question.id)
+        val state = hydrated.copy(messages = hydrated.messages + (threadId to listOf(root, question, answer)))
+            .apply(Frame.Thread(threadId, answer.id))
+        return state to threadId
+    }
+
+    @Test
+    fun pendingEditReplacesTheQuestionAndHidesTheOldAnswerAtOnce() {
+        val (base, threadId) = editableConversation()
+        val pending = PendingEdit("q1", "second try", 4.0)
+        val state = base.copy(pendingEdits = mapOf(threadId to pending))
+        val visible = state.visibleTranscript(threadId)
+        assertEquals(listOf("root", pending.placeholderId), visible.map(Message::id))
+        assertEquals("second try", visible.last().text)
+        assertEquals("root", visible.last().parentId)
+        // nothing was folded: the computer's transcript is untouched
+        assertEquals(listOf("root", "q1", "a1"), state.transcript(threadId).map(Message::id))
+        // a failed edit only drops the stand-in, so the old branch returns
+        assertEquals(listOf("root", "q1", "a1"), state.copy(pendingEdits = emptyMap()).visibleTranscript(threadId).map(Message::id))
+    }
+
+    @Test
+    fun streamedForkTakesOverFromThePendingEdit() {
+        val (base, threadId) = editableConversation()
+        val fork = message("q2", 4.0, "second try").copy(parentId = "root")
+        val state = base.copy(pendingEdits = mapOf(threadId to PendingEdit("q1", "second try", 4.0)))
+            // the message frame alone is a sibling, not a child of the leaf...
+            .apply(Frame.Message(threadId, fork))
+            // ...and the leaf frame moves the branch, which retires the stand-in
+            .apply(Frame.Thread(threadId, fork.id))
+        assertEquals(listOf("root", "q2"), state.visibleTranscript(threadId).map(Message::id))
+    }
+
+    @Test
+    fun adoptEditShowsTheForkWhenTheResponseBeatsTheStream() {
+        val (base, threadId) = editableConversation()
+        val fork = message("q2", 4.0, "second try").copy(parentId = "root")
+        assertEquals(listOf("root", "q2"), base.adoptEdit(fork, threadId).visibleTranscript(threadId).map(Message::id))
+    }
+
+    @Test
+    fun adoptEditNeverHidesAReplyThatAlreadyArrived() {
+        val (base, threadId) = editableConversation()
+        val fork = message("q2", 4.0, "second try").copy(parentId = "root")
+        val reply = message("a2", 5.0, "new answer").copy(role = Message.Role.BOT, parentId = fork.id)
+        val state = base.apply(Frame.Message(threadId, fork))
+            .apply(Frame.Thread(threadId, fork.id))
+            .apply(Frame.Message(threadId, reply))
+            .adoptEdit(fork, threadId)
+        assertEquals(listOf("root", "q2", "a2"), state.visibleTranscript(threadId).map(Message::id))
+    }
+
+    @Test
+    fun lateEditDoesNotUndoBranchSelectionOrNewerEdit() {
+        val (base, threadId) = editableConversation()
+        val pending = PendingEdit("q1", "second try", baseLeafId = "a1")
+        val fork = message("q2", 4.0, "second try").copy(parentId = "root")
+        val switched = base.copy(pendingEdits = mapOf(threadId to pending))
+            .apply(Frame.Thread(threadId, "root"))
+            .adoptEdit(fork, threadId, pending)
+        assertEquals("root", switched.activeLeafIds[threadId])
+        assertTrue(switched.transcript(threadId).any { it.id == "q2" })
+        val newer = PendingEdit("q1", "newer try", baseLeafId = "a1")
+        val superseded = base.copy(pendingEdits = mapOf(threadId to newer)).adoptEdit(fork, threadId, pending)
+        assertEquals("a1", superseded.activeLeafIds[threadId])
+        assertEquals("newer try", superseded.visibleTranscript(threadId).last().text)
+        val accepted = base.copy(pendingEdits = mapOf(threadId to pending)).adoptEdit(fork, threadId, pending)
+        assertEquals("q2", accepted.visibleTranscript(threadId).last().id)
+    }
+
     @Test
     fun versionsAreUserMessagesWithTheSameParent() {
         val root = message("root")

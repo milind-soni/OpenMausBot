@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance } from "../contracts.ts";
@@ -576,6 +576,131 @@ describe("PiDriver turns (fake CLI)", () => {
     unsubscribe();
     const done = await recorder.until((event) => event.type === "turn.completed");
     expect(done).toMatchObject({ ok: true, stopReason: "end_turn" });
+  });
+
+  it("renders a select ask as a question with choices and returns the picked value", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-question-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("question-select", { FAKE_PI_DUMP: dump });
+    await instance.adapter.sendTurn({ threadId: "t-pi-select", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "question",
+      summary: "Which color?",
+      choices: ["Blue", "Green"],
+      questions: [{ question: "Which color?", options: [{ label: "Blue" }, { label: "Green" }] }],
+    });
+    // Exactly what the tabbed QuestionCard submits: one Q:/A: block, not a
+    // bare option label.
+    const outcome = await instance.adapter.respondToRequest("t-pi-select", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "The user answered your questions.\n\nQ: Which color?\nA: Green",
+    });
+    expect(outcome).toBe("answered");
+    await recorder.until((e) => e.type === "turn.completed");
+    const rows = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; value?: string; cancelled?: boolean } });
+    expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", value: "Green" });
+  });
+
+  it("returns typed text verbatim for a free-text input ask", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-input-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("question-input", { FAKE_PI_DUMP: dump });
+    await instance.adapter.sendTurn({ threadId: "t-pi-input", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "question", summary: "Which city?" });
+    expect(opened).not.toHaveProperty("choices");
+    await instance.adapter.respondToRequest("t-pi-input", (opened as { requestId: string }).requestId, {
+      behavior: "answer",
+      message: "  Toronto  ",
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const rows = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; value?: string } });
+    expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-input", value: "  Toronto  " });
+  });
+
+  it.each([false, true])("returns original capped options, refusing ambiguous display labels (%s)", async collision => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-capped-question-"));
+    const dump = join(dir, "dump.jsonl");
+    const label = "  Green ".repeat(30);
+    await create("question-select", { FAKE_PI_DUMP: dump,
+      FAKE_PI_QUESTION_OPTIONS: JSON.stringify([label, collision ? label + "other" : "Blue"]) });
+    await instance.adapter.sendTurn({ threadId: "t-pi-capped", text: "go" });
+    const opened = await recorder.until(e => e.type === "request.opened");
+    await instance.adapter.respondToRequest("t-pi-capped", (opened as { requestId: string }).requestId, {
+      behavior: "answer", message: `The user answered your questions.\n\nQ: Which color?\nA: ${label.trim().slice(0, 120)}`,
+    });
+    await recorder.until(e => e.type === "turn.completed");
+    const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map(line => JSON.parse(line));
+    expect(rows.find(row => row.uiResponse)?.uiResponse).toMatchObject(collision
+      ? { id: "ask-select", cancelled: true } : { id: "ask-select", value: label });
+  });
+
+  it("denies an ask by cancelling the protocol request", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-deny-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("question-select", { FAKE_PI_DUMP: dump });
+    await instance.adapter.sendTurn({ threadId: "t-pi-deny", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    const outcome = await instance.adapter.respondToRequest("t-pi-deny", (opened as { requestId: string }).requestId, {
+      behavior: "deny",
+    });
+    expect(outcome).toBe("rejected");
+    const resolved = await recorder.until((e) => e.type === "request.resolved");
+    expect(resolved).toMatchObject({ behavior: "deny", source: "user" });
+    await recorder.until((e) => e.type === "turn.completed");
+    const rows = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; cancelled?: boolean } });
+    expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
+  });
+
+  it("cancels an unanswered ask after 15 minutes", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-timeout-"));
+    const dump = join(dir, "dump.jsonl");
+    await create("question-select", { FAKE_PI_DUMP: dump });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-pi-timeout", text: "go" });
+      const opened = await recorder.until((e) => e.type === "request.opened");
+      await vi.advanceTimersByTimeAsync(15 * 60_000);
+      const resolved = await recorder.until((e) => e.type === "request.resolved" && e.requestId === opened.requestId);
+      expect(resolved).toMatchObject({ behavior: "deny", source: "timeout" });
+      await recorder.until((e) => e.type === "turn.completed");
+      const rows = readFileSync(dump, "utf8")
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as { uiResponse?: { id?: string; cancelled?: boolean } });
+      expect(rows.find((row) => row.uiResponse)?.uiResponse).toMatchObject({ id: "ask-select", cancelled: true });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels an ask's fail-safe timer when the turn is interrupted", async () => {
+    await create("question-select");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-ask-interrupt", text: "go" });
+      await recorder.until((e) => e.type === "request.opened");
+      await instance.adapter.interruptTurn("t-ask-interrupt");
+      await recorder.until((e) => e.type === "turn.completed");
+      // Flush the short-lived RPC waiter timers, then require that nothing
+      // is left queued: settle() cancels the ask's 15-minute fail-safe
+      // outright instead of leaving it to fire against a dead child while
+      // holding the ask closure alive.
+      await vi.advanceTimersByTimeAsync(21_000);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("respondToRequest is unavailable for an ask that is not pending", async () => {

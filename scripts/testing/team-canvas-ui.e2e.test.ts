@@ -164,7 +164,7 @@ type BotRecord = {
     await ui("press", "--keys", "Enter");
     await click("Box computer");
     await expect.poll(snapshot).toContain("Connect your Box account before creating a cloud computer.");
-    expect(await snapshot()).toContain("Your Box plan and usage charges apply.");
+    await expect.poll(snapshot).toContain("Your Box plan and usage charges apply.");
     const inputRefs = (await ui("snapshot")).refs as Record<string, { role: string; name: string }>;
     const nameInput = Object.entries(inputRefs).filter(([, entry]) => entry.role === "textbox" && entry.name === "New Box computer");
     expect(nameInput).toHaveLength(1);
@@ -206,7 +206,7 @@ type BotRecord = {
     await click("Move bots to Delivery");
     await click("Ben", "checkbox");
     await click("Dana", "checkbox");
-    await click("Move 2 bots");
+    await click("Save");
     await expect.poll(async () => (await bots()).filter(bot => bot.section === "Delivery").map(bot => bot.id).sort())
       .toEqual([ben.id, dana.id].sort());
     await expect.poll(() => evaluate(`document.querySelectorAll(${JSON.stringify(`${teamSelector("Delivery")} [data-bot-id]`)}).length`)).toBe(2);
@@ -216,7 +216,7 @@ type BotRecord = {
     await click("Move bots to Engineering");
     await click("Cleo", "checkbox");
     await click("Dana", "checkbox");
-    await click("Move 2 bots");
+    await click("Save");
     await expect.poll(snapshot).toContain("A team can have only one Chief of Staff");
     expect((await savedBot(cleo.id)).section).toBe("Research");
     expect((await savedBot(dana.id)).section).toBe("Delivery");
@@ -243,7 +243,7 @@ type BotRecord = {
     await manage("Delivery");
     await click("Move bots to Delivery");
     await click("Dana", "checkbox");
-    await click("Move 1 bot");
+    await click("Save");
     await expect.poll(async () => (await savedBot(dana.id)).section).toBe("Delivery");
     expect(identity(await savedBot(dana.id))).toEqual(identity(beforeBots.find(bot => bot.id === dana.id)!));
 

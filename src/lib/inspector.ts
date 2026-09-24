@@ -101,7 +101,10 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
     case "content.delta":
       return { summary: `${e.streamKind}: ${clip(oneLine(e.delta))}`, tone: "plain" };
     case "request.opened":
-      return { summary: `${e.requestType}: ${e.tool} — ${clip(oneLine(e.summary))}`, tone: "plain" };
+      return {
+        summary: `${e.requestType}${e.origin === "output" ? " (agent-composed)" : ""}: ${e.tool} — ${clip(oneLine(e.summary))}`,
+        tone: "plain",
+      };
     case "request.resolved":
       return { summary: `resolved ${e.behavior} · ${e.source}`, tone: "plain" };
     case "thread.token-usage.updated":

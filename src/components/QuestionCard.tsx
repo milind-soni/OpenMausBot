@@ -145,6 +145,10 @@ export function QuestionCard({
         )}
       </div>
 
+      {card.questionRequest?.origin === "output" && (
+        <div className="mt-1 text-[12px] text-ink-secondary">{t("question.origin.badge")}</div>
+      )}
+
       {questions.length > 1 && (
         <div role="tablist" aria-label={t("question.aria.tabs")} className="mt-3 flex flex-wrap gap-1">
           {questions.map((question, index) => (

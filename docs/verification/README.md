@@ -156,11 +156,17 @@ search and draft isolation using disposable simulators and an offline fixture.
 The [Android stream recovery checks](android-stream-recovery.md) exercise early
 stream closure and fallback through disposable HTTP endpoints.
 
+The [iOS transcript checks](ios-transcript.md) cover completed-turn folds,
+Hidden activity, and compact webhook messages using bundled offline data.
+
 The [Android thread checks](android-threads.md) cover the Compose thread tree,
 local selection, draft isolation and installable preview APK.
 
 The [Android server pairing checks](android-server-pairing.md) cover server QR
 confirmation, manual codes, retries and saved-server identity validation.
+
+The [Android transcript checks](android-transcript.md) cover completed-turn
+folds, Hidden reasoning, and compact webhook messages through real Compose UI.
 
 The [right-to-left fixture](bidi.md) checks per-block direction in bot replies
 and per-line direction in sent turns, with code pinned left-to-right.

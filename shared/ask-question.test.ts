@@ -3,13 +3,21 @@ import { describe, expect, it } from "vitest";
 import {
   answerWithoutPreamble,
   askQuestionSummary,
+  ASK_USER_TOOL,
+  ASK_USER_TOOL_DEFINITION,
+  capAnswerEcho,
   formatQuestionAnswers,
+  MAX_ANSWER_ECHO,
   MAX_OPTIONS,
   MAX_QUESTIONS,
   parseAskQuestions,
   parseChoices,
+  parseOmbAskQuestions,
+  parseProtocolAskQuestions,
+  questionAnswersById,
   questionAnswersByQuestion,
   questionChoices,
+  stripOmbAskBlock,
   type AskQuestion,
 } from "./ask-question";
 
@@ -182,6 +190,107 @@ describe("formatQuestionAnswers", () => {
   });
 });
 
+describe("ASK_USER_TOOL_DEFINITION", () => {
+  it("names ask_user and states the parser's caps in the schema", () => {
+    expect(ASK_USER_TOOL_DEFINITION.function.name).toBe(ASK_USER_TOOL);
+    expect(ASK_USER_TOOL).toBe("ask_user");
+    const schema = ASK_USER_TOOL_DEFINITION.function.parameters.properties.questions;
+    expect(schema.maxItems).toBe(MAX_QUESTIONS);
+    expect(schema.minItems).toBe(1);
+    expect(schema.items.properties.options.maxItems).toBe(MAX_OPTIONS);
+    // a question with no options is still answerable — free text
+    expect(schema.items.properties.options.minItems).toBeUndefined();
+  });
+});
+
+describe("parseOmbAskQuestions", () => {
+  const block = (questions: unknown) => "```omb-ask\n" + JSON.stringify({ questions }) + "\n```";
+
+  it("extracts the questions from a fenced omb-ask block", () => {
+    expect(
+      parseOmbAskQuestions(
+        block([{ question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] }, { question: "Who reviews?", header: "Review", options: [] }]),
+      ),
+    ).toEqual([
+      { question: "Ship today?", options: [{ label: "Yes" }, { label: "No" }] },
+      { question: "Who reviews?", header: "Review", options: [] },
+    ]);
+  });
+
+  it("returns null when the fence holds JSON garbage", () => {
+    expect(parseOmbAskQuestions("```omb-ask\n{not json at all\n`")).toBeNull();
+    expect(parseOmbAskQuestions("```omb-ask\n\"just a string\"\n`")).toBeNull();
+    expect(parseOmbAskQuestions("```omb-ask\n{\"questions\": []}\n`")).toBeNull();
+  });
+
+  it("caps an oversized block at the shared question limit", () => {
+    const questions = parseOmbAskQuestions(
+      block(Array.from({ length: MAX_QUESTIONS + 4 }, (_, index) => ({ question: "q" + index, options: [] }))),
+    )!;
+    expect(questions).toHaveLength(MAX_QUESTIONS);
+  });
+
+  it("reads the first fence when the output carries several", () => {
+    const output =
+      block([{ question: "first?", options: [] }]) +
+      "\n\nprose between\n\n" +
+      block([{ question: "second?", options: [] }]);
+    expect(parseOmbAskQuestions(output)).toEqual([{ question: "first?", options: [] }]);
+  });
+
+  it("finds the block inside surrounding prose", () => {
+    const output =
+      "Here is what I found.\n\n" +
+      block([{ question: "Which account?", options: [{ label: "Alpha" }] }]) +
+      "\n\nEverything else is settled.";
+    expect(parseOmbAskQuestions(output)).toEqual([{ question: "Which account?", options: [{ label: "Alpha" }] }]);
+  });
+
+  it("returns null with no fence at all", () => {
+    expect(parseOmbAskQuestions("I have no questions, only statements.")).toBeNull();
+  });
+});
+
+describe("stripOmbAskBlock", () => {
+  it("removes the block and its fence, keeping the prose", () => {
+    const output = "Here is my summary.\n\n```omb-ask\n{\"questions\":[]}\n```\n\nThanks!";
+    expect(stripOmbAskBlock(output)).toBe("Here is my summary.\n\nThanks!");
+  });
+
+  it("leaves output without a block untouched", () => {
+    const output = "Just prose, twice over.\n\nNothing fenced here.";
+    expect(stripOmbAskBlock(output)).toBe(output);
+  });
+});
+
+describe("capAnswerEcho", () => {
+  it("passes an in-bounds answer through unchanged", () => {
+    const answer = formatQuestionAnswers([{ question: "Which model?", options: [] }], [["Opus"]]);
+    expect(capAnswerEcho(answer)).toBe(answer);
+  });
+
+  it("truncates an over-cap echo at the last whole block and says so", () => {
+    const long = "x".repeat(3000);
+    const answer = formatQuestionAnswers(
+      Array.from({ length: 6 }, (_, index) => ({ question: "q" + index, options: [] })),
+      Array.from({ length: 6 }, () => [long]),
+    );
+    expect(answer.length).toBeGreaterThan(MAX_ANSWER_ECHO);
+    const capped = capAnswerEcho(answer);
+    expect(capped.endsWith("\n\n[answer truncated]")).toBe(true);
+    // every block that survived is whole — no partial answer may read as one
+    for (const block of capped.split("\n\n")) {
+      if (block === "[answer truncated]") continue;
+      if (block.startsWith("Q: ")) expect(block.endsWith(long)).toBe(true);
+    }
+  });
+
+  it("cuts at the preamble when even the first block overflows the limit", () => {
+    const answer = formatQuestionAnswers([{ question: "q", options: [] }], [["x".repeat(400)]]);
+    expect(capAnswerEcho(answer, 100)).toBe("The user answered your questions.\n\n[answer truncated]");
+  });
+});
+
 describe("answerWithoutPreamble", () => {
   it("drops the model-facing lead-in the card should not repeat", () => {
     const answer = formatQuestionAnswers([{ question: "Which model?", options: [] }], [["Opus"]]);
@@ -217,6 +326,11 @@ describe("questionAnswersByQuestion", () => {
     expect(questionAnswersByQuestion(forged, questions)).toEqual({ "Which model?": "Opus" });
   });
 
+  it("keeps a __proto__ question text as a real answer key", () => {
+    const odd = parseAskQuestions({ questions: [{ question: "__proto__", options: [] }] })!;
+    expect(Object.entries(questionAnswersByQuestion("Q: __proto__\nA: yes", odd))).toEqual([["__proto__", "yes"]]);
+  });
+
   it("takes a bare reply as the answer when exactly one question was asked", () => {
     // the flat path: a phone answering a single-question card with one of the
     // option labels the harness also sends
@@ -226,5 +340,101 @@ describe("questionAnswersByQuestion", () => {
   it("files nothing for a bare reply when the ask was ambiguous", () => {
     expect(questionAnswersByQuestion("Opus", questions)).toEqual({});
     expect(questionAnswersByQuestion("   ", questions.slice(0, 1))).toEqual({});
+  });
+
+  it("preserves paragraphs and does not fabricate answers from empty or unknown blocks", () => {
+    expect(questionAnswersByQuestion("Q: Which model?\nA: first paragraph\n\nsecond paragraph", questions))
+      .toEqual({ "Which model?": "first paragraph\n\nsecond paragraph" });
+    expect(questionAnswersByQuestion("Q: Which model?\nA: ", questions.slice(0, 1))).toEqual({});
+    expect(questionAnswersByQuestion("Q: Unasked question?\nA: yes", questions.slice(0, 1))).toEqual({});
+    expect(questionAnswersByQuestion("Q: Which model?\nA: Opus", [questions[0]!, questions[0]!])).toEqual({});
+  });
+});
+
+describe("parseProtocolAskQuestions", () => {
+  it("pairs each id with the question parsed from the same entry", () => {
+    expect(
+      parseProtocolAskQuestions([
+        { id: "q-ship", question: "Ship today?", header: "Ship", options: [{ label: "Yes" }] },
+        { id: "q-review", question: "Who reviews?", options: [] },
+      ]),
+    ).toEqual([
+      { id: "q-ship", question: { question: "Ship today?", header: "Ship", options: [{ label: "Yes" }] } },
+      { id: "q-review", question: { question: "Who reviews?", options: [] } },
+    ]);
+  });
+
+  it("skips entries without a usable id or question, and nulls out when none survive", () => {
+    expect(parseProtocolAskQuestions([{ question: "no id", options: [] }, { id: "q", header: "no question text" }])).toBeNull();
+    expect(parseProtocolAskQuestions("please")).toBeNull();
+    expect(parseProtocolAskQuestions([])).toBeNull();
+  });
+
+  it("rejects overlong ids, preserves ids verbatim, and fails duplicate ids whole", () => {
+    const overlong = "i".repeat(201);
+    expect(
+      parseProtocolAskQuestions([
+        { id: overlong, question: "Overlong id?", options: [] },
+        { id: "q-ok", question: "Fine?", options: [] },
+      ]),
+    ).toEqual([{ id: "q-ok", question: { question: "Fine?", options: [] } }]);
+    expect(
+      parseProtocolAskQuestions([
+        { id: "q-same", question: "First?", options: [] },
+        { id: "q-same", question: "Second?", options: [] },
+      ]),
+    ).toBeNull();
+    expect(parseProtocolAskQuestions([{ id: " q-review ", question: "Padded?", options: [] }])).toEqual([
+      { id: " q-review ", question: { question: "Padded?", options: [] } },
+    ]);
+    expect(parseProtocolAskQuestions([{ id: "   ", question: "Blank id?", options: [] }])).toBeNull();
+  });
+});
+
+describe("questionAnswersById", () => {
+  const questions = parseProtocolAskQuestions([
+    { id: "q-ship", question: "Ship today?", options: [{ label: "Yes" }] },
+    { id: "q-review", question: "Who reviews?", options: [{ label: "Ada" }] },
+  ])!;
+
+  it("maps a multi-block reply to an answer per id", () => {
+    const reply = "The user answered your questions.\n\nQ: Ship today?\nA: Yes\n\nQ: Who reviews?\nA: Ada, Lin";
+    expect(questionAnswersById(reply, questions)).toEqual({ "q-ship": "Yes", "q-review": "Ada, Lin" });
+  });
+
+  it("answers only the ids a partial reply covers", () => {
+    expect(questionAnswersById("Q: Ship today?\nA: Yes", questions)).toEqual({ "q-ship": "Yes" });
+  });
+
+  it("keeps blank lines inside a multi-paragraph answer", () => {
+    const reply = "Q: Ship today?\nA: First paragraph\n\nsecond paragraph\n\nQ: Who reviews?\nA: Ada, Lin";
+    expect(questionAnswersById(reply, questions)).toEqual({
+      "q-ship": "First paragraph\n\nsecond paragraph",
+      "q-review": "Ada, Lin",
+    });
+  });
+
+  it("leaves an id unanswered when its A: is blank", () => {
+    expect(questionAnswersById("Q: Ship today?\nA: \n\nQ: Who reviews?\nA: Ada, Lin", questions)).toEqual({
+      "q-review": "Ada, Lin",
+    });
+  });
+
+  it("does not fall back to the flat reply when a block matched but answered nothing", () => {
+    expect(questionAnswersById("Q: Ship today?\nA: ", questions.slice(0, 1))).toEqual({});
+  });
+
+  it("keeps an opaque __proto__ id as a real answer key", () => {
+    const proto = parseProtocolAskQuestions([{ id: "__proto__", question: "Odd id?", options: [] }])!;
+    expect(Object.entries(questionAnswersById("Q: Odd id?\nA: yes", proto))).toEqual([["__proto__", "yes"]]);
+  });
+
+  it("files a bare reply under the single question's id", () => {
+    expect(questionAnswersById("Yes", questions.slice(0, 1))).toEqual({ "q-ship": "Yes" });
+  });
+
+  it("files nothing when a bare reply could answer any of several ids", () => {
+    expect(questionAnswersById("Yes", questions)).toEqual({});
+    expect(questionAnswersById("   ", questions.slice(0, 1))).toEqual({});
   });
 });

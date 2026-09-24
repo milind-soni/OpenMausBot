@@ -133,6 +133,39 @@ describe("MinimaxDriver", () => {
     await instance.dispose();
   });
 
+  it("smoke: offers ask_user and returns the person's reply verbatim", async () => {
+    const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
+      + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))
+      + '}}]}}]}\n'
+      + 'data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n'
+      + 'data: [DONE]\n';
+    const doneBody = 'data: {"choices":[{"delta":{"content":"done"}}]}\n'
+      + 'data: {"choices":[],"usage":{"prompt_tokens":5,"completion_tokens":2}}\n'
+      + 'data: [DONE]\n';
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      bodies.push(String(init?.body));
+      return new Response(bodies.length === 1 ? askBody : doneBody, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await MinimaxDriver.create({
+      instanceId: "minimax-ask", displayName: "MiniMax", enabled: true,
+      config: MinimaxDriver.defaultConfig(), environment: { MINIMAX_API_KEY: "secret" },
+    });
+    const recorder = recordEvents(instance.adapter);
+    await instance.adapter.sendTurn({ threadId: "thread", text: "hi" });
+    const opened = await recorder.until((event) => event.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", choices: ["Yes", "No"] });
+    const reply = "The user answered your questions.\n\nQ: Ship the fixture?\nA: Yes";
+    expect(await instance.adapter.respondToRequest("thread", opened.requestId!, { behavior: "answer", message: reply })).toBe("answered");
+    const completed = await recorder.until((event) => event.type === "turn.completed");
+    expect(completed).toMatchObject({ ok: true });
+    expect(bodies[0]).toContain('"ask_user"');
+    expect(JSON.parse(JSON.parse(bodies[1]!).messages.at(-1).content).result).toBe(reply);
+    recorder.stop();
+    await instance.dispose();
+  }, 20_000);
+
   it("reports a bodyless stream clearly and releases the turn", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
     const instance = await MinimaxDriver.create({

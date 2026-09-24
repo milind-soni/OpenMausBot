@@ -68,6 +68,45 @@ class ThreadNavigationTest {
     }
 
     @Test
+    fun snoozedThreadsFoldAwayUntilTheirClockRunsOutOrTheyNeedThePerson() {
+        val snoozed = listOf("asleep", "timed", "expired", "unread", "working").map {
+            task(it).copy(
+                snoozedUntil = when (it) { "timed" -> 900.0; "expired" -> 100.0; else -> 0.0 },
+                unread = it == "unread",
+                activity = if (it == "working") "working" else "idle",
+            )
+        }
+        val grouped = bot.copy(tasks = snoozed + task("current").copy(snoozedUntil = 0.0))
+        // the sentinel and a live clock both fold; the current thread and one
+        // that needs the person stay, as does a timestamp already past.
+        // Equal update stamps keep stored order, not attention order.
+        assertEquals(listOf("expired", "unread", "working", "current"),
+            grouped.threadGroups(now = 500L).single().tasks.map { it.threadId })
+        assertEquals(6, grouped.threadGroups(includingClosed = true, now = 500L).single().tasks.size)
+        val pinned = grouped.copy(tasks = grouped.tasks!!.map {
+            when (it.threadId) {
+                "asleep" -> it.copy(pinned = true)
+                "unread" -> it.copy(updatedAt = 100.0)
+                else -> it
+            }
+        })
+        assertEquals(listOf("asleep", "unread", "expired", "working", "current"),
+            pinned.threadGroups(now = 500L).single().tasks.map { it.threadId })
+    }
+
+    @Test
+    fun theNextWakeTickIgnoresSentinelsAndExpiredSnoozes() {
+        val tasks = listOf(
+            task("asleep").copy(snoozedUntil = 0.0),
+            task("past").copy(snoozedUntil = 100.0),
+            task("soon").copy(snoozedUntil = 900.0),
+            task("later").copy(snoozedUntil = 1200.0),
+        )
+        assertEquals(900L, nextSnoozeExpiry(tasks, now = 500L))
+        assertNull(nextSnoozeExpiry(listOf(tasks[0], tasks[1]), now = 500L))
+    }
+
+    @Test
     fun waitingOnATeammateIsAWaitNotWorkAndKeepsTheThreadVisible() {
         val wait = task("dispatch").copy(busy = false, activity = "idle", waitingOnTeammate = true)
         assertTrue(wait.isWaitingOnTeammate)

@@ -52,6 +52,22 @@ describe("summarizeRuntime", () => {
     expect(summary.length).toBeLessThanOrEqual("assistant: ".length + 120);
     expect(summary).not.toContain("\n");
   });
+
+  it("marks an agent-composed ask without changing the tool-origin form", () => {
+    expect(
+      summarizeRuntime({
+        ...base,
+        type: "request.opened",
+        requestType: "question",
+        tool: "omb-ask",
+        summary: "Ship the release?",
+        origin: "output",
+      }).summary,
+    ).toBe("question (agent-composed): omb-ask — Ship the release?");
+    expect(
+      summarizeRuntime({ ...base, type: "request.opened", requestType: "question", tool: "ask_user", summary: "Ship?" }).summary,
+    ).toBe("question: ask_user — Ship?");
+  });
 });
 
 describe("summarizeNative", () => {

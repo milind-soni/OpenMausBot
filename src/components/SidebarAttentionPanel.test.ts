@@ -7,6 +7,7 @@ import { AttentionThreadRows, type AttentionThread } from "./SidebarBotActivity"
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 
 const entry: AttentionThread = {
+  kind: "bot",
   botId: "atlas",
   botName: "Atlas",
   task: { threadId: "approval", title: "Review permission", createdAt: 1, queued: false, activity: "waiting-on-you" },

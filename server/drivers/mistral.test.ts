@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ASK_USER_TOOL_DEFINITION } from "../../shared/ask-question.ts";
 import { recordEvents } from "../testing/events.ts";
 import { MistralDriver } from "./mistral.ts";
 
@@ -59,7 +60,7 @@ describe("Mistral provider", () => {
     await instance.dispose();
   });
 
-  it("streams text chunks and provider usage without unsupported request fields", async () => {
+  it.each([undefined, true, false])("streams text and usage with only supported request fields (tools=%s)", async (tools) => {
     let request: RequestInit | undefined;
     vi.stubGlobal("fetch", vi.fn(async (url, init) => {
       if (String(url).endsWith("/models")) return Response.json({ data: [] });
@@ -68,14 +69,47 @@ describe("Mistral provider", () => {
         'data: {"choices":[{"delta":{"content":" there"},"finish_reason":"stop"}],"usage":{"prompt_tokens":15,"completion_tokens":2}}\n\ndata: [DONE]\n\n',
       { headers: { "content-type": "text/event-stream" } });
     }));
-    const instance = await create();
+    const instance = await create({ tools });
     const recorder = recordEvents(instance.adapter);
     await instance.adapter.sendTurn({ threadId: "chat", text: "hello" });
     const completed = await recorder.until((event) => event.type === "turn.completed");
     expect(completed).toMatchObject({ ok: true, usage: { input: 15, output: 2 } });
     expect(JSON.parse(String(request?.body))).toEqual({ model: "mistral-large-latest", stream: true,
-      messages: [{ role: "user", content: "hello" }] });
+      messages: [{ role: "user", content: "hello" }],
+      ...(tools === false ? {} : { tools: [ASK_USER_TOOL_DEFINITION] }) });
     recorder.stop(); await instance.dispose();
+  });
+
+  it("holds a built-in question until the person answers, then returns the answer verbatim", async () => {
+    const bodies: Array<{ messages: Array<{ role: string; content: string }> }> = [];
+    const question = { questions: [{ question: "Which city?", options: [{ label: "Pune" }, { label: "Mumbai" }] }] };
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(url).endsWith("/models")) return Response.json({ data: [] });
+      bodies.push(JSON.parse(String(init?.body)));
+      const chunks = bodies.length === 1 ? [
+        { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: "ask_city", type: "function",
+          function: { name: "ask_user", arguments: JSON.stringify(question) } }] } }] },
+        { choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] },
+      ] : [{ choices: [{ index: 0, delta: { content: "Received." }, finish_reason: "stop" }] }];
+      return new Response(chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n",
+        { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await create();
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "question", text: "Plan a visit." });
+      const opened = await recorder.until(event => event.type === "request.opened");
+      expect(opened).toMatchObject({ requestType: "question", tool: "ask_user", choices: ["Pune", "Mumbai"] });
+      expect(bodies).toHaveLength(1);
+      const answer = "The user answered your questions.\n\nQ: Which city?\nA: Pune\n\nStay two nights.";
+      expect(await instance.adapter.respondToRequest("question", opened.requestId!, { behavior: "answer", message: answer })).toBe("answered");
+      expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const result = bodies[1]!.messages.find(message => message.role === "tool");
+      expect(JSON.parse(result!.content).result).toBe(answer);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
   });
 
   it("extracts chunked text for non-streamed generation too", async () => {

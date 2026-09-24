@@ -165,6 +165,10 @@ internal fun QuestionCardView(chat: Chat, message: Message, haptics: Haptics) {
             }
         }
 
+        if (QuestionCardRules.agentComposed(message)) {
+            Text("Agent-composed question", fontSize = 12.sp, color = secondaryTint)
+        }
+
         if (questions.size > 1) {
             Row(
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -329,6 +333,10 @@ internal object QuestionCardRules {
     /** The tab labels, in order, exactly as the card shows them. */
     fun tabLabels(questions: List<AskQuestion>): List<String> =
         questions.mapIndexed { index, question -> question.tabLabel(index + 1) }
+
+    /** An ask the harness parsed out of model output rather than a tool call. */
+    fun agentComposed(message: Message): Boolean =
+        message.card?.questionRequest?.origin == "output"
 }
 
 /**

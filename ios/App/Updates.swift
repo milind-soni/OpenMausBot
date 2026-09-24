@@ -106,6 +106,7 @@ extension CompanionState {
         case .activity: return last.tool?.name ?? ""
         case .screen: return "Screenshot"
         case .digest: return ""
+        case .compaction: return last.compaction?.chipText ?? last.text ?? ""
         }
     }
 }
