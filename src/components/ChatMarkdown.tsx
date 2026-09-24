@@ -1,6 +1,6 @@
 // Real markdown for bot bubbles: react-markdown + GFM (tables, task lists,
 // strikethrough, autolinks) with a chromed code block — language label, copy
-// button, lazy Shiki highlighting. Model output never reaches the DOM as raw
+// button, lazy Shiki highlighting for a curated set of languages (src/lib/highlighter.ts). Model output never reaches the DOM as raw
 // HTML: no rehype-raw, so HTML in the text renders as text; Shiki's output is
 // generator-escaped. While a message is still streaming, code blocks render
 // as plain <pre> and nothing is cached — partial fences would poison it.
@@ -32,15 +32,10 @@ function CodeBlock({ code, lang, streaming }: { code: string; lang: string; stre
     const cached = highlightCache.get(key);
     if (cached) return setHtml(cached);
     let alive = true;
-    import("shiki")
-      .then((shiki) =>
-        shiki.codeToHtml(code, {
-          lang: lang || "text",
-          theme: "github-dark-default",
-        }),
-      )
+    import("@/lib/highlighter")
+      .then(({ highlightCode }) => highlightCode(code, lang))
       .then((out) => {
-        if (!alive) return;
+        if (!alive || out === null) return;
         if (highlightCache.size >= CACHE_MAX) {
           const first = highlightCache.keys().next().value;
           if (first) highlightCache.delete(first);

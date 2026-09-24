@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
@@ -7,13 +7,24 @@ import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { SettingsPanel } from "@/components/SettingsPanel";
-import { AppsScreen } from "@/components/AppsScreen";
 import { ComputerPanel } from "@/components/ComputerPanel";
-import { SettingsScreen } from "@/components/SettingsScreen";
 import { UpdateBanner } from "@/components/UpdateBanner";
-import { ProjectsScreen } from "@/components/ProjectsScreen";
 import { TaskBoardScreen } from "@/components/TaskBoardScreen";
 import { ProjectsProvider } from "@/state/projects";
+
+// Full-page screens outside the chat loop load on first open, keeping them
+// out of the startup bundle.
+const SettingsScreen = lazy(() => import("@/components/SettingsScreen").then((m) => ({ default: m.SettingsScreen })));
+const AppsScreen = lazy(() => import("@/components/AppsScreen").then((m) => ({ default: m.AppsScreen })));
+const ProjectsScreen = lazy(() => import("@/components/ProjectsScreen").then((m) => ({ default: m.ProjectsScreen })));
+
+function ScreenFallback() {
+  return (
+    <div className="flex flex-1 items-center justify-center text-ink-secondary">
+      <Loader2 size={18} className="animate-spin" />
+    </div>
+  );
+}
 
 function Shell() {
   const { state, dispatch } = useStore();
@@ -56,13 +67,19 @@ function Shell() {
       <div className="relative flex min-h-0 flex-1">
       <Sidebar />
       {state.appSettingsOpen ? (
-        <SettingsScreen />
+        <Suspense fallback={<ScreenFallback />}>
+          <SettingsScreen />
+        </Suspense>
       ) : state.appsOpen ? (
-        <AppsScreen />
+        <Suspense fallback={<ScreenFallback />}>
+          <AppsScreen />
+        </Suspense>
       ) : state.taskBoardOpen ? (
         <TaskBoardScreen />
       ) : state.projectsOpen ? (
-        <ProjectsScreen />
+        <Suspense fallback={<ScreenFallback />}>
+          <ProjectsScreen />
+        </Suspense>
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
