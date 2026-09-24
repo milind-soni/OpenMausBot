@@ -95,7 +95,7 @@ final class SpeechDictation: ObservableObject {
             return
         }
 
-        let mic = await AVAudioApplication.requestRecordPermission()
+        let mic = await MicrophonePermission.request()
         guard gen == generation, !Task.isCancelled else {
             return
         }

@@ -146,7 +146,7 @@ struct AgentProfileView: View {
                                         .disabled(!instance.snapshot.isAvailable)
                                 }
                             }
-                            .onChange(of: selectedInstanceID) { _, instanceID in
+                            .onValueChange(of: selectedInstanceID) { instanceID in
                                 selectDefaults(for: instanceID)
                             }
 
@@ -395,11 +395,11 @@ struct AgentProfileView: View {
                     speakReplies = false
                 }
             }
-            .onChange(of: photo) { _, item in
+            .onValueChange(of: photo) { item in
                 guard let item else { return }
                 Task { await upload(item) }
             }
-            .onChange(of: engine) { _, selected in
+            .onValueChange(of: engine) { selected in
                 Task { await switchEngine(to: selected) }
             }
         }

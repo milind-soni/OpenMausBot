@@ -107,9 +107,9 @@ struct NewSectionSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
-        .sensoryFeedback(.selection, trigger: selectionFeedback)
-        .sensoryFeedback(.warning, trigger: warningFeedback)
-        .sensoryFeedback(.success, trigger: successFeedback)
+        .feedback(.selection, trigger: selectionFeedback)
+        .feedback(.warning, trigger: warningFeedback)
+        .feedback(.success, trigger: successFeedback)
         .alert(
             "Couldn’t create section",
             isPresented: Binding(
@@ -122,10 +122,10 @@ struct NewSectionSheet: View {
             Text(saveError ?? "Try again.")
         }
         .onDisappear { endDrawing() }
-        .onChange(of: scenePhase) { _, phase in
+        .onValueChange(of: scenePhase) { phase in
             if phase != .active { endDrawing() }
         }
-        .onChange(of: bots.map(\.id)) { _, ids in
+        .onValueChange(of: bots.map(\.id)) { ids in
             if selection.isDragging { endDrawing() }
             let available = Set(ids)
             selection.selectAll(selection.selectedIDs.filter(available.contains))
@@ -188,7 +188,7 @@ struct NewSectionSheet: View {
             }
 
             if bots.isEmpty {
-                ContentUnavailableView(
+                EmptyStateView(
                     "No bots yet",
                     systemImage: "square.grid.2x2",
                     description: Text("Create a bot first, then come back to group it into a section.")

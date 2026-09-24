@@ -77,7 +77,7 @@ public struct AgentThoughtChamberView: View {
                     Circle()
                         .fill(mascotColor)
                         .frame(width: 6, height: 6)
-                        .symbolEffect(.pulse, options: .repeating, isActive: isStreaming)
+                        .pulseCompat(isActive: isStreaming)
                 }
                 
                 Spacer()
@@ -113,8 +113,8 @@ public struct AgentThoughtChamberView: View {
                 // While the bot thinks, the newest step is the news: start at
                 // the bottom and keep following as steps arrive, the way the
                 // reply bubble follows its own text.
-                .defaultScrollAnchor(.bottom)
-                .onChange(of: reasoning) { _, _ in
+                .scrollAnchorCompat(.bottom)
+                .onValueChange(of: reasoning) { _ in
                     guard isStreaming, let newest = steps.last else { return }
                     withAnimation { proxy.scrollTo(newest.number, anchor: .bottom) }
                 }

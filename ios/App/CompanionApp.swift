@@ -13,7 +13,7 @@ import UserNotifications
 struct CompanionApp: App {
     @StateObject private var session = Session()
     @Environment(\.scenePhase) private var scenePhase
-    @State private var liveActivities = LiveActivityCoordinator()
+    @State private var liveActivities = LiveActivityBridge()
     @AppStorage(PrefKey.language) private var language = AppLanguage.system.rawValue
 
     var body: some Scene {
@@ -44,7 +44,7 @@ struct CompanionApp: App {
                     liveActivities.attach(to: session)
                 }
                 .onOpenURL { session.receivePairingURL($0) }
-                .onChange(of: scenePhase) { _, phase in
+                .onValueChange(of: scenePhase) { phase in
                     switch phase {
                     case .active:
                         OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
@@ -56,7 +56,10 @@ struct CompanionApp: App {
                     }
                 }
         }
-        .defaultSize(CompanionLayout.defaultWindowSize)
+        // `.defaultSize` is iOS 17 and `SceneBuilder` takes no conditionals,
+        // so it is dropped while the app supports 16. It only suggested an
+        // opening window size for iPad and Stage Manager; the system picks a
+        // sensible one on its own.
     }
 }
 
@@ -120,19 +123,19 @@ struct RootView: View {
             }
         }
         .background(Color(uiColor: .systemBackground).ignoresSafeArea())
-        .onChange(of: session.pairingInvite) { _, invite in
+        .onValueChange(of: session.pairingInvite) { invite in
             guard invite != nil else { return }
             hasSeenWelcome = true
             session.beginPairing()
         }
         .onAppear { reconcileNotificationOnboarding() }
-        .onChange(of: session.notificationAuthorizationResolved) { _, _ in
+        .onValueChange(of: session.notificationAuthorizationResolved) { _ in
             reconcileNotificationOnboarding()
         }
-        .onChange(of: session.notificationAuthorization) { _, _ in
+        .onValueChange(of: session.notificationAuthorization) { _ in
             reconcileNotificationOnboarding()
         }
-        .onChange(of: notificationOnboardingPending) { _, isPending in
+        .onValueChange(of: notificationOnboardingPending) { isPending in
             if isPending { reconcileNotificationOnboarding() }
         }
         .alert(
@@ -202,11 +205,11 @@ struct UnpairedView: View {
 
     var body: some View {
         NavigationStack {
-            ContentUnavailableView {
-                Label("This device was unpaired", systemImage: "lock.slash")
-            } description: {
-                Text("The connection was removed on your computer. Pair again to keep using your chats here.")
-            } actions: {
+            EmptyStateView(
+                title: String(localized: "This device was unpaired"),
+                systemImage: "lock.slash",
+                description: Text("The connection was removed on your computer. Pair again to keep using your chats here.")
+            ) {
                 Button("Pair again", action: onPairAgain)
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)

@@ -11,7 +11,7 @@ name: OpenMausCompanion
 options:
   bundleIdPrefix: com.openmausbot
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "16.0"
   createIntermediateGroups: true
 
 packages:
@@ -211,6 +211,10 @@ targets:
   OpenMausCompanionWidgets:
     type: app-extension
     platform: iOS
+    # Live Activities and the Dynamic Island arrived in 16.1, so this
+    # extension cannot go as low as the app itself. iPhones on 16.0 simply
+    # install the app without the widget extension.
+    deploymentTarget: "16.1"
     sources:
       - path: Widgets
       - path: Shared

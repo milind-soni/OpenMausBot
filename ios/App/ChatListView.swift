@@ -84,7 +84,7 @@ struct ChatListView: View {
                 .refreshable { await session.refresh() }
                 .overlay {
                     if rosterIsEmpty {
-                        ContentUnavailableView(
+                        EmptyStateView(
                             query.isEmpty ? "No bots yet" : "Nothing matches",
                             systemImage: query.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass",
                             description: Text(
@@ -113,7 +113,7 @@ struct ChatListView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Chat.self) { ChatView(chat: $0) }
-            .onChange(of: session.notificationChat) { _, chat in
+            .onValueChange(of: session.notificationChat) { chat in
                 guard let chat else { return }
                 path.append(chat)
                 session.consumeNotificationChat()

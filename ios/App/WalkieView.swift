@@ -56,14 +56,14 @@ struct WalkieView: View {
             if target == nil { targetId = roster.first?.bot.id ?? "" }
             Task { await walkie.prepare() }
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onValueChange(of: scenePhase) { phase in
             switch phase {
             case .active: Task { await walkie.prepare() }
             case .background: walkie.suspend()
             default: break
             }
         }
-        .onChange(of: speakReplies) { _, on in walkie.speaksReplies = on }
+        .onValueChange(of: speakReplies) { on in walkie.speaksReplies = on }
         .onReceive(session.$state) { walkie.observe($0) }
         .onDisappear { walkie.shutdown() }
     }
@@ -127,7 +127,7 @@ struct WalkieView: View {
     }
 
     private var empty: some View {
-        ContentUnavailableView(
+        EmptyStateView(
             "No agents yet",
             systemImage: "person.2",
             description: Text("Bots you make on your computer show up here.")
@@ -346,8 +346,8 @@ struct WalkieView: View {
         .transition(.opacity)
     }
 
-    private static let panel = RoundedRectangle(cornerRadius: 22, style: .continuous)
-        .fill(Color(white: 0.11))
+    private static let panelShape = RoundedRectangle(cornerRadius: 22, style: .continuous)
+    private static var panel: some View { panelShape.fill(Color(white: 0.11)) }
 }
 
 // MARK: - Pieces

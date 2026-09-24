@@ -29,7 +29,7 @@ struct UpdatesSheet: View {
                 .padding(.bottom, 6)
 
                 if updates.isEmpty {
-                    ContentUnavailableView(
+                    EmptyStateView(
                         "Nothing needs you",
                         systemImage: "checkmark.circle",
                         description: Text("When a bot stops for an answer, is mid-task, or finishes something, it shows up here.")
@@ -45,8 +45,7 @@ struct UpdatesSheet: View {
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
-        .presentationBackground(.thinMaterial)
-        .presentationCornerRadius(28)
+        .sheetChromeCompat()
     }
 
     @ViewBuilder

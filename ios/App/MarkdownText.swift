@@ -309,6 +309,6 @@ struct MarkdownText: View {
     /// rather than touching it. Empty when not streaming — an empty `Text`
     /// concatenated in costs nothing and keeps the callers branch-free.
     private func caretText(_ tail: Bool) -> Text {
-        tail ? Text("\u{2007}▍").foregroundStyle(Color.secondary) : Text("")
+        tail ? Text("\u{2007}▍").foregroundColor(Color.secondary) : Text("")
     }
 }

@@ -48,7 +48,7 @@ struct AssistantTurnChip: View {
                 }
             }
         }
-        .onChange(of: revealedMessageId, initial: true) { _, id in
+        .onValueChange(of: revealedMessageId, initial: true) { id in
             if turn.messages.contains(where: { $0.id == id }) { expanded = true }
         }
     }

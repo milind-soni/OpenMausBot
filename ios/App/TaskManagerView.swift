@@ -134,7 +134,7 @@ struct TaskManagerView: View {
                 }
             }
         }
-        .onChange(of: tasks.map(\.threadId)) { _, liveIDs in
+        .onValueChange(of: tasks.map(\.threadId)) { liveIDs in
             selectedThreadIDs.formIntersection(liveIDs)
         }
         .interactiveDismissDisabled(isMutating)
@@ -272,7 +272,7 @@ struct TaskManagerView: View {
     }
 
     private var emptySearch: some View {
-        ContentUnavailableView.search(text: search)
+        EmptyStateView<EmptyView>.search(text: search)
     }
 
     @ViewBuilder private func threadButton(_ task: BotTask) -> some View {

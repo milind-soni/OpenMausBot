@@ -1373,6 +1373,11 @@ final class Session: ObservableObject {
         if let prepared = preparedPhoneCredentials[requestIdentity] {
             return prepared
         }
+        guard #available(iOS 17.0, *) else {
+            // HPKE, which seals the credential end to end, is iOS 17 and up.
+            // There is no weaker path worth offering for a secret.
+            throw PhoneSecretError.requiresNewerOS
+        }
         let envelope = try PhoneSecretCrypto.encrypt(
             value,
             publicKey: publicKey,

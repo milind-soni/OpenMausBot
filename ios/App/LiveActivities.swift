@@ -11,6 +11,11 @@ import Combine
 import Foundation
 import CompanionCore
 
+/// ActivityKit's content/alert API is iOS 16.2, so the whole coordinator is
+/// gated and simply never built on anything older. Those phones keep the app;
+/// they just have no Dynamic Island, which they do not have hardware for
+/// either.
+@available(iOS 16.2, *)
 @MainActor
 final class LiveActivityCoordinator {
     private var cancellable: AnyCancellable?
@@ -91,5 +96,22 @@ final class LiveActivityCoordinator {
             since.removeValue(forKey: activity.attributes.botId)
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
+    }
+}
+
+/// What the app actually holds.
+///
+/// `LiveActivityCoordinator` cannot exist below iOS 16.2, but the app's scene
+/// does not want an `#available` around a stored property. The bridge owns the
+/// coordinator where it is available and does nothing where it is not.
+@MainActor
+final class LiveActivityBridge {
+    private var coordinator: AnyObject?
+
+    func attach(to session: Session) {
+        guard #available(iOS 16.2, *) else { return }
+        let coordinator = LiveActivityCoordinator()
+        coordinator.attach(to: session)
+        self.coordinator = coordinator
     }
 }

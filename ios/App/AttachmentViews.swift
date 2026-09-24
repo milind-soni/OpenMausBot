@@ -154,7 +154,7 @@ struct TranscriptAttachmentView: View {
                     let frame = proxy.frame(in: .global)
                     Color.clear
                         .onAppear { updateThumbnailVisibility(frame) }
-                        .onChange(of: frame) { _, nextFrame in
+                        .onValueChange(of: frame) { nextFrame in
                             updateThumbnailVisibility(nextFrame)
                         }
                 }

@@ -168,7 +168,7 @@ struct NeedsYouIsland: View {
         }
         .frame(maxWidth: .infinity, alignment: .top)
         .animation(.spring(response: 0.55, dampingFraction: 0.78), value: expanded)
-        .onChange(of: update?.card?.requestId) { _, _ in reconcile() }
+        .onValueChange(of: update?.card?.requestId) { _ in reconcile() }
         .onAppear { reconcile() }
     }
 
