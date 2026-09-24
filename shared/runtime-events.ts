@@ -68,7 +68,7 @@ export type RuntimeEvent = RuntimeEventBase &
          * The one figure the harness accumulates — thread.token-usage.updated
          * is a live indicator whose meaning differs per driver (a per-call
          * delta, a thread total, a per-step figure) and must never be summed. */
-        usage?: { input: number; output: number; cachedInput?: number };
+        usage?: { input: number; output: number; cachedInput?: number; cacheWriteInput?: number };
       }
     | {
         type: "turn.wait_started";
@@ -154,7 +154,7 @@ export type RuntimeEvent = RuntimeEventBase &
         approvalScope?: "local-computer";
       }
     | {
-        type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number;
+        type: "thread.token-usage.updated"; input: number; output: number; cachedInput?: number; cacheWriteInput?: number;
         /** What the model's window held on the most recent model call — the
          * whole prompt, cache reads included — and the window's size when the
          * driver knows it. The figure that predicts the next message's cost. */

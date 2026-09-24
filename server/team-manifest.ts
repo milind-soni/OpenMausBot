@@ -38,6 +38,7 @@ const responderSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("member"), member: requiredText(64) }),
   z.object({ kind: z.literal("everyone") }),
   z.object({ kind: z.literal("mentions") }),
+        z.object({ kind: z.literal("dynamic") }),
 ]);
 
 const memberSchema = z.object({
@@ -104,7 +105,8 @@ export interface TeamManifestMember {
 export type TeamManifestResponder =
   | { kind: "member"; member: string }
   | { kind: "everyone" }
-  | { kind: "mentions" };
+  | { kind: "mentions" }
+  | { kind: "dynamic" };
 
 export interface TeamManifestRoom {
   name: string;

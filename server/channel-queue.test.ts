@@ -5,6 +5,7 @@ import {
   cancelChannelMessage,
   drainChannelMessages,
   holdChannelQueue,
+  hasQueuedChannelMessages,
   queuedChannelMessage,
   queueChannelMessage,
   restoreChannelMessages,
@@ -31,6 +32,8 @@ describe("channel queue", () => {
     drainChannelMessages(() => working, run);
     expect(run).not.toHaveBeenCalled();
     expect(_queuedChannelCount("thread-a")).toBe(2);
+    expect(hasQueuedChannelMessages("group-a", "thread-a")).toBe(true);
+    expect(hasQueuedChannelMessages("other-group", "thread-a")).toBe(false);
     expect(queuedChannelMessage("group-a", "thread-a", "send_first_123456")?.id).toBe(first.id);
 
     working = false;

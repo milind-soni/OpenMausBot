@@ -8,7 +8,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { waitForExit } from "./testing/cleanup.ts";
 
 type Bot = { id: string; threadId: string; name: string };
-type Room = { id: string; name: string; memberIds: string[]; section?: string; bulletin: string; working?: boolean };
+type Room = { id: string; name: string; memberIds: string[]; section?: string; bulletin: string; working?: boolean; defaultResponder?: { kind: string } };
 type RpcReply = { result: { isError?: boolean; content: Array<{ text: string }> } };
 
 it("creates and manages an own-section room through the mounted Chief MCP proxy", async () => {
@@ -68,10 +68,15 @@ it("creates and manages an own-section room through the mounted Chief MCP proxy"
       return reply.result.content.map((item) => item.text).join("\n");
     };
     const rooms = async () => (await api<{ groups: Room[] }>("GET", "/api/bots?messages=0")).groups;
-    await tool("create_room", { name: "Review room", member_bot_ids: [peer.id], bulletin: "Review only the assigned change." });
+    await tool("create_room", { name: "Review room", member_bot_ids: [peer.id], bulletin: "Review only the assigned change.", response_mode: "dynamic", meeting_limits: { time: { seconds: 300 }, cost: { hardStopUsd: 0.5, wrapUpUsd: 0.35 } } });
     const room = (await rooms()).find((candidate) => candidate.name === "Review room")!;
-    expect(room).toMatchObject({ section: "Room verification", memberIds: [chief.id, peer.id], working: false });
+    expect(room).toMatchObject({ section: "Room verification", memberIds: [chief.id, peer.id], working: false, defaultResponder: { kind: "dynamic" } });
     expect(await tool("list_rooms", {})).toContain(room.id);
+    await tool("manage_room", { room_id: room.id, action: "set_response_mode", response_mode: "everyone" });
+    expect((await rooms()).find(candidate => candidate.id === room.id)?.defaultResponder).toEqual({ kind: "everyone" });
+    await tool("manage_room", { room_id: room.id, action: "set_response_mode", response_mode: "dynamic" });
+    await tool("manage_room", { room_id: room.id, action: "set_meeting_limits", meeting_limits: { tokens: { hardStop: 100000 }, replies: { hardStop: 10, wrapUpAfter: 7 } } });
+    await tool("manage_room", { room_id: room.id, action: "set_meeting_limits", meeting_limits: {} }, true);
     await tool("manage_room", { room_id: room.id, action: "rename", name: "Verified room" });
     await tool("manage_room", { room_id: room.id, action: "add_members", member_bot_ids: [second.id] });
     await tool("manage_room", { room_id: room.id, action: "remove_members", member_bot_ids: [peer.id] });
@@ -83,6 +88,15 @@ it("creates and manages an own-section room through the mounted Chief MCP proxy"
     await tool("manage_room", { room_id: room.id, action: "add_members", member_bot_ids: [foreign.id] }, true);
     expect((await rooms()).find((candidate) => candidate.id === room.id)).toEqual(saved);
     expect((await rooms()).some((candidate) => candidate.name === "Forbidden room")).toBe(false);
+    await tool("create_room", { name: "Started discussion", member_bot_ids: [peer.id], response_mode: "dynamic", opening_message: "Discuss this shared invitation." });
+    const started = (await rooms()).find(candidate => candidate.name === "Started discussion")!;
+    await expect.poll(async () => (await rooms()).find(candidate => candidate.id === started.id)?.working).toBe(true);
+    const transcript = await api<{ messages: Array<{ role: string; kind: string; text?: string; peerPost?: unknown }> }>("GET", `/api/threads/${(await api<{ groups: Array<{ id: string; threadId: string }> }>("GET", "/api/bots?messages=0")).groups.find(candidate => candidate.id === started.id)!.threadId}/messages`);
+    const invitation = transcript.messages.filter(message => message.text === "Discuss this shared invitation.");
+    expect(invitation).toHaveLength(1);
+    expect(invitation[0]).toMatchObject({ role: "bot", peerPost: {} });
+    await api("POST", `/api/groups/${started.id}/interrupt`, {});
+    await expect.poll(async () => (await rooms()).find(candidate => candidate.id === started.id)?.working).toBe(false);
     await control(["messages", "--channel", room.id, "--limit", "10"]);
     await control(["interrupt", "--bot", chief.id]);
     await tool("manage_room", { room_id: room.id, action: "rename", name: "Expired turn" }, true);

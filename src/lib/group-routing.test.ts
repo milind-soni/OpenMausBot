@@ -10,6 +10,10 @@ describe("roomRespondersForComposer", () => {
     { id: "milind", name: "Milind" },
   ];
 
+  it("keeps dynamic mode and makes all active participants available to the composer", () => {
+    expect(roomRespondersForComposer("hello", members, { defaultResponder: { kind: "dynamic" } })).toEqual(members);
+  });
+
   it("routes an unmentioned message to the configured lead", () => {
     expect(
       roomRespondersForComposer("hello there", members, { defaultResponder: { kind: "member", botId: "atlas" } }),

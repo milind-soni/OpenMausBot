@@ -1557,7 +1557,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         ok: boolean,
         stopReason: string | null,
         cost: number | null = null,
-        usage?: { input: number; output: number; cachedInput?: number },
+        usage?: { input: number; output: number; cachedInput?: number; cacheWriteInput?: number },
       ) => {
         const t = session.turn;
         if (!t || t.settled) return;
@@ -1663,10 +1663,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               emit({
                 ...base(threadId, currentTurnId()),
                 type: "thread.token-usage.updated",
-                input: (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0),
+                input: (msg.usage.input_tokens || 0) + (msg.usage.cache_read_input_tokens || 0) + (msg.usage.cache_creation_input_tokens || 0),
                 output: msg.usage.output_tokens || 0,
                 ...(typeof msg.usage.cache_read_input_tokens === "number"
                   ? { cachedInput: msg.usage.cache_read_input_tokens }
+                  : {}),
+                ...(typeof msg.usage.cache_creation_input_tokens === "number"
+                  ? { cacheWriteInput: msg.usage.cache_creation_input_tokens }
                   : {}),
                 // one assistant message = one model call, and its prompt is
                 // everything in the window: fresh text, cache reads and writes
@@ -1705,6 +1708,9 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
                     output: o.usage.output_tokens || 0,
                     ...(typeof o.usage.cache_read_input_tokens === "number"
                       ? { cachedInput: o.usage.cache_read_input_tokens }
+                      : {}),
+                    ...(typeof o.usage.cache_creation_input_tokens === "number"
+                      ? { cacheWriteInput: o.usage.cache_creation_input_tokens }
                       : {}),
                   }
                 : undefined,

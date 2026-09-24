@@ -2591,6 +2591,8 @@
   "engines.icon.sizeError": "Provider icons must be 128 KB or smaller.",
   "engines.icon.invalidError": "Upload a complete PNG, JPEG, or WebP image up to 128 KB and {dimension} × {dimension} pixels.",
   "engines.icon.dimensionError": "Provider icons must be at most {dimension} × {dimension} pixels.",
+  "room.responder.dynamicOption": "Dynamic",
+  "room.setup.dynamic": "Members follow the topic and reply to one another.",
   "room.usage.uncached": "{tokens} uncached input",
   "room.usage.cached": "{tokens} cached input",
   "room.usage.output": "{tokens} output",

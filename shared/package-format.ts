@@ -189,6 +189,7 @@ const roomSchema = z.object({
     z.object({ kind: z.literal("agent"), agent: key }),
     z.object({ kind: z.literal("everyone") }),
     z.object({ kind: z.literal("mentions") }),
+    z.object({ kind: z.literal("dynamic") }),
   ]),
 });
 const exampleSchema = z.object({

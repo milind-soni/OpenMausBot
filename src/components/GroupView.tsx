@@ -1,3 +1,4 @@
+import { MeetingLimitsButton } from "./MeetingLimits";
 // A room: several bots + you in one shared thread. The sidebar and call view
 // carry the personality; avatars inside the room stay still so a busy group
 // does not become a wall of competing motion. Plain messages go to the room's
@@ -382,7 +383,7 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
   const value = responder.kind === "member" ? `member:${responder.botId}` : responder.kind;
   const lead = responder.kind === "member" ? members.find((member) => member.id === responder.botId) : undefined;
   const title =
-    responder.kind === "everyone"
+    responder.kind === "dynamic" ? t("room.setup.dynamic") : responder.kind === "everyone"
       ? t("room.responder.everyone")
       : responder.kind === "mentions"
         ? t("room.responder.mentions")
@@ -390,7 +391,8 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
 
   const change = (nextValue: string) => {
     let next: GroupDefaultResponder;
-    if (nextValue === "everyone") next = { kind: "everyone" };
+    if (nextValue === "dynamic") next = { kind: "dynamic" };
+    else if (nextValue === "everyone") next = { kind: "everyone" };
     else if (nextValue === "mentions") next = { kind: "mentions" };
     else next = { kind: "member", botId: nextValue.slice("member:".length) };
     dispatch({ type: "patchGroup", groupId: group.id, patch: { defaultResponder: next } });
@@ -413,6 +415,7 @@ function DefaultResponderSelect({ group, members }: { group: Group; members: Bot
         </optgroup>
         <optgroup label={t("room.responder.groupBehavior")}>
           <option value="everyone">{t("room.responder.everyoneOption")}</option>
+          <option value="dynamic">{t("room.responder.dynamicOption")}</option>
           <option value="mentions">{t("room.responder.mentionsOption")}</option>
         </optgroup>
       </select>
@@ -550,7 +553,7 @@ type RoomSetupFields = {
   setupSkippedAt?: number | string | null;
 };
 
-type RoomResponderMode = "lead" | "everyone" | "mentions";
+type RoomResponderMode = "lead" | "everyone" | "mentions" | "dynamic";
 
 function setupResponderMode(responder: GroupDefaultResponder): RoomResponderMode {
   return responder.kind === "member" ? "lead" : responder.kind;
@@ -609,6 +612,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
   }, [leadPickerOpen]);
 
   const responder = (): GroupDefaultResponder => {
+    if (behavior === "dynamic") return { kind: "dynamic" };
     if (behavior === "everyone") return { kind: "everyone" };
     if (behavior === "mentions") return { kind: "mentions" };
     return members.some((member) => member.id === leadId)
@@ -821,6 +825,36 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 {t("room.responder.everyoneOption")}
               </span>
               <span className="ml-6 mt-2 text-[11.5px] text-ink-secondary">{t("room.setup.allMembers")}</span>
+            </button>
+
+            <button
+              type="button"
+              role="radio"
+              aria-checked={behavior === "dynamic"}
+              onClick={() => {
+                setBehavior("dynamic");
+                setLeadPickerOpen(false);
+              }}
+              disabled={saving}
+              className={cn(
+                "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
+                behavior === "dynamic"
+                  ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+              )}
+            >
+              <span className="flex items-center gap-2 text-[13px] font-semibold">
+                <span
+                  className={cn(
+                    "flex size-4 shrink-0 items-center justify-center rounded-full border",
+                    behavior === "dynamic" ? "border-accent bg-accent" : "border-ink-secondary/60",
+                  )}
+                >
+                  {behavior === "dynamic" && <span className="size-1.5 rounded-full bg-white" />}
+                </span>
+                {t("room.responder.dynamicOption")}
+              </span>
+              <span className="ml-6 mt-2 text-[11.5px] text-ink-secondary">{t("room.setup.dynamic")}</span>
             </button>
 
             <button
@@ -1180,7 +1214,7 @@ export function GroupView({ group }: { group: Group }) {
           <GroupCallButton group={group} members={members} />
           <GroupUsageChip usage={group.usage} />
           {!remoteClient && !setupPending && !group.dm && <RoomWorkingFolderChip group={group} onToggle={() => setFolderOpen((open) => !open)} />}
-          {!remoteClient && !setupPending && !group.dm && <DefaultResponderSelect group={group} members={members} />}
+          {!remoteClient && !setupPending && !group.dm && <><DefaultResponderSelect group={group} members={members} /><MeetingLimitsButton group={group} /></>}
           {group.dm || remoteClient ? (
             memberMauses
           ) : (

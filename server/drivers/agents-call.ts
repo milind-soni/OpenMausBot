@@ -784,13 +784,17 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         fromBotId: BOT_ID,
         fromThreadId: THREAD_ID,
         name: roomName,
+        openingMessage: args.opening_message,
         memberIds,
         bulletin,
+        responseMode: args.response_mode,
+        meetingLimits: args.meeting_limits,
+        leadBotId: args.lead_bot_id,
       }),
     });
     if (r.error) return { text: `Couldn't create room: ${r.error}`, isError: true };
     return {
-      text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members.`,
+      text: `Created room “${r.name ?? roomName}” in section “${r.section ?? "General"}” [id: ${r.id}] with ${r.memberCount ?? memberIds.length} members. ${r.discussionStarted ? "The opening message was posted once and the room response mode is running." : "No discussion has started."}`,
     };
   }
   if (name === "manage_room") {
@@ -815,6 +819,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
         memberIds,
         name: roomName,
         bulletin,
+        responseMode: args.response_mode,
+        meetingLimits: args.meeting_limits,
+        leadBotId: args.lead_bot_id,
       }),
     });
     if (r.error) return { text: `Couldn't manage room: ${r.error}`, isError: true };
