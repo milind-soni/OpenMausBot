@@ -412,8 +412,49 @@ export function readActivePathTail(threadId: string, legacyFile: string, limit: 
   return { messages: rows.map(rowToMessage), hasMore };
 }
 
+/** A bounded active-branch read for shared context. Filtering happens in
+ * SQLite before the result limit, so cards and queued rows do not use up the
+ * allowance or require parsing into Message objects. */
+export function readActiveTextTail(threadId: string, legacyFile: string, limit: number): { messages: Message[]; hasMore: boolean } {
+  const database = db();
+  if (!database.prepare("SELECT 1 FROM messages WHERE thread_id = ? LIMIT 1").get(threadId)) importLegacy(threadId, legacyFile);
+  const scanLimit = Math.max(limit + 1, limit * 16);
+  const rows = database.prepare(`
+    WITH RECURSIVE path(id, json, parent_id, depth) AS (
+      SELECT m.id, m.json,
+        CASE WHEN json_type(m.json, '$.parentId') IS NULL THEN
+          (SELECT p.id FROM messages p WHERE p.thread_id = m.thread_id AND p.rowid < m.rowid ORDER BY p.rowid DESC LIMIT 1)
+        ELSE json_extract(m.json, '$.parentId') END, 1
+      FROM messages m WHERE m.thread_id = ? AND m.id = COALESCE(
+        (SELECT active_leaf_id FROM thread_state WHERE thread_id = ?),
+        (SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1))
+      UNION ALL
+      SELECT m.id, m.json,
+        CASE WHEN json_type(m.json, '$.parentId') IS NULL THEN
+          (SELECT p.id FROM messages p WHERE p.thread_id = m.thread_id AND p.rowid < m.rowid ORDER BY p.rowid DESC LIMIT 1)
+        ELSE json_extract(m.json, '$.parentId') END, path.depth + 1
+      FROM path JOIN messages m ON m.thread_id = ? AND m.id = path.parent_id
+      WHERE path.depth < ?
+    )
+    SELECT json FROM path
+    WHERE json_extract(json, '$.kind') = 'text'
+      AND trim(COALESCE(json_extract(json, '$.text'), '')) <> ''
+      AND COALESCE(json_extract(json, '$.queued'), 0) = 0
+      AND json_type(json, '$.at') IN ('integer', 'real')
+    ORDER BY depth LIMIT ?
+  `).all(threadId, threadId, threadId, threadId, scanLimit, limit + 1) as Array<{ json: string }>;
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.pop();
+  rows.reverse();
+  return { messages: rows.map(rowToMessage), hasMore };
+}
+
 export function latestThreadMessageAt(threadId: string): number {
-  const row = db().prepare("SELECT at FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(threadId) as { at: number } | undefined;
+  const row = db().prepare(`
+    SELECT m.at FROM messages m WHERE m.thread_id = ? AND m.id = COALESCE(
+      (SELECT active_leaf_id FROM thread_state WHERE thread_id = ?),
+      (SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1))
+  `).get(threadId, threadId, threadId) as { at: number } | undefined;
   return row?.at ?? 0;
 }
 

@@ -9,7 +9,10 @@ function fixture() {
   const group = { id: "room", threadId: "group", name: "Team", memberIds: ["me"], createdAt: 1, unread: false, bulletin: "", defaultResponder: { kind: "mentions" }, tasks: [{ threadId: "group-task", title: "Group task", createdAt: 1 }] } as GroupRecord;
   const threads: Record<string, Message[]> = { private: [], work: [], group: [], "group-task": [] };
   const store: SharedHistoryStore = { groups: [group], taskByThread: () => undefined,
-    activePathTail: (id, limit) => ({ messages: (threads[id] ?? []).slice(-limit), hasMore: (threads[id]?.length ?? 0) > limit }),
+    activeTextTail: (id, limit) => {
+      const eligible = (threads[id] ?? []).filter(message => message.kind === "text" && message.text?.trim() && !message.queued && Number.isFinite(message.at));
+      return { messages: eligible.slice(-limit), hasMore: eligible.length > limit };
+    },
     latestThreadMessageAt: id => threads[id]?.at(-1)?.at ?? 0 };
   const read = (currentThreadId = "private", maxChars?: number) => sharedHistory(store, bot, { userName: "User", currentThreadId, maxChars });
   return { bot, group, store, threads, read };

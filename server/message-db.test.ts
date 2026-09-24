@@ -19,6 +19,8 @@ import { closeMessageDb,
   readThread,
   readThreadTail,
   readActivePathTail,
+  readActiveTextTail,
+  latestThreadMessageAt,
   recallMessages,
   searchMessages,
   setActiveLeaf,
@@ -94,6 +96,24 @@ describe("message-db", () => {
     expect(tail.hasMore).toBe(true);
     expect(tail.messages.map(message => message.id)).toEqual(Array.from({ length: 12 }, (_, i) => `m${3988 + i}`));
     expect(tail.messages.some(message => message.id === "abandoned")).toBe(false);
+    expect(latestThreadMessageAt("large")).toBeGreaterThan(0);
+  });
+
+  it("ranks the active branch and counts eligible text after filtering cards", () => {
+    insertMessage("eligible", msg("a", "first", { at: 10 }));
+    insertMessage("eligible", msg("card", "not context", { at: 20, kind: "activity", parentId: "a" }));
+    insertMessage("eligible", msg("queued", "not yet sent", { at: 30, queued: true, parentId: "card" }));
+    insertMessage("eligible", msg("b", "second", { at: 40, parentId: "queued" }));
+    insertMessage("eligible", msg("abandoned", "other branch", { at: 1000, parentId: "a" }));
+    setActiveLeaf("eligible", "b");
+    closeMessageDb();
+    expect(latestThreadMessageAt("eligible")).toBe(40);
+    expect(readActiveTextTail("eligible", legacy("eligible"), 2)).toMatchObject({
+      hasMore: false, messages: [{ id: "a" }, { id: "b" }],
+    });
+    expect(readActiveTextTail("eligible", legacy("eligible"), 1)).toMatchObject({
+      hasMore: true, messages: [{ id: "b" }],
+    });
   });
 
   it("migrates known legacy transcripts at Store startup so search sees unopened tasks", () => {

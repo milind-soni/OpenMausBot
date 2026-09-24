@@ -1308,6 +1308,10 @@ export class Store {
     return mdb.readActivePathTail(threadId, messagesFile(threadId), limit);
   }
 
+  activeTextTail(threadId: string, limit: number): { messages: Message[]; hasMore: boolean } {
+    return mdb.readActiveTextTail(threadId, messagesFile(threadId), limit);
+  }
+
   latestThreadMessageAt(threadId: string): number {
     return mdb.latestThreadMessageAt(threadId);
   }
