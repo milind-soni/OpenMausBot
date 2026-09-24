@@ -76,10 +76,11 @@ describe.skipIf(process.platform === "win32")("VPS SSH connection sharing on POS
     const userConfig = join(home, "my config");
     writeFileSync(userConfig, "Host fixture-vps\n  HostName 192.0.2.1\n");
     const config = vpsSshConfigText("/isolated/space path/100%", userConfig, join(home, "absent"));
-    // A real file, not /dev/stdin: Node gives the child a socket for stdin, which Linux cannot open by path (ENXIO).
-    const configFile = join(home, "vps config");
-    writeFileSync(configFile, config);
-    const parsed = spawnSync("/usr/bin/ssh", ["-G", "-F", configFile, "fixture-vps"], { encoding: "utf8" });
+    // A real file, not /dev/stdin: spawnSync feeds stdin through a socketpair, and
+    // Linux refuses to reopen it (ENXIO), so the CI runners cannot read the config.
+    const generatedConfig = join(home, "generated config");
+    writeFileSync(generatedConfig, config);
+    const parsed = spawnSync("/usr/bin/ssh", ["-G", "-F", generatedConfig, "fixture-vps"], { encoding: "utf8" });
     expect(parsed.status, parsed.stderr).toBe(0);
     expect(parsed.stdout).toContain("hostname 192.0.2.1\n");
     expect(parsed.stdout).toContain("controlpath /isolated/space path/100%/cm-");
