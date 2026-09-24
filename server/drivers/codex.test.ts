@@ -64,6 +64,7 @@ posixOnly("CodexDriver turns (fake app-server)", () => {
   afterEach(async () => {
     delete process.env.FAKE_CODEX_MODE;
     delete process.env.FAKE_CODEX_DUMP;
+    delete process.env.FAKE_CODEX_MCP_SERVER;
     delete process.env.OPENAI_API_KEY;
     recorder?.stop();
     await instance?.dispose();
@@ -226,6 +227,33 @@ posixOnly("CodexDriver turns (fake app-server)", () => {
 
     expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
     expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ decision: "approved" });
+  });
+
+  it("pre-approves tool calls from the agents MCP server with an elicitation result", async () => {
+    await create({ mode: "mcp-approval" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-mcp-agents", text: "check the board" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    expect(recorder.events.some((e) => e.type === "request.opened")).toBe(false);
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "accept", content: {} });
+  });
+
+  it("asks before another MCP server's tool call and declines in elicitation form", async () => {
+    process.env.FAKE_CODEX_MCP_SERVER = "someone_else";
+    await create({ mode: "mcp-approval" });
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-mcp-other", text: "go" });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({ requestType: "permission", tool: "mcp" });
+
+    await instance.adapter.respondToRequest("t-mcp-other", opened.requestId!, { behavior: "deny" });
+    await recorder.until((e) => e.type === "turn.completed");
+    expect(JSON.parse(readFileSync(dump, "utf8")).decision).toEqual({ action: "decline", content: null });
   });
 
   it("rejects a second turn while one is in flight", async () => {

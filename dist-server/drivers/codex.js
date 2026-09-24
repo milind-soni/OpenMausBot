@@ -122,17 +122,32 @@ export const CodexDriver = {
                 emit({ ...base(threadId, turnId), type: "turn.completed", ok, stopReason, cost: null });
                 stop(); // the app-server never exits on its own
             };
+            // MCP elicitations answer with {action, content}, not {decision} — codex
+            // rejects the tool call when it can't deserialize the reply.
+            const answerElicitation = (id, accept) => send({ jsonrpc: "2.0", id, result: { action: accept ? "accept" : "decline", content: accept ? {} : null } });
             // server→client approval request → canonical request.opened
             const handleServerRequest = (msg) => {
                 const method = msg.method;
                 const params = msg.params ?? {};
+                if (method === "mcpServer/elicitation/request") {
+                    const toolApproval = params._meta?.codex_approval_kind === "mcp_tool_call";
+                    // only tool-call approvals can be answered; a real form needs input we can't give
+                    if (!toolApproval)
+                        return answerElicitation(msg.id, false);
+                    // our own agents-proxy is pre-approved, as mcp__agents is for claude
+                    if (config.fullAuto || params.serverName === AGENTS_MCP_KEY)
+                        return answerElicitation(msg.id, true);
+                }
+                const elicitation = method === "mcpServer/elicitation/request";
                 const legacy = method === "execCommandApproval" || method === "applyPatchApproval";
                 const isQuestion = method === "item/tool/requestUserInput";
                 const tool = method === "item/fileChange/requestApproval" || method === "applyPatchApproval"
                     ? "edit"
                     : isQuestion
                         ? "ask_user"
-                        : "shell";
+                        : elicitation
+                            ? "mcp"
+                            : "shell";
                 if (config.fullAuto && !isQuestion) {
                     return send({ jsonrpc: "2.0", id: msg.id, result: { decision: legacy ? "approved" : "accept" } });
                 }
@@ -141,9 +156,11 @@ export const CodexDriver = {
                     ? params.command.slice(0, 200)
                     : Array.isArray(params.questions)
                         ? params.questions.map((q) => q.question ?? q.header).filter(Boolean).join(" · ")
-                        : typeof params.reason === "string"
-                            ? params.reason
-                            : tool;
+                        : elicitation && typeof params.message === "string"
+                            ? params.message
+                            : typeof params.reason === "string"
+                                ? params.reason
+                                : tool;
                 const choices = isQuestion
                     ? (params.questions?.[0]?.options ?? []).map((o) => o.label).slice(0, 5)
                     : undefined;
@@ -157,6 +174,9 @@ export const CodexDriver = {
                             answers[q.id] = { answers: [message || QUESTION_TIMEOUT_NOTE] };
                         }
                         send({ jsonrpc: "2.0", id: msg.id, result: { answers } });
+                    }
+                    else if (elicitation) {
+                        answerElicitation(msg.id, behavior === "allow");
                     }
                     else {
                         send({

@@ -4,8 +4,9 @@
 // initialize/thread/turn handshake, then plays a scripted turn. Like the
 // real app-server, it never exits on its own — the driver kills it.
 //
-//   FAKE_CODEX_MODE   happy (default) | approval | resume | stream
+//   FAKE_CODEX_MODE   happy (default) | approval | mcp-approval | resume | stream
 //   FAKE_CODEX_DUMP   path to write {argv, env, calls, decision} as JSON
+//   FAKE_CODEX_MCP_SERVER  serverName for mcp-approval (default gbs_agents)
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { writeFileSync } from "node:fs";
@@ -94,6 +95,19 @@ process.stdin.on("data", (chunk) => {
         if (mode === "approval") {
           out({ jsonrpc: "2.0", id: 100, method: "execCommandApproval", params: { command: "rm -rf scratch" } });
           // turn continues from the approval response handler above
+        } else if (mode === "mcp-approval") {
+          out({
+            jsonrpc: "2.0",
+            id: 100,
+            method: "mcpServer/elicitation/request",
+            params: {
+              serverName: process.env.FAKE_CODEX_MCP_SERVER ?? "gbs_agents",
+              mode: "form",
+              _meta: { codex_approval_kind: "mcp_tool_call" },
+              message: 'Allow the MCP server to run tool "list_tasks"?',
+              requestedSchema: { type: "object", properties: {} },
+            },
+          });
         } else {
           finishTurn();
         }
