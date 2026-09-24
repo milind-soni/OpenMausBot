@@ -1,11 +1,19 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, session, shell, systemPreferences, utilityProcess, webContents } from "electron";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
 import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
-import { registerProjectsIpc } from "./projects.mjs";
+
+// The compiled server and the packaged main process share this module from
+// Resources/electron. electron-builder omits it from app.asar when it is also
+// declared as an extra resource.
+const { registerProjectsIpc } = await import(
+  app.isPackaged
+    ? pathToFileURL(path.join(process.resourcesPath, "electron", "projects.mjs")).href
+    : "./projects.mjs",
+);
 
 app.name = "Gerer Build Studio";
 
