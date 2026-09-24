@@ -158,6 +158,8 @@ function decodeConfig(raw) {
         permissionMode: mode ?? "acceptEdits",
     };
 }
+const runsAsRoot = () => process.getuid?.() === 0;
+const effectivePermissionMode = (config) => config.permissionMode === "bypassPermissions" && runsAsRoot() ? "acceptEdits" : config.permissionMode;
 function firstText(content) {
     if (typeof content === "string")
         return content;
@@ -175,7 +177,7 @@ export const ClaudeDriver = {
     models: MODELS,
     decodeConfig,
     defaultConfig: () => decodeConfig({}),
-    getAutoApprove: (config) => config.permissionMode === "bypassPermissions",
+    getAutoApprove: (config) => effectivePermissionMode(config) === "bypassPermissions",
     setAutoApprove: (config, autoApprove) => ({
         ...config,
         permissionMode: autoApprove ? "bypassPermissions" : "acceptEdits",
@@ -203,6 +205,7 @@ export const ClaudeDriver = {
             const turnId = newId();
             const sessionId = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             const newSessionId = sessionId ? null : newId();
+            const permissionMode = effectivePermissionMode(config);
             const args = [
                 "-p",
                 "--output-format", "stream-json",
@@ -211,7 +214,7 @@ export const ClaudeDriver = {
                 // token-level streaming: content_block_delta events between the
                 // whole-message frames, so the bubble grows as the model writes
                 "--include-partial-messages",
-                "--permission-mode", config.permissionMode === "auto" ? "acceptEdits" : config.permissionMode,
+                "--permission-mode", permissionMode === "auto" ? "acceptEdits" : permissionMode,
             ];
             if (sessionId)
                 args.push("--resume", sessionId);
@@ -264,7 +267,7 @@ export const ClaudeDriver = {
             // an Allow/Deny card in chat, and the agent gets ask_user. Skipped in
             // bypassPermissions (fullAuto) — nothing would ever ask.
             let broker;
-            if (config.permissionMode !== "bypassPermissions") {
+            if (permissionMode !== "bypassPermissions") {
                 const socketPath = permissionSocketPath(threadId);
                 broker = createPermissionBroker({
                     socketPath,

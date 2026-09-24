@@ -1,5 +1,5 @@
 ---
-status: doing
+status: review
 created: 2026-09-24
 updated: 2026-09-24
 scope: release distribution ownership
@@ -37,9 +37,9 @@ Pre-release audit (2026-09-24). Several distribution endpoints still belong to t
 
 - [?] **Resolve uncommitted work before pushing** — `server/composio.ts`, `server/index.ts`, `server/composio.test.ts`, `dist-server/*`, and two `done--` docs are modified or untracked. Commit them as a scoped change or stash them. Decide whether `Ai workflow template/` (untracked, contains `.DS_Store`) belongs in the repository.
   - *Implemented:* Composio work and reviewer approvals are committed (`5cfdc46`, `f494f2d`). `Ai workflow template/` is a generic scaffold and is left untracked.
-- [~] **Tag releases** — The repository has no git tags, yet version is `0.1.14` (`package.json:4`). Tag `v0.1.15` (or whichever version we ship) so update feeds and changelogs map to source.
+- [?] **Tag releases** — `package.json` is at `0.1.15`; the local `v0.1.15` tag identifies the tested release source. The tag remains local pending the user's push approval.
 - [?] **Remove upstream branding from user-facing strings** — `electron/main.mjs:106`. The server-failure page shows a 🐭 and says "restart your Mac" on every platform. Rewrite it to be platform-neutral and include the log path.
   - *Implemented:* Platform-neutral failure page with the log path. Commit `e3e9d03`.
 - [?] **Update LICENSE attribution** — `LICENSE:3`. MIT requires keeping the upstream notice, which is fine. Add our own copyright line for the fork.
   - *Implemented:* Fork copyright line added. Commit `2269b64`.
-- [~] **Clean stale artifacts before packaging** — `release/` holds 289 MB of 0.1.14 output. Clear it so a failed build can't upload old binaries alongside new `latest-mac.yml`.
+- [?] **Clean stale artifacts before packaging** — `release/` is absent in this checkout, so no old installers or update manifests can be picked up from local output. Packaging should still start from an empty `release/` directory on each build machine.
