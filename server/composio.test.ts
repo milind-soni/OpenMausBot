@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { formatConnectedAppsPrompt, listActiveConnections } from "./composio.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatConnectedAppsPrompt, invalidateActiveConnectionsCache, listActiveConnections } from "./composio.ts";
 import type { AppConfig } from "./config.ts";
 
 describe("composio active connections & prompt formatting", () => {
@@ -13,5 +13,22 @@ describe("composio active connections & prompt formatting", () => {
     const cfg: AppConfig = {};
     const prompt = await formatConnectedAppsPrompt(cfg);
     expect(prompt).toBe("");
+  });
+
+  describe("when Composio hangs", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      invalidateActiveConnectionsCache();
+    });
+
+    it("gives up on the prompt block after the budget instead of stalling the turn", async () => {
+      vi.useFakeTimers();
+      vi.stubGlobal("fetch", vi.fn(() => new Promise(() => {})));
+      const cfg: AppConfig = { composio: { key: "ck_test" } };
+      const prompt = formatConnectedAppsPrompt(cfg);
+      await vi.advanceTimersByTimeAsync(3_000);
+      await expect(prompt).resolves.toBe("");
+    });
   });
 });

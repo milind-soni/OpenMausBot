@@ -14,7 +14,7 @@ import * as trello from "./trello.ts";
 import { TrelloLinkStore } from "./trelloLinks.ts";
 import { TrelloSync } from "./trelloSync.ts";
 import { ensureDirs, instanceConfigs, loadConfig, saveConfig, DATA_DIR, EVENTS_DIR, NATIVE_DIR } from "./config.ts";
-import type { ModelSelection, RuntimeEvent } from "./contracts.ts";
+import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
@@ -405,6 +405,47 @@ function formatAttachmentContext(attachments?: Attachment[]): string {
 }
 
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
+type TurnIntegrations = NonNullable<SendTurnInput["integrations"]>;
+
+/** Connected apps and the bot's computer (cloud box or this machine) — shared
+ * by 1:1 and room turns so the two paths can't drift apart. */
+async function computerAndAppIntegrations(
+  bot: { id: string; name: string; computer?: string },
+  driverKind: string,
+): Promise<TurnIntegrations> {
+  const integrations: TurnIntegrations = {};
+  if (cfg.composio?.key) integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
+  const wants = bot.computer; // 'cloud' | 'local' | 'off' | undefined(auto)
+  if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
+    let b = await box.findBox(cfg, bot.id).catch(() => null);
+    // the Computer driver runs ON the box — provision it on first use
+    if (!b && driverKind === "boxAgent") {
+      broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
+      await box.provisionBox(cfg, bot.id, bot.name);
+      b = await box.findBox(cfg, bot.id).catch(() => null);
+    }
+    if (b) integrations.computer = { boxId: b.id, token: cfg.box!.token! };
+  }
+  // local computer (this Mac) via the Electron-hosted cua-driver: the
+  // Electron main process owns the daemon (TCC attribution) and writes
+  // its spawn contract to cua-connection.json; the harness only reads it
+  if (!integrations.computer && wants !== "off" && wants !== "cloud") {
+    const cua = readCuaConnection();
+    if (cua) integrations.localComputer = cua;
+  }
+  return integrations;
+}
+
+function computerPromptHint(integrations: TurnIntegrations, driverKind: string): string {
+  if (integrations.computer && driverKind !== "boxAgent") {
+    return "You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps.";
+  }
+  if (integrations.localComputer) {
+    return "You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully.";
+  }
+  return "";
+}
+
 async function startTurn(
   botId: string,
   text: string,
@@ -488,26 +529,8 @@ async function startTurn(
 
   void (async () => {
     try {
-      const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
-      if (cfg.composio?.key) integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
-      const wants = bot.computer; // 'cloud' | 'local' | 'off' | undefined(auto)
-      if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
-        let b = await box.findBox(cfg, bot.id).catch(() => null);
-        // the Computer driver runs ON the box — provision it on first use
-        if (!b && instance.driverKind === "boxAgent") {
-          broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-          await box.provisionBox(cfg, bot.id, bot.name);
-          b = await box.findBox(cfg, bot.id).catch(() => null);
-        }
-        if (b) integrations.computer = { boxId: b.id, token: cfg.box!.token! };
-      }
-      // local computer (this Mac) via the Electron-hosted cua-driver: the
-      // Electron main process owns the daemon (TCC attribution) and writes
-      // its spawn contract to cua-connection.json; the harness only reads it
-      if (!integrations.computer && wants !== "off" && wants !== "cloud") {
-        const cua = readCuaConnection();
-        if (cua) integrations.localComputer = cua;
-      }
+      const integrations = await computerAndAppIntegrations(bot, instance.driverKind);
+      const computerHint = computerPromptHint(integrations, instance.driverKind);
       // peer-agent comms: give a user-initiated turn the list_bots/ask_bot
       // tools. A comms-invoked turn (depth ≥ cap) gets none — hard recursion
       // stop, so the user's tokens can't be burned by a bot-to-bot loop.
@@ -545,11 +568,7 @@ async function startTurn(
           (projectContext.system ? `\n\n${projectContext.system}` : "") +
           (taskContext.system ? `\n\n${taskContext.system}` : "") +
           composioPrompt +
-          (integrations.computer && instance.driverKind !== "boxAgent"
-            ? " You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
-            : integrations.localComputer
-              ? " You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
-              : "") +
+          (computerHint ? ` ${computerHint}` : "") +
           (integrations.agents
             ? ` You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
             : "") +
@@ -692,22 +711,7 @@ async function runGroupMemberTurn(
     .reverse()
     .find((message) => message.role === "user" && message.kind === "text");
   const latestUserText = latestUserMessage?.text ?? "";
-  const integrations: NonNullable<Parameters<typeof instance.adapter.sendTurn>[0]["integrations"]> = {};
-  if (cfg.composio?.key) integrations.composio = { key: cfg.composio.key, url: cfg.composio.url };
-  const wants = bot.computer;
-  if (wants !== "off" && wants !== "local" && box.boxConfigured(cfg)) {
-    let b = await box.findBox(cfg, bot.id).catch(() => null);
-    if (!b && instance.driverKind === "boxAgent") {
-      broadcast({ kind: "computer", botId: bot.id, state: "provisioning" });
-      await box.provisionBox(cfg, bot.id, bot.name);
-      b = await box.findBox(cfg, bot.id).catch(() => null);
-    }
-    if (b) integrations.computer = { boxId: b.id, token: cfg.box!.token! };
-  }
-  if (!integrations.computer && wants !== "off" && wants !== "cloud") {
-    const cua = readCuaConnection();
-    if (cua) integrations.localComputer = cua;
-  }
+  const integrations = await computerAndAppIntegrations(bot, instance.driverKind);
 
   const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
   const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
@@ -722,11 +726,7 @@ async function runGroupMemberTurn(
     projectContext.system,
     taskContext.system,
     composioPrompt.trim(),
-    integrations.computer && instance.driverKind !== "boxAgent"
-      ? "You have your own cloud computer — use the computer tools (screenshot, computer_exec, open_url) whenever browsing or acting on a desktop helps."
-      : integrations.localComputer
-        ? "You can act on the user's computer through the computer tools — take a screenshot or read the desktop state first, prefer accessibility actions over raw coordinates, and act carefully."
-        : "",
+    computerPromptHint(integrations, instance.driverKind),
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
   ]
     .filter(Boolean)

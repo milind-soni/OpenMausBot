@@ -58,6 +58,7 @@ export interface ActiveConnection {
 }
 
 let activeConnectionsCache: { at: number; connections: ActiveConnection[] } | null = null;
+let activeConnectionsInFlight: Promise<ActiveConnection[]> | null = null;
 
 export function invalidateActiveConnectionsCache() {
   activeConnectionsCache = null;
@@ -75,7 +76,15 @@ export async function listActiveConnections(
   if (!forceRefresh && activeConnectionsCache && Date.now() - activeConnectionsCache.at < 45_000) {
     return activeConnectionsCache.connections;
   }
+  // concurrent turns share one lookup instead of each hitting Composio
+  if (!forceRefresh && activeConnectionsInFlight) return activeConnectionsInFlight;
+  activeConnectionsInFlight = fetchActiveConnections(cfg).finally(() => {
+    activeConnectionsInFlight = null;
+  });
+  return activeConnectionsInFlight;
+}
 
+async function fetchActiveConnections(cfg: AppConfig): Promise<ActiveConnection[]> {
   try {
     const { cards } = await listToolkits(cfg);
     const slugs = cards.map((c) => c.slug);
@@ -114,9 +123,14 @@ export async function listActiveConnections(
     return connections;
   } catch (err) {
     console.error("[composio] listActiveConnections failed:", err);
-    return activeConnectionsCache?.connections ?? [];
+    // cache the failure too, so an outage costs one lookup per 45s, not one per turn
+    const connections = activeConnectionsCache?.connections ?? [];
+    activeConnectionsCache = { at: Date.now(), connections };
+    return connections;
   }
 }
+
+const PROMPT_LOOKUP_BUDGET_MS = 3_000;
 
 /**
  * Formats active connected apps block for system prompt injection.
@@ -125,7 +139,12 @@ export async function listActiveConnections(
 export async function formatConnectedAppsPrompt(cfg: AppConfig): Promise<string> {
   if (!cfg.composio?.key) return "";
   try {
-    const activeConns = await listActiveConnections(cfg);
+    // Runs before every turn: never hold the agent up for more than a moment.
+    // A slow lookup keeps going in the background and fills the cache.
+    const activeConns = await Promise.race([
+      listActiveConnections(cfg),
+      new Promise<ActiveConnection[]>((resolve) => setTimeout(resolve, PROMPT_LOOKUP_BUDGET_MS, []).unref?.()),
+    ]);
     if (activeConns.length === 0) return "";
     const listStr = activeConns
       .map((c) => {
