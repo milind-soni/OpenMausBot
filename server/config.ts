@@ -811,12 +811,28 @@ function migrateLegacyFeatureFlags(): void {
   }
 }
 
+/** The last "config.json is being ignored" warning, so a file that stays
+ * broken is reported once rather than on every loadConfig() call. */
+let lastIgnoredConfigWarning = "";
+
 export function loadConfig(): AppConfig {
   let cfg: AppConfig = {};
   try {
     cfg = parseStoredConfig(parseJson(readFileSync(join(DATA_DIR, "config.json"), "utf8")));
-  } catch {
-    /* first run — env fallbacks below */
+    lastIgnoredConfigWarning = "";
+  } catch (error) {
+    // No file yet is a normal first run: env fallbacks below. Any other failure
+    // (unreadable file, invalid JSON, a schema error in one field) means the
+    // whole file is being ignored for this process — every instance, account
+    // and setting in it — so say why instead of silently running on defaults.
+    // saveConfig() still merges into the raw file, so nothing on disk is lost;
+    // the user just needs to know which field to fix.
+    if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
+      const reason = error instanceof Error ? error.message : String(error);
+      const warning = `config: ignoring ${join(DATA_DIR, "config.json")} and using defaults: ${reason}`;
+      if (warning !== lastIgnoredConfigWarning) console.warn(warning);
+      lastIgnoredConfigWarning = warning;
+    }
   }
   // Env wins over the file for every credential. The desktop shell keeps
   // these secrets OS-encrypted and hands them to this process as env at
