@@ -90,6 +90,12 @@ describe("PATCH /api/instances/:id", () => {
 
   it("flips the toggle, persists it to disk, and reloads the fleet", async () => {
     const patched = await api("PATCH", "/api/instances/claude", { autoApprove: true });
+    if (process.getuid?.() === 0) {
+      expect(patched.status).toBe(400);
+      expect(patched.body.error).toMatch(/root/);
+      expect(JSON.parse(readFileSync(join(home, ".gbs", "config.json"), "utf8")).instances.claude.config.permissionMode).toBe("acceptEdits");
+      return;
+    }
     expect(patched.status).toBe(200);
     const claude = patched.body.instances.find((i: any) => i.instanceId === "claude");
     expect(claude.autoApprove).toBe(true);

@@ -39,8 +39,8 @@ describe("ClaudeDriver.decodeConfig", () => {
 });
 
 describe("ClaudeDriver auto-approve toggle", () => {
-  it("reads bypassPermissions as auto-approve, acceptEdits and the auto alias as not", () => {
-    expect(ClaudeDriver.getAutoApprove!(ClaudeDriver.decodeConfig({ permissionMode: "bypassPermissions" }))).toBe(true);
+  it("reports the effective permission mode, including the root fallback", () => {
+    expect(ClaudeDriver.getAutoApprove!(ClaudeDriver.decodeConfig({ permissionMode: "bypassPermissions" }))).toBe(process.getuid?.() !== 0);
     expect(ClaudeDriver.getAutoApprove!(ClaudeDriver.decodeConfig({ permissionMode: "acceptEdits" }))).toBe(false);
     expect(ClaudeDriver.getAutoApprove!(ClaudeDriver.decodeConfig({ permissionMode: "auto" }))).toBe(false);
   });
@@ -49,7 +49,7 @@ describe("ClaudeDriver auto-approve toggle", () => {
     const base = ClaudeDriver.decodeConfig({});
     const on = ClaudeDriver.setAutoApprove!(base, true);
     expect(on.permissionMode).toBe("bypassPermissions");
-    expect(ClaudeDriver.getAutoApprove!(on)).toBe(true);
+    expect(ClaudeDriver.getAutoApprove!(on)).toBe(process.getuid?.() !== 0);
     const off = ClaudeDriver.setAutoApprove!(on, false);
     expect(off.permissionMode).toBe("acceptEdits");
     expect(ClaudeDriver.getAutoApprove!(off)).toBe(false);
@@ -149,6 +149,25 @@ posixOnly("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(seen.env.CLAUDECODE).toBeUndefined();
     expect(seen.env.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
+  });
+
+  it("uses prompted permissions for bypass config under root and keeps the broker active", async () => {
+    instance = await ClaudeDriver.create({
+      instanceId: "claude-root-mode",
+      displayName: "Claude Test",
+      environment: {},
+      enabled: true,
+      config: { cli: FAKE_CLI, permissionMode: "bypassPermissions" },
+    });
+    recorder = recordEvents(instance.adapter);
+    const dump = join(scratch, "permissions.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    await instance.adapter.sendTurn({ threadId: "t-mode", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const argv: string[] = JSON.parse(readFileSync(dump, "utf8")).argv;
+    expect(argv[argv.indexOf("--permission-mode") + 1]).toBe(process.getuid?.() === 0 ? "acceptEdits" : "bypassPermissions");
+    expect(argv.includes("--permission-prompt-tool")).toBe(process.getuid?.() === 0);
   });
 
   it("mounts the agents comms proxy as an MCP server and pre-allows its tools", async () => {

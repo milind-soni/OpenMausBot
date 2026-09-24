@@ -1597,6 +1597,9 @@ const server = createServer(async (req, res) => {
       if (!driverConfig) return json(res, 404, { error: "no such instance" });
       const { driver, config } = driverConfig;
       if (!driver.setAutoApprove) return json(res, 400, { error: "this provider has no configurable permission mode" });
+      if (body.autoApprove && driver.driverKind === "claudeAgent" && process.getuid?.() === 0) {
+        return json(res, 400, { error: "Claude Full auto is unavailable while the app runs as root. Use Ask before actions or run the app as a regular user." });
+      }
       const nextConfig = driver.setAutoApprove(config, body.autoApprove);
       // `instances` is all-or-nothing on disk (instanceConfigs only falls
       // back to the built-in default fleet when disk has NO instances key

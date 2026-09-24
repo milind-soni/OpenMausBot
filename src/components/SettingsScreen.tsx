@@ -24,7 +24,7 @@ import {
   User,
   XCircle,
 } from "lucide-react";
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, ApiError, useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { InitialsAvatar } from "./Avatar";
 import { ApiKeyRow } from "./ApiKeys";
@@ -311,6 +311,7 @@ function ModelsSection() {
   const instances = state.instances ?? [];
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
+  const [permissionError, setPermissionError] = useState("");
   const [refreshingModels, setRefreshingModels] = useState(false);
   const refreshModels = () => {
     setRefreshingModels(true);
@@ -324,9 +325,13 @@ function ModelsSection() {
     if (pendingId) return;
     setPendingId(instanceId);
     setErrorId(null);
+    setPermissionError("");
     api(`/api/instances/${instanceId}`, { method: "PATCH", body: JSON.stringify({ autoApprove }) })
       .then(({ instances }) => dispatch({ type: "instances", instances }))
-      .catch(() => setErrorId(instanceId))
+      .catch((error) => {
+        setErrorId(instanceId);
+        setPermissionError(error instanceof ApiError && typeof error.body?.error === "string" ? error.body.error : "Couldn't save — try again.");
+      })
       .finally(() => setPendingId(null));
   };
 
@@ -421,7 +426,7 @@ function ModelsSection() {
                             : "You'll be asked to approve edits, commands, and tools."}
                         </div>
                         {errorId === inst.instanceId && (
-                          <div className="mt-1 text-[11px] text-danger">Couldn't save — try again.</div>
+                          <div className="mt-1 text-[11px] text-danger">{permissionError}</div>
                         )}
                       </div>
                       <button
