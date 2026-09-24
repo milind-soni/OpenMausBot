@@ -50,8 +50,9 @@ missing usage, and unsupported pricing. HTTP fixtures exercise custom reply caps
 in Dynamic, everyone, mentions and lead modes, plus a token cap across private
 and public turns and a timer interrupt while the provider is waiting.
 
-The two new structured `meeting_limits` parameters intentionally add 3,012 wire
-bytes to affected catalog profiles. Their golden snapshots and explicit baselines
+The two new structured `meeting_limits` parameters add 2,957 measured wire
+bytes to affected catalog profiles. The explicit budget baselines rise by 2,734
+bytes to accommodate that feature. Their golden snapshots and baselines
 are regenerated together; the existing 2% growth assertions remain enabled.
 The external-only profile is unchanged. This is an accounted feature addition,
 not a relaxed gate for an unexplained schema mismatch.
