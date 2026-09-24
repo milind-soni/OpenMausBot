@@ -3,14 +3,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { configurePromptInspector, diagnosticHeaders, inspectProvider, PromptInspector, promptUsage } from "./prompt-inspector.ts";
+import { configurePromptInspector, diagnosticHeaders, forgetPromptCaptures, inspectProvider, PromptInspector, promptUsage } from "./prompt-inspector.ts";
 import { OpenAICompatDriver } from "./drivers/openai-compat.ts";
 import { makeFakeDriver } from "./testing/fake-driver.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 const dirs: string[] = [];
 const stores: PromptInspector[] = [];
 const createStore = (dir: string) => { const store = new PromptInspector(dir); stores.push(store); return store; };
-const configureStore = (dir: string) => { const store = configurePromptInspector(dir); stores.push(store); return store; };
+const configureStore = (dir: string) => { const store = configurePromptInspector(dir); if (!store) throw new Error("fixture inspector unavailable"); stores.push(store); return store; };
 const directory = () => { const path = mkdtempSync(join(tmpdir(), "omb-prompt-inspector-")); dirs.push(path); return path; };
 afterEach(async () => { for (const store of stores.splice(0)) await store.flush(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const meta = { threadId: "thread", botId: "bot", provider: "fixture" };
@@ -166,4 +166,19 @@ it("scans uncached captures without parsing them or retaining unrelated files", 
   // A fresh disk edit must be observed: cleanup did not cache the old rows.
   writeFileSync(join(dir, "other-0.json"), "invalid after cleanup");
   expect(() => store.read("other-0")).toThrow();
+});
+
+it("does not discard a malformed durable deletion journal", () => {
+  const dir = directory();
+  writeFileSync(join(dir, ".pending-deletions.json"), "{invalid");
+  expect(configurePromptInspector(dir)).toBeNull();
+  expect(() => forgetPromptCaptures("thread")).toThrow("cleanup is unavailable");
+  expect(readFileSync(join(dir, ".pending-deletions.json"), "utf8")).toBe("{invalid");
+});
+
+it("does not let capture flush failure replace provider disposal", async () => {
+  const store = configureStore(directory()), fake = makeFakeDriver();
+  const instance = inspectProvider(await fake.driver.create({ instanceId: "fixture", displayName: undefined, enabled: true, environment: {}, config: {} }));
+  vi.spyOn(store, "flush").mockRejectedValueOnce(new Error("capture disk failed"));
+  await expect(instance.dispose()).resolves.toBeUndefined();
 });

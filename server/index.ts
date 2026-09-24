@@ -18241,6 +18241,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       if (!store.botByThread(m[1]) && !store.groupByThread(m[1])) return json(res, 404, { error: "no such thread" });
       res.setHeader("cache-control", "private, no-store");
+      if (!promptInspector) return json(res, 503, { error: "Prompt inspector unavailable. Repair its storage and restart the server; conversation deletion is paused meanwhile." });
       return json(res, 200, { records: promptInspector.read(m[1]) });
     }
 

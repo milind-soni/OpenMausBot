@@ -206,8 +206,25 @@ export class PromptInspector {
 
 type Handle = ReturnType<PromptInspector["capture"]>;
 let configured: PromptInspector | undefined;
-export function configurePromptInspector(folder: string) { configured = new PromptInspector(folder); return configured; }
-export function forgetPromptCaptures(threadId: string) { configured?.forget(threadId); }
+let initializationFailed = false;
+export function configurePromptInspector(folder: string): PromptInspector | null {
+  try {
+    configured = new PromptInspector(folder);
+    initializationFailed = false;
+    return configured;
+  } catch {
+    configured = undefined;
+    initializationFailed = true;
+    console.error("Prompt inspector storage is unavailable; conversation deletion is paused until it is repaired and the server restarts.");
+    return null;
+  }
+}
+export function forgetPromptCaptures(threadId: string) {
+  // A malformed cleanup journal may still name captures that must be removed.
+  // Keep the conversation intact instead of silently dropping that obligation.
+  if (initializationFailed) throw new Error("Prompt inspector cleanup is unavailable; repair its storage and restart before deleting conversations.");
+  configured?.forget(threadId);
+}
 const context = new AsyncLocalStorage<Meta>();
 export function captureApiRequest(body: unknown, endpoint: string): Handle | undefined {
   try { const meta = context.getStore(); const handle = meta && configured?.capture(meta, "api-request", body, endpoint);
@@ -247,6 +264,10 @@ export function inspectProvider(instance: ProviderInstance): ProviderInstance {
     }
     catch (error) { try { capture.finish("failed", error instanceof Error ? error.message : String(error)); } catch {} close(); throw error; }
   };
-  instance.dispose = async () => { for (const cancel of pending.values()) { try { cancel(); } catch {} } await configured?.flush(); return dispose(); };
+  instance.dispose = async () => {
+    for (const cancel of pending.values()) { try { cancel(); } catch {} }
+    try { await configured?.flush(); } catch { console.error("Prompt inspector storage could not be flushed."); }
+    return dispose();
+  };
   return instance;
 }
