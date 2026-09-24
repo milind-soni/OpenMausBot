@@ -1,42 +1,47 @@
-// PostHog usage analytics + the email → person identity link.
-// The phc_ token is a write-only public key (safe to ship in the client).
-// Autocapture gives clicks/inputs for free; the named events below are the
-// product funnel. Email submissions call identify(), so PostHog's Persons
-// tab doubles as the collected-email list.
-import posthog from "posthog-js";
+// PostHog usage analytics — OFF unless a project token is supplied at build
+// time (VITE_POSTHOG_TOKEN). When it is set: explicit product-funnel events
+// plus click autocapture only; typed text (prompts, keys) is never captured.
+// The SDK is loaded lazily so builds without a token don't ship it.
+import type { PostHog } from "posthog-js";
 
-const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
+const TOKEN = import.meta.env.VITE_POSTHOG_TOKEN?.trim() ?? "";
 
-let ready = false;
+let posthog: PostHog | null = null;
+let started = false;
+
+export const analyticsEnabled = TOKEN.length > 0;
 
 export function initAnalytics() {
-  if (ready) return;
-  posthog.init(TOKEN, {
-    api_host: "https://us.i.posthog.com",
-    autocapture: true,
-    capture_pageview: false, // single-window desktop app — no page routes
-    person_profiles: "identified_only",
-    persistence: "localStorage",
-  });
-  ready = true;
-  const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";
-  // one-time install marker — app_first_open counts installs (the closest
-  // truth to "downloads that mattered"; raw download counts live on the
-  // GitHub release assets)
-  if (!localStorage.getItem("gbs-installed")) {
-    localStorage.setItem("gbs-installed", new Date().toISOString());
-    posthog.capture("app_first_open", { platform });
-  }
-  posthog.capture("app_opened", { platform });
+  if (started || !analyticsEnabled) return;
+  started = true;
+  void import("posthog-js").then(({ default: client }) => {
+    client.init(TOKEN, {
+      api_host: "https://us.i.posthog.com",
+      autocapture: { dom_event_allowlist: ["click"] },
+      mask_all_text: true,
+      mask_all_element_attributes: true,
+      disable_session_recording: true,
+      capture_pageview: false, // single-window desktop app — no page routes
+      person_profiles: "identified_only",
+      persistence: "localStorage",
+    });
+    posthog = client;
+    const platform = navigator.userAgent.includes("Electron") ? "desktop" : "browser";
+    // one-time install marker — app_first_open counts installs
+    if (!localStorage.getItem("gbs-installed")) {
+      localStorage.setItem("gbs-installed", new Date().toISOString());
+      client.capture("app_first_open", { platform });
+    }
+    client.capture("app_opened", { platform });
+  }).catch(() => {});
 }
 
 export function track(event: string, props?: Record<string, unknown>) {
-  if (!ready) return;
-  posthog.capture(event, props);
+  posthog?.capture(event, props);
 }
 
 export function identifyEmail(email: string) {
-  if (!ready) return;
+  if (!posthog) return;
   posthog.identify(email, { email });
   posthog.capture("email_submitted");
 }
