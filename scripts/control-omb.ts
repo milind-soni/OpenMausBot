@@ -431,7 +431,12 @@ export async function launchVerificationServer(
       },
     },
   }, null, 2));
-  beforeStart?.(dataDir);
+  try {
+    beforeStart?.(dataDir);
+  } catch (error) {
+    await removeTempDir(dataDir);
+    throw error;
+  }
 
   const log = openSync(logPath, "a", 0o600);
   const childEnv = verificationServerEnvironment(parentEnv, dataDir, port);

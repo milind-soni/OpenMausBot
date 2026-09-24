@@ -46,6 +46,17 @@ it("captures private and group turns through the real server and removes deleted
   } finally { await fixture.close(); }
 }, 180_000);
 
+it("cleans up its fixture when the pre-start callback fails", async () => {
+  let dataDir = "";
+  const failure = new Error("fixture setup failed");
+  await expect(launchVerificationServer(process.env, undefined, undefined, undefined, undefined, undefined, [], undefined, dir => {
+    dataDir = dir;
+    throw failure;
+  })).rejects.toBe(failure);
+  expect(dataDir).not.toBe("");
+  expect(existsSync(dataDir)).toBe(false);
+});
+
 it.each(["malformed journal", "unusable folder"])("keeps the chat server working when inspector startup has an %s", async (fault) => {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, undefined, [], undefined, dataDir => {
     const folder = join(dataDir, "prompt-inspector");
