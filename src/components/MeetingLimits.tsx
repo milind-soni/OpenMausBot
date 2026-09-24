@@ -63,7 +63,7 @@ export function MeetingLimitsDialog({ group, onClose }: { group: Group; onClose:
     try {
       const raw = Object.fromEntries(rows.filter(row => enabled.has(row.key)).map(row => {
         const scale = row.key === "time" ? 60 : 1;
-        const pair = values[row.key].map(value => value.trim() ? Number(value) * scale : NaN);
+        const pair = values[row.key].map(value => value.trim() ? row.key === "time" ? Math.round(Number(value) * scale) : Number(value) : NaN);
         return [row.key, { [row.wrap]: pair[0], [row.hard]: pair[1] }];
       }));
       const meetingLimits = normalizeMeetingLimits(raw);

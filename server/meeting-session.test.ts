@@ -63,6 +63,12 @@ describe("meeting accounting and enforcement", () => {
     }
     expect(meetingUsageCost({ input: 100, cachedInput: 200 }, price)).toBeCloseTo(0.00002);
   });
+  it("prices provider-reported cache writes separately from fresh and cached input", () => {
+    const writePrice = resolveMeetingPrice("model", [{ id: "provider/model", pricing: {
+      prompt: "0.000002", completion: "0.000004", input_cache_read: "0.0000002", input_cache_write: "0.000003",
+    } }], 0);
+    expect(meetingUsageCost({ input: 100, cachedInput: 20, cacheWriteInput: 30, output: 10 }, writePrice)).toBeCloseTo(0.000234);
+  });
   it("stops usage-limited meetings when a completed provider turn omits accounting", () => {
     const stop = vi.fn();
     const meeting = new MeetingSession(normalizeMeetingLimits({ tokens: { hardStop: 100 } }), { replies: () => 0, persist: vi.fn(), notice: vi.fn(), stop });

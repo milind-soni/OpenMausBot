@@ -4,7 +4,7 @@ export interface MeetingLimits {
   time?: { wrapUpSeconds: number; seconds: number };
   cost?: { wrapUpUsd: number; hardStopUsd: number };
 }
-export interface MeetingUsage { input?: number; output?: number; cachedInput?: number }
+export interface MeetingUsage { input?: number; output?: number; cachedInput?: number; cacheWriteInput?: number }
 export interface MeetingBudgetState {
   replies?: number; tokens?: number; costUsd?: number; startedAt: number; now?: number;
   turnMilliseconds?: number; turnTokens?: number; turnCostUsd?: number;

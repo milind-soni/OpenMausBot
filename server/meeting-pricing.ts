@@ -1,7 +1,7 @@
 import type { MeetingUsage } from "../shared/meeting-limits.ts";
 
 const URL = "https://openrouter.ai/api/v1/models";
-type Rates = { prompt: number; completion: number; input_cache_read?: number };
+type Rates = { prompt: number; completion: number; input_cache_read?: number; input_cache_write?: number };
 export interface MeetingPrice { model: string; rates: Rates; fetchedAt: number; source: string }
 type CatalogueRow = { id: string; pricing?: Record<string, unknown> };
 let cached: { at: number; rows: CatalogueRow[] } | undefined;
@@ -27,6 +27,7 @@ export function resolveMeetingPrice(model: string, rows: CatalogueRow[], at: num
   return { model: row.id, source: URL, fetchedAt: at, rates: {
     prompt: rate(p.prompt, "input"), completion: rate(p.completion, "output"),
     ...(p.input_cache_read === undefined ? {} : { input_cache_read: rate(p.input_cache_read, "cached input") }),
+    ...(p.input_cache_write === undefined ? {} : { input_cache_write: rate(p.input_cache_write, "cache-write input") }),
   } };
 }
 
@@ -47,5 +48,9 @@ export async function openRouterMeetingPrices(models: string[]): Promise<Record<
 export function meetingUsageCost(usage: MeetingUsage, price: MeetingPrice): number {
   const clean = (n: number | undefined) => typeof n === "number" && Number.isFinite(n) ? Math.max(0, n) : 0;
   const input = clean(usage.input), cachedInput = Math.min(input, clean(usage.cachedInput));
-  return (input - cachedInput) * price.rates.prompt + cachedInput * (price.rates.input_cache_read ?? price.rates.prompt) + clean(usage.output) * price.rates.completion;
+  const cacheWriteInput = Math.min(input - cachedInput, clean(usage.cacheWriteInput));
+  return (input - cachedInput - cacheWriteInput) * price.rates.prompt +
+    cachedInput * (price.rates.input_cache_read ?? price.rates.prompt) +
+    cacheWriteInput * (price.rates.input_cache_write ?? price.rates.prompt) +
+    clean(usage.output) * price.rates.completion;
 }
