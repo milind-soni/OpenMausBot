@@ -7,6 +7,7 @@ import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ProjectService } from "../electron/projects.mjs";
 import * as box from "./box.js";
 import * as composio from "./composio.js";
 import * as trello from "./trello.js";
@@ -17,7 +18,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.js";
 import { EventBus } from "./harness/bus.js";
 import { ProviderRegistry } from "./harness/registry.js";
 import { automaticHandoffBots, mentionedBots, Store } from "./store.js";
-import { readRegisteredProjects, resolveProjectContext } from "./projects.js";
+import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.js";
 import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.js";
 import { resolveTaskContext, TaskConflictError, TaskStore, } from "./tasks.js";
 const PORT = Number(process.env.GBS_PORT || 8899);
@@ -114,6 +115,9 @@ let bootSelection = { instanceId: "claude", model: "default" };
 const store = new Store(() => bootSelection);
 const taskStore = new TaskStore(DATA_DIR);
 const trelloLinks = new TrelloLinkStore(DATA_DIR);
+// Match the registry the desktop app (or an isolated test) is already using.
+const projectRegistryFile = projectRegistryCandidates().find((file) => existsSync(file)) ?? projectRegistryCandidates()[0];
+const projectService = new ProjectService({ dataDir: dirname(projectRegistryFile), filePath: projectRegistryFile });
 const trelloSync = new TrelloSync({
     taskStore,
     trelloLinks,
@@ -1573,6 +1577,9 @@ const server = createServer(async (req, res) => {
             const { driver, config } = driverConfig;
             if (!driver.setAutoApprove)
                 return json(res, 400, { error: "this provider has no configurable permission mode" });
+            if (body.autoApprove && driver.driverKind === "claudeAgent" && process.getuid?.() === 0) {
+                return json(res, 400, { error: "Claude Full auto is unavailable while the app runs as root. Use Ask before actions or run the app as a regular user." });
+            }
             const nextConfig = driver.setAutoApprove(config, body.autoApprove);
             // `instances` is all-or-nothing on disk (instanceConfigs only falls
             // back to the built-in default fleet when disk has NO instances key
@@ -1594,7 +1601,33 @@ const server = createServer(async (req, res) => {
         }
         // ── registered projects ──
         if (method === "GET" && path === "/api/projects") {
-            return json(res, 200, { projects: readRegisteredProjects() });
+            const projects = (await projectService.list()).map((project) => ({ ...project, available: !project.missing }));
+            return json(res, 200, { projects });
+        }
+        if (method === "POST" && path.startsWith("/api/projects/")) {
+            const body = await readBody(req);
+            let project;
+            if (path === "/api/projects/add-existing") {
+                if (typeof body.projectPath !== "string")
+                    return json(res, 400, { error: "projectPath must be a string" });
+                project = await projectService.addExisting(body.projectPath);
+            }
+            else if (path === "/api/projects/create") {
+                if (typeof body.parentPath !== "string" || typeof body.name !== "string") {
+                    return json(res, 400, { error: "parentPath and name must be strings" });
+                }
+                project = await projectService.createProject({ parentPath: body.parentPath, name: body.name });
+            }
+            else if (path === "/api/projects/clone") {
+                if (typeof body.repositoryUrl !== "string" || typeof body.destinationPath !== "string") {
+                    return json(res, 400, { error: "repositoryUrl and destinationPath must be strings" });
+                }
+                project = await projectService.cloneProject({ repositoryUrl: body.repositoryUrl, destinationPath: body.destinationPath });
+            }
+            else {
+                return json(res, 404, { error: `no route: ${method} ${path}` });
+            }
+            return json(res, 201, { project });
         }
         // ── app config (API keys — never echoed back, booleans only) ──
         if (method === "GET" && path === "/api/config") {
@@ -1760,7 +1793,7 @@ const server = createServer(async (req, res) => {
         return json(res, 404, { error: `no route: ${method} ${path}` });
     }
     catch (e) {
-        const status = e?.status ?? 500;
+        const status = e?.status ?? (e?.name === "ProjectError" ? 400 : 500);
         return json(res, status, {
             error: e instanceof Error ? e.message : String(e),
             ...(e instanceof TaskConflictError ? { latest: taskView(e.latest) } : {}),

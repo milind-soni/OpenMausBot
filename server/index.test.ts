@@ -76,6 +76,33 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  it("registers and creates host projects for browser clients", async () => {
+    const parentPath = join(home, "workspace");
+    const existingPath = join(parentPath, "existing-app");
+    mkdirSync(existingPath, { recursive: true });
+
+    const added = await api("POST", "/api/projects/add-existing", { projectPath: existingPath });
+    expect(added.status).toBe(201);
+    expect(added.body.project).toMatchObject({ path: existingPath, source: "existing", missing: false });
+
+    const duplicate = await api("POST", "/api/projects/add-existing", { projectPath: existingPath });
+    expect(duplicate.body.project.id).toBe(added.body.project.id);
+
+    const created = await api("POST", "/api/projects/create", { parentPath, name: "new-app" });
+    expect(created.status).toBe(201);
+    expect(created.body.project).toMatchObject({ path: join(parentPath, "new-app"), source: "created" });
+    expect(existsSync(join(parentPath, "new-app"))).toBe(true);
+
+    const listed = await api("GET", "/api/projects");
+    expect(listed.body.projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: added.body.project.id, source: "existing", available: true }),
+      expect.objectContaining({ id: created.body.project.id, source: "created", available: true }),
+    ]));
+
+    expect((await api("POST", "/api/projects/create", { parentPath, name: "../escape" })).status).toBe(400);
+    expect((await api("POST", "/api/projects/clone", { repositoryUrl: "https://example.com/a/b", destinationPath: join(parentPath, "clone") })).status).toBe(400);
+  });
+
   it("identifies itself on /api/health", async () => {
     const { status, body } = await api("GET", "/api/health");
     expect(status).toBe(200);
@@ -536,4 +563,3 @@ describe("harness HTTP API", () => {
     expect(rebindStatus).toBe(403);
   });
 });
-

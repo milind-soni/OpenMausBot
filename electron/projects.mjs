@@ -179,10 +179,11 @@ export function runGitClone({ repositoryUrl, destinationPath }) {
 }
 
 export class ProjectService {
-  constructor({ dataDir, cloneRepository = runGitClone }) {
+  constructor({ dataDir, filePath, cloneRepository = runGitClone }) {
     if (!dataDir || !path.isAbsolute(dataDir)) throw projectError("Project data directory must be absolute.");
     this.dataDir = dataDir;
-    this.filePath = path.join(dataDir, PROJECTS_FILE);
+    if (filePath && !path.isAbsolute(filePath)) throw projectError("Project registry path must be absolute.");
+    this.filePath = filePath || path.join(dataDir, PROJECTS_FILE);
     this.cloneRepository = cloneRepository;
   }
 

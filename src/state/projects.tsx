@@ -42,8 +42,9 @@ export function ProjectsProvider({ children }: { children: ReactNode }) {
           name: p.name,
           mention: p.mention,
           path: p.path,
-          source: "existing",
-          addedAt: Date.now(),
+          source: p.source ?? "existing",
+          addedAt: p.addedAt ?? Date.now(),
+          ...(p.repositoryUrl ? { repositoryUrl: p.repositoryUrl } : {}),
           missing: !p.available,
         }));
         setProjects(list);

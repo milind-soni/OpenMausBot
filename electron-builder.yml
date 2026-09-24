@@ -34,6 +34,9 @@ extraResources:
     to: ui
   - from: dist-server
     to: server
+  # The standalone harness imports the shared project service at runtime.
+  - from: electron/projects.mjs
+    to: electron/projects.mjs
 
 mac:
   target:

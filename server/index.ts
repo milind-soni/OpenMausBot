@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { homedir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ProjectService } from "../electron/projects.mjs";
 
 import * as box from "./box.ts";
 import * as composio from "./composio.ts";
@@ -20,7 +21,7 @@ import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { automaticHandoffBots, mentionedBots, Store, type Attachment, type Message } from "./store.ts";
-import { readRegisteredProjects, resolveProjectContext } from "./projects.ts";
+import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
 import { isJsonContentType, isLoopbackHostname, rejectUntrustedRequest } from "./request-guard.ts";
 import {
   resolveTaskContext,
@@ -131,6 +132,9 @@ let bootSelection = { instanceId: "claude", model: "default" };
 const store = new Store(() => bootSelection);
 const taskStore = new TaskStore(DATA_DIR);
 const trelloLinks = new TrelloLinkStore(DATA_DIR);
+// Match the registry the desktop app (or an isolated test) is already using.
+const projectRegistryFile = projectRegistryCandidates().find((file) => existsSync(file)) ?? projectRegistryCandidates()[0];
+const projectService = new ProjectService({ dataDir: dirname(projectRegistryFile), filePath: projectRegistryFile });
 const trelloSync = new TrelloSync({
   taskStore,
   trelloLinks,
@@ -1622,7 +1626,29 @@ const server = createServer(async (req, res) => {
 
     // ── registered projects ──
     if (method === "GET" && path === "/api/projects") {
-      return json(res, 200, { projects: readRegisteredProjects() });
+      const projects = (await projectService.list()).map((project) => ({ ...project, available: !project.missing }));
+      return json(res, 200, { projects });
+    }
+    if (method === "POST" && path.startsWith("/api/projects/")) {
+      const body = await readBody(req);
+      let project;
+      if (path === "/api/projects/add-existing") {
+        if (typeof body.projectPath !== "string") return json(res, 400, { error: "projectPath must be a string" });
+        project = await projectService.addExisting(body.projectPath);
+      } else if (path === "/api/projects/create") {
+        if (typeof body.parentPath !== "string" || typeof body.name !== "string") {
+          return json(res, 400, { error: "parentPath and name must be strings" });
+        }
+        project = await projectService.createProject({ parentPath: body.parentPath, name: body.name });
+      } else if (path === "/api/projects/clone") {
+        if (typeof body.repositoryUrl !== "string" || typeof body.destinationPath !== "string") {
+          return json(res, 400, { error: "repositoryUrl and destinationPath must be strings" });
+        }
+        project = await projectService.cloneProject({ repositoryUrl: body.repositoryUrl, destinationPath: body.destinationPath });
+      } else {
+        return json(res, 404, { error: `no route: ${method} ${path}` });
+      }
+      return json(res, 201, { project });
     }
 
     // ── app config (API keys — never echoed back, booleans only) ──
@@ -1775,7 +1801,7 @@ const server = createServer(async (req, res) => {
 
     return json(res, 404, { error: `no route: ${method} ${path}` });
   } catch (e) {
-    const status = (e as any)?.status ?? 500;
+    const status = (e as any)?.status ?? ((e as Error)?.name === "ProjectError" ? 400 : 500);
     return json(res, status, {
       error: e instanceof Error ? e.message : String(e),
       ...(e instanceof TaskConflictError ? { latest: taskView(e.latest) } : {}),

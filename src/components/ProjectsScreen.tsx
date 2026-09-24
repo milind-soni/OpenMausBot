@@ -16,8 +16,9 @@ import {
 import type { ProjectRecord } from "@/types/gbs";
 import { cn } from "@/lib/cn";
 import { useProjects } from "@/state/projects";
+import { api } from "@/state/store";
 
-type AddMode = "choose" | "create" | "clone";
+type AddMode = "choose" | "existing" | "create" | "clone";
 
 function errorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -53,6 +54,7 @@ function AddProjectModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [parentPath, setParentPath] = useState("");
+  const [existingPath, setExistingPath] = useState("");
   const [folderName, setFolderName] = useState("");
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [destinationPath, setDestinationPath] = useState("");
@@ -80,7 +82,10 @@ function AddProjectModal({
   };
 
   const addExisting = async () => {
-    if (!projectsApi) return;
+    if (!projectsApi) {
+      setMode("existing");
+      return;
+    }
     setError(null);
     const projectPath = await projectsApi.chooseDirectory({
       title: "Choose an existing project folder",
@@ -88,6 +93,27 @@ function AddProjectModal({
     });
     if (projectPath) finish(projectsApi.addExisting(projectPath));
   };
+
+  const registerExisting = () => {
+    finish(api("/api/projects/add-existing", {
+      method: "POST",
+      body: JSON.stringify({ projectPath: existingPath }),
+    }).then((result) => result.project as ProjectRecord));
+  };
+
+  const createProject = () => projectsApi
+    ? projectsApi.create({ parentPath, name: folderName })
+    : api("/api/projects/create", {
+      method: "POST",
+      body: JSON.stringify({ parentPath, name: folderName }),
+    }).then((result) => result.project as ProjectRecord);
+
+  const cloneProject = () => projectsApi
+    ? projectsApi.clone({ repositoryUrl, destinationPath })
+    : api("/api/projects/clone", {
+      method: "POST",
+      body: JSON.stringify({ repositoryUrl, destinationPath }),
+    }).then((result) => result.project as ProjectRecord);
 
   const chooseParent = async (forClone = false) => {
     if (!projectsApi) return;
@@ -130,7 +156,7 @@ function AddProjectModal({
               </button>
             )}
             <h2 className="text-[17px] font-semibold text-ink">
-              {mode === "choose" ? "Add a project" : mode === "create" ? "Create a project folder" : "Clone from GitHub"}
+              {mode === "choose" ? "Add a project" : mode === "existing" ? "Add an existing folder" : mode === "create" ? "Create a project folder" : "Clone from GitHub"}
             </h2>
           </div>
           <button
@@ -170,12 +196,22 @@ function AddProjectModal({
               <div className="mt-1 text-[12px] leading-5 text-ink-secondary">Clone a repository into a chosen path.</div>
             </button>
           </div>
+        ) : mode === "existing" ? (
+          <form className="mt-4 space-y-4" onSubmit={(event) => { event.preventDefault(); registerExisting(); }}>
+            <label className="block">
+              <span className="mb-1.5 block text-[13px] font-medium text-ink">Folder path on the host machine</span>
+              <input autoFocus value={existingPath} onChange={(event) => setExistingPath(event.target.value)} placeholder="/absolute/path/to/project" className={inputClass} />
+            </label>
+            <button type="submit" disabled={busy || !existingPath.trim()} className="flex w-full items-center justify-center rounded-lg bg-accent py-2.5 text-[14px] font-medium text-white hover:brightness-110 disabled:opacity-40">
+              Add project
+            </button>
+          </form>
         ) : mode === "create" ? (
           <form
             className="mt-4 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (projectsApi) finish(projectsApi.create({ parentPath, name: folderName }));
+              finish(createProject());
             }}
           >
             <label className="block">
@@ -191,14 +227,8 @@ function AddProjectModal({
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-medium text-ink">Create inside</span>
               <div className="flex gap-2">
-                <input value={parentPath} readOnly placeholder="Choose a parent folder" className={cn(inputClass, "min-w-0 flex-1")} />
-                <button
-                  type="button"
-                  onClick={() => void chooseParent()}
-                  className="rounded-lg bg-raised px-3 text-[13px] text-ink hover:bg-raised-hover"
-                >
-                  Browse
-                </button>
+                <input value={parentPath} readOnly={!!projectsApi} onChange={(event) => setParentPath(event.target.value)} placeholder={projectsApi ? "Choose a parent folder" : "/absolute/path/to/parent"} className={cn(inputClass, "min-w-0 flex-1")} />
+                {projectsApi && <button type="button" onClick={() => void chooseParent()} className="rounded-lg bg-raised px-3 text-[13px] text-ink hover:bg-raised-hover">Browse</button>}
               </div>
             </label>
             <button
@@ -215,7 +245,7 @@ function AddProjectModal({
             className="mt-4 space-y-4"
             onSubmit={(event) => {
               event.preventDefault();
-              if (projectsApi) finish(projectsApi.clone({ repositoryUrl, destinationPath }));
+              finish(cloneProject());
             }}
           >
             <label className="block">
@@ -237,17 +267,11 @@ function AddProjectModal({
                   placeholder="Choose a location, then edit the final path"
                   className={cn(inputClass, "min-w-0 flex-1")}
                 />
-                <button
-                  type="button"
-                  onClick={() => void chooseParent(true)}
-                  className="rounded-lg bg-raised px-3 text-[13px] text-ink hover:bg-raised-hover"
-                >
-                  Browse
-                </button>
+                {projectsApi && <button type="button" onClick={() => void chooseParent(true)} className="rounded-lg bg-raised px-3 text-[13px] text-ink hover:bg-raised-hover">Browse</button>}
               </div>
             </label>
             <div className="rounded-lg bg-card px-3 py-2 text-[12px] leading-5 text-ink-secondary">
-              Public repositories work immediately. Private repositories use your existing Git credential or SSH setup.
+              Public repositories work immediately. Private repositories use the host machine's Git credential or SSH setup.
             </div>
             <button
               type="submit"
@@ -307,14 +331,9 @@ export function ProjectsScreen() {
           >
             <RefreshCw size={17} className={cn(refreshing && "animate-spin")} />
           </button>
-          {projectsApi && (
-            <button
-              onClick={() => setAdding(true)}
-              className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110"
-            >
-              <Plus size={16} /> Add project
-            </button>
-          )}
+          <button onClick={() => setAdding(true)} className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110">
+            <Plus size={16} /> Add project
+          </button>
         </div>
       </header>
 
@@ -345,21 +364,12 @@ export function ProjectsScreen() {
             <div className="rounded-2xl border border-dashed border-hairline bg-panel px-6 py-16 text-center">
               <FolderPlus size={32} className="mx-auto text-ink-secondary" />
               <h2 className="mt-4 text-[16px] font-semibold text-ink">
-                {projectsApi ? "Bring your first project in" : "No registered projects found"}
+                Bring your first project in
               </h2>
               <p className="mx-auto mt-2 max-w-sm text-[13px] leading-5 text-ink-secondary">
-                {projectsApi
-                  ? "Add an existing folder, create a fresh workspace, or clone a repository from GitHub."
-                  : "Register project folders in Gerer Build Studio on your host machine to view them across the network."}
+                Add an existing folder, create a fresh workspace, or clone a repository from GitHub. Browser sessions use paths on the host machine.
               </p>
-              {projectsApi && (
-                <button
-                  onClick={() => setAdding(true)}
-                  className="mt-5 rounded-lg bg-raised px-4 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover"
-                >
-                  Add a project
-                </button>
-              )}
+              <button onClick={() => setAdding(true)} className="mt-5 rounded-lg bg-raised px-4 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover">Add a project</button>
             </div>
           ) : visibleProjects.length === 0 ? (
             <div className="py-16 text-center text-[13px] text-ink-secondary">No projects match “{query}”.</div>
@@ -402,7 +412,7 @@ export function ProjectsScreen() {
         </div>
       </div>
 
-      {adding && projectsApi && (
+      {adding && (
         <AddProjectModal
           onClose={() => setAdding(false)}
           onAdded={(project) => {
