@@ -83,7 +83,7 @@ describe("harness HTTP API", () => {
     expect(typeof body.pid).toBe("number");
   });
 
-  it("seeds one starter bot with its greeting", async () => {
+  it("seeds the default team with greetings", async () => {
     const { status, body } = await api("GET", "/api/bots");
     expect(status).toBe(200);
     expect(body.bots.length).toBeGreaterThanOrEqual(1);

@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { DATA_DIR } from "./config.ts";
 import { newId, type Attachment, type ModelSelection, type ThreadId } from "./contracts.ts";
+import { DEFAULT_BOTS } from "./default-bots.ts";
 import { pickBotName } from "./names.ts";
 
 export type { Attachment } from "./contracts.ts";
@@ -455,10 +456,34 @@ export class Store {
     this.saveBots();
   }
 
-  /** First-run seed: one bot so the app never opens empty — it gets a
-   * random friendly name like every other bot. */
+  /** First-run seed: the default team, so the app opens with a ready-made
+   * roster. The lead bot also carries the onboarding card. */
   seedIfEmpty() {
     if (this.bots.length) return;
-    this.createBot();
+    const now = Date.now();
+    DEFAULT_BOTS.forEach((preset, i) => {
+      const bot: BotRecord = {
+        id: newId(),
+        threadId: newId(),
+        name: preset.name,
+        title: preset.title,
+        description: preset.description,
+        notifications: true,
+        color: preset.color,
+        unread: false,
+        modelSelection: this.defaultSelection(),
+        resumeCursors: {},
+        pinned: preset.pinned,
+        createdAt: now - i, // newest first, matching createBot's ordering
+      };
+      this.bots.push(bot);
+      this.appendMessage(bot.threadId, {
+        role: "bot",
+        kind: "text",
+        text: `Hey — I'm ${preset.name}, your ${preset.title}. Nice to meet you.`,
+      });
+      if (i === 0) this.appendMessage(bot.threadId, { role: "bot", kind: "options", card: onboardingCard() });
+    });
+    this.saveBots();
   }
 }

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
+import { DEFAULT_BOTS } from "./default-bots.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { Store, type BotRecord } from "./store.ts";
 
@@ -83,16 +84,26 @@ describe("Store", () => {
     expect(reloaded.bot(bot.id)?.resumeCursors).toEqual({ claude: "sess-abc", codex: "thread-xyz" });
   });
 
-  it("seedIfEmpty creates exactly one starter bot, once", () => {
+  it("seedIfEmpty creates the default team, once", () => {
     const store = new Store(selection);
     store.seedIfEmpty();
-    expect(store.bots).toHaveLength(1);
+    expect(store.bots.map((b) => b.name)).toEqual(DEFAULT_BOTS.map((b) => b.name));
+    expect(store.bots.every((b) => b.description && b.title)).toBe(true);
+    expect(store.bots.every((b) => b.modelSelection.instanceId === selection().instanceId)).toBe(true);
+    expect(store.messagesFor(store.bots[0].threadId).at(-1)?.kind).toBe("options");
     store.seedIfEmpty();
-    expect(store.bots).toHaveLength(1);
+    expect(store.bots).toHaveLength(DEFAULT_BOTS.length);
 
     const reloaded = new Store(selection);
     reloaded.seedIfEmpty();
-    expect(reloaded.bots).toHaveLength(1);
+    expect(reloaded.bots).toHaveLength(DEFAULT_BOTS.length);
+  });
+
+  it("seedIfEmpty leaves an existing roster alone", () => {
+    const store = new Store(selection);
+    store.createBot();
+    store.seedIfEmpty();
+    expect(store.bots).toHaveLength(1);
   });
 
   it("chains appended messages and keeps the newest as active leaf", () => {
