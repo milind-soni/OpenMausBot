@@ -20,11 +20,11 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://github.com/milind-soni/gerer-build-studio-releases/releases/latest/download/GererBuildStudio.dmg">
-  <img src="https://img.shields.io/github/v/release/milind-soni/gerer-build-studio-releases?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe" alt="Download the latest Gerer Build Studio for macOS (.dmg)" height="40">
+<a href="https://github.com/myebstudios/GererBuildStudio/releases/latest">
+  <img src="https://img.shields.io/github/v/release/myebstudios/GererBuildStudio?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe" alt="Download the latest Gerer Build Studio release" height="40">
 </a>
 
-<sub>Apple silicon · signed & notarized · one-click .dmg, always the latest · [all releases](https://github.com/milind-soni/gerer-build-studio-releases/releases)</sub>
+<sub>macOS (Apple silicon) .dmg · Windows installer · [all releases](https://github.com/myebstudios/GererBuildStudio/releases)</sub>
 
 <br>
 <br>
@@ -232,13 +232,13 @@ flowchart LR
 
 ## Quick start
 
-**Easiest:** [download the latest .dmg](https://github.com/milind-soni/gerer-build-studio-releases/releases/latest),
-drag it to Applications, open it. The harness server is embedded — no setup.
+**Easiest:** [download the latest release](https://github.com/myebstudios/GererBuildStudio/releases/latest) — the .dmg on macOS (drag it
+to Applications) or the setup .exe on Windows. The harness server is embedded — no setup.
 
 **From source:**
 
 ```sh
-git clone https://github.com/milind-soni/GererBuildStudio && cd GererBuildStudio
+git clone https://github.com/myebstudios/GererBuildStudio && cd GererBuildStudio
 pnpm install
 
 pnpm dev:server    # harness server → 127.0.0.1:8899
@@ -274,9 +274,20 @@ itself is portable Node).
 Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
 small; adding a provider is one file in [`server/drivers/`](server/drivers/) plus a one-line registration.
 
+## Privacy
+
+Everything runs on your machine. Chats, bots, tasks, and API keys live in `~/.gbs` (keys in a
+file only your user account can read), and the harness server only listens on `127.0.0.1` and
+only accepts requests from the app itself. Set `GBS_HOST` if you really do want it reachable
+from your network.
+
+Release builds send no analytics. A build made with `VITE_POSTHOG_TOKEN` set sends anonymous
+usage events and clicks to that PostHog project. It never records typed text.
+
 ## License
 
-[MIT](LICENSE) © 2026 Milind Soni and contributors.
+[MIT](LICENSE) © 2026 Milind Soni, Esoe B. Fildine, and contributors. Gerer Build Studio is a fork of
+[OpenMausBot](https://github.com/milind-soni/OpenMausBot).
 
 Gerer Build Studio is an independent, open-source project inspired by Grok Bot. It is
 not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark

@@ -3,7 +3,8 @@
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 // `instances.<id>` entries are hand-editable but also written by the app
 // itself (e.g. the Settings permission toggle), via saveConfig's per-id merge.
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
+import { readJsonFile, restrictToOwner, writeJsonAtomic } from "./json-file.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -42,12 +43,11 @@ export function ensureDirs() {
 }
 
 export function loadConfig(): AppConfig {
-  let cfg: AppConfig = {};
-  try {
-    cfg = JSON.parse(readFileSync(join(DATA_DIR, "config.json"), "utf8"));
-  } catch {
-    /* first run — env fallbacks below */
-  }
+  const p = join(DATA_DIR, "config.json");
+  // holds API keys — older builds wrote it world-readable
+  restrictToOwner(p);
+  // first run (or a corrupt file, which is kept aside) — env fallbacks below
+  const cfg = readJsonFile<AppConfig>(p, {});
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
   cfg.composio = { key: process.env.COMPOSIO_KEY, ...cfg.composio };
   cfg.box = { token: process.env.BOX_TOKEN, ...cfg.box };
@@ -60,12 +60,7 @@ export function loadConfig(): AppConfig {
  * echoed back — callers report configured-or-not booleans only). */
 export function saveConfig(patch: Partial<AppConfig>): void {
   const p = join(DATA_DIR, "config.json");
-  let disk: Record<string, unknown> = {};
-  try {
-    disk = JSON.parse(readFileSync(p, "utf8"));
-  } catch {
-    /* first write */
-  }
+  const disk = readJsonFile<Record<string, unknown>>(p, {});
   for (const key of ["xai", "composio", "box", "trello", "profile"] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
@@ -82,7 +77,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
     disk.instances = diskInstances;
   }
   mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(p, JSON.stringify(disk, null, 2));
+  writeJsonAtomic(p, disk);
 }
 
 // Default fleet: one instance per built-in driver (upstream
