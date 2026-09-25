@@ -41,8 +41,8 @@ Talk to them like contacts. Watch them work. Approve what matters.
 
 <br>
 
-<a href="https://buy.polar.sh/polar_cl_bbnfWFUrWONIF4HnUpZf1p0if0eUYg3HeXct73b48Yg">
-  <img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F%20%20Support%20OpenMausBot-any%20amount%20%C2%B7%20or%20monthly-38d591?style=for-the-badge&labelColor=070707" alt="Support OpenMausBot — one-time any amount or monthly, via Polar" height="40">
+<a href="https://github.com/sponsors/milind-soni">
+  <img src="https://img.shields.io/badge/%E2%9D%A4%EF%B8%8F%20%20Support%20OpenMausBot-GitHub%20Sponsors-38d591?style=for-the-badge&labelColor=070707" alt="Support OpenMausBot via GitHub Sponsors" height="40">
 </a>
 
 <br>
@@ -210,7 +210,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 ![Cua](https://img.shields.io/badge/Cua%20Driver-1f2937)
 ![ElevenLabs](https://img.shields.io/badge/ElevenLabs-000000?logo=elevenlabs&logoColor=white)
 ![Fish Audio](https://img.shields.io/badge/Fish%20Audio-2563eb)
-![Polar](https://img.shields.io/badge/Polar-0062ff)
+![GitHub Sponsors](https://img.shields.io/badge/GitHub%20Sponsors-ea4aaa)
 
 </div>
 
@@ -223,7 +223,7 @@ expressions · screenshots of the bot's work folded into the transcript.
 | **Composio** | Connected apps — Gmail, Slack, GitHub, and more |
 | **Cua Driver** | Native computer use on your own machine |
 | **ElevenLabs · Fish Audio** | Hosted voices for bots that talk back |
-| **Polar** | One-time and monthly project support |
+| **GitHub Sponsors** | One-time and monthly project support |
 
 ## How it works
 
@@ -391,9 +391,9 @@ Users can add their own MCP tool servers with zero code via [`docs/custom-mcp-se
 ## Support the project
 
 OpenMausBot is free and open source. If it does real work for you, you can
-[buy the project a coffee or become a monthly supporter](https://buy.polar.sh/polar_cl_bbnfWFUrWONIF4HnUpZf1p0if0eUYg3HeXct73b48Yg) —
-one-time any amount, or monthly. Payments are handled by [Polar](https://polar.sh/supamaus),
-which takes care of receipts and taxes; nothing about the app ever sits behind a paywall.
+[support its development through GitHub Sponsors](https://github.com/sponsors/milind-soni)
+with a one-time contribution or a monthly sponsorship. Your support helps fund ongoing development
+and maintenance; OpenMausBot remains free and open source.
 
 ## Run from a terminal or on a server
 
