@@ -164,7 +164,9 @@ export type RuntimeEvent = RuntimeEventBase &
     // configuring something, not by retrying — the UI offers setup instead.
     // `terminal: true` records failure of the complete turn, rather than a
     // transient error or a legacy provider's diagnostic during cancellation.
-    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean }
+    // `claudeUpdate: true` narrows a setup failure to "this Claude Code is
+    // too old for the model": the UI offers to run `claude update` for them.
+    | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean; claudeUpdate?: boolean }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

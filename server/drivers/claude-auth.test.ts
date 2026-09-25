@@ -2,7 +2,7 @@
 // runner, so they never read or mutate the developer's real credentials.
 import { describe, expect, it } from "vitest";
 
-import { claudeAuthFailure, claudeSignedIn } from "./claude.ts";
+import { claudeAuthFailure, claudeSignedIn, claudeVersionTooOld } from "./claude.ts";
 
 describe("claudeSignedIn", () => {
   it("uses the CLI's machine-readable auth status", async () => {
@@ -59,5 +59,20 @@ describe("claudeAuthFailure", () => {
 
   it("leaves other api errors to the retry classifier", () => {
     expect(claudeAuthFailure({ error: "api_error", is_api_error_message: true }, "API Error (529): overloaded")).toBe(false);
+  });
+});
+
+describe("claudeVersionTooOld", () => {
+  // the text the CLI relays when the API refuses a model newer than it
+  const TOO_OLD = "API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required. Run 'claude update', or update the Claude desktop app, then try again.";
+
+  it("reads the api-error frame for a model this install is too old for", () => {
+    expect(claudeVersionTooOld({ is_api_error_message: true }, TOO_OLD)).toBe(true);
+    expect(claudeVersionTooOld({ error: "invalid_request" }, TOO_OLD)).toBe(true);
+  });
+
+  it("leaves a model's own words and other api errors alone", () => {
+    expect(claudeVersionTooOld({}, TOO_OLD)).toBe(false);
+    expect(claudeVersionTooOld({ is_api_error_message: true }, "API Error: 400 prompt is too long")).toBe(false);
   });
 });
