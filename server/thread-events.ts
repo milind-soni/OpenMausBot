@@ -247,6 +247,14 @@ function isRuntimeEvent(value: unknown): value is RuntimeEvent {
       return typeof value.input === "number" && typeof value.output === "number";
     case "runtime.error":
       return typeof value.message === "string" && (value.setup === undefined || typeof value.setup === "boolean");
+    case "content.class-passed":
+      return (
+        Array.isArray(value.classes) &&
+        value.classes.length > 0 &&
+        value.classes.every((item) => item === "personal" || item === "internal") &&
+        typeof value.funnel === "string" &&
+        stringOrMissing(value.botId)
+      );
     default:
       return false;
   }

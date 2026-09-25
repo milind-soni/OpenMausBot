@@ -9044,9 +9044,51 @@ describe("harness HTTP API", () => {
     expect(autoStart.status).toBe(200);
     expect(autoStart.body.bot.autoStartVps).toBe(true);
     expect((await api("PATCH", `/api/bots/${bot.id}`, { autoStartVps: "yes" })).status).toBe(400);
+    const classes = await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: ["personal"] });
+    expect(classes.status).toBe(200);
+    expect(classes.body.bot.contentClasses).toEqual(["personal"]);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: ["personal", "secret"] })).status).toBe(400);
+    const cleared = await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.bot.contentClasses).toBeUndefined();
     const invalid = await api("PATCH", `/api/bots/${bot.id}`, { cloudBackend: "daytona" });
     expect(invalid.status).toBe(400);
     expect((await api("PATCH", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
+  });
+
+  it("treats clearing a content class as a loosening a busy bot cannot make", async () => {
+    // a dedicated bot on the fixture CLI: shared bots[0] carries live turns
+    // and queues from 200+ order-dependent neighbors, and this guard needs
+    // a turn this test provably started (the POST must not steer or queue)
+    const bot = (await api("POST", "/api/bots", { name: "Leash pull" })).body.bot;
+    try {
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: ["personal", "internal"] })).status).toBe(200);
+      rmSync(fakeClaudeDump, { force: true });
+      const turn = await api("POST", `/api/bots/${bot.id}/messages`, { text: "hold this turn while the leash is pulled" });
+      expect(turn.status).toBe(202);
+      expect(turn.body.queued).toBeUndefined();
+      expect(turn.body.steered).toBeUndefined();
+      expect(turn.body.message).toBeDefined();
+      await readJsonFileWhenReady(fakeClaudeDump, 15_000);
+      // narrowing or clearing the redaction boundary mid-turn is the same
+      // self-loosening the guard exists to stop: a bot's own shell is one
+      // loopback curl from unredacting its output
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: ["personal"] })).status).toBe(409);
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: null })).status).toBe(409);
+      // widening only strengthens the boundary, so it stays allowed mid-turn
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: ["personal", "internal"] })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/interrupt`, {})).status).toBe(200);
+      await expect.poll(
+        async () => (await api("GET", "/api/bots?messages=0")).body.bots.find((entry: { id: string }) => entry.id === bot.id)?.busy,
+        { timeout: 5_000 },
+      ).toBe(false);
+      // idle, the same loopback caller may clear it — with the warning log
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { contentClasses: null })).status).toBe(200);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`, {});
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
   });
 
   it("validates a Composio project key, creates a Session, and keeps externally stored secrets off disk", async () => {

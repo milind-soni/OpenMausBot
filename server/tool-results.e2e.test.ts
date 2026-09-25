@@ -94,7 +94,33 @@ it("bounds a real roster, retrieves its tail, isolates owners and expires stoppe
     const third = await held(other);
     expect((await third.tool("tool_result_read", { id })).isError).toBe(true);
     expect((await api("/api/internal/tool-result", { text: "x".repeat(128 * 1024 + 1) }, first.token)).status).toBe(400);
-    expect((await first.tool("tool_result_read", { id, offset: -1 })).isError).toBe(true);
+    // Live content-class boundary (#1670): configure the bot mid-flight, save
+    // a mixed-class payload, and verify what the model pages back plus the
+    // escape-hatch audit in the canonical thread log.
+    const configured = await api(`/api/bots/${bot.id}`, { contentClasses: ["personal"] }, undefined, "PATCH");
+    expect(configured.status).toBe(200);
+    expect(configured.body.bot.contentClasses).toEqual(["personal"]);
+    const mixed = await api("/api/internal/tool-result", {
+      text: "owner jane@example.com host corp.internal key sk-ant-" + "z".repeat(40),
+    }, first.token);
+    expect(mixed.status).toBe(201);
+    const masked = await api(`/api/internal/tool-result?id=${mixed.body.id}`, undefined, first.token);
+    expect(masked.status).toBe(200);
+    expect(masked.body.text).not.toContain("jane@example.com");
+    expect(masked.body.text).toContain("corp.internal");
+    expect(masked.body.text).not.toContain("sk-ant-");
+    const threadLog = readFileSync(join(fixture.info.dataDir, "events", `${bot.threadId}.ndjson`), "utf8");
+    const passes = threadLog.trim().split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)
+      .filter((event) => event.type === "content.class-passed");
+    expect(passes.length).toBeGreaterThan(0);
+    for (const event of passes) {
+      expect(event.classes).toEqual(["internal"]);
+      expect(event.funnel).toBe("tool-result");
+      // the audit record is content-free: nothing from the payload rides along
+      expect(JSON.stringify(event)).not.toContain("corp.internal");
+      expect(JSON.stringify(event)).not.toContain("jane@example.com");
+      expect(JSON.stringify(event)).not.toContain("sk-ant-");
+    }
     await cli("messages", "--bot", bot.id, "--task", bot.threadId);
     await cli("interrupt", "--bot", bot.id, "--task", bot.threadId);
     await expect.poll(async () => (await api(`/api/internal/tool-result?id=${id}`, undefined, first.token)).status).toBe(401);

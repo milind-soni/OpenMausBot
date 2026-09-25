@@ -16,6 +16,7 @@ import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { canAccessTeam } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
+import { bindContentBoundaryAuditSink } from "./content-boundary.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
@@ -167,6 +168,101 @@ describe("Store", () => {
     expect(JSON.stringify(reloaded.messagesFor(bot.threadId))).not.toContain(key);
     const wire = toWireTask(reloaded.taskByThread(bot.id, bot.threadId)!);
     for (const field of Object.keys(patch)) expect(wire).not.toHaveProperty(field);
+  });
+
+ it("applies configured content classes to bot-authored transcript fields only", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, { contentClasses: ["personal"] });
+    const events: unknown[] = [];
+    bindContentBoundaryAuditSink((event) => events.push(event));
+    const sent = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "ping jane@example.com from 10.0.0.5" });
+    expect(sent.text).toContain("«redacted 16 chars»");
+    expect(sent.text).toContain("10.0.0.5");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "content.class-passed", classes: ["internal"], funnel: "transcript", botId: bot.id });
+    const user = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "my mail is jane@example.com" });
+    expect(user.text).toBe("my mail is jane@example.com");
+    store.patchBot(bot.id, { contentClasses: undefined });
+    const bare = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "still jane@example.com" });
+    expect(bare.text).toBe("still jane@example.com");
+    bindContentBoundaryAuditSink(undefined);
+  });
+
+  it("scrubs content-bearing patches through the same boundary as appends", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, { contentClasses: ["personal"] });
+    const events: unknown[] = [];
+    bindContentBoundaryAuditSink((event) => events.push(event));
+    const msg = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "working" });
+    const patched = store.patchMessage(bot.threadId, msg.id, { text: "mail jane@example.com host corp.internal" });
+    expect(patched?.text).toContain("«redacted 16 chars»");
+    expect(patched?.text).toContain("corp.internal");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "content.class-passed", classes: ["internal"], funnel: "transcript", botId: bot.id });
+    store.patchBot(bot.id, { contentClasses: undefined });
+    const key = "sk-ant-" + "b".repeat(90);
+    const sealed = store.patchMessage(bot.threadId, msg.id, { text: "key " + key });
+    expect(sealed?.text).not.toContain(key);
+    expect(sealed?.text).toContain("«redacted");
+    const theirs = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "mine" });
+    const kept = store.patchMessage(bot.threadId, theirs.id, { text: "my key " + key });
+    expect(kept?.text).toContain(key);
+    bindContentBoundaryAuditSink(undefined);
+    const reloaded = new Store(selection);
+    const stored = reloaded.messagesFor(bot.threadId).find((m) => m.id === msg.id);
+    expect(stored?.text).not.toContain(key);
+    expect(stored?.text).not.toContain("jane@example.com");
+    expect(reloaded.messagesFor(bot.threadId).find((m) => m.id === theirs.id)?.text).toContain(key);
+  });
+
+  it("resolves the busy group speaker when a group bot message lacks attribution", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, { contentClasses: ["personal"] });
+    const group = store.createGroup("Team", [bot.id]);
+    store.patchGroup(group.id, { busyBotId: bot.id });
+    const events: unknown[] = [];
+    bindContentBoundaryAuditSink((event) => events.push(event));
+    const sent = store.appendMessage(group.threadId, { role: "bot", kind: "text", text: "mail jane@example.com host corp.internal" });
+    expect(sent.text).toContain("«redacted 16 chars»");
+    expect(sent.text).toContain("corp.internal");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "content.class-passed", classes: ["internal"], funnel: "transcript", botId: bot.id });
+    store.patchGroup(group.id, { busyBotId: null });
+    const idle = store.appendMessage(group.threadId, { role: "bot", kind: "text", text: "idle jane@example.com" });
+    expect(idle.text).toBe("idle jane@example.com");
+    bindContentBoundaryAuditSink(undefined);
+
+  });
+
+  it("scrubs bot-authored option labels through the card boundary", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    store.patchBot(bot.id, { contentClasses: ["personal"] });
+    const events: unknown[] = [];
+    bindContentBoundaryAuditSink((event) => events.push(event));
+    const key = "sk-ant-" + "b".repeat(90);
+    const sent = store.appendMessage(bot.threadId, {
+      role: "bot",
+      kind: "options",
+      card: { title: "Choose", subtitle: "", options: ["Allow", "Deny", "mail jane@example.com host corp.internal", key] },
+    });
+    expect(sent.card?.options?.[0]).toBe("Allow");
+    expect(sent.card?.options?.[1]).toBe("Deny");
+    expect(sent.card?.options?.[2]).toContain("«redacted 16 chars»");
+    expect(sent.card?.options?.[2]).toContain("corp.internal");
+    expect(sent.card?.options?.[3]).not.toContain(key);
+    expect(sent.card?.options?.[3]).toContain("«redacted");
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: "content.class-passed", classes: ["internal"], funnel: "transcript", botId: bot.id });
+    const reloaded = new Store(selection);
+    const stored = reloaded.messagesFor(bot.threadId).find((m) => m.id === sent.id)?.card;
+    expect(stored?.options?.[0]).toBe("Allow");
+    expect(stored?.options?.[2]).toContain("«redacted 16 chars»");
+    expect(stored?.options?.[3]).not.toContain(key);
+    bindContentBoundaryAuditSink(undefined);
   });
 
   it("round-trips audio attachments with their metadata through persistence", () => {

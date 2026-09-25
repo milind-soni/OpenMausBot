@@ -414,6 +414,7 @@ import { BOT_PACKAGE_MAX_SKILLS, isBotPackage, packageSummary, parsePackageDocum
 import { createTeamManifest, parseTeamManifest } from "./team-manifest.ts";
 import { readThreadEvents } from "./thread-events.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
+import { bindWorkspaceContentPolicy, redactForContentPolicy } from "./content-boundary.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -2637,12 +2638,21 @@ function checkedMemberIds(value: unknown): { ok: true; memberIds: string[] } | {
   return { ok: true, memberIds };
 }
 let bootSelection = { instanceId: "", model: "" };
+
 /** Preset bots for New bot, from shared files and the organization (presets.ts). */
 const presetStore = createPresetStore();
 const store = new Store(
   () => bootSelection,
   (selection) => withNewBotEffort(selection, cfg.newBots?.effort, registry.get(selection.instanceId)?.adapter.capabilities.effortLevels),
 );
+
+
+// The workspace write funnels are botId-addressed and cannot read the store
+// directly; resolve per write so a bot PATCH applies without a restart.
+bindWorkspaceContentPolicy((botId) => {
+  const bot = store.bot(botId);
+  return bot ? { classes: bot.contentClasses, threadId: bot.threadId } : null;
+});
 const teamComputers = new TeamComputers(join(DATA_DIR, "team-computers.json"), ENVIRONMENT_ID);
 let followupsReady = false;
 const sendSequencer = new SendSequencer();
@@ -12636,7 +12646,10 @@ ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: (
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses }));
 
-const toolResults = new ToolResults();
+// Content-class boundary (#1670): credentials always, the bot configured
+// classes at this same ingest point, audited when a loosened class passes.
+const toolResults = new ToolResults(undefined, (owner, text) =>
+  redactForContentPolicy(text, store.bot(owner.botId)?.contentClasses, { botId: owner.botId, threadId: owner.threadId, funnel: "tool-result" }));
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   let url: URL;
   try {
@@ -17281,6 +17294,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.autoStartVps !== "boolean") return json(res, 400, { error: "autoStartVps must be true or false" });
         patch.autoStartVps = body.autoStartVps;
       }
+      // Content classes to redact beyond the always-on credential pass.
+      // null restores the unset (credentials-only) behavior; [] is the
+      // audit-only escape hatch: every detected class passes, each use
+      // lands in the thread event log.
+      if (body.contentClasses !== undefined) {
+        if (body.contentClasses === null) {
+          patch.contentClasses = undefined;
+        } else if (!Array.isArray(body.contentClasses) || body.contentClasses.some((c: unknown) => c !== "personal" && c !== "internal")) {
+          return json(res, 400, { error: "contentClasses must be a list of classes (personal, internal), or null" });
+        } else {
+          patch.contentClasses = [...new Set(body.contentClasses)] as ("personal" | "internal")[];
+        }
+      }
       if (body.chiefOfStaff !== undefined && typeof body.chiefOfStaff !== "boolean") {
         return json(res, 400, { error: "chiefOfStaff must be true or false" });
       }
@@ -17485,6 +17511,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (body.approvePeerComms === false && existingBot?.approvePeerComms === true) loosened.push("approvePeerComms");
       if (section !== undefined && sectionKey(existingBot?.section) !== sectionKey(section)) loosened.push("section");
+      // Dropping a class makes the redaction boundary weaker, so it
+      // loosens like every comparable field: a loopback caller with no
+      // paired session or browser origin may only do it while every bot
+      // is idle — a bot's own shell cannot clear its own redaction
+      // mid-turn. Adding classes only strengthens the boundary.
+      if (body.contentClasses !== undefined) {
+        const currentClasses = existingBot?.contentClasses ?? [];
+        const nextClasses = (patch.contentClasses as ("personal" | "internal")[] | undefined) ?? [];
+        if (currentClasses.some((c) => !nextClasses.includes(c))) loosened.push("contentClasses");
+      }
       if (Array.isArray(patch.alwaysAllow) && patch.alwaysAllow.some((key) => !(existingBot?.alwaysAllow ?? []).includes(key))) {
         loosened.push("alwaysAllow");
       }

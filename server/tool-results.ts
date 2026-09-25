@@ -28,7 +28,17 @@ export class ToolResults {
   private readonly results = new Map<string, SavedResult>();
   private readonly now: () => number;
 
-  constructor(now: () => number = Date.now) { this.now = now; }
+  /** The boundary redaction call: credentials always, plus this owner
+bot configured content classes (#1670). */
+  private readonly redact: (owner: Owner, text: string) => string;
+
+  constructor(
+    now: () => number = Date.now,
+    redactor: (owner: Owner, text: string) => string = (_owner, text) => redactSecretsInText(text),
+  ) {
+    this.now = now;
+    this.redact = redactor;
+  }
 
   private expire(): void {
     const now = this.now();
@@ -40,7 +50,7 @@ export class ToolResults {
   save(owner: Owner, text: string, truncated = false) {
     this.expire();
     // Redact before taking the prefix, including a secret crossing its edge.
-    const redacted = redactSecretsInText(text);
+    const redacted = this.redact(owner, text);
     const bounded = toolResultPrefix(redacted, TOOL_RESULT_MAX_CHARS);
     const result = { botId: owner.botId, threadId: owner.threadId, text: bounded, bytes: Buffer.byteLength(bounded),
       expiresAt: this.now() + TOOL_RESULT_TTL_MS, truncated: truncated || bounded.length < redacted.length };

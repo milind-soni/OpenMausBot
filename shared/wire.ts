@@ -10,6 +10,7 @@
  * as server-private. */
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { CommandAllowlistCandidate } from "./command-allowlist.ts";
+import type { ContentClass } from "./content-class.ts";
 import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop } from "./bot-avatar.ts";
 import type { MascotBodyId } from "./mascot-bodies.ts";
@@ -268,6 +269,12 @@ export interface WireBot {
   approvalMode?: ApprovalMode;
   /** Tools this bot may always use without asking. */
   alwaysAllow?: string[];
+  /** Content classes redacted beyond the always-on credential pass:
+   * "personal", "internal". Credentials are never loosenable. A class
+   * listed here is enforced; a class detected but not listed passes with
+   * an audited event in the thread log (the over-redaction escape hatch).
+   * Unset means credentials-only, exactly the pre-classification behavior. */
+  contentClasses?: ContentClass[];
   /** Speak this bot's replies aloud as they settle, without being asked. */
   speakReplies?: boolean;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */

@@ -13,7 +13,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic } from "./atomic.ts";
 import { indexMemoryFile, indexedMemoryFiles, recallMemory, removeMemoryFile, type MemoryHit } from "./message-db.ts";
-import { redactSecretsInText } from "./redact.ts";
+import { redactWorkspaceText } from "./content-boundary.ts";
 
 import { DATA_DIR } from "./config.ts";
 
@@ -155,7 +155,7 @@ export function writeMemoryFile(botId: string, text: string): void {
   // through (the tool, the Settings editor, a backup import): memory is
   // re-read into every future prompt and travels in backups, which is the
   // same reason learned skills are scrubbed before they are stored.
-  writeFileAtomic(join(workspaceDir(botId), "MEMORY.md"), redactSecretsInText(text), { mode: 0o600 });
+  writeFileAtomic(join(workspaceDir(botId), "MEMORY.md"), redactWorkspaceText(botId, text), { mode: 0o600 });
   indexWrittenMemoryFile(botId, "MEMORY.md");
 }
 
@@ -351,7 +351,8 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   }
   // Scrubbed before it becomes an entry, so what the tool echoes back is
   // what landed in the file; writeMemoryFile scrubs again, harmlessly.
-  const text = update.text === undefined ? undefined : redactSecretsInText(update.text);
+  const text = update.text === undefined ? undefined : redactWorkspaceText(botId, update.text);
+  const source = opts.source === undefined ? undefined : redactWorkspaceText(botId, opts.source);
   const dir = ensureWorkspace(botId);
   // Do not use readMemoryFile's editor-friendly missing/read-error fallback:
   // a failed read must never turn into a successful overwrite of old notes.
@@ -364,7 +365,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
   let next: string;
   let entry: string | undefined;
   if (update.action === "append") {
-    entry = memoryEntry(text!, opts);
+    entry = memoryEntry(text!, { ...opts, source });
     next = appendEntry(current, entry);
   } else {
     const oldText = update.oldText!;
@@ -390,7 +391,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
         return { ok: false, code: "conflict", error: "That entry is already struck through. Replace or remove it, or append the new fact on its own." };
       }
       const struck = `${parsed ? parsed.prefix : line === body ? "" : "- "}~~${body}~~${SEP}superseded ${today}`;
-      entry = memoryEntry(text!, opts);
+      entry = memoryEntry(text!, { ...opts, source });
       next = appendEntry(replaceLine(struck), entry);
     } else if (!parsed) {
       // A hand-written passage keeps the person's own shape: plain
@@ -407,6 +408,12 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
       next = replaceLine(entry);
     }
   }
+  // The assembled file can still carry spans the person or an older
+  // policy wrote; scrub before the size math so the byte count, the
+  // refusal's recent view, and the returned entry all describe the text
+  // that actually persists. Idempotent on already-scrubbed input.
+  next = redactWorkspaceText(botId, next);
+  if (entry !== undefined) entry = redactWorkspaceText(botId, entry);
   const bytes = Buffer.byteLength(next, "utf8");
   const lines = memoryLineCount(next);
   // A write that would push the file past what a session loads is refused
@@ -424,7 +431,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
       lines,
       bytes,
       budget: { lines: MEMORY_MAX_LINES, bytes: MEMORY_MAX_BYTES },
-      recent: recentEntries(current),
+      recent: recentEntries(current).map((line) => redactWorkspaceText(botId, line)),
     };
   }
   writeMemoryFile(botId, next);
@@ -450,8 +457,8 @@ export function appendMemoryLog(botId: string, text: string, opts: MemoryUpdateO
   }
   const now = opts.now ?? new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  const source = cleanSource(opts.source);
-  const line = `- ${pad(now.getHours())}:${pad(now.getMinutes())}${SEP}${source ? `from ${source}${SEP}` : ""}${normaliseEntryText(redactSecretsInText(text))}`;
+  const source = cleanSource(opts.source === undefined ? undefined : redactWorkspaceText(botId, opts.source));
+  const line = `- ${pad(now.getHours())}:${pad(now.getMinutes())}${SEP}${source ? `from ${source}${SEP}` : ""}${normaliseEntryText(redactWorkspaceText(botId, text))}`;
   const dir = join(ensureWorkspace(botId), "memory", MEMORY_LOG_DIR);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = `${memoryDate(now)}.md`;
@@ -474,7 +481,7 @@ export function writeMemoryLog(botId: string, name: string, text: string): void 
   if (!LOG_FILE_NAME.test(name)) throw new Error("invalid log name");
   const dir = join(ensureWorkspace(botId), "memory", MEMORY_LOG_DIR);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileAtomic(join(dir, name), redactSecretsInText(text), { mode: 0o600 });
+  writeFileAtomic(join(dir, name), redactWorkspaceText(botId, text), { mode: 0o600 });
   indexWrittenMemoryFile(botId, `memory/${MEMORY_LOG_DIR}/${name}`);
 }
 
@@ -535,7 +542,7 @@ export function listMemoryTopics(botId: string): Array<{ name: string; bytes: nu
 export function writeMemoryTopic(botId: string, name: string, text: string): void {
   if (!isMemoryTopicName(name)) throw new Error("invalid topic name");
   ensureWorkspace(botId);
-  writeFileAtomic(join(workspaceDir(botId), "memory", name), redactSecretsInText(text), { mode: 0o600 });
+  writeFileAtomic(join(workspaceDir(botId), "memory", name), redactWorkspaceText(botId, text), { mode: 0o600 });
   indexWrittenMemoryFile(botId, `memory/${name}`);
 }
 

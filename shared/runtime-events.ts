@@ -3,6 +3,7 @@
  * store, and the inspector panel cannot drift; server/contracts.ts and
  * server/thread-events.ts re-export these under their historical names. */
 import type { AskQuestion } from "./ask-question.ts";
+import type { ContentClass } from "./content-class.ts";
 
 export type DriverKind = string;
 export type InstanceId = string;
@@ -165,6 +166,11 @@ export type RuntimeEvent = RuntimeEventBase &
     // `terminal: true` records failure of the complete turn, rather than a
     // transient error or a legacy provider's diagnostic during cancellation.
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean }
+    // The content boundary's escape-hatch audit (#1670): this bot is
+    // configured to loosen a class, and that class was detected flowing
+    // through unredacted. Never delivered live — the boundary writes it
+    // straight into the thread's canonical event log.
+    | { type: "content.class-passed"; classes: ContentClass[]; funnel: string; botId?: string }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;
