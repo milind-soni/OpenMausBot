@@ -370,6 +370,23 @@ import {
 } from "./system-prompt.ts";
 import { readCuaConnection, readCuaUnavailableReason, gatedLocalComputer } from "./local-computer.ts";
 import {
+  createCalibrationGate,
+  createDecisionModelClient,
+  decisionModelBaseUrl,
+  decisionModelConfigured,
+  decisionThreshold,
+  keyOverInsecureTransport,
+} from "./decision-model.ts";
+import {
+  createToolRouter,
+  decodeJsonRpcFrame,
+  jsonRpcToolCall,
+  multiExecuteSlugs,
+  parseSchemaResponse,
+  schemaFetchRequest,
+  type ToolRouterReport,
+} from "./tool-router.ts";
+import {
   discoverExistingPerBotLocalVms,
   localVmInventoryEntry,
   shouldArmLocalVmIdle,
@@ -628,6 +645,80 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+
+// The runtime half of the decision-model connection (#1630): confidence-
+// based acting only for a connection whose calibration probe passed in
+// this process. Warmed at boot, on save, and from the row's Test button,
+// so a mount checks a cached verdict instead of probing mid-turn.
+const decisionGate = createCalibrationGate();
+function warmDecisionGate() {
+  const section = cfg.decisionModel;
+  if (section && decisionModelConfigured(section)) void decisionGate.probe(section);
+}
+
+/** Env for the local-computer bridge's chooser. Null on every default
+ * install, and for any connection that has not proved calibrated. */
+function decisionChooserEnv(flow: string): Record<string, string> | null {
+  const section = cfg.decisionModel;
+  if (!section || !decisionModelConfigured(section) || keyOverInsecureTransport(section) || !decisionGate.cached(section)) return null;
+  return {
+    OMB_DECISION_PROVIDER: section.provider ?? "",
+    OMB_DECISION_URL: decisionModelBaseUrl(section) ?? "",
+    OMB_DECISION_API_KEY: section.apiKey ?? "",
+    OMB_DECISION_MODEL: section.model ?? "",
+    OMB_DECISION_THRESHOLD: String(decisionThreshold(section)),
+    OMB_DECISION_FLOW: flow,
+  };
+}
+
+// The composio tool router (#1667): a second caller of the same calibrated
+// decision model, over connected-app discovery instead of the screen. The
+// activation bar is identical to the chooser's — configured, key safe, and
+// probe-passed in this process — so a default install never pays a decision
+// and its discovery payload stays byte-identical.
+function toolRouterActive(): boolean {
+  const section = cfg.decisionModel;
+  return Boolean(
+    section &&
+      decisionModelConfigured(section) &&
+      !keyOverInsecureTransport(section) &&
+      decisionGate.cached(section),
+  );
+}
+const toolRouter = createToolRouter({
+  client: () => {
+    const section = cfg.decisionModel;
+    if (!section || !decisionModelConfigured(section) || keyOverInsecureTransport(section)) return null;
+    return createDecisionModelClient(section)?.client ?? null;
+  },
+  threshold: () => decisionThreshold(cfg.decisionModel),
+  goal: (threadId) => (decisionModelConfigured(cfg.decisionModel) ? turnGoal(threadId) : null),
+  fetchSchemas: async (slugs, transportSessionId, signal) => {
+    // relayMcp has no AbortSignal support today, so the router races the
+    // caller's signal around this call and abandons the wait; the relay
+    // request finishes and its answer is discarded.
+    void signal;
+    const upstream = await composio.relayMcp(cfg, schemaFetchRequest(slugs), transportSessionId);
+    // The relay accepts JSON and SSE answers and returns the upstream bytes
+    // unchanged, so the frame is decoded according to the content type.
+    return parseSchemaResponse(decodeJsonRpcFrame(upstream.bytes, upstream.contentType));
+  },
+  report: publishToolRouterReport,
+});
+
+/** Router outcomes land in the same event stream as the chooser's
+ * (#1630), tagged flow "tool-router" so the two populations stay
+ * separable in the inspector. */
+function publishToolRouterReport(threadId: string, report: ToolRouterReport) {
+  bus.publish({
+    eventId: newId(),
+    provider: "composio",
+    threadId,
+    createdAt: new Date().toISOString(),
+    type: "decision.chooser",
+    ...report,
+  });
+}
 const hostedModels = hostedModelPolicy(DATA_DIR);
 const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
 const decorateHostedProvider = hostedModels ? (instance: ProviderInstance) => hostedModels.decorate(instance) : undefined;
@@ -5281,7 +5372,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
       : "CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
   }
   await bindTurnComputer(owner, "computer:host");
-  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation));
+  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation), decisionChooserEnv("local") ?? undefined);
 }
 
 /** The bot's own VPS desktop, mounted into the local agent. The desktop lease
@@ -7363,6 +7454,64 @@ async function generateThreadTitle(
   }
 }
 
+// The chooser needs the turn's own words for context ("book the flight",
+// not a tool call). Held per thread with a TTL: a stale goal is worse than
+// none, because the chooser would weigh candidates against abandoned work.
+const TURN_GOAL_TTL_MS = 10 * 60 * 1000;
+const turnGoals = new Map<string, { text: string; at: number }>();
+function recordTurnGoal(threadId: string, text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  if (turnGoals.size >= 256) {
+    const now = Date.now();
+    for (const [key, entry] of turnGoals) {
+      if (now - entry.at > TURN_GOAL_TTL_MS) turnGoals.delete(key);
+    }
+    if (turnGoals.size >= 256) {
+      const oldest = [...turnGoals.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest) turnGoals.delete(oldest[0]);
+    }
+  }
+  turnGoals.set(threadId, { text: trimmed.slice(0, 4_000), at: Date.now() });
+}
+function turnGoal(threadId: string): string | null {
+  const entry = turnGoals.get(threadId);
+  if (!entry) return null;
+  if (Date.now() - entry.at > TURN_GOAL_TTL_MS) {
+    turnGoals.delete(threadId);
+    return null;
+  }
+  return entry.text;
+}
+
+/** The control endpoint is an in-process loopback, but the report still
+ * crosses a serialization boundary — validate like any external payload
+ * before it becomes a RuntimeEvent in a log people paste into reports. */
+function sanitizeDecisionReport(value: unknown): {
+  outcome: "acted" | "abstained" | "reobserve" | "below-threshold" | "superseded" | "error";
+  selectedId?: string;
+  confidence?: number;
+  model?: string;
+  flow?: string;
+  detail?: string;
+} | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const outcome = v.outcome;
+  if (outcome !== "acted" && outcome !== "abstained" && outcome !== "reobserve" &&
+      outcome !== "below-threshold" && outcome !== "superseded" && outcome !== "error") return null;
+  const id = typeof v.selectedId === "string" ? v.selectedId.slice(0, 128) : undefined;
+  const confidence =
+    typeof v.confidence === "number" && Number.isFinite(v.confidence) && v.confidence >= 0 && v.confidence <= 1
+      ? v.confidence
+      : undefined;
+  const model = typeof v.model === "string" ? v.model.slice(0, 128) : undefined;
+  const flow = typeof v.flow === "string" ? v.flow.slice(0, 64) : undefined;
+  const detail = typeof v.detail === "string" ? v.detail.slice(0, 512) : undefined;
+  return { outcome, ...(id !== undefined ? { selectedId: id } : {}), ...(confidence !== undefined ? { confidence } : {}),
+    ...(model !== undefined ? { model } : {}), ...(flow !== undefined ? { flow } : {}), ...(detail !== undefined ? { detail } : {}) };
+}
+
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(
   botId: string,
@@ -7462,6 +7611,10 @@ async function startTurn(
   if (botAtThreadCapacity(botId)) {
     throw Object.assign(new Error(`this bot has reached its limit of ${maxConcurrentBotThreads(cfg)} parallel threads — wait for one to finish`), { status: 409, code: "thread_limit" });
   }
+  // Only an admitted turn may own the goal slot: recording before the busy
+  // and capacity checks let a rejected call (a compact racing a live turn,
+  // say) overwrite the active turn's decision-model context (#1630).
+  recordTurnGoal(threadId, text);
   // Steering is never a cancel. A message sent while teammates are working
   // runs now, with their assignments still attached: they keep running and
   // their results still return here (outstandingAssignmentsPrompt tells this
@@ -8214,7 +8367,7 @@ async function startTurn(
         const cua = readCuaConnection();
         if (cua) {
           await bindTurnComputer(resourceOwner, "computer:host");
-          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
+          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId), decisionChooserEnv("local") ?? undefined);
           computerKind = "local";
         }
       }
@@ -12232,6 +12385,15 @@ function configStatus() {
     decisions: { retentionDays: decisionRetentionDays(cfg.decisions?.retentionDays) },
     // the base URL is a setting, not a secret; the key stays write-only
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
+    // the decision-model connection (#1630): routing settings only, never
+    // the key; incomplete = the chooser stays off
+    decisionModel: {
+      configured: decisionModelConfigured(cfg.decisionModel),
+      ...(cfg.decisionModel?.provider ? { provider: cfg.decisionModel.provider } : {}),
+      url: decisionModelBaseUrl(cfg.decisionModel ?? {}) ?? "",
+      model: cfg.decisionModel?.model ?? "",
+      threshold: decisionThreshold(cfg.decisionModel),
+    },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
@@ -14885,18 +15047,50 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             rule: verdict.rule,
           });
         }
+
+        const transportSessionId = Array.isArray(req.headers["mcp-session-id"])
+          ? req.headers["mcp-session-id"][0]
+          : req.headers["mcp-session-id"];
+        const toolCall = toolRouterActive() ? jsonRpcToolCall(body) : null;
+        if (toolCall?.name === "COMPOSIO_MULTI_EXECUTE_TOOL") {
+          // Router telemetry (#1667), never a gate: an execute outside the
+          // verified winner set is the model overruling the ranking, which
+          // is exactly what the event log should show.
+          const outside = toolRouter.observeExecute(internalCapability.threadId, multiExecuteSlugs(toolCall.arguments));
+          if (outside) publishToolRouterReport(internalCapability.threadId, outside);
+        }
         const upstream = await composio.relayMcp(
           cfg,
           body,
-          Array.isArray(req.headers["mcp-session-id"])
-            ? req.headers["mcp-session-id"][0]
-            : req.headers["mcp-session-id"],
+          transportSessionId,
         );
         const headers: Record<string, string> = {
           "content-type": upstream.contentType,
           "cache-control": "no-store",
         };
         if (upstream.transportSessionId) headers["mcp-session-id"] = upstream.transportSessionId;
+        if (toolCall?.name === "COMPOSIO_SEARCH_TOOLS" && upstream.status === 200) {
+          // The router (#1667) rewrites a successful search response in
+          // place: ranked winners keep schemas, the rest keep their names.
+          // Every failure path inside returns null and the original bytes
+          // answer, so a router fault cannot break connected apps.
+          const callerAbort = new AbortController();
+          req.once("aborted", () => callerAbort.abort(new Error("caller aborted")));
+          req.once("close", () => {
+            if (!res.writableEnded) callerAbort.abort(new Error("caller closed"));
+          });
+          const routed = await toolRouter.routeSearch({
+            threadId: internalCapability.threadId,
+            responseBytes: upstream.bytes,
+            contentType: upstream.contentType,
+            transportSessionId,
+            signal: callerAbort.signal,
+          });
+          if (routed) {
+            res.writeHead(upstream.status, { ...headers, "content-type": "application/json" });
+            return res.end(Buffer.from(routed));
+          }
+        }
         res.writeHead(upstream.status, headers);
         return res.end(Buffer.from(upstream.bytes));
       }
@@ -14957,10 +15151,31 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               blockedReason: "Another thread is using this computer. This call was not performed. Pause computer work until that thread finishes, then take a fresh screenshot before acting.",
             });
           }
-          return json(res, 200, { held: snapshot.held, helpOpen: snapshot.helpReason !== null });
+          // The chooser reads its goal here (issue #1630): same endpoint the
+          // bridge already polls for held/help state, so no new surface. Only
+          // when a calibrated decision model is configured — the default
+          // install's payload stays byte-identical.
+          const decisionGoal = decisionModelConfigured(cfg.decisionModel) ? turnGoal(internalCapability.threadId) : null;
+          return json(res, 200, { held: snapshot.held, helpOpen: snapshot.helpReason !== null, ...(decisionGoal ? { decision: { goal: decisionGoal } } : {}) });
         }
         if (method === "POST") {
           const body = await readInternalBody();
+          if (body.decision !== undefined) {
+            // Chooser outcome metrics (#1630): the bridge reports each step
+            // it handled or fell back on. Metrics only — a malformed report
+            // is answered, never propagated into the turn.
+            const report = sanitizeDecisionReport(body.decision);
+            if (!report) return json(res, 400, { error: "invalid decision report" });
+            bus.publish({
+              eventId: newId(),
+              provider: "computer",
+              threadId: internalCapability.threadId,
+              createdAt: new Date().toISOString(),
+              type: "decision.chooser",
+              ...report,
+            });
+            return json(res, 200, { ok: true });
+          }
           const controlKey = internalCapability.teamComputerId ? teamComputerOwner(internalCapability.teamComputerId) : botId;
           const { snapshot, requestId } = computerControl.requestHelpLease(controlKey, body.reason);
           // worth a buzz: the bot is blocked on the person's hands, which
@@ -19342,6 +19557,29 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "POST" && path === "/api/keys/test") {
       const body = await readBody(req, 8192);
       const provider = body?.provider;
+      // The decision-model row's Test button is a calibration probe, not a
+      // key check: two identical canary decisions, an obviously-right
+      // answer, probabilities that sum to one (#1630). Routing comes from
+      // the saved connection; the key may be a draft.
+      if (provider === "decisionModel") {
+        if (body?.key !== undefined && typeof body.key !== "string") {
+          return json(res, 400, { error: "key must be a string" });
+        }
+        const key = typeof body?.key === "string" ? body.key.trim() : cfg.decisionModel?.apiKey?.trim() || "";
+        if (!key && cfg.decisionModel?.provider !== "custom") {
+          return json(res, 400, { error: "No key to test. Paste one or save one first." });
+        }
+        if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
+        const connection = {
+          ...cfg.decisionModel,
+          ...(key ? { apiKey: key } : {}),
+        };
+        if (!decisionModelConfigured(connection)) {
+          return json(res, 400, { error: "Save the lane, model and key first: the probe needs a complete connection." });
+        }
+        res.setHeader("cache-control", "no-store");
+        return json(res, 200, await decisionGate.probe(connection));
+      }
       if (!PROVIDER_KEY_KINDS.includes(provider as ProviderKeyKind)) {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
@@ -19819,7 +20057,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openaiCompat", "decisionModel", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
@@ -20218,6 +20456,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         throw error;
       }
+      // A committed decision-model change (or its removal) moves the gate
+      // right away: the next mounted computer uses the new verdict without a
+      // restart, and a removed connection stops the chooser on its next mount.
+      if (configWriteCommitted) warmDecisionGate();
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) sessions.revalidateEmailSessions();
       if (!sharedComputersEnabled(cfg)) {
@@ -20898,6 +21140,7 @@ server.listen(PORT, "127.0.0.1", () => {
   // ordinary chat. Start only once every registry is initialized and the
   // endpoint is listening; earlier dispatch can hit uninitialized bindings.
   routines!.start();
+  warmDecisionGate();
   const leftover = pendingThreads();
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
   for (const threadId of leftover) {

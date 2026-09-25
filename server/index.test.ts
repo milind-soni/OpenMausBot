@@ -107,6 +107,27 @@ let boxStub: Server;
 let boxStubPort = 0;
 const boxRouteCalls: Array<{ method: string; path: string }> = [];
 const boxPromptBodies: Array<Record<string, unknown>> = [];
+// The composio tool-router relay tests (#1667): a fake Session MCP endpoint
+// and a keyless custom-lane decision endpoint, both on the box stub.
+export type FakeDecisionRequest = { state: unknown; criteria: Record<string, string>; instructions?: string };
+export type FakeDecisionAnswer = { choice: string; confidence: number; probabilities: Record<string, number> };
+let fakeDecisionRequests: FakeDecisionRequest[] = [];
+let fakeDecisionAnswer: ((request: FakeDecisionRequest) => FakeDecisionAnswer) | null = null;
+let fakeDecisionStatus = 200;
+const fakeMcpCalls: Array<{ name: string; arguments: unknown }> = [];
+let fakeSearchTools: (() => Record<string, unknown>) | null = null;
+let fakeSchemaTools: ((slugs: string[]) => { tool_schemas: Record<string, unknown>; not_found?: string[] }) | null = null;
+// When set, the stub answers COMPOSIO_GET_TOOL_SCHEMAS over SSE, the shape
+// a streamed MCP transport produces and the relay passes through unchanged.
+let fakeSchemaSse = false;
+/** One MCP result frame, shared by the stub and the byte-parity asserts so
+ * both sides stringify the exact same object. */
+const mcpResultFrame = (id: unknown, payload: Record<string, unknown>): string =>
+  JSON.stringify({
+    jsonrpc: "2.0",
+    ...(id === undefined ? {} : { id }),
+    result: { content: [{ type: "text", text: JSON.stringify(payload) }], structuredContent: payload },
+  });
 let boxSlowRequestCount = 0;
 let managedBoxRows: Array<Record<string, unknown>> = [];
 let managedBoxListRowsOverride: Array<Record<string, unknown>> | null = null;
@@ -837,6 +858,57 @@ beforeAll(async () => {
         result: { content: [{ type: "text", text: "relay-ok" }] },
       }));
     }
+
+    // A keyless custom-lane decision endpoint (#1667 tests): the calibration
+    // canary needs one deterministic right answer twice, and the ranking lane
+    // needs scripted distributions. http without a key is exactly the
+    // deployment shape the custom lane allows on the operator's machine.
+    if (req.url?.startsWith("/decision/chat/completions")) {
+      if (fakeDecisionStatus !== 200) {
+        res.writeHead(fakeDecisionStatus, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "decision endpoint unavailable" }));
+      }
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const body: { messages?: Array<{ role?: string; content?: unknown }> } = raw ? JSON.parse(raw) : {};
+      const user = body.messages?.find((message) => message.role === "user");
+      const request: FakeDecisionRequest = typeof user?.content === "string" ? JSON.parse(user.content) : {};
+      fakeDecisionRequests.push(request);
+      const answer = Object.hasOwn(request.criteria ?? {}, "two")
+        ? { choice: "two", confidence: 0.99, probabilities: { two: 0.96, three: 0.01, seventeen: 0.01, reobserve: 0.01, abstain: 0.01 } }
+        : (fakeDecisionAnswer?.(request) ?? { choice: "abstain", confidence: 1, probabilities: { abstain: 1 } });
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }));
+    }
+    // The Session MCP endpoint the harness relays to (#1667 tests): search
+    // and schema answers come from mutable fixtures so the router sees
+    // realistic catalog frames instead of the network.
+    if (req.url?.endsWith("/mcp") && req.method === "POST") {
+      if (req.headers["x-api-key"] !== "ak_good") {
+        res.writeHead(401, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: "invalid project key" }));
+      }
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      const frame: { id?: unknown; params?: { name?: string; arguments?: unknown } } = raw ? JSON.parse(raw) : {};
+      const name = frame.params?.name ?? "";
+      fakeMcpCalls.push({ name, arguments: frame.params?.arguments });
+      let payload: Record<string, unknown>;
+      if (name === "COMPOSIO_SEARCH_TOOLS") {
+        payload = fakeSearchTools?.() ?? { success: true, results: [], tool_schemas: {} };
+      } else if (name === "COMPOSIO_GET_TOOL_SCHEMAS") {
+        const slugs = (frame.params?.arguments as { tool_slugs?: string[] } | undefined)?.tool_slugs ?? [];
+        payload = { data: fakeSchemaTools?.(slugs) ?? { tool_schemas: {} } };
+      } else {
+        payload = { success: true };
+      }
+      if (name === "COMPOSIO_GET_TOOL_SCHEMAS" && fakeSchemaSse) {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        return res.end("event: message\r\ndata: " + mcpResultFrame(frame.id, payload) + "\r\n\r\n");
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(mcpResultFrame(frame.id, payload));
+    }
     if (
       req.headers.authorization === "Bearer box_slow"
       && new URL(req.url ?? "/", "http://box.invalid").pathname === "/boxes"
@@ -1041,6 +1113,20 @@ beforeAll(async () => {
         + 'if (process.argv[1] === "session" && process.argv[2] === "list") fs.writeSync(1, JSON.stringify({ success: true, data: { sessions: [] } })); '
         + 'process.exit(fs.existsSync(path.join(base, "browser-clear-fails")) ? 1 : 0);';
       return spawn(process.execPath, ["-e", program, ...args], options);
+    };
+    const realFetch = globalThis.fetch;
+    const composioStubOrigin = "http://127.0.0.1:" + ${boxStubPort};
+    globalThis.fetch = function (input, init) {
+      try {
+        const href = typeof input === "string" ? input : input instanceof URL ? input.href : input && input.url;
+        if (href) {
+          const parsed = new URL(href);
+          if (parsed.hostname === "composio.dev" || parsed.hostname.endsWith(".composio.dev")) {
+            return realFetch(composioStubOrigin + parsed.pathname + parsed.search, init);
+          }
+        }
+      } catch (error) {}
+      return realFetch(input, init);
     };
     syncBuiltinESMExports();
   `)}`;
@@ -9166,6 +9252,307 @@ describe("harness HTTP API", () => {
       await api("DELETE", `/api/bots/${bot.id}`);
     }
   });
+
+  describe("composio tool router relay (#1667)", () => {
+    const searchCatalog = (count: number): Record<string, unknown> => {
+      const tool_schemas: Record<string, unknown> = {};
+      for (let index = 0; index < count; index += 1) {
+        const slug = "TOOL_" + String(index).padStart(4, "0");
+        tool_schemas[slug] = {
+          tool_slug: slug,
+          toolkit: "fixture",
+          description: "Tool " + slug + " does exactly one useful thing.",
+          input_schema: { type: "object", properties: {} },
+        };
+      }
+      return { success: true, results: [], tool_schemas, session: { id: "trs_relay" } };
+    };
+    const searchRequest = { jsonrpc: "2.0" as const, id: 91, method: "tools/call", params: { name: "COMPOSIO_SEARCH_TOOLS", arguments: { query: "fixture", limit: 64 } } };
+    const fullDistribution = (request: FakeDecisionRequest, choice: string): FakeDecisionAnswer => {
+      const probabilities: Record<string, number> = { [choice]: 0.6 };
+      const share = 0.4 / Math.max(Object.keys(request.criteria).length - 1, 1);
+      for (const id of Object.keys(request.criteria)) if (id !== choice) probabilities[id] = share;
+      return { choice, confidence: 0.95, probabilities };
+    };
+    const hydratedSchemas: NonNullable<typeof fakeSchemaTools> = (slugs) => ({
+      tool_schemas: Object.fromEntries(slugs.map((slug) => [
+        slug,
+        { tool_slug: slug, toolkit: "fixture", input_schema: { type: "object", properties: { hydrated: { type: "boolean" } } } },
+      ])),
+    });
+    const relay = async (token: string, body: unknown) => {
+      const response = await fetch(BASE + "/api/internal/connectors/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer " + token },
+        body: JSON.stringify(body),
+      });
+      return { status: response.status, text: await response.text() };
+    };
+    const resetRouterFixtures = () => {
+      fakeDecisionRequests = [];
+      fakeDecisionAnswer = null;
+      fakeDecisionStatus = 200;
+      fakeMcpCalls.length = 0;
+      fakeSearchTools = null;
+      fakeSchemaTools = null;
+      fakeSchemaSse = false;
+    };
+    const routerBot = async () => {
+      const created = await api("POST", "/api/bots", {
+        modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+        requireAvailableModel: true,
+      });
+      expect(created.status).toBe(201);
+      const bot = created.body.bot;
+      expect((await api("PATCH", "/api/bots/" + bot.id, { composio: true })).status).toBe(200);
+      return bot;
+    };
+    const startGoalTurn = async (botId: string, text: string) => {
+      const sent = await api("POST", "/api/bots/" + botId + "/messages", { text });
+      expect(sent.status).toBe(202);
+      await expect.poll(async () => {
+        const state = (await api("GET", "/api/bots?messages=5")).body;
+        return state.bots
+          .find((candidate: { id: string }) => candidate.id === botId)
+          ?.messages?.some((message: { id: string; requestPending?: boolean }) => message.id === sent.body.message.id && message.requestPending);
+      }).toBe(true);
+    };
+    const chooserEvents = async (threadId: string): Promise<Array<Record<string, unknown>>> => {
+      const page = (await api("GET", "/api/threads/" + threadId + "/events")).body;
+      return (page.entries ?? [])
+        .filter((entry: { data?: { type?: string } }) => entry.data?.type === "decision.chooser")
+        .map((entry: { data: unknown }) => entry.data as Record<string, unknown>);
+    };
+    const schemaCalls = () => fakeMcpCalls.filter((call) => call.name === "COMPOSIO_GET_TOOL_SCHEMAS");
+    const cleanup = async (botId: string) => {
+      await api("POST", "/api/bots/" + botId + "/interrupt", {}).catch(() => undefined);
+      await api("DELETE", "/api/bots/" + botId).catch(() => undefined);
+      resetRouterFixtures();
+    };
+
+    it("relays discovery byte-identically with zero decision traffic when no decision model is configured", async () => {
+      expect((await api("PUT", "/api/config", { composio: { apiKey: "ak_good" } })).status).toBe(200);
+      resetRouterFixtures();
+      const payload = searchCatalog(6);
+      fakeSearchTools = () => payload;
+      const bot = await routerBot();
+      try {
+        await startGoalTurn(bot.id, "find a tool that sends a welcome email");
+        // Capabilities minted before a turn begins are revoked at turn
+        // start, so the relay token comes from the live turn's thread.
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+        const decisionCalls = fakeDecisionRequests.length;
+        const relayed = await relay(token, searchRequest);
+        expect(relayed.status).toBe(200);
+        expect(relayed.text).toBe(mcpResultFrame(91, payload));
+        expect(fakeDecisionRequests).toHaveLength(decisionCalls);
+        expect(schemaCalls()).toHaveLength(0);
+        expect(await chooserEvents(bot.threadId)).toHaveLength(0);
+      } finally {
+        await cleanup(bot.id);
+      }
+    });
+
+    it("ranks the catalog, hydrates only the winners, and logs the outcome in decision.chooser events", async () => {
+      expect((await api("PUT", "/api/config", {
+        composio: { apiKey: "ak_good" },
+        decisionModel: { provider: "custom", url: "http://127.0.0.1:" + boxStubPort + "/decision", model: "fixture-router" },
+      })).status).toBe(200);
+      // The committed save warms the calibration gate: the canary probe must
+      // pass twice with identical distributions before the router may act.
+      await expect.poll(async () =>
+        fakeDecisionRequests.filter((request) => Object.hasOwn(request.criteria ?? {}, "two")).length
+      ).toBeGreaterThanOrEqual(2);
+      resetRouterFixtures();
+      fakeSearchTools = () => searchCatalog(36);
+      fakeDecisionAnswer = (request) => fullDistribution(request, "TOOL_0000");
+      fakeSchemaTools = hydratedSchemas;
+      const bot = await routerBot();
+      try {
+        await startGoalTurn(bot.id, "send a welcome email to the new hire");
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+        const relayed = await relay(token, searchRequest);
+        expect(relayed.status).toBe(200);
+        const payload = JSON.parse(relayed.text).result.structuredContent;
+        expect(payload.tool_router.flow).toBe("tool-router");
+        expect(payload.tool_router.ranked_winners[0]).toBe("TOOL_0000");
+        expect(payload.tool_router.ranked_winners).toHaveLength(32);
+        expect(payload.tool_router.schema_omitted_count).toBe(4);
+        expect(payload.tool_schemas.TOOL_0000.rank_verified).toBe(true);
+        expect(payload.tool_schemas.TOOL_0000.input_schema.properties).toEqual({ hydrated: { type: "boolean" } });
+        expect(payload.tool_schemas.TOOL_0035.schema_omitted).toBe(true);
+        expect(payload.tool_schemas.TOOL_0035.input_schema).toBeUndefined();
+        // one batched schema fetch, for exactly the ranked winners
+        expect(schemaCalls()).toHaveLength(1);
+        expect(schemaCalls()[0].arguments).toEqual({ tool_slugs: payload.tool_router.ranked_winners });
+        // the ranking wire carries the goal and one-liners only — no schemas
+        const ranking = fakeDecisionRequests.at(-1);
+        expect(ranking).toBeDefined();
+        expect((ranking as FakeDecisionRequest).state).toMatchObject({ candidate_count: 36 });
+        expect(JSON.stringify((ranking as FakeDecisionRequest).state)).not.toContain("input_schema");
+        for (const entry of ((ranking as FakeDecisionRequest).state as { catalog: Array<Record<string, unknown>> }).catalog) {
+          expect(Object.keys(entry).sort()).toEqual(["description", "name"]);
+        }
+        await expect.poll(async () =>
+          (await chooserEvents(bot.threadId)).filter((event) => event.outcome === "acted").length
+        ).toBeGreaterThanOrEqual(1);
+        const acted = (await chooserEvents(bot.threadId)).find((event) => event.outcome === "acted");
+        expect(acted).toMatchObject({
+          type: "decision.chooser",
+          flow: "tool-router",
+          candidateCount: 36,
+          winnerCount: 32,
+          breakerOpen: false,
+          selectedId: "TOOL_0000",
+        });
+        expect(typeof acted?.latencyMs).toBe("number");
+        // an execute outside the verified winner set is logged, never blocked
+        const executed = await relay(token, {
+          jsonrpc: "2.0",
+          id: 92,
+          method: "tools/call",
+          params: { name: "COMPOSIO_MULTI_EXECUTE_TOOL", arguments: { tools: [{ tool_slug: "TOOL_0000" }, { tool_slug: "TOOL_0035" }] } },
+        });
+        expect(executed.status).toBe(200);
+        await expect.poll(async () =>
+          (await chooserEvents(bot.threadId)).some((event) => event.outcome === "abstained" && String(event.detail).includes("TOOL_0035"))
+        ).toBe(true);
+      } finally {
+        await cleanup(bot.id);
+      }
+    });
+
+    it("hydrates winners from an SSE-framed schema answer", async () => {
+      // The calibrated decision model and its warmed gate come from the
+      // ranking test above, as in the abstain case; only the schema
+      // endpoint's framing changes here.
+      resetRouterFixtures();
+      fakeSearchTools = () => searchCatalog(36);
+      fakeDecisionAnswer = (request) => fullDistribution(request, "TOOL_0000");
+      fakeSchemaTools = hydratedSchemas;
+      fakeSchemaSse = true;
+      const bot = await routerBot();
+      try {
+        await startGoalTurn(bot.id, "send a welcome email to the new hire");
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+        const relayed = await relay(token, searchRequest);
+        expect(relayed.status).toBe(200);
+        const payload = JSON.parse(relayed.text).result.structuredContent;
+        expect(schemaCalls()).toHaveLength(1);
+        expect(payload.tool_schemas.TOOL_0000.rank_verified).toBe(true);
+        expect(payload.tool_schemas.TOOL_0000.input_schema.properties).toEqual({ hydrated: { type: "boolean" } });
+        expect(payload.tool_schemas.TOOL_0035.schema_omitted).toBe(true);
+        await expect.poll(async () =>
+          (await chooserEvents(bot.threadId)).some((event) => event.outcome === "acted")
+        ).toBe(true);
+      } finally {
+        await cleanup(bot.id);
+      }
+    });
+
+    it("abstains to the original bytes with an event and no schema fetch", async () => {
+      resetRouterFixtures();
+      const payload = searchCatalog(36);
+      fakeSearchTools = () => payload;
+      fakeDecisionAnswer = (request) => fullDistribution(request, "abstain");
+      fakeSchemaTools = hydratedSchemas;
+      const bot = await routerBot();
+      try {
+        await startGoalTurn(bot.id, "send a welcome email to the new hire");
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+        const relayed = await relay(token, searchRequest);
+        expect(relayed.status).toBe(200);
+        expect(relayed.text).toBe(mcpResultFrame(91, payload));
+        expect(schemaCalls()).toHaveLength(0);
+        await expect.poll(async () =>
+          (await chooserEvents(bot.threadId)).some((event) => event.outcome === "abstained")
+        ).toBe(true);
+        const abstained = (await chooserEvents(bot.threadId)).find((event) => event.outcome === "abstained");
+        expect(abstained).toMatchObject({ flow: "tool-router", winnerCount: 0 });
+        expect(String(abstained?.detail)).toMatch(/declined to rank/);
+      } finally {
+        await cleanup(bot.id);
+      }
+    });
+
+    it("falls back to the original bytes when winner schemas fail verification", async () => {
+      resetRouterFixtures();
+      const payload = searchCatalog(36);
+      fakeSearchTools = () => payload;
+      fakeDecisionAnswer = (request) => fullDistribution(request, "TOOL_0000");
+      fakeSchemaTools = (slugs) => {
+        const granted = slugs.filter((slug) => slug !== "TOOL_0000");
+        return {
+          ...hydratedSchemas(granted),
+          not_found: ["TOOL_0000"],
+        };
+      };
+      const bot = await routerBot();
+      try {
+        await startGoalTurn(bot.id, "send a welcome email to the new hire");
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+        const relayed = await relay(token, searchRequest);
+        expect(relayed.status).toBe(200);
+        expect(relayed.text).toBe(mcpResultFrame(91, payload));
+        expect(schemaCalls()).toHaveLength(1);
+        await expect.poll(async () =>
+          (await chooserEvents(bot.threadId)).some((event) => event.outcome === "error")
+        ).toBe(true);
+        const failed = (await chooserEvents(bot.threadId)).find((event) => event.outcome === "error");
+        expect(failed?.flow).toBe("tool-router");
+        expect(String(failed?.detail)).toMatch(/schema verification failed/);
+        expect(failed?.breakerOpen).toBe(false);
+      } finally {
+        await cleanup(bot.id);
+      }
+    });
+
+    it("trips the three-error breaker, then relays silently without another decision", async () => {
+      resetRouterFixtures();
+      const payload = searchCatalog(36);
+      fakeSearchTools = () => payload;
+      fakeDecisionAnswer = (request) => fullDistribution(request, "TOOL_0000");
+      fakeSchemaTools = hydratedSchemas;
+      const bot = await routerBot();
+      try {
+        await startGoalTurn(bot.id, "send a welcome email to the new hire");
+        const token = await mintTestCapability(BASE, bot.id, bot.threadId, { kind: "connectors" });
+        // The breaker counts consecutive errors process-wide, and the
+        // fallback tests above may have spent one — a passing decision
+        // first resets the budget so three failures trip it exactly here.
+        const warm = await relay(token, searchRequest);
+        expect(warm.status).toBe(200);
+        expect(JSON.parse(warm.text).result.structuredContent.tool_router.flow).toBe("tool-router");
+      fakeDecisionStatus = 500;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const relayed = await relay(token, searchRequest);
+          expect(relayed.status).toBe(200);
+          expect(relayed.text).toBe(mcpResultFrame(91, payload));
+        }
+        await expect.poll(async () =>
+          (await chooserEvents(bot.threadId)).filter((event) => event.outcome === "error").length
+        ).toBeGreaterThanOrEqual(3);
+        const errors = (await chooserEvents(bot.threadId)).filter((event) => event.outcome === "error");
+        expect(errors).toHaveLength(3);
+        expect(errors.at(-1)?.breakerOpen).toBe(true);
+        expect(String(errors.at(-1)?.detail)).toMatch(/router disabled/);
+        const decisions = fakeDecisionRequests.length;
+        const after = await relay(token, searchRequest);
+        expect(after.status).toBe(200);
+        expect(after.text).toBe(mcpResultFrame(91, payload));
+        expect(fakeDecisionRequests).toHaveLength(decisions);
+        expect((await chooserEvents(bot.threadId)).filter((event) => event.outcome === "error")).toHaveLength(3);
+      } finally {
+        await cleanup(bot.id);
+        // The breaker is process-wide and final; unconfigure the decision
+        // model so the rest of the suite sees the default install again.
+        await api("PUT", "/api/config", { decisionModel: { model: "" } });
+      }
+    });
+  });
+
+
+ 
 
   /** Wait until the decision log carries a connector-scope row matching
    * the predicate (rows are appended fire-and-forget). */

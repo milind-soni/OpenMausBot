@@ -164,6 +164,27 @@ export type RuntimeEvent = RuntimeEventBase &
     // configuring something, not by retrying — the UI offers setup instead.
     // `terminal: true` records failure of the complete turn, rather than a
     // transient error or a legacy provider's diagnostic during cancellation.
+    | {
+        /** The opt-in decision model answered a computer-use step (#1630).
+         * `acted` steps skipped a screenshot and an LLM turn; every other
+         * outcome silently fell back to the normal loop. */
+        type: "decision.chooser";
+        outcome: "acted" | "abstained" | "reobserve" | "below-threshold" | "superseded" | "error";
+        selectedId?: string;
+        confidence?: number;
+        model?: string;
+        flow?: string;
+        detail?: string;
+        // Router outcomes (#1667) add population counters; the computer
+        // chooser omits them, so every field stays optional.
+        /** Candidates the router was offered, and how many kept schemas. */
+        candidateCount?: number;
+        winnerCount?: number;
+        /** Decide-to-answer wall time, and whether the three-error breaker
+         * had already tripped when this event was written. */
+        latencyMs?: number;
+        breakerOpen?: boolean;
+      }
     | { type: "runtime.error"; message: string; setup?: boolean; terminal?: boolean }
   );
 

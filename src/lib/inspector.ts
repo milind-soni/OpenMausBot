@@ -109,6 +109,13 @@ export function summarizeRuntime(e: RuntimeEvent): { summary: string; tone: Insp
       return { summary: `resolved ${e.behavior} · ${e.source}`, tone: "plain" };
     case "thread.token-usage.updated":
       return { summary: `tokens in ${e.input} · out ${e.output}`, tone: "plain" };
+    case "decision.chooser": {
+      const parts = [`decision ${e.outcome}`];
+      if (typeof e.confidence === "number") parts.push(`${Math.round(e.confidence * 100)}%`);
+      if (e.selectedId) parts.push(e.selectedId);
+      if (e.flow) parts.push(e.flow);
+      return { summary: parts.join(" · "), tone: e.outcome === "error" ? "error" : "plain" };
+    }
     case "runtime.error":
       return { summary: `${e.setup ? "setup: " : ""}${clip(oneLine(e.message))}`, tone: "error" };
     default:
