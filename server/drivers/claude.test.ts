@@ -458,6 +458,47 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "update_required" });
   });
 
+  it("retires an outdated child before retry while preserving a healthy pooled session", async () => {
+    await create(undefined, {
+      FAKE_CLAUDE_API_ERROR: "Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required.",
+    });
+    const healthyDump = join(scratch, "healthy-session.json");
+    process.env.FAKE_CLAUDE_DUMP = healthyDump;
+    const healthy = await instance.adapter.sendTurn({ threadId: "t-update-healthy", text: "keep this session" });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === healthy.turnId);
+    const healthyBefore = readFileSync(healthyDump, "utf8");
+
+    process.env.FAKE_CLAUDE_MODE = "api-error";
+    const outdatedDump = join(scratch, "outdated-session.json");
+    process.env.FAKE_CLAUDE_DUMP = outdatedDump;
+    const resumeCursor = "fixture-update-session";
+    const outdated = await instance.adapter.sendTurn({ threadId: "t-update-retry", text: "try the model", resumeCursor });
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === outdated.turnId))
+      .resolves.toMatchObject({ ok: false, stopReason: "update_required" });
+    const outdatedPid = JSON.parse(readFileSync(outdatedDump, "utf8")).pid;
+
+    // Only a new child sees this synthetic replacement runtime. An old
+    // pooled child keeps api-error mode, just as it keeps its loaded code
+    // after the executable on disk has been updated externally.
+    process.env.FAKE_CLAUDE_MODE = "happy";
+    const retryDump = join(scratch, "updated-session.json");
+    process.env.FAKE_CLAUDE_DUMP = retryDump;
+    const retry = await instance.adapter.sendTurn({ threadId: "t-update-retry", text: "retry explicitly", resumeCursor });
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === retry.turnId))
+      .resolves.toMatchObject({ ok: true });
+    const replacement = JSON.parse(readFileSync(retryDump, "utf8"));
+    expect(replacement.pid).not.toBe(outdatedPid);
+    expect(replacement.argv).toContain("--resume");
+    expect(replacement.argv).toContain(resumeCursor);
+
+    const continued = await instance.adapter.sendTurn({ threadId: "t-update-healthy", text: "continue normally" });
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.turnId === continued.turnId))
+      .resolves.toMatchObject({ ok: true });
+    expect(readFileSync(healthyDump, "utf8")).toBe(healthyBefore);
+    expect(JSON.parse(readFileSync(retryDump, "utf8")).pid).toBe(replacement.pid);
+    expect(recorder.events.some((event) => event.type === "turn.retrying")).toBe(false);
+  });
+
   it("keeps a workspace Anthropic key set on purpose while still dropping one from the parent env", async () => {
     await create(undefined, { ANTHROPIC_API_KEY: "sk-ant-workspace-fixture" });
     const dump = join(scratch, "dump-workspace-key.json");

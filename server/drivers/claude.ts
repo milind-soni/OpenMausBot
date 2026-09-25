@@ -1585,6 +1585,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // A settled turn owns no retry budget. Retained CLI sessions may run
         // many later turns on this thread, and each must start fresh.
         retryState.delete(threadId);
+        // Updating the executable cannot update code already loaded by this
+        // pooled child. Retire it before announcing completion so an explicit
+        // retry resumes on a fresh process; healthy sibling sessions stay warm.
+        if (stopReason === "update_required") closeSession(threadId, "update required");
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
