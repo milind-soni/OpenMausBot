@@ -2671,6 +2671,21 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
   return sharingController().save(env, { folders, terminal: input?.terminal === true, computer: input?.computer === true }, info);
 }));
 
+// window.confirm() has no parent window, so window managers (notably tiling
+// ones on Linux) can't center it — it lands at a default screen origin
+// instead of over the app. Route renderer confirms through the main process
+// so dialog.showMessageBox can anchor it to mainWindow.
+ipcMain.handle("dialog:confirm", localWorkspaceOnly("dialog:confirm", async (_event, message) => {
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    message: String(message ?? ""),
+    buttons: ["OK", "Cancel"],
+    defaultId: 0,
+    cancelId: 1,
+  });
+  return response === 0;
+}));
+
 ipcMain.handle("environments:state", localWorkspaceOnly("environments:state", (event) => ({
   localOrigin: rendererOrigin(),
   remote: !senderIsLocal(event),

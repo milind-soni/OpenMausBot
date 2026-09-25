@@ -1013,14 +1013,16 @@ export function LocalComputerSection() {
     setStatus(body as Status);
   };
 
+  const confirmAction = (message: string) => window.ogb?.confirm ? window.ogb.confirm(message) : window.confirm(message);
+
   const act = async (action: Action) => {
     if (
       action === "remove" &&
-      !window.confirm(t("vm.confirm.deleteShared"))
+      !(await confirmAction(t("vm.confirm.deleteShared")))
     ) return;
     if (
       action === "recreate" &&
-      !window.confirm(t("vm.confirm.recreate"))
+      !(await confirmAction(t("vm.confirm.recreate")))
     ) return;
     setPending(action);
     setError(null);
