@@ -89,6 +89,21 @@ it("preserves peer approval expiry through real HTTP responses and durable deleg
       evidence.push({ operation: "ask-bot", outcome, result, card: settled.card });
       rmSync(expiry, { force: true });
     }
+    // A peer may become private while its approval is open. The failure
+    // receipt may echo the addressed id, but must not disclose its new name.
+    const unavailableAsk = api("POST", "/api/internal/ask-bot", { toBotId: target.id, message: "Check access again after approval" }, token);
+    void unavailableAsk.catch(() => {});
+    const unavailableCard = await card(from.threadId);
+    await api("PATCH", `/api/bots/${target.id}`, { hidden: true, name: "Private renamed teammate" });
+    await api("POST", `/api/threads/${from.threadId}/respond`, { requestId: unavailableCard.card.requestId, behavior: "allow" });
+    const unavailableResult = await unavailableAsk;
+    expect(unavailableResult.receipt).toMatchObject({ botId: target.id, outcome: "failed" });
+    expect(unavailableResult.receipt).not.toHaveProperty("botName");
+    expect(JSON.stringify(unavailableResult)).not.toContain("Private renamed teammate");
+    expect((await messages(target.threadId)).some(m => m.role === "user")).toBe(false);
+    evidence.push({ operation: "ask-bot-after-visibility-revocation", result: unavailableResult, targetDispatched: false });
+    await api("PATCH", `/api/bots/${target.id}`, { hidden: false, name: target.name });
+
     const queued = await api("POST", "/api/internal/delegate-bot", { toBotId: target.id, message: "Fixture delegation awaiting approval" }, token);
     writeFileSync(gate, "finish");
     const approval = await card(from.threadId);

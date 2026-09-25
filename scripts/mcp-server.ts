@@ -629,6 +629,7 @@ function projectMessage(message: Record<string, any>) {
         options: message.card.options,
         answered: message.card.answered,
         dismissed: message.card.dismissed,
+        expired: message.card.expired,
       }
     : undefined;
   const tool = isRecord(message.tool)
@@ -655,6 +656,7 @@ function projectMessage(message: Record<string, any>) {
         helpUrl: message.secret.helpUrl,
         provided: message.secret.provided,
         dismissed: message.secret.dismissed,
+        superseded: message.secret.superseded,
         resumed: message.secret.resumed,
       }
     : undefined;
@@ -686,12 +688,12 @@ function taskBelongsTo(owner: Record<string, any>, taskId: string): boolean {
 }
 
 function messageNeedsInput(message: Record<string, any>): boolean {
-  const card = isRecord(message.card) && message.card.requestId && !message.card.answered && !message.card.dismissed;
+  const card = isRecord(message.card) && message.card.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired;
   const connector = isRecord(message.connector) &&
     !message.connector.dismissed &&
     !message.connector.resumed &&
     message.connector.status !== "connected";
-  const secret = isRecord(message.secret) && !message.secret.provided && !message.secret.dismissed;
+  const secret = isRecord(message.secret) && !message.secret.provided && !message.secret.dismissed && !message.secret.superseded;
   return Boolean(card || connector || secret);
 }
 

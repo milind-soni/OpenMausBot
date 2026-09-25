@@ -805,7 +805,7 @@ function cardAnswererFor(auth: RequestAuth): CardAnswerer {
 async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>): Promise<void> {
   const open = (() => {
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
-    return Boolean(card && !card.answered && !card.dismissed);
+    return Boolean(card && !card.answered && !card.dismissed && !card.expired);
   })();
   try {
     await withDecisionActor(decisionActorFor(auth), work);
@@ -3598,7 +3598,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
         message.kind === "options" &&
         message.card?.requestId &&
         !message.card.answered &&
-        !message.card.dismissed,
+        !message.card.dismissed && !message.card.expired,
     ),
   );
 
@@ -9350,7 +9350,7 @@ async function resolveAndSendTeamSetup(res: ServerResponse, args: { botId: strin
   const card = store.messagesFor(args.threadId).find((item) => item.card?.requestId === args.requestId && item.card.teamSetupRequest)?.card;
   if (!card) return false;
   if (args.behavior === "allow" && !ownerReview) { json(res, 403, { error: "Approve team setup or deletion from the desktop app or a paired owner device. In a local browser, wait until every bot is idle." }); return true; }
-  if (args.behavior === "allow" && !card.answered && !card.dismissed) {
+  if (args.behavior === "allow" && !card.answered && !card.dismissed && !card.expired) {
     // Confirmed Chief setup can move bots without the ordinary PATCH route.
     // Keep that atomic Store operation behind the same shared-machine fence.
     for (const operation of card.teamSetupRequest!.operations) {
@@ -11361,7 +11361,7 @@ function proposalPersistence(botId: string, threadId: string) {
     (message) =>
       (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
       !message.card.answered &&
-      !message.card.dismissed,
+      !message.card.dismissed && !message.card.expired,
   ).length;
   return openRequests >= 8
     ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" }
@@ -13904,13 +13904,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (!freshFrom || !freshTarget) return json(res, 404, { error: "no such bot" });
           if (!canAccessTeam(freshFrom, freshTarget.section) || freshTarget.hidden) {
             return json(res, 200, { error: "that bot moved to a different section", receipt: peerDeliveryReceipt({
-              botId: toBotId, botName: freshTarget.name, outcome: "failed",
+              // Access no longer permits reading the peer's current profile.
+              botId: toBotId, outcome: "failed",
               detail: "that bot moved to a different section — the message was not sent",
             }) });
           }
           if (!peerAllowed(freshFrom, freshTarget)) {
             return json(res, 200, { error: "that bot is no longer an allowed peer", receipt: peerDeliveryReceipt({
-              botId: toBotId, botName: freshTarget.name, outcome: "failed",
+              botId: toBotId, outcome: "failed",
               detail: "that bot is no longer an allowed peer — the message was not sent",
             }) });
           }
@@ -16304,7 +16305,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             message.kind === "options" &&
             message.card?.requestId &&
             !message.card.answered &&
-            !message.card.dismissed,
+            !message.card.dismissed && !message.card.expired,
         ) ? [task.threadId] : [],
       );
       return openApprovalThreads.length > 0 && !openApprovalThreads.includes(targetThreadId);

@@ -24,6 +24,8 @@ The checks cover:
 - Ordinary chat's multi-target `coordinate_bots` preserves mixed denial/expiry
   results and sends no work when any required approval fails.
 - Receipt metadata survives reload, while old receipts remain readable.
+- A peer hidden and renamed while its approval is open is never dispatched;
+  the failure receipt does not disclose its newly private name.
 
 The fixture writes safe response/receipt evidence to
 `<server-log>.peer-approval.json` alongside the shared launcher's retained log.

@@ -1417,6 +1417,7 @@
   "activity.decision.user-approved": "Approved",
   "activity.decision.user-denied": "Declined",
   "activity.decision.auto-approved": "Allowed automatically",
+  "activity.decision.auto-denied": "Declined automatically",
   "activity.decision.card-shown": "Asked for approval",
   "activity.decision.review-would-approve": "Reviewer would approve",
   "activity.decision.review-would-deny": "Reviewer would decline",
