@@ -1463,4 +1463,28 @@ describe("loadConfig with an unusable config.json", () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("using defaults");
   });
+
+  it("never logs credential fragments from a JSON parser error", () => {
+    writeFileSync(path, "sk-fixture");
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("invalid JSON");
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain("sk-fixture");
+  });
+
+  it("warns again after a repaired or removed file becomes broken", () => {
+    for (const recovered of ["{}", null]) {
+      writeFileSync(path, "{ not json");
+      loadConfig();
+      warn.mockClear();
+      if (recovered === null) rmSync(path);
+      else writeFileSync(path, recovered);
+      loadConfig();
+      expect(warn).not.toHaveBeenCalled();
+      writeFileSync(path, "{ not json");
+      loadConfig();
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockClear();
+    }
+  });
 });

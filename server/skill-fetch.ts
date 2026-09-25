@@ -82,6 +82,10 @@ export function parseSkillSource(input: string): Target | { rawUrl: string } | {
   }
   const registry = text.match(/^https?:\/\/skills\.sh\/([\w.-]+)\/([\w.-]+)(?:\/([\w.-]+))?\/?$/i);
   if (registry) {
+    if ([registry[1], registry[2]].some((part) => part === "." || part === "..") ||
+      (registry[3] && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(registry[3]))) {
+      return { error: "that does not look like a skills.sh repository or skill URL" };
+    }
     // skills.sh is a registry over GitHub: each page installs from
     // github.com/<owner>/<repo> filtered to the named skill, so resolve to
     // the repo and remember the slug to filter discovery on.

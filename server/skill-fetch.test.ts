@@ -46,6 +46,13 @@ describe("skill import budget", () => {
 });
 
 describe("skill sources", () => {
+  it.each(["https://skills.sh/a/b/...", "https://skills.sh/a/b/---", "https://skills.sh/../b/skill"])(
+    "refuses invalid skills.sh paths instead of importing every skill: %s", async (source) => {
+      const fetcher = vi.fn() as unknown as typeof fetch;
+      expect(await fetchSkillFromSource(source, fetcher)).toEqual({ error: expect.stringContaining("does not look like") });
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
   it.each([
     ["https://github.com/a/b/blob/main/SKILL.md", "https://raw.githubusercontent.com/a/b/main/SKILL.md"],
     ["https://github.com/a/b/blob/main/skills/pdf/SKILL.md", "https://raw.githubusercontent.com/a/b/main/skills/pdf/SKILL.md"],

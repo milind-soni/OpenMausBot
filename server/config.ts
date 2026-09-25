@@ -828,10 +828,15 @@ export function loadConfig(): AppConfig {
     // saveConfig() still merges into the raw file, so nothing on disk is lost;
     // the user just needs to know which field to fix.
     if ((error as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
-      const reason = error instanceof Error ? error.message : String(error);
+      // JSON.parse includes a fragment of the input in some error messages.
+      // A malformed credential must never be copied into the server log.
+      const reason = error instanceof SyntaxError ? "invalid JSON"
+        : error instanceof Error ? error.message : "unable to read configuration";
       const warning = `config: ignoring ${join(DATA_DIR, "config.json")} and using defaults: ${reason}`;
       if (warning !== lastIgnoredConfigWarning) console.warn(warning);
       lastIgnoredConfigWarning = warning;
+    } else {
+      lastIgnoredConfigWarning = "";
     }
   }
   // Env wins over the file for every credential. The desktop shell keeps

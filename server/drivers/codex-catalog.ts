@@ -9,7 +9,6 @@ import { basename, join } from "node:path";
 
 import type { ModelCatalog } from "../contracts.ts";
 import { qualifiedModelLabel } from "../contracts.ts";
-import { harnessHome } from "../env-path.ts";
 import { killCliTree, spawnCli } from "../procs.ts";
 import { codexHome } from "./codex-identity.ts";
 import { mergeLocalInject } from "./local-inject.ts";
@@ -365,10 +364,9 @@ export async function readCodexModelCatalog(
   cli?: string,
 ): Promise<ModelCatalog> {
   const official = (cli ? await readCodexAppServerModelCatalog(cli, env) : null) ?? STATIC_CODEX_MODELS;
-  // CODEX_HOME set but relative: the identity helper refuses it, and the
-  // catalog must refuse too — falling back to ~/.codex would read a home
-  // the user pointed away from. No local config merges in that case.
-  const home = codexHome(env) ?? (env.CODEX_HOME ? null : harnessHome("codex", env));
+  // Match the identity boundary: an explicitly relative CODEX_HOME or user
+  // home must not load a catalog from a different directory.
+  const home = codexHome(env);
   if (!home) return mergeLocalInject(official, env, fetchImpl);
   const mainText = readText(join(home, "config.toml"));
   if (!mainText) return mergeLocalInject(official, env, fetchImpl);

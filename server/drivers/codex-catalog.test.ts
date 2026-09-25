@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -192,6 +192,17 @@ base_url = "http://127.0.0.1:9/v1"
     expect(catalog.default).toBe(STATIC_CODEX_MODELS.default);
     expect(catalog.options.map((option) => option.id)).not.toContain(
       encodeCodexSelection("omlx", "leaked-default"),
+    );
+  });
+
+  it("refuses a relative user home just like the identity lookup", async () => {
+    const home = scratchHome({
+      "config.toml": 'model_provider = "omlx"\nmodel = "relative-home-model"\n[model_providers.omlx]\nname = "Fixture"\nbase_url = "http://127.0.0.1:9/v1"\n',
+    });
+    const relativeHome = relative(process.cwd(), home);
+    const catalog = await readCodexModelCatalog({ HOME: relativeHome, USERPROFILE: relativeHome });
+    expect(catalog.options.map((option) => option.id)).not.toContain(
+      encodeCodexSelection("omlx", "relative-home-model"),
     );
   });
 
