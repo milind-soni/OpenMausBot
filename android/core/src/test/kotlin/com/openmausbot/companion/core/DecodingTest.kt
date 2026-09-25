@@ -610,4 +610,23 @@ class DecodingTest {
             assertNull(message.threadRef, message.id)
         }
     }
+
+    @Test
+    fun decodesTheClaudeUpdateFlagOnAnErrorChipAndItsAbsence() {
+        val flagged = CompanionJson.decodeFromString<Message>(
+            """{"id":"m5","role":"bot","kind":"activity","at":1,
+               "tool":{"name":"error: this model needs a newer Claude Code","ok":false,
+                       "setup":true,"claudeUpdate":true}}""",
+        )
+        assertEquals(Message.Kind.ACTIVITY, flagged.kind)
+        assertEquals(false, flagged.tool?.ok)
+        assertEquals(true, flagged.tool?.setup)
+        assertEquals(true, flagged.tool?.claudeUpdate)
+
+        val plain = CompanionJson.decodeFromString<Message>(
+            """{"id":"m6","role":"bot","kind":"activity","at":1,
+               "tool":{"name":"error: engine is not signed in","ok":false,"setup":true}}""",
+        )
+        assertNull(plain.tool?.claudeUpdate)
+    }
 }

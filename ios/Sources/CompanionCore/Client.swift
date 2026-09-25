@@ -1500,6 +1500,37 @@ public struct CompanionClient: Sendable {
         }
     }
 
+    /// Run Claude Code's own updater on the computer for one engine instance,
+    /// returning the version it now reports. The harness refuses while other
+    /// Claude turns are running; its error text is written for people and
+    /// comes through as the thrown `APIError`.
+    public func updateClaude(instanceId: String) async throws -> String {
+        guard Self.validInstanceID(instanceId) else { throw APIError.badURL }
+        var request = try makeRequest(
+            "POST",
+            "/api/instances/\(instanceId)/claude-update",
+            body: [:]
+        )
+        // The updater downloads and installs a new CLI; the server allows it
+        // up to three minutes. Leave room for its own timeout error rather
+        // than replacing it with the normal twenty-second transport timeout.
+        request.timeoutInterval = 200
+        return try await send(request, as: ClaudeUpdateResponse.self).version
+    }
+
+    private struct ClaudeUpdateResponse: Decodable {
+        let version: String
+    }
+
+    /// Matches the harness's `[\w.-]+` instance route component.
+    private static func validInstanceID(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".."
+            && value.utf8.allSatisfy { byte in
+                (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+                    || byte == 45 || byte == 95 || byte == 46
+            }
+    }
+
     private static func validRouteID(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.allSatisfy { byte in
             (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
