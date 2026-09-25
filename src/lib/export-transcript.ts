@@ -90,7 +90,7 @@ export function formatTranscriptMarkdown(options: ExportTranscriptOptions): stri
     const messageLines: string[] = [];
 
     // Main text content
-    const userContent = isUser ? splitTranscriptAttachments(message.text ?? "", false) : null;
+    const userContent = isUser ? splitTranscriptAttachments(message.text ?? "", false, false) : null;
     const text = userContent?.display ?? message.text;
     if (text?.trim()) {
       messageLines.push(text);
