@@ -530,7 +530,13 @@ type TranscriptFence = {
 
 type TranscriptBlock =
   | { kind: "untilBlank" }
-  | { kind: "untilToken"; closingToken: string };
+  | { kind: "untilToken"; closingToken: string; hiddenWrapper?: boolean };
+
+/** The exact wrapper lines composeMessage writes around a pasted block. The
+ * bot needs them to tell pasted from typed text; a person reading their own
+ * message does not. Anything else on the line keeps the tag visible. */
+const PASTED_TEXT_OPEN = /^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$/i;
+const PASTED_TEXT_CLOSE = /^[\t ]*<\/pasted-text>[\t ]*$/i;
 
 /** Recognise CommonMark-style fenced code without pulling a Markdown parser
  * into the composer bundle. An unterminated fence deliberately protects the
@@ -627,8 +633,14 @@ const TRANSCRIPT_ATTACHMENT_TAG =
   /^<attached-(image|file)[\t ]+path="([^"\r\n]*)"(?:[\t ]+name="([^"\r\n]*)")?[\t ]*\/>[\t ]*$/;
 
 /** Split a stored user message into its display text and attachments for
- * transcript rendering. Markdown exports preserve whitespace; bubbles trim it. */
-export function splitTranscriptAttachments(text: string, trimDisplay = true): TranscriptAttachments {
+ * transcript rendering. Markdown exports preserve whitespace; bubbles trim it.
+ * Bubbles also hide the `<pasted-text>` wrapper lines and show only what was
+ * pasted; exports keep the message exactly as the bot received it. */
+export function splitTranscriptAttachments(
+  text: string,
+  trimDisplay = true,
+  hidePasteWrappers = true,
+): TranscriptAttachments {
   const images: TranscriptImageAttachment[] = [];
   const files: TranscriptFileAttachment[] = [];
   let display = "";
@@ -658,6 +670,7 @@ export function splitTranscriptAttachments(text: string, trimDisplay = true): Tr
       if (block.kind === "untilBlank") {
         if (/^[\t ]*$/.test(line)) block = null;
       } else if (line.toLowerCase().includes(block.closingToken)) {
+        if (block.hiddenWrapper && PASTED_TEXT_CLOSE.test(line)) consumed = true;
         block = null;
       }
     } else if (marker) {
@@ -678,7 +691,13 @@ export function splitTranscriptAttachments(text: string, trimDisplay = true): Tr
           consumed = true;
         }
       }
-      if (!consumed) block = transcriptBlockStarting(line);
+      if (!consumed) {
+        block = transcriptBlockStarting(line);
+        if (hidePasteWrappers && block?.kind === "untilToken" && block.closingToken === "</pasted-text>" && PASTED_TEXT_OPEN.test(line)) {
+          block = { ...block, hiddenWrapper: true };
+          consumed = true;
+        }
+      }
     }
 
     if (!consumed) display += text.slice(cursor, wholeLineEnd);
