@@ -36,7 +36,7 @@ import {
   CREDENTIAL_TARGETS,
   credentialResumeOutcome,
   credentialIsConfigured,
-  isReusableCredentialRequest,
+  isPendingCredentialRequest,
   isCredentialTargetId,
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
@@ -259,6 +259,7 @@ import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import {
@@ -804,7 +805,7 @@ function cardAnswererFor(auth: RequestAuth): CardAnswerer {
 async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: string, work: () => Promise<unknown>): Promise<void> {
   const open = (() => {
     const card = store.messagesFor(threadId).find((message) => message.card?.requestId === requestId)?.card;
-    return Boolean(card && !card.answered && !card.dismissed);
+    return Boolean(card && !card.answered && !card.dismissed && !card.expired);
   })();
   try {
     await withDecisionActor(decisionActorFor(auth), work);
@@ -3597,7 +3598,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
         message.kind === "options" &&
         message.card?.requestId &&
         !message.card.answered &&
-        !message.card.dismissed,
+        !message.card.dismissed && !message.card.expired,
     ),
   );
 
@@ -9355,7 +9356,7 @@ async function resolveAndSendTeamSetup(res: ServerResponse, args: { botId: strin
   const card = store.messagesFor(args.threadId).find((item) => item.card?.requestId === args.requestId && item.card.teamSetupRequest)?.card;
   if (!card) return false;
   if (args.behavior === "allow" && !ownerReview) { json(res, 403, { error: "Approve team setup or deletion from the desktop app or a paired owner device. In a local browser, wait until every bot is idle." }); return true; }
-  if (args.behavior === "allow" && !card.answered && !card.dismissed) {
+  if (args.behavior === "allow" && !card.answered && !card.dismissed && !card.expired) {
     // Confirmed Chief setup can move bots without the ordinary PATCH route.
     // Keep that atomic Store operation behind the same shared-machine fence.
     for (const operation of card.teamSetupRequest!.operations) {
@@ -11366,7 +11367,7 @@ function proposalPersistence(botId: string, threadId: string) {
     (message) =>
       (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
       !message.card.answered &&
-      !message.card.dismissed,
+      !message.card.dismissed && !message.card.expired,
   ).length;
   return openRequests >= 8
     ? { ok: false as const, status: 429, error: "confirm or cancel an existing proposal first" }
@@ -11916,6 +11917,7 @@ async function provideSecretFromPhone(
   const message = secretMessage(context.botId, context.threadId, context.messageId);
   if (!owner || !message?.secret) throw new PhoneSecretError("No such credential request", 404);
   if (message.secret.dismissed) throw new PhoneSecretError("This credential request was dismissed", 409);
+  if (message.secret.superseded) throw new PhoneSecretError("This credential request was superseded by a newer one", 409);
   assertPhoneSecretRequestMatches(context, authenticatedDeviceId, {
     target: message.secret.target,
     requestKey: message.secret.requestKey,
@@ -11982,6 +11984,12 @@ async function provideSecretFromPhone(
     }
     if (current.secret.dismissed) {
       throw new PhoneSecretError("This credential request was dismissed", 409);
+    }
+    // The request route may have superseded this card while the encrypted
+    // save was in flight. Completing the superseded card would mark it
+    // provided and dispatch its continuation, leaving two cards resolved.
+    if (current.secret.superseded) {
+      throw new PhoneSecretError("This credential request was superseded by a newer one", 409);
     }
     // Electron acknowledges only after credentials.bin and the server's
     // external-secret config update both commit. Keep this assertion at the
@@ -13799,7 +13807,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const depth = internalCapability.depth;
         if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
         if (toBotRef === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
-        if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
+        if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop", receipt: peerDeliveryReceipt({
+          botId: toBotRef, outcome: "failed", detail: "message chains are limited to one hop — the message was not sent",
+        }) });
         // A unique reachable teammate name is accepted where an id is
         // expected; see resolveTeammate for why.
         const resolvedTo = resolveTeammate(store.bots, internalSender, toBotRef);
@@ -13846,14 +13856,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             MAX_COMMS_DEPTH,
             fromThreadId,
           );
-          if (queued.result !== "ok" || !queued.id) return json(res, 200, { busy: true });
+          if (queued.result !== "ok" || !queued.id) return json(res, 200, { busy: true, receipt: peerDeliveryReceipt({
+            botId: toBotId, botName: target.name, outcome: "failed",
+            detail: "the teammate was busy and the delegation queue refused the fallback — the message was not delivered",
+          }) });
           // An external caller has no source turn whose completion can
           // begin the busy wait. Drain now so the target's idle release
           // retries this handoff, retaining any approval already granted.
           if (internalCapability.generation === EXTERNAL_RUNTIME_GENERATION && !threadBusy(from.id, fromThreadId)) {
             drainThreadDelegations(fromThreadId);
           }
-          return json(res, 200, { busy: true, taskId: queued.id, toBotName: target.name });
+          return json(res, 200, { busy: true, taskId: queued.id, toBotName: target.name, receipt: peerDeliveryReceipt({
+            botId: toBotId, botName: target.name, outcome: "queued", taskId: queued.id,
+            detail: "the teammate was busy; the ask was queued as a delegation instead",
+          }) });
         };
         if (target.busy) return queueBusyFallback();
         let currentFrom = from;
@@ -13880,17 +13896,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
-          if (verdict !== "allow") return json(res, 200, peerApprovalFailure(verdict));
+          if (verdict !== "allow") {
+            const failure = peerApprovalFailure(verdict);
+            return json(res, 200, { ...failure, receipt: peerDeliveryReceipt({
+              botId: toBotId, botName: target.name, outcome: "failed",
+              detail: `peer review ${failure.error} — the message was not sent`,
+            }) });
+          }
           // The card may have been open for minutes. Re-read both records so
           // deleted bots cannot recreate transcripts through stale objects.
           const freshFrom = store.bot(fromBotId);
           const freshTarget = store.bot(toBotId);
           if (!freshFrom || !freshTarget) return json(res, 404, { error: "no such bot" });
           if (!canAccessTeam(freshFrom, freshTarget.section) || freshTarget.hidden) {
-            return json(res, 200, { error: "that bot moved to a different section" });
+            return json(res, 200, { error: "that bot moved to a different section", receipt: peerDeliveryReceipt({
+              // Access no longer permits reading the peer's current profile.
+              botId: toBotId, outcome: "failed",
+              detail: "that bot moved to a different section — the message was not sent",
+            }) });
           }
           if (!peerAllowed(freshFrom, freshTarget)) {
-            return json(res, 200, { error: "that bot is no longer an allowed peer" });
+            return json(res, 200, { error: "that bot is no longer an allowed peer", receipt: peerDeliveryReceipt({
+              botId: toBotId, outcome: "failed",
+              detail: "that bot is no longer an allowed peer — the message was not sent",
+            }) });
           }
           // Membership can be revoked while the card is open: re-check the
           // same way, so a bot removed from a room mid-approval cannot go on
@@ -13952,20 +13981,37 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             kind: "activity",
             tool: { name: `@${currentTarget.name} is still working — ask converted to a delegation` },
           });
-          return json(res, 200, { timeout: true, taskId, toBotName: currentTarget.name, waitedMs: ASK_BOT_TIMEOUT_MS });
+          return json(res, 200, { timeout: true, taskId, toBotName: currentTarget.name, waitedMs: ASK_BOT_TIMEOUT_MS,
+            receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name, outcome: "injected", taskId,
+              detail: "the teammate's turn started and is still running; only the synchronous wait ended" }) });
         }
         if (outcome.status === "failed" && !outcome.text.trim()) {
           // No partial answer to hand back — mirror the failure where the
           // exchange lives, with the provider's reason instead of silence.
           const why = outcome.stopReason?.trim() ? ` — ${outcome.stopReason.trim().slice(0, 120)}` : "";
           mirrorActivity(commsBus, currentTarget, channel, `Turn failed${why}`, false);
-          return json(res, 200, { botName: currentTarget.name, text: `(the bot's turn failed${why})` });
+          return json(res, 200, { botName: currentTarget.name, text: `(the bot's turn failed${why})`,
+            receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name, outcome: "injected",
+              detail: `the teammate's turn started and failed${why}` }) });
         }
         const reply = outcome.status === "timeout"
           ? outcome.text || "(timed out waiting for the bot to reply)"
           : outcome.text;
         mirrorReply(commsBus, currentTarget, reply, channel);
-        return json(res, 200, { botName: currentTarget.name, text: reply });
+        // A dispatch error arrives as outcome "error" with the reason folded
+        // into text — to the sender it reads like a reply from the peer. The
+        // receipt is what keeps that honest: the turn never started, so the
+        // message was never delivered.
+        const dispatchFailed = outcome.status === "error";
+        return json(res, 200, { botName: currentTarget.name, text: reply,
+          receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name,
+            outcome: dispatchFailed ? "failed" : "injected",
+            detail: dispatchFailed
+              ? "the teammate's turn could not start — the message was not delivered"
+              : outcome.status === "timeout"
+                ? "the teammate's turn started and is still running"
+                : "the teammate's turn ran to completion",
+          }) });
       }
       // Async handoff: the source bot queues a task for a peer and goes
       // back to the user; the peer turn runs after the source's
@@ -14127,7 +14173,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             no_target: "no such bot",
             too_many: "too many delegations queued on this turn — finish some first",
           };
-          return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
+          const refusal = said[queued.result === "ok" ? "no_target" : queued.result];
+          return json(res, 200, { error: refusal, receipt: peerDeliveryReceipt({
+            botId: toBotId, botName: store.bot(toBotId)?.name, outcome: "failed",
+            detail: `${refusal} — nothing was queued`,
+          }) });
         }
         const targetName = store.bot(toBotId)?.name ?? toBotId;
         // The queue normally drains when the source thread's turn completes. A
@@ -14137,20 +14187,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // is nothing to wait for: drain now.
         if (internalCapability.generation === EXTERNAL_RUNTIME_GENERATION && !threadBusy(from.id, fromThreadId)) {
           drainThreadDelegations(fromThreadId);
+          const reviewed = peerReviewRequired(from, fromThreadId);
           return json(res, 200, {
             queued: true,
             taskId: queued.id,
-            message: peerReviewRequired(from, fromThreadId)
+            message: reviewed
               ? `Queued for review — @${targetName} will pick it up once the user approves.`
               : `Delegated — @${targetName} is picking it up now.`,
+            receipt: peerDeliveryReceipt({ botId: toBotId, botName: targetName, outcome: "queued", taskId: queued.id,
+              detail: reviewed
+                ? "the teammate's turn waits on the user's approval"
+                : "the drain started; the teammate's turn has not started yet" }),
           });
         }
+        const reviewed = peerReviewRequired(from, internalCapability.threadId);
         return json(res, 200, {
           queued: true,
           taskId: queued.id,
-          message: peerReviewRequired(from, internalCapability.threadId)
+          message: reviewed
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
+          receipt: peerDeliveryReceipt({ botId: toBotId, botName: targetName, outcome: "queued", taskId: queued.id,
+            detail: reviewed
+              ? "the teammate's turn waits on the user's approval after your turn finishes"
+              : "the teammate's turn runs after your current turn finishes" }),
         });
       }
       if (path === "/api/internal/room-targets" || path === "/api/internal/coordinate-bots") {
@@ -14233,6 +14293,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           const accepted: { requestId: string; botId: string; duplicate: boolean; status: string }[] = [];
           const errors: { botId: string; error: string }[] = [];
+          // One receipt per recipient, in the order the caller addressed
+          // them. Dispatch is asynchronous (RoomHandoffs.tick), so a fresh
+          // enqueue is honestly "queued"; a duplicate inherits the state of
+          // the node that already carries this request_key.
+          const receipts: PeerDeliveryReceipt[] = [];
           for (const target of targets) {
             let createdThread: string | undefined;
             try {
@@ -14271,6 +14336,32 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               if (duplicate && createdThread && createdThread !== node.threadId) store.deleteTask(target.botId, createdThread);
               createdThread = undefined; // The durable coordinator now owns this task.
               accepted.push({ requestId: node.id, botId: node.botId, duplicate, status: node.status });
+              // A duplicate request_key lands on the node enqueue already
+              // made. Only a live node can still report: a failed or
+              // cancelled one already fired its report and tick() skips it,
+              // so promising "its result will resume you" would be the one
+              // lie a receipt must never tell.
+              receipts.push(peerDeliveryReceipt({
+                botId: node.botId,
+                botName: store.bot(node.botId)?.name,
+                outcome: duplicate
+                  ? node.status === "running" || node.status === "completed"
+                    ? "injected"
+                    : node.status === "failed" || node.status === "cancelled"
+                      ? "failed"
+                      : "queued"
+                  : "queued",
+                detail: duplicate
+                  ? node.status === "running"
+                    ? "duplicate request_key — this teammate is already running that exact assignment"
+                    : node.status === "completed"
+                      ? "duplicate request_key — this teammate already completed that assignment; the earlier result stands"
+                      : node.status === "failed" || node.status === "cancelled"
+                        ? `duplicate request_key — the earlier assignment ${node.status === "cancelled" ? "was cancelled" : "failed"} and will not rerun or resume you; resend with a new request_key to retry`
+                      : "duplicate request_key — already in flight; its result will resume you automatically"
+                  : "handed to the coordinator; the teammate's turn has not started yet",
+                requestId: node.id,
+              }));
               if (!duplicate) {
                 const recipient = store.bot(target.botId)!;
                 store.appendMessage(address.threadId, { role: "bot", kind: "activity",
@@ -14282,10 +14373,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               }
             } catch (error) {
               if (createdThread) store.deleteTask(target.botId, createdThread);
-              errors.push({ botId: target.botId, error: error instanceof Error ? error.message : String(error) });
+              const said = error instanceof Error ? error.message : String(error);
+              errors.push({ botId: target.botId, error: said });
+              receipts.push(peerDeliveryReceipt({
+                botId: target.botId, botName: store.bot(target.botId)?.name, outcome: "failed", detail: said,
+              }));
             }
           }
-          return json(res, accepted.length ? 200 : 409, { accepted, errors,
+          return json(res, accepted.length ? 200 : 409, { accepted, errors, receipts,
             ...(accepted.length ? { message: "End your turn after sending all work. These actual teammates will reply and resume you automatically. Do not poll or wait." } : { error: errors.map(e => e.error).join("; ") }),
           });
         }
@@ -14746,17 +14841,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (credentialIsConfigured(cfg, credentialId)) {
           return json(res, 200, { alreadyConfigured: true, label: target.label });
         }
-        const existing = store.activePath(fromThreadId).find((message) =>
-          isReusableCredentialRequest(message, credentialId, from.id, Boolean(owner.group))
-        );
-        if (existing) {
-          if (!existing.text?.trim()) {
-            store.patchMessage(fromThreadId, existing.id, {
-              text: credentialDesktopHandoff(target.label),
-            });
-          }
-          return json(res, 200, { messageId: existing.id, label: target.label });
-        }
+        // A later request supersedes every still-pending card for this
+        // credential instead of silently reusing it: the reason or task has
+        // moved on, so the old card stops offering entry and the person gets
+        // one fresh card they can act on. The fresh card is appended FIRST:
+        // if persistence then fails, the prior cards stay actionable rather
+        // than every pending request ending terminal with no card to act on.
         const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 240) : "";
         const message = store.appendMessage(fromThreadId, {
           role: "bot",
@@ -14772,6 +14862,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             requestKey: randomUUID(),
           },
         });
+        for (const prior of store.activePath(fromThreadId)) {
+          if (prior.id === message.id) continue;
+          if (!prior.secret || !isPendingCredentialRequest(prior, credentialId, from.id, Boolean(owner.group))) continue;
+          store.patchMessage(fromThreadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+        }
         return json(res, 201, { messageId: message.id, label: target.label });
       }
       if (method === "POST" && path === "/api/internal/voice-note") {
@@ -14827,14 +14922,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // Rows are fire-and-forget: a log failure must never take the call
         // (or its refusal) down with it.
         const call = connectorCallFromFrame(body);
-        if (call.kind === "unrecognized") {
+        // A bot with no grants record keeps the pre-grants relay: even an
+        // unreadable frame passes through exactly as it always did.
+        if (call.kind === "unrecognized" && currentSender.connectorTools !== undefined) {
           appendDecision(DATA_DIR, {
             threadId: internalCapability.threadId,
             botId: currentSender.id,
             botName: currentSender.name,
             tool: call.invoked,
             summary: call.reason,
-            decision: "user-denied",
+            decision: "auto-denied",
             source: "connector-scope",
             rule: "connectorTools",
           });
@@ -14865,7 +14962,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   : denial.onGrantedService
                     ? "tool is not in this service's grant"
                     : "service is not granted",
-                decision: "user-denied",
+                decision: "auto-denied",
                 source: "connector-scope",
                 rule: denial.service ? "connectorTools." + denial.service : "connectorTools",
               });
@@ -14886,7 +14983,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             botName: currentSender.name,
             tool: call.names[0],
             summary: ("allowed " + call.names.join(", ")).slice(0, 240),
-            decision: "user-approved",
+            decision: "auto-approved",
             source: "connector-scope",
             rule: verdict.rule,
           });
@@ -16214,7 +16311,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             message.kind === "options" &&
             message.card?.requestId &&
             !message.card.answered &&
-            !message.card.dismissed,
+            !message.card.dismissed && !message.card.expired,
         ) ? [task.threadId] : [],
       );
       return openApprovalThreads.length > 0 && !openApprovalThreads.includes(targetThreadId);
@@ -20466,6 +20563,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (m[3] === "provided") {
         if (message.secret.dismissed) return json(res, 409, { error: "this credential request was dismissed" });
+        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
         if (!credentialIsConfigured(cfg, message.secret.target)) {
           return json(res, 409, { error: `${message.secret.label} was not saved yet` });
         }
@@ -20477,6 +20575,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, state);
       }
       if (m[3] === "resume") {
+        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
         const outcome = credentialResumeOutcome(message.secret);
         if (!outcome) {
           return json(res, 409, { error: "this credential request is not ready to resume" });
@@ -20491,6 +20590,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!state) return json(res, 409, { error: "this credential request is no longer available" });
         return json(res, 200, { resumed: state.resumed });
       }
+      if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
       if (!message.secret.provided && !resumeSecretCard(m[1], threadId, message.id, "dismissed")) {
         return json(res, 409, { error: "this credential request is no longer available" });
       }

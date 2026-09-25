@@ -142,8 +142,11 @@ function multiExecuteCall(invoked: string, args: unknown): ConnectorCall {
 
 /** Judge distinct target names against a bot's grants. grants undefined
  * is the legacy all-tools bot and passes everything; an explicit record —
- * including the empty one — allows only what it names. */
-/** candidates are the caller's connected-service slugs: the real backend
+ * including the empty one — allows only what it names. Service keys are
+ * read as own properties only: a name like CONSTRUCTOR_X maps to the
+ * "constructor" service, and the inherited property must never pose as
+ * a grant.
+ * candidates are the caller's connected-service slugs: the real backend
  * slugs, so an underscored service (bland_ai) keeps its own tools instead
  * of a plain-prefix grant (bland) capturing them. An empty list means the
  * connected-service catalog was unreachable, and the plain first-segment
@@ -161,7 +164,9 @@ export function evaluateConnectorTools(
   let rule = "";
   for (const tool of new Set(names)) {
     const service = serviceSlugForCandidates(tool, candidates) ?? serviceSlugFor(tool);
-    const grant = service === null ? undefined : grants[service];
+    const grant = service !== null && Object.hasOwn(grants, service)
+      ? grants[service]
+      : undefined;
     if (grant && (grant.tools === "*" || grant.tools.includes(tool))) {
       if (!rule) rule = "connectorTools." + service;
       continue;

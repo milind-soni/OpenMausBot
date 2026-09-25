@@ -259,9 +259,10 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
     // transcript's secret-redaction boundary.
     if (card.profileRequest) {
       const scrubChanges = (changes: ProfileRequestChanges): ProfileRequestChanges => {
-        const out: ProfileRequestChanges = {};
+        const out = { ...changes };
         for (const [key, value] of Object.entries(changes)) {
-          out[key as keyof ProfileRequestChanges] = redactSecretsInText(value);
+          // Booleans carry no text to scrub; only string fields pass through redaction.
+          if (typeof value === "string") (out as Record<string, string | boolean>)[key] = redactSecretsInText(value);
         }
         return out;
       };

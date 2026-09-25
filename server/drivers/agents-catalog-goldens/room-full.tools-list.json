@@ -1110,7 +1110,7 @@
     },
     {
       "name": "propose_profile",
-      "description": "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), or working folder (cwd). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section. Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.",
+      "description": "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section. Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1138,6 +1138,14 @@
             "type": "string",
             "maxLength": 1024,
             "description": "Absolute path of the folder your tools read and write in (for example /Users/me/Projects/site). It must already exist. An empty string means your private workspace."
+          },
+          "notifications": {
+            "type": "boolean",
+            "description": "Completion and attention notifications for this bot on the host and paired clients."
+          },
+          "speakReplies": {
+            "type": "boolean",
+            "description": "Speak this bot's replies aloud as they settle, without being asked."
           },
           "reason": {
             "type": "string",

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { soulDiffLines } from "../shared/line-diff.ts";
 import { newId, type ModelSelection } from "./contracts.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
 import { profileSnapshot } from "./profile-revision.ts";
@@ -10,6 +11,14 @@ import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupRe
 
 const section = (value?: string) => value?.trim() || "";
 const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials");
+const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Section", cwd: "Working folder" };
+// The variant rides ModelSelection, and a proposal that omits it removes it,
+// so the review text says both states outright: set on the current
+// selection, explicitly absent on the proposed one. Otherwise a bot with a
+// configured variant shows a before value that hides the setting changing
+// under it.
+const modelSelectionText = (selection: ModelSelection) =>
+  `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
 const fieldsSchema = z.object({
   chiefOfStaff: z.boolean().optional(),
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
@@ -228,9 +237,18 @@ export class TeamSetupRequestService {
           lines.push(`Chief of Staff: ${current?.chiefOfStaff ? "Yes" : "No"} → ${value ? "Yes" : "No"}.${value ? " May coordinate and configure bots in this team." : " Additional managed-team access is removed."}`);
           continue;
         }
-        const before = current ? (key === "section" ? current.section || "General" : current[key as keyof BotRecord]) : undefined;
-        const label = key === "modelSelection" ? "Default engine/model" : key === "cwd" ? "Working folder" : key;
-        lines.push(`${label}: ${current ? `${JSON.stringify(before ?? "")} → ` : ""}${key === "section" ? JSON.stringify(value || "General") : JSON.stringify(value)}`);
+        // The same review shape the profile card uses: labeled before/after
+        // lines, and SOUL.md as a line diff with the shared large-change
+        // fallback — never a JSON.stringify blob of the instructions.
+        if (key === "soul") {
+          lines.push(...soulDiffLines(current?.soul ?? "", value as string));
+        } else if (key === "modelSelection") {
+          lines.push(`Default engine/model: ${current ? `${modelSelectionText(current.modelSelection)} → ` : ""}${modelSelectionText(value as ModelSelection)}`);
+        } else {
+          const before = current ? (key === "section" ? current.section || "General" : String(current[key as keyof BotRecord] ?? "")) : undefined;
+          const after = key === "section" ? (value as string) || "General" : String(value);
+          lines.push(`${FIELD_LABELS[key] ?? key}: ${current ? `"${before}" → ` : ""}"${after}"`);
+        }
       }
     }
     if (!request.deletion) {
@@ -290,7 +308,7 @@ export class TeamSetupRequestService {
     let messageId: string | undefined;
     try {
       messageId = this.options.store.appendMessage(request.threadId, { role: "bot", kind: "options", ...(from ? { from } : {}), card: {
-        ...card, title, options: [], answered: result.state === "applied" ? "allow" : "deny", held: result.error,
+        ...card, title, options: [], ...(result.state === "applied" ? { answered: "allow" as const } : { expired: true }), held: result.error,
         teamSetupRequest: { ...request, result, resumed: true },
       } }).id;
     } catch (error) {
@@ -309,7 +327,7 @@ export class TeamSetupRequestService {
     if (args.behavior !== "allow" && args.behavior !== "deny") throw new TeamSetupError("Confirm or cancel this setup", 400);
     // Stop/dismiss can close a card without a setup decision. It must never
     // resurrect that review or wake the stopped conversation.
-    if (card.answered || card.dismissed) {
+    if (card.answered || card.dismissed || card.expired) {
       const result = request.result ?? { state: "cancelled" as const, bots: [], newTeams: [], error: "This setup card was closed" };
       return { result, request: { ...request, result }, messageId: message.id, duplicate: true };
     }
@@ -321,7 +339,11 @@ export class TeamSetupRequestService {
       if (receipt?.requestId === request.requestId) result = receipt.result;
       else if (args.behavior === "deny") result = { state: "denied", bots: [], newTeams: [] };
       else result = await this.apply(request);
-      this.options.store.patchMessage(args.threadId, message.id, { card: { ...card, answered: result.state === "applied" ? "allow" : "deny", held: result.error, teamSetupRequest: { ...request, result } } });
+      // A setup that could not apply is dead, not denied: the card settles
+      // expired with its options removed, so it stops looking actionable and
+      // the one-line held note says to review a fresh proposal.
+      const dead = result.state !== "applied" && result.state !== "denied";
+      this.options.store.patchMessage(args.threadId, message.id, { card: { ...card, ...(dead ? { expired: true, options: [] } : { answered: result.state === "applied" ? "allow" : "deny" }), held: result.error, teamSetupRequest: { ...request, result } } });
       return { result, request: { ...request, result }, messageId: message.id, duplicate: false };
     } finally { this.resolving.delete(request.requestId); }
   }

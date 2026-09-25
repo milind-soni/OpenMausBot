@@ -34,3 +34,28 @@ export function lineDiff(before: string, after: string): string[] {
   while (j < m) out.push(`+${b[j++]}`);
   return out;
 }
+
+/** Cap on diff lines rendered inside an approval card. Past this the card
+ * shows the complete proposed document instead of a truncated diff, because
+ * truncation can hide the very instructions being approved. */
+export const MAX_DIFF_LINES = 400;
+
+/** The SOUL.md review block shared by the profile and team-setup cards:
+ * byte counts, a line diff for reviewable changes, and the complete
+ * replacement when the diff would outrun the card. The full replacement is
+ * already byte-bounded by profile validation and is readable in the same
+ * generic card on desktop and phones. */
+export function soulDiffLines(before: string, after: string): string[] {
+  const encoder = new TextEncoder();
+  const bytesBefore = encoder.encode(before).length;
+  const bytesAfter = encoder.encode(after).length;
+  const diff = lineDiff(before, after);
+  if (diff.length > MAX_DIFF_LINES) {
+    return [
+      `SOUL.md (${bytesBefore} → ${bytesAfter} bytes):`,
+      "Large change — complete proposed instructions (replaces the current SOUL.md):",
+      after || "(empty)",
+    ];
+  }
+  return [`SOUL.md (${bytesBefore} → ${bytesAfter} bytes):`, ...diff];
+}

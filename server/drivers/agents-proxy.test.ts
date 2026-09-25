@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ToolResults } from "../tool-results.ts";
 import { waitForExit } from "../testing/cleanup.ts";
+import type { PeerDeliveryReceipt } from "../peer-delivery.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -37,7 +38,7 @@ let roomsResponse: unknown = {
   ],
 };
 /** What the stub harness returns from /api/internal/ask-bot. */
-type StubAskResponse = { botName?: string; text?: string; busy?: boolean; timeout?: boolean; waitedMs?: number; taskId?: string; toBotName?: string; error?: string };
+type StubAskResponse = { botName?: string; text?: string; busy?: boolean; timeout?: boolean; waitedMs?: number; taskId?: string; toBotName?: string; error?: string; receipt?: PeerDeliveryReceipt };
 let askResponse: StubAskResponse = { botName: "Helper", text: "hi from helper" };
 let lastDelegateBody: any = null;
 let lastDelegationUrl: string | null = null;
@@ -905,6 +906,48 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.content[0].text).toContain("one hop");
   });
 
+  it("appends the ask_bot delivery receipt after the reply prose", async () => {
+    askResponse = {
+      botName: "Helper", text: "hi from helper",
+      receipt: { botId: "bot-helper", botName: "Helper", outcome: "injected", detail: "the teammate's turn ran to completion" },
+    };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("Helper replied:");
+    expect(text).toContain("Delivery to Helper: injected — the teammate's turn ran to completion");
+  });
+
+  it("renders a failed receipt on a busy ask the queue refused, without claiming delivery", async () => {
+    askResponse = {
+      busy: true,
+      receipt: {
+        botId: "bot-helper", botName: "Helper", outcome: "failed",
+        detail: "the teammate was busy and the delegation queue refused the fallback — the message was not delivered",
+      },
+    };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("busy");
+    expect(text).toContain("Delivery to Helper: failed");
+    expect(text).toContain("the message was not delivered");
+    expect(res.result.isError).toBeFalsy();
+  });
+
+  it("keeps a dispatch failure honest: the prose reads like a reply, the receipt says failed", async () => {
+    askResponse = {
+      botName: "Helper", text: "(couldn't start that bot: provider offline)",
+      receipt: {
+        botId: "bot-helper", botName: "Helper", outcome: "failed",
+        detail: "the teammate's turn could not start — the message was not delivered",
+      },
+    };
+    const res = await callTool("ask_bot", { bot_id: "bot-helper", message: "ping" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("(couldn't start that bot: provider offline)");
+    expect(text).toContain("Delivery to Helper: failed — the teammate's turn could not start");
+    expect(res.result.isError).toBeFalsy();
+  });
+
   it("forwards the source thread when queueing a delegation", async () => {
     delegateResponse = { queued: true, message: "Delegation queued." };
     const res = await callTool("delegate_bot", {
@@ -928,6 +971,20 @@ describe("agents-proxy MCP surface", () => {
     const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "take this" });
     expect(res.result.isError).toBe(true);
     expect(res.result.content[0].text).toContain("do this one yourself");
+  });
+
+  it("appends the delegate_bot delivery receipt under the queue guidance", async () => {
+    delegateResponse = {
+      queued: true, taskId: "task-77", message: "Delegation queued.",
+      receipt: {
+        botId: "bot-helper", botName: "Helper", outcome: "queued", taskId: "task-77",
+        detail: "the teammate's turn runs after your current turn finishes",
+      },
+    };
+    const res = await callTool("delegate_bot", { bot_id: "bot-helper", message: "take this" });
+    const text = res.result.content[0].text;
+    expect(text).toContain("Delegation queued");
+    expect(text).toContain("Delivery to Helper: queued — the teammate's turn runs after your current turn finishes");
   });
 
   it("start_thread: tells the model what a thread is for and what it is not for", async () => {
@@ -1781,7 +1838,7 @@ describe("agents-proxy MCP surface", () => {
     lastProfileRequestBody = null;
     const res = await callTool("propose_profile", { reason: "asked" });
     expect(res.result.isError).toBe(true);
-    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, or cwd");
+    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, or speakReplies");
     expect(lastProfileRequestBody).toBeNull();
   });
 

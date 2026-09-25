@@ -51,7 +51,9 @@ export function isProfileApproval(pending: Pending): boolean {
 /** Open approvals on a thread, oldest first — answered/dismissed drop out. */
 export function pendingApprovals(messages: Message[]): Pending[] {
   return messages
-    .filter((m) => m.kind === "options" && m.card?.requestId && m.card.tool && !m.card.answered && !m.card.dismissed)
+    // An expired proposal is terminal: it must not take over the composer
+    // or offer its decision buttons anywhere.
+    .filter((m) => m.kind === "options" && m.card?.requestId && m.card.tool && !m.card.answered && !m.card.dismissed && !m.card.expired)
     .map((m) => ({
       message: m,
       requestId: m.card!.requestId!,

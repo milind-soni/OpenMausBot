@@ -1,6 +1,6 @@
 // Per-bot profile history: one NDJSON row per changed field, full text only
 // for the soul, secrets scrubbed, and a revision token that moves when any
-// of the four profile fields move.
+// proposable field moves.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
@@ -14,7 +14,7 @@ import {
   recordProfileChange,
 } from "./profile-versions.ts";
 
-const base = { name: "Scout", title: "", description: "", soul: "" };
+const base = { name: "Scout", title: "", description: "", soul: "", notifications: true, speakReplies: false };
 
 /** A real bot's folder exists before any profile change can fire (it is
  * created at bot creation, via writeSoulMirror). Mirror that invariant here
@@ -31,8 +31,11 @@ describe("profileRevision", () => {
     for (const field of ["name", "title", "description", "soul", "cwd"] as const) {
       expect(profileRevision({ ...base, [field]: "x" })).not.toBe(profileRevision(base));
     }
+    for (const field of ["notifications", "speakReplies"] as const) {
+      expect(profileRevision({ ...base, [field]: !base[field] })).not.toBe(profileRevision(base));
+    }
     expect(profileSnapshot({ name: "A", title: "B", description: "C", soul: undefined })).toEqual({
-      name: "A", title: "B", description: "C", soul: "", cwd: "",
+      name: "A", title: "B", description: "C", soul: "", cwd: "", notifications: true, speakReplies: false,
     });
   });
 });

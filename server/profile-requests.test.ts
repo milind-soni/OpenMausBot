@@ -199,11 +199,69 @@ describe("ProfileRequestService", () => {
     const { service, bot } = harness({ name: "Scout" });
     const attempt = (changes: unknown, reason: unknown = "r") =>
       () => service.propose({ botId: bot.id, threadId: bot.threadId, changes, reason });
-    expect(attempt({ notifications: false })).toThrow("unsupported profile field: notifications");
+    expect(attempt({ voice: "alloy" })).toThrow("unsupported profile field: voice");
+    expect(attempt({ autoApprove: true })).toThrow("unsupported profile field: autoApprove");
     expect(attempt({ soul: "x".repeat(24_001) })).toThrow("standing instructions must be at most 24000 bytes");
     expect(attempt({ name: "Kiwi" }, "")).toThrow("reason is required");
-    expect(attempt({})).toThrow("Choose at least one of name, title, description, soul, cwd");
+    expect(attempt({})).toThrow("Choose at least one of name, title, description, soul, cwd, notifications, speakReplies");
     expect(attempt({ name: "Scout" })).toThrow("Nothing would change");
+  });
+
+  it("proposes the alert and voice toggles as one-line before-and-after cards that apply on confirm", async () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { notifications: false }, reason: "r" });
+    expect(proposed.summary).toContain("notifications");
+    const card = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(card.subtitle).toContain("Notifications: on → off");
+    expect(card.subtitle).toContain("Nothing runs.");
+    expect(card.subtitle).not.toContain("Changes what Scout is told");
+    expect(card.profileRequest!.before).toEqual({ notifications: true });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ claimed: true, state: "applied", fields: ["notifications"] });
+    expect(store.bot(bot.id)!.notifications).toBe(false);
+
+    const spoken = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { speakReplies: true }, reason: "r" });
+    const spokenCard = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(spokenCard.subtitle).toContain("Speak replies: off → on");
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: spoken.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "applied" });
+    expect(store.bot(bot.id)!.speakReplies).toBe(true);
+    // The toggles ride the same history rows as every other proposable field.
+    await flushProfileHistory(bot.id);
+    expect(readHistory(bot.id).map((row) => row.field)).toEqual(["speakReplies", "notifications"]);
+    expect(readHistory(bot.id)[0].summary).toBe('speakReplies: "off" → "on"');
+  });
+
+  it("describes a mixed folder-and-toggle card without the instruction line, and a text-plus-toggle card with it", () => {
+    const { service, bot } = harness({ name: "Scout" });
+    const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
+    try {
+      const mixed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir, notifications: false }, reason: "r" });
+      expect(mixed.detail).toContain(`Working folder: its private workspace → ${dir}`);
+      expect(mixed.detail).toContain("Notifications: on → off");
+      expect(mixed.detail).toContain("Scout's tools will read and write files in that folder.");
+      // Neither change edits instructions, so the card must not claim it does.
+      expect(mixed.detail).not.toContain("told on every turn");
+      expect(mixed.detail).toContain("Nothing runs.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const spoken = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { title: "Tracker", speakReplies: true }, reason: "r" });
+    expect(spoken.detail).toContain('Title: "" → "Tracker"');
+    expect(spoken.detail).toContain("Speak replies: off → on");
+    expect(spoken.detail).toContain("Changes what Scout is told on every turn. Nothing runs.");
+  });
+
+  it("fails a toggle card closed when the toggle moved after the card was prepared", () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { notifications: false }, reason: "r" });
+    store.patchBot(bot.id, { notifications: false });
+    const stale = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" });
+    expect(stale).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    // The toggle already matches the proposal's target state — it must not
+    // be re-applied through a card whose revision no longer holds.
+    expect(store.bot(bot.id)!.notifications).toBe(false);
   });
 
   it("re-checks the cap after redaction, since a mask can be longer than the secret it replaces", () => {
@@ -256,8 +314,37 @@ describe("ProfileRequestService", () => {
     const stale = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: b.requestId, behavior: "allow" });
     expect(stale).toMatchObject({ claimed: true, state: "invalid", status: 409 });
     expect((stale as { error: string }).error).toBe("This bot's profile changed after this card was prepared. Ask the bot to review it and propose again.");
-    expect(store.messagesFor(bot.threadId).at(-1)!.card!.held).toContain("changed after this card");
+    // The dead card settles expired: no options left to press, one line
+    // telling the human to ask for a fresh proposal.
+    const dead = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(dead.held).toContain("changed after this card");
+    expect(dead.expired).toBe(true);
+    expect(dead.options).toEqual([]);
+    expect(dead.answered).toBeUndefined();
     expect(store.bot(bot.id)!.title).toBe("");
+  });
+
+  it("never decides an expired card, even after the profile moves back under it", () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { title: "T" }, reason: "r" });
+    store.patchBot(bot.id, { description: "changed elsewhere" });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    const dead = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(dead.expired).toBe(true);
+
+    // The revision the card was prepared against comes back: the card stays
+    // dead for both decisions, and the proposal never applies.
+    store.patchBot(bot.id, { description: "" });
+    const expired = "This profile request expired before it was confirmed. Ask for a fresh proposal.";
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
+      .toEqual({ claimed: true, state: "invalid", error: expired, status: 409 });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "deny" }))
+      .toEqual({ claimed: true, state: "invalid", error: expired, status: 409 });
+    expect(store.bot(bot.id)!.title).toBe("");
+    const card = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(card).toMatchObject({ expired: true, options: [] });
+    expect(card.answered).toBeUndefined();
   });
 
   it("scrubs existing profile secrets in the returned tool result as well as the card", () => {
@@ -332,8 +419,14 @@ describe("ProfileRequestService", () => {
     refuse = "@Peer is no longer in this section";
     expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" }))
       .toMatchObject({ claimed: true, state: "invalid", status: 404 });
+    // The refusal expired the card. The section comes back, but the card
+    // stays dead — a fresh proposal carries the same change instead.
     refuse = null;
     expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" }))
+      .toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    expect(store.messagesFor(bot.threadId).at(-1)!.card).toMatchObject({ expired: true, options: [] });
+    const fresh = service.propose({ botId: bot.id, threadId: bot.threadId, targetBotId: peer.id, changes: { title: "Analyst" }, reason: "r" });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: fresh.requestId, behavior: "allow" }))
       .toMatchObject({ state: "applied", targetBotId: peer.id });
     expect(store.bot(peer.id)!.title).toBe("Analyst");
     expect(store.bot(bot.id)!.title).toBe("");
@@ -426,7 +519,7 @@ describe("propose_profile working folder (cwd)", () => {
     const result = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" });
     expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
     expect(store.bot(bot.id)!.cwd).toBeUndefined();
-    expect(store.messagesFor(bot.threadId).at(-1)!.card!.held).toMatch(/that folder doesn't exist/);
+    expect(store.messagesFor(bot.threadId).at(-1)!.card!).toMatchObject({ expired: true, options: [], held: expect.stringMatching(/that folder doesn't exist/) });
   });
 
   it("a folder change elsewhere makes an open card stale, since cwd is part of the revision", () => {
