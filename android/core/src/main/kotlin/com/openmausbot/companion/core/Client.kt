@@ -541,7 +541,8 @@ class CompanionClient(
      * same thing takes the message off the phone while it is still queued on
      * the computer, and it then arrives anyway.
      */
-    suspend fun cancelQueued(queueId: String, to: MessageDestination) {
+    // A drained row can disappear, but only a confirmed cancellation permits Edit to restore it.
+    suspend fun cancelQueued(queueId: String, to: MessageDestination): Boolean {
         if (!isSafeRouteId(queueId)) throw APIError.BadUrl
         val route = when (to) {
             is MessageDestination.Bot -> "/api/bots/${safeRouteId(to.id)}/queue/$queueId"
@@ -549,11 +550,12 @@ class CompanionClient(
         }
         try {
             sendUnit(makeRequest("DELETE", route, body = jsonBody("threadId" to to.threadId)))
+            return true
         } catch (error: APIError.Status) {
             if (error.code != 404) throw error
             // The harness's own words, not Throwable.message, which falls
             // back to generic text for a 404 and would swallow everything.
-            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return
+            if (error.serverMessage?.contains(ALREADY_DRAINED, ignoreCase = true) == true) return false
             throw APIError.Status(
                 404,
                 "This computer is too old to take back a queued message. Update OpenMausBot on it.",

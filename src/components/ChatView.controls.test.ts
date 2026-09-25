@@ -89,6 +89,17 @@ describe("thread control placement", () => {
     expect(claudeUpdateTarget({ ...claude, driverKind: "codex" })).toBeUndefined();
     expect(claudeUpdateTarget(undefined)).toBeUndefined();
   });
+  it("keeps Retry on the last failed turn after its digest, but never on an older turn", () => {
+    const messages: Bot["messages"] = [
+      { id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" },
+      { id: "error", role: "bot", kind: "activity", at: 2, tool: { name: "error: outdated engine", ok: false } },
+      { id: "digest", role: "bot", kind: "digest", at: 3, text: "no tool activity" },
+    ];
+    const render = () => renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: false, messages } }));
+    expect(render()).toContain("Retry</button>");
+    messages.push({ id: "next", role: "user", kind: "text", at: 4, text: "A different request" });
+    expect(render()).not.toContain("Retry</button>");
+  });
   it("offers the matching macOS Settings and relaunch actions only for a named CUA permission failure", () => {
     fixture.platform = "darwin";
     fixture.localMessage = "Screen Recording required";

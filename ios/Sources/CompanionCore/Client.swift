@@ -1473,7 +1473,10 @@ public struct CompanionClient: Sendable {
     /// too old to have this route answers 404 for it, and reading that as
     /// "already drained" would take the message off the phone while it is
     /// still queued on the computer, and it would then arrive anyway.
-    public func cancelQueued(queueId: String, to destination: MessageDestination) async throws {
+    /// Returns true only for a confirmed cancellation. A stale queue row can
+    /// be retired after a drained response, but its words must not be resent.
+    @discardableResult
+    public func cancelQueued(queueId: String, to destination: MessageDestination) async throws -> Bool {
         let route: String
         let body: [String: Any]?
         switch destination {
@@ -1490,6 +1493,7 @@ public struct CompanionClient: Sendable {
         }
         do {
             try await send(try makeRequest("DELETE", route, body: body))
+            return true
         } catch let APIError.status(code, message) where code == 404 {
             guard message?.localizedCaseInsensitiveContains(Self.alreadyDrainedQueueMessage) == true else {
                 throw APIError.status(
@@ -1497,6 +1501,7 @@ public struct CompanionClient: Sendable {
                     message: "This computer is too old to take back a queued message. Update OpenMausBot on it."
                 )
             }
+            return false
         }
     }
 

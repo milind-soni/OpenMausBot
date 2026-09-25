@@ -22,6 +22,11 @@ The tests launch `-store-preview -chat-presentation-preview`, using
 `-chat-reasoning-preview` adds the runtime frame in
 `App/ChatReasoningPreview.json`. These launch flags are Debug-only.
 
+The same suite uses `-chat-update-preview` and `App/ChatUpdatePreview.json`
+to check that pasted-text wrapper lines disappear while the notes remain,
+and that the Claude update card offers its manual command and Copy action.
+This scene has no API client and cannot run an updater on any computer.
+
 Check that completed narration starts inside a “Worked for 4s” fold and can
 be expanded and collapsed while the final answer stays visible. Webhooks
 show the task without envelope metadata; their payload opens on demand.

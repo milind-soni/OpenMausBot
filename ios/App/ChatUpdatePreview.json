@@ -1,0 +1,19 @@
+{
+  "bots": [{
+    "id": "preview-pepper", "threadId": "preview-gmail", "name": "Pepper",
+    "title": "Personal assistant", "description": "Offline update fixture",
+    "notifications": false, "color": "purple", "unread": false, "busy": false,
+    "modelSelection": { "instanceId": "preview", "model": "preview" },
+    "createdAt": 1789088400000,
+    "tasks": [{ "threadId": "preview-gmail", "title": "Review pasted notes", "createdAt": 1789088400000 }],
+    "activeLeafId": "update-error",
+    "messages": [{
+      "id": "paste", "role": "user", "kind": "text", "at": 1789088400000,
+      "text": "Review these notes.\n\n<pasted-text index=\"1\">\nThe pasted notes stay visible.\n</pasted-text>"
+    }, {
+      "id": "update-error", "parentId": "paste", "role": "bot", "kind": "activity", "at": 1789088401000,
+      "tool": { "name": "error: Claude Code 2.1.268 does not support this model", "ok": false, "setup": true, "claudeUpdate": true }
+    }]
+  }],
+  "groups": []
+}

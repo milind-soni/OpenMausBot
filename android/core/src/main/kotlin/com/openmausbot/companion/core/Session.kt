@@ -1133,7 +1133,7 @@ class Session(
      * once the harness confirms, so a failed cancel leaves the words on
      * screen still waiting — which is what is actually true.
      */
-    /** True only when the computer confirmed the held send is gone, so an
+    /** True only when the computer confirmed cancellation, so an
      * edit never hands back words that already joined a turn. */
     suspend fun cancelQueued(send: QueuedSend, chat: Chat): Boolean {
         val activeClient = client ?: return false
@@ -1142,12 +1142,14 @@ class Session(
             is Chat.RoomChat -> MessageDestination.Room(chat.room.id, chat.threadId)
         }
         try {
-            activeClient.cancelQueued(send.queueId, destination)
+            val cancelled = activeClient.cancelQueued(send.queueId, destination)
+            if (client !== activeClient) return false
             _state.update { it.forgetQueued(send.queueId, chat.threadId) }
-            return true
+            return cancelled
         } catch (error: CancellationException) {
             throw error
         } catch (error: APIError) {
+            if (client !== activeClient) return false
             if (error.isUnauthorized) _status.value = Status.Unauthorized
             _actionError.value = error.message
             return false
