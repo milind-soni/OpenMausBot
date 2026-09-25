@@ -158,7 +158,7 @@ export interface Message {
    * narration of the same chip ("reading a file"), used by call mode. */
   /** `setup` marks an error fixed by installing something, not by retrying.
    * `summary` is the call's input on one redacted line (the shell command). */
-  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
+  tool?: { name: string; ok?: boolean; spoken?: string; setup?: boolean; claudeUpdate?: boolean; summary?: string; input?: string; output?: string ; itemId?: string; outputPath?: string; fullResult?: boolean };
   /** user messages sent into a running turn — the model saw it mid-turn */
   steered?: boolean;
   /** a user message that arrived through the server's API, not typed here */
@@ -1059,9 +1059,9 @@ export type Action =
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
-  | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string }
+  | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string; onCancelled?: () => void }
   | { type: "steerQueued"; botId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
-  | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string }
+  | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string; onCancelled?: () => void }
   | { type: "steerGroupQueued"; groupId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
@@ -2965,7 +2965,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelQueued":
           void api(`/api/bots/${action.botId}/queue/${action.queueId}`, { method: "DELETE", body: JSON.stringify({ threadId: action.threadId }) })
-            .then(() => rawDispatch(action))
+            .then(() => {
+              rawDispatch(action);
+              action.onCancelled?.();
+            })
             .catch(showError);
           break;
         case "steerQueued":
@@ -2988,7 +2991,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           break;
         case "cancelGroupQueued":
           void api(`/api/groups/${action.groupId}/queue/${action.queueId}`, { method: "DELETE" })
-            .then(() => rawDispatch(action))
+            .then(() => {
+              rawDispatch(action);
+              action.onCancelled?.();
+            })
             .catch(showError);
           break;
         case "steerGroupQueued":

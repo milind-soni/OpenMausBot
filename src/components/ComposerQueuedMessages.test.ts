@@ -71,6 +71,25 @@ describe("QueuedComposerMessages", () => {
     expect(markup).toContain('aria-label="Delete queued message 1 of 1"');
   });
 
+  it("offers Edit on every queued row only when the composer can take the words back", () => {
+    const items = [
+      { queueId: "q1", text: "first" },
+      { queueId: "q2", text: "second" },
+    ];
+    const withEdit = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items,
+      onCancel: () => undefined,
+      onEdit: () => undefined,
+    }));
+    expect(withEdit).toContain('aria-label="Edit queued message 1 of 2"');
+    expect(withEdit).toContain('aria-label="Edit queued message 2 of 2"');
+    const withoutEdit = renderToStaticMarkup(createElement(QueuedComposerMessages, {
+      items,
+      onCancel: () => undefined,
+    }));
+    expect(withoutEdit).not.toContain("Edit queued message");
+  });
+
   it("says the fallback Steer stops the running turn when the engine cannot steer live", () => {
     const base = { items: oneItem, onSteer: () => undefined, onCancel: () => undefined } as const;
     const liveMarkup = renderToStaticMarkup(createElement(QueuedComposerMessages, base));

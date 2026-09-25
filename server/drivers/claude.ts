@@ -153,6 +153,20 @@ export function claudeAuthFailure(
   return frame.error === "authentication_failed" || classifyError({ text }).reason === "auth";
 }
 
+/** A model newer than the installed Claude Code: the API refuses it and the
+ * CLI relays that as an api-error frame ("Claude Code 2.1.268 does not
+ * support this model; version 2.1.280 or newer is required. Run 'claude
+ * update'…"). It names no model, so it covers every model it happens for.
+ * Like a signed-out turn, it is fixed by changing the install, not by a
+ * retry, so the UI offers to run the update. */
+export function claudeVersionTooOld(
+  frame: { error?: unknown; is_api_error_message?: unknown },
+  text: string,
+): boolean {
+  if (frame.is_api_error_message !== true && typeof frame.error !== "string") return false;
+  return /\bClaude Code v?\d+(?:\.\d+)+ does not support this model\b/i.test(text);
+}
+
 /** The CLI environment shared by auth probes and real turns.
  *
  * Subscription users can be billed pay-as-you-go if an inherited API key
@@ -994,7 +1008,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
        * the truth — this is. null until init, or on a CLI that omits it. */
       nativePermissionMode: string | null;
       /** the running turn, or null between turns */
-      turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean; stopRequested?: boolean } | null;
+      turn: { turnId: string; input: SendTurnInput; retryAbort: AbortController; settled: boolean; sawStreamDelta: boolean; authFailed?: boolean; updateRequired?: boolean; stopRequested?: boolean } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
       stderr: string;
@@ -1624,6 +1638,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
               emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: text, setup: true });
               break;
             }
+            if (claudeVersionTooOld(o, text)) {
+              if (session.turn) session.turn.updateRequired = true;
+              emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: text, setup: true, claudeUpdate: true });
+              break;
+            }
             if (text.trim()) {
               // The CLI's own report of any other API error is still shown,
               // but marked: the model never produced it.
@@ -1686,7 +1705,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // of the figure was context re-read rather than new text.
             settle(
               o.is_error !== true,
-              session.turn?.authFailed ? "auth_required" : o.stop_reason ?? o.terminal_reason ?? null,
+              session.turn?.authFailed
+                ? "auth_required"
+                : session.turn?.updateRequired
+                  ? "update_required"
+                  : o.stop_reason ?? o.terminal_reason ?? null,
               o.total_cost_usd ?? null,
               o.usage
                 ? {

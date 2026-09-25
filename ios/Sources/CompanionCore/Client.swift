@@ -1473,7 +1473,10 @@ public struct CompanionClient: Sendable {
     /// too old to have this route answers 404 for it, and reading that as
     /// "already drained" would take the message off the phone while it is
     /// still queued on the computer, and it would then arrive anyway.
-    public func cancelQueued(queueId: String, to destination: MessageDestination) async throws {
+    /// Returns true only for a confirmed cancellation. A stale queue row can
+    /// be retired after a drained response, but its words must not be resent.
+    @discardableResult
+    public func cancelQueued(queueId: String, to destination: MessageDestination) async throws -> Bool {
         let route: String
         let body: [String: Any]?
         switch destination {
@@ -1490,6 +1493,7 @@ public struct CompanionClient: Sendable {
         }
         do {
             try await send(try makeRequest("DELETE", route, body: body))
+            return true
         } catch let APIError.status(code, message) where code == 404 {
             guard message?.localizedCaseInsensitiveContains(Self.alreadyDrainedQueueMessage) == true else {
                 throw APIError.status(
@@ -1497,7 +1501,39 @@ public struct CompanionClient: Sendable {
                     message: "This computer is too old to take back a queued message. Update OpenMausBot on it."
                 )
             }
+            return false
         }
+    }
+
+    /// Run Claude Code's own updater on the computer for one engine instance,
+    /// returning the version it now reports. The harness refuses while other
+    /// Claude turns are running; its error text is written for people and
+    /// comes through as the thrown `APIError`.
+    public func updateClaude(instanceId: String) async throws -> String {
+        guard Self.validInstanceID(instanceId) else { throw APIError.badURL }
+        var request = try makeRequest(
+            "POST",
+            "/api/instances/\(instanceId)/claude-update",
+            body: [:]
+        )
+        // The updater downloads and installs a new CLI; the server allows it
+        // up to three minutes. Leave room for its own timeout error rather
+        // than replacing it with the normal twenty-second transport timeout.
+        request.timeoutInterval = 200
+        return try await send(request, as: ClaudeUpdateResponse.self).version
+    }
+
+    private struct ClaudeUpdateResponse: Decodable {
+        let version: String
+    }
+
+    /// Matches the harness's `[\w.-]+` instance route component.
+    private static func validInstanceID(_ value: String) -> Bool {
+        !value.isEmpty && value != "." && value != ".."
+            && value.utf8.allSatisfy { byte in
+                (48...57).contains(byte) || (65...90).contains(byte) || (97...122).contains(byte)
+                    || byte == 45 || byte == 95 || byte == 46
+            }
     }
 
     private static func validRouteID(_ value: String) -> Bool {

@@ -190,4 +190,11 @@ final class QueuedSendTests: XCTestCase {
         XCTAssertTrue(bot.threadGroups().flatMap(\.tasks).isEmpty, "closed and quiet folds away")
         XCTAssertEqual(bot.threadGroups(queuedThreadIds: ["t1"]).flatMap(\.tasks).map(\.threadId), ["t1"], "a held send keeps the row up")
     }
+
+    func testEditDraftLeadsWithTheHeldWordsAndKeepsTheTypedDraft() {
+        let send = held("q1", "actually stop at 10")
+        XCTAssertEqual(send.editDraft(keeping: ""), "actually stop at 10")
+        XCTAssertEqual(send.editDraft(keeping: "  \n"), "actually stop at 10", "whitespace is not a draft")
+        XCTAssertEqual(send.editDraft(keeping: "and use the smaller model"), "actually stop at 10\n\nand use the smaller model")
+    }
 }

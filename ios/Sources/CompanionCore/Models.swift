@@ -119,6 +119,10 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var spoken: String?
     /// Marks an error fixed by installing something, not by retrying.
     public var setup: Bool?
+    /// Marks an error caused by a Claude Code CLI too old for the chosen
+    /// model; the phone offers to run Claude's updater. Absent on older
+    /// computers, so it stays optional.
+    public var claudeUpdate: Bool?
 }
 
 /// A compaction record: from this message on, rebuilds of the thread's
@@ -443,6 +447,14 @@ public struct QueuedSend: Codable, Hashable, Identifiable, Sendable {
         self.queueId = queueId
         self.text = text
         self.reason = reason
+    }
+
+    /// The composer text after this held send is pulled back for editing.
+    /// Its words lead — they were written first — and anything already typed
+    /// stays below them after a blank line, so an edit never drops a draft.
+    public func editDraft(keeping draft: String) -> String {
+        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+        return "\(text)\n\n\(draft)"
     }
 }
 

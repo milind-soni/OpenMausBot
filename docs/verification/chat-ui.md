@@ -213,6 +213,34 @@ and removes only its data directory; the server log stays at the printed path
 and the tools directory keeps the downloads. Every verb refuses a handle whose
 launch has stopped.
 
+## Queued edits and Claude update recovery
+
+The queued-message Edit action must remove the server's held send before
+returning its text to the same thread's draft, ahead of any existing text.
+A phone's `404 no such queued message` response retires a stale queue row,
+but must return **false** for editing: those words may already be running.
+The client regressions cover that distinction and successful cancellation:
+
+```sh
+cd ios && swift test --filter QueuedSendClientTests
+# From android/ with JDK 17 and the Android SDK configured:
+./gradlew :core:test --tests '*SessionP1Test*'
+```
+
+To exercise the desktop Claude update card without an actual provider,
+launch an isolated UI with `FAKE_CLAUDE_MODE=api-error` and
+`FAKE_CLAUDE_API_ERROR="API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required."`.
+Send one short message, then click **Update Claude for me**. The fake updater
+must report its synthetic version and the card must offer **Retry**, even
+when a digest follows the error. This proves the update request and recovery
+UI, not a real Claude installation or a successful provider retry.
+
+The native transcript suites also exercise wrapper-free pasted text and the
+update card with offline data. Android drives a failed update and a successful
+retry against loopback responses; iOS checks the manual command path in a
+disposable simulator. See [iOS](ios-transcript.md) and
+[Android](android-transcript.md).
+
 ## What this proves, and what it does not
 
 Proven: the real composer sends a turn on Enter, the fixture runs the scripted

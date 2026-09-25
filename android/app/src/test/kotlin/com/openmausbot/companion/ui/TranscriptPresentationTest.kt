@@ -27,6 +27,7 @@ import com.openmausbot.companion.core.SearchHit
 import com.openmausbot.companion.core.StreamFrame
 import com.openmausbot.companion.core.target
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlinx.coroutines.awaitCancellation
@@ -82,6 +83,45 @@ class TranscriptPresentationTest {
     fun stop() {
         if (::scene.isInitialized) scene.session.disconnect()
         server.shutdown()
+    }
+
+    @Test
+    fun pastedNotesHideWrappersAndClaudeUpdateCanRecoverFromFailure() {
+        val updates = AtomicInteger()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                if (request.path?.endsWith("/claude-update") == true) {
+                    assertEquals("POST", request.method)
+                    return if (updates.incrementAndGet() == 1) MockResponse().setResponseCode(409)
+                        .setHeader("Content-Type", "application/json")
+                        .setBody("""{"error":"Wait for the running Claude task."}""")
+                    else MockResponse().setHeader("Content-Type", "application/json")
+                        .setBody("""{"ok":true,"version":"2.1.280 (Claude Code)"}""")
+                }
+                return MockResponse().setHeader("Content-Type", "application/json")
+                    .setBody(if (request.path == "/api/instances") "{\"instances\":[]}" else "{\"messages\":[],\"hasMore\":false}")
+            }
+        }
+        mount(ActivityDetail.FULL, transcript = CompanionJson.decodeFromString("""
+            [
+              {"id":"paste","role":"user","kind":"text","at":1000,"text":"Review notes.\n\n<pasted-text index=\"1\">\nThe pasted notes stay visible.\n</pasted-text>"},
+              {"id":"update-error","role":"bot","kind":"activity","at":2000,"tool":{"name":"error: Claude Code is too old","ok":false,"setup":true,"claudeUpdate":true}}
+            ]
+        """))
+        compose.onNodeWithText("The pasted notes stay visible.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("<pasted-text", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("I'll do it myself").assertIsDisplayed()
+        compose.onNodeWithText("Update Claude for me").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Wait for the running Claude task.").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithText("claude update").assertIsDisplayed()
+        compose.onNodeWithText("Try updating again").performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Claude updated — 2.1.280 (Claude Code). Send your message again.").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(2, updates.get())
+        screenshot("claude-update-recovered")
     }
 
     @Test

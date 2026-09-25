@@ -27,6 +27,9 @@ synthetic fleet and an isolated loopback server. It checks:
 - Switching Activity to Hidden hides live reasoning but retains the working
   indicator. Full/Reduced keep reasoning available; Hidden keeps answer tokens.
 - A search hit reveals its intermediate reply inside the completed-turn fold.
+- Pasted-text wrappers disappear while their content stays visible. The Claude
+  update card displays a loopback server refusal, then its successful retry's
+  version and resend guidance; it never runs a real provider updater.
 
 The native graphics fixture writes screenshots under
 `android/app/build/outputs/transcript-screenshots/`. The checked-in

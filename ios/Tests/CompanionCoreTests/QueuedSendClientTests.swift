@@ -74,7 +74,8 @@ final class QueuedSendClientTests: XCTestCase {
     }
 
     func testCancelDeletesTheBotQueueEntryWithTheThreadPinned() async throws {
-        try await client.cancelQueued(queueId: "q1", to: .bot(id: "bot-1", threadId: "thread-9"))
+        let cancelled = try await client.cancelQueued(queueId: "q1", to: .bot(id: "bot-1", threadId: "thread-9"))
+        XCTAssertTrue(cancelled, "Only confirmed cancellation may restore the words for editing")
 
         let request = try XCTUnwrap(QueuedCancelStub.capturedRequest)
         XCTAssertEqual(request.httpMethod, "DELETE")
@@ -85,19 +86,21 @@ final class QueuedSendClientTests: XCTestCase {
     }
 
     func testCancelDeletesTheRoomQueueEntryWithoutABody() async throws {
-        try await client.cancelQueued(queueId: "q1", to: .room(id: "room-1", threadId: "thread-9"))
+        let cancelled = try await client.cancelQueued(queueId: "q1", to: .room(id: "room-1", threadId: "thread-9"))
+        XCTAssertTrue(cancelled)
 
         let request = try XCTUnwrap(QueuedCancelStub.capturedRequest)
         XCTAssertEqual(request.httpMethod, "DELETE")
         XCTAssertEqual(request.url?.path, "/api/groups/room-1/queue/q1")
     }
 
-    func testADrainedEntryIsTheOutcomeTheCallerWanted() async {
+    func testADrainedEntryCanBeRetiredButMustNeverBeRestoredForEditing() async {
         QueuedCancelStub.statusCode = 404
         QueuedCancelStub.responseBody = Data("{\"error\":\"no such queued message\"}".utf8)
 
         do {
-            try await client.cancelQueued(queueId: "q1", to: .bot(id: "bot-1", threadId: "thread-9"))
+            let cancelled = try await client.cancelQueued(queueId: "q1", to: .bot(id: "bot-1", threadId: "thread-9"))
+            XCTAssertFalse(cancelled, "These words may already be running and must not be resent")
         } catch {
             XCTFail("a drained entry is success, not an error: \(error)")
         }

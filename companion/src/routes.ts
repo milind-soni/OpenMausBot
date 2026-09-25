@@ -78,6 +78,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/config$/ },
   { method: "GET", path: /^\/api\/events$/ },
   { method: "GET", path: /^\/api\/instances$/ },
+  // Run Claude Code's own `claude update` on the host when a turn failed
+  // because it is too old for the model. A fixed command against the host's
+  // configured CLI; the harness refuses it while any Claude turn is running.
+  // Instance ids may carry dots, so a dots-only segment is refused outright.
+  { method: "POST", path: /^\/api\/instances\/(?!\.+\/)[\w.-]+\/claude-update$/ },
   { method: "GET", path: /^\/api\/team-map$/ },
   // Sidecar-owned, authenticated endpoint metadata. The proxy terminates it
   // locally; it never becomes a newly exposed harness route.

@@ -1071,11 +1071,31 @@ struct ChatView: View {
 
     // MARK: - Composer
 
+    /// Pull a held send back into the composer to tweak or extend it. The
+    /// computer drops it from the queue first; only a confirmed removal hands
+    /// the words back, so a send that already joined the turn is never resent.
+    private func editQueued(_ send: QueuedSend) {
+        let targetThread = threadId
+        let chat = current
+        Task {
+            guard await session.cancelQueued(send, threadId: targetThread, in: chat) else { return }
+            if threadId == targetThread {
+                draft = send.editDraft(keeping: draft)
+                composerFocused = true
+            } else {
+                // The person switched tasks while the cancel was in flight.
+                var snapshot = threadDrafts[targetThread] ?? ComposerSnapshot()
+                snapshot.text = send.editDraft(keeping: snapshot.text)
+                threadDrafts[targetThread] = snapshot
+            }
+        }
+    }
+
     /// A round + and a glass pill with dictation and send inside it.
     private var composer: some View {
         VStack(spacing: 6) {
             if !heldSends.isEmpty {
-                QueuedSendList(sends: heldSends) { send in
+                QueuedSendList(sends: heldSends, edit: editQueued) { send in
                     Task { await session.cancelQueued(send, threadId: threadId, in: current) }
                 }
                 .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1464,6 +1484,14 @@ struct MessageRow: View {
             }
         case .activity:
             ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
+            // A turn that failed because Claude Code is too old for the
+            // model: offer to run the updater for the engine this thread uses.
+            if message.tool?.claudeUpdate == true, case let .bot(bot) = chat {
+                ClaudeUpdateCard(
+                    instanceId: bot.currentTaskModelSelection.instanceId,
+                    tint: MausPalette.color(chat.color)
+                )
+            }
         case .compaction:
             ReceiptChip(icon: "square.3.layers.3d", label: message.compaction?.chipText ?? message.text ?? "") {
                 selecting = SelectableText(text: message.compaction?.summary ?? message.text ?? "")
@@ -2356,10 +2384,11 @@ struct StreamingBubble: View {
 }
 
 /// The held sends for one thread, as the desktop's composer shows them: one
-/// line each, deletable, with a note when the harness held them for thread
-/// capacity rather than because a turn is running.
+/// line each, editable and deletable, with a note when the harness held them
+/// for thread capacity rather than because a turn is running.
 private struct QueuedSendList: View {
     let sends: [QueuedSend]
+    let edit: (QueuedSend) -> Void
     let cancel: (QueuedSend) -> Void
 
     private var showsCapacityNote: Bool {
@@ -2384,6 +2413,17 @@ private struct QueuedSendList: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        edit(send)
+                    } label: {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.secondary)
+                            .frame(width: 30, height: 30)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit queued message \(index + 1) of \(sends.count)")
                     Button {
                         cancel(send)
                     } label: {

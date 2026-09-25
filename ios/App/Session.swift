@@ -178,7 +178,7 @@ final class Session: ObservableObject {
         let arguments = ProcessInfo.processInfo.arguments
         if (arguments.contains("-store-preview") || arguments.contains("-computer-switcher-preview")),
            let url = Bundle.main.url(
-               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
+               forResource: arguments.contains("-images-preview") ? "ImagePreview" : arguments.contains("-chat-update-preview") ? "ChatUpdatePreview" : arguments.contains("-chat-presentation-preview") ? "ChatPresentationPreview" : arguments.contains("-threads-preview") ? "ThreadPreview" : "StorePreview",
                withExtension: "json"
            ),
            let data = try? Data(contentsOf: url),
@@ -1132,7 +1132,10 @@ final class Session: ObservableObject {
 
     /// Take back a held message. The row only goes when the computer agrees;
     /// an entry that already drained counts as agreement.
-    func cancelQueued(_ send: QueuedSend, threadId: String, in chat: Chat) async {
+    /// True only when the computer confirmed cancellation, so an
+    /// edit never hands back words that already joined a turn.
+    @discardableResult
+    func cancelQueued(_ send: QueuedSend, threadId: String, in chat: Chat) async -> Bool {
         let connectionID = client?.connection.id
         let destination: MessageDestination
         switch chat {
@@ -1140,15 +1143,30 @@ final class Session: ObservableObject {
         case let .room(room): destination = .room(id: room.id, threadId: threadId)
         }
         var agreed = false
+        var cancelled = false
         await perform {
-            try await $0.cancelQueued(queueId: send.queueId, to: destination)
+            cancelled = try await $0.cancelQueued(queueId: send.queueId, to: destination)
             agreed = true
         }
         // The cancel landed on the computer that owned the row. One selected
         // mid-request has already reset state; its rows are not this cancel's
         // to retire.
-        if agreed, client?.connection.id == connectionID {
-            state.cancelQueued(queueId: send.queueId, threadId: threadId)
+        guard agreed, client?.connection.id == connectionID else { return false }
+        state.cancelQueued(queueId: send.queueId, threadId: threadId)
+        return cancelled
+    }
+
+    /// Run Claude Code's updater for one engine instance on the computer.
+    /// Returns the version it now reports. Throws with the harness's own
+    /// message (already written for people) so the card can show it; an
+    /// unpaired device is flagged the same way `perform` does.
+    func updateClaude(instanceId: String) async throws -> String {
+        guard let client else { throw APIError.transport("Not connected to a computer.") }
+        do {
+            return try await client.updateClaude(instanceId: instanceId)
+        } catch let error as APIError where error.isUnauthorized {
+            status = .unauthorized
+            throw error
         }
     }
 

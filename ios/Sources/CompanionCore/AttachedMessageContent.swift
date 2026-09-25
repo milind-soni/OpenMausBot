@@ -39,6 +39,9 @@ public struct AttachedMessageContent: Hashable, Sendable {
         var visible = ""
         var fence: Fence?
         var htmlBlock: HTMLBlock?
+        // Inside a paste whose opening wrapper line was hidden, so its exact
+        // closing line is hidden too.
+        var hidingPasteWrapper = false
         var cursor = source.startIndex
 
         while cursor < source.endIndex {
@@ -61,7 +64,13 @@ public struct AttachedMessageContent: Hashable, Sendable {
                 case .untilBlank:
                     if line.allSatisfy({ $0 == " " || $0 == "\t" }) { htmlBlock = nil }
                 case let .untilToken(closingToken):
-                    if line.lowercased().contains(closingToken) { htmlBlock = nil }
+                    if line.lowercased().contains(closingToken) {
+                        if hidingPasteWrapper && matches(pastedTextCloseExpression, in: line) {
+                            consumedTransportTag = true
+                        }
+                        htmlBlock = nil
+                        hidingPasteWrapper = false
+                    }
                 }
             } else if let marker = fenceMarker(in: line) {
                 fence = Fence(character: marker.character, length: marker.length)
@@ -70,6 +79,13 @@ public struct AttachedMessageContent: Hashable, Sendable {
                 consumedTransportTag = true
             } else if let openingHTMLBlock = htmlBlockStarting(in: line) {
                 htmlBlock = openingHTMLBlock
+                // The bot needs the <pasted-text> wrapper to tell pasted from
+                // typed text; the person reading their own message does not.
+                if case .untilToken("</pasted-text>") = openingHTMLBlock,
+                   matches(pastedTextOpenExpression, in: line) {
+                    hidingPasteWrapper = true
+                    consumedTransportTag = true
+                }
             }
 
             if !consumedTransportTag {
@@ -166,6 +182,15 @@ public struct AttachedMessageContent: Hashable, Sendable {
         "tr", "track", "ul",
     ].joined(separator: "|")
 
+    /// The exact wrapper lines the desktop composer writes around a paste.
+    private static let pastedTextOpenExpression = try! NSRegularExpression(
+        pattern: #"^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$"#,
+        options: .caseInsensitive
+    )
+    private static let pastedTextCloseExpression = try! NSRegularExpression(
+        pattern: #"^[\t ]*</pasted-text>[\t ]*$"#,
+        options: .caseInsensitive
+    )
     private static let pastedTextStartExpression = try! NSRegularExpression(
         pattern: #"^ {0,3}<pasted-text(?:[\t >]|$)"#,
         options: .caseInsensitive

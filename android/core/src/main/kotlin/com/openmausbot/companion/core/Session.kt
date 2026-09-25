@@ -1133,20 +1133,44 @@ class Session(
      * once the harness confirms, so a failed cancel leaves the words on
      * screen still waiting — which is what is actually true.
      */
-    suspend fun cancelQueued(send: QueuedSend, chat: Chat) {
-        val activeClient = client ?: return
+    /** True only when the computer confirmed cancellation, so an
+     * edit never hands back words that already joined a turn. */
+    suspend fun cancelQueued(send: QueuedSend, chat: Chat): Boolean {
+        val activeClient = client ?: return false
         val destination = when (chat) {
             is Chat.BotChat -> MessageDestination.Bot(chat.bot.id, chat.threadId)
             is Chat.RoomChat -> MessageDestination.Room(chat.room.id, chat.threadId)
         }
         try {
-            activeClient.cancelQueued(send.queueId, destination)
+            val cancelled = activeClient.cancelQueued(send.queueId, destination)
+            if (client !== activeClient) return false
             _state.update { it.forgetQueued(send.queueId, chat.threadId) }
+            return cancelled
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: APIError) {
+            if (client !== activeClient) return false
+            if (error.isUnauthorized) _status.value = Status.Unauthorized
+            _actionError.value = error.message
+            return false
+        }
+    }
+
+    /**
+     * Update Claude Code for the engine a failed turn ran on. The answer is
+     * for the card that asked, not the app-wide error banner: it shows the
+     * version on success and the harness's own words (already written for a
+     * person — "stop the running turn first") on failure.
+     */
+    suspend fun updateClaude(instanceId: String): ClaudeUpdateResult {
+        val activeClient = client ?: return ClaudeUpdateResult.Failed("This computer is offline.")
+        return try {
+            ClaudeUpdateResult.Updated(activeClient.updateClaude(instanceId))
         } catch (error: CancellationException) {
             throw error
         } catch (error: APIError) {
             if (error.isUnauthorized) _status.value = Status.Unauthorized
-            _actionError.value = error.message
+            ClaudeUpdateResult.Failed(error.message ?: "Claude Code could not be updated.")
         }
     }
 
@@ -2190,3 +2214,9 @@ class PairingInProgressException : IllegalStateException("Another pairing attemp
 
 /** Thrown when a burned QR credential is presented again. */
 class SpentPairingCredentialException : IllegalStateException(Session.SPENT_QR_MESSAGE)
+
+/** What became of an in-chat Claude Code update. */
+sealed interface ClaudeUpdateResult {
+    data class Updated(val version: String) : ClaudeUpdateResult
+    data class Failed(val message: String) : ClaudeUpdateResult
+}

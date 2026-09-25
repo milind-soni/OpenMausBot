@@ -307,11 +307,7 @@ describe("splitTranscriptAttachments", () => {
       '<attached-file path="/tmp/real.pdf" name="Actual.pdf" />',
     ].join("\n");
     const parsed = splitTranscriptAttachments(stored);
-    expect(parsed.display).toBe([
-      '<pasted-text index="1">',
-      '<attached-file path="/tmp/pasted.pdf" />',
-      "</pasted-text>",
-    ].join("\n"));
+    expect(parsed.display).toBe('<attached-file path="/tmp/pasted.pdf" />');
     expect(parsed.files).toEqual([{ path: "/tmp/real.pdf", name: "Actual.pdf" }]);
     expect(parsed.images).toEqual([]);
   });
@@ -325,12 +321,28 @@ describe("splitTranscriptAttachments", () => {
     expect(splitTranscriptAttachments(stored)).toEqual({ display: stored, images: [], files: [] });
   });
 
-  it("leaves plain text and other tags untouched", () => {
-    const stored = '<pasted-text index="1">\nhi\n</pasted-text>';
+  it("shows only what was pasted, not the wrapper the bot reads", () => {
+    const stored = 'this is for 31/08/26\n\n<pasted-text index="1">\nWe, personally, been using it\n\nsecond paragraph\n</pasted-text>';
     const { display, images, files } = splitTranscriptAttachments(stored);
-    expect(display).toBe(stored);
+    expect(display).toBe("this is for 31/08/26\n\nWe, personally, been using it\n\nsecond paragraph");
     expect(images).toEqual([]);
     expect(files).toEqual([]);
+  });
+
+  it("hides every pasted block, and keeps a closing tag that belongs to the paste", () => {
+    const stored = [
+      '<pasted-text index="1">', "first", "</pasted-text>", "",
+      '<pasted-text index="2">', "a literal </pasted-text> mention", "</pasted-text>",
+    ].join("\n");
+    // the first line naming the closing token ends the block, as the bot sees it
+    expect(splitTranscriptAttachments(stored).display).toBe(["first", "", "a literal </pasted-text> mention", "</pasted-text>"].join("\n"));
+  });
+
+  it("keeps tags visible when they are not the exact wrapper lines, and for exports", () => {
+    const inline = '<pasted-text index="1">hi</pasted-text>';
+    expect(splitTranscriptAttachments(inline).display).toBe(inline);
+    const stored = '<pasted-text index="1">\nhi\n</pasted-text>';
+    expect(splitTranscriptAttachments(stored, false, false).display).toBe(stored);
   });
 });
 

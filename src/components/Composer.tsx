@@ -11,6 +11,7 @@ import {
   changeDraftAttachmentPending,
   forgetFailedComposerSend,
   markDraftEdited,
+  prependComposerDraft,
   recoverFailedComposerSend,
   rememberFailedComposerSend,
   replaceDraftAttachment,
@@ -220,6 +221,8 @@ export function Composer({
   const [dismissedAt, setDismissedAt] = useState<number | null>(null); // Esc'd this @
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const draftIdRef = useRef(draftId);
+  draftIdRef.current = draftId;
   // the latest caret, readable from callbacks without re-creating them
   const caretRef = useRef(0);
   caretRef.current = caret;
@@ -401,6 +404,26 @@ export function Composer({
     }
   };
   useEffect(() => setSteering(false), [threadId, queueHeadId]);
+  // Edit pulls a queued message back into the composer. The server removes it
+  // from the queue first; only a confirmed removal hands the words back, so a
+  // message that already drained into a turn can never also be resent.
+  const editQueued = (queueId: string) => {
+    const queued = queuedMessages.find((item) => item.queueId === queueId);
+    if (!queued) return;
+    const targetDraftId = draftId;
+    const onCancelled = () => {
+      prependComposerDraft(targetDraftId, queued.text);
+      if (targetDraftId !== draftIdRef.current) return;
+      requestAnimationFrame(() => {
+        const input = inputRef.current;
+        if (!input) return;
+        input.focus();
+        input.setSelectionRange(queued.text.length, queued.text.length);
+      });
+    };
+    if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId, onCancelled });
+    else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId, onCancelled });
+  };
   // Double-Enter gesture: when a send lands as a queued chip on a busy
   // steer-capable thread (live steer lost its race, an attachment, an
   // older CLI), a second Enter within a short window pulls that queue into
@@ -877,6 +900,7 @@ export function Composer({
             if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
             else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
           }}
+          onEdit={locked ? undefined : editQueued}
         />
         <div className="relative">
           {/* App-ground from the pill midline down, full-bleed. Bubbles may
