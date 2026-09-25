@@ -273,4 +273,15 @@ class QueuedSendTest {
         val body = """{"images":true,"queueing":true}"""
         assertEquals(true, json.decodeFromString<InstanceCapabilities>(body).queueing)
     }
+
+    @Test
+    fun `editing a held send leads with its words and keeps the typed draft`() {
+        val send = QueuedSend("q1", "actually stop at 10")
+        assertEquals("actually stop at 10", send.editDraft(keeping = ""))
+        assertEquals("actually stop at 10", send.editDraft(keeping = "  \n"))
+        assertEquals(
+            "actually stop at 10\n\nand use the smaller model",
+            send.editDraft(keeping = "and use the smaller model"),
+        )
+    }
 }
