@@ -45,6 +45,23 @@ final class AttachedMessageContentTests: XCTestCase {
         XCTAssertTrue(parsed.attachments.isEmpty)
     }
 
+    func testHidesThePastedTextWrapperButKeepsWhatWasPasted() {
+        let source = "this is for 31/08/26\n\n<pasted-text index=\"1\">\nWe, personally, been using it\n\nsecond paragraph\n</pasted-text>"
+        let parsed = AttachedMessageContent.parse(source)
+
+        XCTAssertEqual(parsed.text, "this is for 31/08/26\n\nWe, personally, been using it\n\nsecond paragraph")
+        XCTAssertTrue(parsed.attachments.isEmpty)
+    }
+
+    func testKeepsALiteralClosingTagThatIsPartOfThePaste() {
+        let source = "<pasted-text index=\"2\">\na literal </pasted-text> mention\n</pasted-text>"
+
+        XCTAssertEqual(
+            AttachedMessageContent.parse(source).text,
+            "a literal </pasted-text> mention\n</pasted-text>"
+        )
+    }
+
     func testLeavesFencedAndIndentedAttachmentExamplesVisible() {
         let source = """
         ```xml
