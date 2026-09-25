@@ -1482,7 +1482,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
           request can restore the old task without spilling into the newly
           selected one. ArrowUp-to-edit stays gated on busy because editing
           rewinds the thread, which a live turn forbids (the server 409s it). */}
-      <div ref={composerDockRef} className="absolute inset-x-0 bottom-0 z-[2]">
+      <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2]">
       {/* The bot's run in this ask as a checklist, once it is worth one (a
           verified step, or more than one command). Save fills this thread's
           composer with the run and the person's request and hands the caret

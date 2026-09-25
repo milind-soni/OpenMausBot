@@ -24,6 +24,7 @@ describe("VerifyCard", () => {
   it("lists each step with its label, full command and status, tagging the verified ones, behind labelled controls", () => {
     const markup = render();
     expect(markup).toContain(`aria-label="${t("chat.verify.aria")}"`);
+    expect(markup).toContain('class="pointer-events-auto ');
     expect(markup).toContain(`>${t("chat.verify.title")}<`);
     expect(markup).toContain("3 steps · 2 verified · 1 failed · 1 running");
     expect(markup).toContain(">doctor<");
