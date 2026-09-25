@@ -148,6 +148,26 @@ export function stripOmbAskBlock(output: string): string {
   return output.replace(OMB_ASK_FENCE_GLOBAL, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** The prompt contract that teaches a model the turn-held ask transport: end
+ * the reply with a fenced `omb-ask` block carrying the questions, and the
+ * answers come back on the next prompt. A harness that cannot pause mid-run
+ * (the BoxAgent transport) appends this to every prompt; the caps in the text
+ * are the constants above, so the taught contract and the parser cannot
+ * drift apart. */
+export function ombAskProtocolPrompt(): string {
+  return [
+    "",
+    "## Asking the person a question",
+    "When a decision belongs to the person, end your reply with a fenced block exactly like this:",
+    "",
+    "```omb-ask",
+    '{"questions":[{"question":"Ship the release now?","header":"Release","options":[{"label":"Ship now"},{"label":"Wait for the QA signoff"}]}]}',
+    "```",
+    "",
+    `The block must be the last thing in your reply. You may ask up to ${MAX_QUESTIONS} questions at once, each with up to ${MAX_OPTIONS} options; the person can always answer in their own words. Their answers arrive on your next prompt as \`Q:\`/\`A:\` lines — never invent them.`,
+  ].join("\n");
+}
+
 /** The one line the card subtitle and a spoken prompt show. */
 export function askQuestionSummary(questions: readonly AskQuestion[]): string {
   const first = questions[0]?.question ?? "";

@@ -36,6 +36,8 @@ import { gateServer, resultBudget } from "../mcp-gate-config.ts";
 import { newEventId, newId } from "../contracts.ts";
 import { askInputSummary, commandSummary, toolDetailPreview } from "../tool-summary.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
+import { sessionIdlePolicy } from "./session-idle.ts";
+import { parseVersionTriple, versionAtLeast } from "./acp/core.ts";
 import {
   applyClaudeInject,
   decodeInjectId,
@@ -326,16 +328,7 @@ export const CLAUDE_CONTEXT_CONTROL_MIN_VERSION: ClaudeCliVersion = CLAUDE_FLAG_
  * is the version. Null when nothing parses, e.g. a wrapper that prints its
  * own banner first — see claudeCliSupports for how that is treated. */
 export function parseClaudeCliVersion(stdout: string | null | undefined): ClaudeCliVersion | null {
-  const match = /(\d+)\.(\d+)\.(\d+)/.exec(stdout ?? "");
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function versionAtLeast(installed: ClaudeCliVersion, floor: ClaudeCliVersion): boolean {
-  for (let i = 0; i < 3; i += 1) {
-    if (installed[i] !== floor[i]) return installed[i] > floor[i];
-  }
-  return true;
+  return parseVersionTriple(stdout ?? "");
 }
 
 /** Whether a CLI reporting `version` accepts `flag`. A version that could
@@ -1009,11 +1002,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       finishClose?: () => Promise<void>;
     }
     const sessions = new Map<string, Session>();
-    const configuredIdleMinimum = Number(process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS);
-    const sessionIdleMinimum = Number.isFinite(configuredIdleMinimum) && configuredIdleMinimum > 0
-      ? configuredIdleMinimum
-      : 10_000;
-    const SESSION_IDLE_MS = Math.max(sessionIdleMinimum, Number(process.env.OMB_CLAUDE_SESSION_IDLE_MS) || 10 * 60_000);
+    const { idleMs: SESSION_IDLE_MS } = sessionIdlePolicy("CLAUDE");
 
     const stopSession = (session: Session) => {
       void killCliTree(session.child).then((stopped) => {

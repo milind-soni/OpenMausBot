@@ -26,6 +26,7 @@ import {
   answerWithoutPreamble,
   askQuestionSummary,
   capAnswerEcho,
+  ombAskProtocolPrompt,
   parseOmbAskQuestions,
   questionChoices,
   stripOmbAskBlock,
@@ -43,21 +44,6 @@ const MODELS = {
     { id: "gpt-5.4", label: "GPT-5.4 (Codex) · on the box" },
   ],
 };
-
-/** The ask contract appended to every prompt. The box harness cannot pause
- * mid-run, so a question rides the run's final output as a fenced block and
- * OMB parses it at settle — the turn-held transport. */
-const ASK_PROTOCOL = [
-  "",
-  "## Asking the person a question",
-  "When a decision belongs to the person, end your reply with a fenced block exactly like this:",
-  "",
-  "```omb-ask",
-  '{"questions":[{"question":"Ship the release now?","header":"Release","options":[{"label":"Ship now"},{"label":"Wait for the QA signoff"}]}]}',
-  "```",
-  "",
-  "The block must be the last thing in your reply. You may ask up to 6 questions at once, each with up to 12 options; the person can always answer in their own words. Their answers arrive on your next prompt as `Q:`/`A:` lines — never invent them.",
-].join("\n");
 
 /** Any fence whose info string names the ask protocol, even when its body
  * does not parse: the marker for "the model tried to ask and failed". */
@@ -165,7 +151,7 @@ export const BoxAgentDriver: ProviderDriver<BoxAgentConfig> = {
       const prompt = [
         turn.system,
         "You are working on the assigned cloud computer — use its desktop, Chrome, and shell within the access described above.",
-        ASK_PROTOCOL,
+        ombAskProtocolPrompt(),
         ...(correction ? [correction] : []),
         "",
         turn.text,

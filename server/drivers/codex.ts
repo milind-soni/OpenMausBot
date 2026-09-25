@@ -42,6 +42,7 @@ import { volatileContextNote, withContextNote } from "./prompt-split.ts";
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import { CodexDeviceAuthController } from "./codex-device-auth.ts";
 import { codexAccountEmail } from "./codex-identity.ts";
+import { versionAtLeast, type VersionTriple } from "./acp/core.ts";
 import { classifyResumeFailure, mayReplay, recoveryPromptFor } from "../resume-recovery.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
 import { parseProtocolAskQuestions, questionAnswersById, questionChoices } from "../../shared/ask-question.ts";
@@ -77,13 +78,8 @@ export function codexPredatesAstra(version: string): boolean {
   const match = /\bcodex-cli\s+v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9a-z.-]+)?(?![\d.])\b/i.exec(value)
     ?? /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9a-z.-]+)?$/i.exec(value);
   if (!match) return false;
-  const installed = match.slice(1, 4).map(Number);
-  for (let i = 0; i < ASTRA_MIN_CODEX_VERSION.length; i += 1) {
-    if (installed[i] !== ASTRA_MIN_CODEX_VERSION[i]) {
-      return installed[i] < ASTRA_MIN_CODEX_VERSION[i];
-    }
-  }
-  return false;
+  const installed: VersionTriple = [Number(match[1]), Number(match[2]), Number(match[3])];
+  return !versionAtLeast(installed, ASTRA_MIN_CODEX_VERSION);
 }
 
 /** Ask the configured executable to update itself. This matters when the user

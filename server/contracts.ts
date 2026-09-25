@@ -438,6 +438,36 @@ export interface ModelCatalog {
   }>;
 }
 
+/** The picker label for a model id when the catalog row carries no display
+ * name: split on the word breaks the catalog treats as separators and
+ * capitalize each part ("gpt-5.4-mini" → "Gpt 5.4 Mini"). Each harness
+ * passes its own break class so existing labels stay byte-for-byte. */
+export function titleCaseModelId(id: string, wordBreaks: RegExp): string {
+  return id
+    .split(wordBreaks)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+/** A picker label that carries a second facet — a display name, a provider
+ * host — beside the model id, unless the facet is already what the id says.
+ * `redundantWhen` decides what counts as "already said" and `decorate` how
+ * the facet is appended, so every harness's labels stay exactly what they
+ * were while the shape is written once. */
+export function qualifiedModelLabel(
+  id: string,
+  qualifier: string | null | undefined,
+  options: {
+    redundantWhen?: (id: string, qualifier: string) => boolean;
+    decorate?: (qualifier: string) => string;
+  } = {},
+): string {
+  const { redundantWhen = () => false, decorate = (facet) => ` — ${facet}` } = options;
+  if (!qualifier || redundantWhen(id, qualifier)) return id;
+  return `${id}${decorate(qualifier)}`;
+}
+
 export interface DriverCreateInput<Config> {
   instanceId: InstanceId;
   displayName: string | undefined;

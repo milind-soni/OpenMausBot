@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { versionFromProbe } from "./core.ts";
+import { parseVersionTriple, versionAtLeast, versionFromProbe } from "./core.ts";
 
 describe("versionFromProbe", () => {
   it("prefers stdout", () => {
@@ -21,5 +21,28 @@ describe("versionFromProbe", () => {
     expect(versionFromProbe("", "")).toBeNull();
     expect(versionFromProbe(undefined, undefined)).toBeNull();
     expect(versionFromProbe("  \n", "\n")).toBeNull();
+  });
+});
+
+describe("parseVersionTriple", () => {
+  it("takes the first dotted triple wherever it appears", () => {
+    expect(parseVersionTriple("2.1.232 (Claude Code)")).toEqual([2, 1, 232]);
+    expect(parseVersionTriple("banner\n1.0.60 (Claude Code)")).toEqual([1, 0, 60]);
+    expect(parseVersionTriple("codex-cli 0.153.1")).toEqual([0, 153, 1]);
+  });
+
+  it("is null when no triple parses", () => {
+    expect(parseVersionTriple("")).toBeNull();
+    expect(parseVersionTriple("no numbers here")).toBeNull();
+  });
+});
+
+describe("versionAtLeast", () => {
+  it("compares componentwise, equal counts as current", () => {
+    expect(versionAtLeast([2, 1, 232], [2, 1, 232])).toBe(true);
+    expect(versionAtLeast([2, 1, 122], [2, 1, 121])).toBe(true);
+    expect(versionAtLeast([2, 1, 121], [2, 1, 122])).toBe(false);
+    expect(versionAtLeast([3, 0, 0], [2, 1, 232])).toBe(true);
+    expect(versionAtLeast([1, 0, 122], [2, 1, 232])).toBe(false);
   });
 });

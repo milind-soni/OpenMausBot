@@ -175,6 +175,26 @@ env_key = "UNSLOTH_STUDIO_AUTH_TOKEN"
     expect(catalog.options.map((option) => option.id)).not.toContain(encodeCodexSelection("omlx", "ignored"));
   });
 
+  it("refuses a relative CODEX_HOME instead of falling back to ~/.codex", async () => {
+    const home = scratchHome({
+      "config.toml": `
+model_provider = "omlx"
+model = "leaked-default"
+
+[model_providers.omlx]
+name = "oMLX"
+base_url = "http://127.0.0.1:9/v1"
+`,
+    });
+
+    const catalog = await readCodexModelCatalog({ HOME: home, CODEX_HOME: "relative-codex" });
+
+    expect(catalog.default).toBe(STATIC_CODEX_MODELS.default);
+    expect(catalog.options.map((option) => option.id)).not.toContain(
+      encodeCodexSelection("omlx", "leaked-default"),
+    );
+  });
+
   it("ignores invalid slugs and a default that is not in the catalog", async () => {
     const home = scratchHome({
       "config.toml": `
@@ -206,7 +226,7 @@ name = "oMLX"
     const instance = await CodexDriver.create({
       instanceId: "codex-catalog",
       displayName: "Codex",
-      environment: { HOME: home },
+      environment: { HOME: home, USERPROFILE: home },
       enabled: true,
       config: { ...CodexDriver.defaultConfig(), cli: FAKE_CLI },
     });

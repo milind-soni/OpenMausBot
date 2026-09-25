@@ -7,7 +7,15 @@ import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { augmentedPath, registerPathDir, resetPathCache, resetPathCacheForTests, splitCliString } from "./env-path.ts";
+import {
+  augmentedPath,
+  harnessHome,
+  registerPathDir,
+  resetPathCache,
+  resetPathCacheForTests,
+  splitCliString,
+  userHome,
+} from "./env-path.ts";
 import { resolveCli } from "./procs.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -127,6 +135,37 @@ describe("augmentedPath", () => {
       resetPathCacheForTests();
       rmSync(localAppData, { recursive: true, force: true });
     }
+  });
+});
+
+describe("userHome / harnessHome", () => {
+  const realPlatform = process.platform;
+  const setPlatform = (value: NodeJS.Platform) => {
+    Object.defineProperty(process, "platform", { value, configurable: true });
+  };
+
+  afterEach(() => {
+    setPlatform(realPlatform);
+  });
+
+  it("prefers HOME off Windows and USERPROFILE on Windows", () => {
+    setPlatform("linux");
+    expect(userHome({ HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" })).toBe("/home/alice");
+    setPlatform("win32");
+    expect(userHome({ HOME: "/home/alice", USERPROFILE: "C:\\Users\\alice" })).toBe("C:\\Users\\alice");
+  });
+
+  it("falls back through the other variable to homedir", () => {
+    setPlatform("linux");
+    expect(userHome({ USERPROFILE: "/home/alice" })).toBe("/home/alice");
+    setPlatform("win32");
+    expect(userHome({ HOME: "C:\\Users\\alice" })).toBe("C:\\Users\\alice");
+    expect(userHome({})).toBe(homedir());
+  });
+
+  it("puts each harness's state directory under the user home", () => {
+    expect(harnessHome("qwen", { HOME: "/home/alice" })).toBe(join("/home/alice", ".qwen"));
+    expect(harnessHome("codex", { HOME: "/home/alice" })).toBe(join("/home/alice", ".codex"));
   });
 });
 
