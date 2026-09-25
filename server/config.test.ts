@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { JsonValue } from "./schema.ts";
 
 import { customMcpServers,
@@ -1419,5 +1419,72 @@ describe("customMcpServers with url entries", () => {
       docs: { type: "sse", url: "https://docs.example/sse", headers: { Authorization: "Bearer t" } },
       notes: { command: "npx", args: [], env: {} },
     });
+  });
+});
+
+describe("loadConfig with an unusable config.json", () => {
+  const path = join(DATA_DIR, "config.json");
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    rmSync(path, { force: true });
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    loadConfig(); // reset the once-per-problem memory with a clean run
+    warn.mockClear();
+  });
+  afterEach(() => {
+    warn.mockRestore();
+    rmSync(path, { force: true });
+  });
+
+  it("stays quiet on a first run with no file", () => {
+    expect(loadConfig().instances).toBeUndefined();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("names the file and the failing field when one schema error drops the whole file", () => {
+    // threads without maxConcurrentPerBot fails the stored schema, which drops
+    // every other section (here: the Claude instance) along with it.
+    writeFileSync(path, JSON.stringify({
+      instances: { claude: { driver: "claudeAgent", displayName: "Claude (work)" } },
+      threads: { eventLogMaxBytes: 1_000_000 },
+    }));
+    expect(loadConfig().instances).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const message = String(warn.mock.calls[0]?.[0]);
+    expect(message).toContain(path);
+    expect(message).toContain("maxConcurrentPerBot");
+  });
+
+  it("warns about invalid JSON too, and only once while the file stays broken", () => {
+    writeFileSync(path, "{ not json");
+    loadConfig();
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("using defaults");
+  });
+
+  it("never logs credential fragments from a JSON parser error", () => {
+    writeFileSync(path, "sk-fixture");
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0])).toContain("invalid JSON");
+    expect(String(warn.mock.calls[0]?.[0])).not.toContain("sk-fixture");
+  });
+
+  it("warns again after a repaired or removed file becomes broken", () => {
+    for (const recovered of ["{}", null]) {
+      writeFileSync(path, "{ not json");
+      loadConfig();
+      warn.mockClear();
+      if (recovered === null) rmSync(path);
+      else writeFileSync(path, recovered);
+      loadConfig();
+      expect(warn).not.toHaveBeenCalled();
+      writeFileSync(path, "{ not json");
+      loadConfig();
+      expect(warn).toHaveBeenCalledTimes(1);
+      warn.mockClear();
+    }
   });
 });

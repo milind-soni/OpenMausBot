@@ -99,7 +99,7 @@ describe("GrokAgentDriver catalog", () => {
     const instance = await GrokAgentDriver.create({
       instanceId: "grok-catalog",
       displayName: "Grok",
-      environment: { HOME: home },
+      environment: { HOME: home, USERPROFILE: home },
       enabled: true,
       config: GrokAgentDriver.defaultConfig(),
     });

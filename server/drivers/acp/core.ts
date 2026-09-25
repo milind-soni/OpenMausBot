@@ -71,6 +71,7 @@ import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { extractMcpImages } from "../../mcp-tool-images.ts";
 import { redactSecretsInText } from "../../redact.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
+import { sessionIdlePolicy } from "../session-idle.ts";
 
 /** ACP vendors put the actionable cause in error.data while keeping the
  * JSON-RPC message generic. Only surface known text fields, never a response
@@ -446,6 +447,28 @@ export function versionFromProbe(stdout: string | undefined, stderr: string | un
   return err || null;
 }
 
+/** A parsed dotted version triple — the shape every harness's version gate
+ * compares, whatever its banner looks like. */
+export type VersionTriple = readonly [number, number, number];
+
+/** The first dotted numeric triple in a version banner, or null when there is
+ * none. A wrapper that prints its own banner first still parses: the triple
+ * is the version wherever it appears. */
+export function parseVersionTriple(value: string): VersionTriple | null {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(value);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Whether `installed` compares at or above `floor`, componentwise. Every
+ * version floor in the tree is a dotted triple. */
+export function versionAtLeast(installed: VersionTriple, floor: VersionTriple): boolean {
+  for (let i = 0; i < 3; i += 1) {
+    if (installed[i] !== floor[i]) return installed[i] > floor[i];
+  }
+  return true;
+}
+
 export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> {
   const DRIVER_KIND = support.driverKind;
   const SOURCE = support.nativeSource;
@@ -512,11 +535,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // contract prompts the live session instead of paying the handshake
       // again. An idle session closes after SESSION_IDLE_MS of quiet.
       const sessions = new Map<string, AcpSession>();
-      const configuredIdleMinimum = Number(process.env.OMB_ACP_SESSION_IDLE_MIN_MS);
-      const sessionIdleMinimum = Number.isFinite(configuredIdleMinimum) && configuredIdleMinimum > 0
-        ? configuredIdleMinimum
-        : 10_000;
-      const SESSION_IDLE_MS = Math.max(sessionIdleMinimum, Number(process.env.OMB_ACP_SESSION_IDLE_MS) || 10 * 60_000);
+      const { idleMs: SESSION_IDLE_MS } = sessionIdlePolicy("ACP");
 
       const closeSession = (threadId: string, why: string) => {
         const session = sessions.get(threadId);

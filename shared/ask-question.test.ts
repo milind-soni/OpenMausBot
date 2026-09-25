@@ -10,6 +10,7 @@ import {
   MAX_ANSWER_ECHO,
   MAX_OPTIONS,
   MAX_QUESTIONS,
+  ombAskProtocolPrompt,
   parseAskQuestions,
   parseChoices,
   parseOmbAskQuestions,
@@ -260,6 +261,16 @@ describe("stripOmbAskBlock", () => {
   it("leaves output without a block untouched", () => {
     const output = "Just prose, twice over.\n\nNothing fenced here.";
     expect(stripOmbAskBlock(output)).toBe(output);
+  });
+});
+
+describe("ombAskProtocolPrompt", () => {
+  it("teaches the fence with the shared caps, so the contract and parser cannot drift", () => {
+    const text = ombAskProtocolPrompt();
+    expect(text).toContain("## Asking the person a question");
+    expect(text).toContain("```omb-ask");
+    expect(text).toContain(`up to ${MAX_QUESTIONS} questions at once, each with up to ${MAX_OPTIONS} options`);
+    expect(text.trimEnd().endsWith("never invent them.")).toBe(true);
   });
 });
 

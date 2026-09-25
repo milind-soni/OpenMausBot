@@ -158,6 +158,22 @@ export function resetPathCacheForTests(): void {
   registeredDirs.length = 0;
 }
 
+/** The user's home directory as this platform defines it. Windows keeps the
+ * real profile in USERPROFILE; a HOME that leaks in from a POSIX-flavored
+ * shell is not where Windows CLIs keep their state, so USERPROFILE wins there
+ * and HOME wins everywhere else. */
+export function userHome(env: Record<string, string | undefined> = process.env): string {
+  return process.platform === "win32"
+    ? env.USERPROFILE || env.HOME || homedir()
+    : env.HOME || env.USERPROFILE || homedir();
+}
+
+/** `<user home>/.<name>` — the per-harness state directory every CLI keeps
+ * (`.qwen`, `.grok`, `.codex`…), Windows-correct everywhere. */
+export function harnessHome(name: string, env: Record<string, string | undefined> = process.env): string {
+  return join(userHome(env), `.${name}`);
+}
+
 /** Every `name` binary on the augmented PATH as absolute paths, in PATH
  * order (first = what a bare name would run). Used by the Engines panel's
  * "detected" dropdown and the /api/cli-candidates endpoint. A path-ish

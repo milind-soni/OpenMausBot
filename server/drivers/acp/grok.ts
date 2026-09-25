@@ -4,10 +4,10 @@
 // The generic protocol runtime lives in acp/core.ts; this file is only the
 // per-harness quirks. Verified against grok 1.0.0.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 
 import type { ModelCatalog } from "../../contracts.ts";
+import { harnessHome } from "../../env-path.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -22,11 +22,6 @@ export const STATIC_GROK_MODELS: ModelCatalog = {
 
 const SLUG = /^[a-z0-9][a-z0-9._-]*$/i;
 
-function grokHome(env: Record<string, string | undefined>): string {
-  if (env.GROK_HOME) return env.GROK_HOME;
-  return join(env.HOME || env.USERPROFILE || homedir(), ".grok");
-}
-
 function unquote(raw: string): string {
   const value = raw.trim();
   if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
@@ -38,7 +33,7 @@ function unquote(raw: string): string {
 /** Local slugs from ~/.grok/config.toml, plus the cloud defaults.
  *  `grok -m <slug>` already accepts these; the picker just didn't list them. */
 export function readGrokModelCatalog(env: Record<string, string | undefined> = process.env): ModelCatalog {
-  const path = join(grokHome(env), "config.toml");
+  const path = join(env.GROK_HOME || harnessHome("grok", env), "config.toml");
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -123,7 +118,7 @@ export function ensureGrokInjectSlug(
   const host = localHost(inject.host);
   if (!host) return modelId;
 
-  const path = join(grokHome(env), "config.toml");
+  const path = join(env.GROK_HOME || harnessHome("grok", env), "config.toml");
   let text = "";
   try {
     text = readFileSync(path, "utf8");
@@ -269,7 +264,7 @@ const support: AcpSupport = {
   // an unauthenticated CLI is a user action, not something to paper over.
   pickAuthMethod: (methods) => (methods.some((m) => m.id === "cached_token") ? "cached_token" : null),
   authFailure: "fail",
-  isAuthenticated: () => existsSync(join(homedir(), ".grok", "auth.json")),
+  isAuthenticated: (env) => existsSync(join(harnessHome("grok", env), "auth.json")),
 
   // `--append-system-prompt`/`--rules` are accepted by the CLI but do NOT
   // reach the agent-stdio system prompt (verified against 1.0.0), so the

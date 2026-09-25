@@ -470,6 +470,7 @@ describe("Qwen / Hermes ACP turns", () => {
       displayName: "Hermes",
       environment: {
         HOME: home,
+        USERPROFILE: home,
         FAKE_ACP_DUMP: dump,
         OPENAI_API_KEY: "8989",
         OPENROUTER_API_KEY: "sk-or-should-not-leak",

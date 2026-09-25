@@ -1,5 +1,6 @@
 // Fetch a skill's files from where users actually keep skills: a GitHub
-// repo, a folder inside one, or a direct SKILL.md. Network in, plain
+// repo, a folder inside one, a direct SKILL.md, or a skills.sh page that
+// points at one. Network in, plain
 // {path, content} list out — validation, scanning, and storage live in
 // skills.ts, so this file owns exactly one concern and its tests can hand
 // it a fake fetch.
@@ -61,10 +62,12 @@ interface Target {
   repo: string;
   ref?: string;
   path: string;
+  skill?: string;
 }
 
-/** owner/repo, github.com/owner/repo[/tree/<ref>/<path>], or a raw/blob URL
- * straight to a SKILL.md. Anything else is refused, loudly. */
+/** owner/repo, github.com/owner/repo[/tree/<ref>/<path>], a raw/blob URL
+ * straight to a SKILL.md, or a skills.sh/owner/repo[/skill] page. Anything
+ * else is refused, loudly. */
 export function parseSkillSource(input: string): Target | { rawUrl: string } | { error: string } {
   const text = input.trim();
   if (!text) return { error: "paste a GitHub repository, folder, or SKILL.md URL" };
@@ -77,9 +80,20 @@ export function parseSkillSource(input: string): Target | { rawUrl: string } | {
   if (tree) {
     return { owner: tree[1]!, repo: tree[2]!, ref: tree[3], path: tree[4] ?? "" };
   }
+  const registry = text.match(/^https?:\/\/skills\.sh\/([\w.-]+)\/([\w.-]+)(?:\/([\w.-]+))?\/?$/i);
+  if (registry) {
+    if ([registry[1], registry[2]].some((part) => part === "." || part === "..") ||
+      (registry[3] && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/i.test(registry[3]))) {
+      return { error: "that does not look like a skills.sh repository or skill URL" };
+    }
+    // skills.sh is a registry over GitHub: each page installs from
+    // github.com/<owner>/<repo> filtered to the named skill, so resolve to
+    // the repo and remember the slug to filter discovery on.
+    return { owner: registry[1]!, repo: registry[2]!, path: "", skill: registry[3] };
+  }
   const shorthand = text.match(/^([\w.-]+)\/([\w.-]+)$/);
   if (shorthand) return { owner: shorthand[1]!, repo: shorthand[2]!, path: "" };
-  return { error: "that does not look like a GitHub repository, folder, or SKILL.md URL" };
+  return { error: "that does not look like a GitHub or skills.sh repository, folder, or SKILL.md URL" };
 }
 
 const CONTENT_ENTRY = z.object({
@@ -127,23 +141,53 @@ export const MAX_SKILLS_PER_IMPORT = 30;
 const MAX_FOLDERS_WALKED = 24;
 const MAX_CHILDREN_PER_FOLDER = 60;
 
+/** Convert a skill name to a URL-safe slug, mirroring the skills.sh
+ * registry's own toSkillSlug: page slugs derive from each SKILL.md's name
+ * field, which can differ from the folder it lives in. */
+const toSkillSlug = (name: string) =>
+  name.toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+
+/** The name field from a skill folder's SKILL.md frontmatter, or undefined
+ * when it cannot be read. Budget and timeout errors still propagate. */
+async function skillNameFrom(entries: ContentEntry[], fetcher: typeof fetch): Promise<string | undefined> {
+  const skillMd = entries.find((entry) => entry.type === "file" && entry.name === "SKILL.md" && entry.download_url);
+  if (!skillMd) return undefined;
+  try {
+    const text = await fetchText(skillMd.download_url!, fetcher);
+    return text.match(/^---\r?\n([\s\S]*?)\r?\n---/)?.[1]?.match(/^name:\s*(.+)$/m)?.[1]?.trim();
+  } catch (error) {
+    if (error instanceof ImportLimitError || (error instanceof Error && error.name === "TimeoutError")) throw error;
+    return undefined;
+  }
+}
+
 /** Where SKILL.md folders live in real repos, per the registry's own
  * discovery order: the pasted path itself, then skills/, then .claude/skills/
- * and .agents/skills/, then one level of direct children. */
+ * and .agents/skills/, then one level of direct children. A requested
+ * skills.sh slug matches a folder whose name slugifies to it, else a skill
+ * whose SKILL.md name does, like the registry's own installer. */
 export async function discoverSkillDirs(target: Target, fetcher: typeof fetch): Promise<string[]> {
   const root = await listDir(target, target.path, fetcher);
-  if (root.some((entry) => entry.type === "file" && entry.name === "SKILL.md")) {
+  const wanted = target.skill ? toSkillSlug(target.skill) || undefined : undefined;
+  const dirMatches = (dir: string) => !!wanted && toSkillSlug(dir.split("/").at(-1)!) === wanted;
+  const isWanted = async (dir: string, entries: ContentEntry[]) => {
+    if (!wanted) return true;
+    if (dirMatches(dir)) return true;
+    const name = await skillNameFrom(entries, fetcher);
+    return !!name && toSkillSlug(name) === wanted;
+  };
+  if (root.some((entry) => entry.type === "file" && entry.name === "SKILL.md") && (await isWanted(target.path, root))) {
     return [target.path];
   }
   const dirs = root.filter((entry) => entry.type === "dir");
   const found: string[] = [];
   const preferred = ["skills", ".claude", ".agents"];
-  const ordered = [...dirs].sort(
-    (a, b) => (preferred.includes(a.name) ? 0 : 1) - (preferred.includes(b.name) ? 0 : 1),
-  );
+  const rank = (name: string) => (wanted && toSkillSlug(name) === wanted ? 0 : preferred.includes(name) ? 1 : 2);
+  const ordered = [...dirs].sort((a, b) => rank(a.name) - rank(b.name));
+  const enough = () => found.length >= (wanted ? 1 : MAX_SKILLS_PER_IMPORT);
   // The shared fetch budget caps the whole walk, not each nested loop.
   for (const dir of ordered.slice(0, MAX_FOLDERS_WALKED)) {
-    if (found.length >= MAX_SKILLS_PER_IMPORT) break;
+    if (enough()) break;
     const base = dir.name === ".claude" || dir.name === ".agents" ? `${dir.path}/skills` : dir.path;
     let children: ContentEntry[];
     try {
@@ -153,14 +197,19 @@ export async function discoverSkillDirs(target: Target, fetcher: typeof fetch): 
       continue;
     }
     if (children.some((entry) => entry.type === "file" && entry.name === "SKILL.md")) {
-      found.push(base);
+      if (await isWanted(base, children)) found.push(base);
       continue;
     }
-    for (const child of children.filter((entry) => entry.type === "dir").slice(0, MAX_CHILDREN_PER_FOLDER)) {
-      if (found.length >= MAX_SKILLS_PER_IMPORT) break;
+    const childDirs = children.filter((entry) => entry.type === "dir");
+    const exact = wanted ? childDirs.find((child) => dirMatches(child.path)) : undefined;
+    const candidates = exact
+      ? [exact, ...childDirs.filter((child) => child !== exact).slice(0, MAX_CHILDREN_PER_FOLDER - 1)]
+      : childDirs.slice(0, MAX_CHILDREN_PER_FOLDER);
+    for (const child of candidates) {
+      if (enough()) break;
       try {
         const inner = await listDir(target, child.path, fetcher);
-        if (inner.some((entry) => entry.type === "file" && entry.name === "SKILL.md")) found.push(child.path);
+        if (inner.some((entry) => entry.type === "file" && entry.name === "SKILL.md") && (await isWanted(child.path, inner))) found.push(child.path);
       } catch (error) {
         if (error instanceof ImportLimitError || (error instanceof Error && error.name === "TimeoutError")) throw error;
         // unreadable child — skip
@@ -203,7 +252,13 @@ export async function fetchSkillFromSource(
       return { skills: [{ source: parsed.rawUrl, files: [{ path: "SKILL.md", content }] }] };
     }
     const dirs = await discoverSkillDirs(parsed, fetcher);
-    if (!dirs.length) return { error: "no SKILL.md found there — paste a skill folder or a repo with a skills/ directory" };
+    if (!dirs.length) {
+      return {
+        error: parsed.skill
+          ? `no skill named "${parsed.skill}" found there — check the exact name on the skills.sh page`
+          : "no SKILL.md found there — paste a skill folder or a repo with a skills/ directory",
+      };
+    }
     const skills: FetchedSkill[] = [];
     for (const dir of dirs) skills.push(await fetchSkillDir(parsed, dir, fetcher));
     return { skills };

@@ -1062,10 +1062,17 @@ describe("parseSkillSource", () => {
     expect(parseSkillSource("https://github.com/o/r/blob/main/skills/tdd/SKILL.md")).toMatchObject({
       rawUrl: "https://raw.githubusercontent.com/o/r/main/skills/tdd/SKILL.md",
     });
+    expect(parseSkillSource("https://skills.sh/vercel-labs/skills")).toMatchObject({ owner: "vercel-labs", repo: "skills" });
+    expect(parseSkillSource("https://skills.sh/vercel-labs/skills/find-skills")).toMatchObject({
+      owner: "vercel-labs",
+      repo: "skills",
+      skill: "find-skills",
+    });
   });
 
   it("refuses non-GitHub input loudly", () => {
     expect("error" in parseSkillSource("https://evil.example/skill.md")).toBe(true);
     expect("error" in parseSkillSource("")).toBe(true);
+    expect("error" in parseSkillSource("https://skills.sh/only-an-owner")).toBe(true);
   });
 });

@@ -26,6 +26,8 @@ OpenMausBot does not proxy every message through its own model account. It start
 
 Additional driver instances can be declared in local configuration. Unavailable engines remain visible with a reason instead of crashing the provider fleet.
 
+Codex models come from the signed-in CLI's live model list. If that list cannot be read, the picker shows an offline fallback that includes GPT-6 Astra, Sol, and Luna with availability marked unverified. An older CLI may not expose newer models; OpenMausBot checks for a newer stable Codex release and offers an update command for the configured executable. Updating the CLI does not grant model access to an account.
+
 ## Mistral API
 
 Open **Settings → Connections**, save your **Mistral API key**, then choose **Mistral (API)** in a bot's model picker. No CLI installation is needed. The **Test** button checks catalog access without sending a chat message.

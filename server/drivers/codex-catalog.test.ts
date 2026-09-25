@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -175,6 +175,37 @@ env_key = "UNSLOTH_STUDIO_AUTH_TOKEN"
     expect(catalog.options.map((option) => option.id)).not.toContain(encodeCodexSelection("omlx", "ignored"));
   });
 
+  it("refuses a relative CODEX_HOME instead of falling back to ~/.codex", async () => {
+    const home = scratchHome({
+      "config.toml": `
+model_provider = "omlx"
+model = "leaked-default"
+
+[model_providers.omlx]
+name = "oMLX"
+base_url = "http://127.0.0.1:9/v1"
+`,
+    });
+
+    const catalog = await readCodexModelCatalog({ HOME: home, CODEX_HOME: "relative-codex" });
+
+    expect(catalog.default).toBe(STATIC_CODEX_MODELS.default);
+    expect(catalog.options.map((option) => option.id)).not.toContain(
+      encodeCodexSelection("omlx", "leaked-default"),
+    );
+  });
+
+  it("refuses a relative user home just like the identity lookup", async () => {
+    const home = scratchHome({
+      "config.toml": 'model_provider = "omlx"\nmodel = "relative-home-model"\n[model_providers.omlx]\nname = "Fixture"\nbase_url = "http://127.0.0.1:9/v1"\n',
+    });
+    const relativeHome = relative(process.cwd(), home);
+    const catalog = await readCodexModelCatalog({ HOME: relativeHome, USERPROFILE: relativeHome });
+    expect(catalog.options.map((option) => option.id)).not.toContain(
+      encodeCodexSelection("omlx", "relative-home-model"),
+    );
+  });
+
   it("ignores invalid slugs and a default that is not in the catalog", async () => {
     const home = scratchHome({
       "config.toml": `
@@ -206,7 +237,7 @@ name = "oMLX"
     const instance = await CodexDriver.create({
       instanceId: "codex-catalog",
       displayName: "Codex",
-      environment: { HOME: home },
+      environment: { HOME: home, USERPROFILE: home },
       enabled: true,
       config: { ...CodexDriver.defaultConfig(), cli: FAKE_CLI },
     });

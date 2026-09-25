@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
+import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 
 const STATIC_MODELS: ModelCatalog = {
@@ -31,11 +32,7 @@ export type OpenCodeCatalogLoader = (
 ) => Promise<ModelCatalog>;
 
 function labelForModel(id: string): string {
-  return id
-    .split(/[-_.]+/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  return titleCaseModelId(id, /[-_.]+/);
 }
 
 function providerLabel(id: string): string {

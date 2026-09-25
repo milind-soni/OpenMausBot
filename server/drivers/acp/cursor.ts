@@ -9,6 +9,7 @@
 // `acp` subcommand. `session/set_model` is attempted when the CLI supports it;
 // a missing method falls back to the argv `--model` pin.
 import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
+import { titleCaseModelId } from "../../contracts.ts";
 import { execCli } from "../../procs.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 
@@ -100,12 +101,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function labelFor(id: string, explicit?: string): string {
-  if (explicit?.trim()) return explicit.trim();
-  return id
-    .split(/[-_./]+/g)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+  const trimmed = explicit?.trim();
+  return trimmed || titleCaseModelId(id, /[-_./]+/);
 }
 
 function pushModel(

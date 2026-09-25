@@ -1886,18 +1886,33 @@ describe("ClaudeDriver turns (fake CLI)", () => {
   });
 
   it("closes an idle session after the configured window", async () => {
-    process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS = "10";
-    process.env.OMB_CLAUDE_SESSION_IDLE_MS = "50";
+    // Ten seconds is the lowest window the floor allows now; poll the native
+    // log for the close rather than sleeping a fixed window past it.
+    process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS = "10000";
+    process.env.OMB_CLAUDE_SESSION_IDLE_MS = "10000";
     await create();
     await instance.adapter.sendTurn({ threadId: "t-idle", text: "one" });
     await recorder.until((e) => e.type === "turn.completed");
     process.env.FAKE_CLAUDE_DUMP = join(scratch, "idle-dump.json");
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await new Promise<void>((resolve, reject) => {
+      const deadline = Date.now() + 20_000;
+      const log = join(NATIVE_DIR, "t-idle.ndjson");
+      const check = () => {
+        if (Date.now() > deadline) return reject(new Error("idle close was never logged"));
+        try {
+          if (readFileSync(log, "utf8").includes('"close":"idle"')) return resolve();
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") return reject(error);
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
     const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
     const second = await instance.adapter.sendTurn({ threadId: "t-idle", text: "two", resumeCursor: announced });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     expect(JSON.parse(readFileSync(join(scratch, "idle-dump.json"), "utf8")).argv).toContain("--resume");
-  });
+  }, 30_000);
 
   it("an exit before result becomes runtime.error + failed turn", async () => {
     await create("exit-early");

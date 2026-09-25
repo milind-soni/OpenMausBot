@@ -306,7 +306,9 @@ that makes one read-only request to the provider from the server.
   `ANTHROPIC_API_KEY` environment variable is deliberately ignored; use the
   page, `config.json`, or `OMB_ANTHROPIC_API_KEY`.
 - **OpenAI-compatible API key and base URL**: OpenRouter by default, or Groq,
-  Together, a gateway, or `https://api.openai.com/v1` for OpenAI itself. This
+  Together, Requesty (`https://router.requesty.ai/v1`, or
+  `https://router.eu.requesty.ai/v1` for the EU region), a gateway, or
+  `https://api.openai.com/v1` for OpenAI itself. This
   powers the OpenAI-compatible engine. Codex has no key path by design and
   always uses a personal ChatGPT login.
 - **xAI API key**: the Grok API engine and xAI image generation.
