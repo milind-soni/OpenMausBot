@@ -34,7 +34,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   return createElement("span", { "data-test-approval-control": true });
 } }));
 
-const { ChatView, ErrorRow } = await import("./ChatView");
+const { ChatView, ErrorRow, claudeUpdateTarget } = await import("./ChatView");
 afterAll(() => vi.unstubAllGlobals());
 
 const bot: Bot = {
@@ -68,6 +68,26 @@ describe("thread control placement", () => {
     expect(markup).toContain("Full access controls tool approvals, not provider safety checks");
     expect(markup).not.toContain("<button");
     expect(renderToStaticMarkup(createElement(ErrorRow, { message: "Network timeout", onRetry: () => {} }))).toContain("<button");
+  });
+  it("offers to update Claude Code for a too-old install, or hands over the command", () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", snapshot: { state: "available", authenticated: true } } as InstanceInfo;
+    const markup = renderToStaticMarkup(createElement(ErrorRow, {
+      message: "API Error: 400 Claude Code 2.1.268 does not support this model; version 2.1.280 or newer is required.",
+      onRetry: () => {},
+      setupInstance: claude,
+      claudeUpdateInstance: claude,
+    }));
+    expect(markup).toContain("Update Claude for me");
+    expect(markup).toContain("I&#x27;ll do it myself");
+    // the offer replaces the plain Retry until they pick a path
+    expect(markup).not.toContain(">Retry<");
+  });
+  it("updates only a local Claude Code engine from chat", () => {
+    const claude = { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude" } as InstanceInfo;
+    expect(claudeUpdateTarget(claude)).toBe(claude);
+    expect(claudeUpdateTarget({ ...claude, readOnly: true })).toBeUndefined();
+    expect(claudeUpdateTarget({ ...claude, driverKind: "codex" })).toBeUndefined();
+    expect(claudeUpdateTarget(undefined)).toBeUndefined();
   });
   it("offers the matching macOS Settings and relaunch actions only for a named CUA permission failure", () => {
     fixture.platform = "darwin";
