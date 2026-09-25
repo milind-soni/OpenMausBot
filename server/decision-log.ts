@@ -36,8 +36,12 @@ import type { AutoVerdictSource } from "./auto-approve.ts";
 import { redactSecrets } from "./redact.ts";
 import { csvCell } from "./usage-ledger.ts";
 
+/** A verdict's outcome. auto-* rows came from a policy — connector grants,
+ * auto-approve rules — with no card in front of a person; user-* rows
+ * record what a person actually answered. */
 export type DecisionKind =
   | "auto-approved"
+  | "auto-denied"
   | "card-shown"
   | "user-approved"
   | "user-denied"

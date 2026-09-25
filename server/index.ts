@@ -14821,14 +14821,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // Rows are fire-and-forget: a log failure must never take the call
         // (or its refusal) down with it.
         const call = connectorCallFromFrame(body);
-        if (call.kind === "unrecognized") {
+        // A bot with no grants record keeps the pre-grants relay: even an
+        // unreadable frame passes through exactly as it always did.
+        if (call.kind === "unrecognized" && currentSender.connectorTools !== undefined) {
           appendDecision(DATA_DIR, {
             threadId: internalCapability.threadId,
             botId: currentSender.id,
             botName: currentSender.name,
             tool: call.invoked,
             summary: call.reason,
-            decision: "user-denied",
+            decision: "auto-denied",
             source: "connector-scope",
             rule: "connectorTools",
           });
@@ -14859,7 +14861,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   : denial.onGrantedService
                     ? "tool is not in this service's grant"
                     : "service is not granted",
-                decision: "user-denied",
+                decision: "auto-denied",
                 source: "connector-scope",
                 rule: denial.service ? "connectorTools." + denial.service : "connectorTools",
               });
@@ -14880,7 +14882,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             botName: currentSender.name,
             tool: call.names[0],
             summary: ("allowed " + call.names.join(", ")).slice(0, 240),
-            decision: "user-approved",
+            decision: "auto-approved",
             source: "connector-scope",
             rule: verdict.rule,
           });

@@ -108,6 +108,18 @@ describe("evaluateConnectorTools", () => {
     expect(verdict.denials).toEqual([{ tool: "GMAIL_SEND_EMAIL", service: "gmail", onGrantedService: false }]);
   });
 
+  it("treats inherited object keys as no grant", () => {
+    // CONSTRUCTOR_X resolves to the "constructor" service; without the
+    // own-property check the prototype's constructor poses as a grant and
+    // grant.tools.includes throws a 500 into the relay.
+    const verdict = evaluateConnectorTools(["CONSTRUCTOR_X", "TOSTRING_Y"], {});
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.denials).toEqual([
+      { tool: "CONSTRUCTOR_X", service: "constructor", onGrantedService: false },
+      { tool: "TOSTRING_Y", service: "tostring", onGrantedService: false },
+    ]);
+  });
+
   it("allows only the exact tools a service's list names", () => {
     const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: ["GMAIL_SEND_EMAIL"] } };
     expect(evaluateConnectorTools(["GMAIL_SEND_EMAIL"], grants)).toMatchObject({
