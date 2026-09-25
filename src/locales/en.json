@@ -879,6 +879,8 @@
   "settings.threadCleanup.error": "Could not save event log settings. Please try again.",
   "composer.queued.deleteAria": "Delete queued message {index} of {count}",
   "composer.queued.deleteTitle": "Delete this queued message",
+  "composer.queued.editAria": "Edit queued message {index} of {count}",
+  "composer.queued.editTitle": "Edit — move this message back into the composer",
   "composer.send.steer": "Send into the running turn",
   "composer.send.queue": "Queue message",
   "composer.send.message": "Send message",

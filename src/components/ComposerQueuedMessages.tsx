@@ -1,4 +1,4 @@
-import { CornerDownRight, Trash2 } from "lucide-react";
+import { CornerDownRight, Pencil, Trash2 } from "lucide-react";
 
 import type { SteerQueueReason } from "../../shared/wire";
 import { t } from "@/lib/i18n";
@@ -48,7 +48,9 @@ export function doubleEnterSteersQueue(
  * The queue sits directly above the composer rather than pretending these
  * words are already part of the transcript. Only its head owns Steer: room
  * queues drain one item at a time, while bot queues coalesce all waiting
- * items into one follow-up. Delete remains available on every exact queue id.
+ * items into one follow-up. Edit and Delete remain available on every exact
+ * queue id: Edit takes the message out of the queue and hands its words back
+ * to the composer, so nothing unsent is ever changed behind the harness.
  */
 export function QueuedComposerMessages({
   items,
@@ -57,6 +59,7 @@ export function QueuedComposerMessages({
   steering = false,
   steerInterrupts = false,
   onCancel,
+  onEdit,
 }: {
   items: Array<{ queueId: string; text: string; reason?: SteerQueueReason }>;
   onSteer?: () => void;
@@ -66,6 +69,8 @@ export function QueuedComposerMessages({
    * the hint must say what the click really does. */
   steerInterrupts?: boolean;
   onCancel: (queueId: string) => void;
+  /** Pull this queued message back into the composer to tweak or extend it. */
+  onEdit?: (queueId: string) => void;
 }) {
   if (!items.length) return null;
 
@@ -133,6 +138,17 @@ export function QueuedComposerMessages({
                   aria-hidden="true"
                 />
                 {steerLabel}
+              </button>
+            )}
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => onEdit(item.queueId)}
+                aria-label={t("composer.queued.editAria", { index: index + 1, count: items.length })}
+                title={t("composer.queued.editTitle")}
+                className="flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
+              >
+                <Pencil size={14} aria-hidden="true" />
               </button>
             )}
             <button
