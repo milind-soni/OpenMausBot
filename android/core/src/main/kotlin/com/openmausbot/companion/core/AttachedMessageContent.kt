@@ -23,6 +23,9 @@ data class AttachedMessageContent(
             val visible = StringBuilder()
             var fence: Fence? = null
             var htmlBlock: HtmlBlock? = null
+            // Inside a paste whose opening wrapper line was hidden, so its
+            // exact closing line is hidden too.
+            var hidingPasteWrapper = false
             var cursor = 0
             while (cursor < source.length) {
                 val newline = source.indexOf('\n', cursor)
@@ -47,7 +50,9 @@ data class AttachedMessageContent(
                         ?.let { it in line.lowercase() }
                         ?: line.all { it == ' ' || it == '\t' }
                     if (shouldEnd) {
+                        if (hidingPasteWrapper && PASTED_TEXT_CLOSE.matches(line)) consumedTransportTag = true
                         htmlBlock = null
+                        hidingPasteWrapper = false
                     }
                 } else if (marker != null) {
                     fence = Fence(marker.character, marker.length)
@@ -69,6 +74,12 @@ data class AttachedMessageContent(
                         consumedTransportTag = true
                     } else {
                         htmlBlock = htmlBlockStarting(line)
+                        // The bot needs the <pasted-text> wrapper to tell pasted
+                        // from typed text; the person reading it does not.
+                        if (htmlBlock?.closingToken == "</pasted-text>" && PASTED_TEXT_OPEN.matches(line)) {
+                            hidingPasteWrapper = true
+                            consumedTransportTag = true
+                        }
                     }
                 }
 
@@ -155,6 +166,9 @@ data class AttachedMessageContent(
             "param", "search", "section", "summary", "table", "tbody", "td", "tfoot", "th", "thead", "title",
             "tr", "track", "ul",
         ).joinToString("|")
+        /** The exact wrapper lines the desktop composer writes around a paste. */
+        private val PASTED_TEXT_OPEN = Regex("""^ {0,3}<pasted-text(?:[\t ]+index="\d+")?[\t ]*>[\t ]*$""", RegexOption.IGNORE_CASE)
+        private val PASTED_TEXT_CLOSE = Regex("""^[\t ]*</pasted-text>[\t ]*$""", RegexOption.IGNORE_CASE)
         private val PASTED_TEXT_START = Regex("""^ {0,3}<pasted-text(?:[\t >]|$)""", RegexOption.IGNORE_CASE)
         private val TYPE_ONE = Regex(
             """^ {0,3}<(script|pre|style|textarea)(?:[\t ]|>|$)""",
