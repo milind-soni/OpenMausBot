@@ -11,6 +11,7 @@ import { parseOptionsCardInput, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared
 import { normalizeCronSchedule } from "../../shared/routine-schedule.ts";
 
 import { peerName } from "../peer-roster.ts";
+import { renderPeerDeliveryReceipts, type PeerDeliveryOutcome, type PeerDeliveryReceipt } from "../peer-delivery.ts";
 import { catalogProfileFromEnv, SHARED_COMPUTER_TOOL_NAMES, WEEKDAYS } from "./agents-catalog.ts";
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
@@ -390,6 +391,29 @@ function recallSpeaker(hit: Json): string {
   return hit.role === "user" ? "user" : "you";
 }
 
+const isPeerDeliveryOutcome = (value: unknown): value is PeerDeliveryOutcome =>
+  value === "queued" || value === "injected" || value === "failed";
+
+/** The delivery receipt a peer-send answer carries, as one prose line.
+ * Unvalidated JSON stays out: a malformed receipt renders nothing rather
+ * than half a line of somebody else's text. */
+function deliveryNote(r: Json): string {
+  const receipt = (r as { receipt?: unknown }).receipt;
+  if (!receipt || typeof receipt !== "object") return "";
+  const { botId, botName, outcome, detail, taskId, requestId } = receipt as Record<string, unknown>;
+  if (typeof botId !== "string" || !botId || typeof detail !== "string" || !detail) return "";
+  if (!isPeerDeliveryOutcome(outcome)) return "";
+  const parsed: PeerDeliveryReceipt = {
+    botId,
+    ...(typeof botName === "string" && botName ? { botName } : {}),
+    outcome,
+    detail,
+    ...(typeof taskId === "string" && taskId ? { taskId } : {}),
+    ...(typeof requestId === "string" && requestId ? { requestId } : {}),
+  };
+  return renderPeerDeliveryReceipts([parsed]);
+}
+
 /** When a recalled line was said, on the machine's own clock. `toISOString()`
  * answers in UTC, which disagrees with every other day the bot is shown: a
  * bare `since`/`until` date is read as local midnight (recent-work.ts
@@ -559,6 +583,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       method: "POST",
       body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, toBotId, message, depth: DEPTH }),
     });
+    const note = deliveryNote(r);
     if (r.timeout) {
       // The peer's turn outlived the synchronous wait, so the harness
       // converted the ask into a delegation — the reply is not lost.
@@ -568,7 +593,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       const amount = waitedSeconds < 60 ? waitedSeconds : Math.round(waitedSeconds / 60);
       const unit = waitedSeconds < 60 ? "second" : "minute";
       return {
-        text: `${r.toBotName ?? "That bot"} is still working after ${amount} ${unit}${amount === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}`,
+        text: `${r.toBotName ?? "That bot"} is still working after ${amount} ${unit}${amount === 1 ? "" : "s"} — the ask was converted to a delegation so the reply is not lost. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}${note ? `\n\n${note}` : ""}`,
       };
     }
     if (r.busy) {
@@ -578,13 +603,13 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       if (taskId) {
         if (!EXTERNAL_RUNTIME) delegationTaskIdsThisTurn.add(taskId);
         return {
-          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — ${EXTERNAL_RUNTIME ? "it waits for the peer and any required approval" : "it runs after your current turn ends"}. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}`,
+          text: `${r.toBotName ?? "That bot"} is busy right now, so your message was queued as a delegation instead — ${EXTERNAL_RUNTIME ? "it waits for the peer and any required approval" : "it runs after your current turn ends"}. Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Finish your turn now; the result will be delivered to this conversation automatically. Use check_delegation in a later turn only if the user asks for status."}${note ? `\n\n${note}` : ""}`,
         };
       }
-      return { text: `That bot is busy right now — try again after it finishes.` };
+      return { text: `That bot is busy right now — try again after it finishes.${note ? `\n\n${note}` : ""}` };
     }
-    if (r.error) return { text: `Couldn't reach that bot: ${r.error}`, isError: true };
-    return { text: `${r.botName ?? "Bot"} replied:\n${r.text ?? "(no reply)"}` };
+    if (r.error) return { text: `Couldn't reach that bot: ${r.error}${note ? `\n\n${note}` : ""}`, isError: true };
+    return { text: `${r.botName ?? "Bot"} replied:\n${r.text ?? "(no reply)"}${note ? `\n\n${note}` : ""}` };
   }
   if (name === "delegate_bot") {
     const toBotId = String(args.bot_id ?? "").trim();
@@ -600,7 +625,8 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     };
     if (reason) body.reason = reason;
     const r = await api(`/api/internal/delegate-bot`, { method: "POST", body: JSON.stringify(body) });
-    if (r.error) return { text: `Couldn't queue the delegation: ${r.error}`, isError: true };
+    const delivery = deliveryNote(r);
+    if (r.error) return { text: `Couldn't queue the delegation: ${r.error}${delivery ? `\n\n${delivery}` : ""}`, isError: true };
     // Fire-and-forget by contract: the harness returns immediately, the
     // peer turn runs after our current turn finishes. The task id is the
     // bot's claim ticket for the outcome.
@@ -610,7 +636,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const suffix = taskId
       ? ` Task id: ${taskId}. ${EXTERNAL_RUNTIME ? EXTERNAL_STATUS_GUIDANCE : "Acknowledge the assignment and finish your turn; the result will be delivered to this conversation automatically. Do not check or wait for it in this turn."}`
       : "";
-    return { text: `${note}${suffix}` };
+    return { text: `${note}${suffix}${delivery ? `\n\n${delivery}` : ""}` };
   }
   if (name === "check_delegation" || name === "wait_delegation") {
     const taskId = String(args.task_id ?? "").trim();

@@ -259,6 +259,7 @@ import { hostedModelPolicy, HOSTED_MODEL_POLICY_HEADER, HOSTED_PROVIDER_SETTINGS
 import type { ProviderInstance } from "./contracts.ts";
 import { selectDefaultModelSelection, withNewBotEffort } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, peerApprovalFailure, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
+import { peerDeliveryReceipt, type PeerDeliveryReceipt } from "./peer-delivery.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
 import { decideRoomPost, emptyRoomPostBudget, type RoomPostAttempt, type RoomPostBudget } from "./room-post-budget.ts";
 import {
@@ -13800,7 +13801,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const depth = internalCapability.depth;
         if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
         if (toBotRef === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
-        if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop" });
+        if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop", receipt: peerDeliveryReceipt({
+          botId: toBotRef, outcome: "failed", detail: "message chains are limited to one hop — the message was not sent",
+        }) });
         // A unique reachable teammate name is accepted where an id is
         // expected; see resolveTeammate for why.
         const resolvedTo = resolveTeammate(store.bots, internalSender, toBotRef);
@@ -13847,14 +13850,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             MAX_COMMS_DEPTH,
             fromThreadId,
           );
-          if (queued.result !== "ok" || !queued.id) return json(res, 200, { busy: true });
+          if (queued.result !== "ok" || !queued.id) return json(res, 200, { busy: true, receipt: peerDeliveryReceipt({
+            botId: toBotId, botName: target.name, outcome: "failed",
+            detail: "the teammate was busy and the delegation queue refused the fallback — the message was not delivered",
+          }) });
           // An external caller has no source turn whose completion can
           // begin the busy wait. Drain now so the target's idle release
           // retries this handoff, retaining any approval already granted.
           if (internalCapability.generation === EXTERNAL_RUNTIME_GENERATION && !threadBusy(from.id, fromThreadId)) {
             drainThreadDelegations(fromThreadId);
           }
-          return json(res, 200, { busy: true, taskId: queued.id, toBotName: target.name });
+          return json(res, 200, { busy: true, taskId: queued.id, toBotName: target.name, receipt: peerDeliveryReceipt({
+            botId: toBotId, botName: target.name, outcome: "queued", taskId: queued.id,
+            detail: "the teammate was busy; the ask was queued as a delegation instead",
+          }) });
         };
         if (target.busy) return queueBusyFallback();
         let currentFrom = from;
@@ -13881,17 +13890,29 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             fromThreadId,
           );
           requireActiveInternalCapability();
-          if (verdict !== "allow") return json(res, 200, peerApprovalFailure(verdict));
+          if (verdict !== "allow") {
+            const failure = peerApprovalFailure(verdict);
+            return json(res, 200, { ...failure, receipt: peerDeliveryReceipt({
+              botId: toBotId, botName: target.name, outcome: "failed",
+              detail: `peer review ${failure.error} — the message was not sent`,
+            }) });
+          }
           // The card may have been open for minutes. Re-read both records so
           // deleted bots cannot recreate transcripts through stale objects.
           const freshFrom = store.bot(fromBotId);
           const freshTarget = store.bot(toBotId);
           if (!freshFrom || !freshTarget) return json(res, 404, { error: "no such bot" });
           if (!canAccessTeam(freshFrom, freshTarget.section) || freshTarget.hidden) {
-            return json(res, 200, { error: "that bot moved to a different section" });
+            return json(res, 200, { error: "that bot moved to a different section", receipt: peerDeliveryReceipt({
+              botId: toBotId, botName: freshTarget.name, outcome: "failed",
+              detail: "that bot moved to a different section — the message was not sent",
+            }) });
           }
           if (!peerAllowed(freshFrom, freshTarget)) {
-            return json(res, 200, { error: "that bot is no longer an allowed peer" });
+            return json(res, 200, { error: "that bot is no longer an allowed peer", receipt: peerDeliveryReceipt({
+              botId: toBotId, botName: freshTarget.name, outcome: "failed",
+              detail: "that bot is no longer an allowed peer — the message was not sent",
+            }) });
           }
           // Membership can be revoked while the card is open: re-check the
           // same way, so a bot removed from a room mid-approval cannot go on
@@ -13953,20 +13974,37 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             kind: "activity",
             tool: { name: `@${currentTarget.name} is still working — ask converted to a delegation` },
           });
-          return json(res, 200, { timeout: true, taskId, toBotName: currentTarget.name, waitedMs: ASK_BOT_TIMEOUT_MS });
+          return json(res, 200, { timeout: true, taskId, toBotName: currentTarget.name, waitedMs: ASK_BOT_TIMEOUT_MS,
+            receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name, outcome: "injected", taskId,
+              detail: "the teammate's turn started and is still running; only the synchronous wait ended" }) });
         }
         if (outcome.status === "failed" && !outcome.text.trim()) {
           // No partial answer to hand back — mirror the failure where the
           // exchange lives, with the provider's reason instead of silence.
           const why = outcome.stopReason?.trim() ? ` — ${outcome.stopReason.trim().slice(0, 120)}` : "";
           mirrorActivity(commsBus, currentTarget, channel, `Turn failed${why}`, false);
-          return json(res, 200, { botName: currentTarget.name, text: `(the bot's turn failed${why})` });
+          return json(res, 200, { botName: currentTarget.name, text: `(the bot's turn failed${why})`,
+            receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name, outcome: "injected",
+              detail: `the teammate's turn started and failed${why}` }) });
         }
         const reply = outcome.status === "timeout"
           ? outcome.text || "(timed out waiting for the bot to reply)"
           : outcome.text;
         mirrorReply(commsBus, currentTarget, reply, channel);
-        return json(res, 200, { botName: currentTarget.name, text: reply });
+        // A dispatch error arrives as outcome "error" with the reason folded
+        // into text — to the sender it reads like a reply from the peer. The
+        // receipt is what keeps that honest: the turn never started, so the
+        // message was never delivered.
+        const dispatchFailed = outcome.status === "error";
+        return json(res, 200, { botName: currentTarget.name, text: reply,
+          receipt: peerDeliveryReceipt({ botId: toBotId, botName: currentTarget.name,
+            outcome: dispatchFailed ? "failed" : "injected",
+            detail: dispatchFailed
+              ? "the teammate's turn could not start — the message was not delivered"
+              : outcome.status === "timeout"
+                ? "the teammate's turn started and is still running"
+                : "the teammate's turn ran to completion",
+          }) });
       }
       // Async handoff: the source bot queues a task for a peer and goes
       // back to the user; the peer turn runs after the source's
@@ -14128,7 +14166,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             no_target: "no such bot",
             too_many: "too many delegations queued on this turn — finish some first",
           };
-          return json(res, 200, { error: said[queued.result === "ok" ? "no_target" : queued.result] });
+          const refusal = said[queued.result === "ok" ? "no_target" : queued.result];
+          return json(res, 200, { error: refusal, receipt: peerDeliveryReceipt({
+            botId: toBotId, botName: store.bot(toBotId)?.name, outcome: "failed",
+            detail: `${refusal} — nothing was queued`,
+          }) });
         }
         const targetName = store.bot(toBotId)?.name ?? toBotId;
         // The queue normally drains when the source thread's turn completes. A
@@ -14138,20 +14180,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // is nothing to wait for: drain now.
         if (internalCapability.generation === EXTERNAL_RUNTIME_GENERATION && !threadBusy(from.id, fromThreadId)) {
           drainThreadDelegations(fromThreadId);
+          const reviewed = peerReviewRequired(from, fromThreadId);
           return json(res, 200, {
             queued: true,
             taskId: queued.id,
-            message: peerReviewRequired(from, fromThreadId)
+            message: reviewed
               ? `Queued for review — @${targetName} will pick it up once the user approves.`
               : `Delegated — @${targetName} is picking it up now.`,
+            receipt: peerDeliveryReceipt({ botId: toBotId, botName: targetName, outcome: "queued", taskId: queued.id,
+              detail: reviewed
+                ? "the teammate's turn waits on the user's approval"
+                : "the drain started; the teammate's turn has not started yet" }),
           });
         }
+        const reviewed = peerReviewRequired(from, internalCapability.threadId);
         return json(res, 200, {
           queued: true,
           taskId: queued.id,
-          message: peerReviewRequired(from, internalCapability.threadId)
+          message: reviewed
             ? `Queued for review — @${targetName} will only pick it up if the user approves after your turn finishes.`
             : `Delegation queued — @${targetName} will pick it up after your current turn finishes.`,
+          receipt: peerDeliveryReceipt({ botId: toBotId, botName: targetName, outcome: "queued", taskId: queued.id,
+            detail: reviewed
+              ? "the teammate's turn waits on the user's approval after your turn finishes"
+              : "the teammate's turn runs after your current turn finishes" }),
         });
       }
       if (path === "/api/internal/room-targets" || path === "/api/internal/coordinate-bots") {
@@ -14234,6 +14286,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           const accepted: { requestId: string; botId: string; duplicate: boolean; status: string }[] = [];
           const errors: { botId: string; error: string }[] = [];
+          // One receipt per recipient, in the order the caller addressed
+          // them. Dispatch is asynchronous (RoomHandoffs.tick), so a fresh
+          // enqueue is honestly "queued"; a duplicate inherits the state of
+          // the node that already carries this request_key.
+          const receipts: PeerDeliveryReceipt[] = [];
           for (const target of targets) {
             let createdThread: string | undefined;
             try {
@@ -14272,6 +14329,32 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               if (duplicate && createdThread && createdThread !== node.threadId) store.deleteTask(target.botId, createdThread);
               createdThread = undefined; // The durable coordinator now owns this task.
               accepted.push({ requestId: node.id, botId: node.botId, duplicate, status: node.status });
+              // A duplicate request_key lands on the node enqueue already
+              // made. Only a live node can still report: a failed or
+              // cancelled one already fired its report and tick() skips it,
+              // so promising "its result will resume you" would be the one
+              // lie a receipt must never tell.
+              receipts.push(peerDeliveryReceipt({
+                botId: node.botId,
+                botName: store.bot(node.botId)?.name,
+                outcome: duplicate
+                  ? node.status === "running" || node.status === "completed"
+                    ? "injected"
+                    : node.status === "failed" || node.status === "cancelled"
+                      ? "failed"
+                      : "queued"
+                  : "queued",
+                detail: duplicate
+                  ? node.status === "running"
+                    ? "duplicate request_key — this teammate is already running that exact assignment"
+                    : node.status === "completed"
+                      ? "duplicate request_key — this teammate already completed that assignment; the earlier result stands"
+                      : node.status === "failed" || node.status === "cancelled"
+                        ? `duplicate request_key — the earlier assignment ${node.status === "cancelled" ? "was cancelled" : "failed"} and will not rerun or resume you; resend with a new request_key to retry`
+                      : "duplicate request_key — already in flight; its result will resume you automatically"
+                  : "handed to the coordinator; the teammate's turn has not started yet",
+                requestId: node.id,
+              }));
               if (!duplicate) {
                 const recipient = store.bot(target.botId)!;
                 store.appendMessage(address.threadId, { role: "bot", kind: "activity",
@@ -14283,10 +14366,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               }
             } catch (error) {
               if (createdThread) store.deleteTask(target.botId, createdThread);
-              errors.push({ botId: target.botId, error: error instanceof Error ? error.message : String(error) });
+              const said = error instanceof Error ? error.message : String(error);
+              errors.push({ botId: target.botId, error: said });
+              receipts.push(peerDeliveryReceipt({
+                botId: target.botId, botName: store.bot(target.botId)?.name, outcome: "failed", detail: said,
+              }));
             }
           }
-          return json(res, accepted.length ? 200 : 409, { accepted, errors,
+          return json(res, accepted.length ? 200 : 409, { accepted, errors, receipts,
             ...(accepted.length ? { message: "End your turn after sending all work. These actual teammates will reply and resume you automatically. Do not poll or wait." } : { error: errors.map(e => e.error).join("; ") }),
           });
         }
