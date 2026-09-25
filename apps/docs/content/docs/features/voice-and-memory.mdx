@@ -29,7 +29,7 @@ OpenMausBot speaks through any OpenAI-compatible server that runs [Chatterbox](h
 
 1. Start your Chatterbox server locally and note its address, for example `http://127.0.0.1:4123`.
 2. In App Settings, pick **Chatterbox (local)** as the voice engine, paste the server address, and set the model id your server expects (the default is `chatterbox-turbo`).
-3. Pick a voice. Voice ids come from the server's `/v1/models` listing when it has one; otherwise a **Default** entry uses the server's built-in voice.
+3. Pick a voice. Voice ids come from the server's `/v1/models` listing when it has one, or `/v1/audio/voices` when it doesn't; otherwise a **Default** entry uses the server's built-in voice.
 
 There is no API key. OpenMausBot sends the text to the configured server address, so synthesis stays on your machine only when that server is local. Per-agent voice overrides work the same as with the other engines, and a dead or unreachable server is reported as a clear error instead of a hang.
 
