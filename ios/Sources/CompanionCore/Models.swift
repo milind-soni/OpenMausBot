@@ -448,6 +448,14 @@ public struct QueuedSend: Codable, Hashable, Identifiable, Sendable {
         self.text = text
         self.reason = reason
     }
+
+    /// The composer text after this held send is pulled back for editing.
+    /// Its words lead — they were written first — and anything already typed
+    /// stays below them after a blank line, so an edit never drops a draft.
+    public func editDraft(keeping draft: String) -> String {
+        if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+        return "\(text)\n\n\(draft)"
+    }
 }
 
 public struct Bot: Codable, Hashable, Identifiable, Sendable {
