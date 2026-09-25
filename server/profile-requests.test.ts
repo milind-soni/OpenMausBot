@@ -199,11 +199,69 @@ describe("ProfileRequestService", () => {
     const { service, bot } = harness({ name: "Scout" });
     const attempt = (changes: unknown, reason: unknown = "r") =>
       () => service.propose({ botId: bot.id, threadId: bot.threadId, changes, reason });
-    expect(attempt({ notifications: false })).toThrow("unsupported profile field: notifications");
+    expect(attempt({ voice: "alloy" })).toThrow("unsupported profile field: voice");
+    expect(attempt({ autoApprove: true })).toThrow("unsupported profile field: autoApprove");
     expect(attempt({ soul: "x".repeat(24_001) })).toThrow("standing instructions must be at most 24000 bytes");
     expect(attempt({ name: "Kiwi" }, "")).toThrow("reason is required");
-    expect(attempt({})).toThrow("Choose at least one of name, title, description, soul, cwd");
+    expect(attempt({})).toThrow("Choose at least one of name, title, description, soul, cwd, notifications, speakReplies");
     expect(attempt({ name: "Scout" })).toThrow("Nothing would change");
+  });
+
+  it("proposes the alert and voice toggles as one-line before-and-after cards that apply on confirm", async () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { notifications: false }, reason: "r" });
+    expect(proposed.summary).toContain("notifications");
+    const card = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(card.subtitle).toContain("Notifications: on → off");
+    expect(card.subtitle).toContain("Nothing runs.");
+    expect(card.subtitle).not.toContain("Changes what Scout is told");
+    expect(card.profileRequest!.before).toEqual({ notifications: true });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ claimed: true, state: "applied", fields: ["notifications"] });
+    expect(store.bot(bot.id)!.notifications).toBe(false);
+
+    const spoken = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { speakReplies: true }, reason: "r" });
+    const spokenCard = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(spokenCard.subtitle).toContain("Speak replies: off → on");
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: spoken.requestId, behavior: "allow" }))
+      .toMatchObject({ state: "applied" });
+    expect(store.bot(bot.id)!.speakReplies).toBe(true);
+    // The toggles ride the same history rows as every other proposable field.
+    await flushProfileHistory(bot.id);
+    expect(readHistory(bot.id).map((row) => row.field)).toEqual(["speakReplies", "notifications"]);
+    expect(readHistory(bot.id)[0].summary).toBe('speakReplies: "off" → "on"');
+  });
+
+  it("describes a mixed folder-and-toggle card without the instruction line, and a text-plus-toggle card with it", () => {
+    const { service, bot } = harness({ name: "Scout" });
+    const dir = mkdtempSync(join(tmpdir(), "omb-cwd-"));
+    try {
+      const mixed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { cwd: dir, notifications: false }, reason: "r" });
+      expect(mixed.detail).toContain(`Working folder: its private workspace → ${dir}`);
+      expect(mixed.detail).toContain("Notifications: on → off");
+      expect(mixed.detail).toContain("Scout's tools will read and write files in that folder.");
+      // Neither change edits instructions, so the card must not claim it does.
+      expect(mixed.detail).not.toContain("told on every turn");
+      expect(mixed.detail).toContain("Nothing runs.");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+
+    const spoken = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { title: "Tracker", speakReplies: true }, reason: "r" });
+    expect(spoken.detail).toContain('Title: "" → "Tracker"');
+    expect(spoken.detail).toContain("Speak replies: off → on");
+    expect(spoken.detail).toContain("Changes what Scout is told on every turn. Nothing runs.");
+  });
+
+  it("fails a toggle card closed when the toggle moved after the card was prepared", () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { notifications: false }, reason: "r" });
+    store.patchBot(bot.id, { notifications: false });
+    const stale = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" });
+    expect(stale).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    // The toggle already matches the proposal's target state — it must not
+    // be re-applied through a card whose revision no longer holds.
+    expect(store.bot(bot.id)!.notifications).toBe(false);
   });
 
   it("re-checks the cap after redaction, since a mask can be longer than the secret it replaces", () => {

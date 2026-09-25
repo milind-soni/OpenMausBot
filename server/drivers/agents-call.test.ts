@@ -88,3 +88,47 @@ describe("create_bot", () => {
     ]);
   });
 });
+
+describe("propose_profile", () => {
+  it("rejects a non-boolean toggle without proposing the valid half", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    const ctx = context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return {};
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    });
+    const result = await callTool("propose_profile", { description: "Calmer replies.", notifications: "on" }, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("propose_profile notifications and speakReplies must be true or false.");
+    expect(calls).toEqual([]);
+  });
+
+  it("passes boolean toggles through with the other fields", async () => {
+    const calls: Array<{ path: string; body: any }> = [];
+    const result = await callTool("propose_profile", { description: "Calmer replies.", notifications: false, speakReplies: true, reason: "Use calmer replies." }, context({
+      client: {
+        api: async (path, init) => {
+          calls.push({ path, body: JSON.parse(String(init?.body)) });
+          return {};
+        },
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBeFalsy();
+    expect(calls).toEqual([
+      {
+        path: "/api/internal/profile-requests",
+        body: {
+          fromBotId: "bot-voice",
+          fromThreadId: "thread-voice",
+          changes: { description: "Calmer replies.", notifications: false, speakReplies: true },
+          reason: "Use calmer replies.",
+        },
+      },
+    ]);
+  });
+});

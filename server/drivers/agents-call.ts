@@ -944,14 +944,23 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return confirmationResult(r, `${action.replace("_", " ")} on routine ${routineId}`);
   }
   if (name === "propose_profile") {
+    // A non-boolean toggle would be dropped silently while any valid half of
+    // the request went through, applying a partial proposal the model never
+    // described. Reject the whole call instead.
+    if ((args.notifications !== undefined && typeof args.notifications !== "boolean")
+      || (args.speakReplies !== undefined && typeof args.speakReplies !== "boolean")) {
+      return { text: "propose_profile notifications and speakReplies must be true or false.", isError: true };
+    }
     const changes: Json = {};
     if (typeof args.name === "string") changes.name = args.name.trim();
     if (typeof args.title === "string") changes.title = args.title.trim();
     if (typeof args.description === "string") changes.description = args.description.trim();
     if (typeof args.soul === "string") changes.soul = args.soul;
     if (typeof args.cwd === "string") changes.cwd = args.cwd.trim();
+    if (typeof args.notifications === "boolean") changes.notifications = args.notifications;
+    if (typeof args.speakReplies === "boolean") changes.speakReplies = args.speakReplies;
     if (!Object.keys(changes).length) {
-      return { text: "propose_profile needs at least one of name, title, description, soul, or cwd.", isError: true };
+      return { text: "propose_profile needs at least one of name, title, description, soul, cwd, notifications, or speakReplies.", isError: true };
     }
     const forBotId = String(args.for_bot_id ?? "").trim();
     const r = await api("/api/internal/profile-requests", {

@@ -90,10 +90,14 @@ export function recordProfileChange(
 ): void {
   const at = Date.now();
   const rows: HistoryRow[] = [];
+  // Toggles land in history as the same on/off wording the card shows;
+  // every other proposable field is text.
+  const historyText = (value: string | boolean | undefined): string =>
+    value === undefined ? "" : typeof value === "boolean" ? (value ? "on" : "off") : value;
   for (const field of PROFILE_REQUEST_FIELDS) {
-    const b = before[field] ?? "";
-    const a = after[field] ?? "";
-    if (b !== a) rows.push(rowFor(field, at, actor, via, b, a));
+    const b = before[field];
+    const a = after[field];
+    if (b !== a) rows.push(rowFor(field, at, actor, via, historyText(b), historyText(a)));
   }
   if (!rows.length) return;
   const previous = writeQueues.get(botId) ?? Promise.resolve();
