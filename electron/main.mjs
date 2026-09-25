@@ -2676,11 +2676,12 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
 // instead of over the app. Route renderer confirms through the main process
 // so dialog.showMessageBox can anchor it to mainWindow.
 ipcMain.handle("dialog:confirm", localWorkspaceOnly("dialog:confirm", async (_event, message) => {
+  if (typeof message !== "string" || !message.trim() || message.length > 4096 || !mainWindow || mainWindow.isDestroyed()) return false;
   const { response } = await dialog.showMessageBox(mainWindow, {
     type: "warning",
-    message: String(message ?? ""),
+    message,
     buttons: ["OK", "Cancel"],
-    defaultId: 0,
+    defaultId: 1,
     cancelId: 1,
   });
   return response === 0;

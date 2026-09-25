@@ -89,6 +89,11 @@ What the screenshot looks like when the recipe passes (`evidence/chat-ui/chat-ui
 
 The permanent form of this recipe is `scripts/testing/control-omb-ui.e2e.test.ts`:
 
+The fixture also hit-tests the rendered empty band beside **This run**. It
+must target the conversation rather than the transparent dock, while points
+inside the card and composer still target those controls. This checks browser
+pointer targeting, not native OS wheel delivery.
+
 ```sh
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/control-omb-ui.e2e.test.ts
 ```
