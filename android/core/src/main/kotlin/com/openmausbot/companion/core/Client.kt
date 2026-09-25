@@ -174,6 +174,20 @@ class CompanionClient(
         .writeTimeout(AVATAR_GENERATION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Claude Code's own updater can take minutes on the computer, so this
+     * route gets its own deadline instead of the twenty-second action one.
+     */
+    private val claudeUpdateClient = baseClient.newBuilder()
+        .followRedirects(baseClient.followRedirects && !connection.pairedWithServer)
+        .followSslRedirects(baseClient.followSslRedirects && !connection.pairedWithServer)
+        .dns(endpoint?.dns ?: baseClient.dns)
+        .callTimeout(CLAUDE_UPDATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .connectTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(CLAUDE_UPDATE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     /** Read identity without sending the saved bearer to a potentially replaced server. */
     suspend fun environment(): ServerEnvironment {
         connection.requireServerTransport()
@@ -435,6 +449,23 @@ class CompanionClient(
             ),
             avatarGenerationClient,
         ).bot
+
+    /**
+     * Run Claude Code's updater for one engine on the computer and return the
+     * version it now reports. The harness refuses while a Claude turn is
+     * running, and its refusal is already worded for a person.
+     */
+    suspend fun updateClaude(instanceId: String): String {
+        if (!isSafeInstanceId(instanceId)) throw APIError.BadUrl
+        return send<ClaudeUpdateResponse>(
+            makeRequest(
+                "POST",
+                "/api/instances/$instanceId/claude-update",
+                body = JsonObject(emptyMap()),
+            ),
+            claudeUpdateClient,
+        ).version
+    }
 
     suspend fun previewVoice(text: String, voiceId: String): ByteArray {
         val raw = perform(makeRequest(
@@ -873,6 +904,8 @@ class CompanionClient(
 
         private const val ACTION_TIMEOUT_SECONDS = 20L
         private const val AVATAR_GENERATION_TIMEOUT_SECONDS = 150L
+        /** The harness allows the updater three minutes; leave room to hear back. */
+        private const val CLAUDE_UPDATE_TIMEOUT_SECONDS = 200L
         private const val STREAM_IDLE_TIMEOUT_SECONDS = 90L
         private const val AVATAR_MAX_BYTES = 10 * 1_024 * 1_024
         const val SHARE_FILE_MAX_BYTES = 25 * 1_024 * 1_024
@@ -974,6 +1007,16 @@ class CompanionClient(
             value.isNotEmpty() && value.all { it.isLetterOrDigit() || it == '-' || it == '_' }
 
         private fun safeRouteId(value: String): String = if (isSafeRouteId(value)) value else throw APIError.BadUrl
+
+        /**
+         * Engine instance ids are `[\w.-]+` on the harness — dots allowed, which
+         * [isSafeRouteId] rightly refuses everywhere else. ASCII only, and never
+         * a bare dot segment.
+         */
+        private fun isSafeInstanceId(value: String): Boolean =
+            value != "." && value != ".." && INSTANCE_ID.matches(value)
+
+        private val INSTANCE_ID = Regex("^[A-Za-z0-9_.-]+$")
 
         private fun isSafeSendId(value: String): Boolean = value.length in 16..80 && isSafeRouteId(value)
 

@@ -40,6 +40,8 @@ describe("what the app may do", () => {
     ["GET", "/api/config"],
     ["GET", "/api/events"],
     ["GET", "/api/instances"],
+    ["POST", "/api/instances/claude/claude-update"],
+    ["POST", "/api/instances/claude.work/claude-update"],
     ["GET", "/api/team-map"],
     ["GET", "/api/companion/endpoints"],
     ["GET", "/api/bots"],
@@ -231,6 +233,18 @@ describe("what it may not", () => {
 
   // Patterns are anchored, so a path that merely starts right is still a
   // path nobody allowed.
+  it("lets a phone update Claude Code and change nothing else about engines", () => {
+    for (const [method, path] of [
+      ["GET", "/api/instances/claude/claude-update"],
+      ["POST", "/api/instances/../claude-update"],
+      ["POST", "/api/instances/.../claude-update"],
+      ["POST", "/api/instances/%2e%2e/claude-update"],
+      ["PATCH", "/api/instances/claude"],
+    ] as Array<[string, string]>) {
+      expect(allowed(method, path), `${method} ${path}`).toBe(false);
+    }
+  });
+
   it("is not fooled by a prefix", () => {
     expect(allowed("GET", "/api/bots/bot_123/computer")).toBe(false);
     expect(allowed("GET", "/api/botsandthensome")).toBe(false);

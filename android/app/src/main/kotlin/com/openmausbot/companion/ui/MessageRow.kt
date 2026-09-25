@@ -91,6 +91,7 @@ import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
 import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
+import com.openmausbot.companion.core.forTask
 import com.openmausbot.companion.core.TranscriptCard
 import com.openmausbot.companion.core.TranscriptCards
 import com.openmausbot.companion.core.webhookContent
@@ -417,7 +418,17 @@ private fun MessageContent(
         } else {
             CardView(chat, message, haptics)
         }
-        Message.Kind.ACTIVITY -> ActivityChip(message.tool, message.threadRef, openThread)
+        Message.Kind.ACTIVITY -> {
+            ActivityChip(message.tool, message.threadRef, openThread)
+            // Claude Code too old for the model: offer the update on the
+            // engine this bot's thread runs on. Rooms have no single engine.
+            val claudeInstance = (chat as? Chat.BotChat)?.bot
+                ?.let { it.forTask(chat.threadId) ?: it }
+                ?.modelSelection?.instanceId
+            if (message.tool?.claudeUpdate == true && claudeInstance != null) {
+                ClaudeUpdateCard(messageId = message.id, instanceId = claudeInstance)
+            }
+        }
         Message.Kind.COMPACTION -> ReceiptChip(
             label = message.compaction?.chipText ?: message.text.orEmpty(),
             detail = message.compaction?.summary ?: message.text.orEmpty(),

@@ -119,6 +119,10 @@ public struct ToolActivity: Codable, Hashable, Sendable {
     public var spoken: String?
     /// Marks an error fixed by installing something, not by retrying.
     public var setup: Bool?
+    /// Marks an error caused by a Claude Code CLI too old for the chosen
+    /// model; the phone offers to run Claude's updater. Absent on older
+    /// computers, so it stays optional.
+    public var claudeUpdate: Bool?
 }
 
 /// A compaction record: from this message on, rebuilds of the thread's
