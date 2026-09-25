@@ -90,6 +90,7 @@
   "approval.status.allowed": "Allowed",
   "approval.status.cancelled": "Cancelled",
   "approval.status.denied": "Denied",
+  "approval.status.expired": "Expired — ask for a fresh proposal",
   "approval.status.waitingConfirmation": "Waiting for your confirmation below",
   "approval.status.waitingAnswer": "Waiting for your answer below",
   "question.card.named": "{name} has a question",

@@ -5,7 +5,7 @@ import {
   credentialConfigPatch,
   credentialIsConfigured,
   credentialResumeOutcome,
-  isReusableCredentialRequest,
+  isPendingCredentialRequest,
   isCredentialTargetId,
   type CredentialConfig,
   type CredentialTargetId,
@@ -45,16 +45,18 @@ describe("credential request allowlist", () => {
     expect(Object.keys(CREDENTIAL_TARGETS)).toHaveLength(6);
   });
 
-  it("reuses open room cards only for the bot that requested them", () => {
+  it("supersedes open room cards only for the bot that requested them", () => {
     const card = {
       kind: "secret",
       secret: { target: "xaiApiKey" },
       from: { botId: "atlas" },
     };
-    expect(isReusableCredentialRequest(card, "xaiApiKey", "atlas", true)).toBe(true);
-    expect(isReusableCredentialRequest(card, "xaiApiKey", "pixel", true)).toBe(false);
-    expect(isReusableCredentialRequest(card, "xaiApiKey", "pixel", false)).toBe(true);
-    expect(isReusableCredentialRequest({ ...card, secret: { ...card.secret, provided: true } }, "xaiApiKey", "atlas", true)).toBe(false);
+    expect(isPendingCredentialRequest(card, "xaiApiKey", "atlas", true)).toBe(true);
+    expect(isPendingCredentialRequest(card, "xaiApiKey", "pixel", true)).toBe(false);
+    expect(isPendingCredentialRequest(card, "xaiApiKey", "pixel", false)).toBe(true);
+    expect(isPendingCredentialRequest({ ...card, secret: { ...card.secret, provided: true } }, "xaiApiKey", "atlas", true)).toBe(false);
+    expect(isPendingCredentialRequest({ ...card, secret: { ...card.secret, dismissed: true } }, "xaiApiKey", "atlas", true)).toBe(false);
+    expect(isPendingCredentialRequest({ ...card, secret: { ...card.secret, superseded: true } }, "xaiApiKey", "atlas", true)).toBe(false);
   });
 
   it("preserves the original save or decline outcome when retrying", () => {

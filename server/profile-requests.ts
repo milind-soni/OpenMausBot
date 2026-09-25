@@ -5,7 +5,7 @@
 // store call, and staleness is a hash of the five fields instead of a
 // scheduler revision. Everything here is re-validated at confirm time —
 // a card can sit open for days.
-import { lineDiff } from "../shared/line-diff.ts";
+import { soulDiffLines } from "../shared/line-diff.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestCardData, type ProfileRequestChanges } from "../shared/profile-request.ts";
 import { parseBotProfilePatch, type BotProfilePatchInput } from "./bot-profile.ts";
@@ -17,7 +17,6 @@ import { redactSecretsInText } from "./redact.ts";
 import type { BotRecord } from "./store.ts";
 
 const MAX_REASON = 500;
-const MAX_DIFF_LINES = 400;
 const STALE = "This bot's profile changed after this card was prepared. Ask the bot to review it and propose again.";
 const NO_SUCH_BOT = "That bot no longer exists";
 const LABELS: Record<Exclude<(typeof PROFILE_REQUEST_FIELDS)[number], "soul" | "cwd">, string> = {
@@ -34,6 +33,7 @@ export interface OptionCardLike {
   options: string[];
   answered?: string;
   dismissed?: boolean;
+  expired?: boolean;
   requestId?: string;
   tool?: string;
   held?: string;
@@ -69,11 +69,16 @@ export interface ProfileRequestServiceOptions {
 
 export class ProfileRequestError extends Error {
   readonly status: number;
+  /** True when no retry of this card can ever succeed — the proposal went
+   * stale (revision mismatch, target or folder gone) and the card must
+   * settle as expired instead of staying actionable. */
+  readonly terminal: boolean;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, options?: { terminal?: boolean }) {
     super(message);
     this.name = "ProfileRequestError";
     this.status = status;
+    this.terminal = options?.terminal === true;
   }
 }
 
@@ -187,21 +192,7 @@ export function profileCardCopy(
     lines.push(`Working folder: ${before.cwd || PRIVATE_WORKSPACE} → ${changes.cwd || PRIVATE_WORKSPACE}`);
   }
   if (changes.soul !== undefined) {
-    const beforeSoul = before.soul ?? "";
-    const afterSoul = changes.soul;
-    const bytesBefore = Buffer.byteLength(beforeSoul, "utf8");
-    const bytesAfter = Buffer.byteLength(afterSoul, "utf8");
-    lines.push(`SOUL.md (${bytesBefore} → ${bytesAfter} bytes):`);
-    const diff = lineDiff(beforeSoul, afterSoul);
-    if (diff.length > MAX_DIFF_LINES) {
-      // Truncating a diff can hide the very instructions being approved.
-      // The full replacement is already byte-bounded by profile validation
-      // and is readable in the same generic card on desktop and phones.
-      lines.push("Large change — complete proposed instructions (replaces the current SOUL.md):");
-      lines.push(afterSoul || "(empty)");
-    } else {
-      lines.push(...diff);
-    }
+    lines.push(...soulDiffLines(before.soul ?? "", changes.soul));
   }
   // The closing line says the consequence of exactly what is on the card:
   // a folder change moves where the bot's tools read and write; the other
@@ -362,18 +353,27 @@ export class ProfileRequestService {
         if (!settled) throw new ProfileRequestError("This profile confirmation card is no longer available", 409);
         return { claimed: true, state: "already_settled", behavior: "allow" };
       }
+      // An expired card is settled terminal state, not a decision waiting on
+      // a slower click: the proposal it carried can never be confirmed as
+      // prepared, even when the condition that expired it reverses (the
+      // revision matches again, the folder comes back). The committed
+      // receipt above still recovers a write that already happened; nothing
+      // past this point can.
+      if (card.expired) {
+        return { claimed: true, state: "invalid", error: "This profile request expired before it was confirmed. Ask for a fresh proposal.", status: 409 };
+      }
       if (args.behavior === "deny") {
         this.store.patchMessage(args.threadId, message.id, { card: { ...card, answered: "deny", held: undefined } });
         return { claimed: true, state: "denied" };
       }
-      if (!target) throw new ProfileRequestError(NO_SUCH_BOT, 404);
+      if (!target) throw new ProfileRequestError(NO_SUCH_BOT, 404, { terminal: true });
       const crossBot = payload.targetBotId !== payload.botId;
       if (crossBot && this.validateTarget) {
         const refusal = this.validateTarget(payload.botId, payload.targetBotId);
-        if (refusal) throw new ProfileRequestError(refusal, 404);
+        if (refusal) throw new ProfileRequestError(refusal, 404, { terminal: true });
       }
       if (profileRevision(target) !== payload.expectedRevision) {
-        throw new ProfileRequestError(STALE, 409);
+        throw new ProfileRequestError(STALE, 409, { terminal: true });
       }
 
       const { cwd, ...rest } = payload.changes;
@@ -384,7 +384,7 @@ export class ProfileRequestService {
         // may be gone by then. 409 like the stale case — the card is no longer
         // applicable as prepared.
         const checked = validateBotCwd(cwd || null);
-        if (!checked.ok) throw new ProfileRequestError(checked.error, 409);
+        if (!checked.ok) throw new ProfileRequestError(checked.error, 409, { terminal: true });
         patch.cwd = checked.cwd ?? undefined;
       }
       if (!this.store.patchBotProfile(target.id, patch)) throw new ProfileRequestError(NO_SUCH_BOT, 404);
@@ -401,12 +401,16 @@ export class ProfileRequestService {
       const status = error instanceof ProfileRequestError ? error.status : 400;
       const detail = error instanceof Error ? error.message : String(error);
       const saved = this.store.bot(payload.targetBotId)?.lastProfileRequestId === payload.requestId;
+      // A terminal failure (stale revision, target gone) can never be
+      // confirmed as prepared: settle the card as expired with its options
+      // removed so it stops looking actionable, and say so in one line.
+      const expired = !saved && error instanceof ProfileRequestError && error.terminal;
       const notice = card.dismissed && card.options.length === 0
         ? "Profile saved. Recording the operation receipt could not finish; the changes will not be applied again."
         : "Profile saved. Confirm again to finish recording this decision; the changes will not be applied again.";
       try {
         this.store.patchMessage(args.threadId, message.id, {
-          card: { ...card, held: saved ? notice : redactSecretsInText(detail).slice(0, 500) },
+          card: { ...card, ...(expired ? { expired: true, options: [] } : {}), held: saved ? notice : redactSecretsInText(detail).slice(0, 500) },
         });
       } catch { /* The durable profile receipt still permits a safe retry. */ }
       if (saved) return {

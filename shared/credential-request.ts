@@ -89,10 +89,13 @@ export function credentialIsConfigured(config: CredentialConfig, id: CredentialT
   }
 }
 
-export function isReusableCredentialRequest(
+/** A still-pending credential card for this target — the set a newer
+ * request supersedes. Provided, dismissed, and already-superseded cards
+ * keep their settled state untouched. */
+export function isPendingCredentialRequest(
   message: {
     kind?: unknown;
-    secret?: { target?: unknown; provided?: unknown; dismissed?: unknown };
+    secret?: { target?: unknown; provided?: unknown; dismissed?: unknown; superseded?: unknown };
     from?: { botId?: unknown };
   },
   target: CredentialTargetId,
@@ -104,6 +107,7 @@ export function isReusableCredentialRequest(
     message.secret?.target === target &&
     message.secret.provided !== true &&
     message.secret.dismissed !== true &&
+    message.secret.superseded !== true &&
     (!roomThread || message.from?.botId === requestingBotId)
   );
 }

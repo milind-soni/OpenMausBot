@@ -36,7 +36,7 @@ import {
   CREDENTIAL_TARGETS,
   credentialResumeOutcome,
   credentialIsConfigured,
-  isReusableCredentialRequest,
+  isPendingCredentialRequest,
   isCredentialTargetId,
   type CredentialTargetId,
 } from "../shared/credential-request.ts";
@@ -11910,6 +11910,7 @@ async function provideSecretFromPhone(
   const message = secretMessage(context.botId, context.threadId, context.messageId);
   if (!owner || !message?.secret) throw new PhoneSecretError("No such credential request", 404);
   if (message.secret.dismissed) throw new PhoneSecretError("This credential request was dismissed", 409);
+  if (message.secret.superseded) throw new PhoneSecretError("This credential request was superseded by a newer one", 409);
   assertPhoneSecretRequestMatches(context, authenticatedDeviceId, {
     target: message.secret.target,
     requestKey: message.secret.requestKey,
@@ -11976,6 +11977,12 @@ async function provideSecretFromPhone(
     }
     if (current.secret.dismissed) {
       throw new PhoneSecretError("This credential request was dismissed", 409);
+    }
+    // The request route may have superseded this card while the encrypted
+    // save was in flight. Completing the superseded card would mark it
+    // provided and dispatch its continuation, leaving two cards resolved.
+    if (current.secret.superseded) {
+      throw new PhoneSecretError("This credential request was superseded by a newer one", 409);
     }
     // Electron acknowledges only after credentials.bin and the server's
     // external-secret config update both commit. Keep this assertion at the
@@ -14740,17 +14747,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (credentialIsConfigured(cfg, credentialId)) {
           return json(res, 200, { alreadyConfigured: true, label: target.label });
         }
-        const existing = store.activePath(fromThreadId).find((message) =>
-          isReusableCredentialRequest(message, credentialId, from.id, Boolean(owner.group))
-        );
-        if (existing) {
-          if (!existing.text?.trim()) {
-            store.patchMessage(fromThreadId, existing.id, {
-              text: credentialDesktopHandoff(target.label),
-            });
-          }
-          return json(res, 200, { messageId: existing.id, label: target.label });
-        }
+        // A later request supersedes every still-pending card for this
+        // credential instead of silently reusing it: the reason or task has
+        // moved on, so the old card stops offering entry and the person gets
+        // one fresh card they can act on. The fresh card is appended FIRST:
+        // if persistence then fails, the prior cards stay actionable rather
+        // than every pending request ending terminal with no card to act on.
         const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 240) : "";
         const message = store.appendMessage(fromThreadId, {
           role: "bot",
@@ -14766,6 +14768,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             requestKey: randomUUID(),
           },
         });
+        for (const prior of store.activePath(fromThreadId)) {
+          if (prior.id === message.id) continue;
+          if (!prior.secret || !isPendingCredentialRequest(prior, credentialId, from.id, Boolean(owner.group))) continue;
+          store.patchMessage(fromThreadId, prior.id, { secret: { ...prior.secret, superseded: true } });
+        }
         return json(res, 201, { messageId: message.id, label: target.label });
       }
       if (method === "POST" && path === "/api/internal/voice-note") {
@@ -20462,6 +20469,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       }
       if (m[3] === "provided") {
         if (message.secret.dismissed) return json(res, 409, { error: "this credential request was dismissed" });
+        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
         if (!credentialIsConfigured(cfg, message.secret.target)) {
           return json(res, 409, { error: `${message.secret.label} was not saved yet` });
         }
@@ -20473,6 +20481,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, state);
       }
       if (m[3] === "resume") {
+        if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
         const outcome = credentialResumeOutcome(message.secret);
         if (!outcome) {
           return json(res, 409, { error: "this credential request is not ready to resume" });
@@ -20487,6 +20496,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!state) return json(res, 409, { error: "this credential request is no longer available" });
         return json(res, 200, { resumed: state.resumed });
       }
+      if (message.secret.superseded) return json(res, 409, { error: "this credential request was superseded by a newer one" });
       if (!message.secret.provided && !resumeSecretCard(m[1], threadId, message.id, "dismissed")) {
         return json(res, 409, { error: "this credential request is no longer available" });
       }
