@@ -128,6 +128,7 @@ private fun CompanionState.lastLine(threadId: String): String {
         Message.Kind.SCREEN -> "Screenshot"
         Message.Kind.DIGEST -> ""
         Message.Kind.COMPACTION -> last.compaction?.chipText ?: last.text.orEmpty()
+        Message.Kind.ROUTINE_RUN -> last.text.orEmpty()
     }
 }
 

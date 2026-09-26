@@ -173,6 +173,27 @@ data class ThreadRef(
     val title: String,
 )
 
+/**
+ * Durable, non-actionable projection of one background routine run — mirrors
+ * `shared/routine-run.ts`'s `RoutineRunCardData` on the server/desktop side.
+ * Upserted into the trusted conversation that created the routine so the user
+ * can see progress, results, and where to review without hunting through the
+ * routines calendar.
+ */
+@Serializable
+data class RoutineRunCard(
+    val runId: String,
+    val routineId: String,
+    val routineName: String,
+    val scheduledFor: Double? = null,
+    val status: String,
+    val deferredAt: Double? = null,
+    val goalStatus: String? = null,
+    val executionThreadId: String? = null,
+    val summary: String? = null,
+    val error: String? = null,
+)
+
 @Serializable
 data class Sender(
     val botId: String,
@@ -226,9 +247,11 @@ data class Message(
     /** Completed provider turns can fold narration without guessing which reply is final. */
     val turnId: String? = null,
     val turnTerminal: Boolean? = null,
+    /** `kind == ROUTINE_RUN`: the lifecycle card. */
+    val routineRun: RoutineRunCard? = null,
 ) {
     @Serializable(with = MessageKindSerializer::class)
-    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, UNKNOWN }
+    enum class Kind { TEXT, OPTIONS, ACTIVITY, SCREEN, DIGEST, COMPACTION, ROUTINE_RUN, UNKNOWN }
 
     @Serializable(with = MessageRoleSerializer::class)
     enum class Role { BOT, USER }
@@ -244,11 +267,13 @@ object MessageKindSerializer : KSerializer<Message.Kind> {
         "screen" -> Message.Kind.SCREEN
         "digest" -> Message.Kind.DIGEST
         "compaction" -> Message.Kind.COMPACTION
+        "routine.run" -> Message.Kind.ROUTINE_RUN
         else -> Message.Kind.UNKNOWN
     }
 
     override fun serialize(encoder: Encoder, value: Message.Kind) {
-        encoder.encodeString(value.name.lowercase())
+        val wire = if (value == Message.Kind.ROUTINE_RUN) "routine.run" else value.name.lowercase()
+        encoder.encodeString(wire)
     }
 }
 
