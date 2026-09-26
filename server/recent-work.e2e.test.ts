@@ -55,8 +55,8 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
     // The first 1:1 turn: nothing said anywhere else yet, so no brief.
     await runControlOmb(["send", "--bot", lead.id, "--text", "Please reconcile the September invoices."], { env });
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
-    const first = dump()?.systemPrompt ?? "";
-    expect(first).not.toContain("Your recent work");
+    const first = JSON.stringify(dump()?.prompt ?? "");
+    expect(first).not.toContain("<other_conversations>");
 
     // The finished turn left one line in Lead's daily log, sourced to the chat.
     await expect.poll(() => dailyLogs(fixture.info.dataDir).some((log) => log.path.includes(lead.id) && /from (chat|thread) /.test(log.text)), { timeout: 10_000 }).toBe(true);
@@ -75,20 +75,22 @@ it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the t
       return text.includes("Reply to the conversation above as") || JSON.stringify(dump()?.prompt ?? "").includes("Reply to the conversation above as");
     }, { timeout: 30_000 }).toBe(true);
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
-    const room = dump()?.systemPrompt ?? "";
-    expect(room).toContain("Your recent work");
-    expect(room).toMatch(/- today \d{2}:\d{2} · 1:1 with User · (?:"[^"]*" · )?you said: "/);
+    const room = JSON.stringify(dump()?.prompt ?? "");
+    expect(room).toContain("<other_conversations>");
+    expect(room).toContain("1:1 with User");
+    expect(room).toContain("Please reconcile the September invoices.");
     const exported = await api("GET", `/api/threads/${group.threadId}/export?format=json`) as { messages?: Array<{ kind?: string; tool?: { name?: string } }> };
-    const chips = (exported.messages ?? []).filter((message) => message.kind === "activity" && /recent-work brief/.test(message.tool?.name ?? ""));
+    const chips = (exported.messages ?? []).filter((message) => message.kind === "activity" && /shared history/.test(message.tool?.name ?? ""));
     expect(chips).toHaveLength(1);
-    expect(chips[0]!.tool!.name).toBe("Lead's recent-work brief covers 1 private chat with you");
+    expect(chips[0]!.tool!.name).toBe("Lead's shared history includes 1 private chat with you");
 
     // Back the other way: Lead's next 1:1 turn knows what it said in the room.
     await runControlOmb(["send", "--bot", lead.id, "--text", "And now?"], { env });
     await runControlOmb(["wait", "--bot", lead.id, "--timeout", "30"], { env });
-    const second = dump()?.systemPrompt ?? "";
-    expect(second).toContain("Your recent work");
-    expect(second).toContain('room "Standup" · you said: "');
+    const second = JSON.stringify(dump()?.prompt ?? "");
+    expect(second).toContain("<other_conversations>");
+    expect(second).toContain("Standup");
+    expect(second).toContain("Lead, what did you do today?");
     // the room turn was logged too, sourced to the room
     expect(dailyLogs(fixture.info.dataDir).find((log) => log.path.includes(lead.id))!.text).toContain('from room "Standup"');
   } finally {
