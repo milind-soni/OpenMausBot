@@ -1322,6 +1322,8 @@
   "usage.history.byUser": "Person",
   "usage.history.byDay": "Day",
   "usage.history.byEngine": "Engine",
+  "usage.history.byRoutine": "Routine",
+  "usage.history.notRoutine": "Not from a routine",
   "usage.history.total": "Total",
   "usage.history.export": "Export CSV",
   "usage.history.owner": "This computer",

@@ -1,5 +1,5 @@
 // App settings → Usage → History: what this workspace spent over a period,
-// by bot, model, person, day or engine, from the server's month-by-month
+// by bot, model, person, day, engine or routine, from the server's month-by-month
 // ledger (server/usage-ledger.ts). The card above it sums live tasks; this
 // one survives restarts and exports for an invoice.
 import { useEffect, useState } from "react";
@@ -11,8 +11,8 @@ import { formatTokens, formatUsd, hasFiniteCost, headlineTokens } from "@/lib/us
 import { Card } from "./SettingsPrimitives";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine";
-export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
+export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine"];
 export type UsagePeriod = "month" | "lastMonth" | "days30";
 
 export interface UsageGroup {
@@ -55,6 +55,7 @@ export function usagePeriodRange(period: UsagePeriod, now = new Date()): { from:
 /** The server can only describe the non-person triggers in English; the
  * app names them itself by key. */
 export function usageGroupLabel(groupBy: UsageGroupBy, group: UsageGroup): string {
+  if (groupBy === "routine") return group.key === "manual" ? t("usage.history.notRoutine") : group.label;
   if (groupBy !== "user") return group.label;
   if (group.key === "owner") return t("usage.history.owner");
   if (group.key === "bot") return t("usage.history.botToBot");
@@ -66,12 +67,13 @@ export function usageExportHref(range: { from: string; to: string }): string {
   return `/api/usage.csv?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`;
 }
 
-const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.history.byModel" | "usage.history.byUser" | "usage.history.byDay" | "usage.history.byEngine"> = {
+const GROUP_LABEL_KEYS: Record<UsageGroupBy, "usage.history.byBot" | "usage.history.byModel" | "usage.history.byUser" | "usage.history.byDay" | "usage.history.byEngine" | "usage.history.byRoutine"> = {
   bot: "usage.history.byBot",
   model: "usage.history.byModel",
   user: "usage.history.byUser",
   day: "usage.history.byDay",
   engine: "usage.history.byEngine",
+  routine: "usage.history.byRoutine",
 };
 
 /** A cost cell: "~" in front when part of it is an estimate, a dash when

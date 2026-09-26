@@ -49,8 +49,8 @@ export interface UsageRow {
   trigger: UsageTrigger;
 }
 
-export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine";
-export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine"];
+export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine";
+export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine"];
 
 export interface UsageGroup {
   key: string;
@@ -258,6 +258,12 @@ function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: st
       return { key: triggerKey(row.trigger), label: triggerLabel(row.trigger) };
     case "day":
       return { key: `day:${row.at.slice(0, 10)}`, label: row.at.slice(0, 10) };
+    case "routine":
+      // Turns a routine started are grouped by routine; everything else
+      // (people, the owner, other bots) shares one "manual" bucket.
+      return row.trigger.kind === "routine"
+        ? { key: triggerKey(row.trigger), label: row.trigger.label ?? row.trigger.routineId ?? "unknown" }
+        : { key: "manual", label: "Not from a routine" };
     default:
       return { key: `engine:${row.driverKind}`, label: row.driverKind };
   }

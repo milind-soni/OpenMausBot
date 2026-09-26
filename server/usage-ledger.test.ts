@@ -147,6 +147,15 @@ describe("usage summaries", () => {
     expect(summarizeUsage([], "day")).toEqual({ groups: [], total: expect.objectContaining({ turns: 0, costUsd: null }) });
   });
 
+  it("groups by routine, with every non-routine turn in one manual bucket", () => {
+    const summary = summarizeUsage(rows, "routine");
+    expect(summary.groups.map((g) => [g.key, g.label, g.turns, g.costUsd])).toEqual([
+      ["routine:r1", "Morning digest", 1, 0.5],
+      ["manual", "Not from a routine", 3, expect.closeTo(0.013, 6)],
+    ]);
+    expect(summary.total.turns).toBe(4);
+  });
+
   it("prices groups from the operator's list and adds a billable column to the CSV only then", () => {
     const prices = { default: { inputPerMillion: 1000, outputPerMillion: 2000 }, "codex/gpt-5": { inputPerMillion: 0, outputPerMillion: 0 } };
     const priced = summarizeUsage(rows, "bot", prices);
