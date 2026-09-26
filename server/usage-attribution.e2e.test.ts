@@ -8,7 +8,7 @@
 //
 // POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ posixOnly("usage attribution e2e", () => {
   let stderr = "";
   let finishGate: string;
   let codexSteerGate: string;
+  let costState: string;
 
   type Reply = { status: number; body: any };
   const request = async (headers: Record<string, string>, method: string, path: string, body?: unknown): Promise<Reply> => {
@@ -80,11 +81,19 @@ posixOnly("usage attribution e2e", () => {
     mkdirSync(join(home, ".openmausbot"), { recursive: true });
     finishGate = join(home, "finish-steered-turn.gate");
     codexSteerGate = join(home, "codex-steer-refused.gate");
+    costState = join(home, "claude-cost-state");
+    mkdirSync(costState);
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
         instances: {
           claude: { driver: "claudeAgent", config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
+          // restores a session's running cost on --resume, like the real CLI
+          claudeResumed: {
+            driver: "claudeAgent",
+            environment: { FAKE_CLAUDE_COST_STATE: costState },
+            config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" },
+          },
           claudeSlow: {
             driver: "claudeAgent",
             environment: { FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: finishGate },
@@ -188,6 +197,21 @@ posixOnly("usage attribution e2e", () => {
     expect(steered.body.steered).toBe(true);
     await waitFor(() => ledger(bot.id).length === 1, "the steered turn to be booked");
     expect(ledger(bot.id)[0]).toMatchObject({ trigger: owner, costUsd: 0.01, costSource: "reported" });
+  }, 40_000);
+
+  it("books each Claude turn at its own cost when the next turn resumes the session in a new process", async () => {
+    // Every turn gets a fresh comms token, so the next one relaunches the CLI
+    // with --resume, and the CLI's first total then counts the earlier turn.
+    const bot = await newBot("claudeResumed", "claude-fake");
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "first turn" })).status).toBe(202);
+    await waitFor(() => ledger(bot.id).length === 1, "the first turn to be booked");
+    await waitFor(async () => (await getBot(bot.id)).busy === false, "the first turn to settle");
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "second turn" })).status).toBe(202);
+    await waitFor(() => ledger(bot.id).length === 2, "the second turn to be booked");
+    const [session] = readdirSync(costState).filter((name) => name.endsWith(".json"));
+    expect(JSON.parse(readFileSync(join(costState, session!), "utf8")).total).toBe(0.02);
+    expect(ledger(bot.id).map((row) => [row.costUsd, row.costSource])).toEqual([[0.01, "reported"], [0.01, "reported"]]);
+    await waitFor(async () => (await getBot(bot.id)).busy === false, "the second turn to settle");
   }, 40_000);
 
   it("pressing Steer on a queued message does not re-book the running turn", async () => {

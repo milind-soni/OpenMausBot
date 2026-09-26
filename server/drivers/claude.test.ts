@@ -28,6 +28,8 @@ import {
   parseClaudeCliVersion,
   permissionSocketPath,
   readClaudeAuthSettings,
+  claudeCostSnapshot,
+  restoredCostBase,
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
@@ -131,6 +133,39 @@ describe("ClaudeDriver.decodeConfig", () => {
     expect(turnCostFromRunningTotal(null, 0.02)).toBeNull();
     // a total below the earlier one cannot be the same count: never negative
     expect(turnCostFromRunningTotal(0.004, 0.02)).toBe(0.004);
+  });
+
+  it("finds the running cost the CLI restored for a resumed session", () => {
+    // Real frames (2.1.282). modelUsage counts [input, cache read, cache
+    // write, output] per model for the whole session; usage is the turn's own.
+    const opus = (total: number, tokens: [number, number, number, number]) => claudeCostSnapshot(total, {
+      "claude-opus-5-5": { inputTokens: tokens[0], cacheReadInputTokens: tokens[1], cacheCreationInputTokens: tokens[2], outputTokens: tokens[3], costUSD: total },
+    })!;
+    const earlier = [
+      opus(1.5822674, [18, 776097, 103347, 30010]),
+      opus(1.7255570000000002, [24, 1167845, 107739, 31499]),
+      opus(3.2557024000000006, [34, 1682172, 227804, 54835]),
+      opus(4.3538464, [36, 1682172, 353781, 59351]),
+    ];
+    // This resumed launch restored the 3.2557 state, not the later 4.3538 one.
+    const resumed = opus(4.212299000000001, [60, 3542515, 254587, 73343]);
+    expect(restoredCostBase(earlier, resumed, { input: 26, cacheRead: 1860343, cacheWrite: 26783, output: 18508 })).toBe(3.2557024000000006);
+    // A fresh session restored nothing; a side call on another model (a
+    // title from Haiku) is in modelUsage but not in the turn's usage.
+    const fresh = claudeCostSnapshot(0.20990999999999999, {
+      "claude-haiku-4-5-20251001": { inputTokens: 978, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, outputTokens: 10, costUSD: 0.001028 },
+      "claude-sonnet-5": { inputTokens: 2, cacheReadInputTokens: 0, cacheCreationInputTokens: 52057, outputTokens: 65, costUSD: 0.208882 },
+    })!;
+    expect(restoredCostBase([], fresh, { input: 2, cacheRead: 0, cacheWrite: 52057, output: 65 })).toBe(0);
+    // An interrupted turn's work was restored but never reported: measure
+    // from the latest known state inside the new counts, so that work is
+    // booked once, with this turn.
+    const beforeInterrupt = opus(0.8265352, [20, 559016, 79339, 3997]);
+    const afterInterrupt = opus(3.0735268, [86, 4211334, 254837, 9611]);
+    expect(restoredCostBase([beforeInterrupt], afterInterrupt, { input: 48, cacheRead: 2873716, cacheWrite: 142479, output: 3805 })).toBe(0.8265352);
+    // No known state at all: the whole figure.
+    expect(restoredCostBase([], resumed, { input: 26, cacheRead: 1860343, cacheWrite: 26783, output: 18508 })).toBe(0);
+    expect(claudeCostSnapshot(null, {})).toBeNull();
   });
 
   it("throws on an invalid permissionMode (registry downgrades this to a shadow)", () => {
@@ -1899,6 +1934,29 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       expect(readFileSync(dump, "utf8")).toBe(launch);
     }
     expect(costs).toEqual([0.01, 0.01, 0.01]);
+  });
+
+  it.each([false, true])("books a resumed session's first turn at its own cost, not the total the CLI restored (driver restarted: %s)", async (restarted) => {
+    // A --resume launch starts from the session's saved running cost: the
+    // fake's new process reports 0.02 for a turn that cost 0.01.
+    const costState = join(scratch, "cost-state");
+    mkdirSync(costState);
+    await create(undefined, { FAKE_CLAUDE_COST_STATE: costState });
+    const threadId = `t-resumed-cost-${restarted}`;
+    const first = await instance.adapter.sendTurn({ threadId, text: "one", system: "Before.", systemStable: "Before." });
+    const firstDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    if (restarted) {
+      // an app restart: nothing the driver held in memory survives
+      recorder.stop();
+      await instance.dispose();
+      await create(undefined, { FAKE_CLAUDE_COST_STATE: costState });
+    }
+    // a changed prompt relaunches the CLI, resuming the same session
+    const second = await instance.adapter.sendTurn({ threadId, text: "two", system: "After.", systemStable: "After.", resumeCursor: announced });
+    const secondDone = await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    expect(JSON.parse(readFileSync(join(costState, `${announced}.json`), "utf8")).total).toBe(0.02);
+    expect([firstDone, secondDone].map((e) => (e as { cost?: unknown }).cost)).toEqual([0.01, 0.01]);
   });
 
   it.each([false, true])("resets retained native context even with an old cursor supplied: %s", async (withCursor) => {
