@@ -54,6 +54,10 @@ export const stepSchema = z.discriminatedUnion("kind", [
   /** Applied before the first turn: pins admission preconditions (for
    * example threads.maxConcurrentPerBot) the scenario's behavior needs. */
   z.object({ kind: z.literal("setConfig"), config: z.record(z.string(), z.unknown()) }),
+  /** Replaces a bot's library skill assignments wholesale (the Skills
+   * surface's PUT), so a scenario can prove an assignment change alters
+   * what the next turn sees. */
+  z.object({ kind: z.literal("setSkillAssignment"), bot: z.string(), skills: z.array(z.string()) }),
   z.object({ kind: z.literal("setVmState"), state: z.record(z.string(), z.unknown()) }),
   z.object({ kind: z.literal("consumeDump"), timeoutMs: z.number().optional() }),
   z.object({ kind: z.literal("captureComputer"), bot: z.string() }),
@@ -68,6 +72,7 @@ export const assertionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("toolNames"), bot: z.string(), equals: z.array(z.string()) }),
   z.object({ kind: z.literal("turnOrder"), bots: z.array(z.string()) }),
   z.object({ kind: z.literal("systemPromptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
+  z.object({ kind: z.literal("systemPromptOmits"), bot: z.string(), turn: z.number().int(), omits: z.string() }),
   z.object({ kind: z.literal("promptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({
     kind: z.literal("handoffTree"),
@@ -105,6 +110,9 @@ export const scenarioSchema = z.object({
   world: z.enum(["coordination", "localVm"]),
   /** Gate keys the scenario uses; the runner materializes each as a file. */
   gates: z.array(z.string()).default([]),
+  /** Library skills the runner installs before any turn (approved, as a
+   * reviewed import would be), under features.skillsLibrary. */
+  librarySkills: z.array(z.object({ name: z.string(), instructions: z.string() })).default([]),
   bots: z.array(scenarioBotSchema),
   steps: z.array(stepSchema),
   assertions: z.array(assertionSchema),

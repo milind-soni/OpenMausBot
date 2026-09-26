@@ -5,6 +5,7 @@ import type { Scenario, Step } from "../types.ts";
 import { buildScriptedPlan } from "../providers/mock/scripted-plan.ts";
 import { BaseWorld, type WorldContext } from "./base-world.ts";
 import { waitUntil } from "./api.ts";
+import { installLibrarySkill } from "../../server/skill-library.ts";
 
 /** The coordination world: the real server plus the scripted engine, exactly
  * the proven e2e recipe (launchVerificationServer with room scripting). * Ordinary chat, coordinate_bots handoffs, and routines run end to end. */
@@ -41,6 +42,18 @@ export class CoordinationWorld extends BaseWorld {
       }
     }
     this.writePlan(scenario);
+    // Library fixtures install straight into the server's data dir, approved:
+    // the eval drives assignment visibility, not the review flow.
+    for (const skill of scenario.librarySkills) {
+      const installed = installLibrarySkill({
+        name: skill.name,
+        instructions: skill.instructions,
+        source: "eval-fixture",
+        reviewState: "approved",
+        root: join(this.dataDir, "skills-library"),
+      });
+      if ("error" in installed) throw new Error("library skill install failed: " + installed.error);
+    }
   }
 
   private writePlan(scenario: Scenario): void {
@@ -80,6 +93,11 @@ export class CoordinationWorld extends BaseWorld {
         const response = await this.api.patch("/api/config", step.config);
         if (response.status >= 300) throw new Error("config patch failed: " + JSON.stringify(response.body));
         return "config patched: " + JSON.stringify(step.config);
+      }
+      case "setSkillAssignment": {
+        const response = await this.api.put("/api/bots/" + this.botId(step.bot) + "/skills-library", { skills: step.skills });
+        if (response.status >= 300) throw new Error("skill assignment failed: " + JSON.stringify(response.body));
+        return "skills assigned to " + step.bot + ": " + step.skills.join(", ");
       }
       case "runRoutine": {
         const id = this.routines.get(step.routine);

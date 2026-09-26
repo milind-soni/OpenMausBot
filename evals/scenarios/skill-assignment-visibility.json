@@ -1,0 +1,36 @@
+{
+  "id": "skill-assignment-visibility",
+  "title": "Assigning a library skill changes what the next turn sees",
+  "behavior": "With features.skillsLibrary on, a turn before assignment omits the library skill from its system prompt; after the Skills surface's assignment PUT, the next turn's system prompt carries the skill.",
+  "issue": 1803,
+  "world": "coordination",
+  "gates": [],
+  "librarySkills": [
+    {
+      "name": "order-audit",
+      "instructions": "---\nname: order-audit\ndescription: Audit every order before it ships.\n---\n\nCheck each line item against the packing slip before shipping anything."
+    }
+  ],
+  "bots": [
+    {
+      "key": "shop",
+      "name": "Shop",
+      "turns": [
+        { "reply": "Order noted" },
+        { "reply": "Order audited" }
+      ]
+    }
+  ],
+  "steps": [
+    { "kind": "setConfig", "config": { "features": { "skillsLibrary": true } } },
+    { "kind": "send", "bot": "shop", "text": "Handle order 1001." },
+    { "kind": "waitForTurns", "bot": "shop", "count": 1, "timeoutMs": 20000 },
+    { "kind": "setSkillAssignment", "bot": "shop", "skills": ["order-audit"] },
+    { "kind": "send", "bot": "shop", "text": "Handle order 1002." },
+    { "kind": "waitForTurns", "bot": "shop", "count": 2, "timeoutMs": 20000 }
+  ],
+  "assertions": [
+    { "kind": "systemPromptOmits", "bot": "shop", "turn": 0, "omits": "order-audit" },
+    { "kind": "systemPromptIncludes", "bot": "shop", "turn": 1, "includes": "order-audit" }
+  ]
+}

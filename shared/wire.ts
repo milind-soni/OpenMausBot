@@ -611,6 +611,30 @@ export type SteerQueueReason = "capacity" | "group-turn";
  * `bot.queued` frame carries them: threadId → queued items. */
 export type BotQueuedMessages = Record<string, Array<{ queueId: string; text: string; reason?: SteerQueueReason }>>;
 
+/** Skills library (features.skillsLibrary) browse surface: one row per
+ * library entry, with the bots currently assigned to it. Version comes
+ * from the org package stamp when one exists; locally imported skills
+ * carry null. */
+export interface SkillsLibrarySkillWire {
+  name: string;
+  description: string;
+  source: string;
+  enabled: boolean;
+  tags: string[];
+  version: string | null;
+  importedAt: string;
+  license?: string;
+  compatibility?: string;
+  warnings: string[];
+  assignedBots: Array<{ id: string; name: string }>;
+}
+
+/** PUT body for a bot's assignment list: the full list, applied
+ * idempotently. */
+export interface BotAssignedSkillsWire {
+  skills: string[];
+}
+
 export type ServerFrame =
   | { kind: "sections"; sections: string[] }
   | { kind: "bot.queued"; queues: BotQueuedMessages }

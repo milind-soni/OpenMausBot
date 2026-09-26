@@ -21,7 +21,21 @@ export interface ParsedSkill {
   description: string;
   license?: string;
   compatibility?: string;
+  /** Optional comma-separated frontmatter tags, normalized for browsing. */
+  tags?: string[];
   body: string;
+}
+
+/** Browsing tags: lowercase slug-ish words, short enough for chip rows. */
+const TAG_PATTERN = /^[a-z0-9][a-z0-9-]{0,23}$/;
+export const SKILL_TAGS_MAX = 8;
+
+export function parseSkillTags(raw: string | undefined): string[] | undefined {
+  if (!raw) return undefined;
+  const tags = [...new Set(
+    raw.split(",").map((tag) => tag.trim().toLowerCase()).filter((tag) => TAG_PATTERN.test(tag)),
+  )].slice(0, SKILL_TAGS_MAX);
+  return tags.length > 0 ? tags : undefined;
 }
 
 /** Minimal frontmatter reader for the two required keys plus the two we
@@ -50,6 +64,7 @@ export function parseSkillMd(raw: string): ParsedSkill | { error: string } {
     description,
     license: fields.license || undefined,
     compatibility: fields.compatibility || undefined,
+    tags: parseSkillTags(fields.tags),
     body: match[2] ?? "",
   };
 }

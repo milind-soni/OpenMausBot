@@ -90,6 +90,14 @@ function score(assertion: Assertion, world: WorldSnapshot): { pass: boolean; det
           ? { pass: true, detail: "system prompt contains the pinned text" }
           : { pass: false, detail: "system prompt lacked: " + assertion.includes + "\n" + turn.system.slice(0, 2000) };
     }
+    case "systemPromptOmits": {
+      const turn = world.turns.find((entry) => entry.bot === assertion.bot && entry.index === assertion.turn);
+      return turn === undefined
+        ? { pass: false, detail: "no evidence turn " + assertion.turn + " for this bot" }
+        : turn.system.includes(assertion.omits)
+          ? { pass: false, detail: "system prompt unexpectedly contained: " + assertion.omits + "\n" + turn.system.slice(0, 2000) }
+          : { pass: true, detail: "system prompt omits the pinned text" };
+    }
     case "promptIncludes": {
       const turn = world.turns.find((entry) => entry.bot === assertion.bot && entry.index === assertion.turn);
       return turn === undefined

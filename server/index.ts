@@ -159,6 +159,7 @@ import {
   vpsSshAlias,
   browserEngineAttachCdpUrl,
   DATA_DIR,
+  skillsLibraryEnabled,
   EVENTS_DIR,
   NATIVE_DIR,
   customMcpServers,
@@ -345,6 +346,8 @@ import {
   getStagedSkillWrite,
   installOrgSkill,
   installSkill,
+  listBotSkillsWithOrigin,
+  resolveBotSkills,
   parseSkillMd,
   scanSkillText,
   listSkills,
@@ -434,7 +437,20 @@ import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.
 import { WebhookManager } from "./webhooks.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
+import {
+  installLibrarySkill,
+  listLibrarySkills,
+  loadBundledSkills,
+  loadUserSkills,
+  mergeSkills,
+  readLibrarySkillFile,
+  readSkillLibraryIndex,
+  renderSkillInstructions,
+  selectBundledSkills,
+  setLibrarySkillReviewState,
+} from "./skill-library.ts";
+import type { SkillsLibrarySkillWire } from "../shared/wire.ts";
+import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport, createLibraryPackageExport, createTeamPackageExport, picture as sharedPicture, TeamExportError, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
 import { importPackageDocument, importTeamManifest, PackageImportError, type PackageImportDeps, type PackageImportResult } from "./package-import.ts";
@@ -1239,6 +1255,17 @@ const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(providerConfigs(), decorateHostedProvider);
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
+
+// Skills library (features.skillsLibrary). While the flag is off both
+// helpers reduce exactly to today's per-bot calls; assignments recorded on
+// bot records stay inert until it is on.
+const listBotSkills = (bot: BotRecord) =>
+  skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills) : listSkills(bot.id);
+const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
+  const own = readSkillFile(bot.id, name);
+  if (own !== null || !skillsLibraryEnabled(cfg)) return own;
+  return readLibrarySkillFile(name);
+};
 
 // Electron's utility-process parent port is private to the desktop main
 // process. It lets a slow first-time managed Composio registration arrive
@@ -2489,7 +2516,7 @@ function checkedExportSkillNames(
   const names = [...value] as string[];
   if (new Set(names).size !== names.length) return { ok: false, error: "skillIds must not contain duplicates" };
   if (names.length > BOT_PACKAGE_MAX_SKILLS) return { ok: false, error: `skillIds must contain at most ${BOT_PACKAGE_MAX_SKILLS} names` };
-  const available = new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)));
+  const available = new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)));
   const unknown = names.find((name) => !available.has(name));
   if (unknown) return { ok: false, error: `skillIds contains unknown imported skill "${unknown}"` };
   return { ok: true, names };
@@ -2504,9 +2531,9 @@ function collectExportSkills(
   if (!selected.size) return byBot;
   for (const bot of bots) {
     const assigned: ExportablePackageSkill[] = [];
-    for (const listing of listSkills(bot.id)) {
+    for (const listing of listBotSkills(bot)) {
       if (!selected.has(listing.name)) continue;
-      const instructions = readSkillFile(bot.id, listing.name);
+      const instructions = readBotSkillFile(bot, listing.name);
       if (instructions === null) {
         throw new Error(`Skill "${listing.name}" changed or is unavailable and cannot be exported safely`);
       }
@@ -2537,7 +2564,7 @@ function collectTeamSkills(
   selection: unknown,
 ): { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] } | { ok: false; error: string; available: string[] } {
   const all = selection === undefined || selection === "all";
-  const available = [...new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)))].sort();
+  const available = [...new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)))].sort();
   if (!all && (!Array.isArray(selection) || selection.some((name) => typeof name !== "string" || !isSkillName(name)))) {
     return { ok: false, error: "skills must be \"all\" or a list of skill names", available };
   }
@@ -2548,9 +2575,9 @@ function collectTeamSkills(
   const skipped: TeamExportSkip[] = [];
   for (const bot of bots) {
     const assigned: ExportablePackageSkill[] = [];
-    for (const listing of listSkills(bot.id)) {
+    for (const listing of listBotSkills(bot)) {
       if (!chosen.has(listing.name)) continue;
-      const instructions = readSkillFile(bot.id, listing.name);
+      const instructions = readBotSkillFile(bot, listing.name);
       if (instructions === null) {
         if (!all) return { ok: false, error: `Skill "${listing.name}" changed or is unavailable and cannot be shared safely`, available };
         const part = `skills[${listing.name}]`;
@@ -2679,6 +2706,25 @@ const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
 hostedModels?.reconcile(store);
+// Skills library boot sweep (features.skillsLibrary): migrate per-bot
+// copies into the shared library and apply assignments. Flag-off boots
+// never enter this block, keeping per-bot behavior byte-identical.
+if (skillsLibraryEnabled(cfg)) {
+  try {
+    const sweep = runSkillsLibraryBootSweep({
+      bots: store.bots,
+      patch: (botId, assignedSkills) => {
+        store.patchBot(botId, { assignedSkills });
+      },
+    });
+    const applied = sweep.outcomes.filter((outcome) => outcome.outcome !== "skipped").length;
+    if (sweep.outcomes.length) {
+      console.log(`[skills-library] boot sweep: ${applied} skill(s) migrated or deduplicated, ${sweep.outcomes.length - applied} skipped`);
+    }
+  } catch (error) {
+    console.error(`[skills-library] boot sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 // A committed profile cleanup means both its config deletion and bot-reference
 // cleanup were intended to be durable. Reconcile stale secondary references
 // before Electron can ACK and remove the journal: a crash between those writes
@@ -2811,7 +2857,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
-    { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
@@ -2882,7 +2928,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
     webhooks: webhooks.list()
       .filter((webhook) => webhook.botId === bot.id)
       .map((webhook) => ({ name: webhook.name, enabled: webhook.enabled })),
-    skills: listSkills(bot.id).map((skill) => ({
+    skills: listBotSkills(bot).map((skill) => ({
       name: skill.name,
       description: skill.description,
       enabled: skill.enabled,
@@ -8574,7 +8620,7 @@ async function startTurn(
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId })) },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
-        { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+        { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
@@ -9466,7 +9512,10 @@ const tighteningRequests = new TighteningRequestService({
   // The card judges the effective mounts, so the snapshot resolves the same
   // way the engine does: through the config-aware custom-server filter.
   mountedMcpServers: (bot) => Object.keys(engineMcpServers(bot)),
-  enabledSkills: (botId) => listSkills(botId).filter((skill) => skill.enabled).map((skill) => skill.name),
+  enabledSkills: (botId) => {
+    const record = store.bot(botId);
+    return (record ? listBotSkills(record) : listSkills(botId)).filter((skill) => skill.enabled).map((skill) => skill.name);
+  },
   disableSkill: (botId, name) => {
     const disabled = setSkillEnabled(botId, name, false);
     return typeof disabled === "object" && "error" in disabled ? { ok: false, error: disabled.error } : { ok: true };
@@ -10532,7 +10581,7 @@ async function runGroupMemberTurn(
     // mounted, exactly as the 1:1 path decides it: memory_update is on the
     // agents server, so a room turn with it must be told to use it too.
     { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
-    { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ]);
@@ -14182,7 +14231,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         return json(res, 200, {
-          skills: listSkills(from.id),
+          skills: listBotSkills(from),
           staged: listStagedSkillWrites(from.id).map(stagedSkillListing),
         });
       }
@@ -18305,8 +18354,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     m = path.match(/^\/api\/bots\/([\w-]+)\/skills$/);
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      if (skillsLibraryEnabled(cfg)) {
+        const { skills, library } = listBotSkillsWithOrigin(m[1]!, store.bot(m[1])!.assignedSkills);
+        return json(res, 200, {
+          skills,
+          library,
+          staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
+        });
+      }
       return json(res, 200, {
-        skills: listSkills(m[1]),
+        skills: listBotSkills(store.bot(m[1])!),
         staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
       });
     }
@@ -18339,6 +18396,82 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const result = removeSkill(m[1]!, m[2]!);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { ok: true });
+    }
+
+    // ── skills library (features.skillsLibrary): local browse surface ────
+    // Everything here is local: the library on disk, assignments on bot
+    // records, imports from pasted SKILL.md text. No registry, no network.
+    m = path.match(/^\/api\/skills-library$/);
+    if (m && method === "GET") {
+      if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
+      const index = readSkillLibraryIndex();
+      const skills: SkillsLibrarySkillWire[] = listLibrarySkills()
+        .map((listing): SkillsLibrarySkillWire => ({
+          name: listing.name,
+          description: listing.description,
+          source: listing.source,
+          enabled: listing.enabled,
+          tags: listing.tags ?? [],
+          version: index[listing.name]?.package?.release ?? null,
+          importedAt: listing.importedAt,
+          ...(listing.license ? { license: listing.license } : {}),
+          ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
+          warnings: listing.warnings,
+          assignedBots: store.bots
+            .filter((bot) => bot.assignedSkills?.includes(listing.name))
+            .map((bot) => ({ id: bot.id, name: bot.name })),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return json(res, 200, { skills });
+    }
+    if (m && method === "POST") {
+      if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
+      const parsed = z.object({ text: z.string().min(1) }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "text must be the SKILL.md contents to import" });
+      const skill = parseSkillMd(parsed.data.text);
+      if ("error" in skill) return json(res, 400, { error: skill.error });
+      // Imports land disabled with their scan warnings attached: enabling is
+      // a separate, explicit review step on the row.
+      const installed = installLibrarySkill({
+        name: skill.name,
+        instructions: parsed.data.text,
+        source: "local-import",
+        license: skill.license,
+        compatibility: skill.compatibility,
+        tags: skill.tags,
+        warnings: scanSkillText(parsed.data.text),
+        reviewState: "disabled",
+      });
+      if ("error" in installed) return json(res, 422, { error: installed.error });
+      return json(res, 201, { skill: installed });
+    }
+    m = path.match(/^\/api\/skills-library\/([a-z0-9-]+)$/);
+    if (m && method === "GET") {
+      if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
+      const text = readLibrarySkillFile(m[1]!);
+      if (text === null) return json(res, 404, { error: "no such skill" });
+      return json(res, 200, { text });
+    }
+    if (m && method === "PATCH") {
+      if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
+      const parsed = z.object({ enabled: z.boolean() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "enabled must be true or false" });
+      const result = setLibrarySkillReviewState(m[1]!, parsed.data.enabled ? "approved" : "disabled");
+      if ("error" in result) return json(res, 404, { error: result.error });
+      return json(res, 200, { skill: result });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/skills-library$/);
+    if (m && method === "PUT") {
+      if (!skillsLibraryEnabled(cfg)) return json(res, 404, { error: "skills library is not enabled" });
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const parsed = z.object({ skills: z.array(z.string().min(1).max(64)).max(200) }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "skills must be a list of skill names" });
+      const index = readSkillLibraryIndex();
+      const names = [...new Set(parsed.data.skills)];
+      const unknown = names.filter((name) => !index[name]);
+      if (unknown.length) return json(res, 422, { error: "not in the library: " + unknown.join(", ") });
+      store.patchBot(m[1]!, { assignedSkills: names });
+      return json(res, 200, { assignedSkills: names });
     }
 
     // ── section context: a user-owned team brief ────────────────────────

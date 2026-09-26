@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useStore, type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
-import { skillAuthoringEnabled } from "@/lib/feature-flags";
+import { skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
 import { inputCls } from "./field";
 import { OrgSkillsCard } from "./OrgSkillsCard";
@@ -22,6 +22,15 @@ interface ManagedSkill {
   enabled: boolean;
   source: string;
   warnings: string[];
+  /** Present only under features.skillsLibrary: where the bot reads this
+   * skill from. Private shadows library on name collision. */
+  origin?: "private" | "library";
+}
+
+/** Library entries this bot has not been assigned yet (flag on only). */
+interface LibraryPoolSkill {
+  name: string;
+  description: string;
 }
 
 interface StagedSkillSummary {
@@ -34,7 +43,10 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const { request: api } = useBotEditor();
   const { state } = useStore();
   const featureEnabled = skillAuthoringEnabled(state.config);
+  const libraryOn = skillsLibraryEnabled(state.config);
   const [skills, setSkills] = useState<ManagedSkill[]>([]);
+  const [libraryPool, setLibraryPool] = useState<LibraryPoolSkill[]>([]);
+  const [addFromLibrary, setAddFromLibrary] = useState("");
   const [staged, setStaged] = useState<StagedSkillSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState("");
@@ -87,10 +99,13 @@ export function SkillsSection({ bot }: { bot: Bot }) {
       const result = (await api(`/api/bots/${bot.id}/skills`)) as {
         skills?: ManagedSkill[];
         staged?: StagedSkillSummary[];
+        library?: LibraryPoolSkill[];
       };
       if (cancelled?.()) return;
       setSkills(result.skills ?? []);
       setStaged(result.staged ?? []);
+      setLibraryPool(result.library ?? []);
+      setAddFromLibrary("");
       setError("");
     } catch (cause) {
       if (!cancelled?.()) setError(cause instanceof Error ? cause.message : "Could not load learned skills.");
@@ -110,10 +125,47 @@ export function SkillsSection({ bot }: { bot: Bot }) {
     };
   }, [bot.id]);
 
+  /** This bot's library assignments, rebuilt from the merged listing: an
+   * assignment can only name a library entry, so the library-origin rows
+   * carry the full list. */
+  const libraryAssignments = () => skills.filter((skill) => skill.origin === "library").map((skill) => skill.name);
+
+  const putAssignments = async (next: string[]) => {
+    await api(`/api/bots/${bot.id}/skills-library`, {
+      method: "PUT",
+      body: JSON.stringify({ skills: next }),
+    });
+    await refresh();
+  };
+
+  const addToBot = async () => {
+    const name = addFromLibrary.trim();
+    if (!name) return;
+    setWorking(name);
+    setError("");
+    try {
+      await putAssignments([...new Set([...libraryAssignments(), name])]);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not assign that skill.");
+    } finally {
+      setWorking("");
+    }
+  };
+
   const toggle = async (skill: ManagedSkill) => {
     setWorking(skill.name);
     setError("");
     try {
+      if (skill.origin === "library") {
+        // Library skills share one review state across every bot assigned
+        // to them; the switch flips it library-wide.
+        await api(`/api/skills-library/${encodeURIComponent(skill.name)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ enabled: !skill.enabled }),
+        });
+        await refresh();
+        return;
+      }
       if (!skill.enabled) {
         // A disabled import has not necessarily been reviewed. Fetch the
         // integrity-checked bytes and require one explicit review step before
@@ -155,6 +207,19 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   };
 
   const remove = async (skill: ManagedSkill) => {
+    if (skill.origin === "library") {
+      if (!window.confirm(`Unassign “${skill.name}” from this bot? The skill stays in the library.`)) return;
+      setWorking(skill.name);
+      setError("");
+      try {
+        await putAssignments(libraryAssignments().filter((name) => name !== skill.name));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Could not unassign that skill.");
+      } finally {
+        setWorking("");
+      }
+      return;
+    }
     if (!window.confirm(`Remove the learned skill “${skill.name}”?`)) return;
     setWorking(skill.name);
     setError("");
@@ -171,7 +236,9 @@ export function SkillsSection({ bot }: { bot: Bot }) {
   const view = async (skill: ManagedSkill) => {
     setError("");
     try {
-      const result = (await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string };
+      const result = skill.origin === "library"
+        ? ((await api(`/api/skills-library/${encodeURIComponent(skill.name)}`)) as { text?: string })
+        : ((await api(`/api/bots/${bot.id}/skills/${encodeURIComponent(skill.name)}`)) as { text?: string });
       setViewing({ name: skill.name, text: result.text ?? "" });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load this skill.");
@@ -211,29 +278,62 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           {featureEnabled ? t("skills.learned.hintOn") : t("skills.learned.hintOff")}
         </div>
 
-        <form
-          className="mt-3 flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void importSkill();
-          }}
-        >
-          <input
-            className={inputCls}
-            placeholder="owner/repo, https://github.com/…/SKILL.md, or https://skills.sh/…"
-            aria-label="Import a skill"
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-          />
-          <button
-            type="submit"
-            disabled={importing || !source.trim()}
-            className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-          >
-            {importing ? "Importing…" : "Import"}
-          </button>
-        </form>
-        {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
+        {libraryOn ? (
+          <div className="mt-3 flex flex-col gap-1.5">
+            {libraryPool.length > 0 ? (
+              <div className="flex items-center gap-2">
+                <select
+                  aria-label="Add a skill from the library"
+                  value={addFromLibrary}
+                  onChange={(e) => setAddFromLibrary(e.target.value)}
+                  className={inputCls + " truncate"}
+                >
+                  <option value="">Add a skill from the library…</option>
+                  {libraryPool.map((skill) => (
+                    <option key={skill.name} value={skill.name}>{skill.name}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={!addFromLibrary || working === addFromLibrary}
+                  onClick={() => void addToBot()}
+                  className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                >
+                  Add
+                </button>
+              </div>
+            ) : (
+              <div className="text-[12px] text-ink-secondary">Every skill in the library is already assigned to this bot.</div>
+            )}
+            <div className="text-[11.5px] text-ink-secondary">Import and manage library skills in Settings → Skills.</div>
+          </div>
+        ) : (
+          <>
+            <form
+              className="mt-3 flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void importSkill();
+              }}
+            >
+              <input
+                className={inputCls}
+                placeholder="owner/repo, https://github.com/…/SKILL.md, or https://skills.sh/…"
+                aria-label="Import a skill"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+              />
+              <button
+                type="submit"
+                disabled={importing || !source.trim()}
+                className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              >
+                {importing ? "Importing…" : "Import"}
+              </button>
+            </form>
+            {importMessage && <div className="mt-1 text-[12px] text-ink-secondary">{importMessage}</div>}
+          </>
+        )}
 
         {loading ? (
           <div className="mt-3 text-[12px] text-ink-secondary">Loading…</div>
@@ -250,6 +350,11 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="truncate font-mono text-[12.5px] text-ink">{skill.name}</div>
+                    {libraryOn && (
+                      <span className="ml-1.5 rounded bg-control px-1 py-px font-mono text-[9.5px] uppercase tracking-wide text-ink-secondary">
+                        {skill.origin === "library" ? "library" : "private"}
+                      </span>
+                    )}
                     <div className="mt-0.5 line-clamp-2 text-[11.5px] text-ink-secondary">{skill.description}</div>
                     <div className="mt-0.5 text-[10.5px] text-ink-secondary">Used when the bot decides it's relevant</div>
                   </button>
