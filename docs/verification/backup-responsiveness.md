@@ -63,17 +63,23 @@ HTTP export, download, import, restart and subsequent conversation continuity.
 The packaged smoke exports and downloads an encrypted archive from an isolated
 bundled server outside the checkout with no node_modules available.
 
-Local verification passed 114 tests across the eight files above, lint,
+Local verification passed 115 tests across the eight files above, lint,
 frontend/server typechecking and the packaged export smoke. A second run on
 Node 24.18.0 passed the worker/archive/policy subset (53 tests) and that same
-packaged export smoke.
+packaged export smoke. After adding abrupt-exit cleanup, both worker regressions
+and the packaged export smoke passed again on Node 24.18.0.
 
 Expected validation errors retain their messages. Unexpected worker failure
 rejects the operation without a synchronous fallback; worker termination is
-awaited before releasing the maintenance gate. Normal failure cleanup remains
-inside the original routine. A process/worker crash can leave private staging,
-which uses the existing backup-expiry cleanup. No new job service or queue is
-needed: the existing HTTP operation lock serializes exports.
+awaited before releasing the maintenance gate. The parent assigns the job ID
+before starting the worker and uses the guarded cleanup path to remove that
+exact job on failure, including an abrupt worker exit. A regression terminates
+a real worker after plaintext copying starts, verifies the partial job is gone
+and an earlier successful archive is untouched, then exports again. Normal
+failure cleanup remains inside the original routine. A whole-process crash
+still uses the existing startup cleanup; parent-side crash cleanup can briefly
+block while deleting partial files. No new job service or queue is needed:
+the existing HTTP operation lock serializes exports.
 
 These checks do not establish Windows/Linux performance or native Settings UI
 behavior. No data format, schema, installation or provider configuration changes.
