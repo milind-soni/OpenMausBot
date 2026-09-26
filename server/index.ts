@@ -359,6 +359,14 @@ import {
   stageSkillWrite,
 } from "./skills.ts";
 import { fetchSkillFromSource } from "./skill-fetch.ts";
+import {
+  listPinnedPacks,
+  pinnedInstructionsPrompt,
+  putPinnedPack,
+  readPinnedPackFile,
+  removePinnedPack,
+  setPinnedPackEnabled,
+} from "./pinned-instructions.ts";
 import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema, resolveBotCreationDefaults } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
@@ -2812,6 +2820,10 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+    // Task-level facts (the pinned working folder) are added at dispatch;
+    // the preview answers with the bot's own settings, the same facts a
+    // first turn of a new task would present.
+    { id: "pinned", label: "Pinned instructions", text: pinnedInstructionsPrompt(bot.id, { role: bot.title, workspace: bot.cwd ?? undefined }) },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
@@ -8575,6 +8587,9 @@ async function startTurn(
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId })) },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+        // Facts are the persona's role line and the folder this turn works
+        // in — both person-owned and static, never message-derived.
+        { id: "pinned", label: "Pinned instructions", text: pinnedInstructionsPrompt(bot.id, { role: bot.title, workspace: cwd ?? undefined }) },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
@@ -10533,6 +10548,7 @@ async function runGroupMemberTurn(
     // agents server, so a room turn with it must be told to use it too.
     { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
     { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "pinned", label: "Pinned instructions", text: pinnedInstructionsPrompt(bot.id, { role: bot.title, workspace: cwd ?? undefined }) },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ]);
@@ -18337,6 +18353,45 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if (m && method === "DELETE") {
       const result = removeSkill(m[1]!, m[2]!);
+      if ("error" in result) return json(res, 404, { error: result.error });
+      return json(res, 200, { ok: true });
+    }
+
+    // ── pinned instruction packs: person-managed, agent-unreachable ──────
+    // There is deliberately NO /api/internal counterpart: an agent can read
+    // a pack body with its file tools like any workspace file, but only a
+    // person can create, replace, enable or remove one, and a workspace
+    // edit breaks the reviewed hash and stops injection (#1669).
+    m = path.match(/^\/api\/bots\/([\w-]+)\/pinned$/);
+    if (m && method === "GET") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      return json(res, 200, { packs: listPinnedPacks(m[1]) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/pinned\/([a-z0-9-]+)$/);
+    if (m && method === "GET") {
+      const text = readPinnedPackFile(m[1]!, m[2]!);
+      if (text === null) return json(res, 404, { error: "no such pinned pack" });
+      return json(res, 200, { text });
+    }
+    if (m && method === "PUT") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const parsed = z.object({ text: z.string().min(1) }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "text must be the full PACK.md, starting with its YAML frontmatter" });
+      const saved = putPinnedPack(m[1]!, m[2]!, parsed.data.text);
+      if ("error" in saved) return json(res, 422, { error: saved.error });
+      return json(res, 201, { pack: saved });
+    }
+    if (m && method === "PATCH") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const parsed = z.object({ enabled: z.boolean() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "enabled must be true or false" });
+      const result = setPinnedPackEnabled(m[1]!, m[2]!, parsed.data.enabled);
+      if ("error" in result) return json(res, 404, { error: result.error });
+      return json(res, 200, { pack: result });
+    }
+    if (m && method === "DELETE") {
+      if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
+      const result = removePinnedPack(m[1]!, m[2]!);
       if ("error" in result) return json(res, 404, { error: result.error });
       return json(res, 200, { ok: true });
     }
