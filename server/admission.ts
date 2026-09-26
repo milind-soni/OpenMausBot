@@ -29,6 +29,59 @@ export type AdmissionQueueReason = "capacity" | "group-turn";
 /** Refusal codes that callers surface verbatim. */
 export type AdmissionRefusalCode = "guarded_busy" | "queue-head-only" | "busy" | "missing";
 
+// ── L2: ordering and batching on drain ─────────────────────────────────
+// M2's drain rule: a sender's CONTIGUOUS burst inside a short window is one
+// item; senders never merge, and a pause past the window reads as separate
+// messages. The window is measured between consecutive queued items, so a
+// rolling burst stays whole while hours-apart texts split.
+
+/** How late one queued text may follow the previous one and still join the
+ * same drained turn. Two minutes covers a person typing a burst in pieces;
+ * anything slower is already a separate thought, not a continuation. */
+export const DRAIN_COALESCE_WINDOW_MS = 120_000;
+
+/** The most items one drained head group may carry. Room turns read the
+ * transcript through the room-context window (its last N messages), so a
+ * group larger than that window would append lines the responder never
+ * sees; the excess stays queued and drains with the next turn instead.
+ * The 1:1 drain carries every group item in its prompt directly, so it
+ * passes no cap. */
+export const DRAIN_COALESCE_MAX_ITEMS = 30;
+
+/** The leading run of queued items that drain together: consecutive items
+ * with the same merge identity, each arriving within the coalescing window
+ * of the one before it. Pure and shape-agnostic — each queue supplies its
+ * own identity (sender + provenance kind) and timestamp accessors, and the
+ * first item always drains, so an empty identity never strands a queue.
+ * `maxItems`, when given, stops the group before it outgrows a bound the
+ * consuming turn can actually carry. */
+export function drainCoalesceHead<T>(
+  items: readonly T[],
+  identityOf: (item: T) => string,
+  queuedAtOf: (item: T) => number,
+  maxItems?: number,
+): T[] {
+  const head: T[] = [];
+  let previousIdentity: string | undefined;
+  let previousAt: number | undefined;
+  for (const item of items) {
+    if (maxItems !== undefined && head.length >= maxItems) break;
+    const identity = identityOf(item);
+    const at = queuedAtOf(item);
+    // The gap must be non-negative AND inside the window: a regressed
+    // timestamp (clock skew, a rewritten row) is not "within the window".
+    const gap = at - (previousAt ?? at);
+    if (head.length === 0 || (identity === previousIdentity && gap >= 0 && gap <= DRAIN_COALESCE_WINDOW_MS)) {
+      head.push(item);
+    } else {
+      break;
+    }
+    previousIdentity = identity;
+    previousAt = at;
+  }
+  return head;
+}
+
 /** Facts about the message and the engine it would run on. */
 export interface AdmissionMessage {
   /** extractTurnImages() found attachments: a live text steer has no image

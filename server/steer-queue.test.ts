@@ -140,12 +140,20 @@ describe("steer-queue module", () => {
     queueSteeredMessage(bot.id, bot.threadId, "from the paired person", { sender: { name: "Priya" } });
     bot.busy = false;
     drainSteeredMessages(store, run);
+    // M2: different senders never coalesce — the owner's turn runs first
+    // and Priya's words wait for the next settle.
+    expect(store.messages.map((message) => [message.text, message.sender])).toEqual([
+      ["from the owner", undefined],
+    ]);
+    drainSteeredMessages(store, run);
     expect(store.messages.map((message) => [message.text, message.sender])).toEqual([
       ["from the owner", undefined],
       ["from the paired person", { name: "Priya" }],
     ]);
-    // the line handed to the turn is the stamped one, not a copy without it
-    expect(run.mock.calls[0][3].sender).toEqual({ name: "Priya" });
+    // the line handed to each turn is the stamped one, not a copy without it
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1][3].sender).toEqual({ name: "Priya" });
+    expect(run.mock.calls[0][3].sender).toBeUndefined();
   });
 
   it("still loads and drains a durable row written before senders were kept", () => {

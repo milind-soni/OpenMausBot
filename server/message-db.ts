@@ -235,6 +235,10 @@ export interface FollowupPayload {
   /** Who the usage ledger books the turn these words start to. Absent on
    * rows written before this existed. */
   trigger?: UsageTrigger;
+  /** When the words were queued (epoch ms), so drain-time coalescing can
+   * tell a contiguous burst from hours-apart texts. Rows written before
+   * this existed read as queued at restore time. */
+  queuedAt?: number;
   /** Aside-lane rows (kind "aside"): the peer whose words these are. The
    * prompt carries the non-steering envelope; text stays the raw words. */
   aside?: {

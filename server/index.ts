@@ -230,7 +230,7 @@ import {
   restoreAsideMessages,
 } from "./aside-queue.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
-import { admit } from "./admission.ts";
+import { admit, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
@@ -250,12 +250,14 @@ import {
   cancelChannelMessage,
   drainChannelMessages,
   holdChannelQueue,
+  headChannelGroup,
   queuedChannelMessage,
   queueChannelMessage,
   restoreChannelMessages,
   restoreHeldChannelQueue,
   resolveHeldReplyTarget,
   settleHeldChannelQueueHead,
+  type ChannelQueueItem,
 } from "./channel-queue.ts";
 import {
   acceptedSendMatch,
@@ -3365,6 +3367,10 @@ type GroupTurnOperation = {
   cancelled: boolean;
   cancellation: AbortController;
   providerHandshakePending: boolean;
+  /** The coalesced burst that started this turn (M2): member turns recover
+   * every burst line from the transcript by these stable queueIds, so each
+   * line's context text and attachments survive the fold into one turn. */
+  queuedQueueIds?: string[];
   goalRun?: {
     runId: string;
     cardMessageId: string;
@@ -7202,6 +7208,9 @@ function drainQueuedSends() {
           },
         });
         resolve();
+        // M2: only this group left the queue, and a turn that never
+        // started publishes no completion to wake the groups behind it.
+        queueMicrotask(drainQueuedSends);
       }).catch(reject);
     }),
     // Provider completion can precede its dispatch promise: keep the queue
@@ -9868,7 +9877,10 @@ const roomHandoffTimer = setInterval(() => {
   try { roomHandoffs.tick(); } catch (error) { console.error("room handoffs:", error); }
 }, 250);
 roomHandoffTimer.unref();
-const GROUP_CONTEXT_MESSAGES = 30;
+// The room-context window IS the drain's coalescing cap: a burst longer
+// than the window would append transcript lines the responder never reads,
+// so both bounds come from one constant (admission.ts).
+const GROUP_CONTEXT_MESSAGES = DRAIN_COALESCE_MAX_ITEMS;
 const MAX_GROUP_HOPS = 1;
 
 type GroupMemberTurnOutcome =
@@ -9908,11 +9920,12 @@ function teammateReportContext(requestId: string, readerBotId?: string): string 
 function serializeRoomContext(
   threadId: string,
   userName: string,
-  textOverride?: { messageId: string; text: string },
+  textOverrides?: ReadonlyArray<{ messageId: string; text: string }>,
   readerBotId?: string,
 ): string {
   const messages = store.messagesFor(threadId);
   const messagesById = new Map(messages.map((message) => [message.id, message]));
+  const overrides = new Map(textOverrides?.map((override) => [override.messageId, override.text]));
   return messages
     .filter((m) => (m.kind === "text" && m.text) || (m.kind === "digest" && m.digest) || m.roomRequest?.phase === "result")
     .slice(-GROUP_CONTEXT_MESSAGES)
@@ -9925,7 +9938,8 @@ function serializeRoomContext(
         // turns. Resolve from the existing bounded store and recheck access.
         return teammateReportContext(m.roomRequest.id, readerBotId);
       }
-      const rendered = textOverride?.messageId === m.id ? { ...m, text: textOverride.text } : m;
+      const overridden = overrides.get(m.id);
+      const rendered = overridden !== undefined ? { ...m, text: overridden } : m;
       // a bot's name is quoted on the speaker line, so it gets one line; a
       // user line that came through the API says so, since the reader would
       // otherwise take it for the person typing
@@ -10107,19 +10121,42 @@ async function runGroupMemberTurn(
   const latestUser = [...store.activePath(threadId)].reverse().find(
     (message) => message.role === "user" && message.kind === "text" && message.text,
   );
-  const resolvedLatestImages = latestUser?.text && !cardContinuation
+  const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
+  // M2: a drained room turn runs one sender's whole burst as ONE turn, so
+  // every burst line must reach the responder the way its own turn would
+  // have carried it — attachments extracted natively, their tags stripped
+  // from the rendered context. Recover the burst by the queueIds recorded
+  // on the operation, not by position: the last line alone is not the burst.
+  const burstIds = new Set(operation?.queuedQueueIds ?? []);
+  const burstOverrides: Array<{ messageId: string; text: string }> = [];
+  const burstImages: ReturnType<typeof extractTurnImages>["images"] = [];
+  if (usesNativeImageInput && !cardContinuation) {
+    for (const message of store.activePath(threadId)) {
+      if (message.role !== "user" || message.kind !== "text" || !message.text) continue;
+      if (!message.queueId || !burstIds.has(message.queueId)) continue;
+      const resolved = extractTurnImages(message.text);
+      burstOverrides.push({ messageId: message.id, text: resolved.text });
+      burstImages.push(...resolved.images);
+    }
+  }
+  // the latest line is usually the burst's last item: extracting it again
+  // would double-count its attachments and re-strip already-stripped words
+  const latestInBurst = latestUser?.queueId !== undefined && burstIds.has(latestUser.queueId);
+  const resolvedLatestImages = latestUser?.text && !cardContinuation && !latestInBurst
     ? extractTurnImages(latestUser.text)
     : { text: latestUser?.text ?? "", images: [] };
-  const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   const roomContext = serializeRoomContext(
     threadId,
     userName,
     usesNativeImageInput && latestUser
-      ? { messageId: latestUser.id, text: resolvedLatestImages.text }
+      ? [
+          ...burstOverrides,
+          ...(latestInBurst ? [] : [{ messageId: latestUser.id, text: resolvedLatestImages.text }]),
+        ]
       : undefined,
     bot.id,
   );
-  const turnImages = usesNativeImageInput ? resolvedLatestImages.images : [];
+  const turnImages = usesNativeImageInput ? [...burstImages, ...resolvedLatestImages.images] : [];
   const skills = availableSkills();
   const selectedSkills = mergeSkills(
     selectBundledSkills(
@@ -11239,6 +11276,11 @@ type StartGroupTurnOptions = {
   sender?: ResolvedSender;
   /** Who the ledger books this room turn's speakers to (see startTurn's `trigger`). */
   trigger?: UsageTrigger;
+  /** A drained queue's coalesced group (M2): one sender's contiguous
+   * in-window burst running as ONE follow-up. Each item lands as its own
+   * transcript line under its own queueId; `text` is the joined burst the
+   * responders are routed and titled on. */
+  queuedGroup?: ChannelQueueItem[];
 };
 
 function startGroupTurn(
@@ -11274,17 +11316,49 @@ function startGroupTurn(
   if (options.goalCoordinatorBotId && (channelMode !== "goal" || !requestedGoalCoordinator)) {
     throw Object.assign(new Error("the selected goal coordinator is not an active room member"), { status: 409 });
   }
-  const message = store.appendMessage(threadId, {
-    role: "user",
-    kind: "text",
-    text,
-    replyToId: replyTo?.id,
-    sendId,
-    channelMode,
-    queueId,
-    via: options.via,
-    sender: options.sender,
-  });
+  // A coalesced drain appends every queued line under its own queueId (the
+  // chips and sendId receipts stay per-item); the LAST line is the turn's
+  // user message, exactly like the 1:1 drain's userMessage.
+  const queuedGroup = options.queuedGroup;
+  const message = queuedGroup && queuedGroup.length > 0
+    ? (() => {
+        for (const item of queuedGroup.slice(0, -1)) {
+          store.appendMessage(threadId, {
+            role: "user",
+            kind: "text",
+            text: item.text,
+            replyToId: item.replyToId,
+            sendId: item.sendId,
+            channelMode: item.mode,
+            queueId: item.id,
+            via: item.via,
+            sender: item.sender,
+          });
+        }
+        const last = queuedGroup[queuedGroup.length - 1]!;
+        return store.appendMessage(threadId, {
+          role: "user",
+          kind: "text",
+          text: last.text,
+          replyToId: replyTo?.id,
+          sendId: last.sendId,
+          channelMode: last.mode,
+          queueId: last.id,
+          via: last.via,
+          sender: last.sender,
+        });
+      })()
+    : store.appendMessage(threadId, {
+        role: "user",
+        kind: "text",
+        text,
+        replyToId: replyTo?.id,
+        sendId,
+        channelMode,
+        queueId,
+        via: options.via,
+        sender: options.sender,
+      });
   // Admitted (see startTurn): the room's speakers are booked to this sender.
   if (options.trigger) turnTriggers.set(threadId, options.trigger);
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
@@ -11357,6 +11431,11 @@ function startGroupTurn(
     threadId,
     goalCoordinator ? [] : responders.map((responder) => responder.id),
   );
+  if (queuedGroup && queuedGroup.length > 0) {
+    // member turns use these stable ids to carry every burst line's words
+    // and attachments through the turn that swallowed the burst
+    operation.queuedQueueIds = queuedGroup.map((item) => item.id);
+  }
   if (goalCoordinator) {
     const runId = options.goalRunId?.trim() || `goal-${Date.now().toString(36)}-${randomUUID()}`;
     const startedAt = Date.now();
@@ -11451,17 +11530,30 @@ function drainQueuedChannelSends(): void {
       const group = store.group(groupId);
       return group ? groupIsWorking(group) : false;
     },
-    ({ groupId, threadId, text, replyToId, sendId, mode, id, via, sender, trigger }) => {
+    ({ groupId, threadId, items }) => {
       const group = store.group(groupId);
       const ownsThread = group?.dm
         ? group.threadId === threadId
         : Boolean(group && store.groupTaskByThread(group.id, threadId));
       if (!group || !ownsThread) return;
+      // The burst runs as ONE room turn: the joined text routes responders
+      // and titles the task, while every queued line still lands under its
+      // own queueId (chips and sendId receipts stay per-item).
+      const head = items[0]!;
+      const last = items[items.length - 1]!;
+      const joined = items.map((item) => item.text).join("\n\n");
       try {
-        startGroupTurn(groupId, text, resolveReplyTarget(threadId, replyToId), sendId, mode, id, { via, threadId, sender, trigger: queuedTurnTrigger({ trigger, sender }) });
+        startGroupTurn(groupId, joined, resolveReplyTarget(threadId, last.replyToId), last.sendId, last.mode, last.id, {
+          threadId,
+          sender: head.sender,
+          trigger: queuedTurnTrigger({ trigger: head.trigger, sender: head.sender }),
+          queuedGroup: items,
+        });
       } catch (error) {
-        if (!store.messagesFor(threadId).some((message) => message.queueId === id && message.role === "user")) {
-          store.appendMessage(threadId, { role: "user", kind: "text", text, replyToId, sendId, channelMode: mode, queueId: id, via, sender });
+        for (const item of items) {
+          if (!store.messagesFor(threadId).some((message) => message.queueId === item.id && message.role === "user")) {
+            store.appendMessage(threadId, { role: "user", kind: "text", text: item.text, replyToId: item.replyToId, sendId: item.sendId, channelMode: item.mode, queueId: item.id, via: item.via, sender: item.sender });
+          }
         }
         store.appendMessage(threadId, {
           role: "bot",
@@ -17163,7 +17255,17 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // turn — never both for the same words.
       const held = holdChannelQueue(current.id, targetThreadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
-      const [head] = held.items;
+      // M2: the head may be a coalesced group (one sender's contiguous
+      // burst); Steer folds that whole group into the live turn as one.
+      const headGroup = headChannelGroup(held.items);
+      const [head] = headGroup;
+      // A live steer has no image side channel — the same rule as the
+      // 1:1 queue: attachment words wait for a real turn where central
+      // admission can hand the images to the engine.
+      if (headGroup.some((item) => extractTurnImages(item.text).images.length > 0)) {
+        restoreHeldChannelQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
+      }
       const decision = admit("room-steer", {
         speakerPresent: Boolean(speaker),
         engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
@@ -17180,11 +17282,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // A reply target that cannot be resolved restores the held queue
       // before the request fails — the room's normal drain keeps the head.
       const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
+      // Each burst line keeps its own reply relationship: the fold renders
+      // per-item reply context (the head through the helper above, the rest
+      // resolved here) so a mixed burst does not inherit the head's quote
+      // or drop its own. A target that cannot be resolved restores the held
+      // queue before the request fails, mirroring the helper's contract.
+      const speakerName = cfg.profile?.name?.trim() || "User";
+      let foldedPrompt: string;
+      try {
+        foldedPrompt = headGroup
+          .map((item, index) =>
+            promptWithReply(
+              item.text,
+              index === 0
+                ? replyTo
+                : item.replyToId
+                  ? resolveReplyTarget(targetThreadId, item.replyToId)
+                  : undefined,
+              speakerName,
+            ),
+          )
+          .join("\n\n");
+      } catch (error) {
+        restoreHeldChannelQueue(held);
+        throw error;
+      }
       // steer was offered only when a live speaker instance could take it;
       // the check carries that invariant to the type system.
       const steered: SteerOutcome = instance?.adapter.steer
         ? await instance.adapter
-            .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .steer(targetThreadId, foldedPrompt)
             .catch((): SteerOutcome => "indeterminate")
         : "refused";
       // The steer was awaited adapter work: re-read every ownership
@@ -17203,25 +17330,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // speaker — and settle the head.
       const delivered = steered !== "refused";
       if (after && delivered && (steered === "indeterminate" || afterSpeakerBotId === speakerBotId)) {
-        const message = store.appendMessage(targetThreadId, {
+        const messages = headGroup.map((item) => store.appendMessage(targetThreadId, {
           role: "user",
           kind: "text",
-          text: head.text,
-          replyToId: head.replyToId,
-          sendId: head.sendId,
-          channelMode: head.mode,
-          queueId: head.id,
-          via: head.via,
+          text: item.text,
+          replyToId: item.replyToId,
+          sendId: item.sendId,
+          channelMode: item.mode,
+          queueId: item.id,
+          via: item.via,
           steered: true,
-          sender: head.sender,
-        });
+          sender: item.sender,
+        }));
         settleHeldChannelQueueHead(held);
         return json(res, 200, {
           ok: true,
           steered: true,
           threadId: targetThreadId,
-          messages: [message],
-          queueIds: [head.id],
+          messages,
+          queueIds: headGroup.map((item) => item.id),
         });
       }
       if (steered === "indeterminate" && !after) {
