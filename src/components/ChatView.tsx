@@ -492,7 +492,7 @@ function Bubble({
               {viewRaw && text ? (
                 <RawMarkdownView text={text} />
               ) : text ? (
-                <ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId: bot.threadId, messageId: message.id }} />
+                <ChatMarkdown filePreviews={false} text={text} mentionPeers={mentionPeers} message={{ threadId: bot.threadId, messageId: message.id }} />
               ) : null}
             </MessageBoundary>
           )}

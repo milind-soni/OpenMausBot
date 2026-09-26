@@ -431,6 +431,7 @@ beforeAll(async () => {
   mkdirSync(join(staticDir, "assets"), { recursive: true });
   writeFileSync(join(staticDir, "index.html"), "<!doctype html><title>Packaged OpenMausBot</title>");
   writeFileSync(join(staticDir, "assets", "smoke.css"), "body { color: white; }");
+  writeFileSync(join(staticDir, "assets", "smoke.worker.mjs"), "export {};");
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
@@ -1084,6 +1085,11 @@ beforeAll(async () => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stderr!.on("data", (c) => (stderr += c));
+  child.on("close", (code, signal) => {
+    if (code !== 0 && signal !== "SIGTERM" && signal !== "SIGINT") {
+      console.error(`Isolated API fixture exited (code=${code}, signal=${signal}):\n${stderr}`);
+    }
+  });
 
   const deadline = Date.now() + 20_000;
   for (;;) {
@@ -1298,6 +1304,12 @@ describe("harness HTTP API", () => {
     expect(asset.status).toBe(200);
     expect(asset.headers.get("content-type")).toBe("text/css");
     expect(await asset.text()).toContain("color: white");
+
+    // PDF.js ships its worker as .mjs; browsers reject module workers served
+    // as application/octet-stream, so the static map must know this extension.
+    const worker = await fetch(`${BASE}/assets/smoke.worker.mjs`);
+    expect(worker.status).toBe(200);
+    expect(worker.headers.get("content-type")).toBe("text/javascript");
 
     const spa = await fetch(`${BASE}/settings/desktop`);
     expect(spa.status).toBe(200);
@@ -7676,6 +7688,10 @@ describe("harness HTTP API", () => {
     } finally {
       rmSync(failureMarker, { force: true });
       if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      // Interrupt acknowledges the request before the provider finishes stopping.
+      // Keep this fixture's profile until the server releases its active turn.
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
@@ -7686,10 +7702,11 @@ describe("harness HTTP API", () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let room: any;
     try {
-      expect((await api("PATCH", "/api/config", {
+      const configured = await api("PATCH", "/api/config", {
         features: { browser: true },
         browserProfiles: [{ id: "work", name: "Work" }],
-      })).status).toBe(200);
+      });
+      expect(configured.status, JSON.stringify(configured.body)).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         browserProfile: "work",
         approvalMode: "auto",
@@ -7743,6 +7760,8 @@ describe("harness HTTP API", () => {
     } finally {
       if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       else await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);

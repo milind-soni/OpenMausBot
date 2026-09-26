@@ -7,6 +7,8 @@ import { ChevronDown, ChevronUp, Download, Film, LoaderCircle, Music, Play, X } 
 import { attachmentBasename, FILE_MAX_BYTES, type TranscriptFileAttachment, type TranscriptImageAttachment } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { filePreviewKind } from "@/lib/file-preview";
+import { PreviewableFile } from "./FilePreview";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
 import { localFilePath } from "./ChatMarkdown";
 import {
@@ -372,7 +374,8 @@ export function AttachmentGallery({ images = [], files = [], message, eager = fa
               <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} onPreview={() => setSelected(item.image)} className="max-h-72 rounded-2xl border-0 bg-transparent" />
             </div>
           ) : item.kind === "video" && message ? (
-            <VideoAttachment key={`${message.threadId}:${message.messageId}:${item.key}`} file={item.file} message={message} />
+            filePreviewKind(item.file.path) ? <PreviewableFile key={`${message.threadId}:${message.messageId}:${item.key}`} path={item.file.path} name={item.file.name} message={message} />
+              : <VideoAttachment key={`${message.threadId}:${message.messageId}:${item.key}`} file={item.file} message={message} />
           ) : null)}
         </div>
       )}

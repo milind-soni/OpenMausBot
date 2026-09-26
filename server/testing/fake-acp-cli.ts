@@ -554,7 +554,7 @@ function handle(msg: any) {
         break;
       }
       const cachedLiveLoad = process.env.FAKE_ACP_CACHED_LIVE_LOAD === "1" && liveSession === msg.params?.sessionId;
-      if (mode === "safe-agent-reads" && !cachedLiveLoad) {
+      if ((mode === "safe-agent-reads" || process.env.FAKE_ACP_COORDINATION_PLAN) && !cachedLiveLoad) {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
       if (process.env.FAKE_ACP_DUMP) {
@@ -575,6 +575,7 @@ function handle(msg: any) {
         });
         break;
       }
+      if (process.env.FAKE_ACP_COORDINATION_PLAN) agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
       }
@@ -707,6 +708,23 @@ function handle(msg: any) {
         );
       };
       const promptText = String(msg.params?.prompt?.[0]?.text ?? "");
+      if (agentsMcp && process.env.FAKE_ACP_COORDINATION_PLAN && process.env.FAKE_ACP_COORDINATION_AGENT) {
+        // The harness-provided entry is used verbatim, including its scoped
+        // capability. This runs actual coordinate_bots calls across ACP too.
+        void import(process.env.FAKE_ACP_COORDINATION_AGENT)
+          .then(module => module.runAcpCoordinationAgent(agentsMcp, promptText, process.env.FAKE_ACP_COORDINATION_PLAN))
+          .then(text => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: {
+              sessionUpdate: "agent_message_chunk", content: { text },
+            } } });
+            complete();
+          })
+          .catch(error => {
+            process.stderr.write(String(error) + "\n");
+            process.exit(1);
+          });
+        return;
+      }
       // A delegated reply woke this bot (control-plane continuation): the
       // harness revived it to fold the result in. Synthesize instead of
       // driving the mode's usual delegate/ask flow, which would loop or

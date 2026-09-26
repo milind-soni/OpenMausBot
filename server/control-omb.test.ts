@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,9 +13,46 @@ import {
   runControlOmb,
 } from "../scripts/control-omb.ts";
 import { installedChrome, UI_MUTATING } from "../scripts/testing/control-omb-ui.ts";
-import { removeTempDir } from "./testing/cleanup.ts";
+import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 describe("control-omb command mapping", () => {
+  it.each(["message", "disconnect"])("cleans up its real fixture after parent IPC %s", async (stopVia) => {
+    const child = spawn(process.execPath, ["--experimental-strip-types", "scripts/control-omb.ts", "launch"], {
+      env: process.env, stdio: ["ignore", "pipe", "pipe", "ipc"],
+    });
+    let output = "";
+    let stderr = "";
+    child.stderr!.on("data", (chunk: Buffer) => { stderr += String(chunk); });
+    try {
+      const info = await new Promise<{ dataDir: string; url: string }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`fixture launch timed out: ${stderr}`)), 30_000);
+        child.once("close", (code) => {
+          clearTimeout(timer);
+          reject(new Error(`fixture exited ${code} before shutdown: ${stderr}`));
+        });
+        child.stdout!.on("data", (chunk: Buffer) => {
+          output += String(chunk);
+          try {
+            const handle = JSON.parse(output);
+            clearTimeout(timer);
+            resolve(handle);
+          } catch { /* the handle may span multiple chunks */ }
+        });
+      });
+      expect(existsSync(info.dataDir)).toBe(true);
+      expect((await runControlOmb(["doctor", "--url", info.url]) as { ok: boolean }).ok).toBe(true);
+      if (stopVia === "disconnect") child.disconnect();
+      await waitForExit(child, {
+        ...(stopVia === "message" ? { message: "control-omb:stop" } : {}), graceMs: 30_000,
+      });
+      expect(child.exitCode, stderr).toBe(0);
+      expect(existsSync(info.dataDir)).toBe(false);
+      await expect(fetch(`${info.url}/api/health`, { signal: AbortSignal.timeout(2_000) })).rejects.toThrow();
+    } finally {
+      await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
+    }
+  }, 65_000);
+
   it("treats unhealthy doctor and non-settled waits as command failures", () => {
     expect(controlResultSucceeded("doctor", { ok: true })).toBe(true);
     expect(controlResultSucceeded("doctor", { ok: false })).toBe(false);

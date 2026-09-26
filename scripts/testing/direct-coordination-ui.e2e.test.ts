@@ -17,7 +17,7 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
   const planPath = join(temporary, "plan.json");
   writeFileSync(planPath, "{}");
   const child = spawn(process.execPath, ["--experimental-strip-types", "scripts/control-omb.ts", "ui", "launch"], {
-    cwd: ROOT, env: { ...process.env, FAKE_CLAUDE_ROOM_PLAN: planPath }, stdio: ["ignore", "pipe", "pipe"],
+    cwd: ROOT, env: { ...process.env, FAKE_CLAUDE_ROOM_PLAN: planPath }, stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   let output = "";
   let error = "";
@@ -80,7 +80,7 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
     writeFileSync(info.logPath + ".direct-coordination.json", JSON.stringify(evidence, null, 2));
     console.log("Direct coordination UI evidence:", info.logPath + ".direct-coordination.json");
   } finally {
-    await waitForExit(child, { signal: "SIGINT", graceMs: 30_000 });
+    await waitForExit(child, { message: "control-omb:stop", graceMs: 30_000 });
     await removeTempDir(temporary);
   }
 }, 240_000);
