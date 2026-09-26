@@ -283,6 +283,7 @@ import {
   Store,
   titleFromLlm,
   type BotRecord,
+  type FullAccessDelegation,
   type GroupDefaultResponder,
   type GroupRecord,
   type Message,
@@ -2931,41 +2932,101 @@ function peerReviewRequired(bot: BotRecord, threadId: string): boolean {
  * that same work to ask defeats the grant — and in practice the person was
  * answering every one of those cards, all day, for the whole team. So a
  * teammate a Full-access Chief delegates to runs Full for that work: the
- * recipient switches, whatever its own level says. The recipient's engine
+ * recipient switches, whatever its own level says. That teammate passes it
+ * on in turn when it hands part of the work further down (MOCA-226), so the
+ * grant reaches all of the work it was given for. The recipient's engine
  * has to implement Full (supportsApprovalMode); otherwise the work keeps the
- * recipient's own level, as before. Only a Chief passes access on — an
- * ordinary bot's delegation still uses the recipient's setting. */
-function delegatedFullAccess(from: BotRecord, fromThreadId: string, target: BotRecord): boolean {
+ * recipient's own level, as before. Every chain starts at a Chief: Full an
+ * ordinary bot holds any other way is never passed on, and that bot's
+ * delegation still uses the recipient's setting.
+ *
+ * `fromHandoffId` is the coordinated request the sender is working on, if
+ * any. In a room the thread is shared, so delegated Full is not stored on
+ * it; it rides the handoff chain instead. */
+function delegatedFullAccess(from: BotRecord, fromThreadId: string, target: BotRecord, fromHandoffId?: string): boolean {
+  const chief = delegationChief(from, fromThreadId, fromHandoffId, new Set());
   return delegationInheritsFullAccess({
     senderIsChief: Boolean(from.chiefOfStaff),
     senderHasFullAccess: fullAccessForSource(from.id, fromThreadId),
+    senderFullAccessDelegated: chief !== null && chief.id !== from.id,
     sameBot: from.id === target.id,
     recipientDriverKind: registry.cliTarget(target.modelSelection.instanceId)?.driverKind,
   });
 }
 
+type DelegationChief = { id: string; name: string };
+
+/** The delegated Full a thread holds, while it still holds Full. A level the
+ * person sets on the thread clears the record (Store.patchTask). */
+function storedFullAccessDelegation(botId: string, threadId: string): FullAccessDelegation | undefined {
+  const delegation = store.taskByThread(botId, threadId)?.fullAccessDelegation;
+  return delegation && fullAccessForSource(botId, threadId) ? delegation : undefined;
+}
+
+/** The Chief whose Full access a bot is working under in this conversation,
+ * or null when it is not passing any on. The bot itself when it is a Chief
+ * with Full here; else the Chief its delegated Full came from — recorded on
+ * its thread, or found by walking its room handoff back to where it began. */
+function delegationChief(from: BotRecord, fromThreadId: string, fromHandoffId: string | undefined, seen: Set<string>): DelegationChief | null {
+  if (from.chiefOfStaff && fullAccessForSource(from.id, fromThreadId)) return { id: from.id, name: from.name };
+  const stored = storedFullAccessDelegation(from.id, fromThreadId);
+  if (stored) return { id: stored.chiefBotId, name: stored.chiefName };
+  return handoffDelegationChief(fromHandoffId, seen);
+}
+
+/** Whether a coordinated request itself runs under delegated Full, and
+ * whose: the bot that sent it was passing Full on, and the recipient can run
+ * Full. The walk is bounded by the handoff tree; `seen` stops a corrupt
+ * cycle. */
+function handoffDelegationChief(handoffId: string | undefined, seen: Set<string>): DelegationChief | null {
+  const handoff = handoffId ? roomHandoffs.nodes.get(handoffId) : undefined;
+  if (!handoff?.parentId || seen.has(handoff.id)) return null;
+  seen.add(handoff.id);
+  const source = roomHandoffs.nodes.get(handoff.parentId);
+  const from = source ? store.bot(source.botId) : undefined;
+  const recipient = store.bot(handoff.botId);
+  if (!source || !from || !recipient || from.id === recipient.id) return null;
+  if (!supportsApprovalMode(registry.cliTarget(recipient.modelSelection.instanceId)?.driverKind, "full")) return null;
+  return delegationChief(from, source.threadId, source.id, seen);
+}
+
 /** Make a delegated thread Full and say so in it once, so the level the
  * chip shows and the level the turns run at agree, and the person can see
- * where the access came from. Idempotent: a pair conversation is reused
- * across delegations and must not collect a chip per request. */
-function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: string): void {
-  if (store.taskByThread(target.id, threadId)?.approvalMode === "full") return;
-  store.patchTask(target.id, threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: [] });
+ * where the access came from. The thread records that its Full was
+ * delegated, which is what lets this bot pass it on again. Idempotent: a
+ * pair conversation is reused across delegations and must not collect a
+ * chip per request. */
+function grantDelegatedFullAccess(from: BotRecord, target: BotRecord, threadId: string, fromThreadId: string, fromHandoffId?: string): void {
+  const task = store.taskByThread(target.id, threadId);
+  const chief = delegationChief(from, fromThreadId, fromHandoffId, new Set());
+  if (!task || !chief) return;
+  const fullAccessDelegation: FullAccessDelegation = { fromBotId: from.id, fromName: from.name, chiefBotId: chief.id, chiefName: chief.name };
+  if (task.approvalMode === "full") {
+    // Already Full — the person's own grant, or an earlier delegation. Leave
+    // its level and saved commands alone; only record where Full came from.
+    if (!task.fullAccessDelegation) store.patchTask(target.id, threadId, { fullAccessDelegation });
+    return;
+  }
+  store.patchTask(target.id, threadId, { approvalMode: "full", autoApprove: false, alwaysAllow: [], fullAccessDelegation });
   store.appendMessage(threadId, {
     role: "bot",
     kind: "activity",
-    tool: { name: `Full access — delegated by ${from.name}, a Chief of Staff with Full access`, ok: true },
+    tool: {
+      name: chief.id === from.id
+        ? `Full access — delegated by ${from.name}, a Chief of Staff with Full access`
+        : `Full access — delegated by ${from.name}, passing on Full access from ${chief.name}, a Chief of Staff`,
+      ok: true,
+    },
   });
 }
 
 /** A room member's level for one turn. Work a Full-access Chief hands out
- * in a room runs Full for that turn: the room thread is shared, so the
- * level is not stored on it — it rides the handoff. */
+ * in a room runs Full for that turn, and so does the work its teammates hand
+ * on from there: the room thread is shared, so the level is not stored on
+ * it — it rides the handoff. */
 function roomTurnApprovalMode(bot: BotRecord, orchestration?: GroupTurnOrchestration): ApprovalMode {
-  const handoff = orchestration?.roomHandoffId ? roomHandoffs.nodes.get(orchestration.roomHandoffId) : undefined;
-  const source = handoff?.parentId ? roomHandoffs.nodes.get(handoff.parentId) : undefined;
-  const from = source ? store.bot(source.botId) : undefined;
-  if (from && source && delegatedFullAccess(from, source.threadId, bot)) return "full";
+  // The walk checks that this bot, the request's recipient, can run Full.
+  if (handoffDelegationChief(orchestration?.roomHandoffId, new Set())) return "full";
   return approvalModeForTurn(bot, Boolean(orchestration?.roomHandoffId));
 }
 
@@ -14832,8 +14893,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 // this coordination serves. The durable pair conversation is
                 // shared by every assignment between two bots, so it names nobody.
                 if (resolved.created && resolved.task.openedBy?.kind === "work") threadStarters.set(resolved.task.threadId, threadPersonKey(address.threadId));
-                if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!)) {
-                  grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId);
+                if (delegatedFullAccess(internalSender, internalCapability.threadId, store.bot(target.botId)!, internalCapability.roomHandoffId)) {
+                  grantDelegatedFullAccess(internalSender, store.bot(target.botId)!, target.threadId, internalCapability.threadId, internalCapability.roomHandoffId);
                 }
               }
               const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
@@ -15170,7 +15231,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!task) return json(res, 500, { error: "couldn't create that thread" });
         // The work is still for the person whose request the opener is on.
         threadStarters.set(task.threadId, threadPersonKey(fromThreadId));
-        if (delegatedFullAccess(from, fromThreadId, target)) grantDelegatedFullAccess(from, target, task.threadId);
+        if (delegatedFullAccess(from, fromThreadId, target, internalCapability.roomHandoffId)) {
+          grantDelegatedFullAccess(from, target, task.threadId, fromThreadId, internalCapability.roomHandoffId);
+        }
         const queued = queueDelegation(
           commsBus,
           from,

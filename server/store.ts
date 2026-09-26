@@ -94,12 +94,32 @@ export interface TaskRecord extends WireTask {
    * it landed. Absent means legacy/unknown: it may be a person's choice,
    * so only positively identified auto pins yield to Works on changes. */
   surfaceSource?: "user" | "auto";
+  /** This thread's Full access came down a Chief of Staff's delegation, and
+   * from whom. Only Full that arrived this way is passed on again when the
+   * bot delegates from here (delegationInheritsFullAccess); a level the
+   * person sets on the thread clears it. */
+  fullAccessDelegation?: FullAccessDelegation;
+}
+
+export interface FullAccessDelegation {
+  /** The bot whose delegation made this thread Full. */
+  fromBotId: string;
+  fromName: string;
+  /** The Chief of Staff whose grant the chain started from. */
+  chiefBotId: string;
+  chiefName: string;
+}
+
+function isFullAccessDelegation(value: unknown): value is FullAccessDelegation {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  return ["fromBotId", "fromName", "chiefBotId", "chiefName"].every((key) => typeof record[key] === "string" && record[key] !== "");
 }
 
 /** TaskRecord fields no client may see. Everything else must be on WireTask:
  * the exactness assertion below fails to compile when either side drifts,
  * so a new server field forces a decision — wire-visible or private here. */
-export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource";
+export type TaskWirePrivateKeys = "resumeCursors" | "lastInstanceId" | "handedMessages" | "appliedCompactionId" | "contextFloor" | "lastContextModel" | "surfaceSource" | "fullAccessDelegation";
 export type TaskWireProjection = Pick<TaskRecord, Exclude<keyof TaskRecord, TaskWirePrivateKeys>>;
 type AssertExact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 type AssertSameKeys<A, B> = [keyof A] extends [keyof B] ? ([keyof B] extends [keyof A] ? true : never) : never;
@@ -113,7 +133,7 @@ export const taskWireProjectionIsExact: TaskWireProjectionIsExact = true;
 export function toWireTask(task: TaskRecord): WireTask {
   const { resumeCursors: _resumeCursors, lastInstanceId: _lastInstanceId, handedMessages: _handedMessages,
     appliedCompactionId: _appliedCompactionId, contextFloor: _contextFloor, lastContextModel: _lastContextModel,
-    surfaceSource: _surfaceSource, ...wire } = task;
+    surfaceSource: _surfaceSource, fullAccessDelegation: _fullAccessDelegation, ...wire } = task;
   return wire;
 }
 
@@ -121,6 +141,7 @@ const TASK_PATCH_FIELDS = [
   "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
   "unread", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "appliedCompactionId", "contextFloor", "lastContextModel",
+  "fullAccessDelegation",
 ] as const satisfies readonly (keyof TaskRecord)[];
 export type TaskPatch = Partial<Pick<TaskRecord, typeof TASK_PATCH_FIELDS[number]>>;
 
@@ -830,6 +851,12 @@ export class Store {
         }
         if (task.approvalMode !== undefined && !isApprovalMode(task.approvalMode)) {
           delete task.approvalMode;
+          botsMigrated = true;
+        }
+        // A malformed record is not a grant anyone gave: drop it rather than
+        // pass Full on from it.
+        if (task.fullAccessDelegation !== undefined && (task.approvalMode !== "full" || !isFullAccessDelegation(task.fullAccessDelegation))) {
+          delete task.fullAccessDelegation;
           botsMigrated = true;
         }
         if (task.busy !== undefined || task.activity !== undefined || task.turnStartedAt !== undefined) botsMigrated = true;
@@ -2353,6 +2380,11 @@ export class Store {
     const task = this.taskByThread(botId, threadId);
     if (!bot || !task) return null;
     if (patch.projectId !== undefined && !this.project(botId, patch.projectId)) return null;
+    // A level set without saying where it came from is the person's own:
+    // delegated Full must not survive it and be passed on as if it had.
+    if (Object.prototype.hasOwnProperty.call(patch, "approvalMode") && !Object.prototype.hasOwnProperty.call(patch, "fullAccessDelegation")) {
+      delete task.fullAccessDelegation;
+    }
     for (const key of TASK_PATCH_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(patch, key)) {
         Object.assign(task, { [key]: structuredClone(patch[key]) });
@@ -2428,10 +2460,14 @@ export class Store {
     const bot = this.bot(botId);
     if (!bot) return null;
     const patch = { approvalMode: mode, autoApprove: false, alwaysAllow: [] };
-    const tasks = (bot.tasks ?? []).map(task => ({ ...task, ...patch }));
+    // The person's grant for every thread replaces any delegated one.
+    const tasks = (bot.tasks ?? []).map(({ fullAccessDelegation: _delegated, ...task }) => ({ ...task, ...patch }));
     const next = { ...bot, ...patch, approvalGrant: undefined, tasks };
     this.saveBots(this.bots.map(candidate => candidate === bot ? next : candidate));
-    bot.tasks?.forEach((task, index) => Object.assign(task, tasks[index]));
+    bot.tasks?.forEach((task, index) => {
+      delete task.fullAccessDelegation;
+      Object.assign(task, tasks[index]);
+    });
     Object.assign(bot, patch, { approvalGrant: undefined });
     this.emit({ type: "bot", botId });
     return bot;

@@ -146,4 +146,18 @@ describe("delegationInheritsFullAccess", () => {
     expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: "hermes" })).toBe(false);
     expect(delegationInheritsFullAccess({ ...base, recipientDriverKind: undefined })).toBe(false);
   });
+  // MOCA-226: the teammate a Chief delegated to passes that Full on in turn.
+  const downline = { senderIsChief: false, senderHasFullAccess: true, senderFullAccessDelegated: true, sameBot: false, recipientDriverKind: "claudeAgent" };
+  it("passes Full on from a teammate working under a Chief's delegated Full", () => {
+    expect(delegationInheritsFullAccess(downline)).toBe(true);
+    // In a room the thread is shared, so the teammate's own level there is
+    // not Full; the delegation alone carries it.
+    expect(delegationInheritsFullAccess({ ...downline, senderHasFullAccess: false })).toBe(true);
+  });
+  it("still passes on nothing from an ordinary bot's own Full, to itself, or to an engine without Full", () => {
+    expect(delegationInheritsFullAccess({ ...downline, senderFullAccessDelegated: false })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...downline, senderFullAccessDelegated: undefined })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...downline, sameBot: true })).toBe(false);
+    expect(delegationInheritsFullAccess({ ...downline, recipientDriverKind: "hermes" })).toBe(false);
+  });
 });

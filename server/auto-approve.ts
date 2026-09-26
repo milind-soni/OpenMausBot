@@ -42,21 +42,28 @@ export function approvalModeForOrigin(mode: ApprovalMode, origin: { peerInitiate
   return mode;
 }
 
-/** Whether work a bot hands to a teammate runs with Full access. Only a Chief
- * of Staff passes access on, and only the Full access the person gave it for
- * the conversation it is delegating from: the Chief exists to get the team's
- * work done without the person answering every card, and a teammate stopping
- * that work to ask defeats the grant. The recipient's engine has to implement
- * Full, or the work keeps the recipient's own level. A bot never elevates
- * itself this way. */
+/** Whether work a bot hands to a teammate runs with Full access. A Chief of
+ * Staff passes on the Full access the person gave it for the conversation it
+ * is delegating from: the Chief exists to get the team's work done without
+ * the person answering every card, and a teammate stopping that work to ask
+ * defeats the grant. The same holds further down the line — a teammate doing
+ * that work under the Chief's Full access passes it on when it hands part of
+ * the work to another teammate, or the grant stops one level short of the
+ * work it was given for. Full a bot holds any other way is never passed on,
+ * so every chain starts at a Chief's grant. The recipient's engine has to
+ * implement Full, or the work keeps the recipient's own level. A bot never
+ * elevates itself this way. */
 export function delegationInheritsFullAccess(input: {
   senderIsChief: boolean;
   senderHasFullAccess: boolean;
+  /** The sender is doing this work under Full access that itself came down
+   * a Chief's delegation. */
+  senderFullAccessDelegated?: boolean;
   sameBot: boolean;
   recipientDriverKind: string | undefined;
 }): boolean {
-  return input.senderIsChief && input.senderHasFullAccess && !input.sameBot
-    && supportsApprovalMode(input.recipientDriverKind, "full");
+  const passesOn = (input.senderIsChief && input.senderHasFullAccess) || input.senderFullAccessDelegated === true;
+  return passesOn && !input.sameBot && supportsApprovalMode(input.recipientDriverKind, "full");
 }
 
 // Tools that ask a PERSON something. A question exists so that a human

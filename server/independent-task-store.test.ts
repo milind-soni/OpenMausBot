@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
-import { isProjectEmoji, Store, type BotRecord, type GroupRecord, type TaskPatch } from "./store.ts";
+import { isProjectEmoji, Store, toWireTask, type BotRecord, type GroupRecord, type TaskPatch } from "./store.ts";
 import { ensureTaskWorkspace } from "./workspace.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "default" });
@@ -39,6 +39,50 @@ describe("independent bot task state", () => {
     expect(approvalModeFor(restarted.bot(other.id)!)).toBe("ask");
     restarted.setAllThreadApprovalMode(bot.id, "ask");
     expect(new Store(selection).tasks(bot.id).every(task => task.approvalMode === "ask")).toBe(true);
+  });
+
+  it("keeps where a thread's delegated Full came from only until the person sets its level", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const delegated = store.createTask(bot.id, "Delegated")!;
+    const other = store.createTask(bot.id, "Also delegated")!;
+    const fullAccessDelegation = { fromBotId: "ada", fromName: "Ada", chiefBotId: "clive", chiefName: "Clive" };
+    for (const task of [delegated, other]) store.patchTask(bot.id, task.threadId, { approvalMode: "full", fullAccessDelegation });
+
+    const restarted = new Store(selection);
+    expect(restarted.taskByThread(bot.id, delegated.threadId)?.fullAccessDelegation).toEqual(fullAccessDelegation);
+    expect(toWireTask(restarted.taskByThread(bot.id, delegated.threadId)!)).not.toHaveProperty("fullAccessDelegation");
+
+    // Any level the person sets is their own, even Full again.
+    restarted.patchTask(bot.id, delegated.threadId, { approvalMode: "full" });
+    expect(restarted.taskByThread(bot.id, delegated.threadId)?.fullAccessDelegation).toBeUndefined();
+    restarted.setAllThreadApprovalMode(bot.id, "full");
+    expect(restarted.taskByThread(bot.id, other.threadId)?.fullAccessDelegation).toBeUndefined();
+    // Other edits leave it alone.
+    restarted.patchTask(bot.id, delegated.threadId, { fullAccessDelegation });
+    restarted.patchTask(bot.id, delegated.threadId, { title: "Renamed" });
+    expect(restarted.taskByThread(bot.id, delegated.threadId)?.fullAccessDelegation).toEqual(fullAccessDelegation);
+    expect(savedBots().find(saved => saved.id === bot.id)!.tasks!.filter(task => task.fullAccessDelegation)).toHaveLength(1);
+  });
+
+  it("drops a saved delegated-Full record that is malformed or no longer on a Full thread", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const malformed = store.createTask(bot.id, "Malformed")!;
+    const asked = store.createTask(bot.id, "Asked")!;
+    const valid = store.createTask(bot.id, "Valid")!;
+    const fullAccessDelegation = { fromBotId: "ada", fromName: "Ada", chiefBotId: "clive", chiefName: "Clive" };
+    const saved = savedBots();
+    const tasks = saved.find(candidate => candidate.id === bot.id)!.tasks!;
+    Object.assign(tasks.find(task => task.threadId === malformed.threadId)!, { approvalMode: "full", fullAccessDelegation: { fromBotId: "ada" } });
+    Object.assign(tasks.find(task => task.threadId === asked.threadId)!, { approvalMode: "ask", fullAccessDelegation });
+    Object.assign(tasks.find(task => task.threadId === valid.threadId)!, { approvalMode: "full", fullAccessDelegation });
+    writeFileSync(join(DATA_DIR, "bots.json"), JSON.stringify(saved));
+
+    const restarted = new Store(selection);
+    expect(restarted.taskByThread(bot.id, malformed.threadId)?.fullAccessDelegation).toBeUndefined();
+    expect(restarted.taskByThread(bot.id, asked.threadId)?.fullAccessDelegation).toBeUndefined();
+    expect(restarted.taskByThread(bot.id, valid.threadId)?.fullAccessDelegation).toEqual(fullAccessDelegation);
   });
 
   it("does not partially elevate any thread when saving the all-threads change fails", () => {
