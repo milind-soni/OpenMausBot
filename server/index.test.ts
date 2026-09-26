@@ -8906,6 +8906,11 @@ describe("harness HTTP API", () => {
       });
       expect(wireScout?.approvalMode).toBe("auto");
       expect(wireScout?.alwaysAllow).toEqual(["Bash"]);
+      // One card data drives every surface: the generic card renders the
+      // subtitle copy on desktop and mobile alike, and the payload carries
+      // the before snapshot and intents verbatim for richer renderers.
+      expect(card?.card?.subtitle).toContain("Always-allow grants: 1 → 0 — removed: Bash");
+      expect(card?.card?.subtitle).toContain("This reduces Scout's authority, and the reverse cannot be proposed back.");
 
       // A human adds a new standing grant while the card sits open: the
       // confirmation must fail closed rather than apply the stale card.
@@ -8927,6 +8932,14 @@ describe("harness HTTP API", () => {
       expect(after.autoApprove).toBe(false);
       // The durable receipt exists server-side but never crosses the wire.
       expect(after).not.toHaveProperty("lastTighteningRequestId");
+
+      // History rows: the proposing bot is the actor, the card id is the
+      // via, in the same History section manual edits write to.
+      const history = await api("GET", `/api/bots/${bot.id}/history`);
+      expect(history.status).toBe(200);
+      const tightened = history.body.rows.filter((r: any) => r.field === "approvalMode");
+      expect(tightened).toHaveLength(1);
+      expect(tightened[0]).toMatchObject({ actor: "bot", via: expect.stringMatching(/^card:/), before: "auto", after: "edits" });
 
       // decisions audit
       await expect.poll(async () => {
