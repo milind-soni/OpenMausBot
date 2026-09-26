@@ -851,6 +851,113 @@ function firstText(content: unknown): string {
   return "";
 }
 
+/** A turn's own cost from the CLI's total_cost_usd, which is not a per-turn
+ * figure: it is "cumulative across turns in streaming-input sessions — each
+ * result carries the running total so far" (2.1.282), and a retained process
+ * runs turn after turn. So a turn costs the growth since the total its
+ * process reported for the turn before — or, for a process's first turn,
+ * since the total the CLI restored on --resume (see restoredCostBase). With
+ * no known start (null) the turn keeps its whole figure. A total that went
+ * down is not the same count, so it is taken whole too rather than booked as
+ * a negative cost. Rounding to 1e-10 USD removes only the float noise of the
+ * subtraction. */
+export function turnCostFromRunningTotal(total: number | null, previous: number | null): number | null {
+  if (total === null) return null;
+  if (previous === null || total < previous) return total;
+  return Number((total - previous).toFixed(10));
+}
+
+/** One running cost state, read from a `result`: total_cost_usd and, per
+ * model, the [input, cache read, cache write, output] tokens of modelUsage.
+ * Both count the whole session so far, including anything --resume restored. */
+export interface ClaudeCostSnapshot {
+  total: number;
+  models: Record<string, [number, number, number, number]>;
+}
+
+export function claudeCostSnapshot(total: unknown, modelUsage: unknown): ClaudeCostSnapshot | null {
+  if (typeof total !== "number" || !Number.isFinite(total)) return null;
+  const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+  const models: ClaudeCostSnapshot["models"] = {};
+  if (modelUsage && typeof modelUsage === "object" && !Array.isArray(modelUsage)) {
+    for (const [model, raw] of Object.entries(modelUsage as Record<string, unknown>)) {
+      if (!raw || typeof raw !== "object") continue;
+      const u = raw as Record<string, unknown>;
+      models[model] = [count(u.inputTokens), count(u.cacheReadInputTokens), count(u.cacheCreationInputTokens), count(u.outputTokens)];
+    }
+  }
+  return { total, models };
+}
+
+/** The running total a resumed session already carried before this
+ * process's first turn. On --resume the CLI (2.1.282) restores the session's
+ * cost from an earlier state — not always the latest one this driver saw —
+ * so that turn's total_cost_usd and modelUsage include the earlier turns.
+ * The restored state is the earlier state that sits inside the new counts
+ * and leaves exactly this turn's own usage for one model; nothing restored
+ * is 0. When no state fits exactly — the CLI saved work that never reported
+ * a result, like an interrupted turn — the latest state inside the new
+ * counts stands, so that work is booked once, with this turn. */
+export function restoredCostBase(
+  earlier: readonly ClaudeCostSnapshot[],
+  current: ClaudeCostSnapshot,
+  usage: { input: number; cacheRead: number; cacheWrite: number; output: number },
+): number {
+  const turn = [usage.input, usage.cacheRead, usage.cacheWrite, usage.output];
+  const nothing: ClaudeCostSnapshot = { total: 0, models: {} };
+  let exact: number | null = null;
+  let inside = 0;
+  for (const state of [nothing, ...earlier]) {
+    const within = Object.entries(state.models).every(([model, counts]) =>
+      counts.every((n, i) => n <= (current.models[model]?.[i] ?? 0)));
+    if (!within) continue;
+    inside = Math.max(inside, state.total);
+    const leavesTurn = Object.entries(current.models).some(([model, counts]) =>
+      counts.every((n, i) => n - (state.models[model]?.[i] ?? 0) === turn[i]));
+    if (leavesTurn) exact = Math.max(exact ?? 0, state.total);
+  }
+  return exact ?? inside;
+}
+
+/** Each Claude session's latest cost states, so the first turn after a
+ * --resume can tell what the CLI restored — after an app restart too. Small
+ * by design: a few states for the most recent sessions. */
+const COST_HISTORY_FILE = join(DATA_DIR, "claude-cost-history.json");
+const COST_HISTORY_SESSIONS = 100;
+const COST_HISTORY_STATES = 8;
+
+function isCostSnapshot(value: unknown): value is ClaudeCostSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const { total, models } = value as { total?: unknown; models?: unknown };
+  return typeof total === "number" && !!models && typeof models === "object" &&
+    Object.values(models).every((counts) => Array.isArray(counts) && counts.length === 4 && counts.every((n) => typeof n === "number"));
+}
+
+function readCostHistory(): Record<string, ClaudeCostSnapshot[]> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(COST_HISTORY_FILE, "utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).map(([id, states]) => [id, Array.isArray(states) ? states.filter(isCostSnapshot) : []]));
+  } catch {
+    return {};
+  }
+}
+
+function recordCostState(sessionId: string, state: ClaudeCostSnapshot): void {
+  const history = readCostHistory();
+  const states = [...(history[sessionId] ?? []), state].slice(-COST_HISTORY_STATES);
+  // most recent session last, so the oldest ones are dropped first
+  delete history[sessionId];
+  history[sessionId] = states;
+  const ids = Object.keys(history);
+  for (const id of ids.slice(0, Math.max(0, ids.length - COST_HISTORY_SESSIONS))) delete history[id];
+  try {
+    writeFileAtomic(COST_HISTORY_FILE, JSON.stringify(history), { mode: 0o600 });
+  } catch {
+    // a lost state only means a later resume keeps its whole figure
+  }
+}
+
 type ClaudeImage = NonNullable<SendTurnInput["images"]>[number];
 type ClaudeUserContent =
   | { type: "image"; source: { type: "base64"; media_type: ClaudeImage["mime"]; data: string } }
@@ -1012,6 +1119,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
       stderr: string;
+      /** The CLI's running total that the next turn's cost is measured from
+       * (see turnCostFromRunningTotal): what --resume restored until the
+       * first turn settles, then the last settled turn's total_cost_usd.
+       * undefined until the first result; null when the start is unknown. */
+      costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
       finishClose?: () => Promise<void>;
     }
@@ -1551,6 +1663,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         idleTimer: null,
         closing: false,
         stderr: "",
+        costTotal: undefined,
       };
       sessions.set(threadId, session);
 
@@ -1559,7 +1672,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const settle = (
         ok: boolean,
         stopReason: string | null,
-        cost: number | null = null,
+        total: number | null = null,
         usage?: { input: number; output: number; cachedInput?: number },
       ) => {
         const t = session.turn;
@@ -1589,10 +1702,25 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // pooled child. Retire it before announcing completion so an explicit
         // retry resumes on a fresh process; healthy sibling sessions stay warm.
         if (stopReason === "update_required") closeSession(threadId, "update required");
+        // `total` is the CLI's running total for this process; the harness
+        // books turn.completed.cost as this turn's own spend
+        const cost = turnCostFromRunningTotal(total, session.costTotal ?? null);
+        if (total !== null) session.costTotal = total;
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
       const currentTurnId = () => session.turn?.turnId ?? turnId;
+      // The process's first result says what --resume restored, which its
+      // turns are measured from; every result is kept for a later resume.
+      const noteCostState = (total: unknown, modelUsage: unknown, usage: Parameters<typeof restoredCostBase>[2]) => {
+        const state = claudeCostSnapshot(total, modelUsage);
+        if (session.costTotal === undefined) {
+          session.costTotal = state && session.sessionId
+            ? restoredCostBase(readCostHistory()[session.sessionId] ?? [], state, usage)
+            : null;
+        }
+        if (state && session.sessionId) recordCostState(session.sessionId, state);
+      };
 
       const handleLine = (line: string) => {
         if (session.closing) return;
@@ -1702,11 +1830,19 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // submitted user turn. Settling it would revoke browser access
             // and deny approvals while that user turn is still running.
             if (o.origin?.kind === "task-notification") break;
-            // result.usage is this invocation's total — one process per turn,
-            // so it is the turn's figure. cache reads count as input: they
-            // are billed (at the cache rate) and they fill the window — but
-            // they are reported separately too, so the UI can show how much
-            // of the figure was context re-read rather than new text.
+            // result.usage is this turn's own figure, "per-turn in
+            // streaming-input sessions" (2.1.282) even on a retained process.
+            // cache reads count as input: they are billed (at the cache rate)
+            // and they fill the window — but they are reported separately
+            // too, so the UI can show how much of the figure was context
+            // re-read rather than new text. total_cost_usd is instead the
+            // process's running total; settle() books this turn's share.
+            noteCostState(o.total_cost_usd, o.modelUsage, {
+              input: o.usage?.input_tokens || 0,
+              cacheRead: o.usage?.cache_read_input_tokens || 0,
+              cacheWrite: o.usage?.cache_creation_input_tokens || 0,
+              output: o.usage?.output_tokens || 0,
+            });
             settle(
               o.is_error !== true,
               session.turn?.authFailed

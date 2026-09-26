@@ -63,10 +63,19 @@
 //                      which `--permission-mode auto` starts in "default",
 //                      the way the real CLI (2.1.266) does for Haiku 4.5 and
 //                      Sonnet 4.5: init reports the mode it actually runs in.
+//   Every result's total_cost_usd is the process's running total (0.01 per
+//   result), the way the real CLI reports it: read the latest, never sum.
+//   Its modelUsage is the same running count per model (tokens and costUSD).
+//   FAKE_CLAUDE_COST_STATE dir: the real CLI (2.1.282) restores a session's
+//                      running cost on --resume, so a resumed process's first
+//                      total already counts the earlier turns. The fake saves
+//                      its running cost per session id here, and a --resume
+//                      launch starts from it.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { runRoomHandoffAgent } from "./room-handoff-agent.ts";
 
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
@@ -247,6 +256,18 @@ const permissionMode =
 let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
+// the running cost behind total_cost_usd and modelUsage; a --resume launch
+// starts from the session's saved one (FAKE_CLAUDE_COST_STATE)
+type FakeModelUsage = { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number; costUSD: number };
+const costStateFile = process.env.FAKE_CLAUDE_COST_STATE ? join(process.env.FAKE_CLAUDE_COST_STATE, `${sessionId}.json`) : null;
+const runningCost: { total: number; modelUsage: Record<string, FakeModelUsage> } = (() => {
+  if (costStateFile && argv.includes("--resume")) {
+    try {
+      return JSON.parse(readFileSync(costStateFile, "utf8"));
+    } catch {}
+  }
+  return { total: 0, modelUsage: {} };
+})();
 let stdinEnded = false;
 let steerGateArmed = false;
 
@@ -464,9 +485,25 @@ const playTurn = (prompt: JsonValue) => {
     runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }
 
+  // total_cost_usd is the process's running total (2.1.282: "read the latest
+  // result rather than summing across results"); usage is this turn's own.
   const finish = () => {
     runHooks("Stop", { stop_hook_active: false });
-    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+    runningCost.total = Number((runningCost.total + 0.01).toFixed(2));
+    const counted = (runningCost.modelUsage[model] ??= { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0 });
+    counted.inputTokens += 10;
+    counted.cacheReadInputTokens += 2;
+    counted.outputTokens += 5;
+    counted.costUSD = Number((counted.costUSD + 0.01).toFixed(2));
+    if (costStateFile) writeFileSync(costStateFile, JSON.stringify(runningCost));
+    out({
+      type: "result",
+      is_error: false,
+      stop_reason: "end_turn",
+      total_cost_usd: runningCost.total,
+      usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
+      modelUsage: runningCost.modelUsage,
+    });
     turnRunning = false;
     finishIfDone();
   };
