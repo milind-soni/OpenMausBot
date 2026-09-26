@@ -30,7 +30,8 @@ import { BotAvatar } from "./Avatar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { cn } from "@/lib/cn";
 import { track } from "@/lib/analytics";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { speechBridge, speechEndNote } from "@/lib/stt/bridge";
+import { useSpeechCapabilities } from "@/lib/stt/useSpeechCapabilities";
 import { callCapabilityHelp } from "@/lib/call-capability";
 
 /** Spoken answers to a permission card. Anything else is read as a reply
@@ -73,10 +74,10 @@ export function CallTargetButton({
   onStart: () => void;
 }) {
   const { state, dispatch } = useStore();
-  const { capabilities, ready: capabilitiesReady } = useDesktopCapabilities();
+  const { capabilities, ready: capabilitiesReady } = useSpeechCapabilities();
   const active = useOnCall() === targetId;
   const capabilityHelp = capabilitiesReady
-    ? callCapabilityHelp(capabilities, Boolean(window.ogb?.speechStart))
+    ? callCapabilityHelp(capabilities, Boolean(speechBridge()))
     : null;
   const supported = capabilitiesReady && !capabilityHelp;
   const localVoice = localSystemVoiceActive();
@@ -264,7 +265,7 @@ function Call({ bot }: { bot: Bot }) {
   }, []);
 
   const hush = useCallback(() => {
-    void window.ogb?.speechStop();
+    void speechBridge()?.stop();
   }, []);
 
   const listen = useCallback(() => {
@@ -272,7 +273,7 @@ function Call({ bot }: { bot: Bot }) {
     move("listening");
     setHeard("");
     setNote(null);
-    void window.ogb?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void speechBridge()?.start({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote("The microphone couldn't start. Check Microphone and Speech Recognition access.");
       }
@@ -320,9 +321,9 @@ function Call({ bot }: { bot: Bot }) {
 
   // ── the microphone ───────────────────────────────────────────────────
   useEffect(() => {
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge) return;
-    const offTranscript = bridge.onSpeechTranscript((line) => {
+    const offTranscript = bridge.onTranscript((line) => {
       if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
       if (line.error) {
         setNote("Dictation stopped unexpectedly. Check Microphone and Speech Recognition access.");
@@ -397,8 +398,14 @@ function Call({ bot }: { bot: Bot }) {
       move("sending");
       dispatch({ type: "send", botId: bot.id, text: said, threadId: bot.threadId });
     });
-    const offEnd = bridge.onSpeechEnd(({ code, reason }) => {
+    const offEnd = bridge.onEnd((info) => {
+      const { code, reason } = info;
       if (!alive.current || currentCall() !== bot.id) return;
+      const universalNote = code === 1 ? speechEndNote(info) : null;
+      if (universalNote) {
+        setNote(universalNote);
+        return;
+      }
       if (code === 2) {
         setNote("Calls need macOS dictation, which isn't available here yet.");
         return;
@@ -420,7 +427,7 @@ function Call({ bot }: { bot: Bot }) {
     return () => {
       offTranscript();
       offEnd();
-      void window.ogb?.speechStop();
+      void speechBridge()?.stop();
     };
     // busy/approval are intentionally initial snapshots. Their live changes
     // are handled below without tearing down native event listeners.

@@ -51,7 +51,8 @@ import {
 import { normalizeState } from "@/lib/mascot";
 import { goalCoordinatorForComposer, groupComposerHint, roomRespondersForComposer } from "@/lib/group-routing";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
-import { useDesktopCapabilities } from "./DesktopCapabilities";
+import { speechBridge, speechEndNote } from "@/lib/stt/bridge";
+import { useSpeechCapabilities } from "@/lib/stt/useSpeechCapabilities";
 import { ReplyQuote } from "./ReplyQuote";
 import { useThreadRefs } from "./ThreadRefs";
 import {
@@ -116,7 +117,7 @@ export function Composer({
   const { state, dispatch } = useStore();
   const ownerOrAdmin = useOwnerOrAdmin();
   const { threads, currentBotId } = useThreadRefs();
-  const { capabilities } = useDesktopCapabilities();
+  const { capabilities } = useSpeechCapabilities();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers members plus @everyone; explicit mentions override the room's
@@ -696,37 +697,46 @@ export function Composer({
   // helper runs; the final transcript stays in the box, ready to edit/send
   useEffect(() => {
     if (!recording) return;
-    const bridge = window.ogb;
+    const bridge = speechBridge();
     if (!bridge) {
       setRecording(false);
       return;
     }
     setSpeechError(null);
-    const offTranscript = bridge.onSpeechTranscript((line) => {
+    const offTranscript = bridge.onTranscript((line) => {
       if (typeof line.text === "string") {
         const base = baseText.current;
         editText(base ? `${base} ${line.text}` : line.text);
       }
     });
-    const offEnd = bridge.onSpeechEnd(({ code }) => {
+    const offEnd = bridge.onEnd((info) => {
       setRecording(false);
-      if (code === 2) {
+      if (info.code === 2) {
         setSpeechError(t("composer.dictation.macOnly"));
-      } else if (code === 1) {
-        setSpeechError(t("composer.dictation.permission"));
+      } else if (info.code === 1) {
+        setSpeechError(speechEndNote(info) ?? t("composer.dictation.permission"));
       }
     });
-    void bridge.speechStart();
+    void bridge.start();
     return () => {
       offTranscript();
       offEnd();
-      void bridge.speechStop();
+      void bridge.stop();
     };
   }, [recording, editText]);
 
   const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
+    const bridge = speechBridge();
+    if (!capabilities.dictation.available || !bridge) {
       setSpeechError(t("composer.dictation.unavailable"));
+      return;
+    }
+    // The native helper streams every word into the box as it goes, so
+    // stopping keeps them. The universal engine may only have audio so far
+    // (cloud STT sends no partials): finish it, and its end event clears
+    // `recording` once the final text has landed.
+    if (recording && bridge.kind === "universal") {
+      void bridge.finish();
       return;
     }
     baseText.current = text.trim();

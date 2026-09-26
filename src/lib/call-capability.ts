@@ -25,6 +25,12 @@ export function callCapabilityHelp(
           label: "Calls need the macOS desktop app",
           reason: "Open it in OpenMausBot for macOS to make calls with on-device speech recognition.",
         };
+      case "stt-setup-required":
+        return {
+          label: "Set up speech recognition to call",
+          reason:
+            "Choose a speech recognition provider under Voice in this agent's settings. A local Whisper server keeps your audio on this computer.",
+        };
       case "unsupported-platform":
         return {
           label: "Calls currently need macOS",

@@ -617,6 +617,20 @@ export interface ConfigStatus {
     baseUrl?: string;
     model?: string;
   };
+  /** Speech recognition used for calls/dictation off macOS. Keys are
+   * reported as booleans only. `interim` means partial transcripts are
+   * cheap (a local server) and the renderer may request them. */
+  stt?: {
+    provider: "" | "openai" | "groq" | "xai" | "local";
+    ready: boolean;
+    openaiConfigured: boolean;
+    groqConfigured: boolean;
+    xaiConfigured: boolean;
+    baseUrl: string;
+    model: string;
+    language: string;
+    interim: boolean;
+  };
   /** Shared write-only credential for on-demand GPT Image avatars. */
   imageGen?: {
     configured: boolean;
@@ -680,7 +694,7 @@ export interface BrowserProfile {
 // Settings shows (a saved key's Test button used to vanish that way).
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
+  "xai" | "mistral" | "anthropic" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "threads" | "localVm" | "opencodeGo" | "tts" | "stt" | "imageGen" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -698,6 +712,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     localVm: frame.localVm,
     opencodeGo: frame.opencodeGo,
     tts: frame.tts,
+    stt: frame.stt,
     imageGen: frame.imageGen,
     profile: frame.profile,
     language: frame.language,

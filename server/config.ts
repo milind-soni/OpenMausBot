@@ -425,6 +425,33 @@ const appConfigSchema = z.object({
       .optional(),
     model: optionalText,
   }).optional(),
+  /** Speech recognition for calls and dictation where Apple's on-device
+   * recognizer is unavailable (Windows, Linux). Off until a provider is
+   * chosen. "openai" and "groq" own their keys; "xai" reuses `xai.key`;
+   * "local" is an OpenAI-compatible transcription server (faster-whisper,
+   * whisper.cpp) whose `baseUrl`/`model` are settings, not secrets. */
+  stt: z.object({
+    provider: z.enum(["openai", "groq", "xai", "local"]).optional(),
+    openaiKey: optionalText,
+    groqKey: optionalText,
+    baseUrl: z
+      .string()
+      .trim()
+      .max(2048)
+      .refine((value) => {
+        if (!value) return true;
+        try {
+          const parsed = new URL(value);
+          const loopback = parsed.hostname === "localhost" || parsed.hostname === "[::1]" || /^127(?:\.\d{1,3}){3}$/.test(parsed.hostname);
+          return parsed.protocol === "https:" || (parsed.protocol === "http:" && loopback);
+        } catch {
+          return false;
+        }
+      }, "the speech server address must use HTTPS, or HTTP on loopback (localhost/127.0.0.1)")
+      .optional(),
+    model: optionalText,
+    language: optionalText,
+  }).optional(),
   /** Avatar provider credentials stay separate; choosing a router never reuses a cloud key. */
   imageGen: z.object({
     provider: z.enum(["openai", "xai", "custom"]).optional(),
@@ -506,6 +533,7 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; fishKey?: string; voice?: string; provider?: "elevenlabs" | "fish" | "system" | "chatterbox" | "xai"; baseUrl?: string; model?: string };
+  stt?: { provider?: "openai" | "groq" | "xai" | "local"; openaiKey?: string; groqKey?: string; baseUrl?: string; model?: string; language?: string };
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
@@ -748,6 +776,7 @@ export const FLEET_NEUTRAL_KEYS: ReadonlySet<string> = new Set([
   "profile",
   "language",
   "tts",
+  "stt",
   "imageGen",
   "vps",
   "rooms",
@@ -870,6 +899,9 @@ export function loadConfig(): AppConfig {
   cfg.tts = { ...cfg.tts };
   if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   if (process.env.OMB_FISH_AUDIO_API_KEY !== undefined) cfg.tts.fishKey = process.env.OMB_FISH_AUDIO_API_KEY;
+  cfg.stt = { ...cfg.stt };
+  if (process.env.OMB_OPENAI_STT_KEY !== undefined) cfg.stt.openaiKey = process.env.OMB_OPENAI_STT_KEY;
+  if (process.env.OMB_GROQ_STT_KEY !== undefined) cfg.stt.groqKey = process.env.OMB_GROQ_STT_KEY;
   cfg.imageGen = { ...cfg.imageGen };
   if (process.env.OMB_OPENAI_IMAGE_KEY !== undefined) cfg.imageGen.key = process.env.OMB_OPENAI_IMAGE_KEY;
   if (process.env.OMB_CUSTOM_IMAGE_KEY !== undefined) cfg.imageGen.customApiKey = process.env.OMB_CUSTOM_IMAGE_KEY;
@@ -902,6 +934,8 @@ export function syncCredentialEnv(patch: Partial<Omit<AppConfig, "threads" | "ne
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
     [patch.tts?.key, "OMB_TTS_KEY"],
     [patch.tts?.fishKey, "OMB_FISH_AUDIO_API_KEY"],
+    [patch.stt?.openaiKey, "OMB_OPENAI_STT_KEY"],
+    [patch.stt?.groqKey, "OMB_GROQ_STT_KEY"],
     [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
     [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
   ];
@@ -1036,7 +1070,7 @@ export function saveConfig(
   // back after we have successfully recognized the legacy list.
   const storedProfiles = storedBrowserProfilesSchema.safeParse(disk.browserProfiles);
   if (storedProfiles.success) disk.browserProfiles = storedProfiles.data;
-  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
+  for (const key of ["xai", "anthropic", "mistral", "openaiCompat", "composio", "box", "opencodeGo", "tts", "stt", "imageGen", "profile", "rooms", "threads", "context", "localVm", "features", "budgets", "billing", "decisions", "onboarding", "browserEngine", "newBots"] as const) {
     const section = checkedPatch[key];
     if (!section) continue;
     const current = jsonObjectSchema.safeParse(disk[key]);

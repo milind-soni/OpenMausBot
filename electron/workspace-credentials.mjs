@@ -12,6 +12,8 @@ export const WORKSPACE_CREDENTIALS = [
   { section: "box", field: "token", name: "boxToken", env: "BOX_TOKEN" },
   { section: "tts", field: "key", name: "ttsKey", env: "OMB_TTS_KEY" },
   { section: "tts", field: "fishKey", name: "fishAudioKey", env: "OMB_FISH_AUDIO_API_KEY" },
+  { section: "stt", field: "openaiKey", name: "openaiSttKey", env: "OMB_OPENAI_STT_KEY" },
+  { section: "stt", field: "groqKey", name: "groqSttKey", env: "OMB_GROQ_STT_KEY" },
   { section: "imageGen", field: "key", name: "openaiImageApiKey", env: "OMB_OPENAI_IMAGE_KEY" },
   { section: "imageGen", field: "customApiKey", name: "customImageApiKey", env: "OMB_CUSTOM_IMAGE_KEY" },
   { section: "opencodeGo", field: "apiKey", name: "opencodeGoApiKey", env: "OPENCODE_API_KEY" },
