@@ -8082,6 +8082,25 @@ async function startTurn(
         }
         return containerComputerFrame(undefined, undefined, localVmTarget);
       };
+      /** Pin the conversation at the moment its seat is actually claimed
+       * (issue #1650): the same guards as the dispatch-time pin below, so
+       * a claim landing later in the turn records exactly what a mount-time
+       * pin would have — and a turn that never claims records nothing.
+       * The guard reads live bot and task state because a claim can land
+       * long after dispatch: a Works on change may have swept this
+       * thread's auto pins, or a person may have pinned it meanwhile, and
+       * a deferred claim must resurrect neither nor clobber either. */
+      const autoPinAllowed = () => {
+        const liveBot = store.bot(bot.id);
+        const liveTask = store.taskByThread(bot.id, threadId);
+        return liveBot?.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned &&
+          Boolean(liveTask && liveTask.surfaceSource !== "user");
+      };
+      const pinAutoSurface = (surface: Surface) => {
+        if (autoPinAllowed()) {
+          store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
+        }
+      };
       /** The exclusive Local VM claim sequence, verbatim from the old inline
        * attach path, shared by dispatch (eager) and the first-screen-call
        * gate (issue #1361). Idempotent per turn: the resource claim and the
@@ -8146,6 +8165,11 @@ async function startTurn(
         // forever. The web panel hid the gap by polling the screenshot
         // route itself.
         previewCapture = localVmPreviewFor(localVmTarget, claimThreadId);
+        // Pin on use: this runs for the dispatch-time claim of a VM created
+        // for the turn and for the gate-fired claim of a lazily mounted one
+        // alike — either way the conversation remembers the desktop this
+        // turn actually took, not one it merely mounted (issue #1650).
+        pinAutoSurface("vm");
         return { target: localVmTarget, runtime: localVm.runtime };
       };
 
@@ -8293,6 +8317,7 @@ async function startTurn(
             // The claim restarts the poller with the capture, the way the
             // Local VM's lazy claim does.
             onClaimed: (vpsCapture) => {
+              pinAutoSurface("cloud");
               previewCapture = vpsCapture;
               if (threadBusy(bot.id, threadId)) {
                 const touched = screenPollers.get(threadId)?.touched ?? false;
@@ -8373,7 +8398,24 @@ async function startTurn(
       ) {
         const cua = readCuaConnection();
         if (cua) {
-          await bindTurnComputer(resourceOwner, "computer:host");
+          // Lazy host claim (issue #1650): the gated integration mounts
+          // now, but the exclusive computer:host seat is taken only by the
+          // first screen tools/call, through the computer-control gate —
+          // the same seam as the Local VM (#1361) and the VPS. An Auto
+          // turn that never touches the screen holds no desktop seat and
+          // records no pin; a claim that finds the seat held waits behind
+          // the holder like every other seat instead of failing on the
+          // spot.
+          autoVmClaims.set(threadId, {
+            owner: resourceOwner,
+            lazy: true,
+            label: "this computer",
+            onRejected: surfaceLazyClaimRejection("this computer"),
+            claim: async () => {
+              await bindTurnComputer(resourceOwner, "computer:host", true);
+              pinAutoSurface("local");
+            },
+          });
           integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
           computerKind = "local";
         }
@@ -8516,8 +8558,15 @@ async function startTurn(
       // turns stay there and the composer can show it. Explicit settings are
       // not recorded: an auto pin yields to a later Works on change (which
       // sweeps it — store.clearAutoSurfacePins); a person's pin does not.
-      if (bot.computer === undefined && !teamComputer && opts?.runOn !== "cloud" && !plan.pinned) {
-        const used = mountedComputer ?? (integrations.browser ? "browser" : null);
+      // Pin on use (issue #1650): every computer that registers a claim
+      // slot — a ready Local VM, the VPS, the host fallback, a VM created
+      // for this turn — records its pin inside the claim itself, so a turn
+      // that only mounted tools records nothing. A Box attached during
+      // dispatch and the built-in browser (no seat to claim) pin here.
+      if (autoPinAllowed()) {
+        const claimSlot = autoVmClaims.get(threadId);
+        const pinsAtClaim = claimSlot?.owner.generation === resourceOwner.generation;
+        const used = pinsAtClaim ? null : mountedComputer ?? (integrations.browser ? "browser" : null);
         if (used) store.patchTask(bot.id, threadId, { surface: used, surfaceSource: "auto" });
       }
       const computerSelection = computerSelectionTurns.get(threadId);

@@ -58,6 +58,11 @@ describe("surface pin provenance against the real server", () => {
     try { return JSON.parse(readFileSync(dumpFile, "utf8")); } catch { return null; }
   }, Boolean);
   const mountedComputer = (sent: any) => sent.mcpConfig.mcpServers.computer;
+  // The first screen tools/call, exactly as the mounted proxy issues it
+  // (issue #1650: a claim and its pin land on use, not on mount).
+  const gate = (c: any) => fetch(c.env.OMB_CONTROL_URL, {
+    headers: { authorization: `Bearer ${c.env.OMB_CONTROL_TOKEN}` },
+  }).then(response => response.json() as Promise<any>);
   const threadState = (botId: string, threadId: string) =>
     api("GET", "/api/bots?messages=0").then(({ body }) =>
       body.bots.find((bot: any) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId));
@@ -155,6 +160,9 @@ describe("surface pin provenance against the real server", () => {
     resetTurn();
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Work slowly.", threadId: task.threadId });
     await busy(bot.id, task.threadId);
+    // The turn's first screen call claims the ready VM — a mount alone
+    // records nothing (issue #1650)…
+    expect(await gate(mountedComputer(await dump()))).toEqual({ held: false, helpOpen: false });
     // The running Auto turn records where it landed with explicit provenance.
     await until(() => savedTask(bot.id, task.threadId)?.surface === "vm", Boolean);
     const refused = await api("PATCH", `/api/bots/${bot.id}/tasks/${task.threadId}`, { surface: "vm" });
@@ -261,6 +269,11 @@ describe("surface pin provenance against the real server", () => {
     resetTurn();
     await apiOk("POST", `/api/bots/${bot.id}/messages`, { text: "Use the available computer.", threadId: task.threadId });
     expect(mountedComputer(await dump()).args.some((arg: string) => arg.includes("container-mcp"))).toBe(true);
+    // …and a turn that has only mounted the VM pins nothing yet: the first
+    // screen tools/call takes the seat and records the pin (issue #1650).
+    expect(savedTask(bot.id, task.threadId)).not.toHaveProperty("surface");
+    expect(await gate(mountedComputer(await dump()))).toEqual({ held: false, helpOpen: false });
+    await until(() => savedTask(bot.id, task.threadId)?.surface === "vm", Boolean);
     expect(savedTask(bot.id, task.threadId)).toMatchObject({ surface: "vm", surfaceSource: "auto" });
     expect(await threadState(bot.id, task.threadId)).not.toHaveProperty("surfaceSource");
     writeFileSync(finishFile, "finish");
