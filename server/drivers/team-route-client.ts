@@ -45,7 +45,8 @@ function parseArgs(args: Json): { taskType: TeamRouteCategory; owners: EligibleO
   const owners: EligibleOwner[] = [];
   for (const owner of args.eligible_owners) {
     if (!record(owner) || Object.keys(owner).length !== 2 ||
-        typeof owner.id !== "string" || !/^[a-z][a-z0-9_-]{0,63}$/.test(owner.id) || seen.has(owner.id) ||
+        typeof owner.id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(owner.id) ||
+        owner.id === "no_suitable_owner" || seen.has(owner.id) ||
         typeof owner.role !== "string" || !TEAM_ROUTE_CATEGORIES.includes(owner.role as TeamRouteCategory)) {
       return "Each eligible owner needs a unique reachable id and one supported role category.";
     }

@@ -56,6 +56,22 @@ describe("OpenMausBot Jev team-route client", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("accepts a reachable UUID whose first character is a digit", async () => {
+    const id = "0abc1234-5678-4abc-8def-123456789012";
+    const fetchImpl = vi.fn(async () => Response.json({
+      suggested_owner_id: id,
+      confidence: 0.84,
+      human_review_required: true,
+    }));
+    const result = await suggestTeamTaskOwner({
+      task_type: "engineering",
+      eligible_owners: [{ id, role: "engineering" }],
+    }, config(fetchImpl, [{ id, name: "Engineer" }]));
+    expect(result.isError).toBeUndefined();
+    expect(JSON.parse(result.text).suggested_owner_id).toBe(id);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces Retry-After from 429 and never retries automatically", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ error: { code: "jev_rate_limited" } }), {
       status: 429,
@@ -86,6 +102,13 @@ describe("OpenMausBot Jev team-route client", () => {
     const options = config(fetchImpl);
     const badArgs = await suggestTeamTaskOwner({ ...args, task_text: "private" }, options);
     expect(badArgs.isError).toBe(true);
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const reservedOwner = await suggestTeamTaskOwner({
+      task_type: "engineering",
+      eligible_owners: [{ id: "no_suitable_owner", role: "engineering" }],
+    }, options);
+    expect(reservedOwner.isError).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
 
     const badEndpoint = await suggestTeamTaskOwner(args, { ...options, endpoint: "http://control-plane.example/v1/team-route/suggest" });

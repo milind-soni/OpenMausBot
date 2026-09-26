@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { callTool, type ToolCallContext } from "./agents-call.ts";
 
 function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
@@ -70,6 +70,46 @@ describe("send_voice_note", () => {
     }));
     expect(result.isError).toBe(true);
     expect(result.text).toContain("Pick a voice in the agent profile.");
+  });
+});
+
+describe("suggest_team_task_owner", () => {
+  it("refuses a disabled turn before contacting the roster or Jev", async () => {
+    const api = vi.fn(async () => ({}));
+    const result = await callTool("suggest_team_task_owner", {}, context({
+      client: { api, apiResponse: async () => ({ ok: true, status: 200, body: {} }) },
+    }));
+    expect(result.isError).toBe(true);
+    expect(api).not.toHaveBeenCalled();
+  });
+
+  it("forwards the scoped endpoint and token after checking the Chief's roster", async () => {
+    const api = vi.fn(async () => ({ bots: [{ id: "bot-qa", name: "QA" }] }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      suggested_owner_id: "bot-qa",
+      confidence: 0.8,
+      human_review_required: true,
+    }));
+    try {
+      const result = await callTool("suggest_team_task_owner", {
+        task_type: "qa_audit",
+        eligible_owners: [{ id: "bot-qa", role: "qa_audit" }],
+      }, context({
+        botId: "bot-chief",
+        teamRouting: true,
+        teamRouteEndpoint: "https://jack.example/v1/team-route/suggest",
+        teamRouteToken: "route-token",
+        client: { api, apiResponse: async () => ({ ok: true, status: 200, body: {} }) },
+      }));
+      expect(result.isError).toBeUndefined();
+      expect(api).toHaveBeenCalledWith("/api/internal/agents?self=bot-chief", expect.any(Object));
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0]!;
+      expect(String(url)).toBe("https://jack.example/v1/team-route/suggest");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer route-token");
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });
 
