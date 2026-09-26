@@ -345,6 +345,7 @@ describe("resolveRequestAuth", () => {
   });
 
   it.each([
+    ["GET", "/api/threads/private-thread/prompt-inspector"],
     ["GET", "/api/settings/custom-domain"],
     ["POST", "/api/settings/custom-domain"],
     ["DELETE", "/api/settings/custom-domain"],

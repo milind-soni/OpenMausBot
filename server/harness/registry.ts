@@ -1,3 +1,4 @@
+import { inspectProvider } from "../prompt-inspector.ts";
 // Provider instance registry — port of upstream's ProviderInstanceRegistryLive
 // behavior, minus Effect: config map → live instances; unknown driver or
 // config-decode failure becomes an UNAVAILABLE SHADOW SNAPSHOT instead of a
@@ -106,7 +107,7 @@ export class ProviderRegistry {
           enabled: entry.enabled ?? true,
           config,
         });
-        this.byId.set(instanceId, { instanceId, live: decorate ? decorate(live) : live });
+        this.byId.set(instanceId, { instanceId, live: inspectProvider(decorate ? decorate(live) : live) });
       } catch (e) {
         this.byId.set(instanceId, {
           instanceId,

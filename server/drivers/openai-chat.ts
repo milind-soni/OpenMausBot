@@ -1,3 +1,4 @@
+import { captureApiRequest, diagnosticHeaders, promptUsage } from "../prompt-inspector.ts";
 import type {
   DriverCreateInput,
   ModelCatalog,
@@ -153,6 +154,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
     tools: ChatToolDefinition[] = [],
+    safeCaptureText: (text: string) => string = redactSecretsInText,
   ): Promise<Completion> => {
     // Idle timer that is renewed on every received chunk during streaming
     const timeoutController = new AbortController();
@@ -165,22 +167,27 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     };
 
     resetIdleTimer();
+    let capture: ReturnType<typeof captureApiRequest>;
 
     try {
       const activeSignal = signal
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
+      const body = {
+        ...options.requestBody(model, messages, stream),
+        ...(tools.length ? { tools } : {}),
+      };
+      capture = captureApiRequest(JSON.parse(JSON.stringify(body, (_key, part) =>
+        typeof part === "string" ? safeCaptureText(part) : part)), `${options.apiUrl}/chat/completions`);
       const response = await fetch(`${options.apiUrl}/chat/completions`, {
         method: "POST",
         ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          ...options.requestBody(model, messages, stream),
-          ...(tools.length ? { tools } : {}),
-        }),
+        body: JSON.stringify(body),
         signal: activeSignal,
       });
+      capture?.patch({ httpStatus: response.status, responseHeaders: diagnosticHeaders(response.headers) });
       if (!response.ok) {
         const body = await response.text().catch(() => "");
         const message = `${options.httpErrorLabel} HTTP ${response.status}${body ? `: ${body.slice(0, 200)}` : ""}`;
@@ -204,13 +211,16 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const reasoning = message.reasoning_content ?? message.reasoning;
         const finishReason = json.choices?.[0]?.finish_reason ?? null;
         activeSignal.throwIfAborted();
+        const toolCalls = calls.finish(finishReason, false);
+        capture?.patch({ usage: promptUsage(json.usage) });
+        capture?.finish("completed");
         return {
           text: options.contentText ? options.contentText(message?.content) : typeof message?.content === "string" ? message.content : "",
           reasoning: options.reasoning && typeof reasoning === "string"
             ? reasoning
             : "",
           usage: usageFrom(json.usage),
-          toolCalls: calls.finish(finishReason, false),
+          toolCalls,
           finishReason,
           protocolReasoning: typeof reasoning === "string" ? reasoning : "",
           protocolReasoningDetails: details.blocks,
@@ -272,7 +282,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           text += contentDelta;
           onDelta?.(contentDelta, "assistant_text");
         }
-        if (chunk.usage) usage = usageFrom(chunk.usage);
+        if (chunk.usage) { usage = usageFrom(chunk.usage); capture?.patch({ usage: promptUsage(chunk.usage) }); }
         return false;
       };
       try {
@@ -308,7 +318,12 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       }
       activeSignal.throwIfAborted();
       if (!sawChoice) throw new ChatProtocolError("provider returned no streaming completion choice");
-      return { text, reasoning, usage, toolCalls: calls.finish(finishReason, malformedFrame), finishReason, protocolReasoning, protocolReasoningDetails: details.blocks };
+      const toolCalls = calls.finish(finishReason, malformedFrame);
+      capture?.finish("completed");
+      return { text, reasoning, usage, toolCalls, finishReason, protocolReasoning, protocolReasoningDetails: details.blocks };
+    } catch (error) {
+      capture?.finish(signal?.aborted ? "interrupted" : "failed", safeCaptureText(asError(error).message));
+      throw error;
     } finally {
       if (idleTimer) clearTimeout(idleTimer);
     }
@@ -449,7 +464,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               completion = await complete(messages, model, true, abort.signal, (text, streamKind) => {
                 streamed = true;
                 delta(text, streamKind);
-              }, tools.definitions);
+              }, tools.definitions, safeText);
               delta("", "assistant_text", true);
               delta("", "reasoning_text", true);
               break;

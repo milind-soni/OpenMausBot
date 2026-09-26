@@ -394,6 +394,8 @@ export async function launchVerificationServer(
   extraProviders: Array<"codex"> = [],
   /** Programmatic tests only: an owned loopback Box provider, never a live account. */
   boxFixtureApi?: string,
+  /** Programmatic startup tests may seed only this newly-created fixture home. */
+  beforeStart?: (dataDir: string) => void,
 ): Promise<VerificationServer> {
   if (boxFixtureApi) {
     if (!/^http:\/\/127\.0\.0\.1:[1-9]\d{0,4}$/.test(boxFixtureApi)) {
@@ -437,6 +439,12 @@ export async function launchVerificationServer(
       },
     },
   }, null, 2));
+  try {
+    beforeStart?.(dataDir);
+  } catch (error) {
+    await removeTempDir(dataDir);
+    throw error;
+  }
 
   const log = openSync(logPath, "a", 0o600);
   const childEnv = verificationServerEnvironment(parentEnv, dataDir, port);
