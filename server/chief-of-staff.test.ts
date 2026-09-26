@@ -3,6 +3,19 @@ import { describe, expect, it } from "vitest";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
 
 describe("chiefOfStaffSystemPrompt roster caps", () => {
+  it("keeps Jev advisory-only and requires a Jack confirmation before assignment", () => {
+    const bots = [
+      { id: "chief", name: "Chief", chiefOfStaff: true, section: "Work" },
+      { id: "coder", name: "Engineer", title: "Engineering", section: "Work" },
+    ];
+    const prompt = chiefOfStaffSystemPrompt("chief", bots, true, "", true, true);
+    expect(prompt).toContain("send Jev only a fixed task category and teammate ids with fixed role categories");
+    expect(prompt).toContain("never task text, conversation excerpts, customer data or secrets");
+    expect(prompt).toContain("wait for Jack's explicit confirmation before coordinate_bots");
+    expect(prompt).toContain("If Jack later confirms that exact suggestion, do not ask again or rerun Jev");
+    expect(chiefOfStaffSystemPrompt("chief", bots, true)).not.toContain("Jev team routing");
+  });
+
   it("clips oversized persona fields instead of interpolating them whole", () => {
     const prompt = chiefOfStaffSystemPrompt(
       "chief",
