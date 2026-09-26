@@ -18,6 +18,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFile
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SessionRegistry } from "./sessions.ts";
@@ -322,6 +323,36 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     const map = (await api("GET", "/api/team-map", undefined, BOB)).body;
     expect(JSON.stringify(map)).not.toContain(ids.hr);
   });
+
+  it("withdraws results when an audience changes while a large search is pending", async () => {
+    const db = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+    let pending: Promise<{ status: number; body: any }> | undefined;
+    try {
+      // A real scan on this disposable fixture, not a fake search response.
+      // Unowned rows create work but must never become visible search results.
+      const text = "synthetic search history ".repeat(50);
+      const insert = db.prepare("INSERT INTO messages(thread_id,id,at,role,kind,text,json) VALUES('search-race',?,1,'user','text',?,?)");
+      db.exec("BEGIN");
+      for (let i = 0; i < 50_000; i++) insert.run(`race-${i}`, text, JSON.stringify({ text }));
+      db.exec("COMMIT");
+      let finished = false;
+      pending = api("GET", "/api/search?q=Zebra", undefined, ADA).finally(() => { finished = true; });
+      // The health round-trip allows the search request to enter the server;
+      // the following edit must finish before the scan does, or this run has
+      // not demonstrated the interleaving we intend to protect.
+      await api("GET", "/api/health");
+      expect((await api("PATCH", `/api/bots/${ids.hr}`, { visibility: "admins" }, BOSS)).status).toBe(200);
+      expect(finished).toBe(false);
+      const result = await pending;
+      expect(result.status).toBe(200);
+      expect(result.body.hits).toEqual([]);
+    } finally {
+      await pending;
+      await api("PATCH", `/api/bots/${ids.hr}`, { visibility: { people: [ADA] } }, BOSS);
+      db.prepare("DELETE FROM messages WHERE thread_id='search-race'").run();
+      db.close();
+    }
+  }, 20_000);
 
   it("keeps the audience an admin's setting", async () => {
     const member = await api("PATCH", `/api/bots/${ids.pub}`, { visibility: "admins" }, ADA);

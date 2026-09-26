@@ -115,6 +115,14 @@ while (Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 300));
 }
 
+let searchReport = null;
+if (listening) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/search?q=packaged-worker-probe`, { signal: AbortSignal.timeout(10_000) });
+    searchReport = { status: response.status, body: await response.json() };
+  } catch (error) { searchReport = { error: String(error) }; }
+}
+
 let browserReport = null;
 if (browserBundle && listening) {
   try {
@@ -224,6 +232,11 @@ if (!listening) {
   console.error(`the packaged server never served /api/health on port ${port}.`);
   console.error(`exit code: ${child.exitCode}`);
   console.error(output.trim() || "(no output)");
+  process.exit(1);
+}
+
+if (searchReport?.status !== 200 || !Array.isArray(searchReport.body?.hits)) {
+  console.error("The packaged read-only search worker did not respond:", searchReport);
   process.exit(1);
 }
 

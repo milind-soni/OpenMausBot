@@ -211,7 +211,7 @@ import type { GroupGoalRunCardData, GroupGoalRunStatus } from "../shared/group-g
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { getOrCreateChannel, mirrorActivity, mirrorExchange, mirrorReply, type CommsBus } from "./comms-visibility.ts";
-import { readMessageText, recallMessages, recentMessages, searchMessages, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
+import { readMessageText, recallMessages, recentMessages, searchMessagesAsync, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
@@ -12729,6 +12729,7 @@ const workspaceBackupRoutes = createWorkspaceBackupRoutes({
       await Promise.all([flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
       // With writers gated and work idle, release our WAL connection for the
       // consistent snapshot. Store reopens it lazily after maintenance.
+      await closeMessageSearch();
       closeMessageDb();
     },
   }, keepLocked),
@@ -15987,9 +15988,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // ── search across every transcript ──────────────────────────────────
-    // A LIKE scan over the SQLite message store: local transcripts are
-    // megabytes at most, so a scan answers in milliseconds and needs no
-    // index to maintain. Hits resolve to the bot/room that owns the thread;
+    // Literal substring scans run in a bounded read-only worker so a large
+    // history cannot stall unrelated turns. Hits resolve to the owning bot/room;
     // rows belonging to deleted conversations resolve to nothing and drop.
     if (method === "GET" && path === "/api/search") {
       const q = url.searchParams.get("q") ?? "";
@@ -16009,8 +16009,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       };
       // A member who may not see every bot: look further, then keep only
       // hits in conversations they can open.
-      const hits = searchMessages(q, visible.everything ? limit : Math.min(limit * 10, 1_000), threadId)
-        .filter((hit) => visible.thread(hit.threadId))
+      const found = await searchMessagesAsync(q, visible.everything ? limit : Math.min(limit * 10, 1_000), threadId);
+      // A scan may outlive a revocation or audience edit. Authorize again
+      // after the await, and resolve visibility from current store state.
+      if (HOSTED_WORKSPACE && auth.kind === "session") {
+        const failure = workspaceAccess ? await workspaceAccess.authorize(req, auth)
+          : { status: 503, error: "Workspace sign-in is unavailable." };
+        if (failure) return json(res, failure.status, { error: failure.error });
+      }
+      const current = resolveRequestAuth(req, {
+        sessions, cookieName: SESSION_COOKIE, streamPath: "/api/events", url,
+        loopbackMutationToken: desktopMutationToken, companionMutationToken,
+        features: { sharedComputers: sharedComputersEnabled(cfg) }, loopbackTrust: LOOPBACK.trust, cliOwnerToken,
+      });
+      if (!current.auth) return json(res, current.status, { error: current.error });
+      const currentVisible = visibleTo(viewerFor(current.auth));
+      if (threadId && !currentVisible.thread(threadId)) return json(res, 404, { error: "no such conversation" });
+      const hits = found
+        .filter((hit) => currentVisible.thread(hit.threadId))
         .slice(0, limit)
         .map((hit) => {
           const bot = store.botByThread(hit.threadId);
@@ -21307,6 +21323,7 @@ const gracefulShutdown = createGracefulShutdown({
     () => flushUsageLedger(DATA_DIR),
     () => flushDecisionLog(DATA_DIR),
     () => flushAdminActivity(DATA_DIR),
+    () => closeMessageSearch(),
   ],
   // Cleanup jobs run concurrently. Release only after they settle (or reach
   // the shutdown deadline), immediately before the process exits, so no new
