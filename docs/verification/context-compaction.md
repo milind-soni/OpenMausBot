@@ -43,9 +43,16 @@ temporary home. No live account, computer or user workspace is touched.
 `context` settings in config.json are optional. `autoCompact: false` disables
 automatic folding, `compactAt` is a fraction below 1 or a token count, and
 `rebuildBytes` controls replay size (default 24,000 bytes). Context-only settings
-do not reload provider processes. The default threshold is 80% of the known
-model window; a real latest-prompt measurement wins over a transcript estimate.
-Summed input tokens across tool rounds are never treated as context size.
+do not reload provider processes. The compaction threshold defaults to 80% of
+the known model window; a real latest-prompt measurement wins over a transcript
+estimate. Summed input tokens across tool rounds are never treated as context
+size.
+
+`context.toolTriage` separately switches on summarization of oversized tool
+results (server/tool-triage.ts): off by default, `true` = 6,000 tokens, a
+number = an explicit budget, and a refused or failed check keeps the raw capped
+preview. A qualifying save's redacted original is spilled durably so its
+pointer outlives the one-hour cache.
 For Claude, the threshold and post-compaction regrowth floor also leave 10%
 headroom below the selected account's numeric native-compaction setting.
 That account's setting takes precedence over the inherited launch environment.

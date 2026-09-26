@@ -41,6 +41,10 @@ export interface ToolCallContext {
   coordinating: boolean;
   sharedComputers: boolean;
   client: HarnessClient;
+  /** Token threshold over which the harness summarizes this proxy's
+   * oversized results server-side, or undefined when triage is off for this
+   * turn. The save route re-checks the live config on every call. */
+  triageTokens?: number;
   turn: TurnGuards;
 }
 
@@ -57,6 +61,10 @@ export interface ToolCallResult {
  *   (agents-catalog.ts) and the harness address and token (agents-client.ts). */
 export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext {
   const profile = catalogProfileFromEnv(env);
+  // Offered only when the harness mounted this proxy with triage on. The
+  // save route re-checks the live config, so a value that has gone stale
+  // mid-turn degrades to the capped preview, never a wrong summary.
+  const triageTokens = Number(env.OMB_TOOL_TRIAGE_TOKENS ?? "");
   return {
     botId: profile.botId,
     threadId: env.OMB_THREAD_ID ?? "",
@@ -65,6 +73,7 @@ export function toolCallContextFromEnv(env: NodeJS.ProcessEnv): ToolCallContext 
     coordinating: profile.coordinating,
     sharedComputers: profile.sharedComputers,
     client: harnessClientFromEnv(env),
+    ...(Number.isSafeInteger(triageTokens) && triageTokens > 0 ? { triageTokens } : {}),
     turn: {
       createdThisTurn: 0,
       roomPostsThisTurn: 0,
@@ -285,8 +294,12 @@ export const capResult = (text: string, context: ToolCallContext) => boundedAgen
   // The standing capability cannot write/read cached tool results. Keep the
   // normal bounded fallback without making a forbidden request or retrying.
   if (context.externalRuntime) throw new Error("External runtime results are not cached");
-  return context.client.api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(3_000),
-    body: JSON.stringify({ text: retained, truncated }) });
+  // Summarization is a bounded model round trip on the server, so only a
+  // proxy offered triage waits for it; every other save keeps the short
+  // budget and the capped preview.
+  const triage = context.triageTokens !== undefined;
+  return context.client.api("/api/internal/tool-result", { method: "POST", signal: AbortSignal.timeout(triage ? 45_000 : 3_000),
+    body: JSON.stringify({ text: retained, truncated, ...(triage ? { triage: true } : {}) }) });
 });
 
 /** "1st", "2nd", "3rd", "4th" — the queue position as a person says it. */

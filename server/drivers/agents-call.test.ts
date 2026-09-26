@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { callTool, type ToolCallContext } from "./agents-call.ts";
+import { describe, expect, it, vi } from "vitest";
+import { callTool, capResult, toolCallContextFromEnv, type ToolCallContext } from "./agents-call.ts";
 
 function context(overrides: Partial<ToolCallContext> = {}): ToolCallContext {
   return {
@@ -130,5 +130,29 @@ describe("propose_profile", () => {
         },
       },
     ]);
+  });
+});
+
+describe("tool result triage wiring", () => {
+  it("offers the triage budget only when the harness mounted it", () => {
+    expect(toolCallContextFromEnv({}).triageTokens).toBeUndefined();
+    expect(toolCallContextFromEnv({ OMB_TOOL_TRIAGE_TOKENS: "junk" }).triageTokens).toBeUndefined();
+    expect(toolCallContextFromEnv({ OMB_TOOL_TRIAGE_TOKENS: "0" }).triageTokens).toBeUndefined();
+    expect(toolCallContextFromEnv({ OMB_TOOL_TRIAGE_TOKENS: "-5" }).triageTokens).toBeUndefined();
+    expect(toolCallContextFromEnv({ OMB_TOOL_TRIAGE_TOKENS: "6000" }).triageTokens).toBe(6_000);
+  });
+
+  it("asks for a summary on the save route only when offered triage", async () => {
+    const bodies: { triage?: unknown }[] = [];
+    const api = vi.fn(async (_path: string, init?: { body?: string }) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return { id: "r-37a58e8d-4411-4a9c-bc1a-00c4278201db" };
+    });
+    const oversized = "x".repeat(30_000);
+    await capResult(oversized, context({ triageTokens: 6_000, client: { api, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } }));
+    await capResult(oversized, context({ client: { api, apiResponse: async () => ({ ok: true, status: 200, body: {} }) } }));
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]).toMatchObject({ triage: true });
+    expect(bodies[1]).not.toHaveProperty("triage");
   });
 });

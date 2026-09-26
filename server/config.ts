@@ -452,6 +452,10 @@ const appConfigSchema = z.object({
     rebuildBytes: z.number().int().min(1_024).max(1_000_000).optional(),
     compactAt: z.number().positive().max(10_000_000).optional(),
     autoCompact: z.boolean().optional(),
+    /** Summarize oversized tool results before the model sees them. true =
+     * the default token budget, a number = an explicit budget, absent/off =
+     * today's capped preview, byte-identical. See server/tool-triage.ts. */
+    toolTriage: z.union([z.boolean(), z.number().int().min(500).max(100_000)]).optional(),
   }).optional(),
   threads: threadsConfigSchema.optional(),
   /** The authorization decision log (server/decision-log.ts): days of month
@@ -510,7 +514,7 @@ export interface AppConfig {
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
-  context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
+  context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; toolTriage?: boolean | number };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
