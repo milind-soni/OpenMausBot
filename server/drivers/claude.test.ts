@@ -28,6 +28,7 @@ import {
   parseClaudeCliVersion,
   permissionSocketPath,
   readClaudeAuthSettings,
+  turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -117,6 +118,19 @@ describe("ClaudeDriver.decodeConfig", () => {
     for (const permissionMode of ["acceptEdits", "auto", "bypassPermissions"] as const) {
       expect(ClaudeDriver.decodeConfig({ permissionMode }).permissionMode).toBe(permissionMode);
     }
+  });
+
+  it("books a turn's share of the CLI's running cost total", () => {
+    // a process's first turn has no earlier total: its figure is its own
+    expect(turnCostFromRunningTotal(1.5822674, null)).toBe(1.5822674);
+    // later turns book the growth — the incident's two consecutive totals
+    expect(turnCostFromRunningTotal(1.7255570000000002, 1.5822674)).toBe(0.1432896);
+    // without the float noise of subtracting two totals
+    expect(turnCostFromRunningTotal(0.03, 0.02)).toBe(0.01);
+    expect(turnCostFromRunningTotal(0.02, 0.02)).toBe(0);
+    expect(turnCostFromRunningTotal(null, 0.02)).toBeNull();
+    // a total below the earlier one cannot be the same count: never negative
+    expect(turnCostFromRunningTotal(0.004, 0.02)).toBe(0.004);
   });
 
   it("throws on an invalid permissionMode (registry downgrades this to a shadow)", () => {
@@ -1866,6 +1880,25 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(readFileSync(dump, "utf8")).toBe(dumpBefore);
     expect(recorder.events.filter((e) => e.type === "turn.started")).toHaveLength(2);
     expect(recorder.events.filter((e) => e.type === "turn.completed")).toHaveLength(2);
+  });
+
+  it("books each turn of a retained process at its own cost, not the process's running total", async () => {
+    // The CLI's total_cost_usd counts every turn the process has run (the
+    // fake reports 0.01, 0.02, 0.03); the harness books each
+    // turn.completed cost as that turn's spend.
+    await create();
+    const dump = join(scratch, "dump.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const costs: unknown[] = [];
+    let launch: string | undefined;
+    for (const text of ["one", "two", "three"]) {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "t-running-total", text });
+      costs.push((await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId) as { cost?: unknown }).cost);
+      launch ??= readFileSync(dump, "utf8");
+      // one process for all three turns: a relaunch would rewrite the dump
+      expect(readFileSync(dump, "utf8")).toBe(launch);
+    }
+    expect(costs).toEqual([0.01, 0.01, 0.01]);
   });
 
   it.each([false, true])("resets retained native context even with an old cursor supplied: %s", async (withCursor) => {

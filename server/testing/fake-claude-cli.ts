@@ -63,6 +63,8 @@
 //                      which `--permission-mode auto` starts in "default",
 //                      the way the real CLI (2.1.266) does for Haiku 4.5 and
 //                      Sonnet 4.5: init reports the mode it actually runs in.
+//   Every result's total_cost_usd is the process's running total (0.01 per
+//   result), the way the real CLI reports it: read the latest, never sum.
 //
 // Keep this file dependency-free — it runs as a bare `node` subprocess.
 import { spawnSync } from "node:child_process";
@@ -247,6 +249,8 @@ const permissionMode =
 let dumped = false;
 let turnRunning = false;
 let steered: string[] = [];
+// results this process has written: total_cost_usd is their running total
+let resultsEmitted = 0;
 let stdinEnded = false;
 let steerGateArmed = false;
 
@@ -464,9 +468,18 @@ const playTurn = (prompt: JsonValue) => {
     runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }
 
+  // total_cost_usd is the process's running total (2.1.282: "read the latest
+  // result rather than summing across results"); usage is this turn's own.
   const finish = () => {
     runHooks("Stop", { stop_hook_active: false });
-    out({ type: "result", is_error: false, stop_reason: "end_turn", total_cost_usd: 0.01, usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 } });
+    resultsEmitted += 1;
+    out({
+      type: "result",
+      is_error: false,
+      stop_reason: "end_turn",
+      total_cost_usd: Number((resultsEmitted * 0.01).toFixed(2)),
+      usage: { input_tokens: 10, cache_read_input_tokens: 2, output_tokens: 5 },
+    });
     turnRunning = false;
     finishIfDone();
   };
