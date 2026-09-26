@@ -159,6 +159,7 @@ import {
   vpsSshAlias,
   browserEngineAttachCdpUrl,
   DATA_DIR,
+  skillsLibraryEnabled,
   EVENTS_DIR,
   NATIVE_DIR,
   customMcpServers,
@@ -345,6 +346,7 @@ import {
   getStagedSkillWrite,
   installOrgSkill,
   installSkill,
+  resolveBotSkills,
   parseSkillMd,
   scanSkillText,
   listSkills,
@@ -434,7 +436,8 @@ import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.
 import { WebhookManager } from "./webhooks.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
-import { loadBundledSkills, loadUserSkills, mergeSkills, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
+import { loadBundledSkills, loadUserSkills, mergeSkills, readLibrarySkillFile, renderSkillInstructions, selectBundledSkills } from "./skill-library.ts";
+import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
 import { createBotPackageExport, createLibraryPackageExport, createTeamPackageExport, picture as sharedPicture, TeamExportError, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
 import { importPackageDocument, importTeamManifest, PackageImportError, type PackageImportDeps, type PackageImportResult } from "./package-import.ts";
@@ -1239,6 +1242,17 @@ const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(providerConfigs(), decorateHostedProvider);
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
+
+// Skills library (features.skillsLibrary). While the flag is off both
+// helpers reduce exactly to today's per-bot calls; assignments recorded on
+// bot records stay inert until it is on.
+const listBotSkills = (bot: BotRecord) =>
+  skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills) : listSkills(bot.id);
+const readBotSkillFile = (bot: BotRecord, name: string): string | null => {
+  const own = readSkillFile(bot.id, name);
+  if (own !== null || !skillsLibraryEnabled(cfg)) return own;
+  return readLibrarySkillFile(name);
+};
 
 // Electron's utility-process parent port is private to the desktop main
 // process. It lets a slow first-time managed Composio registration arrive
@@ -2489,7 +2503,7 @@ function checkedExportSkillNames(
   const names = [...value] as string[];
   if (new Set(names).size !== names.length) return { ok: false, error: "skillIds must not contain duplicates" };
   if (names.length > BOT_PACKAGE_MAX_SKILLS) return { ok: false, error: `skillIds must contain at most ${BOT_PACKAGE_MAX_SKILLS} names` };
-  const available = new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)));
+  const available = new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)));
   const unknown = names.find((name) => !available.has(name));
   if (unknown) return { ok: false, error: `skillIds contains unknown imported skill "${unknown}"` };
   return { ok: true, names };
@@ -2504,9 +2518,9 @@ function collectExportSkills(
   if (!selected.size) return byBot;
   for (const bot of bots) {
     const assigned: ExportablePackageSkill[] = [];
-    for (const listing of listSkills(bot.id)) {
+    for (const listing of listBotSkills(bot)) {
       if (!selected.has(listing.name)) continue;
-      const instructions = readSkillFile(bot.id, listing.name);
+      const instructions = readBotSkillFile(bot, listing.name);
       if (instructions === null) {
         throw new Error(`Skill "${listing.name}" changed or is unavailable and cannot be exported safely`);
       }
@@ -2537,7 +2551,7 @@ function collectTeamSkills(
   selection: unknown,
 ): { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] } | { ok: false; error: string; available: string[] } {
   const all = selection === undefined || selection === "all";
-  const available = [...new Set(bots.flatMap((bot) => listSkills(bot.id).map((skill) => skill.name)))].sort();
+  const available = [...new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)))].sort();
   if (!all && (!Array.isArray(selection) || selection.some((name) => typeof name !== "string" || !isSkillName(name)))) {
     return { ok: false, error: "skills must be \"all\" or a list of skill names", available };
   }
@@ -2548,9 +2562,9 @@ function collectTeamSkills(
   const skipped: TeamExportSkip[] = [];
   for (const bot of bots) {
     const assigned: ExportablePackageSkill[] = [];
-    for (const listing of listSkills(bot.id)) {
+    for (const listing of listBotSkills(bot)) {
       if (!chosen.has(listing.name)) continue;
-      const instructions = readSkillFile(bot.id, listing.name);
+      const instructions = readBotSkillFile(bot, listing.name);
       if (instructions === null) {
         if (!all) return { ok: false, error: `Skill "${listing.name}" changed or is unavailable and cannot be shared safely`, available };
         const part = `skills[${listing.name}]`;
@@ -2679,6 +2693,25 @@ const sendSequencer = new SendSequencer();
 bootSelection = await defaultSelection();
 store.seedIfEmpty();
 hostedModels?.reconcile(store);
+// Skills library boot sweep (features.skillsLibrary): migrate per-bot
+// copies into the shared library and apply assignments. Flag-off boots
+// never enter this block, keeping per-bot behavior byte-identical.
+if (skillsLibraryEnabled(cfg)) {
+  try {
+    const sweep = runSkillsLibraryBootSweep({
+      bots: store.bots,
+      patch: (botId, assignedSkills) => {
+        store.patchBot(botId, { assignedSkills });
+      },
+    });
+    const applied = sweep.outcomes.filter((outcome) => outcome.outcome !== "skipped").length;
+    if (sweep.outcomes.length) {
+      console.log(`[skills-library] boot sweep: ${applied} skill(s) migrated or deduplicated, ${sweep.outcomes.length - applied} skipped`);
+    }
+  } catch (error) {
+    console.error(`[skills-library] boot sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 // A committed profile cleanup means both its config deletion and bot-reference
 // cleanup were intended to be durable. Reconcile stale secondary references
 // before Electron can ACK and remove the journal: a crash between those writes
@@ -2811,7 +2844,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace) }) },
-    { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
   ]);
   const totalBytes = built.sections.reduce((n, s) => n + s.bytes, 0);
   return {
@@ -2882,7 +2915,7 @@ async function botOverview(bot: BotRecord): Promise<BotOverview> {
     webhooks: webhooks.list()
       .filter((webhook) => webhook.botId === bot.id)
       .map((webhook) => ({ name: webhook.name, enabled: webhook.enabled })),
-    skills: listSkills(bot.id).map((skill) => ({
+    skills: listBotSkills(bot).map((skill) => ({
       name: skill.name,
       description: skill.description,
       enabled: skill.enabled,
@@ -8574,7 +8607,7 @@ async function startTurn(
         // never redoes — or forgets — what another one already did
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId })) },
         { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: Boolean(integrations.agents), fileTools: worksInWorkspace }) },
-        { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id) : "" },
+        { id: "skills", label: "Skills index", text: privateWorkspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
         { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
@@ -9466,7 +9499,10 @@ const tighteningRequests = new TighteningRequestService({
   // The card judges the effective mounts, so the snapshot resolves the same
   // way the engine does: through the config-aware custom-server filter.
   mountedMcpServers: (bot) => Object.keys(engineMcpServers(bot)),
-  enabledSkills: (botId) => listSkills(botId).filter((skill) => skill.enabled).map((skill) => skill.name),
+  enabledSkills: (botId) => {
+    const record = store.bot(botId);
+    return (record ? listBotSkills(record) : listSkills(botId)).filter((skill) => skill.enabled).map((skill) => skill.name);
+  },
   disableSkill: (botId, name) => {
     const disabled = setSkillEnabled(botId, name, false);
     return typeof disabled === "object" && "error" in disabled ? { ok: false, error: disabled.error } : { ok: true };
@@ -10532,7 +10568,7 @@ async function runGroupMemberTurn(
     // mounted, exactly as the 1:1 path decides it: memory_update is on the
     // agents server, so a room turn with it must be told to use it too.
     { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
-    { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id) : "" },
+    { id: "skills", label: "Skills index", text: workspace ? skillsSystemPrompt(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },
     { id: "playbooks", label: "Playbooks", text: installedPlaybookInstructions(text, bot.playbooks) },
   ]);
@@ -14182,7 +14218,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 403, { error: "source conversation does not belong to sender" });
         }
         return json(res, 200, {
-          skills: listSkills(from.id),
+          skills: listBotSkills(from),
           staged: listStagedSkillWrites(from.id).map(stagedSkillListing),
         });
       }
@@ -18306,7 +18342,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       if (!store.bot(m[1])) return json(res, 404, { error: "no such bot" });
       return json(res, 200, {
-        skills: listSkills(m[1]),
+        skills: listBotSkills(store.bot(m[1])!),
         staged: listStagedSkillWrites(m[1]).map(stagedSkillListing),
       });
     }
