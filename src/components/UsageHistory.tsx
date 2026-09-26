@@ -7,7 +7,7 @@ import { Download, Loader2 } from "lucide-react";
 import { api } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { formatTokens, formatUsd, hasFiniteCost, headlineTokens } from "@/lib/usage";
+import { formatTokens, formatUsd, hasFiniteCost, headlineTokens, tokensColumnLabel } from "@/lib/usage";
 import { Card } from "./SettingsPrimitives";
 import { UsageBudgetCards, type BudgetState } from "./UsageBudget";
 
@@ -103,7 +103,7 @@ export function UsageHistoryTable({ summary }: { summary: UsageSummary }) {
       <div className={cn(columns, "border-b border-hairline/40 pb-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary")}>
         <span>{t(GROUP_LABEL_KEYS[summary.groupBy])}</span>
         <span className="text-right">{t("usage.colTurns")}</span>
-        <span className="text-right">{t("usage.colTokens")}</span>
+        <span className="text-right">{tokensColumnLabel(summary.total)}</span>
         <span className="text-right">{t("usage.colCost")}</span>
         {billable && <span className="text-right">{t("usage.history.colBillable")}</span>}
       </div>
