@@ -1,9 +1,11 @@
 // The roster.
 //
 // Messages-shaped: a glass header, built-in and user-named sidebar sections,
-// channels as compact tiles, and bot conversations as rows. The floating bar
-// keeps Updates, search, organization and new-bot actions within one thumb's
-// reach while everything scrolls beneath the glass.
+// and a floating bar that keeps Updates, search, organization and new-bot
+// actions within one thumb's reach while everything scrolls beneath the
+// glass. Two densities, chosen in Settings: compact (the default) puts each
+// bot and group on one line; comfortable keeps channels as tiles and bots as
+// two-line rows with a "Threads" disclosure beneath each.
 import SwiftUI
 import CompanionCore
 
@@ -11,6 +13,7 @@ struct ChatListView: View {
     @EnvironmentObject private var session: Session
     @State private var query = ""
     @AppStorage(PrefKey.activityDetail) private var activityDetail = ActivityDetail.full.rawValue
+    @AppStorage(PrefKey.rosterDensity) private var rosterDensity = RosterDensity.default.rawValue
     /// Driven so that making a bot can open it. Value-based navigation alone
     /// cannot push without a tap, and a new bot appearing silently at the
     /// bottom of the roster is a poor answer to pressing +.
@@ -292,44 +295,120 @@ struct ChatListView: View {
         let pinned = summaries(for: session.state.pinnedBots)
         if !pinned.isEmpty {
             sectionLabel(Text("Pinned"))
-                .padding(.top, 2)
+                // a compact row above it leaves little air of its own
+                .padding(.top, density == .compact ? sectionSpacing : 2)
                 .padding(.bottom, 4)
             botRows(pinned)
         }
 
-        channelsStrip(
-            title: "Groups",
-            rooms: session.state.unsectionedChannels,
-            showsCreate: true
-        )
+        switch density {
+        case .comfortable:
+            channelsStrip(
+                title: "Groups",
+                rooms: session.state.unsectionedChannels,
+                showsCreate: true
+            )
 
-        if !session.state.botChats.isEmpty {
-            channelsStrip(title: "Bot threads", rooms: session.state.botChats, showsCreate: false)
+            if !session.state.botChats.isEmpty {
+                channelsStrip(title: "Bot threads", rooms: session.state.botChats, showsCreate: false)
+            }
+        case .compact:
+            compactRoomsSection(
+                title: "Groups",
+                rooms: session.state.unsectionedChannels,
+                showsCreate: true
+            )
+
+            if !session.state.botChats.isEmpty {
+                compactRoomsSection(title: "Bot threads", rooms: session.state.botChats, showsCreate: false)
+            }
         }
 
         let unsectioned = summaries(for: session.state.unsectionedBots)
         if !unsectioned.isEmpty {
             sectionLabel(Text("Bots"))
-                .padding(.top, 18)
+                .padding(.top, sectionSpacing)
                 .padding(.bottom, 4)
             botRows(unsectioned)
         }
 
         ForEach(session.state.sidebarSections) { section in
             VStack(alignment: .leading, spacing: 0) {
-                sectionLabel(Text(verbatim: section.name))
-                    .padding(.top, 18)
-                    .padding(.bottom, section.chiefs.isEmpty && !section.channels.isEmpty ? 10 : 4)
-                if !section.chiefs.isEmpty {
-                    botRows(summaries(for: section.chiefs))
-                }
-                if !section.channels.isEmpty {
-                    channelTiles(section.channels, showsCreate: false)
-                        .padding(.top, section.chiefs.isEmpty ? 0 : 8)
-                        .padding(.bottom, section.bots.isEmpty ? 4 : 8)
+                switch density {
+                case .comfortable:
+                    sectionLabel(Text(verbatim: section.name))
+                        .padding(.top, 18)
+                        .padding(.bottom, section.chiefs.isEmpty && !section.channels.isEmpty ? 10 : 4)
+                    if !section.chiefs.isEmpty {
+                        botRows(summaries(for: section.chiefs))
+                    }
+                    if !section.channels.isEmpty {
+                        channelTiles(section.channels, showsCreate: false)
+                            .padding(.top, section.chiefs.isEmpty ? 0 : 8)
+                            .padding(.bottom, section.bots.isEmpty ? 4 : 8)
+                    }
+                case .compact:
+                    sectionLabel(Text(verbatim: section.name))
+                        .padding(.top, sectionSpacing)
+                        .padding(.bottom, 4)
+                    if !section.chiefs.isEmpty {
+                        botRows(summaries(for: section.chiefs))
+                    }
+                    compactRoomRows(section.channels)
                 }
                 botRows(summaries(for: section.bots))
             }
+        }
+    }
+
+    /// Between one section and the next title.
+    private var sectionSpacing: CGFloat { density == .compact ? 14 : 18 }
+
+    /// Groups as one-line rows under a title that carries the "+" the
+    /// comfortable strip shows as a tile.
+    @ViewBuilder
+    private func compactRoomsSection(title: LocalizedStringKey, rooms: [Room], showsCreate: Bool) -> some View {
+        HStack(spacing: 0) {
+            sectionLabel(Text(title))
+            Spacer(minLength: 0)
+            if showsCreate {
+                Button {
+                    Haptics.selection()
+                    showingNewGroup = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(Color.secondary)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.trailing, 6)
+                .accessibilityLabel("New group")
+                .accessibilityIdentifier("new-group")
+            }
+        }
+        // the "+" is a 44pt target; the title keeps the other titles' rhythm
+        .frame(minHeight: showsCreate ? 44 : nil)
+        .padding(.top, showsCreate ? 0 : sectionSpacing)
+        .padding(.bottom, showsCreate ? 0 : 4)
+        compactRoomRows(rooms)
+    }
+
+    /// In the order the tiles showed them, each stamped with its thread's
+    /// last message the way `chatSummaries` stamps a row.
+    private func compactRoomRows(_ rooms: [Room]) -> some View {
+        let waiting = waitingChats
+        return ForEach(rooms) { room in
+            NavigationLink(value: Chat.room(room)) {
+                CompactRoomRow(
+                    room: room,
+                    lastActivity: session.state.visibleTranscript(forThread: room.threadId).last?.at ?? 0,
+                    waiting: waiting.contains(room.id)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("chat-row.\(room.id)")
         }
     }
 
@@ -367,6 +446,65 @@ struct ChatListView: View {
 
     @ViewBuilder
     private func botRows(_ rows: [ChatSummary]) -> some View {
+        switch density {
+        case .comfortable: comfortableRows(rows)
+        case .compact: compactRows(rows)
+        }
+    }
+
+    /// One line per bot, its threads beneath it once opened. Search results
+    /// can include groups, which get their own one-line row.
+    private func compactRows(_ rows: [ChatSummary]) -> some View {
+        let waiting = waitingChats
+        return ForEach(rows) { summary in
+            switch summary.chat {
+            case let .bot(bot):
+                CompactBotEntry(
+                    bot: bot,
+                    lastActivity: summary.lastActivity,
+                    hasPendingCard: waiting.contains(bot.id),
+                    query: $query,
+                    expanded: expandedBinding(bot.id),
+                    collapsedFolders: $collapsedFolders,
+                    creating: creatingBinding(bot.id),
+                    openRow: {
+                        path.append(session.threadSelection.restoringThread(summary.chat, connectionID: session.connection?.id))
+                    },
+                    open: { chat in path.append(chat) },
+                    manage: { chat in managingThreads = chat }
+                )
+            case let .room(room):
+                Button {
+                    path.append(summary.chat)
+                } label: {
+                    CompactRoomRow(room: room, lastActivity: summary.lastActivity, waiting: waiting.contains(room.id))
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("chat-row.\(room.id)")
+            }
+        }
+    }
+
+    private func expandedBinding(_ botID: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedBots.contains(botID) },
+            set: { value in
+                if value { expandedBots.insert(botID) } else { expandedBots.remove(botID) }
+            }
+        )
+    }
+
+    private func creatingBinding(_ botID: String) -> Binding<Bool> {
+        Binding(
+            get: { creatingThreads.contains(botID) },
+            set: { value in
+                if value { creatingThreads.insert(botID) } else { creatingThreads.remove(botID) }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func comfortableRows(_ rows: [ChatSummary]) -> some View {
         ForEach(Array(rows.enumerated()), id: \.element.id) { index, summary in
             VStack(spacing: 0) {
                 Button {
@@ -382,22 +520,13 @@ struct ChatListView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("chat-row.\(summary.chat.id)")
                 if case let .bot(bot) = summary.chat {
                     BotThreadTree(
                         botID: bot.id, query: $query,
-                        expanded: Binding(
-                            get: { expandedBots.contains(bot.id) },
-                            set: { value in
-                                if value { expandedBots.insert(bot.id) } else { expandedBots.remove(bot.id) }
-                            }
-                        ),
+                        expanded: expandedBinding(bot.id),
                         collapsedFolders: $collapsedFolders,
-                        creating: Binding(
-                            get: { creatingThreads.contains(bot.id) },
-                            set: { value in
-                                if value { creatingThreads.insert(bot.id) } else { creatingThreads.remove(bot.id) }
-                            }
-                        )
+                        creating: creatingBinding(bot.id)
                     ) { chat in
                         path.append(chat)
                     } manage: { chat in
@@ -560,6 +689,9 @@ struct ChatListView: View {
     /// The reader's activity level, which the roster preview folds by.
     private var activity: ActivityDetail { ActivityDetail(rawValue: activityDetail) ?? .full }
 
+    /// How much each row says, from Settings.
+    private var density: RosterDensity { RosterDensity(stored: rosterDensity) }
+
     private var chats: [ChatSummary] {
         let all = session.state.chatSummaries(activity: activity)
         guard !query.isEmpty else {
@@ -606,7 +738,8 @@ struct ChatListView: View {
     private func sectionLabel(_ text: Text) -> some View {
         text
             .textCase(.uppercase)
-            .font(.system(size: 13, weight: .semibold))
+            // compact rows follow Dynamic Type, so their titles do too
+            .font(density == .compact ? .footnote.weight(.semibold) : .system(size: 13, weight: .semibold))
             .tracking(0.4)
             .foregroundStyle(Color.secondary)
             .padding(.horizontal, 20)

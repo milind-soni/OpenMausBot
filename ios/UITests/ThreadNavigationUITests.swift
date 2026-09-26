@@ -264,7 +264,10 @@ final class ThreadNavigationUITests: XCTestCase {
         assertThread("Triage Gmail", in: app)
         XCTAssertTrue(transcriptContains("I’m reviewing Gmail here", in: app))
         app.buttons["Back"].tap()
-        XCTAssertEqual(app.buttons["threads-toggle.preview-pepper"].value as? String, "Expanded, 1 threads")
+        // One thread left is the bot itself: the compact roster drops the
+        // thread control, and the row opens that thread.
+        XCTAssertTrue(app.buttons["chat-row.preview-pepper"].waitForExistence(timeout: 5))
+        assertMissing(app.buttons["threads-toggle.preview-pepper"])
     }
 
     @MainActor
@@ -305,7 +308,9 @@ final class ThreadNavigationUITests: XCTestCase {
             "-AppleLanguages", "(en)", "-AppleLocale", "en_US",
             "-companion.prefs.islandIntro", islandIntro,
             "-companion.onboarding.welcomeSeen", "YES",
-            "-companion.onboarding.notificationsSeen", "YES"
+            "-companion.onboarding.notificationsSeen", "YES",
+            // the install default, whatever an earlier run saved
+            "-reset-list-density"
         ] + extraArguments
         app.launch()
         // Simulator installation can restore an unpaired, prewarmed scene

@@ -272,6 +272,11 @@ final class Session: ObservableObject {
                let pages = try? JSONDecoder().decode([String: ThreadPage].self, from: pagesData) {
                 for (threadID, page) in pages { state.merge(page, intoThread: threadID) }
             }
+            if arguments.contains("-reset-list-density") {
+                // The fresh-install default is checked in UI tests; an
+                // earlier run on the same simulator may have saved a choice.
+                UserDefaults.standard.removeObject(forKey: PrefKey.rosterDensity)
+            }
             status = .live
             return
         }
