@@ -8,6 +8,8 @@ from SQLite or a claim that every persistence operation is nonblocking.
 ```sh
 pnpm bench:persistence
 pnpm bench:persistence --worker
+pnpm bench:persistence --checkpoint-seed --paced
+pnpm bench:persistence --checkpoint-seed --paced --worker
 ```
 
 Each invocation creates and removes its own temporary data directory. Config
@@ -23,6 +25,15 @@ runs that exact query through the new worker. SQL time, per-operation maximums
 and event-loop delay are distinct measurements. Bursts yield between batches;
 they are not 50 live models or a production capacity estimate. Run comparisons
 serially on an idle host, not alongside builds or other benchmarks.
+
+`--checkpoint-seed` checkpoints fixture construction and waits one second
+outside the timed region; it does not change production checkpoint policy.
+`--paced` uses 100 batches, separated by 20 ms, with one canonical and one
+native delta per session per batch and a message commit every 50 batches.
+Searches still run five times and are awaited, so their duration extends the
+workload: this measures event-loop responsiveness, not fixed-rate throughput.
+The raw canonical append maximum is reported separately from the whole log
+batch. Neither mode injects disk contention or proves an idle host.
 
 ## 2026-09-26 observations
 
@@ -46,6 +57,25 @@ attribution run measured 455.55 ms inside ten event publications; a GC-traced
 run measured one 1,267.99 ms message append and 417.27 ms event batch, without
 a corresponding long major-GC pause. Disk/OS variability remains relevant;
 these are not proof that every stall is SQLite or a production regression.
+
+### Separating fixture construction and paced work
+
+Three additional serial baseline/worker pairs used `--checkpoint-seed --paced`,
+including native logs as well as canonical events:
+
+| Paced mixed workload | Median maximum event-loop delay, synchronous | Worker |
+| --- | ---: | ---: |
+| 1 session | 99.81 ms | 3.47 ms |
+| 10 sessions | 102.11 ms | 9.04 ms |
+| 50 sessions | 107.22 ms | 25.99 ms |
+
+Across these six invocations, write/log-only scenarios had event-loop maxima
+of 4.97–30.41 ms; the largest measured message append was 6.17 ms and the
+largest log batch was 22.64 ms. The earlier multi-hundred-millisecond stalls
+did not reproduce in this paced/checkpointed workload. Both pacing and seed
+checkpointing changed, so this does not isolate their individual effects or
+prove the earlier stalls were only setup I/O. It does reinforce the search
+finding without justifying a wholesale asynchronous writer/logger rewrite.
 
 ## Scope and invariants
 
