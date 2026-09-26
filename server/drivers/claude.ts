@@ -851,6 +851,22 @@ function firstText(content: unknown): string {
   return "";
 }
 
+/** A turn's own cost from the CLI's total_cost_usd, which is not a per-turn
+ * figure: it is "cumulative across turns in streaming-input sessions — each
+ * result carries the running total so far" (2.1.282), and a retained process
+ * runs turn after turn. So a turn costs the growth since the total its
+ * process reported for the turn before. A process's first turn has no
+ * earlier total and keeps its whole figure; after --resume that figure can
+ * already include the session's earlier turns, which the driver cannot tell
+ * apart. A total that went down is not the same count, so it is taken whole
+ * too rather than booked as a negative cost. Rounding to 1e-10 USD removes
+ * only the float noise of the subtraction. */
+export function turnCostFromRunningTotal(total: number | null, previous: number | null): number | null {
+  if (total === null) return null;
+  if (previous === null || total < previous) return total;
+  return Number((total - previous).toFixed(10));
+}
+
 type ClaudeImage = NonNullable<SendTurnInput["images"]>[number];
 type ClaudeUserContent =
   | { type: "image"; source: { type: "base64"; media_type: ClaudeImage["mime"]; data: string } }
@@ -1012,6 +1028,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
       stderr: string;
+      /** total_cost_usd as of the last turn this process settled: the CLI's
+       * running total, which the next turn's cost is measured from (see
+       * turnCostFromRunningTotal). null until the process has reported one. */
+      costTotal: number | null;
       /** Root close can precede a failed group stop; retry its finalization. */
       finishClose?: () => Promise<void>;
     }
@@ -1551,6 +1571,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         idleTimer: null,
         closing: false,
         stderr: "",
+        costTotal: null,
       };
       sessions.set(threadId, session);
 
@@ -1559,7 +1580,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       const settle = (
         ok: boolean,
         stopReason: string | null,
-        cost: number | null = null,
+        total: number | null = null,
         usage?: { input: number; output: number; cachedInput?: number },
       ) => {
         const t = session.turn;
@@ -1589,6 +1610,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         // pooled child. Retire it before announcing completion so an explicit
         // retry resumes on a fresh process; healthy sibling sessions stay warm.
         if (stopReason === "update_required") closeSession(threadId, "update required");
+        // `total` is the CLI's running total for this process; the harness
+        // books turn.completed.cost as this turn's own spend
+        const cost = turnCostFromRunningTotal(total, session.costTotal);
+        if (total !== null) session.costTotal = total;
         emit({ ...base(threadId, t.turnId), type: "turn.completed", ok, stopReason, cost, ...(usage ? { usage } : {}) });
         if (session.child.exitCode === null && !session.closing) armIdle(threadId);
       };
@@ -1702,11 +1727,13 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
             // submitted user turn. Settling it would revoke browser access
             // and deny approvals while that user turn is still running.
             if (o.origin?.kind === "task-notification") break;
-            // result.usage is this invocation's total — one process per turn,
-            // so it is the turn's figure. cache reads count as input: they
-            // are billed (at the cache rate) and they fill the window — but
-            // they are reported separately too, so the UI can show how much
-            // of the figure was context re-read rather than new text.
+            // result.usage is this turn's own figure, "per-turn in
+            // streaming-input sessions" (2.1.282) even on a retained process.
+            // cache reads count as input: they are billed (at the cache rate)
+            // and they fill the window — but they are reported separately
+            // too, so the UI can show how much of the figure was context
+            // re-read rather than new text. total_cost_usd is instead the
+            // process's running total; settle() books this turn's share.
             settle(
               o.is_error !== true,
               session.turn?.authFailed
