@@ -21,7 +21,12 @@ import {
   MAX_COMPANION_ENDPOINTS,
   type CompanionEndpoint,
 } from "./endpoints.ts";
-import { denyReason, isCloudDesktopAccess, isMessageFileDownload } from "./routes.ts";
+import {
+  denyReason,
+  isBrowserControlAccess,
+  isCloudDesktopAccess,
+  isMessageFileDownload,
+} from "./routes.ts";
 import { CompanionViewerRelay } from "./viewer-relay.ts";
 import { createSseScrubber, isJson, scrub } from "./wire.ts";
 
@@ -33,7 +38,9 @@ export interface ProxyOptions {
    * Undefined keeps standalone sidecars compatible with a plain Node harness. */
   mutationToken?: () => string | null;
   /** Does this bearer token belong to a paired device? */
-  authenticate: (token: string | undefined) => { id?: string; cloudDesktopAccess: boolean } | null;
+  authenticate: (
+    token: string | undefined,
+  ) => { id?: string; cloudDesktopAccess: boolean; browserControlAccess: boolean } | null;
   /** Redeem a pairing code. Handled here and never forwarded: the harness
    * has no such route and no idea devices exist — pairing is the sidecar's
    * own concern, and the one thing a device does before it has a token. */
@@ -264,6 +271,9 @@ const forwardHeaders = (req: IncomingMessage, authenticatedDeviceId?: string, mu
  * what comes back. Pairing is the one route that stops here. */
 export function createProxyHandler(options: ProxyOptions) {
   const viewers = new CompanionViewerRelay();
+  /** Open SSE streams that exist only because of a per-device capability,
+   * keyed by device, so revoking the capability can close them. */
+  const capabilityStreams = new Map<string, Set<() => void>>();
   const handle = function handle(req: IncomingMessage, res: ServerResponse): void {
     const path = (req.url ?? "/").split("?")[0];
     const method = req.method ?? "GET";
@@ -298,6 +308,17 @@ export function createProxyHandler(options: ProxyOptions) {
     if (isCloudDesktopAccess(method, path) && !device?.cloudDesktopAccess) {
       return sendJson(res, 403, {
         error: "cloud desktop access is off for this device — enable it in OpenMausBot → Settings → Remote access",
+      });
+    }
+
+    // The same shape, and a deliberately separate grant: this one reaches a
+    // browser that is normally signed into the person's own accounts.
+    if (isBrowserControlAccess(method, path) && !device?.browserControlAccess) {
+      return sendJson(res, 403, {
+        // Naming the button matters: the Remote access pane has two
+        // switches now, and every first-time user meets this message because
+        // the grant is deliberately off by default.
+        error: "browser control is off for this device — open Remote access on the computer and turn on \"Allow browser control\" for it",
       });
     }
 
@@ -437,9 +458,24 @@ export function createProxyHandler(options: ProxyOptions) {
             tracksDeviceConnection && currentDevice?.id
               ? options.connected?.(currentDevice.id, disconnect) ?? null
               : null;
+          // A stream that exists only because of a per-device capability must
+          // be closable when that capability is taken away. `connected` above
+          // is about the /api/events presence indicator and deliberately does
+          // not cover these.
+          const capabilityOwner = isBrowserControlAccess(method, path) ? device?.id : undefined;
+          if (capabilityOwner) {
+            const open = capabilityStreams.get(capabilityOwner) ?? new Set<() => void>();
+            open.add(disconnect);
+            capabilityStreams.set(capabilityOwner, open);
+          }
           const release = () => {
             releaseConnection?.();
             releaseConnection = null;
+            if (capabilityOwner) {
+              const open = capabilityStreams.get(capabilityOwner);
+              open?.delete(disconnect);
+              if (open && open.size === 0) capabilityStreams.delete(capabilityOwner);
+            }
           };
           // Headers first and flushed, or nothing downstream believes the
           // connection is live. content-length is meaningless here and
@@ -652,6 +688,15 @@ export function createProxyHandler(options: ProxyOptions) {
     const device = options.authenticate(token);
     viewers.handleUpgrade(req, socket, head, device);
   };
-  handle.disconnectDevice = (deviceId: string): void => viewers.closeDevice(deviceId);
+  handle.disconnectDevice = (deviceId: string): void => {
+    viewers.closeDevice(deviceId);
+    // Revoking a capability has to reach the streams it already granted.
+    // `connected` only ever tracked /api/events, so without this a phone
+    // kept watching a signed-in browser after the grant was taken away.
+    const open = capabilityStreams.get(deviceId);
+    if (!open) return;
+    capabilityStreams.delete(deviceId);
+    for (const close of open) close();
+  };
   return handle;
 }

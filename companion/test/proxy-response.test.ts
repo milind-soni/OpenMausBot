@@ -67,7 +67,7 @@ beforeAll(async () => {
   sidecar = createServer(
     createProxyHandler({
       harnessPort,
-      authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess } : null),
+      authenticate: (t) => (t === TOKEN ? { id: "phone-1", cloudDesktopAccess, browserControlAccess: false } : null),
       redeem: () => ({ error: "not used here" }),
       serverName: () => "Test computer",
       endpoints: () => endpointCandidates,

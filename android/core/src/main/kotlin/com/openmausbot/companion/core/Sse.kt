@@ -14,7 +14,15 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 
-data class SSEEvent(val id: String? = null, val data: String)
+/**
+ * One event off the wire.
+ *
+ * [event] is the `event:` name when the server sent one. `/api/events` does
+ * not use it and leaves it null; the browser-live stream puts its message type
+ * there and strips it from the payload, so dropping this field made every one
+ * of its messages undecodable.
+ */
+data class SSEEvent(val id: String? = null, val event: String? = null, val data: String)
 
 /** A line-oriented parser whose empty input line is the SSE event terminator. */
 class SSEParser {
@@ -44,14 +52,16 @@ class SSEParser {
     companion object {
         internal fun event(fields: List<Pair<String, String>>): SSEEvent? {
             var id: String? = null
+            var event: String? = null
             val data = mutableListOf<String>()
             fields.forEach { (name, value) ->
                 when (name) {
                     "id" -> id = value
+                    "event" -> event = value
                     "data" -> data += value
                 }
             }
-            return data.takeIf { it.isNotEmpty() }?.let { SSEEvent(id, it.joinToString("\n")) }
+            return data.takeIf { it.isNotEmpty() }?.let { SSEEvent(id, event, it.joinToString("\n")) }
         }
     }
 }

@@ -163,7 +163,16 @@ describe("resolveRequestAuth", () => {
       ["POST", "/api/bots/b/read"], ["POST", "/api/bots/b/respond"],
       ["POST", "/api/bots/b/secret-cards/card/provide"],
       ["GET", "/api/events"], ["PATCH", "/api/bots/b/profile"],
+      // Browser control: the harness re-runs the sidecar's own allowlist, so
+      // these resolve here for the same reason the phone may ask for them.
+      // The per-device capability is the proxy's job, not this one's.
+      ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
+    // And the allowlist still closes everything else under that prefix.
+    for (const [method, path] of [
+      ["POST", "/api/bots/b/browser/live"], ["GET", "/api/bots/b/browser/action"],
+      ["POST", "/api/bots/b/browser/restart"],
+    ]) expect(check(method, path).auth?.kind, path).not.toBe("loopback");
     const forged: Record<string, string>[] = [
       { "x-openmausbot-companion-auth": "" },
       { "x-openmausbot-companion-auth": "desktop-secret" },

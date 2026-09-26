@@ -140,6 +140,18 @@ class CompanionClient(
         .build()
 
     /**
+     * A browser-live transport on the route this client is already using.
+     *
+     * Built here rather than standalone so it inherits the endpoint, the
+     * scoped-IPv6 DNS and the streaming timeouts that took real work to get
+     * right — a second copy of that setup would drift.
+     */
+    fun browserLive(): BrowserLiveTransport? {
+        val base = endpoint?.baseUrl ?: return null
+        return BrowserLiveTransport(base, token, streamingClient, actionClient)
+    }
+
+    /**
      * Share uploads can be tens of MB. A wall-clock [callTimeout] would abort a
      * steady transfer; iOS uses an idle `timeoutInterval` that resets on bytes.
      * Connect/read/write idle limits, no overall call deadline.

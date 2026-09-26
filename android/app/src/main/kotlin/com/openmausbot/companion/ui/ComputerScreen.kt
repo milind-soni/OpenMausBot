@@ -20,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,7 +55,7 @@ import kotlinx.coroutines.launch
  * for the composable's lifetime.
  */
 @Composable
-fun ComputerScreen(botId: String, onBack: () -> Unit) {
+fun ComputerScreen(botId: String, onBack: () -> Unit, onOpenBrowser: (String) -> Unit = {}) {
     val environment = LocalCompanion.current
     val session = environment.session
     val scope = rememberCoroutineScope()
@@ -142,6 +143,23 @@ fun ComputerScreen(botId: String, onBack: () -> Unit) {
             )
         }
 
+        // A bot's browser is not a cloud-desktop feature: any bot with one
+        // enabled can be watched and driven, so this sits outside that gate.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 18.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            if (!ComputerPolicy.showsCloudDesktop(bot)) {
+                OutlinedButton(
+                    onClick = { onOpenBrowser(botId) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Open browser") }
+            }
+        }
+
         if (ComputerPolicy.showsCloudDesktop(bot)) {
             Column(
                 modifier = Modifier
@@ -160,6 +178,10 @@ fun ComputerScreen(botId: String, onBack: () -> Unit) {
                         textAlign = TextAlign.Center,
                     )
                 }
+                OutlinedButton(
+                    onClick = { onOpenBrowser(botId) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Open browser") }
                 Button(
                     onClick = { confirming = true },
                     enabled = !opening,

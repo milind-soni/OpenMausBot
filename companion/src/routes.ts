@@ -53,6 +53,24 @@ export const CLOUD_DESKTOP_CONTROL_ROUTE = {
   path: /^\/api\/bots\/[\w-]+\/computer\/(?:control|screenshot|viewer-close)$/,
 } as const;
 
+/** Driving a bot's own browser: the frame stream, and the channel that sends
+ * pointer and keyboard events into it.
+ *
+ * Deliberately separate from the cloud-desktop classifier above rather than
+ * folded into it. A cloud desktop is a disposable VM; a bot's browser is
+ * normally signed into the person's real accounts, with their cookies and
+ * their sessions. A device trusted with a throwaway VM must not acquire the
+ * second permission because the two looked similar from here. */
+export const BROWSER_LIVE_ROUTE = {
+  method: "GET",
+  path: /^\/api\/bots\/[\w-]+\/browser\/live$/,
+} as const;
+
+export const BROWSER_ACTION_ROUTE = {
+  method: "POST",
+  path: /^\/api\/bots\/[\w-]+\/browser\/action$/,
+} as const;
+
 export function isCloudDesktopJoin(method: string, path: string): boolean {
   return method === CLOUD_DESKTOP_JOIN_ROUTE.method && CLOUD_DESKTOP_JOIN_ROUTE.path.test(path);
 }
@@ -64,6 +82,14 @@ export function isMessageFileDownload(method: string, path: string): boolean {
 export function isCloudDesktopAccess(method: string, path: string): boolean {
   return isCloudDesktopJoin(method, path)
     || (method === CLOUD_DESKTOP_CONTROL_ROUTE.method && CLOUD_DESKTOP_CONTROL_ROUTE.path.test(path));
+}
+
+/** Both halves of browser control, behind one capability. Watching the frames
+ * and driving them are the same permission: a viewer that can see a logged-in
+ * session is already past the line the capability is drawn at. */
+export function isBrowserControlAccess(method: string, path: string): boolean {
+  return (method === BROWSER_LIVE_ROUTE.method && BROWSER_LIVE_ROUTE.path.test(path))
+    || (method === BROWSER_ACTION_ROUTE.method && BROWSER_ACTION_ROUTE.path.test(path));
 }
 
 /** Every request the iOS app makes, and nothing else.
@@ -129,6 +155,11 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   CLOUD_DESKTOP_JOIN_ROUTE,
 
   CLOUD_DESKTOP_CONTROL_ROUTE,
+  // A bot's browser, watched and driven from the phone. Like the cloud
+  // desktop above, the proxy applies a second per-device capability check
+  // before either of these reaches the harness.
+  BROWSER_LIVE_ROUTE,
+  BROWSER_ACTION_ROUTE,
   // rooms — making one, and talking in one
   { method: "POST", path: /^\/api\/groups$/ },
   { method: "POST", path: /^\/api\/groups\/[\w-]+\/messages$/ },

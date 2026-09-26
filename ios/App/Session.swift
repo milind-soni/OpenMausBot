@@ -457,6 +457,16 @@ final class Session: ObservableObject {
         connect()
     }
 
+    /// A browser-live transport on the route the session is already using.
+    ///
+    /// Built on demand rather than held: the browser screen is the only thing
+    /// that wants one, it is rarely open, and a stream that outlived the
+    /// session's current route would keep talking to the wrong address.
+    func browserLiveClient() -> BrowserLiveClient? {
+        guard let connection, let token else { return nil }
+        return BrowserLiveClient(connection: connection, token: token)
+    }
+
     /// `GET /.well-known/openmausbot/environment` on a server about to be
     /// paired. Nothing there means this address is not a server; the message
     /// names the address, since that is what the person can fix. Any other

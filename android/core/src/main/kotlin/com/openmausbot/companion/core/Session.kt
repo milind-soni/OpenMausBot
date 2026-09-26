@@ -133,6 +133,15 @@ class Session(
 
     private var registry = ConnectionRegistry()
     private var client: CompanionClient? = null
+
+    /**
+     * A browser-live transport on the route the session is already using.
+     *
+     * Exposed rather than the client itself: the browser screen needs exactly
+     * this and nothing else, and handing out the client would let any caller
+     * reach every route the companion has.
+     */
+    fun browserLive(): BrowserLiveTransport? = client?.browserLive()
     private var token: String? = null
     private var rotation = CandidateRotation(emptyList())
     private var streamJob: Job? = null

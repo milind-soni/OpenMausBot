@@ -1,0 +1,520 @@
+{
+  "cases": [
+    {
+      "name": "direct tap clicks once where the finger landed",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 400,
+            "y": 250,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "ended",
+            "x": 400,
+            "y": 250,
+            "t": 0.05
+          }
+        }
+      ],
+      "expect": [
+        {
+          "move": {
+            "x": 0.4,
+            "y": 0.25
+          }
+        },
+        {
+          "press": {
+            "button": "left",
+            "clicks": 1
+          }
+        },
+        {
+          "release": {
+            "button": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "direct double tap inside the window raises the count",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 400,
+            "y": 250,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "ended",
+            "x": 400,
+            "y": 250,
+            "t": 0.05
+          }
+        },
+        {
+          "touch": {
+            "id": 2,
+            "phase": "began",
+            "x": 400,
+            "y": 250,
+            "t": 0.2
+          }
+        },
+        {
+          "touch": {
+            "id": 2,
+            "phase": "ended",
+            "x": 400,
+            "y": 250,
+            "t": 0.25
+          }
+        }
+      ],
+      "expect": [
+        {
+          "move": {
+            "x": 0.4,
+            "y": 0.25
+          }
+        },
+        {
+          "press": {
+            "button": "left",
+            "clicks": 1
+          }
+        },
+        {
+          "release": {
+            "button": "left"
+          }
+        },
+        {
+          "move": {
+            "x": 0.4,
+            "y": 0.25
+          }
+        },
+        {
+          "press": {
+            "button": "left",
+            "clicks": 2
+          }
+        },
+        {
+          "release": {
+            "button": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "direct tap after the window starts a new sequence",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 400,
+            "y": 250,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "ended",
+            "x": 400,
+            "y": 250,
+            "t": 0.05
+          }
+        },
+        {
+          "touch": {
+            "id": 2,
+            "phase": "began",
+            "x": 400,
+            "y": 250,
+            "t": 0.51
+          }
+        },
+        {
+          "touch": {
+            "id": 2,
+            "phase": "ended",
+            "x": 400,
+            "y": 250,
+            "t": 0.56
+          }
+        }
+      ],
+      "expect": [
+        {
+          "move": {
+            "x": 0.4,
+            "y": 0.25
+          }
+        },
+        {
+          "press": {
+            "button": "left",
+            "clicks": 1
+          }
+        },
+        {
+          "release": {
+            "button": "left"
+          }
+        },
+        {
+          "move": {
+            "x": 0.4,
+            "y": 0.25
+          }
+        },
+        {
+          "press": {
+            "button": "left",
+            "clicks": 1
+          }
+        },
+        {
+          "release": {
+            "button": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "direct hold short of the threshold does nothing yet",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 600,
+            "y": 600,
+            "t": 0
+          }
+        },
+        {
+          "tick": 0.4
+        }
+      ],
+      "expect": []
+    },
+    {
+      "name": "direct long press right clicks at the hold point",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 600,
+            "y": 600,
+            "t": 0
+          }
+        },
+        {
+          "tick": 0.4
+        },
+        {
+          "tick": 0.5
+        }
+      ],
+      "expect": [
+        {
+          "move": {
+            "x": 0.6,
+            "y": 0.6
+          }
+        },
+        {
+          "press": {
+            "button": "right",
+            "clicks": 1
+          }
+        },
+        {
+          "release": {
+            "button": "right"
+          }
+        }
+      ]
+    },
+    {
+      "name": "direct one finger drag scrolls and does not click on lift",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 500,
+            "y": 500,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "moved",
+            "x": 500,
+            "y": 600,
+            "t": 0.1
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "ended",
+            "x": 500,
+            "y": 600,
+            "t": 0.15
+          }
+        }
+      ],
+      "expect": [
+        {
+          "scroll": {
+            "dx": 0,
+            "dy": -0.1
+          }
+        }
+      ]
+    },
+    {
+      "name": "trackpad slow drag moves the cursor one to one then clicks there",
+      "mode": "trackpad",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 500,
+            "y": 500,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "moved",
+            "x": 600,
+            "y": 500,
+            "t": 1.0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "ended",
+            "x": 600,
+            "y": 500,
+            "t": 1.05
+          }
+        },
+        {
+          "touch": {
+            "id": 2,
+            "phase": "began",
+            "x": 100,
+            "y": 100,
+            "t": 2.0
+          }
+        },
+        {
+          "touch": {
+            "id": 2,
+            "phase": "ended",
+            "x": 100,
+            "y": 100,
+            "t": 2.05
+          }
+        }
+      ],
+      "expect": [
+        {
+          "move": {
+            "x": 0.6,
+            "y": 0.5
+          }
+        },
+        {
+          "move": {
+            "x": 0.6,
+            "y": 0.5
+          }
+        },
+        {
+          "press": {
+            "button": "left",
+            "clicks": 1
+          }
+        },
+        {
+          "release": {
+            "button": "left"
+          }
+        }
+      ]
+    },
+    {
+      "name": "trackpad fast drag applies the acceleration curve",
+      "mode": "trackpad",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": true,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 100,
+            "y": 500,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "moved",
+            "x": 200,
+            "y": 500,
+            "t": 0.1
+          }
+        }
+      ],
+      "expect": [
+        {
+          "move": {
+            "x": 0.7625,
+            "y": 0.5
+          }
+        }
+      ]
+    },
+    {
+      "name": "not driving swallows every touch",
+      "mode": "direct",
+      "view": [
+        1000,
+        1000
+      ],
+      "frame": [
+        1000,
+        1000
+      ],
+      "driving": false,
+      "steps": [
+        {
+          "touch": {
+            "id": 1,
+            "phase": "began",
+            "x": 400,
+            "y": 250,
+            "t": 0
+          }
+        },
+        {
+          "touch": {
+            "id": 1,
+            "phase": "ended",
+            "x": 400,
+            "y": 250,
+            "t": 0.05
+          }
+        },
+        {
+          "tick": 1.0
+        }
+      ],
+      "expect": []
+    }
+  ]
+}

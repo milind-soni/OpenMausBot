@@ -19,10 +19,17 @@ private let log = Logger(subsystem: "com.openmausbot.companion", category: "stre
 /// One event off the wire, before it is understood as a `Frame`.
 public struct SSEEvent: Equatable, Sendable {
     public var id: String?
+    /// The `event:` name, when the server sent one.
+    ///
+    /// `/api/events` does not use it and leaves this nil. The browser-live
+    /// stream puts its message type here and strips it from the payload, so
+    /// dropping this field made every one of its messages undecodable.
+    public var event: String?
     public var data: String
 
-    public init(id: String? = nil, data: String) {
+    public init(id: String? = nil, event: String? = nil, data: String) {
         self.id = id
+        self.event = event
         self.data = data
     }
 }
@@ -66,16 +73,18 @@ public struct SSEParser: Sendable {
 
     static func event(from fields: [(name: String, value: String)]) -> SSEEvent? {
         var id: String?
+        var name: String?
         var dataLines: [String] = []
         for field in fields {
             switch field.name {
             case "data": dataLines.append(field.value)
             case "id": id = field.value
+            case "event": name = field.value
             default: break
             }
         }
         guard !dataLines.isEmpty else { return nil }
-        return SSEEvent(id: id, data: dataLines.joined(separator: "\n"))
+        return SSEEvent(id: id, event: name, data: dataLines.joined(separator: "\n"))
     }
 }
 

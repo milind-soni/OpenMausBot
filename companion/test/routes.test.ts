@@ -7,7 +7,7 @@
 // and the one that quietly stopped being true once before.
 import { describe, expect, it } from "vitest";
 
-import { denyReason } from "../src/routes.ts";
+import { denyReason, isBrowserControlAccess, isCloudDesktopAccess } from "../src/routes.ts";
 
 const ask = (method: string, path: string, authenticated = true) =>
   denyReason({ method, path, authenticated });
@@ -267,5 +267,35 @@ describe("what it may not", () => {
       expect(allowed("POST", path), path).toBe(false);
       expect(allowed("DELETE", path), path).toBe(false);
     }
+  });
+});
+
+describe("browser control", () => {
+  it("allows the live stream and the action channel, and nothing else under browser/", () => {
+    expect(allowed("GET", "/api/bots/b1/browser/live")).toBe(true);
+    expect(allowed("POST", "/api/bots/b1/browser/action")).toBe(true);
+    // The two verbs are not interchangeable: the stream is a GET and the
+    // action channel is a POST, and neither route answers the other's method.
+    expect(allowed("POST", "/api/bots/b1/browser/live")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser/action")).toBe(false);
+    // Anything else the harness may grow under this prefix stays closed.
+    expect(allowed("POST", "/api/bots/b1/browser/restart")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser")).toBe(false);
+  });
+
+  it("classifies exactly the two routes as needing the browser capability", () => {
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live")).toBe(true);
+    expect(isBrowserControlAccess("POST", "/api/bots/b1/browser/action")).toBe(true);
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/messages")).toBe(false);
+    // Driving a bot's signed-in browser is not the same permission as a
+    // throwaway cloud desktop, so the classifiers must not overlap.
+    expect(isBrowserControlAccess("POST", "/api/bots/b1/computer/join")).toBe(false);
+    expect(isCloudDesktopAccess("GET", "/api/bots/b1/browser/live")).toBe(false);
+  });
+
+  it("anchors the bot id so a traversal cannot reach another route", () => {
+    expect(allowed("GET", "/api/bots/b1/browser/live/../../config")).toBe(false);
+    expect(allowed("GET", "/api/bots/b1/browser/live?x=1")).toBe(false);
+    expect(isBrowserControlAccess("GET", "/api/bots/b1/browser/live/extra")).toBe(false);
   });
 });
