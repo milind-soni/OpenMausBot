@@ -23,7 +23,7 @@ describe("CI concurrency", () => {
   it("allows cancelled summary jobs to stop without skipping failure reporting", () => {
     expect(workflow.jobs.gate.if).toBe("${{ !cancelled() }}");
     expect(workflow.jobs.gate.needs).toEqual([
-      "static", "vitest", "packaged-server", "windows-cua", "electron-smokes",
+      "static", "vitest", "behavior-evals", "packaged-server", "windows-cua", "electron-smokes",
     ]);
   });
 
