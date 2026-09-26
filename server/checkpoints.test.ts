@@ -5,10 +5,19 @@
 // user's own git repo in the folder is never touched, and dangerous folders
 // (home) are refused outright.
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import { removeTempDir } from "./testing/cleanup.ts";
 
@@ -115,6 +124,82 @@ describe("snapshot", () => {
     writeFileSync(join(cwd, "a.txt"), "two");
     expect(await restore(bot, shouted, first!)).toMatchObject({ ok: true });
     expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
+  });
+});
+
+describe("upgrade from the previous key", () => {
+  // Before canonicalWorktree, the shadow repo was keyed by plain realpathSync,
+  // i.e. by whatever spelling the caller typed. These tests stand in for a
+  // Windows folder whose stored spelling differs from the typed one by giving
+  // realpathSync.native a different, real path for the same folder: a symlink
+  // to it. Git can work through it, and it hashes to another key.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const nativeReal = realpathSync.native;
+  /** How the volume spells `cwd`: `spelling`, or the plain realpath when
+   * null (the previous resolver's answer). Every other path is untouched, so
+   * the home and protected-folder checks keep their real answers. */
+  function withSpelling(cwd: string, spelling: string | null) {
+    const real = realpathSync(cwd);
+    vi.spyOn(realpathSync, "native").mockImplementation(((p: string) => {
+      const resolved = nativeReal(p);
+      return resolved === real || realpathSync(p) === real ? (spelling ?? real) : resolved;
+    }) as never);
+  }
+
+  function aliasOf(cwd: string): string {
+    const alias = join(mkdtempSync(join(tmpdir(), "omb-ckpt-alias-")), "spelled");
+    symlinkSync(cwd, alias, process.platform === "win32" ? "junction" : "dir");
+    scratchDirs.push(join(alias, ".."));
+    return alias;
+  }
+
+  it("still finds history keyed by the previous resolver", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "one");
+    // history written by the previous code: keyed by the typed spelling
+    withSpelling(cwd, null);
+    const first = await snapshot(bot, cwd, "turn 11111111");
+    expect(first).toMatch(/^[0-9a-f]{40}$/);
+
+    // the volume's spelling of the same folder differs from the typed one
+    withSpelling(cwd, aliasOf(cwd));
+    const listed = await listCheckpoints(bot, cwd);
+    expect(listed.map((c) => c.hash)).toEqual([first]);
+
+    writeFileSync(join(cwd, "a.txt"), "two");
+    expect(await restore(bot, cwd, first!)).toMatchObject({ ok: true });
+    expect(readFileSync(join(cwd, "a.txt"), "utf8")).toBe("one");
+
+    // a new checkpoint continues that history (restore added its own safety
+    // checkpoints to it) rather than starting a second one
+    writeFileSync(join(cwd, "a.txt"), "three");
+    const second = await snapshot(bot, cwd, "turn 22222222");
+    const hashes = (await listCheckpoints(bot, cwd)).map((c) => c.hash);
+    expect(hashes[0]).toBe(second);
+    expect(hashes).toContain(first);
+  });
+
+  it("never replaces a canonical history with a legacy one", async () => {
+    const { bot, cwd } = workspace();
+    writeFileSync(join(cwd, "a.txt"), "canonical");
+    const alias = aliasOf(cwd);
+    withSpelling(cwd, alias);
+    const canonical = await snapshot(bot, cwd, "turn 11111111");
+
+    // a legacy repo for the same folder appears later, under the typed spelling
+    withSpelling(cwd, null);
+    writeFileSync(join(cwd, "a.txt"), "legacy");
+    const legacy = await snapshot(bot, cwd, "turn 22222222");
+    expect(legacy).not.toBe(canonical);
+
+    withSpelling(cwd, alias);
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)).toEqual([canonical]);
+    // and the legacy history is left where it was
+    withSpelling(cwd, null);
+    expect((await listCheckpoints(bot, cwd)).map((c) => c.hash)).toEqual([legacy]);
   });
 });
 
