@@ -134,8 +134,8 @@ const botState = async (botId: string) => (await bots()).find((bot) => bot.id ==
 const taskOf = async (botId: string, threadId: string) => (await botState(botId))?.tasks.find((task: any) => task.threadId === threadId);
 const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).body.messages as any[];
 const handoffs = (): any[] => JSON.parse(readFileSync(join(home, ".openmausbot", "room-handoffs.json"), "utf8"));
-const coordinated = async (headers: Record<string, string>, botId: string, message: string, requestKey: string) => {
-  const response = await api("POST", "/api/internal/coordinate-bots", { botIds: [botId], message, requestKey }, headers);
+const coordinated = async (headers: Record<string, string>, botId: string, message: string, requestKey: string, extra: Record<string, unknown> = {}) => {
+  const response = await api("POST", "/api/internal/coordinate-bots", { botIds: [botId], message, requestKey, ...extra }, headers);
   expect(response.status, JSON.stringify(response.body)).toBe(200);
   expect(response.body.accepted).toHaveLength(1);
   return handoffs().find(node => node.id === response.body.accepted[0].requestId);
@@ -359,7 +359,7 @@ describe("start_thread on yourself", () => {
 });
 
 describe("coordinate_bots on a teammate", () => {
-  it.each([1, 2])("runs three recipient threads within capacity %i, returns all results, and leaves the person's selected thread untouched", async (capacity) => {
+  it.each([1, 2])("runs three own_thread recipient rows within capacity %i, returns all results, and leaves the person's selected thread untouched", async (capacity) => {
     expect((await api("PUT", "/api/config", { threads: { maxConcurrentPerBot: capacity } })).status).toBe(200);
     const pm = await createBot("Pam", "gated");
     const qa = await createBot("Quinn", "gated");
@@ -369,7 +369,10 @@ describe("coordinate_bots on a teammate", () => {
       const token = await heldTurn(pm, "Hand the pull requests to QA.");
       const opened: any[] = [];
       for (let index = 1; index <= 3; index++) {
-        opened.push(await coordinated(token, qa.id, `Test pull request ${index}.`, `pr-${index}`));
+        // Since #1684, unlabeled standing work shares the pair conversation
+        // serially; parallel rows within capacity are the own_thread contract,
+        // so this capacity test opts in explicitly.
+        opened.push(await coordinated(token, qa.id, `Test pull request ${index}.`, `pr-${index}`, { threadPolicy: "own_thread" }));
       }
       const before = await botState(qa.id);
       expect(before.threadId).toBe(qa.threadId);
