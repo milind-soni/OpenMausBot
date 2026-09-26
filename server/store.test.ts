@@ -1656,6 +1656,33 @@ describe("Store change stream", () => {
     expect(store.tasks(recipient.id)).toHaveLength(before);
   });
 
+  it("resolvePairConversation never adopts or reclassifies a legacy thread under own_thread policy", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const brief = "Implement and independently verify the CSV export for the reporting page";
+    const legacy = store.createTask(recipient.id, brief, false, undefined, { botId: sender.id, name: "Clive", at: 20 })!;
+    store.appendMessage(legacy.threadId, { role: "bot", kind: "text", text: `@Scout ${brief}`, at: 2_000 });
+    const before = store.tasks(recipient.id).length;
+    // own_thread wants the isolated row even when the caller reports the
+    // conversation busy — the policy must win over the busy answer.
+    const own = store.resolvePairConversation(sender, recipient.id, { label: "Export", working: () => true, ownThread: true })!;
+    expect(own.created).toBe(true);
+    expect(own.task.openedBy).toMatchObject({ botId: sender.id, name: "Clive", kind: "work" });
+    expect(own.task.title).toBe("@Clive · Export");
+    expect(store.tasks(recipient.id)).toHaveLength(before + 1);
+    // the legacy row is untouched: no pair stamp, no rename — own_thread
+    // never mints or reuses the pair conversation
+    const stillLegacy = store.taskByThread(recipient.id, legacy.threadId)!;
+    expect(stillLegacy.openedBy).toEqual({ botId: sender.id, name: "Clive", at: 20 });
+    expect(stillLegacy.title).toBe(brief.slice(0, 80));
+    // the next standing send still adopts it as the pair conversation
+    const standing = store.resolvePairConversation(sender, recipient.id, { working: () => false })!;
+    expect(standing.created).toBe(false);
+    expect(standing.task.threadId).toBe(legacy.threadId);
+    expect(standing.task.openedBy).toEqual({ botId: sender.id, name: "Clive", kind: "pair", at: 20 });
+  });
+
   it("resolvePairConversation adopts a hand-renamed thread without overwriting the name the person typed", () => {
     const store = new Store(selection);
     const recipient = store.createBot({ name: "Scout" });
@@ -1752,6 +1779,44 @@ describe("Store change stream", () => {
     expect(store.resolvePairConversation(sender, recipient.id, idle)!.task.threadId).toBe(pair.threadId);
     expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
     expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "work")).toHaveLength(2);
+  });
+
+  it("resolvePairConversation ownThread runs in a work row even when no pair conversation exists yet", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const selected = store.activeTask(recipient.id)!;
+    const own = store.resolvePairConversation(sender, recipient.id, { working: () => false, ownThread: true, label: "Audit" })!;
+    expect(own.created).toBe(true);
+    expect(own.task.title).toBe("@Clive · Audit");
+    expect(own.task.openedBy).toMatchObject({ botId: sender.id, name: "Clive", kind: "work" });
+    expect(own.task.threadId).not.toBe(selected.threadId);
+    // the pair conversation this policy chose not to use does not exist
+    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(0);
+    // a later standing assignment still opens the pair row, separate from
+    // the work row the own_thread policy created
+    const standing = store.resolvePairConversation(sender, recipient.id, { working: () => false })!;
+    expect(standing.task.threadId).not.toBe(own.task.threadId);
+    expect(standing.task.openedBy?.kind).toBe("pair");
+  });
+
+  it("resolvePairConversation ownThread never reuses or mints the pair conversation", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const pair = store.resolvePairConversation(sender, recipient.id, { working: () => false })!.task;
+    // the standing conversation is free, but own_thread asked for a row of
+    // its own: it gets one instead of joining the pair
+    const freeOwn = store.resolvePairConversation(sender, recipient.id, { working: () => false, ownThread: true, label: "Side job" })!;
+    expect(freeOwn.created).toBe(true);
+    expect(freeOwn.task.threadId).not.toBe(pair.threadId);
+    expect(freeOwn.task.openedBy?.kind).toBe("work");
+    // and when the pair conversation is busy, the outcome is the same row
+    // shape — never a second pair conversation
+    const busyOwn = store.resolvePairConversation(sender, recipient.id, { working: () => true, ownThread: true, label: "Second job" })!;
+    expect(busyOwn.created).toBe(true);
+    expect(busyOwn.task.openedBy?.kind).toBe("work");
+    expect(store.tasks(recipient.id).filter((task) => task.openedBy?.kind === "pair")).toHaveLength(1);
   });
 
   it("a sender deleted and recreated under the same name inherits its pair conversation", () => {

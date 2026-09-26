@@ -341,9 +341,7 @@ app.whenReady().then(async () => {
   // introducing another fake-agent workflow or weakening production auth.
   const peerTarget = (await api("/api/bots", "POST", { modelSelection: { instanceId: "agy", model: "gemini-3.8-flash-high" } })).body.bot;
   await coordinator.request(child, peerTarget.id, "ask");
-  const peerThread = (await api(`/api/bots/${peerTarget.id}/tasks`, "POST", { title: "Existing delegated conversation" })).body.task;
   await coordinator.request(child, peerTarget.id, "full");
-  await coordinator.request(child, peerTarget.id, "full", { threadId: peerThread.threadId });
   assert.equal((await api(`/api/bots/${id}`, "PATCH", { approvePeerComms: false })).status, 200);
   const capability = await api("/api/testing/internal-capability", "POST", { botId: id, threadId: created.body.bot.threadId }, { "x-openmausbot-test-capability": testCapabilityKey });
   assert.equal(capability.status, 201);
@@ -356,19 +354,36 @@ app.whenReady().then(async () => {
   assert.equal((await peerRequest).status, 200);
   const completedPeer = (await api("/api/bots")).body.bots.find((bot) => bot.id === peerTarget.id);
   assert.ok(!pendingCard(completedPeer));
+  const completedPairRow = completedPeer.tasks.find((task) => task.title.startsWith("@"));
+  assert.ok(completedPairRow, "the peer ask never opened a pair conversation on the target");
+  const completedPairMessages = (await api(`/api/threads/${completedPairRow.threadId}/messages?limit=100`)).body.messages;
+  assert.ok(!completedPairMessages.find((message) => message.card?.requestId && !message.card.answered && !message.card.dismissed));
   assert.ok(!peerDecisions.some((row) => row.decision === "card-shown"));
   const peerCalls = JSON.parse(readFileSync(`${agyDump}.config.json`, "utf8"));
   assert.equal(peerCalls.find((call) => call.params.configId === "mode")?.params.value, "yolo");
   console.log(JSON.stringify({ provider: "antigravity", mode: "full", peerInitiated: true, native: "yolo", autoApproved: true, humanApproved: false }));
 
-  // Revoking the receiving thread's grant must restore prompts on the resumed
-  // delegated session, even when the sender itself has Full access.
+  // Revoking the receiving conversation's grant must restore prompts on the
+  // resumed delegated session, even when the sender itself has Full access.
+  // #1684 routes classic asks through the pair conversation the two bots
+  // share, and that row opened while the target's default was Full — a
+  // stored thread grant the later bot-level "ask" does not de-escalate —
+  // so the pair row is where the revoke must land.
+  // The card the restored prompts raise lands on that pair row too: a
+  // bot's `messages` feed follows its selected thread, so the smoke reads
+  // the row's own thread.
   await coordinator.request(child, id, "full");
   await coordinator.request(child, peerTarget.id, "ask");
-  assert.equal((await api(`/api/bots/${peerTarget.id}/tasks/${peerThread.threadId}`, "PATCH", { approvalMode: "ask" })).status, 200);
+  const pairRow = (await api("/api/bots")).body.bots.find((bot) => bot.id === peerTarget.id).tasks.find((task) => task.title.startsWith("@"));
+  assert.ok(pairRow, "the earlier peer ask never opened a pair conversation on the target");
+  assert.equal((await api(`/api/bots/${peerTarget.id}/tasks/${pairRow.threadId}`, "PATCH", { approvalMode: "ask" })).status, 200);
+  const pairPendingCard = async () => {
+    const { messages } = (await api(`/api/threads/${pairRow.threadId}/messages?limit=100`)).body;
+    return messages.find((message) => message.card?.requestId && !message.card.answered && !message.card.dismissed)?.card;
+  };
   const askPeerRequest = api("/api/internal/ask-bot", "POST", { toBotId: peerTarget.id, message: "Ask target must not inherit sender Full" }, { authorization: `Bearer ${capability.body.token}` });
   void askPeerRequest.catch(() => {});
-  const peerCard = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((bot) => bot.id === peerTarget.id)));
+  const peerCard = await until(pairPendingCard);
   const askPeerCalls = JSON.parse(readFileSync(`${agyDump}.config.json`, "utf8"));
   assert.equal(askPeerCalls.find((call) => call.params.configId === "mode")?.params.value, "default");
   assert.equal((await api(`/api/bots/${peerTarget.id}/respond`, "POST", { requestId: peerCard.requestId, behavior: "allow" })).status, 200);
@@ -381,7 +396,17 @@ app.whenReady().then(async () => {
   await coordinator.request(child, customTarget.id, "custom");
   const customRequest = api("/api/internal/ask-bot", "POST", { toBotId: customTarget.id, message: "Delegated Custom uses the native Auto reviewer" }, { authorization: `Bearer ${capability.body.token}` });
   void customRequest.catch(() => {});
-  const customCard = await until(async () => pendingCard((await api("/api/bots")).body.bots.find((bot) => bot.id === customTarget.id)));
+  // #1684 routes this ask through the pair conversation it mints on the
+  // target — the bot's `messages` feed still follows its selected thread,
+  // so the card is read from the row's own thread. The row appears only
+  // once the ask-bot request resolves it, so the poll waits for both.
+  const customCard = await until(async () => {
+    const target = (await api("/api/bots")).body.bots.find((bot) => bot.id === customTarget.id);
+    const row = target.tasks.find((task) => task.title.startsWith("@"));
+    if (!row) return undefined;
+    const { messages } = (await api(`/api/threads/${row.threadId}/messages?limit=100`)).body;
+    return messages.find((message) => message.card?.requestId && !message.card.answered && !message.card.dismissed)?.card;
+  });
   assert.equal(customCard.held, "The provider requires your approval for this action.");
   assert.equal((await api(`/api/bots/${customTarget.id}/respond`, "POST", { requestId: customCard.requestId, behavior: "allow" })).status, 200);
   assert.equal((await customRequest).status, 200);

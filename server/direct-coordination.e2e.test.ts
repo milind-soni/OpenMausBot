@@ -474,6 +474,56 @@ it("gives a second simultaneous assignment its own labelled thread, which closes
   expect(pair).not.toHaveProperty("closedBy");
 }), 60_000);
 
+it("parks an unlabeled standing assignment on a busy pair conversation instead of minting a parallel work row", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Audit complete" }] };
+  f.plan[f.chief.id] = { steps: [
+    { arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } },
+    { arguments: { bot_ids: [f.lead.id], request_key: "audit", message: "Audit the export once it exists" } },
+  ], reply: "Both assignments are out", resumeReply: "Both came back" };
+  await f.start();
+  expect((await f.wait()).status).toBe("settled");
+  const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
+  // Serial delivery in the standing conversation is the designed behavior
+  // for unlabeled work: a busy pair row is a queue to wait in, never a
+  // reason to mint an "@Clive · parallel work" row.
+  expect(tasks).toHaveLength(2);
+  expect(tasks.find((task: any) => task.openedBy?.kind === "work")).toBeUndefined();
+  const pair = tasks.find((task: any) => task.openedBy?.kind === "pair");
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))
+    .toEqual([pair.threadId, pair.threadId]);
+  const transcript = (await f.messages(pair.threadId)).map((message: any) => message.text).filter(Boolean).join("\n");
+  expect(transcript).toContain("Implement the CSV export");
+  expect(transcript).toContain("Audit the export once it exists");
+}), 60_000);
+
+it("keeps a labeled standing assignment on an idle pair conversation instead of rerouting it into a work row", () => fixture(async f => {
+  f.plan[f.lead.id] = { turns: [{ reply: "Export implemented" }, { reply: "Polish applied" }] };
+  f.plan[f.chief.id] = { turns: [
+    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "build", message: "Implement the CSV export" } }], reply: "Assigned the build" },
+    { reply: "The export is implemented" },
+    { steps: [{ arguments: { bot_ids: [f.lead.id], request_key: "polish", message: "Polish the export", label: "Polish" } }], reply: "Assigned the polish" },
+    { reply: "The export is polished" },
+  ] };
+  f.save();
+  const send = async (text: string) => {
+    await f.cli("send", "--bot", f.chief.id, "--task", f.chief.activeTaskId, "--text", text);
+    expect((await f.wait()).status).toBe("settled");
+  };
+  await send("Ask Engineering to build the CSV export.");
+  await send("Now ask them to polish it.");
+  const tasks = (await f.api("/api/bots")).bots.find((bot: any) => bot.id === f.lead.id).tasks;
+  expect(tasks).toHaveLength(2);
+  expect(tasks.find((task: any) => task.openedBy?.kind === "work")).toBeUndefined();
+  const pair = tasks.find((task: any) => task.openedBy?.kind === "pair");
+  // The labeled assignment stays parked on the idle pair row: its own
+  // queued node is not evidence that the conversation is busy.
+  expect(f.nodes().filter((node: any) => node.botId === f.lead.id).map((node: any) => node.threadId))
+    .toEqual([pair.threadId, pair.threadId]);
+  expect((await f.messages(pair.threadId)).some((message: any) => message.text?.includes("Polish the export"))).toBe(true);
+  // No spurious "Pair conversation busy" pointer note in the sender's chat.
+  expect((await f.messages(f.chief.activeTaskId)).some((message: any) => message.tool?.name?.startsWith("Pair conversation busy"))).toBe(false);
+}), 60_000);
+
 it("refuses a reused request_key for different work and leaves no thread behind", () => fixture(async f => {
   f.plan[f.lead.id] = { reply: "Export implemented" };
   f.plan[f.chief.id] = { steps: [
@@ -624,8 +674,15 @@ it("does not cancel a live coordination when an automation turn lands in the con
   const { routine } = await f.api("/api/routines", { name: "Nightly note", prompt: "Send the nightly note.", botId: ops.id,
     enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
   await f.api(`/api/routines/${routine.id}/run`, {});
-  // The delegated turn really reaches the conversation the coordination lives in.
-  await expect.poll(async () => (await f.messages(f.chief.activeTaskId)).some((message: any) => message.peerAsk?.botId === ops.id), { timeout: 25_000 }).toBe(true);
+  // The delegated turn really reaches the chief — through the pair
+  // conversation the two bots share (#1684), never the chief's active
+  // thread, where the live coordination keeps running untouched.
+  const opsPairRow = async () =>
+    (await f.api("/api/bots")).bots.find((b: any) => b.id === f.chief.id).tasks.find((t: any) => t.title === "@Ops")?.threadId as string | undefined;
+  await expect.poll(async () => {
+    const threadId = await opsPairRow();
+    return threadId ? (await f.messages(threadId)).some((message: any) => message.peerAsk?.botId === ops.id) : false;
+  }, { timeout: 25_000 }).toBe(true);
   expect(f.nodes().find((node: any) => node.id === assignment.id).status).not.toBe("cancelled");
 
   await expect.poll(() => f.nodes().find((node: any) => node.id === assignment.id)?.status, { timeout: 25_000 }).toBe("completed");

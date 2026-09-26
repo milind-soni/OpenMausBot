@@ -35,7 +35,16 @@ it.each(["already busy", "became busy during approval"])(
       const peerThread = peer.activeTaskId;
       const messages = async (threadId: string): Promise<any[]> => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages;
       const sourceCards = async () => (await messages(sourceThread)).filter(message => ["ask_bot", "delegate_bot"].includes(message.card?.tool));
-      const peerRequests = async () => (await messages(peerThread)).filter(message => message.role === "user" && message.peerAsk?.botId === source.id);
+      // #1684: peer work lands in the standing pair conversation on the
+      // recipient, never the recipient's selected thread — read inbound
+      // peer asks from that row, found through the public task list.
+      const pairRow = async (): Promise<string | undefined> =>
+        (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === peer.id)
+          ?.tasks?.find((task: any) => task.title === "@External gateway")?.threadId;
+      const peerRequests = async () => {
+        const threadId = await pairRow();
+        return (threadId ? await messages(threadId) : []).filter(message => message.role === "user" && message.peerAsk?.botId === source.id);
+      };
       const sourceState = async () => (await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === source.id);
       const receipt = (id: string) => api("GET", `/api/internal/delegations/${id}`, undefined, true);
       const withholdAfterRevocation = async (id: string) => {
@@ -52,16 +61,28 @@ it.each(["already busy", "became busy during approval"])(
       await api("PATCH", `/api/bots/${source.id}`, { approvePeerComms: true });
       writeFileSync(join(session.info.dataDir, "external-runtimes.json"), JSON.stringify({ [source.id]: { token: TOKEN, threadId: sourceThread } }), { mode: 0o600 });
       const requestText = `Only this queued request: ${scenario}`;
-      const occupy = async () => {
-        await control("send", "--bot", peer.id, "--task", peerThread, "--text", "Keep this unrelated turn running until the fixture gate opens.");
+      const occupy = async (threadId: string) => {
+        await control("send", "--bot", peer.id, "--task", threadId, "--text", "Keep this unrelated turn running until the fixture gate opens.");
         await expect.poll(() => existsSync(prompts) && readFileSync(prompts, "utf8").includes("Keep this unrelated turn running"), { timeout: 15_000 }).toBe(true);
       };
       const approve = async (card: any) => api("POST", `/api/threads/${sourceThread}/respond`, { requestId: card.card.requestId, behavior: "allow" });
       let queued: any;
       if (scenario === "already busy") {
-        await occupy();
+        // The busy that holds peer work is the pair conversation's own turn
+        // (#1684), not any thread on the recipient: prime that conversation
+        // with an approved ask whose gated turn keeps it busy. The parked
+        // primer ask settles on its own (reply or timeout conversion); the
+        // catch wrapper keeps teardown from surfacing an in-flight rejection.
+        void api("POST", "/api/internal/ask-bot", { toBotId: peer.id, message: "Prime the standing pair conversation" }, true)
+          .then(() => {}, () => {});
+        await expect.poll(async () => (await sourceCards()).length, { timeout: 15_000 }).toBe(1);
+        const [primerCard] = await sourceCards();
+        expect(primerCard.card.tool).toBe("ask_bot");
+        await approve(primerCard);
+        await expect.poll(async () =>
+          Boolean((await api("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === peer.id)?.busy), { timeout: 15_000 }).toBe(true);
         queued = await api("POST", "/api/internal/ask-bot", { toBotId: peer.id, message: requestText }, true);
-        expect(await sourceCards()).toHaveLength(0);
+        expect((await sourceCards()).filter(card => !card.card.answered)).toHaveLength(0);
       } else {
         // Attach a rejection handler immediately: fixture teardown must not
         // turn a failed assertion into an unhandled in-flight HTTP rejection.
@@ -71,7 +92,12 @@ it.each(["already busy", "became busy during approval"])(
         const [card] = await sourceCards();
         expect(card.card.tool).toBe("ask_bot");
         expect(await peerRequests()).toHaveLength(0);
-        await occupy();
+        let pairThreadId: string | undefined;
+        await expect.poll(async () => {
+          pairThreadId = await pairRow();
+          return Boolean(pairThreadId);
+        }, { timeout: 15_000 }).toBe(true);
+        await occupy(pairThreadId!);
         await approve(card);
         const outcome = await pendingAsk;
         if ("error" in outcome) throw outcome.error;
@@ -82,7 +108,7 @@ it.each(["already busy", "became busy during approval"])(
       // This is the lost-wakeup boundary: merely storing a fresh queue item
       // does not subscribe it to the target's next idle transition.
       await expect.poll(() => waiting(queued.taskId), { timeout: 5_000 }).toBe(true);
-      expect(await peerRequests()).toHaveLength(0);
+      expect((await peerRequests()).filter(message => message.text.includes(requestText))).toHaveLength(0);
       expect((await sourceState()).busy).toBeFalsy();
       expect((await messages(sourceThread)).filter(message => message.role === "user")).toHaveLength(0);
       await withholdAfterRevocation(queued.taskId);
@@ -90,23 +116,26 @@ it.each(["already busy", "became busy during approval"])(
 
       writeFileSync(gate, "release only the isolated provider");
       if (scenario === "already busy") {
-        await expect.poll(async () => (await sourceCards()).length, { timeout: 15_000 }).toBe(1);
-        const [card] = await sourceCards();
-        expect(card.card.tool).toBe("delegate_bot");
+        await expect.poll(async () => (await sourceCards()).filter(card => card.card.tool === "delegate_bot" && !card.card.answered).length, { timeout: 15_000 }).toBe(1);
+        const [card] = (await sourceCards()).filter(card => card.card.tool === "delegate_bot" && !card.card.answered);
         expect(card.card.answered).toBeFalsy();
-        expect(await peerRequests()).toHaveLength(0);
+        expect((await peerRequests()).filter(message => message.text.includes(requestText))).toHaveLength(0);
         await approve(card);
       }
       await expect.poll(async () => (await receipt(queued.taskId)).status, { timeout: 20_000 }).toBe("done");
       expect((await receipt(queued.taskId)).result).toContain(requestText);
-      expect((await control("wait", "--bot", peer.id, "--task", peerThread)).status).toBe("settled");
-      const requests = await peerRequests();
+      const finalPairRow = await pairRow();
+      expect(finalPairRow).toBeTruthy();
+      expect((await control("wait", "--bot", peer.id, "--task", finalPairRow!)).status).toBe("settled");
+      const requests = (await peerRequests()).filter(message => message.text.includes(requestText));
       expect(requests).toHaveLength(1);
       expect(requests[0].text).toContain(requestText);
       expect((await sourceCards()).map(card => ({ tool: card.card.tool, answered: card.card.answered })))
-        .toEqual([{ tool: scenario === "already busy" ? "delegate_bot" : "ask_bot", answered: "allow" }]);
+        .toEqual(scenario === "already busy"
+          ? [{ tool: "ask_bot", answered: "allow" }, { tool: "delegate_bot", answered: "allow" }]
+          : [{ tool: "ask_bot", answered: "allow" }]);
       await withholdAfterRevocation(queued.taskId);
-      evidence.push({ receipt: await receipt(queued.taskId), sourceMessages: await messages(sourceThread), peerMessages: await messages(peerThread) });
+      evidence.push({ receipt: await receipt(queued.taskId), sourceMessages: await messages(sourceThread), peerMessages: finalPairRow ? await messages(finalPairRow) : [] });
     } finally {
       try {
         if (fixture) {

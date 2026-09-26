@@ -38,6 +38,49 @@ describe("addressed room request tree", () => {
     engine.sourceSettled("turn", true); engine.tick(); await flush();
     expect(child.status).toBe("completed");
   }));
+  it("re-routes labeled pair work before the busy check and dispatches on the retargeted thread", () => fixture(async (engine, hooks) => {
+    const source = { botId: "chief", threadId: "chief-chat" };
+    const node = engine.enqueue(source, "turn", undefined,
+      { botId: "builder", threadId: "pair-row", pairThreadId: "pair-row", label: "Audit" }, "build", "Build it").node;
+    let rerouted = false;
+    hooks.reroute = n => {
+      if (rerouted || n.threadId !== n.pairThreadId) return false;
+      rerouted = true;
+      n.threadId = "work-row";
+      return true;
+    };
+    // the pair conversation the node was enqueued against went busy after
+    // enqueue; the work row it moved to is free
+    hooks.busy = n => n.threadId === "pair-row";
+    engine.tick(); await flush();
+    expect(rerouted).toBe(true);
+    expect(node.threadId).toBe("work-row");
+    expect(node.status).toBe("completed");
+    expect(hooks.run).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(hooks.run).mock.calls[0]![0]!.threadId).toBe("work-row");
+  }));
+  it("never re-routes an owed resume, and persists a re-route across restart", () => fixture((engine, hooks, file) => {
+    const reroute = vi.fn((n: { threadId: string; pairThreadId?: string }) => {
+      if (n.threadId !== n.pairThreadId) return false;
+      n.threadId = "work-row";
+      return true;
+    });
+    hooks.reroute = reroute;
+    hooks.busy = () => true;
+    const source = { botId: "chief", threadId: "chief-chat" };
+    const resume = engine.enqueue(source, "turn", undefined,
+      { botId: "builder", threadId: "pair-row", pairThreadId: "pair-row", label: "Audit" }, "build", "Build it").node;
+    resume.status = "resume";
+    engine.tick();
+    expect(reroute).not.toHaveBeenCalled();
+    expect(resume.threadId).toBe("pair-row");
+    const fresh = engine.enqueue(source, "other", undefined,
+      { botId: "scout", threadId: "pair-two", pairThreadId: "pair-two", label: "Review" }, "build", "Review it").node;
+    engine.tick();
+    expect(fresh.threadId).toBe("work-row");
+    const restarted = new RoomHandoffs(file, hooks);
+    expect(restarted.nodes.get(fresh.id)?.threadId).toBe("work-row");
+  }));
   it.each([false, true])("keeps accepted nested work when its lead fails (throws: %s)", throws => fixture(async (engine, hooks) => {
     const chief = { botId: "chief", threadId: "chief" };
     const lead = { botId: "lead", threadId: "lead" };

@@ -7,6 +7,14 @@ const nodeSchema = z.object({
   id: z.string(), rootId: z.string(), parentId: z.string().optional(),
   groupId: z.string().optional(), threadId: z.string(), botId: z.string(),
   key: z.string(), text: z.string(), createdAt: z.number(),
+  /** The standing pair conversation this node was routed to at enqueue
+   * time, recorded only while the request is re-routable (labeled): a
+   * dispatch-time busy check can then move the run into its own work row
+   * instead of waiting out the standing row. */
+  pairThreadId: z.string().optional(),
+  /** The request's label, kept so a dispatch-time re-route can name the
+   * `@Sender · label` work row it materializes. */
+  label: z.string().optional(),
   requestBatchKey: z.string().optional(),
   status: z.enum(["source", "queued", "running", "waiting", "resume", "completed", "failed", "cancelled"]),
   result: z.string().default(""), reported: z.boolean().default(false),
@@ -24,6 +32,12 @@ const terminal = (n: RoomHandoff) => ["completed", "failed", "cancelled"].includ
 export interface RoomHandoffHooks {
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: RoomHandoff, parent?: RoomHandoff): string | undefined;
+  /** Close the enqueue→dispatch race for re-routable work: called on each
+   * queued dispatch attempt for a node still sitting on its recorded pair
+   * thread. Returns true when the node was retargeted (typically to a
+   * freshly materialized `@Sender · label` work row); the engine persists
+   * and re-broadcasts the node before re-reading its busy state. */
+  reroute?(node: RoomHandoff): boolean;
   busy(node: RoomHandoff): boolean;
   run(node: RoomHandoff, resumed: boolean, signal: AbortSignal): Promise<{ ok: boolean; text: string }>;
   report(child: RoomHandoff, parent: RoomHandoff): void;
@@ -165,7 +179,7 @@ export class RoomHandoffs {
   }
 
   enqueue(source: RoomAddress, generation: string, parentId: string | undefined,
-    target: RoomAddress, key: string, text: string, approvalGranted = false,
+    target: RoomAddress & Partial<Pick<RoomHandoff, "pairThreadId" | "label">>, key: string, text: string, approvalGranted = false,
     rework = false, sourceText = "", requestBatchKey?: string): { node: RoomHandoff; duplicate: boolean } {
     if (this.loadError) throw new Error(this.loadError);
     let parent = parentId ? this.nodes.get(parentId) : this.nodes.get(generation);
@@ -272,8 +286,12 @@ export class RoomHandoffs {
       if (!n.groupId && n.threadId === threadId && !terminal(n)) this.cancelTree(n, reason);
     }
   }
-  activeDirect(threadId: string) {
-    return [...this.nodes.values()].some(n => !n.groupId && n.threadId === threadId && !terminal(n));
+  /** Coordinated work addressed at a conversation. excludeNodeId answers
+   * "is anyone else working there": a queued node asking about the row it is
+   * parked on must not count itself, or it reads its own queue slot as a
+   * busy conversation. */
+  activeDirect(threadId: string, excludeNodeId?: string) {
+    return [...this.nodes.values()].some(n => n.id !== excludeNodeId && !n.groupId && n.threadId === threadId && !terminal(n));
   }
   /** Work this conversation handed out that has not settled yet. The
    * conversation's own node is not outstanding — only what it waits on. */
@@ -338,6 +356,13 @@ export class RoomHandoffs {
       // A stopped source stops waiting; only work that never started is
       // dropped with it. A teammate mid-turn keeps its process and reports.
       if (parent && terminal(parent) && n.status === "queued") { this.cancelTree(n, "Originating request has ended"); continue; }
+      // A labeled request parked on the standing pair conversation may have
+      // lost the race it was enqueued against: the row went busy after
+      // enqueue. Re-read its routing once per dispatch attempt — one hop
+      // into its own work row beats an hour in a queue the label exists to
+      // skip. Only fresh work re-routes; an owed resume belongs to the row
+      // it was owed in.
+      if (n.status === "queued" && this.hooks.reroute?.(n)) this.publish(n);
       if (this.hooks.busy(n)) continue;
       const root = this.root(n);
       const executionCost = 1;

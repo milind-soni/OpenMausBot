@@ -44,6 +44,11 @@ export interface DelegationItem {
    * "any thread running". Absent = a classic delegation into the target's
    * active thread. */
   targetThreadId?: string;
+  /** targetThreadId is the standing pair conversation with the sender, not
+   * a start_thread row: admission is serial on THAT thread (a busy pair row
+   * waits, it never spills into a free slot), and the classic delegated-by
+   * prefix is kept — the recipient should still know a peer assigned this. */
+  pairConversation?: boolean;
 }
 
 interface PendingDelegationItem extends DelegationItem {
@@ -276,6 +281,9 @@ export function _loadPending(): void {
         if (typeof item.targetThreadId === "string" && item.targetThreadId) {
           loaded.targetThreadId = item.targetThreadId;
         }
+        if (item.pairConversation === true && loaded.targetThreadId) {
+          loaded.pairConversation = true;
+        }
         return [loaded];
       });
       if (items.length) pendingDelegations.set(threadId, items);
@@ -383,7 +391,9 @@ export function queueDelegation(
   savePending();
   const sourceGroup = sourceThreadId ? bus.store.groupByThread(sourceThreadId) : undefined;
   // A fresh-thread handoff is announced as the thread it opened, with a
-  // link to it; a classic one as the delegation it is.
+  // link to it; a classic one as the delegation it is. A pair-routed
+  // handoff keeps the classic wording but carries a link to the standing
+  // row, so the person can find where the exchange will land.
   const openedThread = item.targetThreadId ? bus.store.taskByThread(target.id, item.targetThreadId) : undefined;
   const chip: Omit<Message, "id" | "at"> = {
     role: "bot",
@@ -391,7 +401,7 @@ export function queueDelegation(
     // settled at birth: queueing is the whole act. Left open, the chip
     // would spin until the transcript is closed — the chat never patches it
     tool: {
-      name: openedThread
+      name: openedThread && !item.pairConversation
         ? `Opened thread #${openedThread.title} on ${target.name}`
         : `Delegated to @${target.name}${item.reason ? `: ${item.reason}` : ""}`,
       ok: true,
@@ -422,6 +432,7 @@ export function drainDelegations(
     taskId: string,
     sourceBotId: string,
     targetThreadId: string | undefined,
+    pairThread: boolean,
   ) => void | Promise<void>,
   /** Terminal failures before dispatch also need to wake the source. A
    * launched peer reports through its provider-turn finalizer instead. */
@@ -664,6 +675,7 @@ async function processOne(
     taskId: string,
     sourceBotId: string,
     targetThreadId: string | undefined,
+    pairThread: boolean,
   ) => void | Promise<void>,
 ): Promise<"settled" | "requeued" | "dispatched"> {
   let sender = from;
@@ -802,11 +814,13 @@ async function processOne(
   const reasonLine = item.reason ? `\n\n[Reason: ${item.reason}]` : "";
   // A fresh thread's first line gets the shared peer-provenance note from
   // the harness (which knows whether the opener was unattended); the
-  // classic handoff keeps the prefix it has always had.
-  const prefixed = item.targetThreadId
+  // classic handoff keeps the prefix it has always had — including the
+  // pair-routed shape, whose standing row is exactly where a classic
+  // exchange belongs.
+  const prefixed = item.targetThreadId && !item.pairConversation
     ? item.message
     : `[Delegated by @${sender.name}, another bot in this OpenMausBot workspace. Do the work and reply directly.]\n\n${item.message}${reasonLine}`;
-  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId);
+  await runTarget(item.toBotId, prefixed, item.depth + 1, sourceThreadId, channel, item.id, sender.id, item.targetThreadId, item.pairConversation === true);
   return "dispatched";
 }
 
@@ -818,6 +832,11 @@ async function processOne(
  * `processOne` and the hold decision below, so the two can never disagree
  * about whether a handoff could have been delivered right now. */
 function targetCanTakeTurn(bus: CommsBus, target: BotRecord, item: PendingDelegationItem): boolean {
+  // Pair-routed work admits serially on the pair thread itself: spilling
+  // into a free slot would start a second turn inside a busy conversation.
+  if (item.pairConversation && item.targetThreadId) {
+    return bus.canAdmitDirectTurn ? bus.canAdmitDirectTurn(target.id, item.targetThreadId) : !target.busy;
+  }
   return item.targetThreadId
     ? (bus.threadSlotFree ? bus.threadSlotFree(target.id) : !target.busy)
     : bus.canAdmitDirectTurn
@@ -855,7 +874,7 @@ function holdWhileTargetBusy(
 }
 
 function waitingChipText(store: Store, target: BotRecord, item: PendingDelegationItem): string {
-  if (item.targetThreadId) {
+  if (item.targetThreadId && !item.pairConversation) {
     const title = store.taskByThread(target.id, item.targetThreadId)?.title ?? "thread";
     return `Thread #${title} on @${target.name} waiting for a free slot`;
   }

@@ -249,7 +249,8 @@ const toolDefinitions = (externalRuntime: boolean) => [
       message: { type: "string", minLength: 1, maxLength: 4000, description: "Self-contained question or task for these teammates. Send separate requests when responsibilities differ." },
       request_key: { type: "string", description: "A short unique assignment key. Reuse for an identical retry." },
       rework: { type: "boolean", description: "True only for concrete additional work from someone who already completed a request." },
-      label: { type: "string", description: "Optional short name (one line, at most 60 characters) for this job. Used only when the teammate is still working on your previous assignment and this one therefore runs in its own thread beside your standing conversation." },
+      thread_policy: { type: "string", enum: ["standing", "own_thread"], description: "Where the assignment runs. \"standing\" (default) continues your one standing conversation with the teammate, waiting its turn when busy. \"own_thread\" opens a dedicated work thread immediately, parallel to that conversation." },
+      label: { type: "string", description: "Optional short name (one line, at most 60 characters) for this job. Names the dedicated work thread used when thread_policy is \"own_thread\", or when your standing conversation is busy and a labeled assignment therefore moves into its own thread at dispatch." },
     }, required: ["bot_ids", "message", "request_key"] },
   },
   {

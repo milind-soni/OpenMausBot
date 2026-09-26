@@ -3699,6 +3699,39 @@ function outstandingAssignmentsPrompt(threadId: string): string {
 const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   validate: (node, parent) => roomHandoffProblem(node, parent) ??
     (parent && store.bot(parent.botId)?.approvePeerComms && !fullAccessForSource(parent.botId, parent.threadId) && !node.approvalGranted ? "Sender now requires peer approval; submit a new approved request" : undefined),
+  // Decision 3's dispatch-time re-resolution: a labeled assignment parked
+  // on the standing pair conversation moves into its own `@Sender · label`
+  // work row when that conversation went busy between enqueue and dispatch.
+  // The label is exactly the promise this assignment should not queue
+  // behind an unrelated one, and the sender's conversation gets one
+  // pointer note so the enqueue-time link does not go stale.
+  reroute: n => {
+    if (n.groupId || !n.pairThreadId || n.threadId !== n.pairThreadId || !n.label) return false;
+    if (!store.taskByThread(n.botId, n.pairThreadId)) return false;
+    const busy = threadBusy(n.botId, n.pairThreadId) || queuedThreadPosition(n.botId, n.pairThreadId) !== null
+      || roomHandoffs.activeDirect(n.pairThreadId, n.id);
+    if (!busy) return false;
+    const parent = n.parentId ? roomHandoffs.nodes.get(n.parentId) : undefined;
+    const sender = parent ? store.bot(parent.botId) : undefined;
+    const recipient = store.bot(n.botId);
+    if (!parent || !sender || !recipient) return false;
+    // working: () => true — the pair row is busy by the test above, so the
+    // resolver always materializes the isolated work row this reroute is for.
+    const resolved = store.resolvePairConversation(sender, n.botId, { label: n.label, working: () => true });
+    if (!resolved || !resolved.created) return false;
+    n.threadId = resolved.task.threadId;
+    threadStarters.set(resolved.task.threadId, threadPersonKey(parent.threadId));
+    if (delegatedFullAccess(sender, parent.threadId, recipient)) {
+      grantDelegatedFullAccess(sender, recipient, resolved.task.threadId);
+    }
+    store.appendMessage(parent.threadId, {
+      role: "bot", kind: "activity",
+      from: { botId: sender.id, name: sender.name, color: sender.color },
+      tool: { name: `Pair conversation busy — ${recipient.name}'s assignment is running in its own thread`, ok: true },
+      threadRef: { botId: recipient.id, threadId: resolved.task.threadId, title: resolved.task.title },
+    });
+    return true;
+  },
   // A free slot admits fresh work beside a sibling that is actually running
   // (#1589). A card waiting on the person still holds fresh work (#1128).
   // An owed resume is not fresh work, so a sibling card must not starve it
@@ -7030,7 +7063,7 @@ bus.subscribe((event: RuntimeEvent) => {
 /** How a drained delegation becomes a real turn on the target. Shared by
  * the settle-time drain and the boot-time drain of what a previous process
  * left queued. */
-const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId) => {
+const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawText, commsDepth, sourceThreadId, channel, taskId, sourceBotId, openedThreadId, pairThread) => {
     // startTurn REJECTS on an ordinary condition — busy target, deleted bot,
     // unavailable provider. Unhandled, that rejection is fatal to the
     // harness (Node's default), which in the packaged app kills the server
@@ -7050,7 +7083,10 @@ const runDelegatedTurn: Parameters<typeof drainDelegations>[3] = (toBotId, rawTe
     const peerAsk: Message["peerAsk"] | undefined = opener
       ? { botId: opener.id, name: opener.name, unattended: unattended || undefined }
       : undefined;
-    const text = openedThreadId && opener
+    // A pair-routed delegation runs in the standing conversation, where the
+    // drain's classic "[Delegated by @X" prefix already says who assigned
+    // it — the start_thread provenance note belongs to opened work rows.
+    const text = openedThreadId && opener && !pairThread
       ? withPeerProvenance(rawText, { botName: opener.name, delivery: "start_thread", unattended })
       : rawText;
     if (targetThreadId) {
@@ -14307,6 +14343,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
         }
+        // Classic asks run in the standing pair conversation — the row this
+        // sender's exchanges with the target already live in — never in
+        // whatever thread the recipient's sidebar happens to have selected.
+        // Resolved once, before any delivery shape, so the busy fallback,
+        // the aside lane and the direct turn all land in the same
+        // conversation. The row may already be busy: that is the serial
+        // admission a standing conversation is for.
+        const pairThreadId = store.resolvePairConversation(from, toBotId, { working: () => false })?.task.threadId;
         // A busy peer used to be a flat bounce ("try again later") — a
         // dead-end mid-turn that models rarely retry, so the exchange just
         // evaporated. Demote the synchronous ask into a durable handoff
@@ -14318,7 +14362,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const queued = queueDelegation(
             commsBus,
             from,
-            { toBotId, message, reason: "asked while busy", depth, approvalAlreadyGranted },
+            { toBotId, message, reason: "asked while busy", depth, approvalAlreadyGranted,
+              ...(pairThreadId ? { targetThreadId: pairThreadId, pairConversation: true } : {}) },
             MAX_COMMS_DEPTH,
             fromThreadId,
           );
@@ -14347,20 +14392,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // bot whose comms need approval keeps the delegation queue below.
         const tryAsideDelivery = async (): Promise<Record<string, unknown> | null> => {
           if (peerReviewRequired(from, fromThreadId)) return null;
+          const asideThreadId = pairThreadId ?? target.threadId;
           // Busy elsewhere (room turn, sibling thread): the thread this ask
           // targets is not the running one, so there is nothing to fold
           // into here — the queue lane keeps it.
-          if (!threadBusy(toBotId, target.threadId)) return null;
-          const instance = runningTurnInstance(target, target.threadId);
+          if (!threadBusy(toBotId, asideThreadId)) return null;
+          const instance = runningTurnInstance(target, asideThreadId);
           if (!instance?.adapter.capabilities.queueing || !instance.adapter.steer) return null;
           const steer = instance.adapter.steer;
-          queueAsideMessage(toBotId, target.threadId, message, {
+          queueAsideMessage(toBotId, asideThreadId, message, {
             fromBotId: from.id,
             fromBotName: from.name,
             unattended: isUnattended(from.id, fromThreadId),
             commsDepth: depth,
           });
-          const attempt = await attemptAsideInjection(store, toBotId, target.threadId, (_botId, threadId, prompt) =>
+          const attempt = await attemptAsideInjection(store, toBotId, asideThreadId, (_botId, threadId, prompt) =>
             steer(threadId, prompt).catch((): SteerOutcome => "indeterminate"));
           if (!attempt) return null;
           return attempt.delivered
@@ -14461,7 +14507,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           delivery: "ask_bot",
           unattended: isUnattended(currentFrom.id, fromThreadId),
         });
-        const targetThreadId = currentTarget.threadId;
+        const targetThreadId = pairThreadId ?? currentTarget.threadId;
         const outcome = await askBotAndWait(toBotId, prefixed, depth, fromBotId, fromThreadId, targetThreadId);
         requireActiveInternalCapability();
         const replySender = store.bot(fromBotId);
@@ -14667,10 +14713,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!connectorThread(from.id, fromThreadId)) {
           return json(res, 403, { error: "source thread does not belong to sender" });
         }
+        // A delegation joins the sender's standing conversation with the
+        // target rather than landing in the recipient's active thread: the
+        // queue admits serially on that row, so a busy pair conversation
+        // waits its turn instead of spilling into a free slot mid-dialog.
+        const pairThreadId = store.resolvePairConversation(from, toBotId, { working: () => false })?.task.threadId;
         const queued = queueDelegation(
           commsBus,
           from,
-          { toBotId, message, reason, depth },
+          { toBotId, message, reason, depth, ...(pairThreadId ? { targetThreadId: pairThreadId, pairConversation: true } : {}) },
           MAX_COMMS_DEPTH,
           fromThreadId,
         );
@@ -14748,11 +14799,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             botIds: z.array(z.string().min(1).max(128)).min(1).max(4).refine(ids => new Set(ids).size === ids.length),
             message: z.string().trim().min(1).max(4000), requestKey: z.string().regex(/^[\w-]{1,100}$/),
             rework: z.boolean().default(false),
+            // Where the assignment runs: the standing pair conversation
+            // (default, serial admission) or a work row of its own.
+            threadPolicy: z.enum(["standing", "own_thread"]).default("standing"),
             // Only ever a name for a thread, so it travels under the same
             // one-line rule as a peer thread title.
             label: z.string().trim().min(1).max(60).refine(fitsOnOneLine).optional(),
           }).safeParse(await readInternalBody());
-          if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds, message (1-4000 characters), a short requestKey (letters, digits, underscores or hyphens) and an optional one-line label of at most 60 characters." });
+          if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds, message (1-4000 characters), a short requestKey (letters, digits, underscores or hyphens), an optional thread_policy (\"standing\" or \"own_thread\") and an optional one-line label of at most 60 characters." });
           const groupId = parsed.data.groupId ?? source?.id;
           const destination = groupId ? store.group(groupId) : undefined;
           if (groupId && !destination) return json(res, 404, { error: "No such room; use list_room_targets." });
@@ -14768,7 +14822,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             botIds.push(resolved.id);
           }
           if (new Set(botIds).size !== botIds.length) return json(res, 400, { error: "bot_ids name the same teammate twice — send each teammate once" });
-          const targets = botIds.map(botId => ({ groupId: destination?.id,
+          const targets: Array<{ groupId: string | undefined; threadId: string; botId: string; pairThreadId?: string; label?: string }> = botIds.map(botId => ({ groupId: destination?.id,
             threadId: destination ? destination.id === source?.id ? address.threadId : destination.threadId : store.bot(botId)?.threadId ?? "", botId,
           }));
           for (const target of targets) {
@@ -14818,16 +14872,31 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                 // request key, or the thread the person has selected there.
                 const resolved = store.resolvePairConversation(internalSender, target.botId, {
                   label: parsed.data.label,
+                  ownThread: parsed.data.threadPolicy === "own_thread",
                   // "Still working" exactly as close_thread reads it: a
                   // running turn, a queued one, or coordinated work already
-                  // addressed at that thread.
-                  working: threadId => threadBusy(target.botId, threadId)
-                    || queuedThreadPosition(target.botId, threadId) !== null
-                    || roomHandoffs.activeDirect(threadId),
+                  // addressed at that thread. Only labeled standing work
+                  // skips a busy pair row: without a label, serial delivery
+                  // in the standing conversation is the designed behavior,
+                  // so it resolves onto the pair row even when busy.
+                  working: parsed.data.label
+                    ? (threadId => threadBusy(target.botId, threadId)
+                      || queuedThreadPosition(target.botId, threadId) !== null
+                      || roomHandoffs.activeDirect(threadId))
+                    : () => false,
                 });
                 if (!resolved) throw new Error("The recipient no longer exists");
                 target.threadId = resolved.task.threadId;
                 if (resolved.created) createdThread = resolved.task.threadId;
+                // A labeled standing assignment parks on its pair row and
+                // may be re-routed at dispatch if that row went busy after
+                // enqueue; own_thread and busy-pair assignments already got
+                // a work row, and an unlabeled standing assignment is
+                // designed to wait its turn in the conversation.
+                if (resolved.task.openedBy?.kind === "pair" && parsed.data.label) {
+                  target.pairThreadId = resolved.task.threadId;
+                  target.label = parsed.data.label;
+                }
                 // A work thread carries one assignment: it is for the person
                 // this coordination serves. The durable pair conversation is
                 // shared by every assignment between two bots, so it names nobody.

@@ -175,6 +175,20 @@ describe("queueDelegation", () => {
     expect(JSON.stringify(ownSnapshot)).not.toContain("private customer task details");
   });
 
+  it("announces a pair-routed handoff as the delegation it is, linked to the pair row", () => {
+    const pair = store.resolvePairConversation(from, target.id, { working: () => false })!.task;
+    const result = queueDelegation(commsBus, from, {
+      toBotId: target.id, message: "pair work", reason: "followup", depth: 0,
+      targetThreadId: pair.threadId, pairConversation: true,
+    }, 1);
+    expect(result.result).toBe("ok");
+    const chip = store
+      .messagesFor(from.threadId)
+      .find((m) => m.kind === "activity" && m.tool?.name?.startsWith("Delegated to @"));
+    expect(chip?.tool?.name).toBe("Delegated to @Helper: followup");
+    expect(chip?.threadRef).toMatchObject({ botId: target.id, threadId: pair.threadId, title: pair.title });
+  });
+
   it("keys detached routine delegations to their real source thread", async () => {
     const routineTask = store.createTask(from.id, "Routine run", false)!;
     const result = queueDelegation(
@@ -774,6 +788,25 @@ describe("delegations survive a restart", () => {
     expect(JSON.parse(readFileSync(file(), "utf8"))[from.threadId]).toBeUndefined();
   });
 
+  it("keeps pair routing across a restart", async () => {
+    const pair = store.resolvePairConversation(from, target.id, { working: () => false })!.task;
+    queueDelegation(buses.commsBus, from, {
+      toBotId: target.id, message: "still paired", depth: 0,
+      targetThreadId: pair.threadId, pairConversation: true,
+    }, 1);
+    _resetPending();
+    _loadPending();
+    expect(pendingThreads()).toEqual([from.threadId]);
+    const seen: Array<{ targetThreadId: string | undefined; pairThread: boolean; message: string }> = [];
+    drainDelegations(buses.commsBus, buses.approvalBus, from.threadId,
+      (_toBotId, message, _depth, _source, _channel, _taskId, _sourceBotId, targetThreadId, pairThread) => {
+        seen.push({ targetThreadId, pairThread, message });
+      });
+    await waitFor(() => seen.length === 1 && pendingThreads().length === 0);
+    expect(seen[0]).toMatchObject({ targetThreadId: pair.threadId, pairThread: true });
+    expect(seen[0]!.message).toContain("Delegated by @");
+  });
+
   it("drains work queued by a later settled turn while an earlier handoff is waiting", async () => {
     queueDelegation(buses.commsBus, from, { toBotId: target.id, message: "first", depth: 0 }, 1);
     let release!: () => void;
@@ -1081,6 +1114,47 @@ describe("busy waits and expiry", () => {
     drainDelegations(holdBus, approvalBus, from.threadId, runTarget);
     await waitFor(() => runTarget.mock.calls.length === 1 && _pendingCount(from.threadId) === 0);
     expect(chipCount("waiting — they're busy;")).toBe(1);
+  });
+
+  it("admits a pair-routed handoff serially on the pair thread, never through a free slot", async () => {
+    // A busy pair conversation must not spill the handoff into a free
+    // slot: the exchange is serial by design, exactly like a person
+    // sending twice into one conversation.
+    const asked: Array<[string, string]> = [];
+    const pair = store.resolvePairConversation(from, target.id, { working: () => false })!.task;
+    const pairBus: CommsBus = {
+      ...commsBus,
+      canAdmitDirectTurn: (botId, threadId) => { asked.push([botId, threadId]); return false; },
+      threadSlotFree: () => true,
+    };
+    store.patchBot(target.id, { busy: true });
+    queueDelegation(pairBus, from, {
+      toBotId: target.id, message: "pair please", depth: 0,
+      targetThreadId: pair.threadId, pairConversation: true,
+    }, 1);
+    const runTarget = vi.fn();
+    drainDelegations(pairBus, approvalBus, from.threadId, runTarget);
+    await waitFor(() => chipCount("waiting — they're busy;") === 1);
+    expect(asked).toContainEqual([target.id, pair.threadId]);
+    expect(runTarget).not.toHaveBeenCalled();
+  });
+
+  it("keeps the classic delegated-by prefix on a pair-routed handoff and flags the pair thread", async () => {
+    const pair = store.resolvePairConversation(from, target.id, { working: () => false })!.task;
+    queueDelegation(commsBus, from, {
+      toBotId: target.id, message: "pair work", depth: 0,
+      targetThreadId: pair.threadId, pairConversation: true,
+    }, 1);
+    const seen: Array<{ message: string; targetThreadId: string | undefined; pairThread: boolean }> = [];
+    drainDelegations(commsBus, approvalBus, from.threadId,
+      (_toBotId, message, _depth, _source, _channel, _taskId, _sourceBotId, targetThreadId, pairThread) => {
+        seen.push({ message, targetThreadId, pairThread });
+      });
+    await waitFor(() => seen.length === 1 && _pendingCount(from.threadId) === 0);
+    expect(seen[0]!.message).toContain(`[Delegated by @${from.name},`);
+    expect(seen[0]!.message).toContain("pair work");
+    expect(seen[0]!.targetThreadId).toBe(pair.threadId);
+    expect(seen[0]!.pairThread).toBe(true);
   });
 
   it("posts one waiting chip per handoff, however many drains run while the target is busy", async () => {

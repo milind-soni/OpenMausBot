@@ -514,22 +514,24 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     delete canonical.botIds;
     delete canonical.requestKey;
     delete canonical.groupId;
+    delete canonical.threadPolicy;
     if (canonical.bot_ids === undefined) canonical.bot_ids = args.botIds;
     if (canonical.request_key === undefined) canonical.request_key = args.requestKey;
     if (canonical.group_id === undefined) canonical.group_id = args.groupId;
+    if (canonical.thread_policy === undefined) canonical.thread_policy = args.threadPolicy;
     const ids = canonical.bot_ids;
     const usable = Array.isArray(ids) && ids.length > 0 && ids.every((id) => typeof id === "string")
       && typeof canonical.message === "string" && canonical.message.trim().length > 0
       && typeof canonical.request_key === "string" && canonical.request_key.trim().length > 0;
     if (!usable) {
       return {
-        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids), message and request_key are required; group_id, rework and label are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
+        text: `coordinate_bots takes snake_case arguments: bot_ids (an array of 1-4 teammate ids), message and request_key are required; group_id, rework, thread_policy and label are optional. Received: ${Object.keys(args).join(", ") || "none"}.`,
         isError: true,
       };
     }
     const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
       groupId: canonical.group_id, botIds: ids, message: canonical.message,
-      requestKey: canonical.request_key, rework: canonical.rework, label: canonical.label,
+      requestKey: canonical.request_key, rework: canonical.rework, threadPolicy: canonical.thread_policy, label: canonical.label,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }

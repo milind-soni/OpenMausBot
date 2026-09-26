@@ -125,6 +125,22 @@ const messagesOf = async (threadId: string): Promise<StoredMessage[]> => {
   return Array.isArray(messages) ? (messages as StoredMessage[]) : [];
 };
 
+/** The thread of the pair conversation `ownerId` shares with a peer whose
+ * display name is `peerName`. Classic asks are delivered there (#1684),
+ * never into the recipient's active thread, so a test that wants to read
+ * what a peer was handed resolves this row first. */
+const pairRowOf = async (ownerId: string, peerName: string): Promise<string> => {
+  const bots = field((await api("GET", "/api/bots")).body, "bots");
+  const owner = (Array.isArray(bots) ? bots : []).find(
+    (bot: unknown) => typeof bot === "object" && bot !== null && str((bot as { id?: string }).id) === ownerId,
+  );
+  const tasks = field(owner as Record<string, unknown>, "tasks");
+  const row = (Array.isArray(tasks) ? tasks : []).find(
+    (task: unknown) => typeof task === "object" && task !== null && (task as { title?: string }).title === `@${peerName}`,
+  );
+  return str((row as { threadId?: string } | undefined)?.threadId);
+};
+
 /** Wait for the peer-approval card a gated call raises in `threadId`. The
  * call is still in flight while this polls — the card IS the call waiting. */
 const waitForPeerCard = async (threadId: string): Promise<StoredMessage> => {
@@ -304,8 +320,13 @@ describe("peer comms from a room turn", () => {
     expect(asked.body.error, `ask from a room was refused: ${JSON.stringify(asked.body)}`).toBeUndefined();
     expect(str(asked.body.text)).toContain("hello from fake claude");
 
-    // and what the peer was handed says who wrote it and what that means
-    const delivered = (await messagesOf(helper.threadId)).find(
+    // and what the peer was handed says who wrote it and what that means.
+    // #1684: the ask runs in the pair conversation the two bots share, so
+    // the enveloped text lands in the helper's "@Room Asker" row, not in
+    // the helper's active thread.
+    const pairRow = await pairRowOf(helper.id, "Room Asker");
+    expect(pairRow, "the ask never opened a pair conversation on the helper").toBeTruthy();
+    const delivered = (await messagesOf(pairRow)).find(
       (message) => message.role === "user" && message.kind === "text",
     );
     expect(delivered?.text).toContain("[Message from @Room Asker");
