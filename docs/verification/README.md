@@ -219,6 +219,9 @@ The [persistence responsiveness benchmark](persistence-performance.md) measures
 synthetic message/log bursts and history scans, with isolated chat, visibility
 and packaged-worker checks. It is not a production capacity qualification.
 
+The [backup responsiveness benchmark](backup-responsiveness.md) compares in-process
+and worker exports using synthetic data, with isolated backup workflow checks.
+
 The [Japanese desktop font recipe](japanese-desktop.md) checks real Firefox and
 XFCE glyph rendering in disposable managed desktops, including fresh recreation.
 
