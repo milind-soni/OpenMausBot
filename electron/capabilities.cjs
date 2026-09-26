@@ -188,6 +188,7 @@ function desktopCapabilities({
 
   return {
     remote: Boolean(remote),
+    transcription: { available: !remote && DESKTOP_PLATFORMS.has(hostPlatform) },
     host: {
       platform: hostPlatform,
       label:

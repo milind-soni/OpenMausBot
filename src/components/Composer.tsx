@@ -1,3 +1,5 @@
+import { TranscriptionSettings } from "./TranscriptionSettings";
+import { useTranscription } from "./useTranscription";
 import { track } from "@/lib/analytics";
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { ArrowUp, BookOpen, Clock, Mic, Paperclip, Square, Target, Users, X } from "lucide-react";
@@ -214,8 +216,11 @@ export function Composer({
     },
     [text, editText, editAttachments],
   );
-  const [recording, setRecording] = useState(false);
-  const [speechError, setSpeechError] = useState<string | null>(null);
+  const transcription = useTranscription(threadId, text, editText);
+  const recording = transcription.phase === "recording";
+  const speechError = transcription.error;
+  const transcribing = transcription.phase !== "idle";
+  const canTranscribe = capabilities.transcription?.available || capabilities.dictation.available;
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null); // Esc'd this @
@@ -237,8 +242,6 @@ export function Composer({
     });
   }, []);
   const mentionListRef = useRef<HTMLDivElement>(null);
-  // what was typed before the mic went on — partials append after it
-  const baseText = useRef("");
 
   // image paste is offered only when every bot that will actually answer
   // can open one. sendGroup routes to mentions, else the room default —
@@ -556,7 +559,7 @@ export function Composer({
     }
   };
   const send = () => {
-    if (locked || attachmentPending) return;
+    if (locked || attachmentPending || transcribing) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
       !imageTargetsSupport(effectiveText, effectiveChannelMode)
@@ -692,46 +695,7 @@ export function Composer({
     editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
   };
 
-  // native dictation: partials stream into the input while the Swift
-  // helper runs; the final transcript stays in the box, ready to edit/send
-  useEffect(() => {
-    if (!recording) return;
-    const bridge = window.ogb;
-    if (!bridge) {
-      setRecording(false);
-      return;
-    }
-    setSpeechError(null);
-    const offTranscript = bridge.onSpeechTranscript((line) => {
-      if (typeof line.text === "string") {
-        const base = baseText.current;
-        editText(base ? `${base} ${line.text}` : line.text);
-      }
-    });
-    const offEnd = bridge.onSpeechEnd(({ code }) => {
-      setRecording(false);
-      if (code === 2) {
-        setSpeechError(t("composer.dictation.macOnly"));
-      } else if (code === 1) {
-        setSpeechError(t("composer.dictation.permission"));
-      }
-    });
-    void bridge.speechStart();
-    return () => {
-      offTranscript();
-      offEnd();
-      void bridge.speechStop();
-    };
-  }, [recording, editText]);
-
-  const toggleMic = () => {
-    if (!capabilities.dictation.available || !window.ogb) {
-      setSpeechError(t("composer.dictation.unavailable"));
-      return;
-    }
-    baseText.current = text.trim();
-    setRecording((r) => !r);
-  };
+  const toggleMic = () => void transcription.toggle(() => inputRef.current?.focus());
 
   return (
     <div className="pointer-events-none relative px-5 pb-3">
@@ -1070,7 +1034,7 @@ export function Composer({
               }
               send();
             }
-            if (e.key === "Escape" && recording) setRecording(false);
+            if (e.key === "Escape" && transcribing) transcription.cancel();
           }}
           // an upload in flight must not disable the box: a disabled element
           // drops keyboard focus and never gets it back, so the writer had to
@@ -1120,9 +1084,10 @@ export function Composer({
             <Square size={14} className="fill-current" />
           </button>
         )}
-        {!locked && !busy && !hasContent && capabilities.dictation.available && (
+        {!locked && (!busy || recording) && canTranscribe && (
           <button
             onClick={toggleMic}
+            disabled={transcribing && !recording}
             aria-label={recording ? t("composer.dictation.stop") : t("composer.dictation.start")}
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full",
@@ -1132,13 +1097,19 @@ export function Composer({
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >
-            <Mic size={18} />
+            {recording ? <Square size={12} className="fill-current" /> : <Mic size={18} />}
           </button>
         )}
+        {recording && <div role="status" aria-label="Recording microphone audio" className="flex items-center gap-2 text-xs tabular-nums text-ink-secondary">
+          <span>{Math.floor(transcription.seconds / 60)}:{String(transcription.seconds % 60).padStart(2, "0")}</span>
+          <span aria-hidden="true" className="flex h-5 items-center gap-0.5">{transcription.levels.map((level, i) => <span key={i} className="w-0.5 rounded-full bg-current" style={{ height: 3 + level * 17 }} />)}</span>
+        </div>}
+        {transcription.phase === "processing" && <span role="status" className="text-xs text-ink-secondary">Transcribing…</span>}
+        {!locked && capabilities.transcription?.available && <TranscriptionSettings disabled={transcribing} />}
         {hasContent && !locked && (
           <button
             onClick={send}
-            disabled={attachmentPending}
+            disabled={attachmentPending || transcribing}
             aria-label={
               busy && canSteer
                   ? t("composer.send.steer")

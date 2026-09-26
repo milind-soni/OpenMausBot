@@ -1,0 +1,26 @@
+[
+  {
+    "name": "whisper-bin-ubuntu-arm64.tar.gz",
+    "size": 4605905,
+    "browser_download_url": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-ubuntu-arm64.tar.gz",
+    "digest": "sha256:93532a0e3777f26f041ffa358ee77dd88b1a33a86847c1990745327ff335a5d6"
+  },
+  {
+    "name": "whisper-bin-ubuntu-x64.tar.gz",
+    "size": 9793438,
+    "browser_download_url": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-ubuntu-x64.tar.gz",
+    "digest": "sha256:53e7fd8b5764edad916b8848dd0af6abb1ff1d3b86c899e79c78652412536c32"
+  },
+  {
+    "name": "whisper-bin-win-cpu-arm64.zip",
+    "size": 4361895,
+    "browser_download_url": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-win-cpu-arm64.zip",
+    "digest": "sha256:799543b926ab5b6c2d60cab269a2092e0ae8d27820e9e15429e59de3699546fc"
+  },
+  {
+    "name": "whisper-bin-x64.zip",
+    "size": 8573270,
+    "browser_download_url": "https://github.com/ggml-org/whisper.cpp/releases/download/b5130/whisper-bin-x64.zip",
+    "digest": "sha256:f9ec6c52a2e949b62ab51fa21d0d497958f9e41c3010c157c4e42932d5316f3c"
+  }
+]

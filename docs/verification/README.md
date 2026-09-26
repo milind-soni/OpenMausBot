@@ -213,6 +213,9 @@ sent mentions, multiline scrolling and responsive wrapping in real chat views.
 The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
 
+The [desktop transcription checks](transcription.md) exercise protected settings,
+provider transport, recording, cancellation and the real Electron UI in isolation.
+
 ## Evidence
 
 The [persistence responsiveness benchmark](persistence-performance.md) measures

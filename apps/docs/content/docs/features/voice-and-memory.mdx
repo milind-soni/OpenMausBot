@@ -51,7 +51,18 @@ Tool progress and approval requests can be narrated during a call so long-runnin
 
 ## Dictation
 
-The composer microphone uses Apple's local speech recognition in the macOS desktop build. Linux and Windows dictation are not currently shipped.
+Use the arrow beside the composer microphone to open **Transcription** settings. The selected provider applies to private and group drafts on this computer.
+
+- **Windows voice typing (Win+H)** is the Windows default and needs no API key. Windows owns its microphone panel; use that panel to stop.
+- **macOS speech recognition** is the Mac default.
+- **Local Whisper** runs offline after downloading a model. Choose Base, Small, or Large v3 Turbo, set CPU threads, and optionally enable hardware acceleration. Supported Windows/Linux systems can download the pinned engine; on macOS install `whisper-cpp` or choose an existing `whisper-cli`.
+- **OpenRouter, OpenAI, Groq, Deepgram, Azure Speech, or a custom OpenAI-compatible service** can transcribe recorded audio. Cloud providers use their own API billing. Azure requires a resource endpoint and explicit language. A local compatible service can be used without a key.
+
+For in-app recording, the microphone shows elapsed time and live input levels. Click it again to finish transcription; the text remains editable until you send it. Changing chats cancels the recording. Windows voice typing uses the system panel instead of the in-app waveform.
+
+Keys are stored using the operating system's protected storage. **Key saved** appears beside the API key label; an empty key field preserves the saved key, while **Remove** explicitly clears it when you save. If protected storage cannot be unlocked, settings report an error instead of resetting your provider or discarding credentials.
+
+Transcription settings do not change call-mode speech recognition. Local-device transcription controls are unavailable when viewing a remote workspace.
 
 ## Memory
 

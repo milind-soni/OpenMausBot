@@ -26,6 +26,7 @@ const __APP_VERSION__: string;
   type DesktopComputerSharing = import("../../electron/computer-sharing.mjs").SharingState;
 
   type DesktopCapabilities = {
+    transcription?: { available: boolean };
     host: {
       platform: "darwin" | "linux" | "win32" | "other";
       /** The user's home folder, for showing paths as ~/… */
@@ -198,6 +199,14 @@ const __APP_VERSION__: string;
       };
       /** Start native dictation. Call mode supplies endpointMs so silence
        * finalizes a turn; composer dictation omits it and remains manual. */
+      sttSettings?(): Promise<import("../lib/transcription").SttState>;
+      sttSave?(config: import("../lib/transcription").SttConfig): Promise<import("../lib/transcription").SttState>;
+      sttInstall?(request: { id: string; executable: string }): Promise<import("../lib/transcription").LocalSpeechState>;
+      sttPickEngine?(): Promise<string | null>;
+      sttBegin?(): Promise<{ id: string; provider: string; kind: "audio" | "native" | "system"; language: string }>;
+      sttCancel?(id: string): Promise<void>;
+      sttTranscribe?(request: { id: string; pcm: ArrayBuffer }): Promise<{ text: string }>;
+      sttVoiceTyping?(): Promise<void>;
       speechStart(options?: { endpointMs?: number }): Promise<void>;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */
