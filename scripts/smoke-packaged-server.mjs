@@ -218,6 +218,27 @@ if (listening) {
   }
 }
 
+// An HTTP export must actually start the bundled worker outside the checkout.
+// Existence checks alone cannot catch an unbundled transitive dependency.
+let backupReport = null;
+if (listening) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/workspace-backup/export`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ password: "packaged-fixture-password-only" }), signal: AbortSignal.timeout(30_000),
+    });
+    assert.equal(response.status, 200, "Packaged backup worker did not export successfully");
+    const archive = await response.json();
+    assert.equal(archive.summary.format, "openmaus.workspace-backup");
+    const download = await fetch(`http://127.0.0.1:${port}/api/workspace-backup/download/${archive.id}`);
+    assert.equal(download.status, 200);
+    const bytes = Buffer.from(await download.arrayBuffer());
+    assert.equal(bytes.length, archive.bytes);
+    assert.equal(bytes.subarray(0, 16).toString(), "OMB-WORKSPACE-1\n");
+    backupReport = { ok: true, bytes: bytes.length };
+  } catch (error) { backupReport = { error: String(error) }; }
+}
+
 cleanup();
 
 if (!listening) {
@@ -263,8 +284,13 @@ if (
 }
 
 const count = Object.keys(proxyReport.resolved).length;
+if (!backupReport?.ok) {
+  console.error("the packaged backup worker failed its encrypted export smoke:", backupReport);
+  process.exit(1);
+}
 console.log(`packaged server started with no node_modules in reach (port ${port}) ✓`);
 console.log(`all ${count} spawned proxy paths resolve inside the packaged server dir ✓`);
 console.log("packaged MCP stdio server reached the API and flushed its final frames ✓");
+console.log("packaged backup worker exported an encrypted archive ✓");
 if (layerShipped) console.log("packaged server found its enterprise layer inside the server dir ✓");
 if (browserBundle) console.log(`packaged browser discovered without installation; access remains opt-in ✓ ${JSON.stringify(browserReport)}`);

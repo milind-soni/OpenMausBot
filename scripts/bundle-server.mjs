@@ -45,6 +45,7 @@ const ENTRY_POINTS = [
   // package, the container image and checkouts; pair-cli.ts stays as an alias
   "openmausbot.ts",
   "pair-cli.ts",
+  "workspace-backup.worker.ts",
   // The packaged smoke probe imports this manifest directly. Importing the
   // shared avatar contract widens TypeScript's inferred emit root to the repo,
   // so tsc may place its copy under dist-server/server/. Bundle an explicit

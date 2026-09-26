@@ -44,6 +44,9 @@ pnpm exec vitest run server/workspace-backup-workflow.test.ts --silent=false
 
 ## Additional checks
 
+Export worker behavior and repeatable latency measurements are documented in
+[Backup responsiveness](backup-responsiveness.md).
+
 ```sh
 pnpm exec vitest run server/workspace-backup.test.ts \
   server/workspace-backup-policy.test.ts \

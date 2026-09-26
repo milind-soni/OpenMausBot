@@ -10,6 +10,7 @@ import { isAbsolute, join, parse, posix, relative, resolve, win32 } from "node:p
 import { homedir } from "node:os";
 import { backup, DatabaseSync } from "node:sqlite";
 import { pipeline } from "node:stream/promises";
+import { Worker } from "node:worker_threads";
 import * as tar from "tar";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { writeFileAtomic } from "./atomic.ts";
@@ -58,6 +59,7 @@ export interface CreateWorkspaceBackupOptions {
   clientState?: WorkspaceBackupClientState;
   appVersion?: string;
 }
+type CreatedWorkspaceBackup = { id: string; path: string; summary: WorkspaceBackupSummary };
 export interface WorkspaceRestoreResult {
   restored: boolean;
   rolledBack?: boolean;
@@ -254,7 +256,29 @@ function databaseCounts(path: string): { threads: number; messages: number } {
   } finally { db.close(); }
 }
 
-export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions) {
+/** The existing maintenance gate owns exclusivity until this worker has exited.
+ * Keep synchronous file validation/fsync intact, but off the request thread. */
+export async function createWorkspaceBackup(dataDir: string, options: CreateWorkspaceBackupOptions): Promise<CreatedWorkspaceBackup> {
+  const source = new URL("./workspace-backup.worker.ts", import.meta.url);
+  const worker = new Worker(existsSync(source) ? source : new URL("./workspace-backup.worker.js", import.meta.url), {
+    workerData: { dataDir, options }, execArgv: [],
+  });
+  try {
+    return await new Promise<CreatedWorkspaceBackup>((resolveBackup, reject) => {
+      const failed = () => reject(new Error("The backup worker stopped before completing. Try again."));
+      worker.once("message", (reply: { result?: CreatedWorkspaceBackup; error?: string }) => {
+        if (reply.result) resolveBackup(reply.result);
+        else if (reply.error) reject(new Error(reply.error));
+        else failed();
+      });
+      worker.once("error", failed);
+      worker.once("exit", failed);
+    });
+  } finally { await worker.terminate(); }
+}
+
+/** Worker implementation; application callers use createWorkspaceBackup. */
+export async function createWorkspaceBackupSnapshot(dataDir: string, options: CreateWorkspaceBackupOptions): Promise<CreatedWorkspaceBackup> {
   if (Object.hasOwn(options, "credentials")) throw new Error("Workspace backups do not transfer credentials.");
   assertLocalAuthOutsideSnapshot(dataDir);
   const salt = randomBytes(16);
