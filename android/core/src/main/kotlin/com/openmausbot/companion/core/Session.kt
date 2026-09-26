@@ -2043,7 +2043,12 @@ class Session(
         }
     }
 
-    suspend fun loadOverview(botId: String): BotOverview? {
+    /**
+     * The overview read. [quiet] suppresses the global action error for
+     * supplementary callers — the profile sheet's grants fetch — where a
+     * failed read should leave one section absent, not error the profile.
+     */
+    suspend fun loadOverview(botId: String, quiet: Boolean = false): BotOverview? {
         val activeClient = client ?: return null
         val connectionId = _connection.value?.id
         return try {
@@ -2052,7 +2057,7 @@ class Session(
             overview.takeIf { _connection.value?.id == connectionId }
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
-            if (_connection.value?.id == connectionId) _actionError.value = error.message
+            if (!quiet && _connection.value?.id == connectionId) _actionError.value = error.message
             null
         }
     }
