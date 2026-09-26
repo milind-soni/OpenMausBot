@@ -5042,10 +5042,7 @@ async function scheduleTurnDigest(input: {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const capture = async () => {
-      const after = await checkpoints.snapshot(input.botId, checkpoint.cwd, `settle ${input.threadId.slice(0, 8)}`, controller.signal);
-      if (!after || controller.signal.aborted) return null;
-      if (checkpoint.hash === after) return { changed: [], added: [], deleted: [] };
-      return checkpoints.diffStat(input.botId, checkpoint.cwd, checkpoint.hash, after, controller.signal);
+      return checkpoints.diffWorkingTree(input.botId, checkpoint.cwd, checkpoint.hash, controller.signal);
     };
     let files: Awaited<ReturnType<typeof capture>>;
     try {
