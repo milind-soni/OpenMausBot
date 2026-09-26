@@ -330,6 +330,9 @@ const threadsConfigSchema = z.object({
   /** Days a closed or archived thread's event logs survive (#1280).
    * Absent keeps them forever. */
   eventLogRetentionDays: z.number().int().min(1).max(3650).optional(),
+  /** Days a closed thread waits before auto-archive (#1280). Absent
+   * keeps auto-archive off, the default. */
+  autoArchiveDays: z.number().int().min(1).max(3650).optional(),
 }).strict();
 /** Workspace-wide defaults every new bot starts with (Store.createBot). */
 const newBotsConfigSchema = z.object({
@@ -457,6 +460,7 @@ const appConfigSchema = z.object({
   /** The authorization decision log (server/decision-log.ts): days of month
    * files kept, at least; OMB_DECISION_RETENTION_DAYS wins when set. */
   decisions: z.object({ retentionDays: z.number().int().min(1).max(3650).optional() }).strict().optional(),
+
   localVm: localVmConfigSchema.optional(),
   features: featureConfigSchema.optional(),
   onboarding: onboardingConfigSchema.optional(),
@@ -509,7 +513,7 @@ export interface AppConfig {
   imageGen?: ImageGenerationConfig;
   profile?: { name?: string; email?: string; aboutMe?: string };
   rooms?: { turnTimeoutMinutes: number; handoffLifetimeMinutes?: number; handoffMinRunwayMinutes?: number; handoffHardCapMinutes?: number };
-  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
+  threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number; autoArchiveDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean };
   /** Shared preserves the historical singleton. Per-bot gives every bot a
    * separate container, durable workspace, viewer and lease. */
@@ -682,6 +686,12 @@ export function threadEventLogMaxBytes(cfg: AppConfig): number | null {
  * forever. */
 export function threadEventLogRetentionDays(cfg: AppConfig): number | null {
   return cfg.threads?.eventLogRetentionDays ?? null;
+}
+
+/** Days a closed thread waits before auto-archive (#1280). Null — the
+ * default — keeps auto-archive off. */
+export function threadAutoArchiveDays(cfg: AppConfig): number | null {
+  return cfg.threads?.autoArchiveDays ?? null;
 }
 
 export function localVmMode(cfg: AppConfig): "shared" | "per-bot" {
