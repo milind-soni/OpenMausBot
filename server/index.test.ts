@@ -19,7 +19,7 @@ import {
   DhkemP256HkdfSha256,
   HkdfSha256,
 } from "@hpke/core";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
@@ -1109,6 +1109,70 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  afterEach(async () => {
+    // Issue #1731: this block shares one harness server and store, so a busy
+    // hold that outlives its own test — a turn whose interrupt lost the race
+    // under load, a leaked computer-control lease, an armed fixture gate —
+    // makes every later test's first config or lifecycle write hit the 409
+    // busy guard instead of its expected response. Drain the holds between
+    // tests so a leak fails inside its own test rather than cascading through
+    // the rest of the block.
+    managedBoxListGate?.release();
+    managedBoxListGate = null;
+    managedBoxCreateGate?.release();
+    managedBoxCreateGate = null;
+    managedBoxDeleteGate?.release();
+    managedBoxDeleteGate = null;
+    const deadline = Date.now() + 15_000;
+    let stuck = { bots: [] as string[], groups: [] as string[], computers: [] as string[] };
+    while (Date.now() < deadline) {
+      const state = (await api("GET", "/api/bots?messages=0")).body;
+      // bot.busy aggregates every task, but a bare interrupt reaches only the
+      // bot's default thread — a busy task on another thread survives it and
+      // the drain times out. Read each busy task's thread from the same
+      // listing and interrupt those threads explicitly.
+      const bots = state.bots as Array<{
+        id: string;
+        busy?: boolean;
+        tasks?: Array<{ threadId: string; busy?: boolean }>;
+      }>;
+      stuck = {
+        bots: bots.filter((bot) => bot.busy).map((bot) => bot.id),
+        groups: (state.groups as Array<{ id: string; busyBotId?: string | null }>)
+          .filter((group) => group.busyBotId).map((group) => group.id),
+        computers: Object.entries((state.computerControl ?? {}) as Record<string, { held?: boolean }>)
+          .filter(([, snapshot]) => snapshot?.held).map(([id]) => id),
+      };
+      if (!stuck.bots.length && !stuck.groups.length && !stuck.computers.length) break;
+      for (const id of stuck.groups) await api("POST", `/api/groups/${id}/interrupt`, {}).catch(() => undefined);
+      for (const id of stuck.bots) {
+        const busyThreads = bots.find((bot) => bot.id === id)?.tasks
+          ?.filter((task) => task.busy).map((task) => task.threadId) ?? [];
+        if (busyThreads.length) {
+          for (const threadId of busyThreads) {
+            await api("POST", `/api/bots/${id}/interrupt`, { threadId }).catch(() => undefined);
+          }
+        } else {
+          await api("POST", `/api/bots/${id}/interrupt`, {}).catch(() => undefined);
+        }
+      }
+      for (const id of stuck.computers) await api("POST", `/api/bots/${id}/computer/control`, { action: "release" }).catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (stuck.bots.length || stuck.groups.length || stuck.computers.length) {
+      throw new Error(
+        "leaked busy holds past this test (drain timed out): " +
+        `bots=[${stuck.bots.join(", ")}] groups=[${stuck.groups.join(", ")}] computers=[${stuck.computers.join(", ")}]`,
+      );
+    }
+    // The same 409s also defeat the finally blocks that were supposed to
+    // reset config, leaving a pasted token behind for later tests to trip
+    // over, so scrub that residue here too.
+    const config = (await api("GET", "/api/config")).body;
+    if (config.box?.configured) await api("PUT", "/api/config", { box: { token: "" } }).catch(() => undefined);
+    if (config.vps?.configured) await api("PUT", "/api/config", { vps: { sshAlias: "" } }).catch(() => undefined);
+  });
+
   it("reconciles durable working goal cards with scheduler truth after a restart", async () => {
     const state = await api("GET", "/api/bots?messages=30");
     const room = state.body.groups.find(
