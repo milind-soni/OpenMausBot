@@ -99,14 +99,14 @@ const FULL = { direct: "direct+skills+shared+voice", room: "room+own-thread+skil
  * by more than 2%, and may not undercut it by more than 2% either: a smaller
  * catalog is the goal, so lock the win in by lowering the number. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "direct": 43524,
-  "direct+voice": 44265,
-  "direct+shared": 45269,
-  "direct+shared+voice": 46010,
-  "direct+skills": 45450,
-  "direct+skills+voice": 46191,
-  "direct+skills+shared": 47195,
-  "direct+skills+shared+voice": 47936,
+  "direct": 43815,
+  "direct+voice": 44556,
+  "direct+shared": 45560,
+  "direct+shared+voice": 46301,
+  "direct+skills": 45741,
+  "direct+skills+voice": 46482,
+  "direct+skills+shared": 47486,
+  "direct+skills+shared+voice": 48227,
   "room": 41542,
   "room+voice": 42283,
   "room+shared": 43287,
@@ -123,8 +123,8 @@ const BUDGET_BASELINE: Record<string, number> = {
   "room+own-thread+skills+voice": 45496,
   "room+own-thread+skills+shared": 46500,
   "room+own-thread+skills+shared+voice": 47241,
-  "external": 3030,
-  "external+everything": 3030,
+  "external": 3321,
+  "external+everything": 3321,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';

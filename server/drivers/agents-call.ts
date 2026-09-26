@@ -605,7 +605,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (!toBotId || !message) return { text: "ask_bot needs bot_id and message.", isError: true };
     const r = await api(`/api/internal/ask-bot`, {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, toBotId, message, depth: DEPTH }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, toBotId, message, depth: DEPTH, contextOnly: args.context_only === true }),
     });
     const note = deliveryNote(r);
     if (r.timeout) {

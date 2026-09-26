@@ -240,6 +240,9 @@ export interface FollowupPayload {
   aside?: {
     fromBotId: string;
     fromBotName: string;
+    /** The conversation the words were sent from (absent on rows written
+     * before this existed): Stop there withdraws exactly this send. */
+    fromThreadId?: string;
     unattended?: boolean;
     /** Comms depth captured when the aside was queued, so a degraded
      * follow-up turn inherits the same one-hop chain limit. */

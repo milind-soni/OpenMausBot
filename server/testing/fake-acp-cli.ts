@@ -26,6 +26,15 @@
 //                   | ask-peer (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
+//                     FAKE_ACP_ASK_CONTEXT_ONLY=1 sends context_only:true
+//                     (the aside lane); default omits it (busy peers queue
+//                     as delegations). FAKE_ACP_ASK_TEXT_FILE replaces the
+//                     sent text with that file's contents, so a test can
+//                     park an oversized ask behind a steer gate.
+//                     FAKE_ACP_ASK_TARGET_NAME asks the named teammate
+//                     instead of whichever one list_bots happened to print
+//                     first — the roster is newest-first, so "first line"
+//                     is not a stable target once a fleet has 3+ bots.
 //                   | delegate-peer (same as ask-peer but uses delegate_bot —
 //                     returns immediately, the peer runs after our turn)
 //                   | chief-delegate (delegates only for an ASSIGN_TO_PEER
@@ -814,11 +823,34 @@ function handle(msg: any) {
         // the comms e2e: reach a peer bot through the injected agents proxy
         // and reply with whatever it said (the peer's fake runs plain happy
         // — its depth-1 turn gets no agents server, so no recursion)
+        const askText = process.env.FAKE_ACP_ASK_TEXT_FILE
+          ? readFileSync(process.env.FAKE_ACP_ASK_TEXT_FILE, "utf8")
+          : "ping from fake";
+        const targetName = process.env.FAKE_ACP_ASK_TARGET_NAME?.trim();
+        // list_bots prints one "- Name … [id: …]" line per teammate; a
+        // named target is that line's id, with the roster's own first-line
+        // fallback kept for the tests that never cared which peer answered.
+        const askBotId = (list: string): string => {
+          if (targetName) {
+            for (const line of list.split("\n")) {
+              if (!line.startsWith(`- ${targetName}`)) continue;
+              const after = line.slice(2 + targetName.length);
+              if (after && !/^[\s—([]/.test(after)) continue;
+              const id = /\[id: ([\w-]+)/.exec(line)?.[1];
+              if (id) return id;
+            }
+          }
+          return /id: ([\w-]+)/.exec(list)?.[1] ?? "";
+        };
         void driveMcp(agentsMcp, [
           { name: "list_bots", args: () => ({}) },
           {
             name: "ask_bot",
-            args: (list) => ({ bot_id: /id: ([\w-]+)/.exec(list)?.[1] ?? "", message: "ping from fake" }),
+            args: (list) => ({
+              bot_id: askBotId(list),
+              message: askText,
+              ...(process.env.FAKE_ACP_ASK_CONTEXT_ONLY === "1" ? { context_only: true } : {}),
+            }),
           },
         ])
           .then((reply) => {

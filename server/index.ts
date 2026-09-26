@@ -225,9 +225,12 @@ import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, inci
 const SESSION_READ_MAX_CHARS = 8_000;
 import {
   attemptAsideInjection,
+  cancelAsides,
+  cancelAsidesFromSource,
   drainAsideMessages,
   queueAsideMessage,
   restoreAsideMessages,
+  type AsideItem,
 } from "./aside-queue.ts";
 import { promptWithReply, transcriptText } from "./replies.ts";
 import { admit } from "./admission.ts";
@@ -1953,6 +1956,13 @@ function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
 }
 
 async function interruptDirectThread(botId: string, threadId: string): Promise<void> {
+  // Stop owns this conversation in both directions. Asides waiting FOR it
+  // never get their degraded turn — the conversation stopped, not paused —
+  // and asides this conversation sent FROM here are withdrawn with it, by
+  // the source thread the row carries. Both happen before the interrupt
+  // await, so the settle boundary that follows cannot resurrect them.
+  cancelAsides(threadId);
+  cancelAsidesFromSource(threadId);
   const requestOwner = directRequestOwners.get(threadId);
   if (requestOwner) {
     requestOwner.stopped = true;
@@ -7225,6 +7235,23 @@ function drainQueuedSends() {
  * mid-turn instead (one batched call); an idle thread degrades them to a
  * single enveloped follow-up turn, exactly the shape the steer-queue
  * gives queued person messages. */
+function asideStillDeliverable(item: AsideItem, targetBotId: string): boolean {
+  // The admission that let the aside in, re-checked at delivery time: the
+  // sender still exists and is not archived, still reaches the target
+  // (section, audience, allowlist, not hidden), the source conversation is
+  // still the sender's, and the comms do not now require a fresh approval
+  // card. A row that fails retires cancelled — queued peer words must not
+  // outlive the grants that admitted them. Rows written before
+  // fromThreadId existed fall back to the sender's current main thread for
+  // the source legs.
+  const from = store.bot(item.aside.fromBotId);
+  if (!from || from.hidden) return false;
+  const target = store.bot(targetBotId);
+  if (!target || target.hidden || !canAccessTeam(from, target.section) || !peerAllowed(from, target)) return false;
+  const sourceThreadId = item.aside.fromThreadId ?? from.threadId;
+  return Boolean(connectorThread(from.id, sourceThreadId)) && !peerReviewRequired(from, sourceThreadId);
+}
+
 function drainAsideLane() {
   if (!followupsReady) return;
   void drainAsideMessages({
@@ -7263,6 +7290,7 @@ function drainAsideLane() {
       }),
     isBlocked: (botId, threadId) => threadBusy(botId, threadId) || botAtThreadCapacity(botId) || Boolean(activeGroupTurnForBot(botId))
       || parksBehindCoordination(botId, threadId),
+    revalidate: asideStillDeliverable,
   }).catch((error) => console.warn("aside-queue: drain failed", error));
 }
 
@@ -14272,6 +14300,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         const depth = internalCapability.depth;
         if (!toBotRef || !message) return json(res, 400, { error: "toBotId and message required" });
+        if (body.contextOnly !== undefined && typeof body.contextOnly !== "boolean") {
+          return json(res, 400, { error: "contextOnly must be a boolean" });
+        }
+        // The sender chooses its busy-peer delivery explicitly: the aside
+        // lane is context with no reply, so it is never a silent fallback.
+        const contextOnly = body.contextOnly === true;
         if (toBotRef === fromBotId) return json(res, 400, { error: "a bot cannot message itself" });
         if (depth >= MAX_COMMS_DEPTH) return json(res, 200, { error: "message chains are limited to one hop", receipt: peerDeliveryReceipt({
           botId: toBotRef, outcome: "failed", detail: "message chains are limited to one hop — the message was not sent",
@@ -14357,6 +14391,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           queueAsideMessage(toBotId, target.threadId, message, {
             fromBotId: from.id,
             fromBotName: from.name,
+            fromThreadId,
             unattended: isUnattended(from.id, fromThreadId),
             commsDepth: depth,
           });
@@ -14378,7 +14413,11 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               };
         };
         if (target.busy) {
-          const asideReceipt = await tryAsideDelivery();
+          // Only an explicit context_only ask may degrade to the aside
+          // lane. The default keeps the sender's reply coming back: a busy
+          // peer queues as a delegation with a task id, never a silent
+          // fire-and-forget because the target happens to expose a seam.
+          const asideReceipt = contextOnly ? await tryAsideDelivery() : null;
           if (asideReceipt) return json(res, 200, asideReceipt);
           return queueBusyFallback();
         }
@@ -21593,7 +21632,7 @@ for (const row of chatFollowups()) {
   settleChatFollowups([row.id], null);
 }
 restoreSteeredMessages();
-restoreAsideMessages(store);
+restoreAsideMessages(store, asideStillDeliverable);
 restoreChannelMessages();
 
 // Repair known auto pins that conflict with Works on before dispatch starts.

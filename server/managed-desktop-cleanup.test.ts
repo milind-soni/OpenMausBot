@@ -49,6 +49,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   const autoVmClaims = new Map<string, { owner: { threadId: string; generation: string } }>();
   const started = new Map<string, ReturnType<typeof deferred>>(), interrupted = new Map<string, ReturnType<typeof deferred>>();
   const interruptCalls: string[] = [], cancelled: string[] = [], revoked: string[] = [], messages: string[] = [], settled: string[] = [], detached: string[] = [];
+  const asidesCancelled: string[] = [], asidesFromSourceCancelled: string[] = [];
   for (const threadId of threadIds) {
     const bot = { id: threadId, busy: true, modelSelection: { instanceId: "company" } };
     bots.set(threadId, bot); tasks.set(threadId, { threadId, busy: true });
@@ -84,6 +85,8 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
     turnResources: { release() {} }, settlingResourceOwners: new Map(), turnComputerResources: new Map(), teamComputerTurns: new Map(),
     roomHandoffs: { stopAwaitingDirect() {} }, noteTeammatesLeftRunning() {},
     cancelDirectTurnDispatch: (_botId: string, threadId: string) => cancelled.push(threadId),
+    cancelAsides: (threadId: string) => asidesCancelled.push(threadId),
+    cancelAsidesFromSource: (threadId: string) => asidesFromSourceCancelled.push(threadId),
     cancelGroupTurnOperations: (_groupId: string, threadId: string) => cancelled.push(threadId),
     revokeInternalCapabilitiesForThread: (threadId: string) => revoked.push(threadId),
     releaseLocalVmThread: (threadId: string) => vmLeases.delete(threadId),
@@ -98,7 +101,7 @@ function fixture(kind: "direct" | "group", threadIds = ["first"]) {
   return {
     bots, tasks, groups, owners, directBots, speakers, vmLeases, approvals, screens, watched,
     autoVmClaims,
-    interruptCalls, cancelled, revoked, messages, settled, detached,
+    interruptCalls, cancelled, revoked, messages, settled, detached, asidesCancelled, asidesFromSourceCancelled,
     context,
     stop: () => context.stopCompanyInstances(["company"]) as Promise<void>,
     interrupt: (threadId: string) => context.interruptDirectThread(threadId, threadId) as Promise<void>,
@@ -131,6 +134,10 @@ it("preserves a personal direct turn started while a slower Company sibling is s
   const f = fixture("direct", ["first", "slow"]);
   const stopping = f.stop();
   await Promise.all([f.started("first"), f.started("slow")]);
+  // The stop-lifecycle seam runs before the adapter resolves: asides waiting
+  // for this thread and asides it sent are both withdrawn with it.
+  expect(f.asidesCancelled).toEqual(["first", "slow"]);
+  expect(f.asidesFromSourceCancelled).toEqual(["first", "slow"]);
   f.finish("first");
   // Let interruptDirectThread finish for the first thread while the batch's
   // second adapter remains pending, then simulate a new personal dispatch.
@@ -148,7 +155,11 @@ it("preserves a personal direct turn started while a slower Company sibling is s
 
 it("interruptDirectThread cannot close a replacement generation's approval after awaiting its adapter", async () => {
   const f = fixture("direct"), interrupted = f.interrupt("first");
-  await f.started("first"); f.replace("first"); f.finish("first"); await interrupted;
+  await f.started("first");
+  // Both directions of the aside withdrawal fire before the adapter resolves.
+  expect(f.asidesCancelled).toEqual(["first"]);
+  expect(f.asidesFromSourceCancelled).toEqual(["first"]);
+  f.replace("first"); f.finish("first"); await interrupted;
   expectPersonalResources(f, "first");
 });
 
@@ -191,6 +202,8 @@ for (const kind of ["direct", "group"] as const) {
     expect(f.approvals.has("first")).toBe(false);
     expect(f.watched.has("first")).toBe(false);
     if (kind === "direct") {
+      expect(f.asidesCancelled).toEqual(["first"]);
+      expect(f.asidesFromSourceCancelled).toEqual(["first"]);
       expect(f.directBots.has("first")).toBe(false);
       expect(f.tasks.get("first")?.busy).toBe(false);
       expect(f.messages).toEqual(["first"]);

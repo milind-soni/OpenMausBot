@@ -275,6 +275,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
       properties: {
         bot_id: { type: "string", description: "The target bot's id (from list_bots or your roster); a unique teammate name also resolves." },
         message: { type: "string", description: "What to say / ask the bot." },
+        context_only: { type: "boolean", description: "Busy teammate only: true delivers this as a non-interrupting aside folded into their current work — context they may use, no reply back to you. Default false keeps your answer coming: the ask queues as a delegation with a task id instead." },
       },
       required: ["bot_id", "message"],
     },
