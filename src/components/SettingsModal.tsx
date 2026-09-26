@@ -33,6 +33,7 @@ import { UsageSection } from "./UsageSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { WorkspacesSection, workspacesAvailable } from "./WorkspacesSection";
 import { SkinPicker } from "./SkinPicker";
+import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { AboutMeSettings } from "./AboutMeSettings";
 import { ThreadConcurrencySettings } from "./ThreadConcurrencySettings";
@@ -360,6 +361,29 @@ function NotificationSoundsRow() {
         aria-label={t("settings.notificationSounds.play")}
         onClick={() => setNotificationSounds(!enabled)}
       />
+    </SettingRow>
+  );
+}
+
+function FontRow() {
+  const [current, setCurrent] = useState<FontId>(readFont);
+  return (
+    <SettingRow title={t("settings.font.title")} subtitle={t("settings.font.subtitle")}>
+      <select
+        value={current}
+        aria-label={t("settings.font.aria")}
+        onChange={(event) => {
+          // SAFETY: the options are rendered from FONT_IDS, so the value is always a member.
+          const id = event.target.value as FontId;
+          applyFont(id);
+          setCurrent(id);
+        }}
+        className="min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
+      >
+        {FONT_IDS.map((id) => (
+          <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
+        ))}
+      </select>
     </SettingRow>
   );
 }
@@ -740,6 +764,7 @@ export function SettingsModal() {
                   <SkinPicker />
                 </Card>
                 <div>
+                  <FontRow />
                   <ShowThreadsRow />
                   <NotificationSoundsRow />
                   {!remoteActive && <ToolCallsRow />}
