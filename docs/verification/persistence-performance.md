@@ -110,6 +110,14 @@ Worker tests cover parity, committed writes/deletes, queue bounds, timeouts,
 read-only failure and database replacement. Packaged smoke invokes search
 outside the checkout, with no `node_modules` available.
 
+The history seed yields every 1,000 inserts so a slow test disk cannot starve
+the HTTP client's socket-close handling. Windows CI exposed an `ECONNRESET`
+after setup; an isolated reproduction blocking the client for eight seconds
+after bot creation produced the same error. Splitting that setup delay into
+50 ms chunks with event-loop yields let the subsequent send settle normally.
+This changes only fixture construction, not production requests, search load,
+timeouts or assertions; no request retries were added.
+
 ## Remaining work (not covered by this search-only change)
 
 1. Attribute write/log tail latency under isolated disk contention and test

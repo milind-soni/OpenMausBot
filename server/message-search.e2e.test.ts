@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { performance } from "node:perf_hooks";
+import { setImmediate } from "node:timers/promises";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
 
@@ -26,7 +27,12 @@ it("keeps independent fixture chats and health requests usable during queued his
       const insert = db.prepare("INSERT INTO messages(thread_id,id,at,role,kind,text,json) VALUES('synthetic-history',?,1,'user','text',?,?)");
       const text = "synthetic archive ".repeat(60);
       db.exec("BEGIN");
-      for (let i = 0; i < 50_000; i++) insert.run(`m-${i}`, text, JSON.stringify({ id: `m-${i}`, at: 1, role: "user", kind: "text", text }));
+      for (let i = 0; i < 50_000; i++) {
+        insert.run(`m-${i}`, text, JSON.stringify({ id: `m-${i}`, at: 1, role: "user", kind: "text", text }));
+        // Slow CI disks can outlast HTTP keep-alive during fixture setup.
+        // Let the client process closed sockets before it sends chat requests.
+        if (i % 1000 === 999) await setImmediate();
+      }
       db.exec("COMMIT");
     } finally { db.close(); }
     await Promise.all(bots.map((bot, i) => control(["send", "--bot", bot.id, "--text", `concurrent-search-probe-${i}`])));
