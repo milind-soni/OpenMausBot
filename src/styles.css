@@ -570,6 +570,30 @@ body,
   height: 100%;
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+   FONTS
+   An optional interface-font override, independent of the skin (see
+   src/lib/fonts.ts). `:root[data-font]` outranks the skins' `[data-skin]`
+   blocks, so the choice holds on every skin. No attribute = the skin's font.
+   Poppins is used when installed on the system; otherwise the stack falls
+   back to the system UI font.
+   ──────────────────────────────────────────────────────────────────────── */
+:root[data-font="system"] {
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+:root[data-font="inter"] {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI", Roboto, sans-serif;
+}
+:root[data-font="poppins"] {
+  --font-sans: "Poppins", system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", Roboto, sans-serif;
+}
+:root[data-font="serif"] {
+  --font-sans: "Iowan Old Style", "Charter", Georgia, "Times New Roman", serif;
+}
+
 body {
   background-color: var(--color-app);
   color: var(--color-ink);
