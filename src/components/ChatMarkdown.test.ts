@@ -61,10 +61,23 @@ describe("mention highlighting", () => {
 describe("math rendering", () => {
   it("renders inline, display, and TeX-style delimiters with KaTeX", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-      text: "Inline $s'(t)=2t$.\n\n$$\\int_0^3 2t\\,dt=9$$\n\n\\(x^2\\)\n\n\\[y^2\\]",
+      text: "Inline \\(s'(t)=2t\\).\n\n$$\\int_0^3 2t\\,dt=9$$\n\n\\(x^2\\)\n\n\\[y^2\\]",
     }));
     expect(html.match(/class="katex"/g)?.length).toBeGreaterThanOrEqual(4);
     expect(html).toContain("katex-display");
+  });
+
+  it("keeps multiple currency amounts in one paragraph as plain text", () => {
+    const text = "Jan −$3,000 · Feb −$2,000 · Avg ≈ $2,200 and $5 vs $10";
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(html).not.toContain("katex");
+    expect(html).toContain("Jan −$3,000 · Feb −$2,000 · Avg ≈ $2,200 and $5 vs $10");
+  });
+
+  it("renders \\(…\\) as inline math without promoting it to display", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "Inline \\(x^2\\) here" }));
+    expect(html.match(/class="katex"/g)).toHaveLength(1);
+    expect(html).not.toContain("katex-display");
   });
 
   it("keeps code dollar signs and malformed TeX delimiters literal", () => {
@@ -78,7 +91,7 @@ describe("math rendering", () => {
     const text = "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter \\(rendered\\).";
     const html = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
     expect(normalizeMathDelimiters(text)).toBe(
-      "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter $rendered$.",
+      "  ~~~tex\n\\(not rendered\\)\n ~~~~\n\nAfter $$rendered$$.",
     );
     expect(html.match(/class="katex"/g)).toHaveLength(1);
     expect(html).toContain("not rendered");
@@ -86,18 +99,18 @@ describe("math rendering", () => {
 
   it("rejects backticks in a backtick-fence info string", () => {
     const text = "```js `invalid`\n\\(rendered\\)\n```";
-    expect(normalizeMathDelimiters(text)).toBe("```js `invalid`\n$rendered$\n```");
+    expect(normalizeMathDelimiters(text)).toBe("```js `invalid`\n$$rendered$$\n```");
   });
 
   it("protects block-quoted and CRLF fenced code", () => {
     const quoted = "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter \\(rendered\\).";
     expect(normalizeMathDelimiters(quoted)).toBe(
-      "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter $rendered$.",
+      "> ```tex\n> \\(not rendered\\)\n> ```\n\nAfter $$rendered$$.",
     );
 
     const crlf = "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter \\(rendered\\).";
     expect(normalizeMathDelimiters(crlf)).toBe(
-      "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter $rendered$.",
+      "```tex\r\n\\(not rendered\\)\r\n```\r\n\r\nAfter $$rendered$$.",
     );
   });
 

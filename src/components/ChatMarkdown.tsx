@@ -744,12 +744,15 @@ export function normalizeMathDelimiters(text: string): string {
   };
   const tokenized = protectFencedCode(text, protect)
     .replace(/(`+)[\s\S]*?\1/g, protect);
+  // remark-math runs with singleDollarTextMath off (so "$5 and $10" stays
+  // text), so inline TeX is emitted as $$…$$. The compact-$$ rewrite runs
+  // first so it cannot promote that inline output to a display block.
   let normalized = tokenized
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$\n${math}\n$$`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$${math}$`)
     // remark-math treats flow math as a block only when the fences occupy
     // their own lines; accept the compact form models commonly produce.
-    .replace(/\$\$[ \t]*([^\n][\s\S]*?)[ \t]*\$\$/g, (_match, math: string) => `$$\n${math}\n$$`);
+    .replace(/\$\$[ \t]*([^\n][\s\S]*?)[ \t]*\$\$/g, (_match, math: string) => `$$\n${math}\n$$`)
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, math: string) => `$$\n${math}\n$$`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, math: string) => `$$${math}$$`);
   protectedCode.forEach((value, index) => {
     normalized = normalized.split(`\u0000OMB_CODE_${index}\u0000`).join(value);
   });
@@ -772,7 +775,7 @@ function ChatMarkdownComponent({ text, streaming = false, message, mentionPeers 
   return (
     <div className="chat-md min-w-0 [&>*+*]:mt-2">
       <Markdown
-        remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+        remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }], remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
         rehypePlugins={[rehypeKatex]}
         urlTransform={chatUrlTransform}
         components={{
