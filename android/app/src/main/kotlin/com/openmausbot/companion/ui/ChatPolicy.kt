@@ -478,6 +478,8 @@ object MessageActions {
         // A tool chip is context, a screenshot is pixels, a digest is a log line.
         Message.Kind.ACTIVITY, Message.Kind.SCREEN, Message.Kind.DIGEST -> null
         Message.Kind.COMPACTION -> message.compaction?.summary ?: message.text?.takeIf { it.isNotBlank() }
+        Message.Kind.ROUTINE_RUN -> message.routineRun?.let { it.summary ?: it.error }
+            ?: message.text?.takeIf { it.isNotBlank() }
     }
 
     /**

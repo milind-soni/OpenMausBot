@@ -453,7 +453,7 @@ class DecodingTest {
     @Test
     fun unknownMessageArrivesOverTheStream() {
         val frame = CompanionJson.decodeFromString<StreamFrame>(
-            """{"kind":"message","seq":3,"threadId":"t1","message":{"id":"m9","role":"bot","kind":"routine.run","at":9,"text":"ran"}}""",
+            """{"kind":"message","seq":3,"threadId":"t1","message":{"id":"m9","role":"bot","kind":"something.newer","at":9,"text":"ran"}}""",
         ).frame as Frame.Message
         assertEquals("t1", frame.threadId)
         assertEquals(Message.Kind.UNKNOWN, frame.message.kind)

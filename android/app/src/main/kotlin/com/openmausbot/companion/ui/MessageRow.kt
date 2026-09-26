@@ -33,6 +33,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -89,6 +91,7 @@ import com.openmausbot.companion.core.DisplayedMessageAttachment
 import com.openmausbot.companion.core.DownloadedFile
 import com.openmausbot.companion.core.Message
 import com.openmausbot.companion.core.OptionCard
+import com.openmausbot.companion.core.RoutineRunCard
 import com.openmausbot.companion.core.ThreadRef
 import com.openmausbot.companion.core.ToolActivity
 import com.openmausbot.companion.core.forTask
@@ -437,6 +440,11 @@ private fun MessageContent(
         // Turn-audit chip (tool list + reply preview). Desktop shows it only
         // behind a "show tool calls" setting Android doesn't have; hide it.
         Message.Kind.DIGEST -> {}
+        Message.Kind.ROUTINE_RUN -> RoutineRunReceipt(
+            message = message,
+            resolvedBotId = (chat as? Chat.BotChat)?.bot?.id ?: message.from?.botId,
+            openThread = openThread,
+        )
         // A message kind from a newer computer. Almost everything the harness
         // sends carries `text`, so showing it is usually the whole message and
         // always better than a gap in the transcript. When there is nothing to
@@ -1006,6 +1014,161 @@ private fun ReceiptChip(label: String, detail: String) {
         }
         if (expanded && detail.isNotEmpty() && detail != label) {
             Text(text = detail, fontSize = 12.sp, color = secondaryTint)
+        }
+    }
+}
+
+private const val ROUTINE_RUN_DETAIL_LIMIT = 280
+
+/** Mirrors `desktop`'s `RoutineRunCard.tsx` COPY/GOAL_COPY tables. */
+private data class RoutineRunStatusCopy(val label: String, val tint: @Composable () -> Color)
+
+@Composable
+private fun routineRunStatusCopy(run: RoutineRunCard): RoutineRunStatusCopy = when (run.goalStatus) {
+    "needs-input" -> RoutineRunStatusCopy("Needs your input") { MaterialTheme.colorScheme.tertiary }
+    "blocked" -> RoutineRunStatusCopy("Blocked") { MaterialTheme.colorScheme.error }
+    "limit-reached" -> RoutineRunStatusCopy("Turn limit reached") { MaterialTheme.colorScheme.tertiary }
+    "paused" -> RoutineRunStatusCopy("Paused") { secondaryTint }
+    "stopped" -> RoutineRunStatusCopy("Stopped") { secondaryTint }
+    "failed" -> RoutineRunStatusCopy("Failed") { MaterialTheme.colorScheme.error }
+    "completed" -> RoutineRunStatusCopy("Completed") { secondaryTint }
+    else -> when {
+        run.status == "queued" && run.deferredAt != null ->
+            RoutineRunStatusCopy("Deferred: target busy") { MaterialTheme.colorScheme.tertiary }
+        else -> when (run.status) {
+            "queued" -> RoutineRunStatusCopy("Queued") { secondaryTint }
+            "running" -> RoutineRunStatusCopy("Running") { MaterialTheme.colorScheme.tertiary }
+            "waiting" -> RoutineRunStatusCopy("Waiting") { MaterialTheme.colorScheme.tertiary }
+            "completed" -> RoutineRunStatusCopy("Completed") { secondaryTint }
+            "failed" -> RoutineRunStatusCopy("Failed") { MaterialTheme.colorScheme.error }
+            "cancelled" -> RoutineRunStatusCopy("Cancelled") { secondaryTint }
+            "missed" -> RoutineRunStatusCopy("Missed") { MaterialTheme.colorScheme.error }
+            else -> RoutineRunStatusCopy(run.status) { secondaryTint }
+        }
+    }
+}
+
+private fun compactRoutineDetail(value: String?): String {
+    val clean = value?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+    return if (clean.length > ROUTINE_RUN_DETAIL_LIMIT) {
+        clean.take(ROUTINE_RUN_DETAIL_LIMIT - 1).trimEnd() + "…"
+    } else {
+        clean
+    }
+}
+
+/**
+ * A routine's lifecycle receipt, upserted into the thread that created it —
+ * mirrors desktop's `RoutineRunCard.tsx`. `message.text` is the fallback for
+ * an older/partially-hydrated payload; a null `routineRun` shows that instead
+ * of leaving an unexplained gap in the transcript.
+ */
+@Composable
+private fun RoutineRunReceipt(
+    message: Message,
+    resolvedBotId: String?,
+    openThread: ((ThreadRef) -> Unit)?,
+) {
+    val run = message.routineRun
+    if (run == null) {
+        val fallback = message.text?.trim().orEmpty()
+        if (fallback.isNotEmpty()) {
+            Text(
+                text = fallback,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
+        return
+    }
+    val copy = routineRunStatusCopy(run)
+    val detail = compactRoutineDetail(
+        if (run.status == "failed" || run.status == "missed") run.error ?: run.summary else run.summary ?: run.error,
+    )
+    val showFullReport = run.status == "completed" &&
+        (run.summary?.length ?: 0) > ROUTINE_RUN_DETAIL_LIMIT
+    var expanded by remember(message.id) { mutableStateOf(false) }
+    val haptics = rememberHaptics()
+    val actionLabel = if (run.goalStatus == "needs-input") "Review" else "Open run"
+    val threadRef = run.executionThreadId?.takeIf { resolvedBotId != null }?.let {
+        ThreadRef(botId = resolvedBotId!!, threadId = it, title = run.routineName)
+    }
+
+    Column(
+        modifier = Modifier
+            .widthIn(max = 340.dp)
+            .fillMaxWidth()
+            .border(1.dp, secondaryTint.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = run.routineName,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Text(text = copy.label, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = copy.tint())
+        }
+        Text(
+            text = RelativeStamp.dateAndTime(run.scheduledFor ?: message.at),
+            fontSize = 11.5.sp,
+            color = secondaryTint,
+        )
+        if (detail.isNotEmpty()) {
+            Text(text = detail, fontSize = 13.sp, color = secondaryTint, modifier = Modifier.padding(top = 4.dp))
+        }
+        if (showFullReport) {
+            Row(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .heightIn(min = MIN_TOUCH_TARGET)
+                    .clickable(role = Role.Button) {
+                        haptics.play(TactileAction.TOGGLE_ACTIVITY_RUN)
+                        expanded = !expanded
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(text = "Show report", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = secondaryTint)
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = null,
+                    tint = secondaryTint,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            if (expanded) {
+                Text(
+                    text = run.summary.orEmpty(),
+                    fontSize = 12.sp,
+                    color = secondaryTint,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+        if (threadRef != null && openThread != null) {
+            Row(
+                modifier = Modifier
+                    .padding(top = 6.dp)
+                    .heightIn(min = MIN_TOUCH_TARGET)
+                    .clickable(role = Role.Button) {
+                        haptics.play(TactileAction.OPEN_THREAD_CHIP)
+                        openThread(threadRef)
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(text = actionLabel, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = secondaryTint)
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = secondaryTint,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
     }
 }

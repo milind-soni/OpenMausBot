@@ -144,6 +144,7 @@ internal fun previewText(message: Message): String = when (message.kind) {
     Message.Kind.SCREEN -> "Screenshot"
     Message.Kind.DIGEST -> ""
     Message.Kind.COMPACTION -> message.compaction?.chipText ?: message.text.orEmpty()
+    Message.Kind.ROUTINE_RUN -> message.text.orEmpty()
     Message.Kind.UNKNOWN -> message.text.orEmpty()
 }
 
