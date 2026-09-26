@@ -105,11 +105,11 @@ const targetBotSchema = z.object({
 }).strict();
 const routineProposalSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), routine: routineToolDefinitionSchema, forBot: targetBotSchema.optional() }).strict(),
-  z.object({ action: z.literal("update"), routineId: z.string().max(128), changes: routineToolChangesSchema }).strict(),
-  z.object({ action: z.literal("pause"), routineId: z.string().max(128) }).strict(),
-  z.object({ action: z.literal("resume"), routineId: z.string().max(128) }).strict(),
-  z.object({ action: z.literal("run_now"), routineId: z.string().max(128) }).strict(),
-  z.object({ action: z.literal("delete"), routineId: z.string().max(128) }).strict(),
+  z.object({ action: z.literal("update"), routineId: z.string().max(128), changes: routineToolChangesSchema, forBot: targetBotSchema.optional() }).strict(),
+  z.object({ action: z.literal("pause"), routineId: z.string().max(128), forBot: targetBotSchema.optional() }).strict(),
+  z.object({ action: z.literal("resume"), routineId: z.string().max(128), forBot: targetBotSchema.optional() }).strict(),
+  z.object({ action: z.literal("run_now"), routineId: z.string().max(128), forBot: targetBotSchema.optional() }).strict(),
+  z.object({ action: z.literal("delete"), routineId: z.string().max(128), forBot: targetBotSchema.optional() }).strict(),
 ]);
 
 const storedWeekdaysSchema = z.array(z.number().int().min(0).max(6)).min(1).max(7).refine(
@@ -228,6 +228,7 @@ const storedChangesSchema = storedDefinitionSchema
 const storedManageBase = {
   routineId: z.string().regex(ROUTINE_ID),
   expectedUpdatedAt: z.number().int().nonnegative(),
+  forBot: targetBotSchema.optional(),
 };
 const storedOperationSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("create"), routine: storedDefinitionSchema, forBot: targetBotSchema.optional() }).strict(),
@@ -610,7 +611,11 @@ function normalizedOperation(
     return operation;
   }
   const id = routineId(validated.routineId);
-  const current = ownedRoutine(manager, id, botId);
+  // A targeted action manages the named bot's routine: ownership and every
+  // run's permissions stay with that bot, exactly as a routine created
+  // through the for_bot_id path keeps them.
+  const ownerBotId = validated.forBot?.botId ?? botId;
+  const current = ownedRoutine(manager, id, ownerBotId);
   if (!current) throw new RoutineRequestError("That routine does not exist", 404);
   if (validated.action === "update") {
     return {
@@ -618,12 +623,18 @@ function normalizedOperation(
       routineId: id,
       expectedUpdatedAt: current.updatedAt,
       changes: normalizeChanges(validated.changes, now),
+      ...(validated.forBot ? { forBot: validated.forBot } : {}),
     };
   }
   if (validated.action === "resume" && nextOccurrence(current.schedule, now) === null) {
     throw new RoutineRequestError(noFutureResumeMessage(current.schedule), 409);
   }
-  return { action: validated.action, routineId: id, expectedUpdatedAt: current.updatedAt };
+  return {
+    action: validated.action,
+    routineId: id,
+    expectedUpdatedAt: current.updatedAt,
+    ...(validated.forBot ? { forBot: validated.forBot } : {}),
+  };
 }
 
 function asSchedule(schedule: RoutineRequestSchedule, now: number): RoutineSchedule {
@@ -817,7 +828,7 @@ function cardCopy(
   const actionCopy = ACTION_COPY[operation.action];
   const actionLabel = actionCopy.title;
   const name = redactSecretsInText(definition?.name ?? "routine");
-  const forBot = operation.action === "create" ? operation.forBot : undefined;
+  const forBot = operation.forBot;
   const forSuffix = forBot ? ` for @${redactSecretsInText(forBot.name)}` : "";
   const title = `${actionLabel} “${name}”${forSuffix}?`;
   if (!definition) {
@@ -1017,7 +1028,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
   }
   const current = operation.action === "create"
     ? null
-    : verifyManageSnapshot(operation, manager, botId);
+    : verifyManageSnapshot(operation, manager, operation.forBot?.botId ?? botId);
   const schedule = operation.action === "create"
     ? operation.routine.schedule
     : operation.action === "update"
@@ -1113,7 +1124,7 @@ export class RoutineRequestService {
       throw new RoutineRequestError(schemaIssue(parsedProposal.error, "Invalid routine proposal"));
     }
     const operation = normalizedOperation(this.routines, botId, parsedProposal.data, at);
-    if (operation.action === "create" && operation.forBot && this.validateTarget) {
+    if (operation.forBot && this.validateTarget) {
       const refusal = this.validateTarget(botId, operation.forBot);
       if (refusal) throw new RoutineRequestError(refusal, 403);
     }
@@ -1326,7 +1337,7 @@ export class RoutineRequestService {
         return { claimed: true, state: "denied" };
       }
       revalidateOperation(payload.operation, this.routines, payload.botId, this.now());
-      if (payload.operation.action === "create" && payload.operation.forBot && this.validateTarget) {
+      if (payload.operation.forBot && this.validateTarget) {
         const refusal = this.validateTarget(payload.botId, payload.operation.forBot);
         if (refusal) throw new RoutineRequestError(refusal, 404, { terminal: true });
       }
@@ -1440,7 +1451,7 @@ export class RoutineRequestService {
           fingerprint,
         }).id;
       case "update": {
-        const current = verifyManageSnapshot(operation, this.routines, payload.botId);
+        const current = verifyManageSnapshot(operation, this.routines, operation.forBot?.botId ?? payload.botId);
         const updated = this.routines.update(
           operation.routineId,
           updateFromChanges(operation.changes, confirmationAt, current.schedule),
@@ -1459,7 +1470,7 @@ export class RoutineRequestService {
       }
       case "pause":
       case "resume": {
-        verifyManageSnapshot(operation, this.routines, payload.botId);
+        verifyManageSnapshot(operation, this.routines, operation.forBot?.botId ?? payload.botId);
         const updated = this.routines.update(operation.routineId, { enabled: operation.action === "resume" }, {
           requestId: payload.requestId,
           messageId,
@@ -1473,7 +1484,7 @@ export class RoutineRequestService {
         return updated.id;
       }
       case "run_now": {
-        verifyManageSnapshot(operation, this.routines, payload.botId);
+        verifyManageSnapshot(operation, this.routines, operation.forBot?.botId ?? payload.botId);
         const run = this.routines.runNow(operation.routineId, {
           requestId: payload.requestId,
           messageId,
@@ -1487,7 +1498,7 @@ export class RoutineRequestService {
         return run.id;
       }
       case "delete":
-        verifyManageSnapshot(operation, this.routines, payload.botId);
+        verifyManageSnapshot(operation, this.routines, operation.forBot?.botId ?? payload.botId);
         if (!this.routines.remove(operation.routineId, {
           requestId: payload.requestId,
           messageId,

@@ -671,12 +671,17 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_routine_action",
     description:
-      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id." + PROPOSAL_OUTCOME,
+      "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. If the user asks to change ANOTHER bot's routine and that bot is in your section, call list_bots and pass that bot's id as for_bot_id; the routine keeps its owner and every run keeps that bot's engine and permissions." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         routine_id: { type: "string", minLength: 1, description: "Routine id from list_routines." },
+        for_bot_id: {
+          type: "string",
+          description:
+            "Only when the requested change targets ANOTHER bot's routine and that bot is in your section: that bot's id from list_bots. Learn the routine id from that bot's own routines (it can run list_routines). Omit to change one of your own routines.",
+        },
         action: {
           type: "string",
           enum: ["update", "pause", "resume", "run_now", "delete"],

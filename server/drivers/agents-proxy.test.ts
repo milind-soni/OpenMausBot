@@ -1610,6 +1610,18 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.isError).toBeFalsy();
   });
 
+  it("forwards for_bot_id when the action targets another bot's routine", async () => {
+    lastRoutineRequestBody = null;
+    const res = await callTool("propose_routine_action", {
+      action: "pause",
+      routine_id: "routine-morning",
+      for_bot_id: "bot-helper",
+    });
+    expect(lastRoutineRequestBody.forBotId).toBe("bot-helper");
+    expect(lastRoutineRequestBody.routineId).toBe("routine-morning");
+    expect(res.result.isError).toBeFalsy();
+  });
+
   it.each(["box", "cloud"])("maps %s execution to the explicit Box runner without changing stored wire values", async (run_on) => {
     const res = await callTool("propose_routine", {
       name: "Box check", instructions: "Check explicitly on Box.",

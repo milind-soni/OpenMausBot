@@ -983,11 +983,14 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (!routineId || !action) {
       return { text: "propose_routine_action needs a routine_id and supported action.", isError: true };
     }
+    const forBotId = String(args.for_bot_id ?? "").trim();
     const body: Json = {
       fromBotId: BOT_ID,
       fromThreadId: THREAD_ID,
       action,
       routineId,
+      // JSON.stringify drops the key entirely when no target was named
+      ...(forBotId ? { forBotId } : {}),
     };
     if (action === "update") {
       if (!jsonRecord(args.changes)) {

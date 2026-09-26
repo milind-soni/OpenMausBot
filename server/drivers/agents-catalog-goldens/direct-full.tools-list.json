@@ -1025,7 +1025,7 @@
     },
     {
       "name": "propose_routine_action",
-      "description": "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.",
+      "description": "Prepare a user-requested change to one of this bot's existing routines. Use list_routines first to get the routine id. If the user asks to change ANOTHER bot's routine and that bot is in your section, call list_bots and pass that bot's id as for_bot_id; the routine keeps its owner and every run keeps that bot's engine and permissions. Read the result: granted Full Access may apply the change immediately. If applied, continue the requested work without another confirmation. Only a pending result requires ending the turn and waiting for the in-app decision. Never claim success from the permission mode alone; report failed or cancelled results honestly. This does not elevate another bot's execution permissions.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1034,6 +1034,10 @@
             "type": "string",
             "minLength": 1,
             "description": "Routine id from list_routines."
+          },
+          "for_bot_id": {
+            "type": "string",
+            "description": "Only when the requested change targets ANOTHER bot's routine and that bot is in your section: that bot's id from list_bots. Learn the routine id from that bot's own routines (it can run list_routines). Omit to change one of your own routines."
           },
           "action": {
             "type": "string",

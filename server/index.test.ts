@@ -8784,6 +8784,123 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("gates targeted routine actions like creation and re-checks the target at confirm", async () => {
+    const chief = (await api("POST", "/api/bots", { name: "Acting chief" })).body.bot;
+    let teammateId = "";
+    let outsiderId = "";
+    try {
+      const teammate = (await api("POST", "/api/bots", { name: "Ops helper" })).body.bot;
+      const outsider = (await api("POST", "/api/bots", { name: "Other section", section: "Routine elsewhere" })).body.bot;
+      teammateId = teammate.id;
+      outsiderId = outsider.id;
+      const teammateRoutine = (await api("POST", "/api/routines", {
+        name: "Teammate digest",
+        prompt: "Summarize the teammate's queue.",
+        botId: teammate.id,
+        runOn: "maus",
+        enabled: true,
+        schedule: { type: "daily", time: "07:30", weekdays: [1, 2, 3, 4, 5] },
+      })).body.routine;
+      const ownRoutine = (await api("POST", "/api/routines", {
+        name: "Chief digest",
+        prompt: "Summarize the chief's queue.",
+        botId: chief.id,
+        runOn: "maus",
+        enabled: true,
+        schedule: { type: "daily", time: "08:00", weekdays: [1] },
+      })).body.routine;
+      const token = await mintTestCapability(BASE, chief.id, chief.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+      const post = (body: Record<string, unknown>) => fetch(`${BASE}/api/internal/routine-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify(body),
+      });
+
+      const outOfSection = await post({
+        fromBotId: chief.id,
+        fromThreadId: chief.threadId,
+        action: "pause",
+        routineId: teammateRoutine.id,
+        forBotId: outsider.id,
+      });
+      expect(outOfSection.status).toBe(403);
+      expect(z.object({ error: z.string() }).parse(await outOfSection.json()).error).toMatch(/different section/);
+
+      const unknown = await post({
+        fromBotId: chief.id,
+        fromThreadId: chief.threadId,
+        action: "pause",
+        routineId: teammateRoutine.id,
+        forBotId: "bot-that-does-not-exist",
+      });
+      expect(unknown.status).toBe(404);
+
+      // The routine id is scoped to the named bot: the proposer's own routine
+      // must not satisfy a targeted action.
+      const wrongOwner = await post({
+        fromBotId: chief.id,
+        fromThreadId: chief.threadId,
+        action: "pause",
+        routineId: ownRoutine.id,
+        forBotId: teammate.id,
+      });
+      expect(wrongOwner.status).toBe(404);
+
+      const proposed = await post({
+        fromBotId: chief.id,
+        fromThreadId: chief.threadId,
+        action: "pause",
+        routineId: teammateRoutine.id,
+        forBotId: teammate.id,
+      });
+      expect(proposed.status).toBe(201);
+      const proposal = z.object({ requestId: z.string() }).parse(await proposed.json());
+      const proposerState = (await api("GET", "/api/bots")).body;
+      const card = proposerState.bots
+        .find((candidate: { id: string }) => candidate.id === chief.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposal.requestId);
+      expect(card?.card.title).toContain(`for @${teammate.name}`);
+
+      const confirmed = await api("POST", `/api/threads/${chief.threadId}/respond`, {
+        requestId: proposal.requestId,
+        behavior: "allow",
+      });
+      expect(confirmed).toMatchObject({ status: 200, body: { routineAction: "pause" } });
+      const paused = (await api("GET", "/api/routines")).body.routines
+        .find((routine: { id: string }) => routine.id === teammateRoutine.id);
+      expect(paused).toMatchObject({ botId: teammate.id, enabled: false });
+
+      // The target is re-authorized when the user confirms, not just at
+      // proposal: a moved bot refuses and the routine stays untouched.
+      const resume = await post({
+        fromBotId: chief.id,
+        fromThreadId: chief.threadId,
+        action: "resume",
+        routineId: teammateRoutine.id,
+        forBotId: teammate.id,
+      });
+      expect(resume.status).toBe(201);
+      const resumeProposal = z.object({ requestId: z.string() }).parse(await resume.json());
+      expect((await api("PATCH", `/api/bots/${teammate.id}`, { section: "Moved away" })).status).toBe(200);
+      const refused = await api("POST", `/api/threads/${chief.threadId}/respond`, {
+        requestId: resumeProposal.requestId,
+        behavior: "allow",
+      });
+      expect(refused.status).toBe(404);
+      const stillPaused = (await api("GET", "/api/routines")).body.routines
+        .find((routine: { id: string }) => routine.id === teammateRoutine.id);
+      expect(stillPaused).toMatchObject({ enabled: false });
+    } finally {
+      await api("DELETE", `/api/bots/${chief.id}`);
+      if (teammateId) await api("DELETE", `/api/bots/${teammateId}`);
+      if (outsiderId) await api("DELETE", `/api/bots/${outsiderId}`);
+    }
+  });
+
   it("keeps a proposed profile change inert until its card is confirmed, then records history", async () => {
     const soulFileOf = (botId: string) => join(home, ".openmausbot", "bots", botId, "SOUL.md");
     const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;

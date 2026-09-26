@@ -1721,6 +1721,141 @@ describe("cross-bot routine targeting", () => {
     // the refusal is written back onto the card so the user sees why
     expect(store.messagesFor("thread-a")[0]?.card).toMatchObject({ expired: true, held: expect.stringMatching(/no longer exists/) });
   });
+
+  it("manages the named bot's routine, not the proposer's", async () => {
+    const { routines, service, store } = targetedHarness();
+    const peerRoutine = routines.create({
+      botId: forOps.forBot.botId,
+      name: "Ops digest",
+      prompt: "Summarize the section's operations.",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const ownRoutine = routines.create({
+      botId: "bot-a",
+      name: "Own digest",
+      prompt: "Summarize my own work.",
+      schedule: { type: "daily", time: "10:00", weekdays: [2] },
+    });
+    const proposed = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "pause", routineId: peerRoutine.id, forBot: forOps.forBot },
+    });
+    const card = store.messagesFor("thread-a")[0]?.card;
+    expect(card?.title).toContain("for @Ops");
+    expect(card?.routineRequest?.operation).toMatchObject({ action: "pause", forBot: forOps.forBot });
+    expect(service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: proposed.requestId,
+      behavior: "allow",
+    })).toMatchObject({ claimed: true, state: "applied", action: "pause" });
+    expect(routines.listRoutines().find((routine) => routine.id === peerRoutine.id))
+      .toMatchObject({ botId: forOps.forBot.botId, enabled: false });
+    expect(routines.listRoutines().find((routine) => routine.id === ownRoutine.id)?.enabled).toBe(true);
+
+    const updated = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: {
+        action: "update",
+        routineId: peerRoutine.id,
+        changes: { name: "Renamed ops digest" },
+        forBot: forOps.forBot,
+      },
+    });
+    expect(service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: updated.requestId,
+      behavior: "allow",
+    })).toMatchObject({ claimed: true, state: "applied", action: "update", resultId: peerRoutine.id });
+    expect(routines.listRoutines().find((routine) => routine.id === peerRoutine.id)?.name)
+      .toBe("Renamed ops digest");
+  });
+
+  it("scopes a targeted action's routine lookup to the named bot", async () => {
+    const { routines, service } = targetedHarness();
+    const ownRoutine = routines.create({
+      botId: "bot-a",
+      name: "Own digest",
+      prompt: "Summarize my own work.",
+      schedule: { type: "daily", time: "10:00", weekdays: [2] },
+    });
+    await expect(service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "pause", routineId: ownRoutine.id, forBot: forOps.forBot },
+    })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("refuses a targeted manage action at propose time when the target fails authorization", async () => {
+    const { routines, service, store } = targetedHarness(() => "@Ops belongs to a different section");
+    const peerRoutine = routines.create({
+      botId: forOps.forBot.botId,
+      name: "Ops digest",
+      prompt: "Summarize the section's operations.",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    await expect(service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "delete", routineId: peerRoutine.id, forBot: forOps.forBot },
+    })).rejects.toMatchObject({ message: "@Ops belongs to a different section", status: 403 });
+    expect(store.messagesFor("thread-a")).toHaveLength(0);
+    expect(routines.listRoutines()).toHaveLength(1);
+  });
+
+  it("re-checks a targeted manage action at confirm time without touching the routine", async () => {
+    let reachable = true;
+    const { routines, service, store } = targetedHarness(() => (reachable ? null : "@Ops is no longer in this section"));
+    const peerRoutine = routines.create({
+      botId: forOps.forBot.botId,
+      name: "Ops digest",
+      prompt: "Summarize the section's operations.",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const proposed = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "pause", routineId: peerRoutine.id, forBot: forOps.forBot },
+    });
+    reachable = false;
+    const result = service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: proposed.requestId,
+      behavior: "allow",
+    });
+    expect(result).toMatchObject({ claimed: true, state: "invalid", status: 404 });
+    expect(routines.listRoutines().find((routine) => routine.id === peerRoutine.id)?.enabled).toBe(true);
+    expect(store.messagesFor("thread-a")[0]?.card)
+      .toMatchObject({ expired: true, held: expect.stringMatching(/no longer in this section/) });
+  });
+
+  it("expires a targeted manage action when the target's routine changes under it", async () => {
+    const { routines, service } = targetedHarness();
+    const peerRoutine = routines.create({
+      botId: forOps.forBot.botId,
+      name: "Ops digest",
+      prompt: "Summarize the section's operations.",
+      schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    });
+    const proposed = await service.propose({
+      botId: "bot-a",
+      threadId: "thread-a",
+      proposal: { action: "pause", routineId: peerRoutine.id, forBot: forOps.forBot },
+    });
+    routines.update(peerRoutine.id, { name: "Renamed under the card" });
+    const result = service.resolve({
+      botId: "bot-a",
+      threadId: "thread-a",
+      requestId: proposed.requestId,
+      behavior: "allow",
+    });
+    expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    expect(routines.listRoutines().find((routine) => routine.id === peerRoutine.id)).toMatchObject({ enabled: true });
+  });
 });
 
 describe("consequenceLine", () => {
