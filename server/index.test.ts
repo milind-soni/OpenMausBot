@@ -8869,6 +8869,74 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("applies proposed color and avatar changes only on confirm, by stored-image reference", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    const botState = async () =>
+      ((await api("GET", "/api/bots")).body.bots as Array<{ id: string; color: string; avatarUrl: string | null; avatarCrop?: string }>)
+        .find((candidate) => candidate.id === bot.id)!;
+    try {
+      await api("PATCH", "/api/bots/" + bot.id, { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const internalHeaders = {
+        authorization: "Bearer " + token,
+        "content-type": "application/json",
+      };
+      const post = (changes: unknown) => fetch(BASE + "/api/internal/profile-requests", {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, changes, reason: "you asked" }),
+      });
+
+      // The palette and the avatar's by-reference contract are both enforced
+      // at the route, before any card exists.
+      const badColor = await post({ color: "chartreuse" });
+      expect(badColor.status).toBe(400);
+      expect(((await badColor.json()) as { error: string }).error).toContain("color must be one of");
+      const externalAvatar = await post({ avatarUrl: "https://cdn.example.com/face.png" });
+      expect(externalAvatar.status).toBe(400);
+      expect(((await externalAvatar.json()) as { error: string }).error).toContain("avatarUrl must be a stored");
+      const missingAvatar = await post({ avatarUrl: "/api/attachments/00000000-0000-0000-0000-000000000000.png" });
+      expect(missingAvatar.status).toBe(400);
+      expect(((await missingAvatar.json()) as { error: string }).error).toContain("must reference an existing stored image");
+
+      const before = await botState();
+      const avatarUrl = await uploadAvatar();
+      const proposal = await post({ color: "teal", avatarUrl });
+      expect(proposal.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
+      const state = (await api("GET", "/api/bots")).body;
+      const card = state.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
+      expect(card?.card).toMatchObject({ tool: "update_profile", profileRequest: { targetBotId: bot.id } });
+      expect(card.card.subtitle).toContain("Color: " + before.color + " → teal");
+      expect(card.card.subtitle).toContain("Avatar: set to the image shown on this card");
+      // Inert until confirmed.
+      expect((await botState()).color).toBe(before.color);
+      expect((await botState()).avatarUrl).toBeNull();
+
+      const ok = await api("POST", "/api/threads/" + bot.threadId + "/respond", { requestId: proposed.requestId, behavior: "allow" });
+      expect(ok.body).toMatchObject({ ok: true, outcome: "allowed-once", profileFields: ["color", "avatarUrl"] });
+      const applied = await botState();
+      expect(applied.color).toBe("teal");
+      expect(applied.avatarUrl).toBe(avatarUrl);
+      expect(applied.avatarCrop).toBe("circle");
+
+      // "" clears the custom image and returns to the mascot.
+      const clear = await post({ avatarUrl: "" });
+      expect(clear.status).toBe(201);
+      const cleared = z.object({ requestId: z.string() }).passthrough().parse(await clear.json());
+      await api("POST", "/api/threads/" + bot.threadId + "/respond", { requestId: cleared.requestId, behavior: "allow" });
+      const finalBot = await botState();
+      expect(finalBot.avatarUrl).toBeNull();
+      expect(finalBot.avatarCrop).toBe("mascot");
+      expect(finalBot.color).toBe("teal");
+    } finally {
+      await api("POST", "/api/bots/" + bot.id + "/interrupt");
+      await api("DELETE", "/api/bots/" + bot.id);
+    }
+  });
+
   it("keeps a proposed tightening inert until confirmed, fails closed when loosened, and never leaks the receipt", async () => {
     const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
     try {

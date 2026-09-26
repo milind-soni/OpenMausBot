@@ -203,7 +203,7 @@ describe("ProfileRequestService", () => {
     expect(attempt({ autoApprove: true })).toThrow("unsupported profile field: autoApprove");
     expect(attempt({ soul: "x".repeat(24_001) })).toThrow("standing instructions must be at most 24000 bytes");
     expect(attempt({ name: "Kiwi" }, "")).toThrow("reason is required");
-    expect(attempt({})).toThrow("Choose at least one of name, title, description, soul, cwd, notifications, speakReplies");
+    expect(attempt({})).toThrow("Choose at least one of name, title, description, soul, cwd, notifications, speakReplies, color, or avatarUrl");
     expect(attempt({ name: "Scout" })).toThrow("Nothing would change");
   });
 
@@ -528,5 +528,104 @@ describe("propose_profile working folder (cwd)", () => {
     store.patchBot(bot.id, { cwd: tmpdir() });
     const result = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" });
     expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+  });
+});
+
+describe("propose_profile color and avatar", () => {
+  it("proposes the mascot color as a one-line card and applies it on confirm", async () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { color: "teal" }, reason: "You asked for teal." });
+    expect(proposed.summary).toContain("color");
+    const card = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(card.subtitle).toContain("Color: blue → teal");
+    // A cosmetic card changes nothing the bot is told.
+    expect(card.subtitle).not.toContain("Changes what Scout is told");
+    expect(card.subtitle).toContain("Nothing runs.");
+    expect(card.profileRequest!.before).toEqual({ color: "blue" });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ claimed: true, state: "applied", targetBotId: bot.id, fields: ["color"] });
+    expect(store.bot(bot.id)!.color).toBe("teal");
+    // Color rides the same history rows as every other proposable field.
+    await flushProfileHistory(bot.id);
+    expect(readHistory(bot.id).map((row) => row.field)).toEqual(["color"]);
+  });
+
+  it("refuses an unknown color, a no-op color, and goes stale when the color moved elsewhere", () => {
+    const { service, store, bot } = harness({ name: "Scout" });
+    const attempt = (color: unknown) => () => service.propose({ botId: bot.id, threadId: bot.threadId, changes: { color }, reason: "r" });
+    expect(attempt("chartreuse")).toThrow("color must be one of:");
+    expect(attempt(7)).toThrow("color must be one of:");
+    expect(attempt("blue")).toThrow("Nothing would change");
+
+    const { requestId } = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { color: "teal" }, reason: "r" });
+    store.patchBot(bot.id, { color: "red" });
+    const result = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" });
+    expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    expect(store.bot(bot.id)!.color).toBe("red");
+  });
+
+  it("sets a stored avatar by reference on confirm, picking a real crop for a mascot bot", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    const service = new ProfileRequestService({ store, attachmentExists: () => true });
+    const url = "/api/attachments/proposed-avatar-1.png";
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { avatarUrl: url }, reason: "You shared this picture." });
+    const card = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(card.subtitle).toContain("Avatar: set to the image shown on this card");
+    expect(card.profileRequest!.changes.avatarUrl).toBe(url);
+    expect(card.profileRequest!.before).toEqual({ avatarUrl: "" });
+    expect(service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" }))
+      .toMatchObject({ claimed: true, state: "applied", fields: ["avatarUrl"] });
+    // A mascot bot graduates to a real crop, mirroring the panel's upload.
+    expect(store.bot(bot.id)!.avatarUrl).toBe(url);
+    expect(store.bot(bot.id)!.avatarCrop).toBe("circle");
+
+    // A bot that already cropped its own image keeps that crop.
+    const cropped = harness({ name: "Second" });
+    const croppedBot = cropped.bot;
+    croppedBot.avatarUrl = "/api/attachments/old-2.jpg";
+    croppedBot.avatarCrop = "square";
+    const again = new ProfileRequestService({ store: cropped.store, attachmentExists: () => true });
+    const replace = again.propose({ botId: croppedBot.id, threadId: croppedBot.threadId, changes: { avatarUrl: "/api/attachments/new-2.jpg" }, reason: "r" });
+    expect(cropped.store.messagesFor(croppedBot.threadId).at(-1)!.card!.subtitle).toContain("Avatar: replaced with the image shown on this card");
+    again.resolve({ botId: croppedBot.id, threadId: croppedBot.threadId, requestId: replace.requestId, behavior: "allow" });
+    expect(cropped.store.bot(croppedBot.id)!.avatarUrl).toBe("/api/attachments/new-2.jpg");
+    expect(cropped.store.bot(croppedBot.id)!.avatarCrop).toBe("square");
+  });
+
+  it("clearing the avatar returns to the mascot crop", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    bot.avatarUrl = "/api/attachments/current-3.webp";
+    bot.avatarCrop = "rounded";
+    const service = new ProfileRequestService({ store, attachmentExists: () => true });
+    const proposed = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { avatarUrl: "" }, reason: "r" });
+    const card = store.messagesFor(bot.threadId).at(-1)!.card!;
+    expect(card.subtitle).toContain("Avatar: removed (back to the mascot)");
+    service.resolve({ botId: bot.id, threadId: bot.threadId, requestId: proposed.requestId, behavior: "allow" });
+    expect(store.bot(bot.id)!.avatarUrl).toBeUndefined();
+    expect(store.bot(bot.id)!.avatarCrop).toBe("mascot");
+  });
+
+  it("refuses an avatar that is not a stored attachment URL at proposal", () => {
+    const { service, bot } = harness({ name: "Scout" });
+    const attempt = (avatarUrl: unknown) => () => service.propose({ botId: bot.id, threadId: bot.threadId, changes: { avatarUrl }, reason: "r" });
+    expect(attempt("https://cdn.example.com/face.png")).toThrow("avatarUrl must be a stored PNG, JPEG, GIF, or WebP attachment");
+    expect(attempt("/api/attachments/face.svg")).toThrow("avatarUrl must be a stored PNG, JPEG, GIF, or WebP attachment");
+  });
+
+  it("refuses a missing stored image at proposal, and expires the card when it vanishes before confirm", () => {
+    const { store, bot } = harness({ name: "Scout" });
+    let stored = true;
+    const service = new ProfileRequestService({ store, attachmentExists: () => stored });
+    stored = false;
+    expect(() => service.propose({ botId: bot.id, threadId: bot.threadId, changes: { avatarUrl: "/api/attachments/gone-4.png" }, reason: "r" }))
+      .toThrow("avatarUrl must reference an existing stored image");
+
+    stored = true;
+    const { requestId } = service.propose({ botId: bot.id, threadId: bot.threadId, changes: { avatarUrl: "/api/attachments/gone-4.png" }, reason: "r" });
+    stored = false;
+    const result = service.resolve({ botId: bot.id, threadId: bot.threadId, requestId, behavior: "allow" });
+    expect(result).toMatchObject({ claimed: true, state: "invalid", status: 409 });
+    expect(store.bot(bot.id)!.avatarUrl).toBeUndefined();
+    expect(store.messagesFor(bot.threadId).at(-1)!.card!).toMatchObject({ expired: true, options: [], held: expect.stringMatching(/no longer stored/) });
   });
 });

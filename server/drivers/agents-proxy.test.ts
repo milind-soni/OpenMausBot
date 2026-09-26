@@ -1928,11 +1928,22 @@ describe("agents-proxy MCP surface", () => {
     });
   });
 
+  it("propose_profile forwards color and avatar_url as profile changes", async () => {
+    lastProfileRequestBody = null;
+    await callTool("propose_profile", { color: "teal", avatar_url: "/api/attachments/shared-1.png", reason: "asked" });
+    expect(lastProfileRequestBody).toEqual({
+      fromBotId: "bot-asker",
+      fromThreadId: "thread-asker-routine",
+      changes: { color: "teal", avatarUrl: "/api/attachments/shared-1.png" },
+      reason: "asked",
+    });
+  });
+
   it("propose_profile refuses an empty change set without calling the harness", async () => {
     lastProfileRequestBody = null;
     const res = await callTool("propose_profile", { reason: "asked" });
     expect(res.result.isError).toBe(true);
-    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, or speakReplies");
+    expect(res.result.content[0].text).toContain("needs at least one of name, title, description, soul, cwd, notifications, speakReplies, color, or avatar_url");
     expect(lastProfileRequestBody).toBeNull();
   });
 

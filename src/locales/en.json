@@ -74,6 +74,7 @@
   "approval.card.wantsTo": "Wants to {action}",
   "approval.card.profileWantsToOwn": "{name} wants to update its profile",
   "approval.card.profileWantsToOther": "{name} wants to update @{target}'s profile",
+  "approval.card.proposedAvatar": "Proposed avatar",
   "approval.aria.routineDetails": "Routine details",
   "approval.aria.skillDetails": "Skill details",
   "approval.aria.profileChange": "Profile change",

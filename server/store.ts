@@ -29,11 +29,11 @@ import { isMentionBoundary, isMentionNameContinuation } from "../shared/mention-
 import type { HandedState } from "./delta-context.ts";
 import type { AgentPart, PartPair, RoomPart } from "./package-parts.ts";
 import type {
-  BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord, MausColor,
+  BotActivity, GroupDefaultResponder, GroupTask as GroupTaskRecord,
   ConnectorToolGrant, OptionCardData, TaskClosedBy, TaskOpenedBy, TaskUsage, WireBot, WireGroup,
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
-import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN } from "../shared/wire.ts";
+import { CONNECTOR_SLUG_PATTERN, CONNECTOR_TOOL_NAME_PATTERN, MAUS_COLORS } from "../shared/wire.ts";
 // Re-exported under their historical names so server-side importers keep working.
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
@@ -473,19 +473,6 @@ function tightenRegistryFile(file: string): void {
   }
 }
 const messagesFile = (threadId: string) => join(DATA_DIR, `messages-${threadId}.json`);
-
-const COLORS: MausColor[] = [
-  "green",
-  "blue",
-  "red",
-  "orange",
-  "purple",
-  "cyan",
-  "pink",
-  "yellow",
-  "teal",
-  "coral",
-];
 
 /** Sections are persisted as display labels, so exact trimmed labels are
  * their identity. Missing/blank means the unsectioned (General) team. */
@@ -1676,7 +1663,7 @@ export class Store {
       soul: profile.soul ?? "",
       soulHash: soulHash(profile.soul ?? ""),
       notifications: true,
-      color: profile.color ?? COLORS[this.bots.length % COLORS.length],
+      color: profile.color ?? MAUS_COLORS[this.bots.length % MAUS_COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
       ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
       // Restricted from its first frame: no one else is ever told it exists.
@@ -1742,7 +1729,7 @@ export class Store {
         const createdAt = Date.now();
         const modelSelection = this.newBotSelection(operation.fields.modelSelection);
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
-          title: "", description: "", soul: "", notifications: true, color: COLORS[nextBots.length % COLORS.length], unread: false,
+          title: "", description: "", soul: "", notifications: true, color: MAUS_COLORS[nextBots.length % MAUS_COLORS.length], unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
           approvalMode: "ask", autoApprove: false, composio: false, approvePeerComms: false,
           // A Chief's new teammate is seen by exactly the Chief's audience:
@@ -1907,7 +1894,7 @@ export class Store {
 
   /** Commit a validated profile change before publishing its fields. Unlike
    * runtime revocation, a failed user edit must leave the old profile intact. */
-  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
+  patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "color" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
     const next = { ...bot, ...patch };

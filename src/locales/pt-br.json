@@ -26,6 +26,7 @@
   "approval.card.wantsTo": "Quer {action}",
   "approval.card.profileWantsToOwn": "{name} quer atualizar o próprio perfil",
   "approval.card.profileWantsToOther": "{name} quer atualizar o perfil de @{target}",
+  "approval.card.proposedAvatar": "Avatar proposto",
   "approval.aria.routineDetails": "Detalhes da rotina",
   "approval.aria.skillDetails": "Detalhes da habilidade",
   "approval.aria.profileChange": "Alteração de perfil",

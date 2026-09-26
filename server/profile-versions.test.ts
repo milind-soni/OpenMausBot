@@ -34,8 +34,11 @@ describe("profileRevision", () => {
     for (const field of ["notifications", "speakReplies"] as const) {
       expect(profileRevision({ ...base, [field]: !base[field] })).not.toBe(profileRevision(base));
     }
+    expect(profileRevision({ ...base, color: "teal" })).not.toBe(profileRevision(base));
+    expect(profileRevision({ ...base, avatarUrl: "/api/attachments/a.png" })).not.toBe(profileRevision(base));
     expect(profileSnapshot({ name: "A", title: "B", description: "C", soul: undefined })).toEqual({
       name: "A", title: "B", description: "C", soul: "", cwd: "", notifications: true, speakReplies: false,
+      color: "green", avatarUrl: "",
     });
   });
 });

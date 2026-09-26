@@ -481,6 +481,7 @@
   "approval.card.wantsTo": "{action} चाहता है",
   "approval.card.profileWantsToOwn": "{name} अपनी प्रोफ़ाइल अपडेट करना चाहता है",
   "approval.card.profileWantsToOther": "{name} @{target} की प्रोफ़ाइल अपडेट करना चाहता है",
+  "approval.card.proposedAvatar": "प्रस्तावित अवतार",
   "approval.aria.routineDetails": "रूटीन का विवरण",
   "approval.aria.skillDetails": "कौशल का विवरण",
   "approval.aria.profileChange": "प्रोफ़ाइल में बदलाव",

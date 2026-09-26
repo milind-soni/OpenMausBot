@@ -13,6 +13,7 @@
 import { CREDENTIAL_TARGETS } from "../../shared/credential-request.ts";
 import { OPTIONS_CARD_LIMITS, WATCHER_OPTIONS_CARD_BOT_ID } from "../../shared/options-card.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
+import { MAUS_COLORS } from "../../shared/wire.ts";
 
 /** Which tools a turn is shown. The harness decides each of these when it
  * builds the integration (server/index.ts agentsIntegration); the server
@@ -695,7 +696,7 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "propose_profile",
     description:
-      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), or your alert and voice toggles (notifications, speakReplies). Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section." + PROPOSAL_OUTCOME,
+      "Submit user-requested changes to your own name, title, description, standing instructions (SOUL.md), working folder (cwd), alert and voice toggles (notifications, speakReplies), mascot color, or custom avatar image. Keep SOUL.md short — who you are and the rules you never break; put step-by-step procedure into a skill instead. A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section." + PROPOSAL_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -716,6 +717,16 @@ const toolDefinitions = (externalRuntime: boolean) => [
         speakReplies: {
           type: "boolean",
           description: "Speak this bot's replies aloud as they settle, without being asked.",
+        },
+        color: {
+          type: "string",
+          enum: [...MAUS_COLORS],
+          description: "Mascot color, shown while the avatar uses the mascot shape.",
+        },
+        avatar_url: {
+          type: "string",
+          maxLength: 256,
+          description: "Custom avatar image already stored by the app, as an /api/attachments/... URL (for example a picture the person shared in this conversation). An empty string removes the custom image and returns to the mascot.",
         },
         reason: { type: "string", minLength: 1, maxLength: 500, description: "One sentence the user will see explaining why." },
         for_bot_id: {

@@ -481,6 +481,7 @@
   "approval.card.wantsTo": "想{action}",
   "approval.card.profileWantsToOwn": "{name} 想更新自己的资料",
   "approval.card.profileWantsToOther": "{name} 想更新 @{target} 的资料",
+  "approval.card.proposedAvatar": "建议的头像",
   "approval.aria.routineDetails": "例行任务详情",
   "approval.aria.skillDetails": "技能详情",
   "approval.aria.profileChange": "资料变更",

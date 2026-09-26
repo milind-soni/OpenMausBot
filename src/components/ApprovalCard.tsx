@@ -145,6 +145,14 @@ export function ApprovalCard({
         {card.subtitle}
       </pre>
 
+      {card.profileRequest?.changes.avatarUrl && (
+        <img
+          src={card.profileRequest.changes.avatarUrl}
+          alt={t("approval.card.proposedAvatar")}
+          className="mt-2 flex size-16 rounded-xl border border-hairline/40 object-cover"
+        />
+      )}
+
       {card.skillRequest && <SkillRequestPreview request={card.skillRequest} />}
 
       {heldNote && (

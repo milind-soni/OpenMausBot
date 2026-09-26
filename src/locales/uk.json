@@ -22,6 +22,7 @@
   "approval.card.wantsTo": "Хоче {action}",
   "approval.card.profileWantsToOwn": "{name} хоче оновити свій профіль",
   "approval.card.profileWantsToOther": "{name} хоче оновити профіль @{target}",
+  "approval.card.proposedAvatar": "Запропонований аватар",
   "approval.aria.routineDetails": "Деталі рутини",
   "approval.aria.skillDetails": "Деталі навички",
   "approval.aria.profileChange": "Зміна профілю",

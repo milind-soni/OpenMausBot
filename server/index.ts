@@ -9437,6 +9437,9 @@ const profileRequests = new ProfileRequestService({
   store,
   autoApply: fullAccessForSource,
   canPersist: proposalPersistence,
+  // A proposed avatar is carried by reference; both the card and confirm
+  // re-check that the stored image still exists.
+  attachmentExists: storedAvatarExists,
   // A Chief may change a section peer; anyone else only itself. Re-checked at confirm.
   validateTarget: chiefPeerTargetRule("profile"),
 });
