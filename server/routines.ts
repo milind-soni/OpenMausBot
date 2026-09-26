@@ -6,7 +6,7 @@ import { z } from "zod";
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { redactSecretsInText } from "./redact.ts";
+import { redactSecrets, redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import type { RoutineRequestOperation } from "../shared/routine-request.ts";
 import { normalizeCronSchedule, nextCronRuns, type RoutineCronSchedule } from "../shared/routine-schedule.ts";
@@ -333,7 +333,7 @@ export interface RoutineManagerOptions {
   /** Executes a reviewed scripted routine in the D2 sandbox: no task, no
    * thread, no admission seat. Unset (or a routine without a script) leaves
    * the tick loop on today's LLM path, byte-identical. */
-  runScripted?: (run: RoutineRun, routine: Routine) => Promise<ScriptedRunOutcome>;
+  runScripted?: (run: RoutineRun, routine: Routine, abortSignal?: AbortSignal) => Promise<ScriptedRunOutcome>;
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -815,6 +815,10 @@ export class RoutineManager {
   private webhookRunReceipts: WebhookRunReceipt[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private ticking = false;
+  /** Abort handles for in-flight scripted runs, keyed by run id so
+   * cancelRun and disableForBot can stop the sandbox child, not just flip
+   * the receipt to cancelled while the run keeps executing. */
+  private readonly scriptedInFlight = new Map<string, AbortController>();
 
   constructor(options: RoutineManagerOptions) {
     this.options = options;
@@ -1212,6 +1216,7 @@ export class RoutineManager {
     for (const run of this.runs) {
       if (run.botId !== botId || !["queued", "running", "waiting"].includes(run.status)) continue;
       run.status = "cancelled";
+      this.scriptedInFlight.get(run.id)?.abort("bot_disabled");
       if (run.target === "room-goal") run.goalStatus = "stopped";
       run.attention = undefined;
       run.finishedAt = this.now();
@@ -1407,6 +1412,7 @@ export class RoutineManager {
     const run = this.runs.find((r) => r.id === id);
     if (!run || !["queued", "running", "waiting"].includes(run.status)) return null;
     run.status = "cancelled";
+    this.scriptedInFlight.get(id)?.abort("run_cancelled");
     if (run.target === "room-goal") run.goalStatus = "stopped";
     run.attention = undefined;
     run.finishedAt = this.now();
@@ -1618,44 +1624,63 @@ export class RoutineManager {
         if (run.target === "bot" && this.options.runScripted) {
           const scriptedRoutine = this.routines.find((r) => r.id === run.routineId);
           if (scriptedRoutine?.script) {
+            const scriptVersion = scriptedRoutine.script.version;
             run.startedAt = this.now();
             run.status = "running";
             this.save();
             this.emitRun(run);
-            let outcome: ScriptedRunOutcome;
-            try {
-              outcome = await this.options.runScripted(run, scriptedRoutine);
-            } catch (error) {
-              outcome = {
+            // Dispatched without awaiting: a scripted run can hold the
+            // sandbox child for up to 300s, and the scheduler must keep
+            // sweeping timeouts and dispatching other work meanwhile. The
+            // receipt is applied when the run settles, then a fresh tick
+            // drains whatever queued behind it.
+            const controller = new AbortController();
+            this.scriptedInFlight.set(run.id, controller);
+            const runId = run.id;
+            void Promise.resolve()
+              .then(() => this.options.runScripted!(run, scriptedRoutine, controller.signal))
+              .catch((error): ScriptedRunOutcome => ({
                 ok: false,
                 logs: [],
                 warnings: [],
                 logTruncated: false,
                 exitCode: null,
                 durationMs: 0,
-                scriptVersion: scriptedRoutine.script.version,
+                scriptVersion,
                 deterministic: true,
                 failure: { kind: "crash", detail: `host_error: ${error instanceof Error ? error.message : String(error)}` },
-              };
-            }
-            run.exitCode = outcome.exitCode;
-            run.durationMs = outcome.durationMs;
-            run.scriptVersion = outcome.scriptVersion;
-            run.deterministic = outcome.deterministic;
-            if (outcome.warnings.length > 0) run.warnings = [...outcome.warnings];
-            if (outcome.ok) {
-              run.result = outcome.value;
-              run.output = renderScriptedOutput(outcome.value) || undefined;
-              run.status = "completed";
-              run.attention = undefined;
-              run.error = undefined;
-              run.finishedAt = this.now();
-              this.save();
-              this.emitRun(run);
-            } else {
-              run.failure = outcome.failure;
-              this.failRun(run, scriptedFailureMessage(outcome));
-            }
+              }))
+              .then((outcome) => {
+                this.scriptedInFlight.delete(runId);
+                // Re-read after the await: a cancel or disable that landed
+                // while the child ran already finalized this receipt, and
+                // its verdict stands — the late outcome is dropped.
+                const live = this.runs.find((candidate) => candidate.id === runId);
+                if (!live || live.status !== "running") {
+                  queueMicrotask(() => void this.tick());
+                  return;
+                }
+                live.exitCode = outcome.exitCode;
+                live.durationMs = outcome.durationMs;
+                live.scriptVersion = outcome.scriptVersion;
+                live.deterministic = outcome.deterministic;
+                if (outcome.warnings.length > 0) live.warnings = [...outcome.warnings];
+                if (outcome.ok) {
+                  const safeValue = redactSecrets(outcome.value);
+                  live.result = safeValue;
+                  live.output = renderScriptedOutput(safeValue) || undefined;
+                  live.status = "completed";
+                  live.attention = undefined;
+                  live.error = undefined;
+                  live.finishedAt = this.now();
+                  this.save();
+                  this.emitRun(live);
+                } else {
+                  live.failure = outcome.failure;
+                  this.failRun(live, scriptedFailureMessage(outcome));
+                }
+                queueMicrotask(() => void this.tick());
+              });
             continue;
           }
         }

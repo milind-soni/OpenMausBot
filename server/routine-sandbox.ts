@@ -58,6 +58,10 @@ export interface ScriptedRoutineAllowlistEntry {
   port?: number;
   /** Bearer credential resolved host-side at call time. */
   credentialId?: string;
+  /** Reviewed opt-in for sending the bearer over plain http. The runtime
+   * still requires the pinned resolved address to be loopback, so this can
+   * never become a plaintext credential to an external peer. */
+  allowHttpCredential?: boolean;
   /** Reviewed opt-in for otherwise-denied address ranges. */
   allow?: ScriptedDeniedRangeName[];
 }
@@ -107,6 +111,9 @@ export interface ScriptedRoutineRunOptions {
   resolveCredential?: (credentialId: string) => string | undefined;
   resolveDns?: (host: string) => Promise<string[]>;
   stateDir?: string;
+  /** Aborts the sandbox child cooperatively; the abort reason becomes the
+   * crash detail on the session's done receipt. */
+  abortSignal?: AbortSignal;
   /** Test seam: replaces the shipped bootstrap with a hostile child.
    * Never set in production wiring; the runtime canary always uses the
    * real BOOTSTRAP_SOURCE regardless of this option. */
@@ -131,6 +138,12 @@ const STDERR_MAX_BYTES = 4 * 1024;
 const FRAME_MAX_BYTES = 256 * 1024;
 const STATE_MAX_BYTES = 64 * 1024;
 const RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
+/** Worst-case size of one host-to-child fetch-response line: a body at the
+ * RESPONSE_MAX_BYTES cap can expand sixfold under JSON escaping (every code
+ * unit can become a \uXXXX escape), plus header and framing slack. The
+ * child's stdin buffer cap mirrors this number verbatim, so anything the
+ * host admitted always fits. */
+const HOST_CHANNEL_MAX_BYTES = RESPONSE_MAX_BYTES * 6 + 1024 * 1024;
 const MAX_OUTSTANDING_REQUESTS = 4;
 const MAX_TOTAL_REQUESTS = 50;
 const MAX_REDIRECTS = 3;
@@ -178,6 +191,12 @@ const RESPONSE_STRIP_HEADERS = new Set([
 function errorText(error: unknown): string {
   if (error instanceof Error) return error.stack ?? error.message;
   return String(error);
+}
+
+/** Maps an AbortSignal's reason onto the crash detail of the run receipt. */
+function abortReasonText(signal: AbortSignal): string {
+  const reason: unknown = signal.reason;
+  return typeof reason === "string" && reason !== "" ? reason : "aborted";
 }
 
 /** Normalizes a DNS-resolved address before any range check (ADR N-6):
@@ -255,7 +274,7 @@ function isValidAllowlistHost(host: string): boolean {
   if (host.startsWith("-") || host.endsWith("-")) return false;
   if (isIPv4(host)) return false;
   if (/^[0-9a-f:]+$/i.test(host) && host.includes(":")) return false;
-  if (!/^[a-z0-9-]+(.[a-z0-9-]+)*$/i.test(host)) return false;
+  if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*$/i.test(host)) return false;
   return true;
 }
 
@@ -264,7 +283,17 @@ const allowlistEntrySchema = z.strictObject({
   scheme: z.enum(["http", "https"]).optional(),
   port: z.number().int().min(1).max(65535).optional(),
   credentialId: z.string().trim().min(1).max(128).optional(),
+  allowHttpCredential: z.boolean().optional(),
   allow: z.array(z.enum(DENIED_RANGE_NAMES)).max(DENIED_RANGE_NAMES.length).optional(),
+}).superRefine((entry, ctx) => {
+  // A bearer over plain http is only reviewable for a loopback service;
+  // the opt-in is the review record, the runtime pins the address class.
+  if (entry.scheme === "http" && entry.credentialId !== undefined && entry.allowHttpCredential !== true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "http entries with a credential must set allowHttpCredential (loopback only)",
+    });
+  }
 });
 
 const scriptedRoutineScriptSchema = z.strictObject({
@@ -298,12 +327,18 @@ export function loadScriptedRoutineScript(value: unknown): ScriptedRoutineScript
 export class FramedLineReader {
   private buffer: Buffer = Buffer.alloc(0);
   private done = false;
+  // Parameter properties (TS-only syntax) are deliberately avoided across
+  // server/: the server boots under Node's native type stripping, which
+  // rejects them at import time (strip-only mode).
+  private readonly maxLineBytes: number;
+  private readonly onLine: (line: string) => void;
+  private readonly onOverflow: () => void;
 
-  constructor(
-    private readonly maxLineBytes: number,
-    private readonly onLine: (line: string) => void,
-    private readonly onOverflow: () => void,
-  ) {}
+  constructor(maxLineBytes: number, onLine: (line: string) => void, onOverflow: () => void) {
+    this.maxLineBytes = maxLineBytes;
+    this.onLine = onLine;
+    this.onOverflow = onOverflow;
+  }
 
   push(chunk: Buffer): void {
     if (this.done || chunk.length === 0) return;
@@ -549,6 +584,26 @@ const BOOTSTRAP_LINES: readonly string[] = [
   "  delete globalThis.fetch;",
   "  globalThis.process = undefined;",
   "",
+  "  // delete removes only the global binding; (function(){}).constructor",
+  "  // and the async/generator variants still reach their constructors,",
+  "  // which are all dynamic-eval equivalents. Block every one.",
+  "  function blockFunctionConstructor(prototype, label) {",
+  "    Object_.defineProperty(prototype, \"constructor\", {",
+  "      configurable: false,",
+  "      enumerable: false,",
+  "      get: function () {",
+  "        var error = new Error_(\"access denied: the \" + label + \" constructor is neutered in the scripted routine sandbox\");",
+  "        error.code = \"ERR_ACCESS_DENIED\";",
+  "        throw error;",
+  "      },",
+  "      set: function () { /* swallowed */ },",
+  "    });",
+  "  }",
+  "  blockFunctionConstructor(Object_.getPrototypeOf(function () {}), \"Function\");",
+  "  blockFunctionConstructor(Object_.getPrototypeOf(async function () {}), \"AsyncFunction\");",
+  "  blockFunctionConstructor(Object_.getPrototypeOf(function* () {}), \"GeneratorFunction\");",
+  "  blockFunctionConstructor(Object_.getPrototypeOf(async function* () {}), \"AsyncGeneratorFunction\");",
+  "",
   "  function uncaught(error) {",
   "    if (settled) return;",
   "    finish(envelope(false, { error: errorText(error) }));",
@@ -651,7 +706,10 @@ const BOOTSTRAP_LINES: readonly string[] = [
   "      var ack = stateAcks.get(message.id);",
   "      stateAcks.delete(message.id);",
   "      if (!ack) return;",
-  "      if (message.ok === true) ack.resolve(message.value === undefined ? null : message.value);",
+  "      if (message.ok === true) {",
+  "        stateData = message.value === undefined ? null : message.value;",
+  "        ack.resolve(stateData);",
+  "      }",
   "      else ack.reject(new Error_(typeof message.error === \"string\" ? message.error : \"state put failed\"));",
   "      return;",
   "    }",
@@ -683,8 +741,8 @@ const BOOTSTRAP_LINES: readonly string[] = [
   "      hostMessage(message);",
   "      if (settled) return;",
   "    }",
-  "    if (stdinBuffer.length > 2097152) {",
-  "      finish(envelope(false, { error: \"host channel line exceeds the 2 MiB buffer cap\" }));",
+    `    if (stdinBuffer.length > ${HOST_CHANNEL_MAX_BYTES}) {`,
+    `      finish(envelope(false, { error: "host channel line exceeds the ${Math.round(HOST_CHANNEL_MAX_BYTES / (1024 * 1024))} MiB worst-case frame cap (a 2 MiB body can expand sixfold under JSON escaping)" }));`,
   "    }",
   "  });",
   "  proc.stdin.on(\"end\", function () {",
@@ -800,6 +858,12 @@ const BOOTSTRAP_LINES: readonly string[] = [
   "    checks.wasm_removed = typeof globalThis.WebAssembly === \"undefined\";",
   "    checks.process_removed = globalThis.process === undefined;",
   "    checks.require_removed = typeof globalThis.require === \"undefined\";",
+  "    var ctorBlocked = true;",
+  "    try { void (function () {}).constructor; ctorBlocked = false; } catch (error) { /* blocked */ }",
+  "    try { void (async function () {}).constructor; ctorBlocked = false; } catch (error) { /* blocked */ }",
+  "    try { void (function* () {}).constructor; ctorBlocked = false; } catch (error) { /* blocked */ }",
+  "    try { void (async function* () {}).constructor; ctorBlocked = false; } catch (error) { /* blocked */ }",
+  "    checks.function_ctor_blocked = ctorBlocked;",
   "    var chain = promiseThen.call(probeNet(), function (netResult) {",
   "      checks.net_denied = netResult.denied;",
   "      diagnostics.net = netResult.code;",
@@ -903,6 +967,10 @@ class ScriptedRunSession {
     this.child.stderr?.on("data", (chunk: Buffer) => {
       this.stderrTail = (this.stderrTail + chunk.toString("utf8")).slice(-STDERR_MAX_BYTES);
     });
+    // A child that dies mid-write fails the stream asynchronously (EPIPE);
+    // without a listener that error is uncaught and takes the server down.
+    // The close path owns the receipt.
+    this.child.stdin?.on("error", () => { /* the close path reports the exit */ });
 
     const shimInput = this.child.stdio?.[3] as Readable | null | undefined;
     const shimReader = new FramedLineReader(
@@ -1086,10 +1154,27 @@ class ScriptedRunSession {
     });
   }
 
+  /** N-4: the result envelope and child exit are both terminal for the
+   * whole protocol; nothing further is serviced on any channel. */
+  private isSettled(): boolean {
+    return this.exited || this.resultEnvelope !== null;
+  }
+
   private async performFetch(frame: FetchFrame): Promise<void> {
-    const respondError = (message: string): void => {
+    try {
+      await this.performFetchLocked(frame);
+    } finally {
       this.outstanding.delete(frame.id);
       this.requests.delete(frame.id);
+    }
+  }
+
+  private async performFetchLocked(frame: FetchFrame): Promise<void> {
+    // The outstanding slot and the request registry cover the WHOLE fetch
+    // including every redirect hop (N-3): admitted at the frame gate,
+    // released only at a terminal, so a mid-chain hop can never free
+    // budget for a fifth concurrent frame.
+    const respondError = (message: string): void => {
       this.sendToChild({ id: frame.id, type: "fetch-response", ok: false, error: message.slice(0, 2000) });
     };
     const deny = (detail: string, deniedHost?: string): void => {
@@ -1142,24 +1227,14 @@ class ScriptedRunSession {
         return deny("port " + port + " is not allowed for " + host + " (entry declares " + entry.port + ")", host);
       }
 
-      // Credentials are resolved host-side at call time and re-derived on
-      // every redirect hop, so an authorization can never ride cross-host.
-      let authorization: string | undefined;
-      if (entry.credentialId !== undefined) {
-        const secret = this.resolveCredential?.(entry.credentialId);
-        if (secret === undefined || secret === "") {
-          this.warnings.push("credential not available: " + entry.credentialId);
-          return respondError("credential not available: " + entry.credentialId);
-        }
-        authorization = secret;
-      }
-
       let addresses: string[];
       try {
         addresses = await this.resolveDns(host);
       } catch (error) {
         return respondError("dns lookup failed for " + host + ": " + errorText(error).slice(0, 300));
       }
+      // Settled while DNS was in flight: no further hop may be minted.
+      if (this.isSettled()) return;
       if (addresses.length === 0) {
         return respondError("dns lookup returned no addresses for " + host);
       }
@@ -1175,6 +1250,27 @@ class ScriptedRunSession {
       }
       const pinned = normalized[0]!;
       const family = isIPv4(pinned) ? 4 : 6;
+
+      // Credentials are resolved host-side at call time, after DNS and
+      // range validation, and re-derived on every redirect hop, so an
+      // authorization can never ride cross-host — and never over plaintext
+      // http to an external peer: https always qualifies, plain http only
+      // for a pinned loopback address on an entry that reviewed the opt-in.
+      let authorization: string | undefined;
+      if (entry.credentialId !== undefined) {
+        if (url.protocol !== "https:" && deniedRangeForAddress(pinned) !== "loopback") {
+          return deny(
+            "credential transport requires https or a pinned loopback address for " + host,
+            host,
+          );
+        }
+        const secret = this.resolveCredential?.(entry.credentialId);
+        if (secret === undefined || secret === "") {
+          this.warnings.push("credential not available: " + entry.credentialId);
+          return respondError("credential not available: " + entry.credentialId);
+        }
+        authorization = secret;
+      }
 
       const headers: Record<string, string> = {};
       const lowered = new Set<string>();
@@ -1192,6 +1288,9 @@ class ScriptedRunSession {
       if (!lowered.has("accept-encoding")) headers["accept-encoding"] = "identity";
 
       const hop = await this.performHop(url, method, body, headers, pinned, family, frame.id);
+      // Settled mid-hop (result envelope or child exit): the fetch is
+      // over; no response is sent and no further hop is minted (N-4).
+      if (this.isSettled()) return;
       if (hop.type === "error") {
         if (hop.fatal) {
           this.fatal(hop.fatal);
@@ -1220,8 +1319,6 @@ class ScriptedRunSession {
         continue;
       }
       const sanitized = sanitizeResponseHeaders(hop.headers);
-      this.outstanding.delete(frame.id);
-      this.requests.delete(frame.id);
       this.sendToChild({
         id: frame.id,
         type: "fetch-response",
@@ -1245,12 +1342,24 @@ class ScriptedRunSession {
     frameId: number,
   ): Promise<HopResult> {
     return new Promise<HopResult>((resolve) => {
+      // Entry guard: a session that settled while DNS was in flight must
+      // not mint a new request, and no hop may outlive the run's wall
+      // clock (N-4) — the session kill paths remain the primary deadline.
+      if (this.isSettled()) {
+        resolve({ type: "error", message: "session settled before the hop started" });
+        return;
+      }
+      const remainingMs = this.startedAt + this.timeoutMs - Date.now();
+      if (remainingMs <= 0) {
+        resolve({ type: "error", message: "session wall clock exhausted before the hop started" });
+        return;
+      }
       let finished = false;
+      let hopTimer: ReturnType<typeof setTimeout> | null = null;
       const finish = (result: HopResult): void => {
         if (finished) return;
         finished = true;
-        this.outstanding.delete(frameId);
-        this.requests.delete(frameId);
+        if (hopTimer !== null) clearTimeout(hopTimer);
         resolve(result);
       };
       const lib = url.protocol === "https:" ? https : http;
@@ -1324,6 +1433,11 @@ class ScriptedRunSession {
       });
       if (hasBody) request.write(body);
       request.end();
+      hopTimer = setTimeout(() => {
+        request.destroy();
+        finish({ type: "error", message: "hop exceeded the session wall clock" });
+      }, remainingMs);
+      hopTimer.unref?.();
     });
   }
 
@@ -1468,11 +1582,15 @@ class ScriptedRunSession {
 
 const activeRuns = new Set<ScriptedRunSession>();
 
-/** Server shutdown hook: kills and reaps every in-flight scripted child. */
-export function abortAllScriptedRoutineRuns(): void {
-  for (const run of Array.from(activeRuns)) {
+/** Server shutdown hook: aborts every in-flight scripted child and waits
+ * for each run's receipt to settle, so no child or in-flight host request
+ * outlives the caller's shutdown path. */
+export async function abortAllScriptedRoutineRuns(): Promise<void> {
+  const runs = Array.from(activeRuns);
+  for (const run of runs) {
     run.abort("server_shutdown");
   }
+  await Promise.allSettled(runs.map((run) => run.done));
 }
 
 const CANARY_CHECK_KEYS: readonly string[] = [
@@ -1484,6 +1602,7 @@ const CANARY_CHECK_KEYS: readonly string[] = [
   "dynamic_import_blocked",
   "eval_removed",
   "function_removed",
+  "function_ctor_blocked",
   "wasm_removed",
   "process_removed",
   "require_removed",
@@ -1619,8 +1738,8 @@ export async function runScriptedRoutine(
   const timeoutSeconds = Math.min(script.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS);
   const rssLimitBytes = Math.max(script.rssLimitBytes ?? DEFAULT_RSS_LIMIT_BYTES, MIN_RSS_LIMIT_BYTES);
 
-  try {
-    const session = new ScriptedRunSession({
+    try {
+      const session = new ScriptedRunSession({
       manifest: { script: { source: script.source }, state },
       script,
       statePath,
@@ -1628,9 +1747,21 @@ export async function runScriptedRoutine(
       resolveDns: options.resolveDns ?? defaultResolveDns,
       timeoutMs: timeoutSeconds * 1000,
       rssLimitBytes,
-      bootstrapSource: options.bootstrapSource ?? BOOTSTRAP_SOURCE,
-    });
-    return await session.done;
+        bootstrapSource: options.bootstrapSource ?? BOOTSTRAP_SOURCE,
+      });
+      const abortSignal = options.abortSignal;
+      if (abortSignal !== undefined) {
+        if (abortSignal.aborted) {
+          session.abort(abortReasonText(abortSignal));
+        } else {
+          abortSignal.addEventListener(
+            "abort",
+            () => session.abort(abortReasonText(abortSignal)),
+            { once: true },
+          );
+        }
+      }
+      return await session.done;
   } catch (error) {
     return quickFailure("crash", "host_error: " + errorText(error).slice(0, 500));
   }

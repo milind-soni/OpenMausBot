@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  abortAllScriptedRoutineRuns,
   CANARY_ENV_ALLOWED,
   deniedRangeFor,
   FramedLineReader,
@@ -201,12 +202,18 @@ describe("scripted routine sandbox runtime", () => {
       expect(loadScriptedRoutineScript({ source: "return 1;", version })).toBeDefined();
     });
 
+    it("accepts an http credential with the loopback transport opt-in", () => {
+      const entry = { ...valid.networkAllowlist[0]!, credentialId: "cred-test", allowHttpCredential: true };
+      expect(loadScriptedRoutineScript({ ...valid, networkAllowlist: [entry] })).toBeDefined();
+    });
+
     it.each([
       ["a bad version", { ...valid, version: "not-a-hash" }],
       ["an unknown field", { ...valid, extra: true }],
       ["an IP-literal host", { ...valid, networkAllowlist: [{ ...valid.networkAllowlist[0]!, host: "127.0.0.1" }] }],
       ["a wildcard host", { ...valid, networkAllowlist: [{ ...valid.networkAllowlist[0]!, host: "*.example.com" }] }],
       ["a userinfo host", { ...valid, networkAllowlist: [{ ...valid.networkAllowlist[0]!, host: "user@api.local.test" }] }],
+      ["an http credential without the transport opt-in", { ...valid, networkAllowlist: [{ ...valid.networkAllowlist[0]!, credentialId: "cred-test" }] }],
       ["too many allowlist entries", { ...valid, networkAllowlist: Array.from({ length: 33 }, () => valid.networkAllowlist[0]!) }],
       ["null", null],
       ["a bare string", "return 1;"],
@@ -277,6 +284,14 @@ describe("scripted routine sandbox runtime", () => {
       expect(outcome.exitCode).toBe(0);
     });
 
+    it("blocks the Function constructor reachable through a function's prototype", { timeout: 30_000 }, async () => {
+      const outcome = await run(makeScript("return typeof (function () {}).constructor;"));
+      expect(outcome.ok).toBe(false);
+      expect(outcome.failure?.kind).toBe("script_error");
+      expect(outcome.failure?.detail).toContain("access denied: the Function constructor is neutered");
+      expect(outcome.exitCode).toBe(0);
+    });
+
     it("reports a child that exits without a result envelope as a crash", { timeout: 30_000 }, async () => {
       const outcome = await run(makeScript("return 1;"), { bootstrapSource: "process.exit(1);" });
       expect(outcome.ok).toBe(false);
@@ -322,7 +337,7 @@ describe("scripted routine sandbox runtime", () => {
       });
       const outcome = await run(
         makeScript("await fetch(" + JSON.stringify(scriptTarget(port, "/who")) + "); return 'done';", {
-          networkAllowlist: [allowlistEntry({ port, credentialId: "cred-test" })],
+          networkAllowlist: [allowlistEntry({ port, credentialId: "cred-test", allowHttpCredential: true })],
         }),
         { resolveCredential: () => "tok_secret_do_not_leak" },
       );
@@ -482,7 +497,7 @@ describe("scripted routine sandbox runtime", () => {
       const outcome = await run(
         makeScript("await fetch(" + JSON.stringify(scriptTarget(port, "/a")) + "); return 'done';", {
           networkAllowlist: [
-            allowlistEntry({ port, credentialId: "cred-test" }),
+            allowlistEntry({ port, credentialId: "cred-test", allowHttpCredential: true }),
             { host: "dest.local.test", scheme: "http", port, allow: ["loopback"] },
           ],
         }),
@@ -493,6 +508,51 @@ describe("scripted routine sandbox runtime", () => {
       expect(hits[0]!.headers.authorization).toBe("Bearer tok_redirect_secret");
       expect(hits[1]!.headers.authorization).toBeUndefined();
       expect(hits[1]!.url).toBe("/final");
+    });
+
+    it("refuses a credential over plain http to a non-loopback address", { timeout: 30_000 }, async () => {
+      const outcome = await run(
+        makeScript("await fetch(" + JSON.stringify("http://api.local.test/x") + "); return 'unreachable';", {
+          networkAllowlist: [allowlistEntry({ credentialId: "cred-test" })],
+        }),
+        {
+          resolveDns: async () => ["93.184.216.34"],
+          resolveCredential: () => {
+            throw new Error("credential must not resolve before the transport check");
+          },
+        },
+      );
+      expect(outcome.ok).toBe(false);
+      expect(outcome.failure?.kind).toBe("policy_violation");
+      expect(outcome.failure?.detail).toContain("credential transport requires https or a pinned loopback address");
+      expect(outcome.failure?.deniedHost).toBe("api.local.test");
+    });
+
+    it("holds the outstanding slot across a whole redirect chain", { timeout: 30_000 }, async () => {
+      const { port, hits } = await startServer((req, res) => {
+        if (req.url === "/a") {
+          res.writeHead(302, { location: "/b" });
+          res.end();
+          return;
+        }
+        // /b and the /h* hops never respond: the redirect chain and three
+        // plain fetches stay in flight together.
+      });
+      const outcome = await run(makeScript(
+        "var base = " + JSON.stringify("http://api.local.test:" + port) + ";" +
+        "fetch(base + '/a');" +
+        "fetch(base + '/h1');" +
+        "fetch(base + '/h2');" +
+        "fetch(base + '/h3');" +
+        "await new Promise(function (resolve) { setTimeout(resolve, 250); });" +
+        "await fetch(base + '/h4');" +
+        "return 'unreachable';",
+        { networkAllowlist: [allowlistEntry({ port })] },
+      ));
+      expect(outcome.ok).toBe(false);
+      expect(outcome.failure?.kind).toBe("request_limit");
+      expect(outcome.failure?.detail).toContain("outstanding (4");
+      expect(hits.map((hit) => hit.url).sort()).toEqual(["/a", "/b", "/h1", "/h2", "/h3"]);
     });
 
     it("fails a response over the 2 MiB cap as response_too_large", { timeout: 30_000 }, async () => {
@@ -507,6 +567,20 @@ describe("scripted routine sandbox runtime", () => {
       expect(outcome.ok).toBe(false);
       expect(outcome.failure?.kind).toBe("response_too_large");
       expect(outcome.failure?.detail).toContain("2 MiB cap");
+    });
+
+    it("round-trips a max-size body whose worst-case JSON escaping exceeds the raw cap on the wire", { timeout: 30_000 }, async () => {
+      const { port } = await startServer((_req, res) => {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end(Buffer.from(Uint8Array.from({ length: 2 * 1024 * 1024 }, () => 1)));
+      });
+      const outcome = await run(makeScript(
+        "const response = await fetch(" + JSON.stringify(scriptTarget(port, "/escape-heavy")) + ");" +
+        "return { status: response.status, length: (await response.text()).length };",
+        { networkAllowlist: [allowlistEntry({ port })] },
+      ));
+      expect(outcome.ok).toBe(true);
+      expect(outcome.value).toEqual({ status: 200, length: 2 * 1024 * 1024 });
     });
   });
 
@@ -534,6 +608,12 @@ describe("scripted routine sandbox runtime", () => {
       expect(outcome.ok).toBe(false);
       expect(outcome.failure?.kind).toBe("state_error");
       expect(outcome.failure?.detail).toContain("cap");
+    });
+
+    it("serves a fresh state.get immediately after state.put settles", { timeout: 30_000 }, async () => {
+      const outcome = await run(makeScript("await state.put({ x: 1 }); return state.get();"));
+      expect(outcome.ok).toBe(true);
+      expect(outcome.value).toEqual({ x: 1 });
     });
   });
 
@@ -603,6 +683,20 @@ describe("scripted routine sandbox runtime", () => {
       expect(outcome.ok).toBe(false);
       expect(outcome.failure?.kind).toBe("crash");
       expect(outcome.failure?.detail).toContain("shim_frame_limit");
+    });
+
+    it("aborts every in-flight run on shutdown and waits for the receipts", { timeout: 30_000 }, async () => {
+      const { port } = await startServer(() => { /* never responds */ });
+      const pending = run(makeScript(
+        "await fetch(" + JSON.stringify(scriptTarget(port, "/hang")) + "); return 'unreachable';",
+        { networkAllowlist: [allowlistEntry({ port })], timeoutSeconds: 10 },
+      ));
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await abortAllScriptedRoutineRuns();
+      const outcome = await pending;
+      expect(outcome.ok).toBe(false);
+      expect(outcome.failure?.kind).toBe("crash");
+      expect(outcome.failure?.detail).toContain("server_shutdown");
     });
   });
 });

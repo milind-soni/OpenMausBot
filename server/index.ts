@@ -8981,10 +8981,11 @@ routines = new RoutineManager({
   // this manager byte-identical to today's behavior.
   ...(scriptedRoutinesEnabled(cfg)
     ? {
-        runScripted: (_run: RoutineRun, routine: Routine) =>
+        runScripted: (_run: RoutineRun, routine: Routine, abortSignal?: AbortSignal) =>
           runScriptedRoutine(routine, {
             resolveCredential: (credentialId: string) =>
               isCredentialTargetId(credentialId) ? credentialValue(cfg, credentialId) : undefined,
+            abortSignal,
           }),
       }
     : {}),
@@ -21666,7 +21667,7 @@ if (TUNNEL_SOCKET) {
 
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
-    () => {
+    async () => {
       followupsReady = false;
       companyShutdown = true;
       if (workspaceAccessTimer) clearInterval(workspaceAccessTimer);
@@ -21681,7 +21682,7 @@ const gracefulShutdown = createGracefulShutdown({
       vps.closeAllVpsDesktopTunnels();
       watchdog.stop();
       routines?.stop();
-      abortAllScriptedRoutineRuns();
+      await abortAllScriptedRoutineRuns();
       calendarCalls?.stop();
       webhookIngress?.server.close();
       tunnelListener?.close();

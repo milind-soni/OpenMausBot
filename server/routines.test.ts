@@ -3009,9 +3009,9 @@ describe("scripted routines (D2 sandbox)", () => {
     };
   }
 
-  function scriptOnDisk(h: ReturnType<typeof harness>, script: unknown): void {
+  function scriptOnDisk(h: ReturnType<typeof harness>, script: unknown, index = 0): void {
     const disk = JSON.parse(readFileSync(h.options.file!, "utf8")) as { routines: Array<{ script?: unknown }> };
-    disk.routines[0]!.script = script;
+    disk.routines[index]!.script = script;
     writeFileSync(h.options.file!, JSON.stringify(disk));
   }
 
@@ -3043,6 +3043,10 @@ describe("scripted routines (D2 sandbox)", () => {
     const manager = new RoutineManager(h.options);
     h.setNow(routine.nextRunAt!);
     await manager.tick();
+    // The scripted dispatch is deliberately async (the scheduler must not
+    // hold its tick for a 300s sandbox child), so the receipt lands shortly
+    // after tick returns.
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("completed");
     expect(h.started).toHaveLength(0);
     expect(h.taskActivations).toHaveLength(0);
     const run = manager.listRuns()[0]!;
@@ -3077,6 +3081,7 @@ describe("scripted routines (D2 sandbox)", () => {
     const manager = new RoutineManager(h.options);
     h.setNow(routine.nextRunAt!);
     await manager.tick();
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("failed");
     expect(h.started).toHaveLength(0);
     expect(h.failed).toHaveLength(1);
     const run = manager.listRuns()[0]!;
@@ -3095,6 +3100,7 @@ describe("scripted routines (D2 sandbox)", () => {
     const manager = new RoutineManager(h.options);
     h.setNow(routine.nextRunAt!);
     await manager.tick();
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("failed");
     expect(h.started).toHaveLength(0);
     expect(h.failed).toHaveLength(1);
     const run = manager.listRuns()[0]!;
@@ -3142,6 +3148,7 @@ describe("scripted routines (D2 sandbox)", () => {
     h.setBot("ready");
     await manager.tick();
     expect(calls).toBe(1);
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("completed");
     expect(manager.listRuns()[0]!.status).toBe("completed");
   });
 
@@ -3175,8 +3182,122 @@ describe("scripted routines (D2 sandbox)", () => {
     release();
     await ticking;
     await manager.tick();
+    await expect.poll(() => manager.listRuns().every((candidate) => candidate.status === "completed")).toBe(true);
     expect(manager.listRuns().map((candidate) => candidate.status).sort()).toEqual(["completed", "completed"]);
     expect(order).toEqual(["scheduled", "manual"]);
     expect(h.started).toHaveLength(0);
+  });
+
+  it("keeps dispatching other routines while a scripted run is in flight", { timeout: 10_000 }, async () => {
+    const h = harness(start);
+    const first = h.manager.create(input());
+    const second = h.manager.create({ ...input(), schedule: { type: "interval" as const, everyMinutes: 10, anchorAt: start } });
+    const script = makeValidScript();
+    scriptOnDisk(h, script);
+    scriptOnDisk(h, script, 1);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const dispatched: string[] = [];
+    const statusOf = (routineId: string) => () => manager.listRuns().find((run) => run.routineId === routineId)?.status;
+    h.options.runScripted = async (run) => {
+      dispatched.push(run.routineId === first.id ? "first" : "second");
+      if (run.routineId === first.id) await gate;
+      return okOutcome(script.version);
+    };
+    const manager = new RoutineManager(h.options);
+    h.setNow(first.nextRunAt!);
+    await manager.tick();
+    await expect.poll(() => manager.listRuns().some((run) => run.routineId === first.id && run.status === "running")).toBe(true);
+    // The first scripted run is parked in the sandbox child. The scheduler
+    // tick must still return and dispatch a second routine's run rather
+    // than holding the whole scheduler for the child's wall clock.
+    h.setNow(second.nextRunAt!);
+    await manager.tick();
+    await expect.poll(() => statusOf(second.id)() === "running" && statusOf(first.id)() === "running").toBe(true);
+    release();
+    await expect.poll(() => manager.listRuns().every((run) => run.status === "completed")).toBe(true);
+    expect(dispatched).toEqual(["first", "second"]);
+    expect(h.started).toHaveLength(0);
+  });
+
+  it("cancels an in-flight scripted run, aborts the sandbox, and drops the late outcome", { timeout: 10_000 }, async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    const script = makeValidScript();
+    scriptOnDisk(h, script);
+    let signal: AbortSignal | undefined;
+    let sandboxAborted = false;
+    h.options.runScripted = async (_run, _routineDefinition, abortSignal) => {
+      signal = abortSignal;
+      // Park until the manager aborts: the receipt below is then a LATE
+      // outcome that must never overwrite the cancelled verdict.
+      await new Promise<void>((resolve) => {
+        if (abortSignal?.aborted) resolve();
+        else abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      sandboxAborted = true;
+      return okOutcome(script.version);
+    };
+    const manager = new RoutineManager(h.options);
+    h.setNow(routine.nextRunAt!);
+    await manager.tick();
+    const runId = manager.listRuns()[0]!.id;
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("running");
+    await manager.cancelRun(runId);
+    await expect.poll(() => sandboxAborted).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(signal?.aborted).toBe(true);
+    const run = manager.listRuns()[0]!;
+    expect(run.status).toBe("cancelled");
+    expect(run.result).toBeUndefined();
+    expect(run.exitCode).toBeUndefined();
+    expect(h.started).toHaveLength(0);
+  });
+
+  it("aborts an in-flight scripted run when the bot is disabled and keeps the cancelled verdict", { timeout: 10_000 }, async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    scriptOnDisk(h, makeValidScript());
+    let sandboxAborted = false;
+    h.options.runScripted = async (_run, _routineDefinition, abortSignal) => {
+      await new Promise<void>((resolve) => {
+        if (abortSignal?.aborted) resolve();
+        else abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      sandboxAborted = true;
+      return okOutcome("v");
+    };
+    const manager = new RoutineManager(h.options);
+    h.setNow(routine.nextRunAt!);
+    await manager.tick();
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("running");
+    manager.disableForBot("maus-1");
+    await expect.poll(() => sandboxAborted).toBe(true);
+    await new Promise((resolve) => setImmediate(resolve));
+    const run = manager.listRuns()[0]!;
+    expect(run.status).toBe("cancelled");
+    expect(run.result).toBeUndefined();
+    expect(run.error).toBe("The assigned bot was deleted");
+  });
+
+  it("redacts credential-shaped values from the persisted scripted result", { timeout: 10_000 }, async () => {
+    const h = harness(start);
+    const routine = h.manager.create(input());
+    const script = makeValidScript();
+    scriptOnDisk(h, script);
+    h.options.runScripted = async () => ({
+      ...okOutcome(script.version),
+      value: { token: "sk-live-0123456789abcdef0123", note: "kept as-is" },
+    });
+    const manager = new RoutineManager(h.options);
+    h.setNow(routine.nextRunAt!);
+    await manager.tick();
+    await expect.poll(() => manager.listRuns()[0]?.status).toBe("completed");
+    const run = manager.listRuns()[0]!;
+    expect(run.result).toEqual({ token: expect.stringMatching(/^«redacted \d+ chars»$/), note: "kept as-is" });
+    expect(JSON.stringify(run.result)).not.toContain("sk-live-0123456789abcdef0123");
+    expect(run.output).not.toContain("sk-live-0123456789abcdef0123");
   });
 });
