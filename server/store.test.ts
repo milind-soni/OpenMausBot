@@ -1656,6 +1656,33 @@ describe("Store change stream", () => {
     expect(store.tasks(recipient.id)).toHaveLength(before);
   });
 
+  it("resolvePairConversation never adopts or reclassifies a legacy thread under own_thread policy", () => {
+    const store = new Store(selection);
+    const recipient = store.createBot({ name: "Scout" });
+    const sender = store.createBot({ name: "Clive" });
+    const brief = "Implement and independently verify the CSV export for the reporting page";
+    const legacy = store.createTask(recipient.id, brief, false, undefined, { botId: sender.id, name: "Clive", at: 20 })!;
+    store.appendMessage(legacy.threadId, { role: "bot", kind: "text", text: `@Scout ${brief}`, at: 2_000 });
+    const before = store.tasks(recipient.id).length;
+    // own_thread wants the isolated row even when the caller reports the
+    // conversation busy — the policy must win over the busy answer.
+    const own = store.resolvePairConversation(sender, recipient.id, { label: "Export", working: () => true, ownThread: true })!;
+    expect(own.created).toBe(true);
+    expect(own.task.openedBy).toMatchObject({ botId: sender.id, name: "Clive", kind: "work" });
+    expect(own.task.title).toBe("@Clive · Export");
+    expect(store.tasks(recipient.id)).toHaveLength(before + 1);
+    // the legacy row is untouched: no pair stamp, no rename — own_thread
+    // never mints or reuses the pair conversation
+    const stillLegacy = store.taskByThread(recipient.id, legacy.threadId)!;
+    expect(stillLegacy.openedBy).toEqual({ botId: sender.id, name: "Clive", at: 20 });
+    expect(stillLegacy.title).toBe(brief.slice(0, 80));
+    // the next standing send still adopts it as the pair conversation
+    const standing = store.resolvePairConversation(sender, recipient.id, { working: () => false })!;
+    expect(standing.created).toBe(false);
+    expect(standing.task.threadId).toBe(legacy.threadId);
+    expect(standing.task.openedBy).toEqual({ botId: sender.id, name: "Clive", kind: "pair", at: 20 });
+  });
+
   it("resolvePairConversation adopts a hand-renamed thread without overwriting the name the person typed", () => {
     const store = new Store(selection);
     const recipient = store.createBot({ name: "Scout" });

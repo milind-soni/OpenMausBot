@@ -2567,7 +2567,10 @@ export class Store {
     // cost a new row, never merge two bots' histories.
     const fromSender = this.tasks(recipientId).filter((task) => task.openedBy && this.openerIdentity(task.openedBy) === sender.id);
     let pair = fromSender.find((task) => task.openedBy?.kind === "pair");
-    if (!pair) {
+    // own_thread never mints or reuses the pair row, and adoption is a
+    // reuse: it must not stamp or rename a legacy thread as the pair
+    // conversation on its way to the isolated work row.
+    if (!pair && !options.ownThread) {
       const lastActivity = (task: TaskRecord) =>
         this.messagesTail(task.threadId, 1).messages.at(-1)?.at ?? task.openedBy?.at ?? task.createdAt;
       const adopted = fromSender

@@ -3709,7 +3709,7 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
     if (n.groupId || !n.pairThreadId || n.threadId !== n.pairThreadId || !n.label) return false;
     if (!store.taskByThread(n.botId, n.pairThreadId)) return false;
     const busy = threadBusy(n.botId, n.pairThreadId) || queuedThreadPosition(n.botId, n.pairThreadId) !== null
-      || roomHandoffs.activeDirect(n.pairThreadId);
+      || roomHandoffs.activeDirect(n.pairThreadId, n.id);
     if (!busy) return false;
     const parent = n.parentId ? roomHandoffs.nodes.get(n.parentId) : undefined;
     const sender = parent ? store.bot(parent.botId) : undefined;
@@ -14875,10 +14875,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
                   ownThread: parsed.data.threadPolicy === "own_thread",
                   // "Still working" exactly as close_thread reads it: a
                   // running turn, a queued one, or coordinated work already
-                  // addressed at that thread.
-                  working: threadId => threadBusy(target.botId, threadId)
-                    || queuedThreadPosition(target.botId, threadId) !== null
-                    || roomHandoffs.activeDirect(threadId),
+                  // addressed at that thread. Only labeled standing work
+                  // skips a busy pair row: without a label, serial delivery
+                  // in the standing conversation is the designed behavior,
+                  // so it resolves onto the pair row even when busy.
+                  working: parsed.data.label
+                    ? (threadId => threadBusy(target.botId, threadId)
+                      || queuedThreadPosition(target.botId, threadId) !== null
+                      || roomHandoffs.activeDirect(threadId))
+                    : () => false,
                 });
                 if (!resolved) throw new Error("The recipient no longer exists");
                 target.threadId = resolved.task.threadId;

@@ -286,8 +286,12 @@ export class RoomHandoffs {
       if (!n.groupId && n.threadId === threadId && !terminal(n)) this.cancelTree(n, reason);
     }
   }
-  activeDirect(threadId: string) {
-    return [...this.nodes.values()].some(n => !n.groupId && n.threadId === threadId && !terminal(n));
+  /** Coordinated work addressed at a conversation. excludeNodeId answers
+   * "is anyone else working there": a queued node asking about the row it is
+   * parked on must not count itself, or it reads its own queue slot as a
+   * busy conversation. */
+  activeDirect(threadId: string, excludeNodeId?: string) {
+    return [...this.nodes.values()].some(n => n.id !== excludeNodeId && !n.groupId && n.threadId === threadId && !terminal(n));
   }
   /** Work this conversation handed out that has not settled yet. The
    * conversation's own node is not outstanding — only what it waits on. */
