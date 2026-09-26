@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import type { Scenario, Step } from "../types.ts";
 import type { SendReceipt, WorldSnapshot } from "../scorers/snapshot.ts";
 import { makeClient, waitUntil } from "./api.ts";
@@ -137,6 +138,17 @@ export abstract class BaseWorld {
       case "writeGate": {
         writeFileSync(this.gatePath(step.gate), "open\n");
         return "gate " + step.gate + " open";
+      }
+      case "installSkill": {
+        // Both worlds pass gatesDir = <dataRoot>/eval-gates, so its parent
+        // is the server's OMB_DATA_DIR; skills/ under it is exactly where
+        // the server hot-loads user skills on every turn.
+        const root = join(dirname(this.gatesDir), "skills", step.skill.id);
+        mkdirSync(root, { recursive: true });
+        const { skillMd, ...manifest } = step.skill;
+        writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+        writeFileSync(join(root, "SKILL.md"), skillMd.endsWith("\n") ? skillMd : skillMd + "\n");
+        return "skill " + step.skill.id + " installed as a user skill (hot-loaded per turn)";
       }
       default:
         return this.runWorldStep(step, ctx);

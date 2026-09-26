@@ -1,0 +1,135 @@
+{
+  "id": "bench-triage-handoff",
+  "title": "Triage requests dispatch to the duty officer instead of being answered directly",
+  "behavior": "With the skill installed, a triage request carries the openmaus-skill block on the system prompt and the scripted follower dispatches one self-contained brief to the duty officer; without it, the same prompt gets a direct answer with no dispatch and no skill block.",
+  "skill": {
+    "id": "bench-triage-handoff",
+    "name": "Bench Triage Handoff",
+    "version": "0.1.0",
+    "description": "Route triage requests to the duty officer with a self-contained brief instead of answering them directly.",
+    "defaultEnabled": true,
+    "triggerTerms": ["triage"],
+    "requiredCapabilities": [],
+    "skillMd": "---\nname: bench-triage-handoff\ndescription: Route triage requests to the duty officer with a self-contained brief instead of answering them directly.\n---\n\n# Bench Triage Handoff\n\nWhen the user asks to triage anything, dispatch exactly one self-contained brief to the duty officer via coordinate_bots (bot_ids, request_key, message) and report the assignment back. Do not answer the triage question yourself.\n"
+  },
+  "subject": {
+    "key": "worker",
+    "name": "Bench coordinator",
+    "chiefOfStaff": true,
+    "managedSections": ["Operations"]
+  },
+  "targets": [
+    {
+      "key": "duty",
+      "name": "Duty officer",
+      "section": "Operations",
+      "turns": [
+        {
+          "reply": "Triage handled; one item escalated."
+        }
+      ]
+    }
+  ],
+  "prompts": [
+    {
+      "id": "queue-triage",
+      "text": "Please triage the support queue and tell me what deserves attention.",
+      "assertions": [
+        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openmaus-skill id=\"bench-triage-handoff\"" },
+        { "kind": "toolNames", "bot": "worker", "equals": ["coordinate_bots"] },
+        { "kind": "turnOrder", "bots": ["worker", "duty"] },
+        { "kind": "promptIncludes", "bot": "worker", "turn": 0, "includes": "triage" }
+      ],
+      "withSkill": {
+        "turns": [
+          {
+            "steps": [
+              {
+                "arguments": {
+                  "bot_ids": ["@duty"],
+                  "request_key": "triage",
+                  "message": "Triage the support queue and report what deserves attention."
+                }
+              }
+            ],
+            "reply": "Assigned to the duty officer."
+          }
+        ]
+      },
+      "withoutSkill": {
+        "turns": [
+          {
+            "reply": "From my own reading, two items matter; handled it myself."
+          }
+        ]
+      }
+    },
+    {
+      "id": "incident-triage",
+      "text": "Can you triage yesterday's incident reports and rank the follow-ups?",
+      "assertions": [
+        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openmaus-skill id=\"bench-triage-handoff\"" },
+        { "kind": "toolNames", "bot": "worker", "equals": ["coordinate_bots"] },
+        { "kind": "turnOrder", "bots": ["worker", "duty"] },
+        { "kind": "promptIncludes", "bot": "worker", "turn": 0, "includes": "incident" }
+      ],
+      "withSkill": {
+        "turns": [
+          {
+            "steps": [
+              {
+                "arguments": {
+                  "bot_ids": ["@duty"],
+                  "request_key": "triage",
+                  "message": "Triage yesterday's incident reports and rank the follow-ups."
+                }
+              }
+            ],
+            "reply": "Assigned to the duty officer."
+          }
+        ]
+      },
+      "withoutSkill": {
+        "turns": [
+          {
+            "reply": "Ranked the follow-ups myself; the pager gap is the big one."
+          }
+        ]
+      }
+    },
+    {
+      "id": "inbox-triage",
+      "text": "Triage my inbox from the weekend and flag anything urgent.",
+      "assertions": [
+        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openmaus-skill id=\"bench-triage-handoff\"" },
+        { "kind": "toolNames", "bot": "worker", "equals": ["coordinate_bots"] },
+        { "kind": "turnOrder", "bots": ["worker", "duty"] },
+        { "kind": "promptIncludes", "bot": "worker", "turn": 0, "includes": "weekend" }
+      ],
+      "withSkill": {
+        "turns": [
+          {
+            "steps": [
+              {
+                "arguments": {
+                  "bot_ids": ["@duty"],
+                  "request_key": "triage",
+                  "message": "Triage the weekend inbox and flag anything urgent."
+                }
+              }
+            ],
+            "reply": "Assigned to the duty officer."
+          }
+        ]
+      },
+      "withoutSkill": {
+        "turns": [
+          {
+            "reply": "Nothing urgent in there; cleared it myself."
+          }
+        ]
+      }
+    }
+  ],
+  "replicates": 1
+}
