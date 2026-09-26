@@ -245,6 +245,7 @@ import {
   restoreHeldSteeredQueue,
   restoreSteeredMessages,
   settleHeldSteeredQueue,
+  _queuedCount,
 } from "./steer-queue.ts";
 import {
   cancelChannelMessage,
@@ -382,6 +383,25 @@ import {
   type ComputerPromptKind,
 } from "./system-prompt.ts";
 import { readCuaConnection, readCuaUnavailableReason, gatedLocalComputer } from "./local-computer.ts";
+import {
+  createCalibrationGate,
+  createDecisionModelClient,
+  decisionModelBaseUrl,
+  decisionModelConfigured,
+  decisionThreshold,
+  keyOverInsecureTransport,
+} from "./decision-model.ts";
+import {
+  admissionBudgetMs,
+  buildAdmissionState,
+  DEFAULT_QUEUE_OVERRIDE_THRESHOLD,
+  DEFAULT_STEER_OVERRIDE_THRESHOLD,
+  decideAdmission,
+  steerPrior,
+  validateAdmissionState,
+  type AdmissionLayer,
+  type AdmissionPreference,
+} from "./steer-policy.ts";
 import {
   discoverExistingPerBotLocalVms,
   localVmInventoryEntry,
@@ -643,6 +663,49 @@ let companionMutationToken: string | undefined = DESKTOP_MANAGED ? "" : undefine
 // Where remote clients reach this server (a proxy's public address); pairing URLs use it.
 const FALLBACK_PUBLIC_URL = process.env.OMB_PUBLIC_URL?.trim().replace(/\/+$/, "") || null;
 const cfg = loadConfig();
+
+// The runtime half of the decision-model connection (#1630): confidence-
+// based acting only for a connection whose calibration probe passed in
+// this process. Warmed at boot, on save, and from the row's Test button,
+// so a mount checks a cached verdict instead of probing mid-turn.
+const decisionGate = createCalibrationGate();
+function warmDecisionGate() {
+  const section = cfg.decisionModel;
+  if (section && decisionModelConfigured(section)) void decisionGate.probe(section);
+}
+
+/** Env for the local-computer bridge's chooser. Null on every default
+ * install, and for any connection that has not proved calibrated. */
+function decisionChooserEnv(flow: string): Record<string, string> | null {
+  const section = cfg.decisionModel;
+  if (!section || !decisionModelConfigured(section) || keyOverInsecureTransport(section) || !decisionGate.cached(section)) return null;
+  return {
+    OMB_DECISION_PROVIDER: section.provider ?? "",
+    OMB_DECISION_URL: decisionModelBaseUrl(section) ?? "",
+    OMB_DECISION_API_KEY: section.apiKey ?? "",
+    OMB_DECISION_MODEL: section.model ?? "",
+    OMB_DECISION_THRESHOLD: String(decisionThreshold(section)),
+    OMB_DECISION_FLOW: flow,
+  };
+}
+/** The steer-policy chooser's connection: the same gate as the computer-use
+ * chooser (configured, key-safe, calibrated in this process), plus the
+ * asymmetric thresholds and the hot-path abort budget. Null means the
+ * per-bot preference decides alone — today's behavior, byte for byte. */
+function steerPolicyConnection() {
+  const section = cfg.decisionModel;
+  if (!section?.uses?.steerPolicy) return null;
+  if (!decisionModelConfigured(section) || keyOverInsecureTransport(section) || !decisionGate.cached(section)) return null;
+  const built = createDecisionModelClient(section);
+  if (!built) return null;
+  const policy = section.steerPolicy;
+  return {
+    client: built.client,
+    queueOverrideThreshold: policy?.queueOverrideThreshold ?? DEFAULT_QUEUE_OVERRIDE_THRESHOLD,
+    steerOverrideThreshold: policy?.steerOverrideThreshold ?? DEFAULT_STEER_OVERRIDE_THRESHOLD,
+    budgetMs: admissionBudgetMs(policy?.budgetMs),
+  };
+}
 const hostedModels = hostedModelPolicy(DATA_DIR);
 const providerConfigs = () => hostedModels ? hostedModels.configs() : instanceConfigs(cfg);
 const decorateHostedProvider = hostedModels ? (instance: ProviderInstance) => hostedModels.decorate(instance) : undefined;
@@ -5368,7 +5431,7 @@ async function mountHostComputer(owner: TurnOwner, botId: string, providerSuppor
       : "CUA Driver is not ready for this computer — check permissions and restart OpenMausBot");
   }
   await bindTurnComputer(owner, "computer:host");
-  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation));
+  return gatedLocalComputer(cua, controlIntegration(botId, owner.threadId, owner.generation), decisionChooserEnv("local") ?? undefined);
 }
 
 /** The bot's own VPS desktop, mounted into the local agent. The desktop lease
@@ -7522,6 +7585,103 @@ async function generateThreadTitle(
   }
 }
 
+// The chooser needs the turn's own words for context ("book the flight",
+// not a tool call). Held per thread with a TTL: a stale goal is worse than
+// none, because the chooser would weigh candidates against abandoned work.
+const TURN_GOAL_TTL_MS = 10 * 60 * 1000;
+const turnGoals = new Map<string, { text: string; at: number }>();
+function recordTurnGoal(threadId: string, text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  if (turnGoals.size >= 256) {
+    const now = Date.now();
+    for (const [key, entry] of turnGoals) {
+      if (now - entry.at > TURN_GOAL_TTL_MS) turnGoals.delete(key);
+    }
+    if (turnGoals.size >= 256) {
+      const oldest = [...turnGoals.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest) turnGoals.delete(oldest[0]);
+    }
+  }
+  turnGoals.set(threadId, { text: trimmed.slice(0, 4_000), at: Date.now() });
+}
+function turnGoal(threadId: string): string | null {
+  const entry = turnGoals.get(threadId);
+  if (!entry) return null;
+  if (Date.now() - entry.at > TURN_GOAL_TTL_MS) {
+    turnGoals.delete(threadId);
+    return null;
+  }
+  return entry.text;
+}
+
+/** When the running turn's goal was recorded — i.e. when the turn started.
+ * The admission chooser uses it both as the elapsed-time signal and to tell
+ * a reply that targets a message born inside the running turn. */
+function turnGoalStart(threadId: string): number | null {
+  const entry = turnGoals.get(threadId);
+  if (!entry || Date.now() - entry.at > TURN_GOAL_TTL_MS) return null;
+  return entry.at;
+}
+
+/** One admission telemetry event per busy 1:1 send and each human Steer
+ * press, naming which layer decided (preference / model / mechanical /
+ * human). Metrics only — never propagated into the turn. */
+function publishAdmission(
+  threadId: string,
+  event: {
+    layer: AdmissionLayer;
+    decision: AdmissionPreference;
+    preference: AdmissionPreference;
+    detail: string;
+    confidence?: number;
+    model?: string;
+  },
+): void {
+  bus.publish({
+    eventId: newId(),
+    provider: "admission",
+    threadId,
+    createdAt: new Date().toISOString(),
+    type: "decision.admission",
+    surface: "direct",
+    layer: event.layer,
+    decision: event.decision,
+    preference: event.preference,
+    detail: event.detail,
+    ...(event.confidence !== undefined ? { confidence: event.confidence } : {}),
+    ...(event.model !== undefined ? { model: event.model } : {}),
+  });
+}
+
+/** The control endpoint is an in-process loopback, but the report still
+ * crosses a serialization boundary — validate like any external payload
+ * before it becomes a RuntimeEvent in a log people paste into reports. */
+function sanitizeDecisionReport(value: unknown): {
+  outcome: "acted" | "abstained" | "reobserve" | "below-threshold" | "superseded" | "error";
+  selectedId?: string;
+  confidence?: number;
+  model?: string;
+  flow?: string;
+  detail?: string;
+} | null {
+  if (typeof value !== "object" || value === null) return null;
+  const v = value as Record<string, unknown>;
+  const outcome = v.outcome;
+  if (outcome !== "acted" && outcome !== "abstained" && outcome !== "reobserve" &&
+      outcome !== "below-threshold" && outcome !== "superseded" && outcome !== "error") return null;
+  const id = typeof v.selectedId === "string" ? v.selectedId.slice(0, 128) : undefined;
+  const confidence =
+    typeof v.confidence === "number" && Number.isFinite(v.confidence) && v.confidence >= 0 && v.confidence <= 1
+      ? v.confidence
+      : undefined;
+  const model = typeof v.model === "string" ? v.model.slice(0, 128) : undefined;
+  const flow = typeof v.flow === "string" ? v.flow.slice(0, 64) : undefined;
+  const detail = typeof v.detail === "string" ? v.detail.slice(0, 512) : undefined;
+  return { outcome, ...(id !== undefined ? { selectedId: id } : {}), ...(confidence !== undefined ? { confidence } : {}),
+    ...(model !== undefined ? { model } : {}), ...(flow !== undefined ? { flow } : {}), ...(detail !== undefined ? { detail } : {}) };
+}
+
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 async function startTurn(
   botId: string,
@@ -7621,6 +7781,10 @@ async function startTurn(
   if (botAtThreadCapacity(botId)) {
     throw Object.assign(new Error(`this bot has reached its limit of ${maxConcurrentBotThreads(cfg)} parallel threads — wait for one to finish`), { status: 409, code: "thread_limit" });
   }
+  // Only an admitted turn may own the goal slot: recording before the busy
+  // and capacity checks let a rejected call (a compact racing a live turn,
+  // say) overwrite the active turn's decision-model context (#1630).
+  recordTurnGoal(threadId, text);
   // Steering is never a cancel. A message sent while teammates are working
   // runs now, with their assignments still attached: they keep running and
   // their results still return here (outstandingAssignmentsPrompt tells this
@@ -8374,7 +8538,7 @@ async function startTurn(
         const cua = readCuaConnection();
         if (cua) {
           await bindTurnComputer(resourceOwner, "computer:host");
-          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId));
+          integrations.localComputer = gatedLocalComputer(cua, controlIntegration(bot.id, threadId, dispatchClaimId), decisionChooserEnv("local") ?? undefined);
           computerKind = "local";
         }
       }
@@ -12568,6 +12732,15 @@ function configStatus() {
     decisions: { retentionDays: decisionRetentionDays(cfg.decisions?.retentionDays) },
     // the base URL is a setting, not a secret; the key stays write-only
     openaiCompat: { configured: Boolean(cfg.openaiCompat?.key), url: cfg.openaiCompat?.url ?? "" },
+    // the decision-model connection (#1630): routing settings only, never
+    // the key; incomplete = the chooser stays off
+    decisionModel: {
+      configured: decisionModelConfigured(cfg.decisionModel),
+      ...(cfg.decisionModel?.provider ? { provider: cfg.decisionModel.provider } : {}),
+      url: decisionModelBaseUrl(cfg.decisionModel ?? {}) ?? "",
+      model: cfg.decisionModel?.model ?? "",
+      threshold: decisionThreshold(cfg.decisionModel),
+    },
     composio: {
       configured: composio.configured(cfg),
       mode: composio.connectionMode(cfg),
@@ -15563,10 +15736,32 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const bot = store.bot(botId);
         if (!bot) return json(res, 404, { error: "no such bot" });
         if (method === "GET") {
-          return json(res, 200, await computerCallGate(internalCapability));
+          // The chooser reads its goal here (issue #1630): same endpoint the
+          // bridge already polls for held/help state, so no new surface. Only
+          // when a calibrated decision model is configured — the default
+          // install's payload stays byte-identical.
+          const gate = await computerCallGate(internalCapability);
+          const decisionGoal = decisionModelConfigured(cfg.decisionModel) ? turnGoal(internalCapability.threadId) : null;
+          return json(res, 200, { ...gate, ...(decisionGoal ? { decision: { goal: decisionGoal } } : {}) });
         }
         if (method === "POST") {
           const body = await readInternalBody();
+          if (body.decision !== undefined) {
+            // Chooser outcome metrics (#1630): the bridge reports each step
+            // it handled or fell back on. Metrics only — a malformed report
+            // is answered, never propagated into the turn.
+            const report = sanitizeDecisionReport(body.decision);
+            if (!report) return json(res, 400, { error: "invalid decision report" });
+            bus.publish({
+              eventId: newId(),
+              provider: "computer",
+              threadId: internalCapability.threadId,
+              createdAt: new Date().toISOString(),
+              type: "decision.chooser",
+              ...report,
+            });
+            return json(res, 200, { ok: true });
+          }
           const controlKey = internalCapability.teamComputerId ? teamComputerOwner(internalCapability.teamComputerId) : botId;
           const { snapshot, requestId } = computerControl.requestHelpLease(controlKey, body.reason);
           // worth a buzz: the bot is blocked on the person's hands, which
@@ -17876,6 +18071,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (typeof body.parkDirectMessages !== "boolean") return json(res, 400, { error: "parkDirectMessages must be true or false" });
         patch.parkDirectMessages = body.parkDirectMessages;
       }
+      // Preferred admission when this bot's 1:1 thread is busy: fold new
+      // words into the live turn (steer, the historical default) or queue
+      // them for the next turn. The decision-model steer policy may override
+      // this at confidence; it never changes anything else about the seam.
+      if (body.defaultAdmission !== undefined) {
+        if (body.defaultAdmission !== "steer" && body.defaultAdmission !== "queue") {
+          return json(res, 400, { error: "defaultAdmission must be steer or queue" });
+        }
+        patch.defaultAdmission = body.defaultAdmission;
+      }
       // Per-bot selection of app-wide MCP servers. Omitted keeps the current
       // selection; null restores all enabled servers; [] explicitly mounts none.
       let requestedMcpServers = existingBot?.mcpServers;
@@ -18864,14 +19069,68 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // admission can hand it to the provider natively.
             const carriesImages = extractTurnImages(text).images.length > 0;
             const steerTarget = handoffs.current(threadId);
+            const computerSelected = Boolean(computerSelectionTurns.get(threadId)?.selected);
+            const engineCanSteer = instance?.adapter.capabilities.queueing === true && typeof instance.adapter.steer === "function";
+            // L0 stays the shared admission module's verdict (slice 1); the
+            // chooser only layers preference and confident overrides on top.
             const busyAdmission = admit("direct-busy", {
               carriesImages,
-              pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
-              engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+              pendingComputerSelection: computerSelected,
+              engineCanSteer,
             });
+            const canSteer = busyAdmission.action === "steer";
+            // Admission (steer-vs-queue) in layers: mechanical clamps first,
+            // then the user's per-bot preference, then — only when a
+            // calibrated decision model is opted in — a confident override
+            // with asymmetric thresholds. The model's only power is to
+            // withhold or redirect a steer it is confident about; abstain,
+            // low confidence, errors and timeouts all mean "preference".
+            const preference: AdmissionPreference = currentAtStart.defaultAdmission === "queue" ? "queue" : "steer";
+            const goalStartedAt = turnGoalStart(threadId);
+            const state = buildAdmissionState({
+              message: text,
+              runningTurnOpeningRequest: turnGoal(threadId),
+              runningTurnStartedAt: goalStartedAt,
+              queueDepth: _queuedCount(threadId),
+              replyToRunningTurn: Boolean(replyTo && goalStartedAt !== null && replyTo.at >= goalStartedAt),
+              unattended: isUnattended(bot.id, threadId),
+              engine: currentAtStart.modelSelection?.instanceId ?? "",
+              sender: auth.kind,
+            });
+            let admission: AdmissionPreference = canSteer ? preference : "queue";
+            let report: { layer: AdmissionLayer; detail: string; confidence?: number; model?: string };
+            const connection = canSteer ? steerPolicyConnection() : null;
+            if (!canSteer) {
+              report = {
+                layer: "mechanical-clamp",
+                detail: carriesImages ? "images" : computerSelected ? "computer-selection" : "engine-cannot-steer",
+              };
+            } else if (!connection) {
+              report = { layer: "preference-default", detail: "model-off" };
+            } else if (preference === "queue" && !steerPrior(state)) {
+              // Volume cut: a queue-preferring bot consults the model only
+              // when a steer prior exists; otherwise the preference stands
+              // without a model call, saving hot-path latency and privacy
+              // exposure.
+              report = { layer: "preference-default", detail: "no-steer-prior" };
+            } else if (!validateAdmissionState(state)) {
+              report = { layer: "preference-default", detail: "state-invalid" };
+            } else {
+              const decision = await decideAdmission({
+                client: connection.client,
+                preference,
+                queueOverrideThreshold: connection.queueOverrideThreshold,
+                steerOverrideThreshold: connection.steerOverrideThreshold,
+                budgetMs: connection.budgetMs,
+                state,
+              });
+              admission = decision.action;
+              report = decision;
+            }
+            publishAdmission(threadId, { ...report, decision: admission, preference });
             // steer was offered only when a live instance could take it;
             // the second check carries that fact to the type system.
-            if (busyAdmission.action === "steer" && instance?.adapter.steer) {
+            if (canSteer && admission === "steer" && instance?.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
                 .catch((): SteerOutcome => "indeterminate");
@@ -19010,6 +19269,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
+        publishAdmission(bot.threadId, {
+          layer: "human",
+          decision: "steer",
+          preference: bot.defaultAdmission === "queue" ? "queue" : "steer",
+          detail: "queue-steer-pressed",
+        });
         return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
       }
       if (steered === "indeterminate") {
@@ -19025,6 +19290,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // The turn may have settled while the steer was refused; a queue that
       // is now drainable must not strand behind a missed settle.
       if (current && !current.busy) drainQueuedSends();
+      publishAdmission(bot.threadId, {
+        layer: "human",
+        decision: "queue",
+        preference: bot.defaultAdmission === "queue" ? "queue" : "steer",
+        detail: "queue-steer-refused",
+      });
       return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
     }
 
@@ -20049,6 +20320,29 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (method === "POST" && path === "/api/keys/test") {
       const body = await readBody(req, 8192);
       const provider = body?.provider;
+      // The decision-model row's Test button is a calibration probe, not a
+      // key check: two identical canary decisions, an obviously-right
+      // answer, probabilities that sum to one (#1630). Routing comes from
+      // the saved connection; the key may be a draft.
+      if (provider === "decisionModel") {
+        if (body?.key !== undefined && typeof body.key !== "string") {
+          return json(res, 400, { error: "key must be a string" });
+        }
+        const key = typeof body?.key === "string" ? body.key.trim() : cfg.decisionModel?.apiKey?.trim() || "";
+        if (!key && cfg.decisionModel?.provider !== "custom") {
+          return json(res, 400, { error: "No key to test. Paste one or save one first." });
+        }
+        if (key.length > 512) return json(res, 400, { error: "That does not look like an API key." });
+        const connection = {
+          ...cfg.decisionModel,
+          ...(key ? { apiKey: key } : {}),
+        };
+        if (!decisionModelConfigured(connection)) {
+          return json(res, 400, { error: "Save the lane, model and key first: the probe needs a complete connection." });
+        }
+        res.setHeader("cache-control", "no-store");
+        return json(res, 200, await decisionGate.probe(connection));
+      }
       if (!PROVIDER_KEY_KINDS.includes(provider as ProviderKeyKind)) {
         return json(res, 400, { error: `provider must be one of ${PROVIDER_KEY_KINDS.join(", ")}` });
       }
@@ -20526,7 +20820,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     if ((method === "PUT" || method === "PATCH") && path === "/api/config") {
       const body = await readBody(req);
-      if (hostedModels && ["instances", "anthropic", "openaiCompat", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
+      if (hostedModels && ["instances", "anthropic", "openaiCompat", "decisionModel", "xai", "mistral", "opencodeGo"].some(key => Object.hasOwn(body, key))) return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
       const patch = parseConfigPatch(body);
       if (patch.newBotDefaults) {
         if (patch.newBotDefaults.profile.modelSelection) {
@@ -20925,6 +21219,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         throw error;
       }
+      // A committed decision-model change (or its removal) moves the gate
+      // right away: the next mounted computer uses the new verdict without a
+      // restart, and a removed connection stops the chooser on its next mount.
+      if (configWriteCommitted) warmDecisionGate();
       let browserReferenceCleanupError: unknown = null;
       if (patch.signIn !== undefined) sessions.revalidateEmailSessions();
       if (!sharedComputersEnabled(cfg)) {
@@ -21617,6 +21915,7 @@ server.listen(PORT, "127.0.0.1", () => {
   // ordinary chat. Start only once every registry is initialized and the
   // endpoint is listening; earlier dispatch can hit uninitialized bindings.
   routines!.start();
+  warmDecisionGate();
   const leftover = pendingThreads();
   if (leftover.length) console.log(`delegations: ${leftover.length} thread(s) with queued handoffs from a previous run — draining`);
   for (const threadId of leftover) {

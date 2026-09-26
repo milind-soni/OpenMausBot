@@ -548,6 +548,54 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     }
   };
 
+  /** Tap the runtime stream the way an app window does and keep only
+  * admission decisions. No decision model is configured in this suite:
+  * every event here must come from the preference or a mechanical clamp. */
+  const admissionStream = async () => {
+    const controller = new AbortController();
+    const res = await fetch(`${BASE}/api/events`, { signal: controller.signal, headers: { accept: "text/event-stream" } });
+    const wire = res.body;
+    if (!res.ok || !wire) throw new Error(`event stream opened ${res.status}`);
+    const events: any[] = [];
+    let buffer = "";
+    void (async () => {
+      const reader = wire.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        let split: number;
+        while ((split = buffer.indexOf("\n\n")) !== -1) {
+          for (const line of buffer.slice(0, split).split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const frame = JSON.parse(line.slice(6)) as { kind?: string; event?: { type?: string } };
+              if (frame.kind === "runtime" && frame.event?.type === "decision.admission") events.push(frame.event);
+            } catch {
+              /* a non-JSON frame */
+            }
+          }
+          buffer = buffer.slice(split + 2);
+        }
+      }
+    })().catch(() => {
+      /* the abort in close() */
+    });
+    return {
+      matching: async (predicate: (event: any) => boolean, what: string, ms = 15_000) => {
+        const deadline = Date.now() + ms;
+        for (;;) {
+          const found = events.find(predicate);
+          if (found) return found;
+          if (Date.now() > deadline) throw new Error(`${what} never happened. stderr: ${stderr.slice(-2000)}`);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      },
+      close: () => controller.abort(),
+    };
+  };
+
   const newBot = async (instanceId: string, name: string) => {
     return (await api("POST", "/api/bots", { name, modelSelection: { instanceId, model: "fake-model" } })).body.bot;
   };
@@ -886,4 +934,41 @@ describe("steer-queue e2e (fake ACP fleet)", () => {
     },
     60_000,
   );
+
+  it("patches defaultAdmission per bot and rejects anything but steer or queue", async () => {
+    const bot = await newBot("steer", "Choosy");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { defaultAdmission: "queue" })).status).toBe(200);
+    expect((await botById(bot.id)).defaultAdmission).toBe("queue");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { defaultAdmission: "steer" })).status).toBe(200);
+    expect((await botById(bot.id)).defaultAdmission).toBe("steer");
+    const bad = await api("PATCH", `/api/bots/${bot.id}`, { defaultAdmission: "sometimes" });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error).toMatch(/defaultAdmission must be steer or queue/);
+  });
+
+  it("a busy send on a queue-preferring bot that cannot steer queues with a mechanical-clamp event", async () => {
+    rmSync(drainGate, { force: true });
+    const bot = await newBot("steer", "Queued by clamp");
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "long job" })).status).toBe(202);
+    await until(async () => (await botById(bot.id)).busy === true, "the clamp turn to start");
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { defaultAdmission: "queue" })).status).toBe(200);
+    const stream = await admissionStream();
+    try {
+      const queued = await api("POST", `/api/bots/${bot.id}/messages`, { text: "queue this mechanically" });
+      expect(queued.status).toBe(202);
+      expect(queued.body).toMatchObject({ ok: true, queued: true });
+      expect((await botById(bot.id)).messages.some((m: any) => m.text === "queue this mechanically")).toBe(false);
+      const event = await stream.matching(
+        (candidate: any) => candidate.layer === "mechanical-clamp" && candidate.decision === "queue" && candidate.preference === "queue" && candidate.detail === "engine-cannot-steer",
+        "the mechanical-clamp admission event",
+      );
+      expect(event.confidence).toBeUndefined();
+    } finally {
+      stream.close();
+      writeFileSync(drainGate, "complete");
+    }
+    await until(async () => (await botById(bot.id)).messages.some((m: any) => m.text === "queue this mechanically"), "the clamped queue to drain");
+    await until(async () => !(await botById(bot.id)).busy, "the drained turn to settle");
+    rmSync(drainGate, { force: true });
+  }, 60_000);
 });

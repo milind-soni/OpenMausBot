@@ -279,6 +279,11 @@ export interface WireBot {
   voiceNotes?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
+  /** Preferred admission when this bot's 1:1 thread is busy: fold new words
+   * into the live turn (steer, the historical default) or queue them for the
+   * next turn. The decision-model steer policy, when enabled, only overrides
+   * this at confidence. */
+  defaultAdmission?: "steer" | "queue";
   /** true after an edit/branch-switch rewound the visible conversation. */
   rewound?: boolean;
   pinned?: boolean;

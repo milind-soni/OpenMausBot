@@ -17,6 +17,9 @@ importers:
       '@trycua/cua-driver':
         specifier: 0.28.2
         version: 0.28.2
+      '@typesafe-ai/sdk':
+        specifier: 0.6.0
+        version: 0.6.0
       ajv:
         specifier: 8.17.1
         version: 8.17.1
@@ -2065,6 +2068,10 @@ packages:
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
+
+  '@typesafe-ai/sdk@0.6.0':
+    resolution: {integrity: sha512-IddX+Q0XM+VagOUZFeP7wZjaO4SHMdvnh2zEBdrZZnXedWI3BNK1lKhMx3ayrkFWvVLbVcUHJy6AVZlY+e6Jaw==}
+    engines: {node: '>=20'}
 
   '@ubjs/core@0.31.0-3':
     resolution: {integrity: sha512-39XrJgUZ2VVb561sSnkXPhczNoeBsNiSRArecsV0JE7CJq69ajFkcn9/tBAUS2NpgHkLIDU+z6Ks2+1wXnboxg==}
@@ -6311,6 +6318,8 @@ snapshots:
   '@types/unist@2.0.11': {}
 
   '@types/unist@3.0.3': {}
+
+  '@typesafe-ai/sdk@0.6.0': {}
 
   '@ubjs/core@0.31.0-3': {}
 

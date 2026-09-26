@@ -329,4 +329,64 @@ describe("createMcpBridgeInterceptor", () => {
     expect(answered).toEqual([]);
     expect(forwarded).toEqual([frame("tools/list", 1)]);
   });
+
+  it("runs the chooser downstream of the gate: a held computer never reaches it", async () => {
+    const intercepted: number[] = [];
+    const intercept = createMcpBridgeInterceptor({
+      answer: () => {},
+      forward: () => {},
+      gate: { isHeld: async () => true },
+      chooser: {
+        intercept: async (call) => {
+          intercepted.push(Number(call.id));
+          return { handled: false };
+        },
+      },
+    });
+    await intercept(frame("tools/call", 7));
+    expect(intercepted).toEqual([]);
+  });
+
+  it("answers a call the chooser handles and forwards one it declines", async () => {
+    const answered: string[] = [];
+    const forwarded: string[] = [];
+    const intercept = createMcpBridgeInterceptor({
+      answer: (line) => answered.push(line),
+      forward: (line) => forwarded.push(line),
+      chooser: {
+        intercept: async (call) => (call.name === "screenshot" ? { handled: true, text: "acted" } : { handled: false }),
+      },
+    });
+    await intercept(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "screenshot", arguments: {} } }));
+    await intercept(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "type", arguments: { text: "hi" } } }));
+    expect(answered).toHaveLength(1);
+    expect(JSON.parse(answered[0]!)).toEqual({
+      jsonrpc: "2.0",
+      id: 1,
+      result: { content: [{ type: "text", text: "acted" }] },
+    });
+    expect(forwarded).toEqual([JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "type", arguments: { text: "hi" } } })]);
+  });
+
+  it("keeps answers ordered while a slow decision is in flight", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const decided = new Promise<void>((resolve) => (release = resolve));
+    const intercept = createMcpBridgeInterceptor({
+      answer: (line) => order.push(`answer:${JSON.parse(line).id}`),
+      forward: (line) => order.push(`fwd:${JSON.parse(line).id}`),
+      chooser: {
+        intercept: async (call) => {
+          if (call.id === 1) await decided;
+          return { handled: call.id === 1 };
+        },
+      },
+    });
+    const call = (id: number) => JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "screenshot", arguments: {} } });
+    const first = intercept(call(1));
+    const second = intercept(call(2));
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["answer:1", "fwd:2"]);
+  });
 });

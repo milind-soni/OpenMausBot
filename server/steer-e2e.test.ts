@@ -8,6 +8,7 @@
 // POSIX-gated like the other CLI e2es (the fakes are shebang scripts).
 import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +29,27 @@ posixOnly("mid-turn steering e2e", () => {
   let steerGate: string;
   let steerFinishGate: string;
   let codexSteerGate: string;
+  // The admission chooser's fake decision model: a keyless custom-lane
+  // endpoint on this machine. It answers the boot-time calibration canary
+  // deterministically, then serves whatever admission outcome the test
+  // below has staged — including a slow one, to exercise the abort budget.
+  let decisionServer: ReturnType<typeof createServer>;
+  let admissionOutcome: { choice: "steer" | "queue" | "abstain"; confidence: number; delayMs?: number } = { choice: "abstain", confidence: 0.99 };
+  let admissionCalls = 0;
+  const resetAdmissionOutcome = () => {
+    admissionOutcome = { choice: "abstain", confidence: 0.99 };
+  };
+  /** Probabilities over the admission candidates that sum to exactly one:
+  * validateChoice checks the sum, and drifting floats would flake. */
+  const admissionAnswer = () => {
+    const probabilities: Record<string, number> = { steer: 0, queue: 0, abstain: 0 };
+    probabilities[admissionOutcome.choice] = admissionOutcome.confidence;
+    const others = (["steer", "queue", "abstain"] as const).filter((id) => id !== admissionOutcome.choice);
+    const rest = Math.round(((1 - admissionOutcome.confidence) / 2) * 1e6) / 1e6;
+    probabilities[others[0]] = rest;
+    probabilities[others[1]] = Math.round((1 - admissionOutcome.confidence - rest) * 1e6) / 1e6;
+    return { choice: admissionOutcome.choice, confidence: admissionOutcome.confidence, probabilities };
+  };
 
   const api = async (method: string, path: string, body?: unknown): Promise<{ status: number; body: any }> => {
     const res = await fetch(`${BASE}${path}`, {
@@ -71,7 +93,89 @@ posixOnly("mid-turn steering e2e", () => {
     }
   };
 
+  /** Tap the runtime stream the way an app window does and keep only
+  * admission decisions. Open it before the send that should publish. */
+  const admissionStream = async () => {
+    const controller = new AbortController();
+    const res = await fetch(`${BASE}/api/events`, { signal: controller.signal, headers: { accept: "text/event-stream" } });
+    const wire = res.body;
+    if (!res.ok || !wire) throw new Error(`event stream opened ${res.status}`);
+    const events: any[] = [];
+    let buffer = "";
+    void (async () => {
+      const reader = wire.getReader();
+      const decoder = new TextDecoder();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        buffer += decoder.decode(value, { stream: true });
+        let split: number;
+        while ((split = buffer.indexOf("\n\n")) !== -1) {
+          for (const line of buffer.slice(0, split).split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const frame = JSON.parse(line.slice(6)) as { kind?: string; event?: { type?: string } };
+              if (frame.kind === "runtime" && frame.event?.type === "decision.admission") events.push(frame.event);
+            } catch {
+              /* a non-JSON frame */
+            }
+          }
+          buffer = buffer.slice(split + 2);
+        }
+      }
+    })().catch(() => {
+      /* the abort in close() */
+    });
+    return {
+      matching: async (predicate: (event: any) => boolean, what: string, ms = 15_000) => {
+        const deadline = Date.now() + ms;
+        for (;;) {
+          const found = events.find(predicate);
+          if (found) return found;
+          if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}. stderr: ${stderr.slice(-2000)}`);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      },
+      close: () => controller.abort(),
+    };
+  };
+
   beforeAll(async () => {
+    // The decision endpoint must listen before the harness boots: the
+    // calibration gate probes it at startup and a failed probe backs off
+    // for a minute, long enough to starve every admission test below.
+    decisionServer = createServer((req, res) => {
+      res.on("error", () => {});
+      let body = "";
+      req.on("data", (chunk) => (body += chunk));
+      req.on("end", () => {
+        try {
+          const messages = (JSON.parse(body) as { messages?: Array<{ role?: string; content?: string }> }).messages ?? [];
+          const payload = JSON.parse(messages.find((message) => message.role === "user")?.content ?? "{}") as { criteria?: Record<string, string> };
+          const criteria = payload.criteria ?? {};
+          const canary = Object.hasOwn(criteria, "two");
+          let answer: { choice: string; confidence: number; probabilities: Record<string, number> };
+          if (canary) {
+            answer = { choice: "two", confidence: 0.99, probabilities: { two: 0.99, three: 0.005, seventeen: 0.003, reobserve: 0.001, abstain: 0.001 } };
+          } else {
+            admissionCalls += 1;
+            answer = admissionAnswer();
+          }
+          const respond = () => {
+            if (res.destroyed) return; // the budget aborted this call long ago
+            res.writeHead(200, { "content-type": "application/json" });
+            res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answer) } }] }));
+          };
+          if (!canary && admissionOutcome.delayMs) setTimeout(respond, admissionOutcome.delayMs);
+          else respond();
+        } catch {
+          res.writeHead(400);
+          res.end();
+        }
+      });
+    });
+    await new Promise<void>((resolve) => decisionServer.listen(0, "127.0.0.1", resolve));
+    const decisionPort = (decisionServer.address() as { port: number }).port;
     chmodSync(FAKE_CLAUDE, 0o755);
     chmodSync(FAKE_ACP, 0o755);
     chmodSync(FAKE_CODEX, 0o755);
@@ -84,6 +188,13 @@ posixOnly("mid-turn steering e2e", () => {
     writeFileSync(
       join(home, ".openmausbot", "config.json"),
       JSON.stringify({
+        decisionModel: {
+          provider: "custom",
+          url: `http://127.0.0.1:${decisionPort}/v1`,
+          model: "fake-admission",
+          uses: { steerPolicy: true },
+          steerPolicy: { queueOverrideThreshold: 0.7, steerOverrideThreshold: 0.9, budgetMs: 250 },
+        },
         instances: {
           claude: { driver: "claudeAgent", environment: { FAKE_CLAUDE_MODE: "slow" }, config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
           claudeSteer: {
@@ -133,6 +244,8 @@ posixOnly("mid-turn steering e2e", () => {
   }, 30_000);
 
   afterAll(async () => {
+    decisionServer?.closeAllConnections?.();
+    decisionServer?.close();
     child?.kill("SIGTERM");
     await new Promise<void>((resolve) => {
       if (!child || child.exitCode !== null) return resolve();
@@ -542,5 +655,151 @@ posixOnly("mid-turn steering e2e", () => {
     expect((await getGroup())?.messages.find((m: any) => m.text === "second")?.sender).toEqual(PAIRED);
     await api("POST", `/api/groups/${room.id}/interrupt`, {});
     await waitFor(async () => (await getGroup())?.working === false, "the drained room turn to settle");
+  }, 40_000);
+
+  // ---- the admission chooser: the calibrated model configured above may
+  // override the per-bot preference only at confidence, asymmetrically,
+  // and every decision publishes the layer that made it ----
+
+  /** A bot parked mid-turn on the slow fake — the busy 1:1 seam the
+  * chooser decides on, with the finish gate cleared so the window stays
+  * open until each test releases it. */
+  const busyAdmissionTurn = async (text: string) => {
+    rmSync(steerFinishGate, { force: true });
+    const created = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "claudeSteer", model: "claude-fake" } });
+    expect((await api("POST", `/api/bots/${created.id}/messages`, { text })).status).toBe(202);
+    await waitFor(async () => (await getBot(created.id)).busy === true, "the admission turn to start");
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the admission turn tool chip");
+    return created;
+  };
+
+  it("a confident queue override holds the busy send for the next turn, and the human Steer press reclaims it", async () => {
+    const created = await busyAdmissionTurn("refactor the parser module");
+    const stream = await admissionStream();
+    admissionOutcome = { choice: "queue", confidence: 0.95 };
+    try {
+      const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "an independent new request" });
+      expect(second.status).toBe(202);
+      expect(second.body).toMatchObject({ ok: true, queued: true });
+      expect(typeof second.body.queueId).toBe("string");
+      expect((await getBot(created.id)).messages.some((m: any) => m.text === "an independent new request")).toBe(false);
+      await stream.matching(
+        (event) => event.layer === "model-override" && event.decision === "queue" && event.preference === "steer" && event.confidence === 0.95 && event.detail === "override:queue",
+        "the queue override event",
+      );
+      const steered = await api("POST", `/api/bots/${created.id}/queue/${second.body.queueId}/steer`, { threadId: created.threadId });
+      expect(steered.status).toBe(200);
+      expect(steered.body.steered).toBe(true);
+      const folded = (await getBot(created.id)).messages.find((m: any) => m.text === "an independent new request");
+      expect(folded?.steered).toBe(true);
+      await stream.matching(
+        (event) => event.layer === "human" && event.decision === "steer" && event.preference === "steer" && event.detail === "queue-steer-pressed",
+        "the human steer event",
+      );
+    } finally {
+      resetAdmissionOutcome();
+      stream.close();
+      writeFileSync(steerFinishGate, "finish");
+    }
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the queue-steered turn to settle");
+  }, 40_000);
+
+  it("abstain maps to the preference: the default steers, with the abstention on record", async () => {
+    const created = await busyAdmissionTurn("draft the launch plan");
+    const stream = await admissionStream();
+    admissionOutcome = { choice: "abstain", confidence: 0.99 };
+    try {
+      const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "keep the tone dry" });
+      expect(second.status).toBe(202);
+      expect(second.body.steered).toBe(true);
+      await stream.matching(
+        (event) => event.layer === "preference-default" && event.decision === "steer" && event.preference === "steer" && event.detail === "abstain",
+        "the abstain-fallback event",
+      );
+    } finally {
+      resetAdmissionOutcome();
+      stream.close();
+      writeFileSync(steerFinishGate, "finish");
+    }
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the steered turn to settle");
+    const folded = (await getBot(created.id)).messages.find((m: any) => m.text === "keep the tone dry");
+    expect(folded?.steered).toBe(true);
+  }, 40_000);
+
+  it("a decision slower than the hot-path budget times out to the preference without delaying the send", async () => {
+    const created = await busyAdmissionTurn("audit the config loader");
+    const stream = await admissionStream();
+    admissionOutcome = { choice: "steer", confidence: 0.99, delayMs: 800 };
+    try {
+      const startedAt = Date.now();
+      const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "start with the tests" });
+      expect(second.status).toBe(202);
+      expect(second.body.steered).toBe(true);
+      // the 250ms budget fired well before the 800ms answer landed
+      expect(Date.now() - startedAt).toBeLessThan(800);
+      await stream.matching(
+        (event) => event.layer === "preference-default" && event.decision === "steer" && event.preference === "steer" && event.detail === "timeout",
+        "the timeout-fallback event",
+      );
+    } finally {
+      resetAdmissionOutcome();
+      stream.close();
+      writeFileSync(steerFinishGate, "finish");
+    }
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the budgeted turn to settle");
+  }, 40_000);
+
+  it("a confident steer override beats a queue preference when the reply targets the running turn", async () => {
+    const created = await busyAdmissionTurn("draft the launch plan");
+    // the turn's opening line is born inside the running turn: replying to
+    // it is the steer prior that unlocks the chooser for a queue-preferring bot
+    await waitFor(async () => Boolean((await getBot(created.id)).messages.find((m: any) => m.text === "hello from fake claude")), "the running turn's opening line");
+    const opening = (await getBot(created.id)).messages.find((m: any) => m.text === "hello from fake claude");
+    expect((await api("PATCH", `/api/bots/${created.id}`, { defaultAdmission: "queue" })).status).toBe(200);
+    const stream = await admissionStream();
+    admissionOutcome = { choice: "steer", confidence: 0.95 };
+    try {
+      const second = await api("POST", `/api/bots/${created.id}/messages`, { text: "make it two pages, not ten", replyToId: opening.id });
+      expect(second.status).toBe(202);
+      expect(second.body.steered).toBe(true);
+      await stream.matching(
+        (event) => event.layer === "model-override" && event.decision === "steer" && event.preference === "queue" && event.confidence === 0.95 && event.detail === "override:steer",
+        "the steer override event",
+      );
+    } finally {
+      resetAdmissionOutcome();
+      stream.close();
+      writeFileSync(steerFinishGate, "finish");
+    }
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the overridden turn to settle");
+    const folded = (await getBot(created.id)).messages.find((m: any) => m.text === "make it two pages, not ten");
+    expect(folded?.steered).toBe(true);
+  }, 40_000);
+
+  it("a queue preference without a steer prior stands without a model call", async () => {
+    const created = await busyAdmissionTurn("refactor the parser module");
+    expect((await api("PATCH", `/api/bots/${created.id}`, { defaultAdmission: "queue" })).status).toBe(200);
+    const stream = await admissionStream();
+    const before = admissionCalls;
+    let queued: { status: number; body: any } | undefined;
+    try {
+      queued = await api("POST", `/api/bots/${created.id}/messages`, { text: "an unrelated new ask" });
+      expect(queued.status).toBe(202);
+      expect(queued.body).toMatchObject({ ok: true, queued: true });
+      // the volume cut: no reply targeting the running turn, no model call
+      expect(admissionCalls).toBe(before);
+      await stream.matching(
+        (event) => event.layer === "preference-default" && event.decision === "queue" && event.preference === "queue" && event.detail === "no-steer-prior",
+        "the volume-cut event",
+      );
+    } finally {
+      resetAdmissionOutcome();
+      stream.close();
+      writeFileSync(steerFinishGate, "finish");
+    }
+    expect(queued?.body?.queued).toBe(true);
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.text === "an unrelated new ask"), "the queued ask to drain");
+    await waitFor(async () => (await getBot(created.id)).busy === false, "the drained turn to settle");
   }, 40_000);
 });

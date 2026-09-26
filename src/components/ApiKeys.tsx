@@ -8,9 +8,9 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 
-export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "xai" | "mistral";
+export type ConfigSection = "composio" | "box" | "opencodeGo" | "anthropic" | "openaiCompat" | "decisionModel" | "xai" | "mistral";
 /** Sections whose key can be tried against the provider from the server. */
-export type TestableProvider = "anthropic" | "openaiCompat" | "xai" | "mistral";
+export type TestableProvider = "anthropic" | "openaiCompat" | "decisionModel" | "xai" | "mistral";
 
 const SECTIONS: Record<
   ConfigSection,
@@ -24,6 +24,7 @@ const SECTIONS: Record<
   opencodeGo: { body: (v) => ({ opencodeGo: { apiKey: v } }), flag: (c) => c.opencodeGo?.configured ?? false },
   anthropic: { body: (v) => ({ anthropic: { key: v } }), flag: (c) => c.anthropic?.configured ?? false },
   openaiCompat: { body: (v) => ({ openaiCompat: { key: v } }), flag: (c) => c.openaiCompat?.configured ?? false },
+  decisionModel: { body: (v) => ({ decisionModel: { apiKey: v } }), flag: (c) => c.decisionModel?.configured ?? false },
   mistral: { body: (v) => ({ mistral: { key: v } }), flag: (c) => c.mistral?.configured ?? false },
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
 };
@@ -89,6 +90,14 @@ const CREDENTIALS: Record<
     descriptionKey: "keys.openaiCompat.desc",
     href: "https://openrouter.ai/keys",
     linkLabelKey: "keys.openaiCompat.link",
+    optional: true,
+  },
+  decisionModel: {
+    labelKey: "keys.decisionModel.label",
+    placeholderKey: "keys.decisionModel.placeholder",
+    descriptionKey: "keys.decisionModel.desc",
+    href: "https://typesafe.ai",
+    linkLabelKey: "keys.decisionModel.link",
     optional: true,
   },
   mistral: {
@@ -257,9 +266,11 @@ export function ApiKeyRow({
       const result = await api("/api/keys/test", { method: "POST", body: JSON.stringify({ provider: testProvider, ...(value.trim() ? { key: value.trim() } : {}) }) });
       if (generation !== testGeneration.current) return;
       const outcome = result.ok
-        ? result.check === "authentication" ? t("keys.testAuthenticated")
+        ? result.check === "calibration" ? t("keys.testCalibrated", { confidence: String(Math.round((result.confidence ?? 0) * 100)) })
+          : result.check === "authentication" ? t("keys.testAuthenticated")
           : result.models?.length ? t("keys.testCatalog", { models: result.models.join(", ") }) : t("keys.testCatalogNoModels")
-        : result.reason === "rejected" ? t("keys.testRejected")
+        : result.reason === "uncalibrated" ? (result.detail ? t("keys.testUncalibratedDetail", { detail: result.detail }) : t("keys.testUncalibrated"))
+          : result.reason === "rejected" ? t("keys.testRejected")
           : result.reason === "unreachable" ? t("keys.testUnreachable")
             : t("keys.testUnexpected", { status: String(result.status ?? "?") });
       setVerdict(
@@ -452,6 +463,134 @@ export function OpenAiCompatUrl() {
       </div>
       <p className="mt-1 text-[11.5px] leading-relaxed text-ink-secondary">{t("keys.openaiCompat.urlHint")}</p>
       {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
+    </div>
+  );
+}
+
+/** The decision model's routing: which lane serves the bounded chooser and
+ * how confident it must be before acting (#1630). Settings, not secrets —
+ * saved beside the write-only key, exactly like the OpenAI-compatible
+ * engine's URL. It is never an Engines provider, so it cannot appear in
+ * the bot model picker. */
+export function DecisionModelRouting() {
+  const { state, dispatch } = useStore();
+  const saved = state.config?.decisionModel;
+  const [provider, setProvider] = useState(saved?.provider ?? "");
+  const [url, setUrl] = useState(saved?.url ?? "");
+  const [model, setModel] = useState(saved?.model ?? "");
+  const [threshold, setThreshold] = useState(String(saved?.threshold ?? 0.9));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setProvider(saved?.provider ?? "");
+    setUrl(saved?.url ?? "");
+    setModel(saved?.model ?? "");
+    setThreshold(String(saved?.threshold ?? 0.9));
+  }, [saved?.provider, saved?.url, saved?.model, saved?.threshold]);
+
+  const parsedThreshold = Number(threshold);
+  const thresholdValid = Number.isFinite(parsedThreshold) && parsedThreshold >= 0.5 && parsedThreshold <= 1;
+  const complete = provider !== "" && model.trim() !== "" && (provider !== "custom" || url.trim() !== "");
+  const dirty =
+    (provider ?? "") !== (saved?.provider ?? "") ||
+    url.trim() !== (saved?.url ?? "") ||
+    model.trim() !== (saved?.model ?? "") ||
+    (thresholdValid ? Math.round(parsedThreshold * 1000) : 0) !== Math.round((saved?.threshold ?? 0.9) * 1000);
+
+  const save = () => {
+    if (saving || !dirty || !complete || !thresholdValid) return;
+    setSaving(true);
+    setError(null);
+    api("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({
+        decisionModel: {
+          provider,
+          url: url.trim(),
+          model: model.trim(),
+          threshold: Math.round(parsedThreshold * 1000) / 1000,
+        },
+      }),
+    })
+      .then((status: ConfigStatus) => dispatch({ type: "configStatus", config: status }))
+      .catch((e) => setError(e.message))
+      .finally(() => setSaving(false));
+  };
+
+  const inputClass =
+    "w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[12px] text-ink placeholder:text-ink-secondary focus:border-hairline focus:outline-none";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="text-[12.5px] leading-relaxed text-ink-secondary">{t("keys.decisionModel.routingHint")}</div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] text-ink-secondary">{t("keys.decisionModel.lane")}</span>
+          <select
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as typeof provider)}
+            aria-label={t("keys.decisionModel.lane")}
+            className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] text-ink focus:border-hairline focus:outline-none"
+          >
+            {!saved?.provider && <option value="">{t("keys.decisionModel.laneNone")}</option>}
+            <option value="typesafe">TypeSafe</option>
+            <option value="vercel">Vercel AI Gateway</option>
+            <option value="openrouter">OpenRouter</option>
+            <option value="custom">{t("keys.decisionModel.laneCustom")}</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] text-ink-secondary">{t("keys.decisionModel.model")}</span>
+          <input
+            type="text"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="jev-latest"
+            aria-label={t("keys.decisionModel.model")}
+            spellCheck={false}
+            className={inputClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] text-ink-secondary">{t("keys.decisionModel.url")}</span>
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder={provider === "custom" ? "http://127.0.0.1:8000/v1" : "https://api.typesafe.ai"}
+            aria-label={t("keys.decisionModel.url")}
+            spellCheck={false}
+            className={inputClass}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] text-ink-secondary">{t("keys.decisionModel.threshold")}</span>
+          <input
+            type="number"
+            min={0.5}
+            max={1}
+            step={0.05}
+            value={threshold}
+            onChange={(e) => setThreshold(e.target.value)}
+            aria-label={t("keys.decisionModel.threshold")}
+            className={inputClass}
+          />
+        </label>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={save}
+          disabled={saving || !dirty || !complete || !thresholdValid}
+          className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
+        </button>
+        {!thresholdValid && <span className="text-[12px] text-danger">{t("keys.decisionModel.thresholdRange")}</span>}
+        {complete && !dirty && thresholdValid && saved?.configured && (
+          <span className="text-[12px] text-ink-secondary">{t("keys.decisionModel.testHint")}</span>
+        )}
+      </div>
+      {error && <div className="text-[12px] text-danger">{error}</div>}
     </div>
   );
 }
