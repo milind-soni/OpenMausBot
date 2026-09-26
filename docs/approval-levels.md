@@ -47,11 +47,21 @@ that access on**. Work it delegates from a Full-access conversation —
 Full access whatever the teammate's own level: the delegated thread is
 switched to Full, stays Full, and opens with a line saying so ("Full access —
 delegated by Clive, a Chief of Staff with Full access"). Work a Full-access
-Chief hands out inside a room runs Full for that turn. The teammate's own
-default and its other conversations do not change; a teammate whose engine
-has no Full mode keeps its own level; an ordinary bot's delegation still uses
-the recipient's setting; a Chief delegating from an Ask conversation passes
-nothing on. Questions and missing credentials still reach you.
+Chief hands out inside a room runs Full for that turn.
+
+The access reaches the whole of that work, not only its first step. When the
+teammate hands part of it to another teammate, that work runs Full too, and
+its thread says where the access came from ("Full access — delegated by Ada,
+passing on Full access from Clive, a Chief of Staff"). In a room, work handed
+on from a Full-access Chief's request runs Full for that turn in the same way.
+
+Every chain starts at a Chief. The teammate's own default and its other
+conversations do not change; a teammate whose engine has no Full mode keeps
+its own level, and does not pass Full on; Full an ordinary bot holds any
+other way — including Full you gave it yourself — is not passed on, so its
+delegation still uses the recipient's setting; a Chief delegating from an Ask
+conversation passes nothing on. Setting a delegated thread's level yourself
+ends the chain there. Questions and missing credentials still reach you.
 
 ## Answering a request
 
