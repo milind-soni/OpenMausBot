@@ -28,8 +28,13 @@ struct ChatListView: View {
     @State private var managingThreads: Chat?
     @FocusState private var searchFocused: Bool
 
-    /// Room for the floating bar, so the last row can scroll clear of it.
-    private static let barClearance: CGFloat = 96
+    /// Space between the header's glass buttons and whatever the list
+    /// starts with, so a first section title is never tucked under them.
+    private static let listTopInset: CGFloat = 12
+    /// Clear space above the floating bar once the list is scrolled to its
+    /// end. The bar's own height is inset by `safeAreaInset`, so the last
+    /// row stays fully visible and tappable whatever the bar measures.
+    private static let listBottomMargin: CGFloat = 16
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -79,9 +84,11 @@ struct ChatListView: View {
                             botRows(chats)
                         }
                     }
-                    .padding(.bottom, Self.barClearance)
+                    .padding(.top, Self.listTopInset)
+                    .padding(.bottom, Self.listBottomMargin)
                 }
                 .refreshable { await session.refresh() }
+                .accessibilityIdentifier("roster-list")
                 .overlay {
                     if rosterIsEmpty {
                         EmptyStateView(
@@ -95,13 +102,13 @@ struct ChatListView: View {
                         )
                     }
                 }
+                // The list scrolls beneath the floating bar, and its end is
+                // inset by the bar's measured height rather than a guess.
+                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
             }
             // top-aligned: the roster fills downward from the header
             .frame(maxWidth: CompanionLayout.rosterWidth, maxHeight: .infinity, alignment: .top)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .overlay(alignment: .bottom) {
-                bottomBar.frame(maxWidth: CompanionLayout.rosterWidth)
-            }
             // a bot that stopped for you grows out of the island
             .overlay(alignment: .top) {
                 if CompanionLayout.supportsIslandPresentation {
@@ -264,7 +271,7 @@ struct ChatListView: View {
     private var rosterSections: some View {
         if !attention.isEmpty {
             sectionLabel(Text("Needs attention"))
-                .padding(.top, 10)
+                .padding(.top, 2)
                 .padding(.bottom, 4)
             ForEach(attention) { entry in
                 Button {
