@@ -33,8 +33,9 @@ it("Clive reviews multi-provider teams once, continues after each decision, and 
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const state = async () => (await api("GET", "/api/bots")).bots;
-    // The fixture starts with a randomly named bot, which can itself be
-    // Mira, Patch, or Quill. Compare identities, not that starter's name.
+    // The fixture pins its starter's name (control-omb.ts), but identity is
+    // still the honest comparison: "Quill" once collided with a randomly
+    // named starter and looked like a leaked planned bot (#1257).
     const initialBotIds = new Set((await state()).map((bot: any) => bot.id));
     const setupBots = async () => (await state()).filter((bot: any) => !initialBotIds.has(bot.id));
     let previousPid: number | undefined;
