@@ -1464,6 +1464,14 @@ struct MessageRow: View {
             }
         case .activity:
             ActivityChip(tool: message.tool, threadRef: message.threadRef, openThread: openThread)
+            // A turn that failed because Claude Code is too old for the
+            // model: offer to run the updater for the engine this thread uses.
+            if message.tool?.claudeUpdate == true, case let .bot(bot) = chat {
+                ClaudeUpdateCard(
+                    instanceId: bot.currentTaskModelSelection.instanceId,
+                    tint: MausPalette.color(chat.color)
+                )
+            }
         case .compaction:
             ReceiptChip(icon: "square.3.layers.3d", label: message.compaction?.chipText ?? message.text ?? "") {
                 selecting = SelectableText(text: message.compaction?.summary ?? message.text ?? "")
