@@ -1697,6 +1697,47 @@ describe("ACP turns (fake CLI)", () => {
       expect(rpc().filter((m) => m === "session/prompt")).toHaveLength(2);
     });
 
+    it("an agent that pins MCP servers to its process gets a fresh one when the token rotates", async () => {
+      countFile = join(scratch, "launches");
+      rpcFile = join(scratch, "rpc.json");
+      process.env.FAKE_ACP_LAUNCH_COUNT_FILE = countFile;
+      process.env.FAKE_ACP_RPC_DUMP = rpcFile;
+      // Hermes keeps the agents proxy it started first and ignores the new
+      // env on session/load, so the rotated token must reach a new process.
+      await create(createAcpDriver({
+        ...SELECT_MODEL_SUPPORT,
+        driverKind: "pinnedMcpTest",
+        selectModel: undefined,
+        mcpServersPinnedToProcess: true,
+      }));
+      const integration = (token: string) => ({
+        command: process.execPath,
+        args: [FAKE_CLI],
+        env: { OMB_COMMS_TOKEN: token },
+      });
+      const turn = async (text: string, token: string, resumeCursor?: string) => {
+        const sent = await instance.adapter.sendTurn({
+          threadId: "t-pinned-token",
+          text,
+          resumeCursor,
+          integrations: { agents: integration(token) },
+        });
+        const done = await recorder.until((e) => e.type === "turn.completed" && e.turnId === sent.turnId);
+        expect(done).toMatchObject({ ok: true });
+      };
+
+      await turn("one", "token-one");
+      await turn("two", "token-two", "fake-acp-session");
+      expect(launches()).toBe(2);
+      // the replacement resumed the same native session with the new token
+      expect(rpc()).toEqual(expect.arrayContaining(["initialize", "session/load", "session/prompt"]));
+      expect(rpc()).not.toContain("session/new");
+
+      // the same servers are still the same contract: no respawn
+      await turn("three", "token-two", "fake-acp-session");
+      expect(launches()).toBe(2);
+    });
+
     it("an agent that refuses to re-load its live session gets one fresh process, then resumes", async () => {
       countFile = join(scratch, "launches");
       const appendFile = join(scratch, "rpc-all.jsonl");

@@ -24,6 +24,10 @@
 //                   | ask-peer (spawn the injected "agents" MCP server from
 //                     session/new's mcpServers, call list_bots + ask_bot on a
 //                     peer, and reply with what the peer said — the comms e2e)
+//                   | list-peers (call list_bots through the injected "agents"
+//                     MCP server and reply with the result. Like Hermes, the
+//                     first agents server this process is offered — on
+//                     session/new or session/load — is kept for its life)
 //                   | delegate-peer (same as ask-peer but uses delegate_bot —
 //                     returns immediately, the peer runs after our turn)
 //                   | chief-delegate (delegates only for an ASSIGN_TO_PEER
@@ -520,7 +524,8 @@ function handle(msg: any) {
         dumpState.mcpServers = servers;
         writeFileSync(process.env.FAKE_ACP_DUMP, JSON.stringify(dumpState, null, 2));
       }
-      agentsMcp = servers.find((s: any) => s?.name === "agents") ?? null;
+      const offered = servers.find((s: any) => s?.name === "agents") ?? null;
+      agentsMcp = mode === "list-peers" ? agentsMcp ?? offered : offered;
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(servers, null, 2));
       }
@@ -553,6 +558,8 @@ function handle(msg: any) {
       }
       if (mode === "safe-agent-reads") {
         agentsMcp = (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
+      } else if (mode === "list-peers") {
+        agentsMcp ??= (msg.params?.mcpServers ?? []).find((server: any) => server.name === "agents") ?? null;
       }
       if (process.env.FAKE_ACP_DUMP) {
         writeFileSync(`${process.env.FAKE_ACP_DUMP}.mcp.json`, JSON.stringify(msg.params?.mcpServers ?? []));
@@ -803,6 +810,18 @@ function handle(msg: any) {
           .catch((e) => {
             const message = e instanceof Error ? e.message : String(e);
             out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `delegate error: ${message}` } } } });
+            complete();
+          });
+        return;
+      }
+      if (mode === "list-peers" && agentsMcp) {
+        void driveMcp(agentsMcp, [{ name: "list_bots", args: () => ({}) }])
+          .then((list) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peers: ${list}` } } } });
+            complete();
+          })
+          .catch((e) => {
+            out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `peers error: ${(e as Error).message}` } } } });
             complete();
           });
         return;
