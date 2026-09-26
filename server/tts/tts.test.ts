@@ -16,6 +16,10 @@ const MP3 = Buffer.from([0xff, 0xfb, 0x90, 0x00, 0x11, 0x22, 0x33, 0x44]);
 const WAV = Buffer.from("RIFF....WAVEfmt ");
 /** flipped by tests that want the server to have no /v1/models route */
 let modelsFail = false;
+/** flipped by tests that want /v1/models to drop the connection */
+let modelsDrop = false;
+/** flipped by tests that want the server to have no /v1/audio/voices route */
+let audioVoicesFail = false;
 let stubBase = "";
 
 beforeAll(async () => {
@@ -88,7 +92,21 @@ beforeAll(async () => {
         res.writeHead(200, { "content-type": "audio/wav" });
         return res.end(WAV);
       }
+      if (path === "/v1/audio/voices") {
+        if (audioVoicesFail) return send(404, { detail: "no audio voices route" });
+        return send(200, {
+          status: "ok",
+          voices: [
+            { filename: "Emily.wav", display_name: "Emily" },
+            { filename: "Gianna.wav", display_name: "Gianna" },
+          ],
+        });
+      }
       if (path === "/v1/models") {
+        if (modelsDrop) {
+          req.socket?.destroy();
+          return;
+        }
         if (modelsFail) return send(404, { detail: "no models route" });
         return send(200, { data: [{ id: "alex" }, { id: "turbo-en" }] });
       }
@@ -468,8 +486,11 @@ describe("Chatterbox (local server)", () => {
     expect(message).toMatch(/couldn't reach the Chatterbox server/i);
   });
 
-  it("lists the server's models as voices, with a fallback when it cannot", async () => {
+  it("lists the server's models as voices, with audio/voices and Default as fallbacks", async () => {
     refuse = null;
+    modelsFail = false;
+    modelsDrop = false;
+    audioVoicesFail = false;
     const { listVoices } = await voice();
     expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
       { id: "alex", label: "alex" },
@@ -477,9 +498,23 @@ describe("Chatterbox (local server)", () => {
     ]);
     modelsFail = true;
     expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
+      { id: "Emily.wav", label: "Emily" },
+      { id: "Gianna.wav", label: "Gianna" },
+    ]);
+    modelsFail = false;
+    modelsDrop = true;
+    expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
+      { id: "Emily.wav", label: "Emily" },
+      { id: "Gianna.wav", label: "Gianna" },
+    ]);
+    modelsDrop = false;
+    modelsFail = true;
+    audioVoicesFail = true;
+    expect(await listVoices(cfg(chatCfg({ baseUrl: stubBase })))).toEqual([
       { id: "default", label: "Default", description: "the server's built-in Chatterbox voice" },
     ]);
     modelsFail = false;
+    audioVoicesFail = false;
   });
 
   it("lists no voices without a server address, rather than calling out", async () => {

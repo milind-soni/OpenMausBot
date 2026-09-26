@@ -152,7 +152,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // App-owned profile images. Upload is image-only and capped at 10 MB by
   // the harness; GET is a single bare generated filename, never a path.
   { method: "POST", path: /^\/api\/attachments$/ },
-  { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp)$/i },
+  // Voice notes are served from the same dir as .mp3; the harness honors
+  // Range on them so a phone player can seek without the whole clip.
+  { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3)$/i },
   // Share-sheet documents are raw, capped at 25 MiB, and stored under a
   // generated filename by the harness. The display name stays in the query;
   // only this exact upload route crosses the companion boundary.

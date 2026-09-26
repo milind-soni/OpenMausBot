@@ -56,7 +56,7 @@ import { BotPickerList } from "./BotPickerList";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
-import { orderedThreadList, SidebarThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
+import { orderedThreadList, SidebarThreadRow, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -287,6 +287,7 @@ function useRevealedThreadRow(reveal: AppState["revealThread"], currentThreadId:
 
 export function GroupThreadList({ group, selected, density = "comfortable", query = "" }: { group: Group; selected: boolean; density?: SidebarDensity; query?: string }) {
   const { state, dispatch } = useStore();
+  const now = useRelativeNow();
   const [showAll, setShowAll] = useState(false);
   const busy = Boolean(group.working || group.busyBotId);
   const waiting = state.bots.find((bot) => bot.id === group.busyBotId)?.activity === "waiting-on-you";
@@ -298,6 +299,7 @@ export function GroupThreadList({ group, selected, density = "comfortable", quer
   useRevealedThreadRow(state.revealThread, selected ? group.threadId : null);
   return <div className="mb-2 space-y-0.5" role="group" aria-label={t("task.namedList", { name: group.name })}>
     {visible.map((task) => <SidebarThreadRow key={task.threadId} task={task} ownerId={group.id} current={selected && task.threadId === group.threadId} compact={density === "compact"}
+      now={now}
       onSelect={() => { if (task.threadId !== group.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: task.threadId }); else dispatch({ type: "select", id: group.id }); }}
       onRename={(title) => dispatch({ type: "renameGroupTask", groupId: group.id, threadId: task.threadId, title })}
       onDelete={() => dispatch({ type: "deleteGroupTask", groupId: group.id, threadId: task.threadId })}
@@ -886,6 +888,7 @@ export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; on
  * Waiting and working stay visible as status, not as a sort key. */
 export function BotThreadList({ bot, selected, density = "comfortable", query = "", hidden = false }: { bot: Bot; selected: boolean; density?: SidebarDensity; query?: string; hidden?: boolean }) {
   const { state, dispatch } = useStore();
+  const now = useRelativeNow();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
     .filter((task) => !task.routineRunId)
     .map((task) => ({ ...task, queued: Boolean(state.pendingQueued[task.threadId]?.length) }));
@@ -930,6 +933,7 @@ export function BotThreadList({ bot, selected, density = "comfortable", query = 
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
     return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} compact={density === "compact"} folders={projects} activityLabel={task.threadId === bot.threadId ? activeActivityLabel : undefined}
+      now={now}
       onSelect={() => { if (task.threadId !== bot.threadId) dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId }); else dispatch({ type: "select", id: bot.id }); }}
       onRename={(title) => dispatch({ type: "renameTask", botId: bot.id, threadId: task.threadId, title })}
       onDelete={() => dispatch({ type: "deleteTask", botId: bot.id, threadId: task.threadId })}

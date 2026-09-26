@@ -17,6 +17,7 @@ import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
+import type { TighteningRequestCardData } from "./tightening-request.ts";
 import type { SkillRequestCardData } from "./skill-request.ts";
 import type { QuestionRequestCardData } from "./ask-question.ts";
 import type { RoutineRunCardData } from "./routine-run.ts";
@@ -272,6 +273,9 @@ export interface WireBot {
   speakReplies?: boolean;
   /** This bot's own voice id, so a room of bots doesn't sound like one person. */
   voice?: string;
+  /** Whether this bot may send voice notes. Absent/true = allowed; false
+   * hides the tool and refuses the route even with a voice configured. */
+  voiceNotes?: boolean;
   /** Queue direct-chat messages behind outstanding delegated work. */
   parkDirectMessages?: boolean;
   /** true after an edit/branch-switch rewound the visible conversation. */
@@ -474,6 +478,8 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
   profileRequest?: ProfileRequestCardData;
+  /** A durable authority-tightening proposal (propose_tightening). */
+  tighteningRequest?: TighteningRequestCardData;
   teamSetupRequest?: TeamSetupRequest;
   /** A durable learned-skill proposal. */
   skillRequest?: SkillRequestCardData;

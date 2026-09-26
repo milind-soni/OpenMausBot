@@ -556,6 +556,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   if (name === "post_to_room") {
     const groupId = String(args.group_id ?? "").trim();
     const message = String(args.message ?? "").trim();
+    const attachVoiceNote = args.attach_voice_note === true;
     if (!groupId || !message) {
       return { text: "post_to_room needs group_id (from list_rooms) and message.", isError: true };
     }
@@ -567,12 +568,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     }
     const r = await api("/api/internal/post-to-room", {
       method: "POST",
-      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message }),
+      body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, groupId, message, attachVoiceNote }),
     });
     if (r.error) return { text: String(r.error), isError: true };
     turn.roomPostsThisTurn += 1;
     return {
-      text: `Posted in ${r.roomName ?? "the room"}. Nobody's turn was started, so expect no reply — tell the user it is posted.`,
+      text: `Posted in ${r.roomName ?? "the room"}${r.attachedVoiceNote ? " with the voice note attached" : ""}. Nobody's turn was started, so expect no reply — tell the user it is posted.`,
     };
   }
   if (name === "ask_bot") {

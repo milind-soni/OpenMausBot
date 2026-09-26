@@ -33,7 +33,7 @@ export interface WorldSnapshot {
   /** threadId of each bot's active chat thread, by bot key. */
   activeThreads: Record<string, string>;
   /** Messages collected at snapshot time, keyed by threadId. */
-  threads: Record<string, Array<{ text?: string; kind?: string; tool?: { name?: string } }>>;
+  threads: Record<string, Array<{ role?: string; text?: string; kind?: string; tool?: { name?: string } }>>;
   sends: SendReceipt[];
   /** Named observations recorded by steps (gate answers, routine snapshots). */
   observations: Record<string, unknown>;
@@ -61,5 +61,12 @@ export interface ScenarioResult {
   steps: StepResult[];
   assertions: AssertionResult[];
   assertionsInput: Assertion[];
+  /** The frozen serializable evidence the trace tiers diff: turns with
+    * tool calls, the handoff tree, and send receipts. */
+  evidence: {
+    turns: EvidenceTurn[];
+    handoffs: HandoffNodeView[];
+    sends: SendReceipt[];
+  };
   error?: string;
 }

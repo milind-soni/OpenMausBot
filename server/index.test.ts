@@ -4056,6 +4056,65 @@ describe("harness HTTP API", () => {
     expect(malformedId.status).toBe(400);
   });
 
+  it("serves audio attachments with single-range 206s and keeps images full", async () => {
+    // Voice notes land in the attachments dir via saveAudio; seed one the
+    // same way the voice-note route does, under a generated-style name.
+    const audio = Buffer.from("0123456789abcdefghij");
+    const audioName = "voice-note-range-fixture.mp3";
+    mkdirSync(join(home, ".openmausbot", "attachments"), { recursive: true });
+    writeFileSync(join(home, ".openmausbot", "attachments", audioName), audio);
+    const size = audio.byteLength;
+
+    const bounded = await fetch(`${BASE}/api/attachments/${audioName}`, { headers: { range: "bytes=2-7" } });
+    expect(bounded.status).toBe(206);
+    expect(bounded.headers.get("content-type")).toBe("audio/mpeg");
+    expect(bounded.headers.get("content-range")).toBe(`bytes 2-7/${size}`);
+    expect(bounded.headers.get("content-length")).toBe("6");
+    expect(Buffer.from(await bounded.arrayBuffer()).equals(audio.subarray(2, 8))).toBe(true);
+
+    const openEnded = await fetch(`${BASE}/api/attachments/${audioName}`, { headers: { range: "bytes=12-" } });
+    expect(openEnded.status).toBe(206);
+    expect(openEnded.headers.get("content-range")).toBe(`bytes 12-${size - 1}/${size}`);
+    expect(Buffer.from(await openEnded.arrayBuffer()).equals(audio.subarray(12))).toBe(true);
+
+    const suffix = await fetch(`${BASE}/api/attachments/${audioName}`, { headers: { range: "bytes=-4" } });
+    expect(suffix.status).toBe(206);
+    expect(suffix.headers.get("content-range")).toBe(`bytes ${size - 4}-${size - 1}/${size}`);
+    expect(Buffer.from(await suffix.arrayBuffer()).equals(audio.subarray(size - 4))).toBe(true);
+
+    const pastEof = await fetch(`${BASE}/api/attachments/${audioName}`, { headers: { range: `bytes=${size}-` } });
+    expect(pastEof.status).toBe(416);
+    expect(pastEof.headers.get("content-range")).toBe(`bytes */${size}`);
+
+    // multi-range and malformed headers read as absent: full 200, one body
+    for (const bad of ["bytes=0-1,3-4", "bytes=x-y", "chunks=0-9"]) {
+      const ignored = await fetch(`${BASE}/api/attachments/${audioName}`, { headers: { range: bad } });
+      expect(ignored.status).toBe(200);
+      expect(Buffer.from(await ignored.arrayBuffer()).equals(audio)).toBe(true);
+    }
+
+    // a no-range audio GET is unchanged
+    const plain = await fetch(`${BASE}/api/attachments/${audioName}`);
+    expect(plain.status).toBe(200);
+    expect(Buffer.from(await plain.arrayBuffer()).equals(audio)).toBe(true);
+
+    // images keep the pre-Range behavior: a Range header is ignored
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const saved = await fetch(`${BASE}/api/attachments`, {
+      method: "POST",
+      headers: { "content-type": "image/png" },
+      body: new Uint8Array(png),
+    });
+    const imageName = ((await saved.json()) as { path: string }).path.split(/[\\/]/).pop()!;
+    const imageWithRange = await fetch(`${BASE}/api/attachments/${imageName}`, { headers: { range: "bytes=0-4" } });
+    expect(imageWithRange.status).toBe(200);
+    expect(imageWithRange.headers.get("content-range")).toBeNull();
+    expect(Buffer.from(await imageWithRange.arrayBuffer()).equals(png)).toBe(true);
+  });
+
   it("keeps a channel image in its transcript while sending native pixels to the responder", async () => {
     const created = await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
@@ -8804,6 +8863,108 @@ describe("harness HTTP API", () => {
         const decisions = (await api("GET", "/api/decisions")).body.decisions;
         return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
       }).toEqual(["card-shown:profile", "user-approved:user"]);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("keeps a proposed tightening inert until confirmed, fails closed when loosened, and never leaks the receipt", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    try {
+      // Start from Auto with one standing grant, so tightening to Edits is a
+      // real reduction and the loosened-since path stays reachable.
+      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+
+      // Escalation is refused before any card exists.
+      const escalation = await fetch(`${BASE}/api/internal/tightening-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { approvalMode: "full" }, reason: "not allowed" }),
+      });
+      expect(escalation.status).toBe(400);
+
+      const proposal = await fetch(`${BASE}/api/internal/tightening-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "incident lockdown" }),
+      });
+      expect(proposal.status).toBe(201);
+      const proposed = z.object({ requestId: z.string() }).passthrough().parse(await proposal.json());
+      const state = (await api("GET", "/api/bots")).body;
+      const wireScout = state.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      const card = wireScout
+        ?.messages.find((message: { card?: { requestId?: string } }) => message.card?.requestId === proposed.requestId);
+      expect(card?.card).toMatchObject({
+        tool: "tighten_permissions",
+        tighteningRequest: { botId: bot.id, targetBotId: bot.id, intents: { alwaysAllow: ["Bash"] } },
+      });
+      expect(wireScout?.approvalMode).toBe("auto");
+      expect(wireScout?.alwaysAllow).toEqual(["Bash"]);
+
+      // A human adds a new standing grant while the card sits open: the
+      // confirmation must fail closed rather than apply the stale card.
+      await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllow: ["Bash", "WebSearch"] });
+      const stale = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: proposed.requestId, behavior: "allow" });
+      expect(stale.status).toBe(409);
+
+      // A fresh card against the live state applies on confirm.
+      const againResponse = await fetch(`${BASE}/api/internal/tightening-requests`, {
+        method: "POST",
+        headers: internalHeaders,
+        body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { approvalMode: "edits" }, reason: "incident lockdown" }),
+      });
+      const again = z.object({ requestId: z.string() }).passthrough().parse(await againResponse.json());
+      const ok = await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: again.requestId, behavior: "allow" });
+      expect(ok.body).toMatchObject({ ok: true, outcome: "allowed-once", tighteningFields: ["approvalMode"] });
+      const after = (await api("GET", "/api/bots")).body.bots.find((candidate: { id: string }) => candidate.id === bot.id);
+      expect(after.approvalMode).toBe("edits");
+      expect(after.autoApprove).toBe(false);
+      // The durable receipt exists server-side but never crosses the wire.
+      expect(after).not.toHaveProperty("lastTighteningRequestId");
+
+      // decisions audit
+      await expect.poll(async () => {
+        const decisions = (await api("GET", "/api/decisions")).body.decisions;
+        return decisions.filter((d: any) => d.requestId === again.requestId).map((d: any) => `${d.decision}:${d.source}`).sort();
+      }).toEqual(["card-shown:tightening", "user-approved:user"]);
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`);
+      await api("DELETE", `/api/bots/${bot.id}`);
+    }
+  });
+
+  it("counts tightening cards against the shared proposal budget", async () => {
+    const bot = (await api("POST", "/api/bots", { name: "Scout" })).body.bot;
+    try {
+      // A standing grant keeps every tightening proposal a real reduction,
+      // so eight cards can pile up without touching live authority.
+      await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "auto", alwaysAllow: ["Bash"] });
+      const token = await mintTestCapability(BASE, bot.id, bot.threadId);
+      const internalHeaders = {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      };
+      const proposeTightening = () =>
+        fetch(`${BASE}/api/internal/tightening-requests`, {
+          method: "POST",
+          headers: internalHeaders,
+          body: JSON.stringify({ fromBotId: bot.id, fromThreadId: bot.threadId, intents: { alwaysAllow: ["Bash"] }, reason: "incident lockdown" }),
+        });
+
+      // Tightening cards consume the same per-thread budget as the other
+      // proposal kinds; eight open cards fill it.
+      for (let index = 0; index < 8; index += 1) {
+        expect((await proposeTightening()).status).toBe(201);
+      }
+      const ninth = await proposeTightening();
+      expect(ninth.status).toBe(429);
+      expect(await ninth.json()).toMatchObject({ error: "confirm or cancel an existing proposal first" });
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);

@@ -8,6 +8,7 @@
 import { soulDiffLines } from "../shared/line-diff.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { PROFILE_REQUEST_FIELDS, type ProfileRequestCardData, type ProfileRequestChanges } from "../shared/profile-request.ts";
+import type { TighteningRequestCardData } from "../shared/tightening-request.ts";
 import { parseBotProfilePatch, type BotProfilePatchInput } from "./bot-profile.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { newId } from "./contracts.ts";
@@ -44,6 +45,7 @@ export interface OptionCardLike {
   tool?: string;
   held?: string;
   profileRequest?: ProfileRequestCardData;
+  tighteningRequest?: TighteningRequestCardData;
 }
 
 /** Kept narrow so the domain can be tested without constructing the full app store. */

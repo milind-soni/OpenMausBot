@@ -41,8 +41,15 @@ describe("snooze expiry wake-up", () => {
     vi.stubGlobal("window", {
       setTimeout: (callback: () => void, delay: number) => { scheduled = { at: Date.now() + delay, fire: callback }; return 1; },
       clearTimeout: vi.fn(),
+      // the production list also runs the shared relative-time clock; its
+      // interval is covered by SidebarThreadRow.relative-now.test.ts
+      setInterval: vi.fn(() => 0),
+      clearInterval: vi.fn(),
     });
     vi.stubGlobal("fetch", vi.fn());
+    // the shared relative-time clock also listens for visibility changes;
+    // its behavior is covered by SidebarThreadRow.relative-now.test.ts
+    vi.stubGlobal("document", { visibilityState: "visible", addEventListener: vi.fn(), removeEventListener: vi.fn() });
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 

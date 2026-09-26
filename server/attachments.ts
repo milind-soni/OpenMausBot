@@ -677,3 +677,45 @@ function mimeForExt(ext: string): string {
       return "application/octet-stream";
   }
 }
+
+/** Verdict on a `Range` header for audio serving (#1745). `none` means
+ * "answer as if the header was absent" — the pre-Range full 200 that
+ * images and documents keep forever — and covers absent, malformed,
+ * non-bytes, and multi-range headers alike. `unsatisfiable` is the one
+ * malformed-but-meaningful case (a start at or past EOF) that must answer
+ * 416 rather than silently degrade, so players learn the truth about the
+ * file they are seeking inside. */
+export type AudioRange =
+  | { kind: "none" }
+  | { kind: "unsatisfiable" }
+  | { kind: "range"; start: number; end: number };
+
+/** Parse a single `bytes=` range against a stored audio file. Only the
+ * canonical shapes a player sends are honored: `a-b`, `a-`, and `-n`
+ * (the last-n-bytes suffix). Anything else — commas, letters, reversed
+ * bounds, internal spaces — reads as "not understood" and the caller sends
+ * the whole file, which is always a correct answer to a GET. */
+export function parseAudioRange(header: string | undefined, size: number): AudioRange {
+  const raw = header?.trim();
+  if (!raw) return { kind: "none" };
+  const m = raw.match(/^bytes=(\d*)-(\d*)$/);
+  if (!m) return { kind: "none" };
+  const [, rawStart, rawEnd] = m;
+  if (rawStart === "") {
+    // `bytes=-` carries no bounds at all: malformed input, not a suffix
+    // range, so the caller answers with the whole file. A real zero-length
+    // suffix (`bytes=-0`) stays unsatisfiable below, per RFC 9110.
+    if (rawEnd === "") return { kind: "none" };
+    // suffix range: the final n bytes; zero is unsatisfiable by definition
+    const suffix = Number(rawEnd);
+    if (!suffix) return { kind: "unsatisfiable" };
+    if (size === 0) return { kind: "unsatisfiable" };
+    return { kind: "range", start: Math.max(0, size - suffix), end: size - 1 };
+  }
+  const start = Number(rawStart);
+  if (start >= size) return { kind: "unsatisfiable" };
+  if (rawEnd === "") return { kind: "range", start, end: size - 1 };
+  const end = Number(rawEnd);
+  if (end < start) return { kind: "none" };
+  return { kind: "range", start, end: Math.min(end, size - 1) };
+}

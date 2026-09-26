@@ -52,6 +52,11 @@ export async function runScenario(scenario: Scenario): Promise<ScenarioResult> {
     steps,
     assertions,
     assertionsInput: scenario.assertions,
+    evidence: {
+      turns: snapshot?.turns ?? [],
+      handoffs: snapshot?.handoffs ?? [],
+      sends: snapshot?.sends ?? [],
+    },
     ...(error === undefined ? {} : { error }),
   };
 }

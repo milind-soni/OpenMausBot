@@ -18,6 +18,7 @@ const result: ScenarioResult = {
     { assertion: { kind: "turnOrder", bots: [] }, pass: false, detail: "expected chief, got lead" },
   ],
   assertionsInput: [{ kind: "turnOrder", bots: [] }],
+  evidence: { turns: [], handoffs: [], sends: [] },
   error: "boom",
 };
 

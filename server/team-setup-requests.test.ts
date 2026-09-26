@@ -195,7 +195,8 @@ describe("reviewed Chief team setup", () => {
   it.each(["target", "chief", "team", "scope", "busy", "source"])("cancels a %s change while the review was open, without any batch mutation", async (change) => {
     const h = harness();
     const request = h.propose([{ action: "update", botId: h.peer.id, fields: { title: "Researcher", section: "Engineering" } }, specialist("Mira", "Research")], ["Research"]);
-    if (change === "target") h.peer.description = "newer user edit";
+    // A touched field: scoped revision (#1791) ignores drift on untouched fields.
+    if (change === "target") h.peer.title = "newer user edit";
     if (change === "chief") h.chief.chiefOfStaff = false;
     if (change === "team") h.teams.push("Research");
     if (change === "scope") h.chief.managedSections = [];
@@ -210,6 +211,42 @@ describe("reviewed Chief team setup", () => {
     expect(h.messages[0].card?.options).toEqual([]);
     expect(h.messages[0].card?.answered).toBeUndefined();
     expect(h.messages[0].card?.held).toBeTruthy();
+  });
+  it("applies a one-field plan despite unrelated drift on the target and the Chief", async () => {
+    const h = harness();
+    const card = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }]);
+    h.peer.soul = "newer user edit";
+    h.peer.description = "also newer";
+    h.chief.title = "Renamed meanwhile";
+    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
+    expect(h.peer.modelSelection).toEqual({ instanceId: "codex", model: "gpt-fixture" });
+    expect(h.peer.soul).toBe("newer user edit");
+    expect(h.chief.title).toBe("Renamed meanwhile");
+  });
+  it("still cancels when a field the plan touches drifts, on the target and on the Chief", async () => {
+    const h = harness();
+    const target = h.propose([{ action: "update", botId: h.peer.id, fields: { modelSelection: { instanceId: "codex", model: "gpt-fixture" } } }]);
+    h.peer.modelSelection = { instanceId: "claude", model: "opus" };
+    expect((await h.resolve(target.requestId))?.result).toMatchObject({ state: "cancelled", error: "@Ada changed. This setup was cancelled; review a new proposal." });
+    const chief = h.propose([{ action: "update", botId: h.chief.id, fields: { title: "Chief of Staff" } }]);
+    h.chief.title = "Owner renamed the Chief";
+    expect((await h.resolve(chief.requestId))?.result).toMatchObject({ state: "cancelled", error: "The Chief's settings changed. This setup was cancelled; review a new proposal." });
+    expect(h.apply).not.toHaveBeenCalled();
+  });
+  it("keeps a plan that never touches the Chief valid across the Chief's own drift", async () => {
+    const h = harness();
+    const card = h.propose([{ action: "update", botId: h.peer.id, fields: { title: "Researcher" } }]);
+    h.chief.soul = "Chief drifted elsewhere";
+    h.chief.modelSelection = { instanceId: "codex", model: "gpt-fixture" };
+    expect((await h.resolve(card.requestId))?.result.state).toBe("applied");
+    expect(h.peer.title).toBe("Researcher");
+  });
+  it("cancels when the section a card displayed moves, even though the plan did not change it", async () => {
+    const h = harness();
+    const card = h.propose([{ action: "update", botId: h.peer.id, fields: { title: "Researcher" } }]);
+    h.peer.section = "Engineering";
+    expect((await h.resolve(card.requestId))?.result).toMatchObject({ state: "cancelled", error: "@Ada changed. This setup was cancelled; review a new proposal." });
+    expect(h.apply).not.toHaveBeenCalled();
   });
   it("preserves existing elevated permissions and peer allowlists", () => {
     const h = harness(); h.peer.approvalMode = "full";

@@ -53,6 +53,7 @@ const {
   deleteAttachment,
   extensionForFileMime,
   extensionForMime,
+  parseAudioRange,
   readAttachment,
   sanitizeSharedFileName,
   saveAudio,
@@ -450,6 +451,50 @@ describe("readAttachment name lock", () => {
     expect(readAttachment("no-extension")).toBeNull();
     expect(readAttachment("uuid.jpeg")).toBeNull(); // saved as .jpg
     expect(readAttachment("note.wav")).toBeNull(); // only .mp3 audio is written
+  });
+});
+
+describe("parseAudioRange", () => {
+  const SIZE = 1000;
+
+  it("parses bounded, open-ended, and suffix ranges", () => {
+    expect(parseAudioRange("bytes=0-499", SIZE)).toEqual({ kind: "range", start: 0, end: 499 });
+    expect(parseAudioRange("bytes=500-999", SIZE)).toEqual({ kind: "range", start: 500, end: 999 });
+    expect(parseAudioRange("bytes=400-", SIZE)).toEqual({ kind: "range", start: 400, end: 999 });
+    expect(parseAudioRange("bytes=-100", SIZE)).toEqual({ kind: "range", start: 900, end: 999 });
+    // a suffix longer than the file is the whole file
+    expect(parseAudioRange("bytes=-9999", SIZE)).toEqual({ kind: "range", start: 0, end: 999 });
+  });
+
+  it("clamps an end past EOF to the last byte", () => {
+    expect(parseAudioRange("bytes=990-5000", SIZE)).toEqual({ kind: "range", start: 990, end: 999 });
+  });
+
+  it("answers unsatisfiable for a start at or past EOF and a zero suffix", () => {
+    expect(parseAudioRange("bytes=1000-", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=1000-1200", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
+    expect(parseAudioRange("bytes=0-", 0)).toEqual({ kind: "unsatisfiable" });
+  });
+
+  it("ignores absent, malformed, multi-range, and non-bytes headers", () => {
+    expect(parseAudioRange(undefined, SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=-", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=0-99,200-299", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=a-b", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=99-0", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("bytes=0 - 99", SIZE)).toEqual({ kind: "none" });
+    expect(parseAudioRange("chunks=0-99", SIZE)).toEqual({ kind: "none" });
+    // surrounding OWS is legal per RFC 9110 and common from proxies
+    expect(parseAudioRange("  bytes=0-99  ", SIZE)).toEqual({ kind: "range", start: 0, end: 99 });
+  });
+
+  it("distinguishes an empty suffix from a zero suffix", () => {
+    // no bounds at all is malformed input: answer with the full 200 body
+    expect(parseAudioRange("bytes=-", SIZE)).toEqual({ kind: "none" });
+    // a real zero-length suffix is valid but unsatisfiable, per RFC 9110
+    expect(parseAudioRange("bytes=-0", SIZE)).toEqual({ kind: "unsatisfiable" });
   });
 });
 

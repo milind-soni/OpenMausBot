@@ -372,6 +372,11 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
   // A test's key for relaying an organization library into the fixture
   // (POST /api/testing/org-library); the route does not exist without it.
   if (parentEnv.OMB_TEST_ORG_LIBRARY_KEY) childEnv.OMB_TEST_ORG_LIBRARY_KEY = parentEnv.OMB_TEST_ORG_LIBRARY_KEY;
+  // Voice-note e2e fault injection: arms the one-shot audio-append failure
+  // prelude inside the fixture server (see fail-audio-append-once.mjs).
+  if (parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE) {
+    childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE = parentEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE;
+  }
   return childEnv;
 }
 
@@ -449,7 +454,12 @@ export async function launchVerificationServer(
     AGENT_BROWSER_EXECUTABLE_PATH: browser.executablePath,
   });
   if (boxFixtureApi) childEnv.OMB_BOX_API = boxFixtureApi;
-  const child = spawn(process.execPath, ["--experimental-strip-types", join(ROOT, "server", "index.ts")], {
+  const serverArgs = ["--experimental-strip-types"];
+  if (childEnv.OMB_TEST_FAIL_AUDIO_APPEND_ONCE === "1") {
+    serverArgs.push("--import", pathToFileURL(join(ROOT, "server", "testing", "fail-audio-append-once.mjs")).href);
+  }
+  serverArgs.push(join(ROOT, "server", "index.ts"));
+  const child = spawn(process.execPath, serverArgs, {
     cwd: ROOT,
     env: childEnv,
     stdio: ["ignore", log, log],

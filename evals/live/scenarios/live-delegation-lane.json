@@ -1,0 +1,52 @@
+{
+  "id": "live-delegation-lane",
+  "title": "Live smoke: a chief delegates one micro-task and reports the settled result",
+  "behavior": "Against a real model, a chief still routes one concrete task through exactly one coordinate_bots call to the Engineering maker, the maker replies in its own node thread, and both handoff nodes complete.",
+  "bots": [
+    {
+      "key": "chief",
+      "name": "Chief",
+      "chiefOfStaff": true,
+      "managedSections": ["Engineering"]
+    },
+    {
+      "key": "maker",
+      "name": "Maker",
+      "section": "Engineering"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "send",
+      "bot": "chief",
+      "text": "Use coordinate_bots as your only tool call to assign the Engineering maker one micro-task: reply with the single word READY. When the maker completes, reply here with one short confirmation sentence. Do not do the micro-task yourself."
+    },
+    {
+      "kind": "waitForNodeStatus",
+      "bot": "maker",
+      "status": "completed"
+    },
+    {
+      "kind": "waitForTurns",
+      "bot": "chief",
+      "count": 2
+    },
+    {
+      "kind": "waitForNodeStatus",
+      "bot": "chief",
+      "status": "completed"
+    }
+  ],
+  "invariants": [
+    { "kind": "sendNotQueued", "bot": "chief" },
+    { "kind": "toolNames", "bot": "chief", "equals": ["coordinate_bots"] },
+    {
+      "kind": "handoffTree",
+      "equals": [
+        { "bot": "chief", "status": "completed" },
+        { "bot": "maker", "status": "completed", "hasParent": true }
+      ]
+    },
+    { "kind": "botReplied", "bot": "maker", "thread": "node" }
+  ]
+}

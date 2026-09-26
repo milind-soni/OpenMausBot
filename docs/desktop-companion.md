@@ -53,6 +53,8 @@ The remote Computer panel includes the host panel's per-agent **Scheduled tasks*
 
 A Mac remote client supports dictation and live calls against any host: Apple Speech runs locally on the Mac, and only the transcript crosses the paired connection. When a Mac client selects a built-in system voice, reply speech is synthesized and played locally on that Mac; ElevenLabs and Fish Audio reply audio is synthesized by the host and relayed byte for byte. A Windows remote client still needs a future Windows speech-to-text implementation for microphone input.
 
+Voice-note attachments stream through the same relay: the mp3 serving route is on the companion allowlist, the audio crosses byte for byte, and `Range` requests are forwarded so a player can seek inside a clip without re-downloading it.
+
 The host must be running and awake. Cleartext HTTP is accepted only for a `.ts.net` MagicDNS hostname because that connection is encrypted inside Tailscale's WireGuard tunnel. Raw IP addresses, LAN hostnames, URL credentials, paths, queries, and fragments are rejected.
 
 ## Security model

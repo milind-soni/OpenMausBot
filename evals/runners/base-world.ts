@@ -63,7 +63,10 @@ export abstract class BaseWorld {
     return value;
   }
 
-  protected evidence(): Array<Record<string, any>> {
+  /** The scripted engine's evidence log for offline worlds; the live world
+   * overrides this to derive the same row shape from real thread messages,
+   * so it may return a promise. */
+  protected evidence(): Array<Record<string, any>> | Promise<Array<Record<string, any>>> {
     if (!existsSync(this.evidencePath)) return [];
     return readFileSync(this.evidencePath, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   }
@@ -82,7 +85,9 @@ export abstract class BaseWorld {
     );
   }
 
-  protected async threadMessages(threadId: string): Promise<Array<{ text?: string; kind?: string; tool?: { name?: string } }>> {
+  protected async threadMessages(
+    threadId: string,
+  ): Promise<Array<{ role?: string; text?: string; kind?: string; turnId?: string; tool?: { name?: string; arguments?: Record<string, unknown> } }>> {
     const response = await this.api.get("/api/threads/" + threadId + "/messages");
     return (response.body.messages ?? []) as Array<{ text?: string; kind?: string; tool?: { name?: string } }>;
   }
@@ -101,7 +106,7 @@ export abstract class BaseWorld {
         const key = this.botKey(step.bot);
         await waitUntil(
           "turns for " + key,
-          async () => this.evidence().filter((turn) => this.botKeyOf(turn.botId) === key).length,
+          async () => (await this.evidence()).filter((turn) => this.botKeyOf(turn.botId) === key).length,
           (count) => count >= step.count,
           step.timeoutMs ?? 20_000,
         );
@@ -145,7 +150,8 @@ export abstract class BaseWorld {
   }
 
   async snapshot(ctx: WorldContext): Promise<WorldSnapshot> {
-    const turns = this.evidence().map((turn) => ({
+    const evidence = await this.evidence();
+    const turns = evidence.map((turn) => ({
       bot: this.botKeyOf(turn.botId),
       index: turn.turnIndex,
       threadId: turn.threadId,

@@ -62,6 +62,20 @@ function score(assertion: Assertion, world: WorldSnapshot): { pass: boolean; det
         ? { pass: true, detail: calls.length + " tool call(s) matched" }
         : { pass: false, detail: mismatches.join("; ") };
     }
+    case "toolNames": {
+      const names = world.turns
+        .filter((turn) => turn.bot === assertion.bot)
+        .flatMap((turn) => turn.toolCalls.map((call) => call.tool));
+      const mismatches = assertion.equals.flatMap((want, index) =>
+        names[index] === want ? [] : ["call #" + (index + 1) + ": expected " + want + ", got " + (names[index] ?? "nothing")],
+      );
+      if (names.length > assertion.equals.length) {
+        mismatches.push(names.length - assertion.equals.length + " unexpected extra call(s): " + names.slice(assertion.equals.length).join(", "));
+      }
+      return mismatches.length === 0
+        ? { pass: true, detail: names.length + " tool name(s) matched in order" }
+        : { pass: false, detail: mismatches.join("; ") };
+    }
     case "turnOrder": {
       const actual = world.turns.map((turn) => turn.bot);
       return deepEqual(actual, assertion.bots)

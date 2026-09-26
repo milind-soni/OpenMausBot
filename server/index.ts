@@ -68,6 +68,7 @@ import {
   extensionForMime,
   FILE_MAX_BYTES,
   IMAGE_MAX_BYTES,
+  parseAudioRange,
   readAttachment,
   saveAudio,
   saveFile,
@@ -219,6 +220,7 @@ import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, inci
  * window; a computer-use turn's output can run to hundreds of KB. */
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
+import { admit } from "./admission.ts";
 import { _loadPending, buildDelegationFailurePrompt, buildDelegationRevivalPrompt, DELEGATION_TTL_MS, DelegationWakeBudget, discardDelegations, drainDelegations, expireStaleDelegations, findDelegationReceipt, pendingDelegationInfo, pendingDelegationSnapshot, pendingThreads, queueDelegation, recordDelegationReceipt, releaseDelegationsWaitingOn, summarizeDelegatedActivity, type DelegationReceipt, type QueueResult } from "./delegations.ts";
 import {
   cancelSteeredMessage,
@@ -404,6 +406,7 @@ import { RoutineRequestService } from "./routine-requests.ts";
 import { createOptionsCard } from "./options-card.ts";
 import { buildBotOverview, type BotOverview, connectedAppsFacts } from "./bot-overview.ts";
 import { ProfileRequestService } from "./profile-requests.ts";
+import { TighteningRequestService } from "./tightening-requests.ts";
 import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
@@ -1666,7 +1669,10 @@ function agentsIntegration(
       OMB_SHARED_COMPUTERS_ENABLED: sharedComputersEnabled(cfg) ? "1" : "0",
       // Same capability rule for voice: the tool is offered only when this
       // bot can actually speak, and the route re-checks on every call.
-      OMB_VOICE_NOTES: tts.voiceReady(cfg, (botForThread(botId, threadId) ?? store.bot(botId))?.voice) ? "1" : "0",
+      OMB_VOICE_NOTES: (() => {
+        const speaking = botForThread(botId, threadId) ?? store.bot(botId);
+        return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
+      })(),
     },
   };
 }
@@ -1899,7 +1905,11 @@ function hasDirectDispatch(botId: string): boolean {
  * share this test so peer and room work waits for a real slot, not total
  * bot idleness. */
 function canAdmitDirectTurn(botId: string, threadId: string): boolean {
-  return !threadBusy(botId, threadId) && !botAtThreadCapacity(botId) && !activeGroupTurnForBot(botId);
+  return admit("peer", {}, {
+    threadBusy: threadBusy(botId, threadId),
+    atCapacity: botAtThreadCapacity(botId),
+    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+  }).action === "start";
 }
 
 /** Routine and webhook dispatch shares startTurn's admission preconditions
@@ -1908,7 +1918,12 @@ function canAdmitDirectTurn(botId: string, threadId: string): boolean {
  * blocks every other turn kind; it does not consume a capacity slot. */
 function unattendedDispatchState(botId: string): "ready" | "busy" | "missing" {
   const bot = store.bot(botId);
-  return !bot ? "missing" : botAtThreadCapacity(botId) || activeGroupTurnForBot(botId) ? "busy" : "ready";
+  const decision = admit("unattended", {}, {
+    botPresent: Boolean(bot),
+    atCapacity: Boolean(bot) && botAtThreadCapacity(botId),
+    groupTurn: Boolean(bot) && Boolean(activeGroupTurnForBot(botId)),
+  });
+  return decision.action !== "refuse" ? "ready" : decision.code === "missing" ? "missing" : "busy";
 }
 
 function requestedTaskBot(botId: string, rawThreadId: unknown): BotRecord {
@@ -2693,7 +2708,7 @@ const wireTask = (task: TaskRecord): WireTask => {
 };
 
 const wireBot = (bot: BotRecord): WireBot => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, tasks, approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTighteningRequestId: _lastTighteningRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
   // An elevated selection is inert until the desktop confirms its exact
   // private reply. Every ordinary client sees the effective Ask state during
   // that two-phase window, never a grant that may still roll back.
@@ -2707,7 +2722,7 @@ const wireBot = (bot: BotRecord): WireBot => {
 /** The correlated private response carries the requested value so Electron
  * can validate it before sending the confirmation that makes it effective. */
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
-  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
+  const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTighteningRequestId: _lastTighteningRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, ...rest } = bot;
   return { ...rest, approvalMode: approvalModeFor(rest), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map(wireTask) } : {}) };
 };
 
@@ -7122,22 +7137,25 @@ function drainQueuedSends() {
 /** Keep a person's words off the transcript until a direct-thread slot is
  * available. Reuse the existing cancellable, idempotent composer queue. */
 async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: Message, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger) {
-  const capacity = botAtThreadCapacity(botId);
-  // A room turn holds the bot exactly like the sibling opened-thread queue
-  // below: the drain's own block check waits it out, so the words queue
-  // here rather than bounce off startTurn's 409.
-  const groupTurn = activeGroupTurnForBot(botId);
-  if (capacity || threadBusy(botId, threadId) || groupTurn || parksBehindCoordination(botId, threadId)) {
-    const reason = capacity ? "capacity" as const : groupTurn ? "group-turn" as const : undefined;
+  const decision = admit("direct", {}, {
+    // A room turn holds the bot exactly like the sibling opened-thread queue
+    // below: the drain's own block check waits it out, so the words queue
+    // here rather than bounce off startTurn's 409.
+    atCapacity: botAtThreadCapacity(botId),
+    threadBusy: threadBusy(botId, threadId),
+    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+    parksBehindCoordination: parksBehindCoordination(botId, threadId),
+  });
+  if (decision.action === "queue") {
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
-      reason,
+      reason: decision.reason,
       prompt: promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"),
       sender,
       trigger,
     });
-    return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason };
+    return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason };
   }
   const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger });
   return { ok: true as const, threadId, message };
@@ -7159,14 +7177,16 @@ async function startOrQueueOpenedThread(
   unattended: boolean,
 ): Promise<{ state: "running" } | { state: "queued"; position: number } | { state: "failed"; error: string }> {
   const peerAsk = { botId, name: store.bot(botId)!.name, unattended: unattended || undefined };
-  // A room turn holds the bot too (startTurn refuses a direct turn during
-  // one); the drain's own block check already waits for it, so the words
-  // queue here rather than bounce.
-  const capacity = botAtThreadCapacity(botId);
-  const groupTurn = activeGroupTurnForBot(botId);
-  if (capacity || groupTurn) {
+  const decision = admit("opened-thread", {}, {
+    // A room turn holds the bot too (startTurn refuses a direct turn during
+    // one); the drain's own block check already waits for it, so the words
+    // queue here rather than bounce.
+    atCapacity: botAtThreadCapacity(botId),
+    groupTurn: Boolean(activeGroupTurnForBot(botId)),
+  });
+  if (decision.action === "queue") {
     queueSteeredMessage(botId, threadId, text, {
-      reason: capacity ? "capacity" : "group-turn",
+      reason: decision.reason,
       unattended,
       peerAsk,
     });
@@ -9261,6 +9281,33 @@ const profileRequests = new ProfileRequestService({
     return null;
   },
 });
+const tighteningRequests = new TighteningRequestService({
+  store,
+  autoApply: fullAccessForSource,
+  canPersist: proposalPersistence,
+  // Same reach as a profile change: a Chief may tighten a section peer;
+  // anyone else only itself. Re-checked at confirm.
+  validateTarget: (proposerBotId, targetBotId) => {
+    const proposer = store.bot(proposerBotId);
+    const target = store.bot(targetBotId);
+    if (!target) return "that bot no longer exists";
+    if (!proposer?.chiefOfStaff) return "only a section's Chief of Staff can change another bot's permissions";
+    if (!canReachPeer(proposer, target)) return "that bot is not in a team this Chief is allowed to manage";
+    return null;
+  },
+  // The card judges the effective mounts, so the snapshot resolves the same
+  // way the engine does: through the config-aware custom-server filter.
+  mountedMcpServers: (bot) => Object.keys(engineMcpServers(bot)),
+  enabledSkills: (botId) => listSkills(botId).filter((skill) => skill.enabled).map((skill) => skill.name),
+  disableSkill: (botId, name) => {
+    const disabled = setSkillEnabled(botId, name, false);
+    return typeof disabled === "object" && "error" in disabled ? { ok: false, error: disabled.error } : { ok: true };
+  },
+  // The owner's own routes stop a busy bot before touching its approval
+  // level or MCP mounts; the card asks for the same, except an emergency
+  // full/custom → ask downgrade, which applies first and stops after.
+  targetBusy: (botId) => Boolean(store.bot(botId)?.busy || activeGroupTurnForBot(botId)),
+});
 const teamSetupTeams = () => [...new Set(["", ...readSections(), ...store.bots.map((bot) => sectionKey(bot.section)), ...store.groups.map((group) => sectionKey(group.section))])];
 const teamSetupRequests = new TeamSetupRequestService({
   store, teams: teamSetupTeams, canAccessTeam, canPersist: proposalPersistence, maxBots: MAX_WORKSPACE_BOTS,
@@ -9523,6 +9570,50 @@ function resolveAndSendProfile(
       ok: true, outcome: "allowed-once", profileFields: result.fields,
       ...(result.settlementPending ? { settlementPending: true, message: result.message } : {}),
     });
+    return true;
+  }
+  if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
+  if (result.state === "already_settled") {
+    json(res, 200, { ok: true, outcome: result.behavior === "allow" ? "allowed-once" : "rejected", alreadySettled: true });
+    return true;
+  }
+  json(res, 200, { ok: true, outcome: "rejected" });
+  return true;
+}
+
+function resolveAndSendTightening(
+  res: ServerResponse,
+  args: { botId: string; botName?: string; threadId: string; requestId: string; behavior: string },
+): boolean {
+  const card = store.messagesFor(args.threadId).find(
+    (message) => message.card?.requestId === args.requestId && message.card.tighteningRequest,
+  )?.card;
+  if (!card) return false;
+  const result = tighteningRequests.resolve(args);
+  if (!result.claimed) return false;
+  if (result.state === "applied" || result.state === "denied") {
+    appendDecision(DATA_DIR, {
+      threadId: args.threadId, requestId: args.requestId, botId: args.botId, botName: args.botName,
+      tool: "tighten_permissions", summary: card.subtitle,
+      decision: result.state === "applied" ? "user-approved" : "user-denied", source: "user",
+    });
+  }
+  if (result.state === "applied") {
+    const target = store.bot(result.targetBotId);
+    if (target) broadcast({ kind: "bot", bot: wireBot(target) });
+    if (result.emergencyStop) {
+      // Mirror the owner's own route: the fail-closed Ask is already
+      // persisted, then the exact turn still holding the elevated
+      // per-turn snapshot is stopped. The response never waits on it.
+      void stopBotForEmergencyApprovalDowngrade(result.targetBotId).catch((error) => {
+        console.warn(
+          `[tightening] emergency stop failed for bot ${result.targetBotId}: ${
+            error instanceof Error ? error.message : String(error)
+          }. The fail-closed Ask is persisted, but the in-flight turn keeps its elevated access until it ends.`,
+        );
+      });
+    }
+    json(res, 200, { ok: true, outcome: "allowed-once", tighteningFields: result.fields });
     return true;
   }
   if (result.state === "invalid") { json(res, result.status, { error: result.error }); return true; }
@@ -11361,11 +11452,11 @@ function proposalPersistence(botId: string, threadId: string) {
   if (fullAccessForSource(botId, threadId)) return { ok: true as const };
   // Only cards on the visible branch can be acted on from the composer.
   // Abandoned branches must not permanently consume the proposal quota.
-  // Routine and profile proposals share one budget per bot per thread, so
-  // one thread cannot pile up 8 of each.
+  // Routine, profile, tightening, and team-setup proposals share one budget
+  // per bot per thread, so one thread cannot pile up 8 of each.
   const openRequests = store.activePath(threadId).filter(
     (message) =>
-      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
+      (message.card?.routineRequest?.botId === botId || message.card?.profileRequest?.botId === botId || message.card?.tighteningRequest?.botId === botId || message.card?.teamSetupRequest?.botId === botId) &&
       !message.card.answered &&
       !message.card.dismissed && !message.card.expired,
   ).length;
@@ -13549,6 +13640,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         return json(res, 201, proposed);
       }
+      if (method === "POST" && path === "/api/internal/tightening-requests") {
+        const parsed = z.object({
+          fromBotId: z.string().min(1).max(128),
+          fromThreadId: z.string().min(1).max(128),
+          forBotId: z.string().max(128).optional(),
+          intents: z.unknown(),
+          reason: z.unknown(),
+        }).strict().safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "invalid tightening proposal" });
+        const body = parsed.data;
+        const from = store.bot(body.fromBotId);
+        if (!from) return json(res, 403, { error: "unknown sender" });
+        const owner = connectorThread(from.id, body.fromThreadId);
+        if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
+        const targetBotId = body.forBotId?.trim() || from.id;
+        const proposed = tighteningRequests.submit({
+          botId: from.id,
+          threadId: body.fromThreadId,
+          targetBotId,
+          intents: body.intents,
+          reason: body.reason,
+          from: owner.group ? { botId: from.id, name: from.name, color: from.color } : undefined,
+        });
+        appendDecision(DATA_DIR, {
+          threadId: body.fromThreadId, requestId: proposed.requestId, botId: from.id, botName: from.name,
+          tool: "tighten_permissions", summary: proposed.detail, decision: proposed.state === "applied" ? "auto-approved" : "card-shown",
+          source: proposed.state === "applied" ? "full-access" : "tightening",
+        });
+        return json(res, 201, proposed);
+      }
       if (method === "GET" && path === "/api/internal/team-setup-catalog") {
         let chief = store.bot(internalCapability.botId)!;
         if (!chief.chiefOfStaff || chief.hidden) return json(res, 403, { error: "Only an active Chief may plan team setup" });
@@ -14408,6 +14529,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!owner) return json(res, 403, { error: "source conversation does not belong to sender" });
         const groupId = String(body.groupId ?? "").trim();
         const message = String(body.message ?? "").trim();
+        const attachVoiceNote = body.attachVoiceNote === true;
+        if (body.attachVoiceNote !== undefined && typeof body.attachVoiceNote !== "boolean") {
+          return json(res, 400, { error: "attachVoiceNote must be true or false" });
+        }
         if (!groupId || !message) {
           return json(res, 400, { error: "post_to_room needs group_id (from list_rooms) and message" });
         }
@@ -14500,13 +14625,50 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // here is also what keeps its window alive through a turn that only
         // posts — an aged-out mark would hand the next hop to auto-approve.
         const unattended = isUnattended(poster.id, internalCapability.threadId);
+        // A room post is the one send path that bypasses the settling reply,
+        // so an explicit attach flag — never a silent default — moves this
+        // turn's parked voice note onto the posted message. The removal
+        // matters twice over: the clip is delivered exactly once (the
+        // settling reply no longer finds it parked), and it survives a turn
+        // that dies after the post, because it is no longer parked cleanup's
+        // to delete. The post text stands as the caption.
+        let attachedVoiceNote = false;
+        let stagedAttachments: NonNullable<Message["attachments"]> = [];
+        let detachParkedAudio: (() => void) | undefined;
+        if (attachVoiceNote) {
+          const parkedKey = turnAttachmentKey(fromThreadId, liveTurnByThread.get(fromThreadId));
+          const parked = turnAttachmentsByTurn.get(parkedKey) ?? [];
+          const audio = parked.filter((attachment) => attachment.kind === "audio");
+          if (!audio.length) {
+            return json(res, 400, { error: "no voice note to attach — call send_voice_note in this turn first" });
+          }
+          stagedAttachments = audio.map((attachment) => ({
+            kind: "audio" as const,
+            path: attachment.path,
+            mime: attachment.mime,
+          }));
+          attachedVoiceNote = true;
+          // The parked set is mutated only after the append below lands.
+          // Everything between is synchronous, so nothing can interleave,
+          // and a persistence failure must leave the clip parked: the post
+          // can then be retried, whereas a premature removal strands the
+          // clip on disk attached to nothing — and the catalog already told
+          // the model never to retry a refused post.
+          detachParkedAudio = () =>
+            turnAttachmentsByTurn.set(
+              parkedKey,
+              parked.filter((attachment) => attachment.kind !== "audio"),
+            );
+        }
         const posted = store.appendMessage(room.threadId, {
           role: "bot",
           kind: "text",
           text: message,
           from: { botId: poster.id, name: poster.name, color: poster.color },
           peerPost: unattended ? { unattended: true } : {},
+          ...(attachedVoiceNote ? { attachments: stagedAttachments } : {}),
         });
+        detachParkedAudio?.();
         store.patchGroup(room.id, { unread: true });
         // The same visibility contract the peer tools keep: whatever a bot
         // does elsewhere shows up in the conversation it is actually in.
@@ -14522,7 +14684,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         };
         if (owner.group) chip.from = { botId: poster.id, name: poster.name, color: poster.color };
         store.appendMessage(fromThreadId, chip);
-        return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name });
+        return json(res, 201, { ok: true, messageId: posted.id, roomName: room.name, attachedVoiceNote });
       }
       // start_thread: a bot opens a real thread — on itself for separate
       // work, or on a teammate as a handoff that should run on its own.
@@ -14878,6 +15040,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         // here so a call that reaches an unconfigured workspace answers with
         // the setup guidance instead of a provider failure.
         const voiceBot = botForThread(internalSender.id, internalCapability.threadId) ?? internalSender;
+        if (voiceBot.voiceNotes === false) {
+          return json(res, 403, { error: "voice notes are turned off for this bot" });
+        }
         try {
           const audio = await tts.speak(cfg, text, voiceBot.voice);
           // Synthesis can outlive its turn: a stop or settle during the await
@@ -15787,15 +15952,36 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     if (m && method === "GET") {
       const attachment = readAttachment(m[1]!);
       if (!attachment) return json(res, 404, { error: "no such attachment" });
+      const size = attachment.bytes.byteLength;
       // Who may see an attachment is decided per request — the dispatcher
       // 404s hidden ones above — so the browser must never reuse one
       // member's copy after a switch to another identity in the same profile.
-      res.writeHead(200, {
+      const headers = {
         "content-type": attachment.mime,
-        "content-length": String(attachment.bytes.byteLength),
         "cache-control": "private, no-store",
         "x-content-type-options": "nosniff",
-      });
+      };
+      // Range serving is audio-only (#1745): a player scrubbing a voice note
+      // asks for byte windows, and images/documents keep the full response
+      // the app has always relied on. A header we do not understand reads
+      // as absent — the full 200 is always a correct answer to a GET.
+      if (attachment.mime.startsWith("audio/")) {
+        const rawRange = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
+        const range = parseAudioRange(rawRange, size);
+        if (range.kind === "unsatisfiable") {
+          res.writeHead(416, { ...headers, "content-range": `bytes */${size}` });
+          return res.end();
+        }
+        if (range.kind === "range") {
+          res.writeHead(206, {
+            ...headers,
+            "content-length": String(range.end - range.start + 1),
+            "content-range": `bytes ${range.start}-${range.end}/${size}`,
+          });
+          return res.end(attachment.bytes.subarray(range.start, range.end + 1));
+        }
+      }
+      res.writeHead(200, { ...headers, "content-length": String(size) });
       return res.end(attachment.bytes);
     }
 
@@ -16565,7 +16751,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               status: 409,
             });
           }
-          if (groupIsWorking(current)) {
+          const decision = admit("room", {}, { roomWorking: groupIsWorking(current) });
+          if (decision.action === "queue") {
             const queued = queueChannelMessage(current.id, threadId, text, {
               replyToId: replyTo?.id,
               sendId,
@@ -16633,21 +16820,30 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       // turn — never both for the same words.
       const held = holdChannelQueue(current.id, targetThreadId, m[2]);
       if (!held) return json(res, 404, { error: "no such queued message" });
-      if (!speaker || !instance?.adapter.capabilities.queueing || !instance.adapter.steer) {
-        restoreHeldChannelQueue(held);
-        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
-      }
       const [head] = held.items;
-      if (!head || head.id !== m[2]) {
+      const decision = admit("room-steer", {
+        speakerPresent: Boolean(speaker),
+        engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+        isQueueHead: Boolean(head && head.id === m[2]),
+      });
+      if (decision.action === "refuse") {
         restoreHeldChannelQueue(held);
         return json(res, 409, { error: "only the first queued message can steer" });
+      }
+      if (decision.action === "queue") {
+        restoreHeldChannelQueue(held);
+        return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
       }
       // A reply target that cannot be resolved restores the held queue
       // before the request fails — the room's normal drain keeps the head.
       const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
-      const steered = await instance.adapter
-        .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
-        .catch((): SteerOutcome => "indeterminate");
+      // steer was offered only when a live speaker instance could take it;
+      // the check carries that invariant to the type system.
+      const steered: SteerOutcome = instance?.adapter.steer
+        ? await instance.adapter
+            .steer(targetThreadId, promptWithReply(head.text, replyTo, cfg.profile?.name?.trim() || "User"))
+            .catch((): SteerOutcome => "indeterminate")
+        : "refused";
       // The steer was awaited adapter work: re-read every ownership
       // invariant before writing anything, exactly like the 1:1 path. A
       // speaker change, a channel switch, or a settled room restores the
@@ -17305,6 +17501,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       if (body.composio !== undefined) {
         if (typeof body.composio !== "boolean") return json(res, 400, { error: "composio must be true or false" });
         patch.composio = body.composio;
+      }
+      // per-bot gate on sending voice notes: the toggle is about what this
+      // bot may do (an admin decision), not how it looks, so it lives here
+      // rather than the client-writable profile surface.
+      if (body.voiceNotes !== undefined) {
+        if (typeof body.voiceNotes !== "boolean") return json(res, 400, { error: "voiceNotes must be true or false" });
+        patch.voiceNotes = body.voiceNotes;
       }
       // which of those apps' tools this bot may call (connector grants 1/5:
       // data model only — enforcement lands with slice 2). null returns the
@@ -18293,7 +18496,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             if (store.activeLeaf(threadId) !== body.expectedActiveLeafId) {
               throw Object.assign(new Error("the conversation changed before this message could start"), { status: 409, code: "guarded_branch" });
             }
-            if (currentAtStart.busy || threadBusy(bot.id, threadId) || botAtThreadCapacity(bot.id) || parksBehindCoordination(bot.id, threadId) || activeGroupTurnForBot(bot.id)) {
+            const guardedAdmission = admit("guarded", {}, {
+              botBusy: currentAtStart.busy,
+              threadBusy: threadBusy(bot.id, threadId),
+              atCapacity: botAtThreadCapacity(bot.id),
+              parksBehindCoordination: parksBehindCoordination(bot.id, threadId),
+              groupTurn: Boolean(activeGroupTurnForBot(bot.id)),
+            });
+            if (guardedAdmission.action === "refuse") {
               throw Object.assign(new Error("wait for a free thread slot before retrying this message"), { status: 409, code: "guarded_busy" });
             }
             const message = await startTurn(bot.id, text, { threadId, replyTo, sendId, sender: messageSender(auth), trigger });
@@ -18311,7 +18521,14 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             // admission can hand it to the provider natively.
             const carriesImages = extractTurnImages(text).images.length > 0;
             const steerTarget = handoffs.current(threadId);
-            if (!carriesImages && !computerSelectionTurns.get(threadId)?.selected && instance?.adapter.capabilities.queueing && instance.adapter.steer) {
+            const busyAdmission = admit("direct-busy", {
+              carriesImages,
+              pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
+              engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+            });
+            // steer was offered only when a live instance could take it;
+            // the second check carries that fact to the type system.
+            if (busyAdmission.action === "steer" && instance?.adapter.steer) {
               steered = await instance.adapter
                 .steer(threadId, promptWithReply(text, replyTo, cfg.profile?.name?.trim() || "User"))
                 .catch((): SteerOutcome => "indeterminate");
@@ -18579,6 +18796,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           requestId: String(body.requestId),
           behavior,
         })) return;
+        if (resolveAndSendTightening(res, {
+          botId: bot.id,
+          botName: bot.name,
+          threadId: bot.threadId,
+          requestId: String(body.requestId),
+          behavior,
+        })) return;
         if (sendSkillResolution(res, resolveSkillRequest({
           botId: bot.id,
           botName: bot.name,
@@ -18667,6 +18891,21 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (resolveAndSendProfile(res, {
             botId: profileBotId,
             botName: profileOwner?.name,
+            threadId,
+            requestId,
+            behavior,
+          })) return;
+        }
+        const tighteningCard = store.messagesFor(threadId).find(
+          (message) => message.card?.requestId === requestId && message.card.tighteningRequest,
+        );
+        if (tighteningCard?.card?.tighteningRequest) {
+          const tighteningBotId = tighteningCard.from?.botId ?? store.botByThread(threadId)?.id;
+          if (!tighteningBotId) return json(res, 400, { error: "this tightening request has no valid owner" });
+          const tighteningOwner = store.bot(tighteningBotId);
+          if (resolveAndSendTightening(res, {
+            botId: tighteningBotId,
+            botName: tighteningOwner?.name,
             threadId,
             requestId,
             behavior,

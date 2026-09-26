@@ -63,6 +63,9 @@ export const stepSchema = z.discriminatedUnion("kind", [
 export const assertionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("sendNotQueued"), bot: z.string() }),
   z.object({ kind: z.literal("toolCalls"), bot: z.string(), equals: z.array(scriptedToolCallSchema) }),
+  /** Ordered tool names for one bot, ignoring arguments: the golden-thread
+   * trace shape, and the live tier's argument-agnostic invariant. */
+  z.object({ kind: z.literal("toolNames"), bot: z.string(), equals: z.array(z.string()) }),
   z.object({ kind: z.literal("turnOrder"), bots: z.array(z.string()) }),
   z.object({ kind: z.literal("systemPromptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
   z.object({ kind: z.literal("promptIncludes"), bot: z.string(), turn: z.number().int(), includes: z.string() }),
@@ -105,6 +108,9 @@ export const scenarioSchema = z.object({
   bots: z.array(scenarioBotSchema),
   steps: z.array(stepSchema),
   assertions: z.array(assertionSchema),
+  /** Present when a tier-2 redactor produced this fixture from a real
+   * thread export; pins the pipeline version that must reproduce it. */
+  golden: z.object({ from: z.literal("redacted-thread"), redactor: z.number().int() }).optional(),
 });
 
 export type ScriptedToolCall = z.infer<typeof scriptedToolCallSchema>;

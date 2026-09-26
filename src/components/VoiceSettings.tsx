@@ -31,7 +31,7 @@ export function VoiceSettings({
   workspaceConfigurationLocked = false,
 }: {
   bot: Bot;
-  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies">>) => void;
+  onPatch: (patch: Partial<Pick<Bot, "voice" | "speakReplies" | "voiceNotes">>) => void;
   workspaceConfigurationLocked?: boolean;
 }) {
   const { state, dispatch } = useStore();
@@ -428,6 +428,20 @@ export function VoiceSettings({
           checked={Boolean(bot.speakReplies)}
           aria-label="Read this bot's replies aloud"
           onClick={() => onPatch({ speakReplies: !bot.speakReplies })}
+        />
+      </div>
+
+      <div className="mt-4 flex items-center justify-between gap-4">
+        <div>
+          <div className="text-[13px] font-medium text-ink">Voice notes</div>
+          <div className="mt-0.5 text-[11.5px] leading-relaxed text-ink-secondary">
+            Let this agent send spoken notes; on unless switched off here.
+          </div>
+        </div>
+        <Switch
+          checked={bot.voiceNotes !== false}
+          aria-label="Let this bot send voice notes"
+          onClick={() => onPatch({ voiceNotes: bot.voiceNotes === false })}
         />
       </div>
 

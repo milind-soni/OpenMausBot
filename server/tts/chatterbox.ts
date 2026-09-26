@@ -64,16 +64,40 @@ async function request(url: string, init: RequestInit, what: string, baseUrl: st
 
 export async function listChatterboxVoices(baseUrl: string): Promise<Voice[]> {
   try {
-    const res = await request(
-      `${apiRoot(baseUrl)}/models`,
+    try {
+      const res = await request(
+        `${apiRoot(baseUrl)}/models`,
+        { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) },
+        "listing voices",
+        baseUrl,
+      );
+      if (res.ok) {
+        const body = await safeJson(res);
+        const voices = (body?.data ?? [])
+          .map((m: any): Voice => ({ id: String(m?.id ?? ""), label: String(m?.id ?? "") }))
+          .filter((v: Voice) => v.id);
+        if (voices.length) return voices;
+      }
+    } catch {
+      // /v1/models missing or unreachable — try /v1/audio/voices next
+    }
+    // Some servers (e.g. Chatterbox-TTS-Server) list voices here instead.
+    const voicesRes = await request(
+      `${apiRoot(baseUrl)}/audio/voices`,
       { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) },
       "listing voices",
       baseUrl,
     );
-    if (res.ok) {
-      const body = await safeJson(res);
-      const voices = (body?.data ?? [])
-        .map((m: any): Voice => ({ id: String(m?.id ?? ""), label: String(m?.id ?? "") }))
+    if (voicesRes.ok) {
+      const body = await safeJson(voicesRes);
+      const voices = (body?.voices ?? [])
+        .map((entry: any): Voice => {
+          // Chatterbox-TTS-Server currently returns filename strings; docs (and
+          // /get_predefined_voices) describe { filename, display_name } objects.
+          if (typeof entry === "string") return { id: entry, label: entry };
+          const id = String(entry?.filename ?? entry?.id ?? "");
+          return { id, label: String(entry?.display_name ?? entry?.name ?? id) };
+        })
         .filter((v: Voice) => v.id);
       if (voices.length) return voices;
     }

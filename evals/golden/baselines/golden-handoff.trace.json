@@ -1,0 +1,47 @@
+{
+  "id": "golden-handoff",
+  "turns": [
+    {
+      "bot": "bot1",
+      "index": 0,
+      "calls": [
+        {
+          "tool": "coordinate_bots",
+          "argKeys": [
+            "bot_ids",
+            "message",
+            "request_key"
+          ],
+          "errored": false
+        }
+      ]
+    },
+    {
+      "bot": "bot2",
+      "index": 0,
+      "calls": []
+    },
+    {
+      "bot": "bot1",
+      "index": 1,
+      "calls": []
+    }
+  ],
+  "handoffs": [
+    {
+      "bot": "bot1",
+      "status": "completed"
+    },
+    {
+      "bot": "bot2",
+      "status": "completed",
+      "hasParent": true
+    }
+  ],
+  "sends": [
+    {
+      "bot": "bot1"
+    }
+  ],
+  "outcome": "pass"
+}

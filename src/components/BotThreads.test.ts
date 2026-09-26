@@ -49,6 +49,14 @@ describe("sidebar bot threads", () => {
     expect(single).not.toContain('disabled=""');
   });
 
+  it("shows fresh threads with a relative stamp while the tooltip keeps the full date", () => {
+    const recent = Date.now() - 5 * 60_000;
+    const fresh = { ...bot, unread: false, busy: false, activity: "idle" as const, tasks: [{ threadId: "fresh", title: "Fresh question", createdAt: recent, busy: false, activity: "idle" as const }] };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(BotThreadList, { bot: fresh, selected: true })));
+    expect(markup).toContain("5 min ago");
+    expect(markup).toContain(`title="Fresh question · ${formatUpdatedAt(recent)}"`);
+  });
+
   it("groups folder threads under one bot while keeping loose threads and empty folders reachable", () => {
     const projectBot = { ...bot, projects: [{ id: "research", name: "Research", emoji: "🧪" }, { id: "empty", name: "Ideas" }],
       tasks: bot.tasks!.map((task) => ({ ...task, ...(task.threadId === "working" ? { projectId: "research" } : {}) })) };

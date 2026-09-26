@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "id": "golden-handoff",
+    "title": "Golden thread: a chief delegates a research task and reports the settled result",
+    "behavior": "A real coordination thread, redacted to placeholders, still replays its recorded delegation trace: one coordinate_bots dispatch, one specialist completion, and the owner's final report, with the handoff tree landing exactly as exported.",
+    "participants": [
+      { "name": "Atlas", "id": "b0f6bde4-0a3b-4c1e-9a5e-2f7c8d91aa01" },
+      { "name": "Nova", "id": "c1a7cef5-1b4c-5d2f-8b6f-3a8d9e02bb12" }
+    ]
+  },
+  "bot": "Atlas",
+  "messages": [
+    {
+      "role": "user",
+      "kind": "text",
+      "text": "Atlas, have Nova research the Q3 churn spike. My email is brad@example-corp.com and the dashboard is https://metrics.example-corp.com/q3 — send her the context from /Users/brad/projects/churn-analysis/notes.md"
+    },
+    {
+      "role": "bot",
+      "kind": "activity",
+      "tool": {
+        "name": "coordinate_bots",
+        "arguments": {
+          "bot_ids": ["c1a7cef5-1b4c-5d2f-8b6f-3a8d9e02bb12"],
+          "request_key": "churn-research",
+          "message": "Research the Q3 churn spike described in /Users/brad/projects/churn-analysis/notes.md and reply with findings. Context: https://metrics.example-corp.com/q3"
+        }
+      }
+    },
+    {
+      "role": "bot",
+      "kind": "text",
+      "text": "Assigned Nova the churn spike research with the notes from /Users/brad/projects/churn-analysis/notes.md; I will report back at brad@example-corp.com when she settles."
+    },
+    {
+      "role": "bot",
+      "kind": "text",
+      "text": "Nova finished the churn research; the summary is in her thread and the key driver was annual-plan downgrades."
+    }
+  ],
+  "handoffs": [
+    { "bot": "Atlas", "status": "completed" },
+    { "bot": "Nova", "status": "completed", "hasParent": true }
+  ]
+}

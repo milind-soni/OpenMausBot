@@ -15,7 +15,7 @@ import { nextRename } from "@/lib/rename";
 import { FolderIcon, NewThreadButton } from "./BotProjects";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { attentionJumpAction, attentionOwnerName, AttentionThreadRows, crossBotAttentionThreads, threadsWhenTreeHidden, type AttentionThread } from "./SidebarBotActivity";
-import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency } from "./SidebarThreadRow";
+import { formatUpdatedAt, orderedThreadList, threadByline, threadRecency, threadUpdatedLabel, useRelativeNow } from "./SidebarThreadRow";
 
 /** Click-to-switch used to close this menu immediately, which unmounted the
  * row before a double-click (or right-click) could start a rename. Linger
@@ -50,6 +50,14 @@ export function filterTasks<T extends { title: string }>(tasks: readonly T[], qu
     else if (title.includes(needle)) substring.push(task);
   }
   return [...prefix, ...substring];
+}
+
+/** The picker row's stamp, sharing the sidebar row's contract: relative
+ * label in the flow, the exact date one hover away, ISO for machines. */
+function TaskUpdatedTime({ task, now }: { task: { updatedAt?: number; createdAt?: number }; now: number }) {
+  const stamp = threadRecency(task);
+  if (!Number.isFinite(stamp) || stamp <= 0) return null;
+  return <time dateTime={new Date(stamp).toISOString()} title={formatUpdatedAt(stamp)}>{threadUpdatedLabel(stamp, now)}</time>;
 }
 
 /** Quiet per-task token tally; the hover title explains the cached share. */
@@ -113,6 +121,7 @@ function ConversationTaskPicker({
   const ref = useRef<HTMLDivElement>(null);
   const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishingRename = useRef(false);
+  const now = useRelativeNow();
 
   const current = tasks.find((t) => t.threadId === threadId);
 
@@ -349,7 +358,7 @@ function ConversationTaskPicker({
                       <div className="truncate text-[13px] text-ink">{task.title}</div>
                       <div className="text-[11px] text-ink-secondary">
                         {task.activity === "waiting-on-you" ? `${t("task.waiting")} · ` : task.waitingForTeammates ? `${t("task.waitingOnTeammate")} · ` : task.busy ? `${t("chat.activity.working")} · ` : task.unread ? `${t("task.unread")} · ` : ""}
-                        {formatUpdatedAt(threadRecency(task))}
+                        <TaskUpdatedTime task={task} now={now} />
                         <TaskUsage usage={task.usage} />
                         {opener && ` · ${opener}`}
                       </div>

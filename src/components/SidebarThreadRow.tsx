@@ -23,6 +23,30 @@ export function formatUpdatedAt(at: number): string {
   return new Date(at).toLocaleString([], { dateStyle: "short", timeStyle: "short" });
 }
 
+/** The visible stamp on a thread row: "just now" for the freshest work, then
+ * minutes, hours, and days, then the full date once a thread is a week old.
+ * The caller supplies "now" so one clock tick re-renders a whole list
+ * instead of each row keeping its own timer. */
+export function threadUpdatedLabel(at: number, now: number): string {
+  if (!Number.isFinite(at) || at <= 0) return "";
+  if (!Number.isFinite(now)) return formatUpdatedAt(at);
+  const seconds = Math.max(0, Math.round((now - at) / 1000));
+  if (seconds < 45) return t("task.updated.justNow");
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return t("task.updated.minutes", { count: minutes });
+  const hours = Math.round(minutes / 60);
+  // Tier on unrounded time like the week gate below: 23.5 hours rounds to
+  // a display of "24 h ago" without a day having actually passed.
+  if (seconds < 86_400) return t("task.updated.hours", { count: hours });
+  const days = Math.round(hours / 24);
+  if (days === 1) return t("task.updated.yesterday");
+  // Gate the fallback on unrounded elapsed time: six and a half days rounds
+  // to "7 d ago" but is still inside the week, so the absolute date waits
+  // for a full seven days.
+  if (seconds < 7 * 86_400) return t("task.updated.days", { count: days });
+  return formatUpdatedAt(at);
+}
+
 /** Newest message, else when the thread was created. Missing stamps sort as
  * oldest so a half-loaded row cannot jump the list as NaN. */
 export function threadRecency(task: { updatedAt?: number; createdAt?: number }): number {
@@ -155,6 +179,26 @@ export function useSnoozeExpiry(tasks: readonly Pick<Task, "snoozedUntil">[]): v
     return () => window.clearTimeout(id);
   }, [next, tick]);
 }
+
+/** One low-frequency clock for every relative stamp in a list: rows stay
+ * timer-free and re-render when this tick moves. Paused while the window is
+ * hidden, resynced the moment it becomes visible again, and cleared on
+ * unmount — the same shape the computer inventory's refresh uses. */
+export function useRelativeNow(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const sync = () => { if (document.visibilityState === "visible") setNow(Date.now()); };
+    const timer = window.setInterval(sync, 30_000);
+    // a window returning from hours hidden should not show a stale label
+    // while it waits for the next tick
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
+  return now;
+}
 /** Attention outranks recency within a bot: waiting-on-you needs the person
  * most, then working/busy, then a teammate wait, then queued, then unread.
  * The thread being looked at rides just
@@ -181,7 +225,7 @@ export function orderedSidebarThreads<T extends ThreadRowTask>(tasks: T[], activ
 
 /** One quiet row for bot and group histories. Surface denotes selection;
  * working/waiting/unread remain independent signals, never different cards. */
-export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel }: {
+export function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onDelete, onMove, onArchive, onPin, onSnooze, activityLabel, now }: {
   task: ThreadRowTask;
   /** the bot or room that owns the thread: the link's ?bot= */
   ownerId: string;
@@ -190,6 +234,9 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   folders?: BotProject[];
   /** Live verb the chat pane already derives ("Reading a file"); shown only while the row is working. */
   activityLabel?: string;
+  /** The list's shared clock tick; the visible stamp renders relative to it.
+   * Omit to keep the absolute date everywhere. */
+  now?: number;
   onSelect: () => void;
   onRename: (title: string) => void;
   onDelete: () => void;
@@ -208,7 +255,8 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
   const updatedAt = threadRecency(task);
-  const updatedLabel = formatUpdatedAt(updatedAt);
+  const updatedStamp = formatUpdatedAt(updatedAt);
+  const updatedLabel = now === undefined ? updatedStamp : threadUpdatedLabel(updatedAt, now);
   const closed = Boolean(task.closedBy) && !status;
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
@@ -260,7 +308,7 @@ export function SidebarThreadRow({ task, ownerId, current, compact, folders, onS
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={[task.title, updatedLabel, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
+        title={[task.title, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         onClick={onSelect} onDoubleClick={startRename}
         onContextMenu={(event) => { event.preventDefault(); openMenu(event.clientX, event.clientY); }}
         onKeyDown={(event) => { if (event.key === "ContextMenu" || event.shiftKey && event.key === "F10") { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}

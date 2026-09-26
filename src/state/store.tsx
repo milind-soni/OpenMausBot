@@ -405,6 +405,8 @@ export interface Bot {
   speakReplies?: boolean;
   /** this bot's own voice id (falls back to the app-wide one) */
   voice?: string;
+  /** whether this bot may send voice notes (on unless switched off) */
+  voiceNotes?: boolean;
   pinned?: boolean;
   hidden?: boolean;
   /** Sidebar section this bot renders under; absent = unsectioned. */
