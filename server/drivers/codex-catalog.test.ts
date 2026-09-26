@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -20,8 +20,8 @@ afterEach(() => {
   for (const dir of scratchDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-function scratchHome(files: Record<string, string>): string {
-  const home = mkdtempSync(join(tmpdir(), "omb-codex-catalog-"));
+function scratchHome(files: Record<string, string>, parent = tmpdir()): string {
+  const home = mkdtempSync(join(parent, "omb-codex-catalog-"));
   scratchDirs.push(home);
   const root = join(home, ".codex");
   mkdirSync(root, { recursive: true });
@@ -196,10 +196,12 @@ base_url = "http://127.0.0.1:9/v1"
   });
 
   it("refuses a relative user home just like the identity lookup", async () => {
+    // Windows cannot express a relative path across different drives.
     const home = scratchHome({
       "config.toml": 'model_provider = "omlx"\nmodel = "relative-home-model"\n[model_providers.omlx]\nname = "Fixture"\nbase_url = "http://127.0.0.1:9/v1"\n',
-    });
+    }, process.cwd());
     const relativeHome = relative(process.cwd(), home);
+    expect(isAbsolute(relativeHome)).toBe(false);
     const catalog = await readCodexModelCatalog({ HOME: relativeHome, USERPROFILE: relativeHome });
     expect(catalog.options.map((option) => option.id)).not.toContain(
       encodeCodexSelection("omlx", "relative-home-model"),
