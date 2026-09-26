@@ -436,6 +436,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
   const { botId: BOT_ID, threadId: THREAD_ID, depth: DEPTH, externalRuntime: EXTERNAL_RUNTIME, coordinating: COORDINATING, turn } = context;
   const { delegationTaskIdsThisTurn } = turn;
   const { api, apiResponse } = context.client;
+  if (name === "discuss_room") {
+    const r = await api("/api/internal/discuss-room", { method: "POST", body: JSON.stringify({
+      memberIds: args.member_ids, topic: args.topic, requestKey: args.request_key,
+    }) });
+    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+  }
   if (name === "vm_exec") {
     const { ok, body } = await apiResponse("/api/internal/vm-exec", {
       method: "POST",

@@ -7676,6 +7676,10 @@ describe("harness HTTP API", () => {
     } finally {
       rmSync(failureMarker, { force: true });
       if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
+      // Interrupt acknowledges the request before the provider finishes stopping.
+      // Keep this fixture's profile until the server releases its active turn.
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
@@ -7686,10 +7690,11 @@ describe("harness HTTP API", () => {
     const bot = (await api("POST", "/api/bots")).body.bot;
     let room: any;
     try {
-      expect((await api("PATCH", "/api/config", {
+      const configured = await api("PATCH", "/api/config", {
         features: { browser: true },
         browserProfiles: [{ id: "work", name: "Work" }],
-      })).status).toBe(200);
+      });
+      expect(configured.status, JSON.stringify(configured.body)).toBe(200);
       expect((await api("PATCH", `/api/bots/${bot.id}`, {
         browserProfile: "work",
         approvalMode: "auto",
@@ -7743,6 +7748,8 @@ describe("harness HTTP API", () => {
     } finally {
       if (room) await api("POST", `/api/groups/${room.id}/interrupt`, {}).catch(() => undefined);
       else await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).body.bots
+        .find((candidate: { id: string }) => candidate.id === bot.id)?.busy, { timeout: 5_000 }).toBe(false);
       await api("PATCH", "/api/config", { features: { browser: false }, browserProfiles: [] }).catch(() => undefined);
       if (room) await api("DELETE", `/api/groups/${room.id}`).catch(() => undefined);
       await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);

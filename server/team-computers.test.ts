@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import * as atomic from "./atomic.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner } from "./team-computers.ts";
 
 const directories: string[] = [];
@@ -13,7 +14,10 @@ const fixture = () => {
   const environmentId = randomUUID();
   return { file, environmentId, registry: new TeamComputers(file, environmentId) };
 };
-afterEach(() => { for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
 
 describe("named team computer ownership", () => {
   it("renames the team label without changing computer identity or merging assignments", () => {
@@ -29,6 +33,7 @@ describe("named team computer ownership", () => {
     expect(registry.forSection("Delivery")?.id).toBe(b.id);
   });
   it("persists unassigned identities before provisioning and retries without a second owner", () => {
+    const writes = vi.spyOn(atomic, "writeFileAtomic");
     const { registry, file, environmentId } = fixture();
     const requestId = randomUUID();
     const created = registry.create("Design desktop", requestId);
@@ -44,8 +49,15 @@ describe("named team computer ownership", () => {
     expect(restarted.list()).toHaveLength(1);
     restarted.setProblem(requestId);
     expect(new TeamComputers(file, environmentId).get(requestId)?.problem).toBeUndefined();
-    // Windows exposes synthetic POSIX mode bits; its ACLs are not represented here.
-    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    // The spy calls the real writer: every OS must request private creation.
+    // Windows stat emulates mode bits and cannot prove POSIX group/other access.
+    expect(writes).toHaveBeenCalled();
+    for (const [path, , options] of writes.mock.calls) {
+      expect(path).toBe(file);
+      expect(options).toEqual({ mode: 0o600 });
+    }
+    if (process.platform === "win32") expect(statSync(file).mode & 0o600).toBe(0o600);
+    else expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
   it("has one computer per team and requires explicit unassignment before moving", () => {

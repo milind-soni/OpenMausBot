@@ -1,0 +1,27 @@
+{
+  "sourceMessageId": "8e73f4de-8afc-4045-86bf-adb382dc5d34",
+  "sourceAuthor": "ヒナ",
+  "draftChecks": {
+    "matches_implementation_draft_header": true,
+    "five_data_rows": true,
+    "seven_columns_each_row": true,
+    "dates_in_draft_interval": true,
+    "both_date_boundaries_present": true,
+    "unique_contract_ids": true,
+    "masked_names_with_distinct_embedded_customer_ids": true,
+    "statuses_and_conditional_loss_reasons": true,
+    "integer_amounts_or_empty_for_lost_deals": true
+  },
+  "draftChecksPassed": true,
+  "finalAcceptance": {
+    "expectedColumns": 8,
+    "actualColumns": 7,
+    "separateCustomerIdColumn": false,
+    "passesFinalColumnContract": false
+  },
+  "limits": [
+    "Extracted chat text, not a bot-created file.",
+    "Passing draft checks does not satisfy the later eight-column decision.",
+    "No file-byte, runtime export, or production-readiness claim."
+  ]
+}

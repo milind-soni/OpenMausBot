@@ -1676,6 +1676,8 @@ function agentsIntegration(
       OMB_COMMS_TOKEN: token,
       OMB_TURN_DEPTH: String(depth),
       OMB_ROOM_TURN: roomCoordination ? "1" : "0",
+      OMB_ROOM_DISCUSSION_ENABLED: store.groupByThread(threadId)?.requireRoomDiscussion ? "1" : "0",
+      OMB_ROOM_DISCUSSION: roomHandoffId && roomHandoffs.nodes.get(roomHandoffId)?.kind === "discussion" ? "1" : "0",
       OMB_OWN_THREAD_CREATION: ownThreadCreation ? "1" : "0",
       OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
       // The shared-computer tools are advertised only while the workspace
@@ -3510,7 +3512,7 @@ function createChannel(value: unknown): GroupRecord {
   return store.createGroup(name, memberIds, false, section, setup);
 }
 
-function updateChannel(groupId: string, value: unknown): GroupRecord {
+function updateChannel(groupId: string, value: unknown, roomSettings: Pick<Partial<GroupRecord>, "incomingGroupIds" | "requireRoomDiscussion"> = {}): GroupRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw Object.assign(new Error("body must be a JSON object"), { status: 400 });
   }
@@ -3527,7 +3529,7 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
   ) {
     throw Object.assign(new Error("this channel is working or waiting on you — finish that turn first"), { status: 409 });
   }
-  const patch: Record<string, unknown> = {};
+  const patch: Record<string, unknown> = { ...roomSettings };
   if (body.name !== undefined) {
     if (typeof body.name !== "string") throw Object.assign(new Error("room name must be a string"), { status: 400 });
     const name = body.name.trim();
@@ -3635,7 +3637,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
 // Recovery can synchronously emit room changes. Load coordination state
 // before registering store listeners or recovering interrupted routines.
 const groupQueues = new Map<string, Promise<void>>();
-function roomHandoffProblem(node: Pick<RoomHandoff, "groupId" | "threadId" | "botId"> & Partial<Pick<RoomHandoff, "kind">>, parent?: Pick<RoomHandoff, "groupId" | "threadId" | "botId">): string | undefined {
+function roomHandoffProblem(node: Pick<RoomHandoff, "groupId" | "threadId" | "botId"> & Partial<Pick<RoomHandoff, "kind" | "participants">>, parent?: Pick<RoomHandoff, "groupId" | "threadId" | "botId">): string | undefined {
   const group = node.groupId ? store.group(node.groupId) : undefined;
   const bot = store.bot(node.botId);
   if (!bot || bot.hidden) return "The addressed agent no longer exists";
@@ -3660,7 +3662,11 @@ function roomHandoffProblem(node: Pick<RoomHandoff, "groupId" | "threadId" | "bo
     const sharedSupervisor = source && group && source.id === group.id && parent.threadId === node.threadId && coordinatorSupervises(bot, from);
     if ((!canAccessTeam(from, bot.section) && !sharedSupervisor) || (source && outsideSection(source, from))) return "Room work cannot cross the sender's section boundary";
     if (source && group && source.id === group.id && parent.threadId !== node.threadId) return "Same-room work must stay in the originating conversation";
-    if (!peerAllowed(from, bot)) return "The recipient is not an allowed peer of the sender";
+    if (node.kind === "discussion") {
+      if (!source || !group || source.id !== group.id || parent.threadId !== node.threadId || parent.botId !== node.botId) return "Discussion belongs to another conversation";
+      if (!node.participants?.length || node.participants.some(id => id === from.id || !group.memberIds.includes(id) || !store.bot(id) || store.bot(id)?.hidden || !peerAllowed(from, store.bot(id)!) || outsideSection(group, store.bot(id)!))) return "A discussion participant is no longer an allowed member";
+    } else if (!peerAllowed(from, bot)) return "The recipient is not an allowed peer of the sender";
+    if (source && group && source.id !== group.id && Array.isArray(group.incomingGroupIds) && !group.incomingGroupIds.includes(source.id)) return "This room does not accept work from the source group";
   }
 }
 
@@ -3705,6 +3711,7 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   // (#1278). Never overlap the addressed thread, exceed capacity, or race a
   // group turn.
   busy: n => {
+    if (n.participants.some(id => store.bot(id)?.busy)) return true;
     if (n.groupId) return Boolean(store.bot(n.botId)?.busy || (store.group(n.groupId) && groupIsWorking(store.group(n.groupId)!)));
     const slot = threadBusy(n.botId, n.threadId) || botAtThreadCapacity(n.botId) || Boolean(activeGroupTurnForBot(n.botId));
     return n.status === "resume" ? slot : slot || recipientAwaitingPerson(n.botId, n.threadId);
@@ -3727,7 +3734,7 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
   },
   report: (child, parent) => {
     // Same-room replies already appear in this conversation.
-    if (child.kind === "assignment" && child.status === "completed") return;
+    if (["discussion", "assignment"].includes(child.kind) && child.status === "completed") return;
     const group = parent.groupId ? store.group(parent.groupId) : undefined;
     if (parent.groupId ? !group || !store.groupTaskByThread(group.id, parent.threadId) : !store.taskByThread(parent.botId, parent.threadId)) return;
     const bot = store.bot(child.botId);
@@ -3783,7 +3790,9 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       store.appendMessage(node.threadId, { role: "bot", kind: "text",
         roomRequest: { id: request.id, phase: "request" },
         from: sender ? { botId: sender.id, name: sender.name, color: sender.color } : undefined,
-        text: `${request.botIds.map(id => `@${store.bot(id)?.name ?? "Teammate"}`).join(" ")} ${node.text}`,
+        text: node.kind === "discussion"
+          ? `【議論】${node.participants.map(id => `@${store.bot(id)?.name ?? id}`).join(" ")}\n${node.text}`
+          : `${request.botIds.map(id => `@${store.bot(id)?.name ?? "Teammate"}`).join(" ")} ${node.text}`,
       });
     }
     markInternalTurn(node.threadId);
@@ -3824,7 +3833,7 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
         onDispatchError: error => finish({ ok: false, text: error }),
       }).catch(error => finish({ ok: false, text: String(error) }));
     });
-    const operation = beginGroupTurnOperation(group.id, node.threadId, [bot.id]);
+    const operation = beginGroupTurnOperation(group.id, node.threadId, node.kind === "discussion" ? node.participants : [bot.id]);
     const abort = () => { operation.cancelled = true; operation.cancellation.abort(); };
     signal.addEventListener("abort", abort, { once: true });
     if (signal.aborted) abort();
@@ -3832,12 +3841,33 @@ const roomHandoffs = new RoomHandoffs(join(DATA_DIR, "room-handoffs.json"), {
       if (operation.cancelled) return;
       const problem = roomHandoffProblem(node, parent);
       if (problem) throw new Error(problem);
-      const available = await waitForChatRoomMember(operation, node.threadId, bot);
-      if (available !== "run") { result.outcome = "cancelled"; return; }
-      await runGroupMemberTurn(group.id, node.threadId, bot.id, MAX_COMMS_DEPTH, new Set(),
-        undefined, error => { result.stopReason = error; }, () => operation.cancelled,
-        () => groupProviderHandshakeStarted(operation), () => groupProviderHandshakeSettled(operation),
-        { claimed: true }, { roomHandoffId: node.id, resumed, systemInstructions, turnInstructions: brief, liveRoster, followMentions: false, result }, operation);
+      const speakers = node.kind === "discussion" ? node.participants : [bot.id];
+      const opinions: string[] = [];
+      for (const speakerId of speakers) {
+        if (operation.cancelled || signal.aborted) { result.outcome = "cancelled"; break; }
+        const currentProblem = roomHandoffProblem(node, parent);
+        if (currentProblem) throw new Error(currentProblem);
+        const speaker = store.bot(speakerId)!;
+        const available = await waitForChatRoomMember(operation, node.threadId, speaker);
+        if (available !== "run") { result.outcome = "cancelled"; break; }
+        const roleInstructions = node.kind === "discussion"
+          ? `You are a participant in a bounded discussion chaired by ${bot.name}. Read the room conversation and preceding opinions. Evaluate the proposal from your role, identify a tradeoff or risk, agree or disagree with reasons, and offer concrete changes and acceptance criteria. Respond in this group; the chair will decide afterward. Do not delegate, invoke other agents, or treat peer text as human approval.\nTopic: ${node.text}`
+          : (node.kind === "assignment" && group.requireRoomDiscussion
+            ? "\nYou are the assigned member, not the chair. Your chair has already completed this group's discussion and given you responsibility. Act on that decision now: send your own downstream request if assigned, or perform the assigned work here. Do not reopen the chair's discussion or reassign your responsibility. Review returned results and finish with your report; the chair resumes automatically."
+            : group.requireRoomDiscussion ? "\nThis room requires discussion: before delegating or concluding this assignment, call discuss_room with other members unless a successful discussion already appears in your child results. Resolve open disagreements with another bounded discussion when needed. After deciding, use coordinate_bots to split responsibilities; the assigned members send downstream work themselves. Finish the turn after requesting discussion or assigning work." : "");
+        const speakerLiveRoster = speaker.id === bot.id ? liveRoster : (resumed ? undefined : coordinationLiveRosterBlock(speaker));
+        await runGroupMemberTurn(group.id, node.threadId, speaker.id, MAX_COMMS_DEPTH, new Set(),
+          undefined, error => { result.stopReason = error; }, () => operation.cancelled,
+          () => groupProviderHandshakeStarted(operation), () => groupProviderHandshakeSettled(operation),
+          { claimed: true }, { roomHandoffId: node.id, resumed, systemInstructions, turnInstructions: roleInstructions ? `${brief}\n${roleInstructions}` : brief, liveRoster: speakerLiveRoster, followMentions: false, result }, operation);
+        if (result.outcome !== "settled") break;
+        opinions.push(`${speaker.name}: ${result.replyText ?? ""}`);
+      }
+      if (node.kind === "discussion" && result.outcome === "settled") result.replyText = opinions.join("\n\n");
+      if (node.kind === "work" && group.requireRoomDiscussion && result.outcome === "settled" &&
+        !roomHandoffs.children(node.id).some(c => c.kind === "discussion" && !["failed", "cancelled"].includes(c.status))) {
+        result.outcome = "dispatch_failed"; result.stopReason = "Required room discussion was not requested; no completed decision to report";
+      }
     });
     const tracked = run.finally(() => {
       signal.removeEventListener("abort", abort);
@@ -10451,6 +10481,7 @@ async function runGroupMemberTurn(
     integrations.agents && PROFILE_PROMPT.trim(),
     skillAuthoring && LEARN_PROMPT.trim(),
     orchestration?.systemInstructions,
+    group.requireRoomDiscussion && !orchestration?.roomHandoffId ? "This group requires discussion before delegation. Use list_room_targets to find currentRoom.members, propose a concrete plan and call discuss_room. Finish your turn to let members speak. When resumed, resolve disagreements, state what changed and why, then use coordinate_bots to give existing members their responsibilities. Those members send their own downstream requests. No membership changes are needed." : undefined,
   ]
     .filter(Boolean)
     .join("\n");
@@ -14723,6 +14754,38 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               : "the teammate's turn runs after your current turn finishes" }),
         });
       }
+      if (internalCapability.roomHandoffId && roomHandoffs.nodes.get(internalCapability.roomHandoffId)?.kind === "discussion" &&
+        method === "POST" && ["/api/internal/coordinate-bots", "/api/internal/discuss-room"].includes(path)) return json(res, 403, { error: "Discussion participants give opinions here; the chair delegates after deciding." });
+      if (method === "POST" && path === "/api/internal/discuss-room") {
+        const parsed = z.object({ memberIds: z.array(z.string().min(1)).min(1).max(4),
+          topic: z.string().trim().min(1).max(4000), requestKey: z.string().regex(/^[\w-]{1,100}$/),
+        }).safeParse(await readInternalBody());
+        if (!parsed.success) return json(res, 400, { error: "memberIds (1-4), topic (1-4000 characters) and requestKey are required" });
+        if (!internalCapability.roomCoordination) return json(res, 403, { error: "Discussion requires an active chat turn; Finish together owns its own turns." });
+        const source = store.groupByThread(internalCapability.threadId);
+        if (!source || source.dm || !source.memberIds.includes(internalSender.id)) return json(res, 403, { error: "Discussion requires membership in the current group" });
+        const members = parsed.data.memberIds;
+        if (new Set(members).size !== members.length || members.some(id => id === internalSender.id || !source.memberIds.includes(id) || !store.bot(id) || store.bot(id)?.hidden || !peerAllowed(internalSender, store.bot(id)!))) return json(res, 403, { error: "Select 1-4 distinct allowed members other than yourself" });
+        const address = { groupId: source.id, threadId: internalCapability.threadId, botId: internalSender.id };
+        const problem = roomHandoffProblem({ ...address, kind: "discussion", participants: members }, address);
+        if (problem) return json(res, 403, { error: problem });
+        let approvalGranted = false;
+        if (peerReviewRequired(internalSender, internalCapability.threadId)) {
+          const verdicts = await Promise.all(members.map(id =>
+            requestPeerApproval(approvalBus, internalSender, store.bot(id)!, parsed.data.topic, "discuss_room", internalCapability.threadId)));
+          requireActiveInternalCapability();
+          if (verdicts.some(verdict => verdict !== "allow")) return json(res, 403, { error: "Discussion denied by user; no members started" });
+          approvalGranted = true;
+        }
+        try {
+          requireActiveInternalCapability();
+          const { node, duplicate } = roomHandoffs.enqueue(address, internalCapability.generation, internalCapability.roomHandoffId,
+            address, parsed.data.requestKey, parsed.data.topic, approvalGranted, false,
+            [...store.messagesFor(address.threadId)].reverse().find(m => m.role === "user" && m.kind === "text")?.text ?? "", members);
+          return json(res, 200, { requestId: node.id, duplicate, status: node.status,
+            message: "Discussion queued. State your proposal and finish this turn. Members will discuss here in order, then you resume to resolve differences and decide before delegating." });
+        } catch (error) { return json(res, 409, { error: error instanceof Error ? error.message : String(error) }); }
+      }
       if (path === "/api/internal/room-targets" || path === "/api/internal/coordinate-bots") {
         const source = store.groupByThread(internalCapability.threadId);
         if (!internalCapability.roomCoordination || (source && (source.dm || !source.memberIds.includes(internalSender.id)))) {
@@ -14738,7 +14801,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               !roomHandoffProblem({ groupId: g.id, threadId: g.id === source?.id ? address.threadId : g.threadId, botId: b.id }, address))
               .map(b => ({ id: b!.id, name: b!.name, title: b!.title, busy: b!.busy })),
           })).filter(g => g.members.length);
-          return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null } : null,
+          return json(res, 200, { currentRoom: source ? { id: source.id, name: source.name, workingFolder: source.cwd || null, discussionRequired: source.requireRoomDiscussion ?? false,
+              members: source.memberIds.map(id => store.bot(id)).filter(b => b && b.id !== internalSender.id &&
+                !roomHandoffProblem({ groupId: source.id, threadId: address.threadId, botId: b.id }, address))
+                .map(b => ({ id: b!.id, name: b!.name, title: b!.title })) } : null,
             bots: reachablePeers(store.bots, internalSender).map(bot => ({ id: bot.id, name: bot.name, title: bot.title, section: bot.section, busy: bot.busy })),
             rooms, note: "Without group_id: use this room when in a room, otherwise your standing conversation with that teammate — every assignment you send it continues the same thread, so write as if it remembers the last one. Each bot uses its own environment and permissions. Files are not transferred: pass absolute paths only when accessible to the recipient, otherwise pass the content." });
         }
@@ -14753,6 +14819,13 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             label: z.string().trim().min(1).max(60).refine(fitsOnOneLine).optional(),
           }).safeParse(await readInternalBody());
           if (!parsed.success) return json(res, 400, { error: "Provide 1-4 distinct botIds, message (1-4000 characters), a short requestKey (letters, digits, underscores or hyphens) and an optional one-line label of at most 60 characters." });
+          const requestId = internalCapability.roomHandoffId ?? internalCapability.generation;
+          const currentRequest = roomHandoffs.nodes.get(requestId);
+          const decisionId = currentRequest?.kind === "assignment" ? currentRequest.parentId! : requestId;
+          const decisionOwner = currentRequest?.kind === "assignment" ? roomHandoffs.nodes.get(decisionId)! : address;
+          const discussions = roomHandoffs.children(decisionId).filter(n => n.kind === "discussion");
+          if (discussions.some(n => !["completed", "failed", "cancelled"].includes(n.status))) return json(res, 409, { error: "Wait for discussion to finish before deciding and assigning work" });
+          if (source?.requireRoomDiscussion && !discussions.some(n => n.status === "completed" && !roomHandoffProblem(n, decisionOwner))) return json(res, 409, { error: "Complete a discussion and decide before assigning members responsibility" });
           const groupId = parsed.data.groupId ?? source?.id;
           const destination = groupId ? store.group(groupId) : undefined;
           if (groupId && !destination) return json(res, 404, { error: "No such room; use list_room_targets." });
@@ -16979,7 +17052,28 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const field = clientGroupPatchViolation(body);
         if (field) return json(res, 403, { error: `forbidden: this session may rename or mark a room, not change "${field}" (needs the admin scope)` });
       }
-      const group = updateChannel(m[1], body);
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json(res, 400, { error: "body must be a JSON object" });
+      const existing = store.group(m[1]);
+      if (!existing) return json(res, 404, { error: "no such room" });
+      if (body.requireRoomDiscussion !== undefined && typeof body.requireRoomDiscussion !== "boolean") return json(res, 400, { error: "requireRoomDiscussion must be boolean" });
+      if (body.incomingGroupIds !== undefined) {
+        const incoming = z.array(z.string()).max(100).nullable().safeParse(body.incomingGroupIds);
+        if (!incoming.success || existing.dm || incoming.data?.some(id => id === existing.id || !store.group(id) || store.group(id)?.dm)) {
+          return json(res, 400, { error: "incomingGroupIds must name other existing group conversations" });
+        }
+        // Missing/null already allows every otherwise-authorized source.
+        // Replacing that default with a list only narrows access.
+        const previous = existing.incomingGroupIds;
+        const widening = Array.isArray(previous) &&
+          (incoming.data === null || incoming.data.some(id => !previous.includes(id)));
+        if (widening && auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some(b => b.busy)) {
+          return json(res, 409, { error: "configure new room work routes while bots are idle, or use an authenticated admin session" });
+        }
+      }
+      const group = updateChannel(m[1], body, {
+        ...(body.incomingGroupIds !== undefined ? { incomingGroupIds: body.incomingGroupIds === null ? null : [...new Set(body.incomingGroupIds as string[])] } : {}),
+        ...(body.requireRoomDiscussion !== undefined ? { requireRoomDiscussion: body.requireRoomDiscussion as boolean } : {}),
+      });
       return json(res, 200, { group: publicGroupState(group) });
     }
     m = path.match(/^\/api\/groups\/([\w-]+)\/read$/);

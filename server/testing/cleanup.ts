@@ -12,6 +12,8 @@ import { rmSync } from "node:fs";
 export interface WaitForExitOptions {
   /** Sent immediately. Omit for a child the caller has already signalled. */
   signal?: NodeJS.Signals;
+  /** Opt-in IPC request for a launcher with a graceful shutdown handler. */
+  message?: string;
   /** How long the polite signal gets before SIGKILL. */
   graceMs?: number;
 }
@@ -40,7 +42,7 @@ export function waitForExit(
   child: ChildProcess | undefined,
   options: WaitForExitOptions | number = {},
 ): Promise<void> {
-  const { signal, graceMs = 5_000 } = typeof options === "number" ? { graceMs: options } : options;
+  const { signal, message, graceMs = 5_000 } = typeof options === "number" ? { graceMs: options } : options;
 
   return new Promise<void>((resolve) => {
     // signalCode, not just exitCode: a process killed by a signal reports its
@@ -54,6 +56,11 @@ export function waitForExit(
     };
     child.on("close", done);
 
+    if (message !== undefined && child.connected) {
+      // The callback consumes a possible disconnect race. The bounded kill
+      // below still applies if the launcher cannot receive the request.
+      child.send(message, () => {});
+    }
     if (signal) {
       try {
         child.kill(signal);

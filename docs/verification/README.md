@@ -16,6 +16,13 @@ node --experimental-strip-types scripts/control-omb.ts launch
 Run the foreground launcher directly rather than through `pnpm`; this ensures
 it receives Ctrl-C and can stop its child before removing the temporary data.
 
+Automated parents can spawn `launch` or `ui launch` with a Node IPC channel
+(`stdio: ["ignore", "pipe", "pipe", "ipc"]`) and send `"control-omb:stop"`.
+That requests the same cleanup on every OS, including Windows where
+`child.kill("SIGINT")` forcibly terminates the launcher. Disconnecting the
+parent's IPC channel also requests cleanup. Wait for the launcher's exit
+before checking that its temporary data has been removed.
+
 It gives the child a temporary data directory and home, chooses a free
 harness/webhook port pair, installs only the repository's fake engine, prints
 the URL, PID, data directory, and persistent log path, then stays attached to
@@ -53,6 +60,10 @@ Use only mapped, tested commands:
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
+- [Coordination regression coverage and migration](coordination-test-migration.md)
+- [Optional addressed room routes](room-handoffs.md)
+- [Required discussion in each layer](room-discussion.md)
+- [Branching three-layer organization](room-pyramid.md)
 - [Chief access to additional teams](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Claude coordination and turn-scoped tools](claude-tool-lifecycle.md)
@@ -212,6 +223,12 @@ sent mentions, multiline scrolling and responsive wrapping in real chat views.
 
 The [Group and Goal Local VM recipe](group-local-vm.md) checks per-speaker
 desktop routing, cancellation, and computer authority cleanup.
+
+The [addressed room work recipe](room-handoffs.md) checks opt-in routes,
+recipient-only execution, cancellation and return routing. The
+[discussion recipe](room-discussion.md) and [three-layer organization](room-pyramid.md)
+exercise discussion, member assignment and downstream branching through the
+shared control surface and the real injected agents MCP proxy.
 
 ## Evidence
 

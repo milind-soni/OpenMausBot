@@ -2143,7 +2143,11 @@ describe("standing external runtime", () => {
 
 // Opt-in computer sharing is off unless the harness turns it on. A separate
 // child is the only honest check: the tool list is frozen at module load.
-describe("with computer sharing off (the default)", () => {
+describe.each([
+  { mode: "legacy", room: "0", own: "0", discussion: "0" },
+  { mode: "direct coordination", room: "1", own: "1", discussion: "0" },
+  { mode: "room discussion", room: "1", own: "1", discussion: "1" },
+])("with computer sharing off in $mode", ({ room, own, discussion }) => {
   let gated: ChildProcess;
   const gatedPending = new Map<number, (msg: any) => void>();
   let gatedId = 500;
@@ -2167,6 +2171,10 @@ describe("with computer sharing off (the default)", () => {
         OMB_COMMS_TOKEN: TOKEN,
         OMB_TURN_DEPTH: "0",
         OMB_SKILL_AUTHORING_ENABLED: "1",
+        OMB_ROOM_TURN: room,
+        OMB_OWN_THREAD_CREATION: own,
+        OMB_ROOM_DISCUSSION: discussion,
+        OMB_ROOM_DISCUSSION_ENABLED: "1",
         // deliberately no OMB_SHARED_COMPUTERS_ENABLED
       },
       stdio: ["pipe", "pipe", "inherit"],
@@ -2196,9 +2204,20 @@ describe("with computer sharing off (the default)", () => {
     const names = list.result.tools.map((tool: { name: string }) => tool.name);
     expect(names).not.toContain("list_shared_computers");
     expect(names).not.toContain("shared_computer");
-    // the rest of the surface is untouched — this is a gate, not a removal
-    expect(names).toContain("list_bots");
-    expect(names).toContain("skills_list");
+    if (discussion === "1") {
+      // Discussion participants cannot bypass their chair, even if another
+      // capability flag accidentally claims self-job permission.
+      expect(names).toEqual(["list_room_targets"]);
+    } else {
+      expect(names).toContain("list_bots");
+      expect(names).toContain("skills_list");
+      if (room === "1") {
+        expect(names).toContain("coordinate_bots");
+        expect(names).toContain("discuss_room");
+        const selfJob = list.result.tools.find((tool: { name: string }) => tool.name === "start_thread");
+        expect(selfJob.inputSchema.properties.bot_id.enum).toEqual(["bot-asker"]);
+      }
+    }
   });
 
   it("refuses the handlers if a model calls them by name anyway", async () => {

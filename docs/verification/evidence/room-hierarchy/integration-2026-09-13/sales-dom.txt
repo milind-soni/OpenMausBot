@@ -1,0 +1,315 @@
+- complementary "ボットとナビゲーション":
+  - button "サイドバーをアバターだけに畳む":
+  - button "サイドバーの表示密度を選ぶ"
+  - button "新規または共有":
+  - textbox "ボットとメッセージを検索":
+    - /placeholder: 検索
+  - button "Group chats" [expanded]:
+    - generic: Group chats
+  - button "レオ メイ +1 QAチーム":
+    - img "レオ"
+    - img "メイ"
+    - generic: "+1"
+    - generic: QAチーム
+  - button "Collapse QAチーム threads" [expanded]:
+  - group "QAチーム threads":
+    - button "New task":
+      - generic: New task
+    - button "Actions for New task":
+    - button "新しいスレッド":
+      - text: 新しいスレッド
+  - button "ソラ ヒナ +1 実装チーム":
+    - img "ソラ"
+    - img "ヒナ"
+    - generic: "+1"
+    - generic: 実装チーム
+  - button "Collapse 実装チーム threads" [expanded]:
+  - group "実装チーム threads":
+    - button "New task":
+      - generic: New task
+    - button "Actions for New task":
+    - button "新しいスレッド":
+      - text: 新しいスレッド
+  - button "コウ サキ +1 営業部":
+    - img "コウ"
+    - img "サキ"
+    - generic: "+1"
+    - generic: 営業部
+  - button "Collapse 営業部 threads" [expanded]:
+  - group "営業部 threads":
+    - button "New task":
+      - generic: New task
+    - button "Actions for New task":
+    - button "新しいスレッド":
+      - text: 新しいスレッド
+  - button "レン リツ +1 開発部":
+    - img "レン"
+    - img "リツ"
+    - generic: "+1"
+    - generic: 開発部
+  - button "Collapse 開発部 threads" [expanded]:
+  - group "開発部 threads":
+    - button "New task":
+      - generic: New task
+    - button "Actions for New task":
+    - button "新しいスレッド":
+      - text: 新しいスレッド
+  - button "ミナト アオイ +1 経営会議":
+    - img "ミナト"
+    - img "アオイ"
+    - generic: "+1"
+    - generic: 経営会議
+  - button "Collapse 経営会議 threads" [expanded]:
+  - group "経営会議 threads":
+    - button "@ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案…":
+      - generic: "@ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案…"
+    - button "Actions for @ミナト CSV出力の公開準備をしてください。経営会議で既存のアオイ・ユイと2巡議論し、修正案…":
+    - button "新しいスレッド":
+      - text: 新しいスレッド
+  - button "ボット" [expanded]:
+    - generic: ボット
+  - button "Ivy Ivy の名前を変更 Hi, I'm Ivy. What would you like me to do?":
+    - img "Ivy"
+    - button "Ivy の名前を変更": Ivy
+    - generic: Hi, I'm Ivy. What would you like me to do?
+  - button "Expand Ivy threads":
+  - button "New folder under Ivy":
+  - button "Actions for Ivy":
+  - button "検証会社" [expanded]:
+    - generic: 検証会社
+  - button "ハル QAチームの異常系担当 ハル の名前を変更 Hi, I'm ハル. What would you like me to do?":
+    - img "ハル"
+    - generic: QAチームの異常系担当
+    - button "ハル の名前を変更": ハル
+    - generic: Hi, I'm ハル. What would you like me to do?
+  - button "Expand ハル threads":
+  - button "New folder under ハル":
+  - button "Actions for ハル":
+  - button "メイ QAチームの境界値担当 メイ の名前を変更 Hi, I'm メイ. What would you like me to do?":
+    - img "メイ"
+    - generic: QAチームの境界値担当
+    - button "メイ の名前を変更": メイ
+    - generic: Hi, I'm メイ. What would you like me to do?
+  - button "Expand メイ threads":
+  - button "New folder under メイ":
+  - button "Actions for メイ":
+  - button "レオ QAチームのリーダー レオ の名前を変更 Hi, I'm レオ. What would you like me to do?":
+    - img "レオ"
+    - generic: QAチームのリーダー
+    - button "レオ の名前を変更": レオ
+    - generic: Hi, I'm レオ. What would you like me to do?
+  - button "Expand レオ threads":
+  - button "New folder under レオ":
+  - button "Actions for レオ":
+  - button "ナギ 実装チームのデータ検証担当 ナギ の名前を変更 Hi, I'm ナギ. What would you like me to do?":
+    - img "ナギ"
+    - generic: 実装チームのデータ検証担当
+    - button "ナギ の名前を変更": ナギ
+    - generic: Hi, I'm ナギ. What would you like me to do?
+  - button "Expand ナギ threads":
+  - button "New folder under ナギ":
+  - button "Actions for ナギ":
+  - button "ヒナ 実装チームのCSV作成担当 ヒナ の名前を変更 Hi, I'm ヒナ. What would you like me to do?":
+    - img "ヒナ"
+    - generic: 実装チームのCSV作成担当
+    - button "ヒナ の名前を変更": ヒナ
+    - generic: Hi, I'm ヒナ. What would you like me to do?
+  - button "Expand ヒナ threads":
+  - button "New folder under ヒナ":
+  - button "Actions for ヒナ":
+  - button "ソラ 実装チームのリーダー ソラ の名前を変更 Hi, I'm ソラ. What would you like me to do?":
+    - img "ソラ"
+    - generic: 実装チームのリーダー
+    - button "ソラ の名前を変更": ソラ
+    - generic: Hi, I'm ソラ. What would you like me to do?
+  - button "Expand ソラ threads":
+  - button "New folder under ソラ":
+  - button "Actions for ソラ":
+  - button "トワ 営業部の営業運用担当 トワ の名前を変更 Hi, I'm トワ. What would you like me to do?":
+    - img "トワ"
+    - generic: 営業部の営業運用担当
+    - button "トワ の名前を変更": トワ
+    - generic: Hi, I'm トワ. What would you like me to do?
+  - button "Expand トワ threads":
+  - button "New folder under トワ":
+  - button "Actions for トワ":
+  - button "サキ 営業部の顧客説明担当 サキ の名前を変更 Hi, I'm サキ. What would you like me to do?":
+    - img "サキ"
+    - generic: 営業部の顧客説明担当
+    - button "サキ の名前を変更": サキ
+    - generic: Hi, I'm サキ. What would you like me to do?
+  - button "Expand サキ threads":
+  - button "New folder under サキ":
+  - button "Actions for サキ":
+  - button "コウ 営業部の部長 コウ の名前を変更 Hi, I'm コウ. What would you like me to do?":
+    - img "コウ"
+    - generic: 営業部の部長
+    - button "コウ の名前を変更": コウ
+    - generic: Hi, I'm コウ. What would you like me to do?
+  - button "Expand コウ threads":
+  - button "New folder under コウ":
+  - button "Actions for コウ":
+  - button "マコ 開発部の品質担当 マコ の名前を変更 Hi, I'm マコ. What would you like me to do?":
+    - img "マコ"
+    - generic: 開発部の品質担当
+    - button "マコ の名前を変更": マコ
+    - generic: Hi, I'm マコ. What would you like me to do?
+  - button "Expand マコ threads":
+  - button "New folder under マコ":
+  - button "Actions for マコ":
+  - button "リツ 開発部の実装担当 リツ の名前を変更 Hi, I'm リツ. What would you like me to do?":
+    - img "リツ"
+    - generic: 開発部の実装担当
+    - button "リツ の名前を変更": リツ
+    - generic: Hi, I'm リツ. What would you like me to do?
+  - button "Expand リツ threads":
+  - button "New folder under リツ":
+  - button "Actions for リツ":
+  - button "レン 開発部の部長 レン の名前を変更 Hi, I'm レン. What would you like me to do?":
+    - img "レン"
+    - generic: 開発部の部長
+    - button "レン の名前を変更": レン
+    - generic: Hi, I'm レン. What would you like me to do?
+  - button "Expand レン threads":
+  - button "New folder under レン":
+  - button "Actions for レン":
+  - button "ユイ 経営会議の営業担当 ユイ の名前を変更 Hi, I'm ユイ. What would you like me to do?":
+    - img "ユイ"
+    - generic: 経営会議の営業担当
+    - button "ユイ の名前を変更": ユイ
+    - generic: Hi, I'm ユイ. What would you like me to do?
+  - button "Expand ユイ threads":
+  - button "New folder under ユイ":
+  - button "Actions for ユイ":
+  - button "アオイ 経営会議の開発担当 アオイ の名前を変更 Hi, I'm アオイ. What would you like me to do?":
+    - img "アオイ"
+    - generic: 経営会議の開発担当
+    - button "アオイ の名前を変更": アオイ
+    - generic: Hi, I'm アオイ. What would you like me to do?
+  - button "Expand アオイ threads":
+  - button "New folder under アオイ":
+  - button "Actions for アオイ":
+  - button "ミナト 経営会議の議長 ミナト の名前を変更 Hi, I'm ミナト. What would you like me to do?":
+    - img "ミナト"
+    - generic: 経営会議の議長
+    - button "ミナト の名前を変更": ミナト
+    - generic: Hi, I'm ミナト. What would you like me to do?
+  - button "Expand ミナト threads":
+  - button "New folder under ミナト":
+  - button "Actions for ミナト":
+  - paragraph
+  - button "ツール":
+    - generic: ツール
+  - button "あなた":
+    - generic: "?"
+    - generic: あなた
+- main:
+  - generic: 営業部
+  - button "すべてのスレッド":
+    - generic: すべてのスレッド
+    - generic: "1"
+  - button "会話内を検索":
+  - button "Export conversation":
+  - button "Calls currently need the macOS desktop app":
+  - button "グループの作業フォルダー":
+  - generic "通常のメッセージは コウ に届きます。@メンションが優先されます":
+    - combobox "既定の応答者":
+      - 'option "リード: コウ" [selected]'
+      - 'option "リード: サキ"'
+      - 'option "リード: トワ"'
+      - option "全員が応答"
+      - option "メンションされたときだけ"
+  - button "メンバーを管理 — このグループにボット 3 体":
+    - generic "コウ":
+      - img "コウ"
+    - generic "サキ":
+      - img "サキ"
+    - generic "トワ":
+      - img "トワ"
+  - generic "グループの協働設定"
+  - button "企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者コウは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。":
+    - generic: 企業組織の実験。既存3名で議論→決定→担当メンバーへの分担→担当者が下流へ依頼又は成果を作成→責任者へ報告、の順。責任者コウは受領・会議の進行・採否・取りまとめを担当。責任者自身はcoordinate_botsで下流へ送らず、決定後coordinate_botsを2人それぞれに使う。担当メンバーは議論の発言時には意見を述べ、後で担当として割り当てられたターンで実行する。担当としての実行時は議論をやり直さない。議論はdiscuss_roomで他2名を順に指定し1巡行う。各自が前の人の意見に賛否と具体的な改善を述べる。非同期ツール受付後は即座に最終応答でターン終了。待機、再送、ScheduleWakeup禁止。返却結果への了承は最終応答に書く。架空案件のみ。外部検索・実データ・コード変更不要。日本語で各発言原則250字、成果の表やCSVだけは必要な長さで。論点:公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。
+  - log "Group chat 営業部":
+    - generic: 今日 14:09
+    - img "ユイ"
+    - generic: ユイ
+    - generic "2026/9/13 14:09:02":
+      - paragraph: "@コウ 経営会議決定を具体化した依頼。公開時の顧客説明と運用。サキは便利さ、トワは個人情報持出しの制約を検討。決定後サキに顧客向けFAQ3問、トワに社内操作チェックリスト5項目の作成を依頼する。"
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "コウ"
+    - generic: コウ
+    - generic "2026/9/13 14:09:02":
+      - paragraph: 営業部仮案。各担当の意見を求めます。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - generic "2026/9/13 14:09:03":
+      - paragraph: 【議論】@サキ @トワ 営業部第1巡。修正案を検討
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "サキ"
+    - generic: サキ
+    - generic "2026/9/13 14:09:03":
+      - paragraph: サキ懸念。仮案に条件不足があるため修正を提案します。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "トワ"
+    - generic: トワ
+    - generic "2026/9/13 14:09:04":
+      - paragraph: トワ懸念。仮案に条件不足があるため修正を提案します。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "サキ"
+    - generic: Sent to サキ
+    - img "トワ"
+    - generic: Sent to トワ
+    - img "コウ"
+    - generic: コウ
+    - generic "2026/9/13 14:09:05":
+      - paragraph: 営業部決定。懸念を反映し2名に別々の責任を割り当てました。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - generic "2026/9/13 14:09:05":
+      - paragraph: "@サキ 営業部決定に基づく担当業務。実行してください"
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "サキ"
+    - generic: サキ
+    - generic "2026/9/13 14:09:05":
+      - paragraph: サキ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "コウ"
+    - generic: コウ
+    - generic "2026/9/13 14:09:05":
+      - paragraph: "@トワ 営業部決定に基づく担当業務。実行してください"
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "トワ"
+    - generic: トワ
+    - generic "2026/9/13 14:09:06":
+      - paragraph: トワ成果。担当の成果物を作成しました。検査表:入力0件→ヘッダのみ、上限超過→中断。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+    - img "コウ"
+    - generic: コウ
+    - generic "2026/9/13 14:09:07":
+      - paragraph: 営業部統合報告。両担当の成果を確認しました。
+    - button "メッセージに返信":
+    - button "メッセージをピン留め":
+    - generic: 14:09
+  - button "ファイルを添付":
+  - button "みんなで仕上げる":
+    - text: 目標
+  - textbox "営業部 へのメッセージ":
+    - /placeholder: 営業部 へのメッセージ — コウ が応答します
