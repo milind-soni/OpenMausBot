@@ -16,6 +16,8 @@ enum AppLanguage: String, CaseIterable, Identifiable {
     /// language setting at all would do.
     case system
     case english = "en"
+    case simplifiedChinese = "zh-Hans"
+    case traditionalChinese = "zh-Hant"
     case portugueseBrazil = "pt-BR"
 
     var id: String { rawValue }
@@ -25,8 +27,10 @@ enum AppLanguage: String, CaseIterable, Identifiable {
         case .system: "Follow the system"
         // A language names itself. Someone who cannot read the language the app
         // is currently in still has to be able to find their own in this list,
-        // so these two are marked `shouldTranslate: false` in the catalog.
+        // so these labels are marked `shouldTranslate: false` in the catalog.
         case .english: "English"
+        case .simplifiedChinese: "简体中文"
+        case .traditionalChinese: "繁體中文"
         case .portugueseBrazil: "Português (Brasil)"
         }
     }

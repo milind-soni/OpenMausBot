@@ -1,5 +1,7 @@
 package com.openmausbot.companion.ui
 
+import androidx.compose.ui.res.stringResource
+
 import android.content.ClipData
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -124,10 +126,12 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
                     .padding(horizontal = 8.dp, vertical = 3.dp)
                     // Two glyphs and two numbers say "three added, one removed"
                     // to anyone who can see them; this says it to everyone else.
-                    .semantics(mergeDescendants = true) {
-                        contentDescription =
-                            "${card.additions} lines added, ${card.deletions} removed"
-                    },
+                    .localizedSemantics(
+                        mergeDescendants = true,
+                        contentDescription = {
+                            stringResource(R.string.mobile_a11y_diff_stats, card.additions, card.deletions)
+                        },
+                    ),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 Text(
@@ -180,9 +184,15 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
 
                 if (card.isTruncated) {
                     val label = if (showingAll) {
-                        "Show first ${TranscriptCard.Diff.PREVIEW_LINES} lines"
+                        stringResource(
+                            R.string.mobile_diff_show_first_lines,
+                            TranscriptCard.Diff.PREVIEW_LINES,
+                        )
                     } else {
-                        "Show all ${card.lines.size} lines"
+                        stringResource(
+                            R.string.mobile_diff_show_all_lines,
+                            card.lines.size,
+                        )
                     }
                     TextButton(
                         onClick = {
@@ -192,10 +202,9 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
                         // Compose has no "hint" the way UIAccessibility does, so
                         // iOS's hint is folded into the name: the reader must not
                         // be left thinking Copy Diff copies the preview.
-                        modifier = Modifier.semantics {
-                            contentDescription =
-                                "$label. The copied diff always includes every line"
-                        },
+                        modifier = Modifier.localizedSemantics(contentDescription = {
+                            stringResource(R.string.mobile_a11y_diff_copy_hint, label)
+                        }),
                     ) {
                         Text(label, fontSize = 13.sp)
                     }
@@ -206,7 +215,7 @@ fun DiffCard(card: TranscriptCard.Diff, modifier: Modifier = Modifier) {
         HorizontalDivider(color = secondaryTint.copy(alpha = 0.2f))
 
         TextButton(onClick = { copy(card.text) }) {
-            Text("Copy Diff", fontSize = 13.sp)
+            Text(stringResource(R.string.mobile_copy_diff_18f2296a), fontSize = 13.sp)
         }
     }
 }
@@ -290,7 +299,7 @@ fun DataTableCard(card: TranscriptCard.Table, modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "DATA TABLE",
+                text = stringResource(R.string.mobile_data_table_54baf78e),
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
@@ -320,7 +329,7 @@ fun DataTableCard(card: TranscriptCard.Table, modifier: Modifier = Modifier) {
         HorizontalDivider(color = secondaryTint.copy(alpha = 0.2f))
 
         TextButton(onClick = { copy(card.csv()) }) {
-            Text("Copy CSV", fontSize = 13.sp)
+            Text(stringResource(R.string.mobile_copy_csv_b810b7cd), fontSize = 13.sp)
         }
     }
 }
@@ -366,7 +375,7 @@ private fun DataGrid(
                 headers.indices.forEach { column ->
                     Text(
                         // A short row is padded, not dropped: iOS reads
-                        // `colIdx < row.count ? row[colIdx] : ""` for the same
+                        // `colIdx < row.count ? row[colIdx] : stringResource(R.string.mobile_text_da39a3ee)` for the same
                         // reason, and a missing cell that took no space would
                         // slide the rest of the row under the wrong heading.
                         text = row.getOrElse(column) { "" },
@@ -497,9 +506,11 @@ fun ThoughtChamber(
                         expanded = !expanded
                     },
                 )
-                .semantics {
-                    stateDescription = if (expanded) "Expanded" else "Collapsed"
-                }
+                .localizedSemantics(stateDescription = {
+                    stringResource(
+                        if (expanded) R.string.mobile_a11y_expanded else R.string.mobile_a11y_collapsed,
+                    )
+                })
                 .padding(horizontal = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -511,13 +522,17 @@ fun ThoughtChamber(
                 modifier = Modifier.size(16.dp),
             )
             Text(
-                text = if (streaming) "Thinking…" else "Thought Process",
+                text = if (streaming) stringResource(R.string.mobile_thinking_a60d9c9c) else stringResource(R.string.mobile_thought_process_1756ad28),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = if (steps.size == 1) "1 step" else "${steps.size} steps",
+                text = if (steps.size == 1) {
+                    stringResource(R.string.mobile_step_29869c51)
+                } else {
+                    stringResource(R.string.mobile_steps_count, steps.size)
+                },
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 color = secondaryTint,
@@ -577,7 +592,11 @@ private fun Disclosure(expanded: Boolean, label: String, onToggle: () -> Unit) {
                 onClickLabel = if (expanded) "Collapse" else "Expand",
                 onClick = onToggle,
             )
-            .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" },
+            .localizedSemantics(stateDescription = {
+                stringResource(
+                    if (expanded) R.string.mobile_a11y_expanded else R.string.mobile_a11y_collapsed,
+                )
+            }),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

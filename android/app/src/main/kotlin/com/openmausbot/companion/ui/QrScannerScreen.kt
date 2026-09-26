@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ExperimentalGetImage
@@ -72,10 +76,10 @@ fun QrScannerScreen(onCancel: () -> Unit, validate: (String) -> String?) {
     Column(modifier = Modifier.fillMaxSize()) {
         Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp)) {
             TextButton(onClick = onCancel, modifier = Modifier.align(Alignment.CenterStart)) {
-                Text("Cancel")
+                Text(stringResource(R.string.mobile_cancel_77dfd213))
             }
             Text(
-                text = "Scan QR Code",
+                text = stringResource(R.string.mobile_scan_qr_code_04e3f103),
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -83,21 +87,20 @@ fun QrScannerScreen(onCancel: () -> Unit, validate: (String) -> String?) {
 
         when {
             cameraFailure != null -> EmptyState(
-                title = "Scanner unavailable",
+                title = stringResource(R.string.mobile_scanner_unavailable_cc42e33b),
                 description = cameraFailure!!,
             )
 
             access == CameraAccess.UNKNOWN -> EmptyState(
-                title = "Requesting camera access…",
-                description = "Allow camera access to scan the pairing QR code shown by OpenMausBot.",
+                title = stringResource(R.string.mobile_requesting_camera_access_30e104c0),
+                description = stringResource(R.string.mobile_camera_permission_description),
             )
 
             access == CameraAccess.DENIED -> EmptyState(
-                title = "Camera access needed",
-                description = "Allow camera access to scan the pairing QR code shown by " +
-                    "OpenMausBot, or go back and enter the address and code by hand.",
+                title = stringResource(R.string.mobile_camera_access_needed_28a22fc4),
+                description = stringResource(R.string.mobile_camera_permission_denied),
             ) {
-                Button(onClick = environment.openAppSettings) { Text("Open Settings") }
+                Button(onClick = environment.openAppSettings) { Text(stringResource(R.string.mobile_open_settings_134635e9)) }
             }
 
             else -> ScannerSurface(
@@ -118,6 +121,7 @@ private fun ScannerSurface(
     onCameraFailure: (String) -> Unit,
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraUnavailable = stringResource(R.string.mobile_camera_unavailable)
     // A camera reports the same QR on many consecutive frames. One payload is
     // latched at a time; a rejected one re-arms after the message has had time
     // to be read.
@@ -179,10 +183,10 @@ private fun ScannerSurface(
                                     Log.w("PairingScanner", "could not bind the camera", error)
                                 },
                             )
-                            if (!started) onCameraFailure(CAMERA_UNAVAILABLE)
+                            if (!started) onCameraFailure(cameraUnavailable)
                         } catch (error: Exception) {
                             Log.w("PairingScanner", "camera unavailable", error)
-                            onCameraFailure(CAMERA_UNAVAILABLE)
+                            onCameraFailure(cameraUnavailable)
                         }
                     },
                     ContextCompat.getMainExecutor(viewContext),
@@ -192,7 +196,7 @@ private fun ScannerSurface(
         )
 
         Text(
-            text = validationError ?: "Point the camera at the QR code on your computer",
+            text = validationError ?: stringResource(R.string.mobile_point_the_camera_at_the_qr_code_on_77e56351),
             fontSize = 15.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center,
@@ -267,11 +271,6 @@ internal fun <A> CameraLifecycle.startAnalyzing(
         false
     }
 }
-
-private const val CAMERA_UNAVAILABLE =
-    "This phone's camera could not be started. Use its Camera app to read the QR code, " +
-        "or enter the address and code by hand."
-
 
 private fun bindCamera(
     provider: ProcessCameraProvider,

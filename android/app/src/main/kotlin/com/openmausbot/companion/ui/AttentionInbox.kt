@@ -15,6 +15,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.openmausbot.companion.R
 import com.openmausbot.companion.core.Bot
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.CompanionState
@@ -94,6 +96,12 @@ private fun attentionRank(entry: AttentionEntry): Int = when {
 /** Selection only: the row jumps; menus and management stay in the sheet. */
 @Composable
 internal fun AttentionRow(entry: AttentionEntry, onOpen: () -> Unit) {
+    val status = when {
+        entry.task.activity == "waiting-on-you" -> stringResource(R.string.mobile_waiting_on_you_edab5b72)
+        entry.task.busy == true || entry.task.activity == "working" -> stringResource(R.string.mobile_thread_working)
+        entry.queued -> stringResource(R.string.mobile_queued_6a599877)
+        else -> stringResource(R.string.mobile_unread_07b032b5)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -115,7 +123,7 @@ internal fun AttentionRow(entry: AttentionEntry, onOpen: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "${entry.botName} · ${entry.statusLine()}",
+                text = "${entry.botName} · $status",
                 fontSize = 12.sp,
                 color = secondaryTint,
                 maxLines = 1,

@@ -1,5 +1,7 @@
 package com.openmausbot.companion.ui
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -63,7 +65,10 @@ import com.openmausbot.companion.core.Chat
 import com.openmausbot.companion.core.NotificationTarget
 import com.openmausbot.companion.core.Routine
 import com.openmausbot.companion.core.RoutineRun
+import com.openmausbot.companion.core.RoutineSchedule
 import kotlinx.coroutines.launch
+import java.time.ZoneId
+import java.util.Locale
 
 /**
  * Tasks & Routines — the port of `ios/App/TasksRoutinesView.swift`.
@@ -111,14 +116,14 @@ internal fun TasksRoutinesScreen(onBack: () -> Unit, onOpenChat: (Chat) -> Unit)
         ) {
             HeaderBackButton(onBack)
             Text(
-                text = "Threads & Routines",
+                text = stringResource(R.string.mobile_threads_routines_65d7efcd),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f),
             )
             ChromeButton(
                 icon = Icons.Filled.Add,
-                contentDescription = "New routine",
+                contentDescription = stringResource(R.string.mobile_new_routine_32809dc6),
                 onClick = { editor = RoutineEditorTarget.new() },
                 size = 36.dp,
                 glyph = 18.dp,
@@ -199,7 +204,7 @@ internal fun TasksRoutinesScreen(onBack: () -> Unit, onOpenChat: (Chat) -> Unit)
                 if (receipts.isEmpty() && !loading) {
                     item(key = "receipts-empty") {
                         Text(
-                            text = RoutineRules.NO_RECEIPTS,
+                            text = localizedMobileCopy(RoutineRules.NO_RECEIPTS),
                             fontSize = 14.sp,
                             color = secondaryTint,
                             modifier = Modifier.padding(horizontal = 20.dp),
@@ -247,8 +252,8 @@ internal fun TasksRoutinesScreen(onBack: () -> Unit, onOpenChat: (Chat) -> Unit)
     deleting?.let { routine ->
         AlertDialog(
             onDismissRequest = { deleting = null },
-            title = { Text("Delete ${routine.name}?") },
-            text = { Text(RoutineRules.DELETE_MESSAGE) },
+            title = { Text(stringResource(R.string.mobile_delete_routine_name_41a4c8bf, routine.name)) },
+            text = { Text(localizedMobileCopy(RoutineRules.DELETE_MESSAGE)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -258,11 +263,11 @@ internal fun TasksRoutinesScreen(onBack: () -> Unit, onOpenChat: (Chat) -> Unit)
                         }
                     },
                 ) {
-                    Text("Delete routine", color = MaterialTheme.colorScheme.error)
+                    Text(stringResource(R.string.mobile_delete_routine_0cb076a0), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { deleting = null }) { Text("Cancel") }
+                TextButton(onClick = { deleting = null }) { Text(stringResource(R.string.mobile_cancel_77dfd213)) }
             },
         )
     }
@@ -372,7 +377,7 @@ private fun RoutineRow(
         ) {
             Text(routine.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text(
-                text = RoutineRules.routineSubtitle(routine, bot?.name),
+                text = localizedRoutineSubtitle(routine, bot?.name),
                 fontSize = 12.sp,
                 color = secondaryTint,
                 maxLines = 2,
@@ -402,14 +407,14 @@ private fun RoutineRow(
         Box {
             ChromeButton(
                 icon = Icons.Filled.MoreVert,
-                contentDescription = "Actions for ${routine.name}",
+                contentDescription = stringResource(R.string.mobile_actions_for_routine_name_767f1549, routine.name),
                 onClick = { menuOpen = true },
                 size = 36.dp,
                 glyph = 18.dp,
             )
             DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                 DropdownMenuItem(
-                    text = { Text("Run now") },
+                    text = { Text(stringResource(R.string.mobile_run_now_2af00e23)) },
                     onClick = {
                         menuOpen = false
                         onRunNow()
@@ -417,7 +422,7 @@ private fun RoutineRow(
                 )
                 if (canToggle) {
                     DropdownMenuItem(
-                        text = { Text(if (routine.enabled) "Pause" else "Resume") },
+                        text = { Text(if (routine.enabled) stringResource(R.string.mobile_pause_781961bc) else stringResource(R.string.mobile_resume_b3bd0b5a)) },
                         onClick = {
                             menuOpen = false
                             onToggle()
@@ -425,14 +430,14 @@ private fun RoutineRow(
                     )
                 }
                 DropdownMenuItem(
-                    text = { Text("Edit") },
+                    text = { Text(stringResource(R.string.mobile_edit_5301648d)) },
                     onClick = {
                         menuOpen = false
                         onEdit()
                     },
                 )
                 DropdownMenuItem(
-                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                    text = { Text(stringResource(R.string.mobile_delete_f6fdbe48), color = MaterialTheme.colorScheme.error) },
                     onClick = {
                         menuOpen = false
                         onDelete()
@@ -471,13 +476,13 @@ private fun RoutineRunRow(
             ) {
                 Text(run.routineName, fontSize = 15.sp)
                 Text(
-                    text = RoutineRules.runSubtitle(run, bot?.name),
+                    text = localizedRoutineRunSubtitle(run, bot?.name),
                     fontSize = 12.sp,
                     color = secondaryTint,
                 )
             }
             Text(
-                text = RoutineRules.runStatusLabel(run.status),
+                text = localizedMobileCopy(RoutineRules.runStatusLabel(run.status)),
                 fontSize = 12.sp,
                 color = tint,
             )
@@ -513,7 +518,7 @@ private fun RoutineRunRow(
                 }
                 if (run.status == "waiting") {
                     Text(
-                        text = RoutineRules.WAITING_ON_YOU,
+                        text = localizedMobileCopy(RoutineRules.WAITING_ON_YOU),
                         fontSize = 14.sp,
                         color = attentionTint,
                     )
@@ -596,7 +601,7 @@ internal fun SectionHeading(text: String) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(
-            text = text.uppercase(),
+            text = localizedMobileCopy(text).uppercase(),
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             color = secondaryTint,
@@ -613,7 +618,76 @@ private fun SectionNote(title: String, description: String) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-        Text(description, fontSize = 13.sp, color = secondaryTint)
+        Text(localizedMobileCopy(title), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text(localizedMobileCopy(description), fontSize = 13.sp, color = secondaryTint)
     }
+}
+
+@Composable
+private fun localizedRoutineSubtitle(routine: Routine, botName: String?): String {
+    val schedule = routine.schedule
+    val summary = when (schedule.type) {
+        RoutineSchedule.Kind.ONCE -> schedule.at?.let {
+            RelativeStamp.dateAndTime(it, ZoneId.systemDefault(), Locale.getDefault())
+        } ?: stringResource(R.string.mobile_routine_date_unavailable)
+
+        RoutineSchedule.Kind.INTERVAL -> schedule.everyMinutes?.let { minutes ->
+            val cadence = stringResource(R.string.mobile_routine_every_minutes, minutes)
+            schedule.anchorAt?.let { anchor ->
+                stringResource(
+                    R.string.mobile_routine_interval_with_start,
+                    cadence,
+                    RelativeStamp.dateAndTime(anchor.toDouble(), ZoneId.systemDefault(), Locale.getDefault()),
+                )
+            } ?: cadence
+        } ?: stringResource(R.string.mobile_routine_interval_unavailable)
+
+        RoutineSchedule.Kind.DAILY -> {
+            val selectedDays = schedule.weekdays.orEmpty()
+            val days = when {
+                selectedDays.size == 7 -> stringResource(R.string.mobile_every_day_3b2eb513)
+                selectedDays == listOf(1, 2, 3, 4, 5) -> stringResource(R.string.mobile_weekdays_4ffc67b6)
+                else -> {
+                    val dayNames = mutableListOf<String>()
+                    for (day in selectedDays) {
+                        routineWeekdayShortResource(day)?.let { dayNames += stringResource(it) }
+                    }
+                    dayNames.joinToString(stringResource(R.string.mobile_routine_weekday_separator))
+                }
+            }
+            stringResource(R.string.mobile_routine_daily_at, days, schedule.time ?: "—")
+        }
+
+        RoutineSchedule.Kind.UNKNOWN -> stringResource(R.string.mobile_routine_newer_schedule)
+    }
+    val location = when (routine.runLocation) {
+        com.openmausbot.companion.core.RoutineRunLocation.MAUS ->
+            stringResource(R.string.mobile_this_computer_4ccce6f4)
+        com.openmausbot.companion.core.RoutineRunLocation.CLOUD ->
+            stringResource(R.string.mobile_cloud_vm_26ca291f)
+    }
+    return stringResource(
+        R.string.mobile_routine_subtitle,
+        botName ?: stringResource(R.string.mobile_deleted_agent_ff6eff9d),
+        summary,
+        location,
+    )
+}
+
+@Composable
+private fun localizedRoutineRunSubtitle(run: RoutineRun, botName: String?): String = stringResource(
+    R.string.mobile_routine_run_subtitle,
+    botName ?: stringResource(R.string.mobile_deleted_agent_ff6eff9d),
+    RelativeStamp.dateAndTime(run.scheduledFor, ZoneId.systemDefault(), Locale.getDefault()),
+)
+
+private fun routineWeekdayShortResource(day: Int): Int? = when (day) {
+    0 -> R.string.mobile_routine_sunday_short
+    1 -> R.string.mobile_routine_monday_short
+    2 -> R.string.mobile_routine_tuesday_short
+    3 -> R.string.mobile_routine_wednesday_short
+    4 -> R.string.mobile_routine_thursday_short
+    5 -> R.string.mobile_routine_friday_short
+    6 -> R.string.mobile_routine_saturday_short
+    else -> null
 }

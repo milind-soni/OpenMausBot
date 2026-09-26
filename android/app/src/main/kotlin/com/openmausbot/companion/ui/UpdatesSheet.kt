@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -65,7 +69,7 @@ internal fun UpdatesBar(updates: List<ChatUpdate>, onOpen: () -> Unit, modifier:
         modifier = modifier
             .chromeCapsule()
             .clip(CircleShape)
-            .clickable(onClickLabel = "Open updates", role = Role.Button, onClick = onOpen)
+            .clickable(onClickLabel = stringResource(R.string.mobile_open_updates_2c80d633), role = Role.Button, onClick = onOpen)
             .heightIn(min = 52.dp)
             .padding(start = if (first == null) 16.dp else 7.dp, end = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -92,7 +96,7 @@ internal fun UpdatesBar(updates: List<ChatUpdate>, onOpen: () -> Unit, modifier:
                     )
                 }
                 Text(
-                    text = UpdatesSummary.headline(updates),
+                    text = localizedUpdatesHeadline(updates),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = if (first == null) secondaryTint else MaterialTheme.colorScheme.onSurface,
@@ -101,7 +105,7 @@ internal fun UpdatesBar(updates: List<ChatUpdate>, onOpen: () -> Unit, modifier:
                 )
             }
             Text(
-                text = UpdatesSummary.subline(updates),
+                text = localizedUpdatesSubline(updates),
                 fontSize = 12.sp,
                 color = secondaryTint,
                 maxLines = 1,
@@ -117,6 +121,42 @@ internal fun UpdatesBar(updates: List<ChatUpdate>, onOpen: () -> Unit, modifier:
         )
     }
 }
+
+@Composable
+private fun localizedUpdatesHeadline(updates: List<ChatUpdate>): String {
+    val first = updates.firstOrNull() ?: return localizedMobileCopy(UpdatesSummary.headline(updates))
+    return when (first.kind) {
+        UpdateKind.NEEDS_YOU -> stringResource(R.string.mobile_updates_headline_needs_you, first.chat.name)
+        UpdateKind.WORKING -> stringResource(R.string.mobile_updates_headline_working, first.chat.name)
+        UpdateKind.TO_REVIEW -> stringResource(R.string.mobile_updates_headline_review, first.chat.name)
+    }
+}
+
+@Composable
+private fun localizedUpdatesSubline(updates: List<ChatUpdate>): String {
+    val first = updates.firstOrNull() ?: return localizedMobileCopy(UpdatesSummary.subline(updates))
+    val remaining = updates.size - 1
+    if (remaining == 1) return stringResource(R.string.mobile_updates_one_more)
+    if (remaining > 1) return stringResource(R.string.mobile_updates_more_count, remaining)
+    return localizedUpdateLine(first.line.ifEmpty { " " })
+}
+
+@Composable
+private fun localizedUpdatesCount(updates: List<ChatUpdate>): String =
+    if (updates.isEmpty()) localizedMobileCopy(UpdatesSummary.count(updates))
+    else stringResource(R.string.mobile_updates_active_count, updates.size)
+
+@Composable
+private fun localizedUpdateLine(line: String): String {
+    if (line == "Queued — waiting for an available slot") {
+        return stringResource(R.string.mobile_updates_queued_waiting)
+    }
+    val queued = QUEUED_MESSAGES.matchEntire(line)?.groupValues?.getOrNull(1)?.toIntOrNull()
+    if (queued != null) return stringResource(R.string.mobile_updates_queued_count, queued)
+    return localizedMobileCopy(line)
+}
+
+private val QUEUED_MESSAGES = Regex("^(\\d+) messages queued$")
 
 /** Up to three mascots overlapping, the way a group of faces reads at a glance. */
 @Composable
@@ -163,9 +203,9 @@ internal fun UpdatesSheet(onOpen: (Chat) -> Unit, onDismiss: () -> Unit) {
                         .padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Updates", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.mobile_updates_c76d1807), fontSize = 22.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.weight(1f))
-                    Text(UpdatesSummary.count(updates), fontSize = 13.sp, color = secondaryTint)
+                    Text(localizedUpdatesCount(updates), fontSize = 13.sp, color = secondaryTint)
                 }
             }
 
@@ -182,7 +222,7 @@ internal fun UpdatesSheet(onOpen: (Chat) -> Unit, onDismiss: () -> Unit) {
             sections.forEach { (kind, items) ->
                 item(key = "section-$kind") {
                     Text(
-                        text = UpdatesSummary.sectionLabel(kind),
+                        text = localizedMobileCopy(UpdatesSummary.section(kind)).uppercase(),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 0.5.sp,
@@ -240,7 +280,7 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = update.line.ifEmpty { " " },
+                text = localizedUpdateLine(update.line),
                 fontSize = 14.sp,
                 color = secondaryTint,
                 maxLines = if (update.kind == UpdateKind.NEEDS_YOU) 3 else 1,
@@ -250,7 +290,7 @@ private fun UpdateRow(update: ChatUpdate, face: MausState, onOpen: () -> Unit) {
             if (update.kind == UpdateKind.NEEDS_YOU && card != null && card.isPending) {
                 if (card.skillRequest != null) {
                     Text(
-                        "Open the chat to review SKILL.md",
+                        stringResource(R.string.mobile_open_the_chat_to_review_skill_md_6225775b),
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = secondaryTint,

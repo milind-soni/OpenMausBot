@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -168,14 +172,14 @@ fun TaskSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = "${current.name}'s threads",
+                        text = stringResource(R.string.mobile_current_name_s_threads_d34c7ce0, current.name),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.weight(1f),
                     )
                     Icon(
                         imageVector = Icons.Filled.Add,
-                        contentDescription = "New thread",
+                        contentDescription = stringResource(R.string.mobile_new_thread_02057e28),
                         tint = if (TaskRules.canCreate(current)) {
                             MaterialTheme.colorScheme.onSurface
                         } else {
@@ -209,17 +213,17 @@ fun TaskSheet(
                     ChatAvatar(chat = current, size = 48.dp, state = MausState.IDLE, animated = false)
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(current.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(TaskRules.subtitle(current), fontSize = 14.sp, color = secondaryTint)
+                        Text(localizedMobileCopy(TaskRules.subtitle(current)), fontSize = 14.sp, color = secondaryTint)
                     }
                 }
                 Text(
-                    text = TaskRules.CONTEXT_FOOTER,
+                    text = localizedMobileCopy(TaskRules.CONTEXT_FOOTER),
                     fontSize = 13.sp,
                     color = secondaryTint,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 2.dp),
                 )
                 error?.let {
-                    Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+                    Text(localizedMobileCopy(it), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
                 }
 
                 LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
@@ -270,7 +274,7 @@ fun TaskSheet(
                     if (archived.isNotEmpty()) {
                         item(key = "archived") {
                             Text(
-                                "Archived",
+                                stringResource(R.string.mobile_archived_eddc813f),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = secondaryTint,
@@ -316,7 +320,7 @@ fun TaskSheet(
                         .padding(horizontal = 12.dp),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(onClick = onDismiss, enabled = !saving) { Text("Done") }
+                    TextButton(onClick = onDismiss, enabled = !saving) { Text(stringResource(R.string.mobile_done_e9b450d1)) }
                 }
             }
         }
@@ -325,7 +329,7 @@ fun TaskSheet(
     renaming?.let { task ->
         TaskTitleDialog(
             heading = "Rename thread",
-            label = "Title",
+            label = stringResource(R.string.mobile_title_768e0c1c),
             title = title,
             onTitleChange = { title = it },
             confirmText = "Save",
@@ -349,8 +353,8 @@ fun TaskSheet(
     pendingDelete?.let { task ->
         AlertDialog(
             onDismissRequest = { if (!saving) pendingDelete = null },
-            title = { Text("Delete ${TaskRules.title(task)}?") },
-            text = { Text(error ?: "This conversation will be deleted. Generated files are kept.") },
+            title = { Text(stringResource(R.string.mobile_delete_taskrules_title_task_df44dd3a, TaskRules.title(task))) },
+            text = { Text(error ?: stringResource(R.string.mobile_this_conversation_will_be_deleted__af9201c8)) },
             confirmButton = {
                 TextButton(enabled = !saving && TaskRules.canDelete(task, current), onClick = {
                     if (!TaskRules.canDelete(task, current)) return@TextButton
@@ -367,9 +371,9 @@ fun TaskSheet(
                             }
                         }
                     }
-                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(R.string.mobile_delete_f6fdbe48), color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = { TextButton(enabled = !saving, onClick = { pendingDelete = null; error = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(enabled = !saving, onClick = { pendingDelete = null; error = null }) { Text(stringResource(R.string.mobile_cancel_77dfd213)) } },
         )
     }
 
@@ -480,7 +484,9 @@ private fun TaskRow(
     ) {
         BotThreadRow(task, selected = current, modifier = Modifier.weight(1f), now = now, queued = queued)
 
-        val pinLabel = if (task.pinned == true) "Unpin" else "Pin"
+        val pinLabel = stringResource(
+            if (task.pinned == true) R.string.mobile_a11y_unpin else R.string.mobile_a11y_pin,
+        )
         Text(
             text = pinLabel,
             fontSize = 12.sp,
@@ -488,12 +494,16 @@ private fun TaskRow(
             color = if (enabled) secondaryTint else secondaryTint.copy(alpha = 0.4f),
             modifier = Modifier
                 .clickable(enabled = enabled) { onPin(task) }
-                .semantics { contentDescription = "$pinLabel ${TaskRules.title(task)}" }
+                .localizedSemantics(contentDescription = {
+                    stringResource(R.string.mobile_pinlabel_taskrules_title_task_5545ef6f, pinLabel, TaskRules.title(task))
+                })
                 .padding(horizontal = 8.dp),
         )
 
         if (onArchive != null) {
-            val label = if (task.isArchived) "Unarchive" else "Archive"
+            val label = stringResource(
+                if (task.isArchived) R.string.mobile_a11y_unarchive else R.string.mobile_a11y_archive,
+            )
             Text(
                 text = label,
                 fontSize = 12.sp,
@@ -501,14 +511,16 @@ private fun TaskRow(
                 color = if (canArchive) secondaryTint else secondaryTint.copy(alpha = 0.4f),
                 modifier = Modifier
                     .clickable(enabled = canArchive) { onArchive(task) }
-                    .semantics { contentDescription = "$label ${TaskRules.title(task)}" }
+                    .localizedSemantics(contentDescription = {
+                        stringResource(R.string.mobile_label_taskrules_title_task_48c15f59, label, TaskRules.title(task))
+                    })
                     .padding(horizontal = 8.dp),
             )
         }
 
         Icon(
             imageVector = Icons.Filled.Edit,
-            contentDescription = "Rename ${TaskRules.title(task)}",
+            contentDescription = stringResource(R.string.mobile_rename_taskrules_title_task_054bec52, TaskRules.title(task)),
             tint = secondaryTint,
             modifier = Modifier
                 .size(48.dp)
@@ -531,7 +543,7 @@ private fun TaskRow(
 
         Icon(
             imageVector = Icons.Filled.Delete,
-            contentDescription = "Delete ${TaskRules.title(task)}",
+            contentDescription = stringResource(R.string.mobile_delete_taskrules_title_task_961ae881, TaskRules.title(task)),
             tint = if (canDelete) MaterialTheme.colorScheme.error else secondaryTint.copy(alpha = 0.4f),
             modifier = Modifier
                 .size(48.dp)
@@ -594,7 +606,7 @@ private fun TaskTitleDialog(
 ) {
     AlertDialog(
         onDismissRequest = onCancel,
-        title = { Text(heading) },
+        title = { Text(localizedMobileCopy(heading)) },
         text = {
             Column {
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -608,8 +620,8 @@ private fun TaskTitleDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(confirmText) }
+            TextButton(onClick = onConfirm, enabled = confirmEnabled) { Text(localizedMobileCopy(confirmText)) }
         },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.mobile_cancel_77dfd213)) } },
     )
 }

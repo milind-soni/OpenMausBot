@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -133,11 +137,11 @@ fun ConnectedAppsScreen(onBack: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             HeaderBackButton(onBack)
-            Text("Connected Apps", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(stringResource(R.string.mobile_connected_apps_8ab72a8e), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
             TextButton(
                 onClick = { scope.launch { refresh(showProgress = true) } },
                 enabled = !refreshing,
-            ) { Text(if (refreshing) "Refreshing…" else "Refresh") }
+            ) { Text(if (refreshing) stringResource(R.string.mobile_refreshing_96141178) else stringResource(R.string.mobile_refresh_56e3badc)) }
         }
         HorizontalDivider()
 
@@ -158,7 +162,7 @@ fun ConnectedAppsScreen(onBack: () -> Unit) {
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it },
-                    label = { Text("Search apps") },
+                    label = { Text(stringResource(R.string.mobile_search_apps_ca3ce8f3)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -173,9 +177,9 @@ fun ConnectedAppsScreen(onBack: () -> Unit) {
                             modifier = Modifier.padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Text("Connected apps need setup", fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.mobile_connected_apps_need_setup_2cdb536a), fontWeight = FontWeight.SemiBold)
                             Text(
-                                "Configure Composio on your computer first. Provider credentials are never returned to this phone.",
+                                stringResource(R.string.mobile_configure_composio_on_your_compute_4281e8b0),
                                 color = secondaryTint,
                                 fontSize = 13.sp,
                             )
@@ -198,7 +202,7 @@ fun ConnectedAppsScreen(onBack: () -> Unit) {
                 }
 
                 if (!loading && catalog?.cards.isNullOrEmpty()) {
-                    Text("No connected apps are available from this computer.", color = secondaryTint)
+                    Text(stringResource(R.string.mobile_no_connected_apps_are_available_fr_0529e71d), color = secondaryTint)
                 }
 
                 if (loading) {
@@ -214,18 +218,18 @@ fun ConnectedAppsScreen(onBack: () -> Unit) {
         val normalized = ConnectedAppsRules.additionalAccountAlias(alias)
         AlertDialog(
             onDismissRequest = { aliasTarget = null },
-            title = { Text("Account alias") },
+            title = { Text(stringResource(R.string.mobile_account_alias_8cf27ca0)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
                         value = alias,
                         onValueChange = { alias = it },
-                        label = { Text("Work, Personal, Client…") },
+                        label = { Text(stringResource(R.string.mobile_work_personal_client_7d6a18a4)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "An alias makes the account explicit when an agent uses more than one ${target.label} account.",
+                        stringResource(R.string.mobile_an_alias_makes_the_account_explici_725873b3, target.label),
                         color = secondaryTint,
                         fontSize = 13.sp,
                     )
@@ -238,9 +242,9 @@ fun ConnectedAppsScreen(onBack: () -> Unit) {
                         aliasTarget = null
                         authorize(target.slug, normalized)
                     },
-                ) { Text("Continue") }
+                ) { Text(stringResource(R.string.mobile_continue_2e026239)) }
             },
-            dismissButton = { TextButton(onClick = { aliasTarget = null }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { aliasTarget = null }) { Text(stringResource(R.string.mobile_cancel_77dfd213)) } },
         )
     }
 }
@@ -262,12 +266,12 @@ private val AliasTargetSaver = listSaver<AliasTarget?, String>(
 private fun CredentialStoreWarning(hasLastKnownInventory: Boolean) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Accounts could not be re-checked", fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.tertiary)
+            Text(stringResource(R.string.mobile_accounts_could_not_be_re_checked_6727be8f), fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.tertiary)
             Text(
                 if (hasLastKnownInventory) {
-                    "Showing what was connected last time. Your computer could not open its credential store just now, so these accounts could not be re-checked. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this."
+                    stringResource(R.string.mobile_showing_what_was_connected_last_ti_62107fa4)
                 } else {
-                    "Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this."
+                    stringResource(R.string.mobile_your_computer_could_not_open_its_c_fa640d75)
                 },
                 color = secondaryTint,
                 fontSize = 13.sp,
@@ -296,18 +300,18 @@ private fun ConnectorCardView(
                     Text(card.label, fontWeight = FontWeight.SemiBold)
                     Text(card.blurb, color = secondaryTint, fontSize = 13.sp)
                 }
-                if (pending) Text("Connecting…", color = secondaryTint, fontSize = 13.sp)
+                if (pending) Text(stringResource(R.string.mobile_connecting_fd3e7969), color = secondaryTint, fontSize = 13.sp)
             }
 
             when {
-                !hasAuthoritativeInventory -> Text("Connection unknown", color = secondaryTint)
+                !hasAuthoritativeInventory -> Text(stringResource(R.string.mobile_connection_unknown_973b0484), color = secondaryTint)
                 accounts.isEmpty() && !connected && !pending -> Button(onClick = onConnect, enabled = configured) {
-                    Text("Connect ${card.label}")
+                    Text(stringResource(R.string.mobile_connect_card_label_c9e612b4, card.label))
                 }
                 accounts.isEmpty() -> {
-                    Text(if (pending) "Connecting…" else "Connected")
+                    Text(if (pending) stringResource(R.string.mobile_connecting_fd3e7969) else stringResource(R.string.mobile_connected_c2f9b7b4))
                     Text(
-                        "Account details are unavailable from this provider. Refresh after authorization finishes.",
+                        stringResource(R.string.mobile_account_details_are_unavailable_fr_d9d62172),
                         color = secondaryTint,
                         fontSize = 13.sp,
                     )
@@ -320,7 +324,7 @@ private fun ConnectorCardView(
                     TextButton(
                         onClick = onAddAccount,
                         enabled = ConnectedAppsRules.canAddAnotherAccount(accounts),
-                    ) { Text("Add another account") }
+                    ) { Text(stringResource(R.string.mobile_add_another_account_5dcc7913)) }
                 }
             }
         }
@@ -332,10 +336,10 @@ private fun ConnectorAccountRow(account: ConnectorAccount) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(modifier = Modifier.weight(1f)) {
             Text(account.displayName)
-            Text(ConnectedAppsPolicy.statusLabel(account.status), color = secondaryTint, fontSize = 12.sp)
+            Text(localizedMobileCopy(ConnectedAppsPolicy.statusLabel(account.status)), color = secondaryTint, fontSize = 12.sp)
             SelectionContainer { Text(account.id, color = secondaryTint, fontSize = 11.sp) }
         }
-        Text(if (account.isActive) "Active" else "Pending", color = secondaryTint, fontSize = 12.sp)
+        Text(if (account.isActive) stringResource(R.string.mobile_active_a733b809) else stringResource(R.string.mobile_pending_96f608c1), color = secondaryTint, fontSize = 12.sp)
     }
 }
 

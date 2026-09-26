@@ -37,25 +37,30 @@ class PhoneSectionCopyTest {
     @Test
     fun `pairing sends the person to Settings then Phone`() {
         val source = sourceFile("ui/PairingScreen.kt").readText()
+        val english = locate("src/main/res/values/strings.xml").readText()
 
-        // Step one of setup. Upstream: `ios/App/OnboardingViews.swift:137`.
+        // The copy lives in resources so Android can select Simplified or
+        // Traditional Chinese. Keep the pairing screen wired to those entries
+        // and keep the canonical English text explicit in the default catalog.
         assertTrue(
-            source.contains("1.  Open OpenMausBot → Settings → Phone"),
-            "the setup steps must name the Phone section",
-        )
-        // A discovered computer that answered without an address.
-        assertTrue(
-            source.contains("Enter the address shown in Phone settings instead."),
-            "the discovery fallback must name Phone settings",
-        )
-        // The tailnet hint, and the manual-address footnote.
-        assertTrue(
-            source.contains("same account — Phone settings will then show a name ending in "),
-            "the Tailscale hint must name Phone settings",
+            source.contains("R.string.mobile_open_openmausbot_settings_phone_38cfc5bb") &&
+                english.contains("1.  Open OpenMausBot → Settings → Phone"),
+            "the setup steps must use the localized Settings → Phone copy",
         )
         assertTrue(
-            source.contains("Whatever Phone settings on your computer shows — "),
-            "the manual-address footnote must name Phone settings",
+            source.contains("R.string.mobile_pairing_no_address") &&
+                english.contains("Enter the address shown in Phone settings instead."),
+            "the discovery fallback must use the localized Phone settings copy",
+        )
+        assertTrue(
+            source.contains("R.string.mobile_pair_tailscale_hint") &&
+                english.contains("Phone settings will then show a name ending in "),
+            "the Tailscale hint must use the localized Phone settings copy",
+        )
+        assertTrue(
+            source.contains("R.string.mobile_pair_manual_address_hint") &&
+                english.contains("Phone settings on your computer shows — "),
+            "the manual-address footnote must use the localized Phone settings copy",
         )
     }
 

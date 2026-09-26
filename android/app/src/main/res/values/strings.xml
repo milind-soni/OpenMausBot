@@ -11,4 +11,749 @@
     <string name="notification_channel_always_on_desc">Shown while OpenMausBot stays connected in the background</string>
     <string name="always_on_notification_title">MausBot is staying connected</string>
     <string name="always_on_notification_text">Notifications will reach you even with the app closed</string>
+    <string name="mobile_text_da39a3ee"></string>
+    <string name="mobile_answeredcount_of_questions_size_91c7d963">%1$s of %2$s</string>
+    <string name="mobile_label_taskrules_title_task_48c15f59">%1$s %2$s</string>
+    <string name="mobile_minutes_minutes_29dd88a9">%1$s minutes</string>
+    <string name="mobile_pinlabel_taskrules_title_task_5545ef6f">%1$s %2$s</string>
+    <string name="mobile_bot_name_s_computer_7637def1">%1$s\'s computer</string>
+    <string name="mobile_chat_name_has_a_question_13ca9f26">%1$s has a question</string>
+    <string name="mobile_current_name_avatar_de638954">%1$s avatar</string>
+    <string name="mobile_current_name_s_threads_d34c7ce0">%1$s\'s threads</string>
+    <string name="mobile_versionindex_1_of_versions_size_91d50e4a">%1$s of %2$s</string>
+    <string name="mobile_computer_458a0ead">/computer</string>
+    <string name="mobile_diff_c1ee9024">/diff</string>
+    <string name="mobile_retry_cdc02b83">/retry</string>
+    <string name="mobile_steer_72f3f4c7">/steer</string>
+    <string name="mobile_threads_3e761c97">/threads</string>
+    <string name="mobile_text_c984aed0">000000</string>
+    <string name="mobile_step_29869c51">1 step</string>
+    <string name="mobile_open_openmausbot_settings_phone_38cfc5bb">1.  Open OpenMausBot → Settings → Phone</string>
+    <string name="mobile_choose_set_up_a_phone_8fd474a9">2.  Choose Set up a phone</string>
+    <string name="mobile_a_frame_of_this_bot_s_computer_39b6a5bb">A frame of this bot\'s computer</string>
+    <string name="mobile_account_alias_8cf27ca0">Account alias</string>
+    <string name="mobile_account_details_are_unavailable_fr_d9d62172">Account details are unavailable from this provider. Refresh after authorization finishes.</string>
+    <string name="mobile_accounts_could_not_be_re_checked_6727be8f">Accounts could not be re-checked</string>
+    <string name="mobile_actions_for_routine_name_767f1549">Actions for %1$s</string>
+    <string name="mobile_active_a733b809">Active</string>
+    <string name="mobile_activity_detail_049f3bdf">Activity detail</string>
+    <string name="mobile_add_61cc55aa">Add</string>
+    <string name="mobile_add_another_account_5dcc7913">Add another account</string>
+    <string name="mobile_address_d70f93df">Address</string>
+    <string name="mobile_adds_to_existing_section_731f1f94">Adds to existing section</string>
+    <string name="mobile_advanced_4d064726">Advanced</string>
+    <string name="mobile_agent_5ce2e6f4">Agent</string>
+    <string name="mobile_agent_notifications_a3bd8bd0">Agent notifications</string>
+    <string name="mobile_alignment_time_ca919bd7">Alignment time</string>
+    <string name="mobile_always_allow_this_tool_2ce82a7e">Always allow this tool</string>
+    <string name="mobile_an_alias_makes_the_account_explici_725873b3">An alias makes the account explicit when an agent uses more than one %1$s account.</string>
+    <string name="mobile_answered_e0aafffa">Answered</string>
+    <string name="mobile_archived_eddc813f">Archived</string>
+    <string name="mobile_art_direction_52d878a2">Art direction</string>
+    <string name="mobile_back_b52b36b7">Back</string>
+    <string name="mobile_bot_settings_7092a294">Bot settings</string>
+    <string name="mobile_bot_threads_ec81acf2">Bot threads</string>
+    <string name="mobile_bots_4ca88ea4">Bots</string>
+    <string name="mobile_computer_9e47da19">COMPUTER</string>
+    <string name="mobile_camera_access_needed_28a22fc4">Camera access needed</string>
+    <string name="mobile_cancel_77dfd213">Cancel</string>
+    <string name="mobile_choose_file_54a2a841">Choose File</string>
+    <string name="mobile_choose_a_bot_or_channel_da2a8cc1">Choose a bot or channel</string>
+    <string name="mobile_choose_a_computer_f361ffc3">Choose a computer</string>
+    <string name="mobile_choose_a_custom_repeat_interval_8a1bd1da">Choose a custom repeat interval</string>
+    <string name="mobile_choose_a_different_computer_9e2a62ed">Choose a different computer</string>
+    <string name="mobile_choose_a_repeat_interval_f59b3f71">Choose a repeat interval</string>
+    <string name="mobile_choose_all_that_apply_5a20d235">Choose all that apply</string>
+    <string name="mobile_choose_an_agent_faaaf2b4">Choose an agent</string>
+    <string name="mobile_choose_an_agent_voice_e284a527">Choose an agent voice</string>
+    <string name="mobile_clear_search_67300d0f">Clear search</string>
+    <string name="mobile_close_slash_commands_5ff49abb">Close slash commands</string>
+    <string name="mobile_collapse_9cf188d3">Collapse</string>
+    <string name="mobile_collapsed_0084e8fa">Collapsed</string>
+    <string name="mobile_computer_924645b3">Computer</string>
+    <string name="mobile_configure_composio_on_your_compute_4281e8b0">Configure Composio on your computer first. Provider credentials are never returned to this phone.</string>
+    <string name="mobile_confirm_computer_d778cfbd">Confirm computer</string>
+    <string name="mobile_connect_b65463cb">Connect</string>
+    <string name="mobile_connect_card_label_c9e612b4">Connect %1$s</string>
+    <string name="mobile_connected_c2f9b7b4">Connected</string>
+    <string name="mobile_connected_apps_8ab72a8e">Connected Apps</string>
+    <string name="mobile_connected_apps_need_setup_2cdb536a">Connected apps need setup</string>
+    <string name="mobile_connecting_fd3e7969">Connecting…</string>
+    <string name="mobile_connection_unknown_973b0484">Connection unknown</string>
+    <string name="mobile_continue_2e026239">Continue</string>
+    <string name="mobile_copied_8e3df45a">Copied</string>
+    <string name="mobile_copy_af74f7c5">Copy</string>
+    <string name="mobile_copy_csv_b810b7cd">Copy CSV</string>
+    <string name="mobile_copy_diff_18f2296a">Copy Diff</string>
+    <string name="mobile_copy_all_9da9f044">Copy all</string>
+    <string name="mobile_create_6e157c5d">Create</string>
+    <string name="mobile_creates_a_new_section_9da73eb0">Creates a new section</string>
+    <string name="mobile_current_agent_voice_4e95cc5f">Current agent voice</string>
+    <string name="mobile_custom_081ae3fd">Custom</string>
+    <string name="mobile_custom_interval_1eea7679">Custom interval</string>
+    <string name="mobile_data_table_54baf78e">DATA TABLE</string>
+    <string name="mobile_delete_f6fdbe48">Delete</string>
+    <string name="mobile_delete_taskrules_title_task_961ae881">Delete %1$s</string>
+    <string name="mobile_delete_taskrules_title_task_df44dd3a">Delete %1$s?</string>
+    <string name="mobile_delete_routine_name_41a4c8bf">Delete %1$s?</string>
+    <string name="mobile_delete_routine_0cb076a0">Delete routine</string>
+    <string name="mobile_delete_this_queued_message_4390e043">Delete this queued message</string>
+    <string name="mobile_dismiss_70afe9ef">Dismiss</string>
+    <string name="mobile_done_e9b450d1">Done</string>
+    <string name="mobile_edit_5301648d">Edit</string>
+    <string name="mobile_edit_address_31fe67f4">Edit address</string>
+    <string name="mobile_edit_and_retry_f683a3c2">Edit and retry</string>
+    <string name="mobile_edit_quick_reply_57e333e3">Edit quick reply</string>
+    <string name="mobile_edit_routine_6e36897b">Edit routine</string>
+    <string name="mobile_edit_reorder_or_remove_the_prompts_1044e38d">Edit, reorder, or remove the prompts shown above an empty composer.</string>
+    <string name="mobile_every_x_minutes_000b5c3a">Every X minutes</string>
+    <string name="mobile_expand_9869e506">Expand</string>
+    <string name="mobile_expanded_6d170474">Expanded</string>
+    <string name="mobile_file_b4915d3a">FILE</string>
+    <string name="mobile_for_example_summarize_this_and_lis_12b3d099">For example: summarize this and list the next steps</string>
+    <string name="mobile_from_5_minutes_to_24_hours_a6bafa40">From 5 minutes to 24 hours</string>
+    <string name="mobile_group_name_optional_0fd3a15c">Group name (optional)</string>
+    <string name="mobile_groups_ae9629f4">Groups</string>
+    <string name="mobile_hide_34d8b60f">Hide</string>
+    <string name="mobile_hide_full_address_63c5e519">Hide full address</string>
+    <string name="mobile_icon_716f63b9">Icon</string>
+    <string name="mobile_instruction_optional_3c5a084f">Instruction (optional)</string>
+    <string name="mobile_interrupt_d5db4549">Interrupt</string>
+    <string name="mobile_last_used_ac909777">LAST USED</string>
+    <string name="mobile_label_74341e3c">Label</string>
+    <string name="mobile_load_earlier_messages_4ac08d16">Load earlier messages</string>
+    <string name="mobile_looking_5e65f10e">Looking…</string>
+    <string name="mobile_manage_bot_name_s_threads_f3530e9f">Manage %1$s\'s threads</string>
+    <string name="mobile_message_68f4145f">Message</string>
+    <string name="mobile_messaged_it_withname_bd9371e7">Messaged %1$s</string>
+    <string name="mobile_model_68c2cc7f">Model</string>
+    <string name="mobile_move_down_260ff8ae">Move down</string>
+    <string name="mobile_move_up_b4f57cd0">Move up</string>
+    <string name="mobile_name_709a2322">Name</string>
+    <string name="mobile_new_bot_66d3c052">New bot</string>
+    <string name="mobile_new_group_f9850c0b">New group</string>
+    <string name="mobile_new_quick_reply_c5c6238d">New quick reply</string>
+    <string name="mobile_new_routine_32809dc6">New routine</string>
+    <string name="mobile_new_thread_02057e28">New thread</string>
+    <string name="mobile_new_thread_with_bot_name_80fb4510">New thread with %1$s</string>
+    <string name="mobile_newer_schedule_c56a41aa">Newer schedule</string>
+    <string name="mobile_next_bc981983">Next</string>
+    <string name="mobile_next_version_514439d0">Next version</string>
+    <string name="mobile_no_connected_apps_are_available_fr_0529e71d">No connected apps are available from this computer.</string>
+    <string name="mobile_no_limit_10850b93">No limit</string>
+    <string name="mobile_not_now_e4571490">Not now</string>
+    <string name="mobile_ok_9ce3bd42">OK</string>
+    <string name="mobile_old_proposal_hint">This proposal was created by an older build and cannot be safely enabled. Deny it and ask the bot to create it again.</string>
+    <string name="mobile_on_this_network_4c9f524a">On this network</string>
+    <string name="mobile_on_your_computer_9a621537">On your computer</string>
+    <string name="mobile_one_time_6fea9e4d">One time</string>
+    <string name="mobile_open_cf9b7706">Open</string>
+    <string name="mobile_open_settings_134635e9">Open Settings</string>
+    <string name="mobile_open_desktop_cd6f8218">Open desktop</string>
+    <string name="mobile_open_the_chat_to_review_skill_md_6225775b">Open the chat to review SKILL.md</string>
+    <string name="mobile_open_updates_2c80d633">Open updates</string>
+    <string name="mobile_openmausbot_befe710d">OpenMausBot</string>
+    <string name="mobile_or_enter_the_address_f74dcf1c">Or enter the address</string>
+    <string name="mobile_organize_bots_08f4197e">Organize bots</string>
+    <string name="mobile_organize_bots_into_a_section_9293c5af">Organize bots into a section</string>
+    <string name="mobile_other_6e6a6f20">Other</string>
+    <string name="mobile_other_ways_to_connect_d9e8585d">Other ways to connect</string>
+    <string name="mobile_pair_discovery_empty">Nothing found yet. Check that this phone and your computer are on the same Wi-Fi network — a guest network often blocks them from seeing each other. You can always enter the address below instead.</string>
+    <string name="mobile_pair_manual_address_hint">Use whatever Phone settings on your computer shows — a secure https:// address, an address on this network, or a Tailscale name like macbook.tail1234.ts.net:8810.</string>
+    <string name="mobile_pair_scanner_hint">Scan the QR code, check the computer name, and confirm. The address and one-time credential are filled securely for you.</string>
+    <string name="mobile_pair_tailscale_hint">If it never appears, install Tailscale on both and sign in to the same account — Phone settings will then show a name ending in .ts.net to enter below.</string>
+    <string name="mobile_pair_again_379e2bf5">Pair again</string>
+    <string name="mobile_pair_with_a_computer_51716e03">Pair with a computer</string>
+    <string name="mobile_pair_with_this_computer_8420e8b3">Pair with this computer</string>
+    <string name="mobile_pause_781961bc">Pause</string>
+    <string name="mobile_pending_96f608c1">Pending</string>
+    <string name="mobile_photo_library_26def20d">Photo Library</string>
+    <string name="mobile_point_the_camera_at_the_qr_code_on_77e56351">Point the camera at the QR code on your computer</string>
+    <string name="mobile_previous_version_989537a3">Previous version</string>
+    <string name="mobile_private_by_design_3aaa9fd1">Private by design</string>
+    <string name="mobile_prompt_a817d7eb">Prompt</string>
+    <string name="mobile_provider_7ceee3f3">Provider</string>
+    <string name="mobile_queued_6a599877">Queued</string>
+    <string name="mobile_quick_replies_c14223c4">Quick replies</string>
+    <string name="mobile_reading_shared_content_61a0de26">Reading shared content</string>
+    <string name="mobile_reasoning_effort_cd32c0f5">Reasoning effort</string>
+    <string name="mobile_refresh_56e3badc">Refresh</string>
+    <string name="mobile_refreshing_96141178">Refreshing…</string>
+    <string name="mobile_remove_e963907d">Remove</string>
+    <string name="mobile_remove_attachment_name_ecd908a4">Remove %1$s</string>
+    <string name="mobile_remove_computer_name_272e4835">Remove %1$s?</string>
+    <string name="mobile_remove_connection_name_e686927b">Remove %1$s?</string>
+    <string name="mobile_rename_taskrules_title_task_054bec52">Rename %1$s</string>
+    <string name="mobile_requesting_camera_access_30e104c0">Requesting camera access…</string>
+    <string name="mobile_reset_44c57abd">Reset</string>
+    <string name="mobile_reset_quick_replies_4d3d1256">Reset quick replies?</string>
+    <string name="mobile_respond_when_a_bot_needs_you_96973325">Respond when a bot needs you</string>
+    <string name="mobile_resume_b3bd0b5a">Resume</string>
+    <string name="mobile_retry_9f5cd8a2">Retry</string>
+    <string name="mobile_retry_send_6a2d9259">Retry send</string>
+    <string name="mobile_review_the_complete_skill_md_61fb9a9a">Review the complete SKILL.md</string>
+    <string name="mobile_routine_name_9a8a0dda">Routine name</string>
+    <string name="mobile_run_b1b39260">Run</string>
+    <string name="mobile_run_now_2af00e23">Run now</string>
+    <string name="mobile_runs_every_dd679464">Runs every</string>
+    <string name="mobile_discovery_permission_hint">Searching this network needs %1$s, which is still off. The QR code and the address below work without it.</string>
+    <string name="mobile_send_to_bd1c2c33">SEND TO</string>
+    <string name="mobile_sharing_f789760c">SHARING</string>
+    <string name="mobile_slash_commands_e7bb82f3">SLASH COMMANDS</string>
+    <string name="mobile_summary_collapsed">%1$s, collapsed</string>
+    <string name="mobile_summary_expanded">%1$s, expanded</string>
+    <string name="mobile_save_efc007a3">Save</string>
+    <string name="mobile_scan_qr_code_04e3f103">Scan QR Code</string>
+    <string name="mobile_scanner_unavailable_cc42e33b">Scanner unavailable</string>
+    <string name="mobile_screenshot_unavailable_cfe6fcbe">Screenshot unavailable</string>
+    <string name="mobile_search_bce06414">Search</string>
+    <string name="mobile_search_apps_ca3ce8f3">Search apps</string>
+    <string name="mobile_search_threads_006299d3">Search threads</string>
+    <string name="mobile_section_name_75e2b3c1">Section name</string>
+    <string name="mobile_select_text_9d49219e">Select text</string>
+    <string name="mobile_selected_days_7890ff6e">Selected days</string>
+    <string name="mobile_send_9bc2575c">Send</string>
+    <string name="mobile_send_to_b98cc23a">Send to</string>
+    <string name="mobile_send_to_openmausbot_4dffcb75">Send to OpenMausBot</string>
+    <string name="mobile_settings_c7f73bb5">Settings</string>
+    <string name="mobile_share_09ca55ca">Share</string>
+    <string name="mobile_share_as_json_df80c8e6">Share as JSON</string>
+    <string name="mobile_share_transcript_004e223a">Share transcript</string>
+    <string name="mobile_show_d97d1ee3">Show</string>
+    <string name="mobile_show_full_address_889be5c7">Show full address</string>
+    <string name="mobile_showing_what_was_connected_last_ti_62107fa4">Showing what was connected last time. Your computer could not open its credential store just now, so these accounts could not be re-checked. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.</string>
+    <string name="mobile_slash_commands_efce77da">Slash commands</string>
+    <string name="mobile_something_went_wrong_8d886c0b">Something went wrong</string>
+    <string name="mobile_source_skill_source_unknown_6370895d">Source: %1$s</string>
+    <string name="mobile_speak_replies_90b05ae0">Speak replies</string>
+    <string name="mobile_steer_02f4a3c6">Steer</string>
+    <string name="mobile_steering_eabc6c5d">Steering…</string>
+    <string name="mobile_stop_if_still_running_after_45efb175">Stop if still running after</string>
+    <string name="mobile_submit_answer_bf80bc31">Submit answer</string>
+    <string name="mobile_submit_answers_988c4130">Submit answers</string>
+    <string name="mobile_tap_to_preview_fa5ce0ea">Tap to preview</string>
+    <string name="mobile_the_chip_row_is_hidden_while_this__209bd34b">The chip row is hidden while this list is empty.</string>
+    <string name="mobile_thinking_a60d9c9c">Thinking…</string>
+    <string name="mobile_this_conversation_will_be_deleted__af9201c8">This conversation will be deleted. Generated files are kept.</string>
+    <string name="mobile_this_creates_a_new_version_and_con_9a5d779d">This creates a new version and continues from there.</string>
+    <string name="mobile_this_image_couldn_t_be_displayed_34d0827e">This image couldn\'t be displayed.</string>
+    <string name="mobile_this_phone_was_unpaired_09273604">This phone was unpaired</string>
+    <string name="mobile_this_removes_the_saved_connection__54db6818">This removes the saved connection from this phone only.</string>
+    <string name="mobile_this_removes_the_saved_connection__45c7d71e">This removes the saved connection from this phone only. Another saved computer will stay available.</string>
+    <string name="mobile_this_restores_the_four_chips_the_a_ca291a72">This restores the four chips the app came with and discards your own.</string>
+    <string name="mobile_thought_process_1756ad28">Thought Process</string>
+    <string name="mobile_threads_bb12e8aa">Threads</string>
+    <string name="mobile_threads_routines_65d7efcd">Threads &amp; Routines</string>
+    <string name="mobile_time_6c82e6dd">Time</string>
+    <string name="mobile_title_768e0c1c">Title</string>
+    <string name="mobile_touch_and_hold_the_text_to_select__efc64a9c">Touch and hold the text to select part of it.</string>
+    <string name="mobile_try_again_042c862e">Try again</string>
+    <string name="mobile_type_your_own_answer_84cf9943">Type your own answer</string>
+    <string name="mobile_unpair_9c293ad4">Unpair</string>
+    <string name="mobile_unread_07b032b5">Unread</string>
+    <string name="mobile_updates_c76d1807">Updates</string>
+    <string name="mobile_use_open_to_view_this_file_in_a_co_9a046473">Use Open to view this file in a compatible app.</string>
+    <string name="mobile_use_another_computer_ff6a1b80">Use another computer</string>
+    <string name="mobile_voice_3091c844">Voice</string>
+    <string name="mobile_voice_engine_3b4d8dea">Voice engine</string>
+    <string name="mobile_waiting_on_teammate_158d309b">Waiting on teammate</string>
+    <string name="mobile_waiting_on_you_edab5b72">Waiting on you</string>
+    <string name="mobile_watch_chat_name_s_computer_92efc119">Watch %1$s\'s computer</string>
+    <string name="mobile_watch_computer_c96208ca">Watch computer</string>
+    <string name="mobile_what_should_the_agent_do_b9526063">What should the agent do?</string>
+    <string name="mobile_what_this_agent_does_82aa1b56">What this agent does</string>
+    <string name="mobile_work_personal_client_7d6a18a4">Work, Personal, Client…</string>
+    <string name="mobile_workspace_default_b81e277f">Workspace default</string>
+    <string name="mobile_your_chats_in_your_pocket_91291d76">Your chats, in your pocket</string>
+    <string name="mobile_your_computer_could_not_open_its_c_fa640d75">Your computer could not open its credential store, so it cannot say which accounts are connected. Nothing has been disconnected — restarting OpenMausBot on your computer usually clears this.</string>
+    <string name="mobile_https_mac_example_or_192_168_1_42__e277eb2d">https://mac.example or 192.168.1.42:8810</string>
+    <string name="mobile_minutes_be2e2bb6">minutes</string>
+    <string name="mobile_minutes_starting_288a3d24">minutes, starting</string>
+    <string name="mobile_plus_6a8437dd">plus</string>
+    <string name="mobile_sha256_reviewed_take_8_d4013810">sha256 %1$s</string>
+    <string name="mobile_a11y_bot_threads">%1$s\'s threads</string>
+    <string name="mobile_a11y_folder">%1$s folder</string>
+    <string name="mobile_a11y_thread_state_expanded">Expanded, %1$s threads</string>
+    <string name="mobile_a11y_thread_state_collapsed">Collapsed, %1$s threads</string>
+    <string name="mobile_a11y_diff_stats">%1$s lines added, %2$s removed</string>
+    <string name="mobile_a11y_diff_copy_hint">%1$s. The copied diff always includes every line</string>
+    <string name="mobile_a11y_file_attachment">File attachment: %1$s. Tap to preview.</string>
+    <string name="mobile_a11y_image_attachment">Image attachment: %1$s. Tap to preview.</string>
+    <string name="mobile_a11y_summary_expanded">%1$s, expanded</string>
+    <string name="mobile_a11y_summary_collapsed">%1$s, collapsed</string>
+    <string name="mobile_a11y_open_chat_settings">Open %1$s settings</string>
+    <string name="mobile_a11y_close">Close</string>
+    <string name="mobile_a11y_choose_custom_repeat_interval">Choose a custom repeat interval</string>
+    <string name="mobile_a11y_repeat_interval">Repeat interval, %1$s minutes</string>
+    <string name="mobile_a11y_change_interval_start">Change when the interval starts</string>
+    <string name="mobile_a11y_routine_timeout">Routine timeout</string>
+    <string name="mobile_a11y_expanded">Expanded</string>
+    <string name="mobile_a11y_collapsed">Collapsed</string>
+    <string name="mobile_a11y_pin">Pin</string>
+    <string name="mobile_a11y_unpin">Unpin</string>
+    <string name="mobile_a11y_archive">Archive</string>
+    <string name="mobile_a11y_unarchive">Unarchive</string>
+    <string name="mobile_running_steps">Running %1$s steps</string>
+    <string name="mobile_ran_steps">Ran %1$s steps</string>
+    <string name="mobile_pairing_failed">Pairing failed.</string>
+    <string name="mobile_pairing_no_address">That computer did not answer with an address. Enter the address shown in Phone settings instead.</string>
+    <string name="mobile_pairing_invalid_address">Enter a secure https:// address, 192.168.1.42:8810, or a name like macbook.tail1234.ts.net.</string>
+    <string name="mobile_pairing_invalid_qr">That is not an OpenMausBot pairing QR code.</string>
+    <string name="mobile_camera_permission_description">Allow camera access to scan the pairing QR code shown by OpenMausBot.</string>
+    <string name="mobile_camera_permission_denied">Allow camera access to scan the pairing QR code shown by OpenMausBot, or go back and enter the address and code by hand.</string>
+
+    <string name="mobile_settings_name">Name</string>
+    <string name="mobile_settings_other_computers">Other computers</string>
+    <string name="mobile_settings_connect_another_computer">Connect another computer</string>
+    <string name="mobile_settings_computers_paired_separately">Each computer is paired separately. Only the selected computer is active at a time.</string>
+    <string name="mobile_settings_troubleshooting">Troubleshooting</string>
+    <string name="mobile_settings_try_reconnecting">Try reconnecting</string>
+    <string name="mobile_settings_background_connection">Background connection</string>
+    <string name="mobile_settings_always_on">Always on</string>
+    <string name="mobile_settings_only_while_open">Only while open</string>
+    <string name="mobile_settings_turn_off">Turn off</string>
+    <string name="mobile_settings_turn_on">Turn on</string>
+    <string name="mobile_settings_background_on_description">OpenMausBot keeps a permanent notification while this is on, so scheduled reminders and routine results reach you even with the app fully closed.</string>
+    <string name="mobile_settings_background_off_description">Notifications only arrive while the app is open or was recently backgrounded. Turn this on if you rely on scheduled routines to notify you later — it adds a permanent low-priority notification and uses a little more battery.</string>
+    <string name="mobile_settings_change_activity_detail">Change activity detail</string>
+    <string name="mobile_settings_not_here">Not here</string>
+    <string name="mobile_settings_notifications_footer">Approvals and finished work appear while OpenMausMobile is connected, including frames replayed after a short background pause. Closed-app push needs a separate push-relay release that does not exist yet.</string>
+    <string name="mobile_settings_workspace_footer">Routine schedules are safe to manage here. Provider keys, webhook secrets, pairing, revocation, Local VM, and agent execution policy stay on your computer.</string>
+    <string name="mobile_settings_unpair_footer">Removes the pairing from this phone only. To stop it reaching the computer at all, remove the device in OpenMausBot → Settings → Phone.</string>
+    <string name="mobile_settings_not_here_body">API keys, pairing and the Local VM are managed on the computer. This phone is deliberately not allowed to change them.</string>
+    <string name="mobile_settings_unpair_confirm_title">Unpair this phone?</string>
+    <string name="mobile_settings_unpair_confirm_message">You\'ll need a new pairing code to connect again.</string>
+    <string name="mobile_settings_edit_address_message">Enter whatever Phone settings on your computer shows. The pairing itself is kept.</string>
+    <string name="mobile_settings_connected_status">Connected</string>
+    <string name="mobile_settings_connecting_status">Connecting…</string>
+    <string name="mobile_settings_not_paired_status">Not paired</string>
+    <string name="mobile_settings_unpaired_on_computer_status">Unpaired on the computer</string>
+    <string name="mobile_settings_notifications_allowed">Allowed</string>
+    <string name="mobile_settings_notifications_not_allowed">Not allowed</string>
+    <string name="mobile_settings_notifications_disabled">Turned off in system settings</string>
+    <string name="mobile_settings_notifications_on">Notifications are on</string>
+    <string name="mobile_settings_enable_notifications">Enable notifications</string>
+    <string name="mobile_settings_open_notification_settings">Open notification settings</string>
+    <string name="mobile_settings_troubleshooting_live">This computer is connected and responding normally.</string>
+    <string name="mobile_settings_troubleshooting_connecting">OpenMausBot is trying the saved connection automatically.</string>
+    <string name="mobile_settings_troubleshooting_unpaired">This phone was removed from the computer. Pair it again to reconnect.</string>
+    <string name="mobile_settings_troubleshooting_not_paired">This phone is not paired with a computer.</string>
+    <string name="mobile_settings_use_computer">Use %1$s</string>
+    <string name="mobile_settings_remove_computer">Remove %1$s</string>
+    <string name="mobile_onboarding_welcome_title">Take your bots with you</string>
+    <string name="mobile_onboarding_welcome_subtitle">Open chats, approve actions, and send new work from your phone.</string>
+    <string name="mobile_onboarding_welcome_connect">Connect my computer</string>
+    <string name="mobile_onboarding_not_now">Not now</string>
+    <string name="mobile_onboarding_unpaired_title">Connect when you\'re ready</string>
+    <string name="mobile_onboarding_unpaired_body">Pair this phone with OpenMausBot to see your chats and respond to your bots.</string>
+    <string name="mobile_onboarding_unpaired_hint">On your computer, open OpenMausBot → Settings → Phone.</string>
+    <string name="mobile_onboarding_connect_computer">Connect computer</string>
+    <string name="mobile_onboarding_notifications_title">Stay in the loop</string>
+    <string name="mobile_onboarding_notifications_approvals">Approvals that are waiting for you</string>
+    <string name="mobile_onboarding_notifications_finished">Finished work and important updates</string>
+    <string name="mobile_onboarding_enable_notifications">Enable notifications</string>
+    <string name="mobile_onboarding_conversations">Pick up the same conversations from your computer.</string>
+    <string name="mobile_onboarding_approvals">Review approvals without going back to your desk.</string>
+    <string name="mobile_onboarding_trusted_computer">You choose which trusted computer this phone connects to.</string>
+    <string name="mobile_activity_full">Full</string>
+    <string name="mobile_activity_full_caption">Every step a bot takes.</string>
+    <string name="mobile_activity_reduced">Reduced</string>
+    <string name="mobile_activity_reduced_caption">Steps fold into one line. Failures always show.</string>
+    <string name="mobile_activity_hidden">Hidden</string>
+    <string name="mobile_activity_hidden_caption">No activity, only messages.</string>
+
+    <string name="mobile_settings_connect_computer">Connect a computer</string>
+    <string name="mobile_settings_connection_label">Connection</string>
+    <string name="mobile_settings_status_label">Status</string>
+    <string name="mobile_settings_activity_label">Activity</string>
+    <string name="mobile_settings_notifications_section">Notifications</string>
+    <string name="mobile_settings_chat_section">Chat</string>
+    <string name="mobile_settings_workspace_section">Workspace</string>
+    <string name="mobile_settings_remove_this_computer">Remove this computer</string>
+    <string name="mobile_settings_unpair_this_phone">Unpair this phone</string>
+    <string name="mobile_settings_invalid_address">Enter a secure https:// address, 192.168.1.42:8810, or a name like macbook.tail1234.ts.net.</string>
+
+    <string name="mobile_roster_no_bots_yet">No bots yet</string>
+    <string name="mobile_roster_nothing_matches">Nothing matches</string>
+    <string name="mobile_roster_empty_description">Bots you create on your computer show up here.</string>
+    <string name="mobile_roster_no_thread_matches">No thread matches “%1$s”.</string>
+    <string name="mobile_roster_needs_attention">Needs attention</string>
+    <string name="mobile_roster_pinned">Pinned</string>
+    <string name="mobile_roster_messages">Messages</string>
+    <string name="mobile_thread_closed">Closed</string>
+    <string name="mobile_thread_working">Working</string>
+    <string name="mobile_phone_unpaired_banner">This phone was unpaired on the computer.</string>
+
+    <string name="mobile_action_add_photo">Add a photo to this message</string>
+    <string name="mobile_action_add_document">Add a document from Files</string>
+    <string name="mobile_action_new_thread_for_bot">Start a fresh thread with %1$s</string>
+    <string name="mobile_action_new_conversation_in_channel">Start a fresh conversation in %1$s</string>
+    <string name="mobile_action_manage_threads">Switch, rename or remove one</string>
+    <string name="mobile_action_bot_settings">Model, profile, voice and notifications</string>
+    <string name="mobile_action_live_computer">Live view of what %1$s is doing</string>
+    <string name="mobile_action_markdown_transcript">This thread as Markdown</string>
+    <string name="mobile_action_structured_transcript">Structured transcript data</string>
+    <string name="mobile_action_stop_turn">Stop the current turn</string>
+    <string name="mobile_slash_computer_description">Open live screen &amp; desktop controls</string>
+    <string name="mobile_slash_threads_description">View and manage threads</string>
+    <string name="mobile_slash_diff_description">Inspect latest git changes and patches</string>
+    <string name="mobile_slash_retry_description">Retry the last turn with fresh context</string>
+    <string name="mobile_slash_steer_description">Steer and redirect active execution</string>
+
+    <string name="mobile_section_ready">%1$s is ready</string>
+    <string name="mobile_section_add_more_bots">Choose more bots for another section, or tap Done.</string>
+    <string name="mobile_section_chief_conflict">A section can have one Chief. Go back and choose one Chief, or use a section without one.</string>
+    <string name="mobile_section_pinned_stays">Pinned bots stay in Pinned until you unpin them.</string>
+    <string name="mobile_section_at_limit">100 selected — that’s the section limit.</string>
+    <string name="mobile_section_under_limit">Choose up to 100 bots for one section.</string>
+
+    <string name="mobile_all_quiet_889fd4f7">All quiet</string>
+
+    <string name="mobile_apply_model_474897c3">Apply model</string>
+
+    <string name="mobile_avatar_7631b26e">Avatar</string>
+
+    <string name="mobile_can_reach_e5d301f8">Can reach</string>
+
+    <string name="mobile_checking_cloud_vm_availability_b07ff23f">Checking Cloud VM availability…</string>
+
+    <string name="mobile_choose_a_png_jpeg_gif_or_webp_image_1f68957d">Choose a PNG, JPEG, GIF, or WebP image.</string>
+
+    <string name="mobile_choose_an_available_provider_to_change_t_a1efc697">Choose an available provider to change this bot\'s model.</string>
+
+    <string name="mobile_circle_1cc7820a">Circle</string>
+
+    <string name="mobile_cloud_vm_26ca291f">Cloud VM</string>
+
+    <string name="mobile_cloud_vm_status_is_unavailable_32c78491">Cloud VM status is unavailable</string>
+
+    <string name="mobile_completed_1798b3ba">Completed</string>
+
+    <string name="mobile_completed_waiting_failed_and_manually_st_55acdcb1">Completed, waiting, failed, and manually started runs appear here.</string>
+
+    <string name="mobile_computer_only_bc8646ec">Computer only</string>
+
+    <string name="mobile_connect_when_you_re_ready_49cd74c6">Connect when you\'re ready</string>
+
+    <string name="mobile_couldn_t_start_the_microphone_320ceafa">Couldn\'t start the microphone.</string>
+
+    <string name="mobile_couldn_t_transcribe_that_f440f144">Couldn\'t transcribe that.</string>
+
+    <string name="mobile_current_provider_unavailable_2fe5cf65">Current provider (unavailable)</string>
+
+    <string name="mobile_default_808d7dca">Default</string>
+
+    <string name="mobile_deleted_agent_ff6eff9d">Deleted agent</string>
+
+    <string name="mobile_dictation_isn_t_available_for_this_langu_1a6b15c5">Dictation isn\'t available for this language.</string>
+
+    <string name="mobile_dictation_needs_microphone_access_enable_e9addded">Dictation needs Microphone access. Enable it in Settings → OpenMausMobile.</string>
+
+    <string name="mobile_does_0ae736c9">Does</string>
+
+    <string name="mobile_elevenlabs_is_not_configured_5a3dcc07">ElevenLabs is not configured</string>
+
+    <string name="mobile_explain_steps_b60a9fb6">Explain steps</string>
+
+    <string name="mobile_fish_audio_d3c00ff4">Fish Audio</string>
+
+    <string name="mobile_fish_audio_is_not_configured_4aa1ef09">Fish Audio is not configured</string>
+
+    <string name="mobile_generate_an_avatar_01e5cee4">Generate an avatar</string>
+
+    <string name="mobile_generate_on_computer_ff5b7448">Generate on computer</string>
+
+    <string name="mobile_hide_diff_120df7c2">Hide Diff</string>
+
+    <string name="mobile_identity_7e5a975b">Identity</string>
+
+    <string name="mobile_idle_cc1ebdd0">Idle</string>
+
+    <string name="mobile_loading_models_eeade2be">Loading models</string>
+
+    <string name="mobile_local_discovery_was_interrupted_retrying_4f231b2f">Local discovery was interrupted. Retrying…</string>
+
+    <string name="mobile_mascot_e0489488">Mascot</string>
+
+    <string name="mobile_more_4bab2d8f">More</string>
+
+    <string name="mobile_needs_you_0d9d0df1">Needs you</string>
+
+    <string name="mobile_new_task_17b2b838">New task</string>
+
+    <string name="mobile_no_changes_recorded_yet_2eab95e9">No changes recorded yet.</string>
+
+    <string name="mobile_no_model_providers_are_available_a224e94c">No model providers are available</string>
+
+    <string name="mobile_no_routines_1cd3f572">No routines</string>
+
+    <string name="mobile_nothing_needs_you_c7649c9b">Nothing needs you</string>
+
+    <string name="mobile_nothing_scheduled_or_learned_yet_a497b19f">Nothing scheduled or learned yet.</string>
+
+    <string name="mobile_nothing_to_show_yet_95f8d609">Nothing to show yet</string>
+
+    <string name="mobile_open_live_cloud_desktop_88662ef7">Open live cloud desktop</string>
+
+    <string name="mobile_open_live_cloud_desktop_f2746abf">Open live cloud desktop?</string>
+
+    <string name="mobile_open_task_a1f1752a">Open task</string>
+
+    <string name="mobile_open_thread">Open thread</string>
+
+    <string name="mobile_opening_b1b8530b">Opening…</string>
+
+    <string name="mobile_past_run_receipts_remain_available_fd5e2bbd">Past run receipts remain available.</string>
+
+    <string name="mobile_paused_c7dfb6f1">Paused</string>
+
+    <string name="mobile_pick_a_voice_for_this_agent_before_enabl_121cdfed">Pick a voice for this agent before enabling speech.</string>
+
+    <string name="mobile_pick_an_agent_voice_or_configure_a_works_1f464020">Pick an agent voice or configure a workspace default on your computer first.</string>
+
+    <string name="mobile_preparing_attachments_343475f3">Preparing attachments…</string>
+
+    <string name="mobile_preview_f1fbb2b4">Preview</string>
+
+    <string name="mobile_preview_voice_560a6fec">Preview voice</string>
+
+    <string name="mobile_primary_account_32f2184e">Primary account</string>
+
+    <string name="mobile_recent_changes_1bfd2320">Recent changes</string>
+
+    <string name="mobile_rounded_c5aa340f">Rounded</string>
+
+    <string name="mobile_routines_a445e5ad">Routines</string>
+
+    <string name="mobile_run_all_automated_tests_4032d93f">Run all automated tests</string>
+
+    <string name="mobile_run_receipts_9115568f">Run receipts</string>
+
+    <string name="mobile_run_tests_fcab481b">Run tests</string>
+
+    <string name="mobile_save_profile_changes_49c8333d">Save profile changes</string>
+
+    <string name="mobile_schedule_0a8adac9">Schedule</string>
+
+    <string name="mobile_schedule_recurring_or_one_time_agent_wor_3c7526bf">Schedule recurring or one-time agent work.</string>
+
+    <string name="mobile_sending_cf765512">Sending…</string>
+
+    <string name="mobile_show_diff_78016e77">Show diff</string>
+
+    <string name="mobile_square_82810cb9">Square</string>
+
+    <string name="mobile_start_dictation_ee00527b">Start dictation</string>
+
+    <string name="mobile_stop_dictation_96ad53f1">Stop dictation</string>
+
+    <string name="mobile_stop_this_bot_before_changing_its_model_df92a917">Stop this bot before changing its model.</string>
+
+    <string name="mobile_that_image_is_larger_than_10_mb_baaf657b">That image is larger than 10 MB.</string>
+
+    <string name="mobile_the_downloaded_file_couldn_t_be_previewe_e92bd29f">The downloaded file couldn\'t be previewed.</string>
+
+    <string name="mobile_the_generated_audio_could_not_be_played_fc933657">The generated audio could not be played.</string>
+
+    <string name="mobile_this_bot_s_computer_is_only_captured_whi_df844363">This bot\'s computer is only captured while it is working.</string>
+
+    <string name="mobile_this_computer_4ccce6f4">This computer</string>
+
+    <string name="mobile_to_review_066f77ce">To review</string>
+
+    <string name="mobile_unknown_bc7819b3">Unknown</string>
+
+    <string name="mobile_upload_image_f35dec5f">Upload image</string>
+
+    <string name="mobile_use_mascot_0de90a12">Use mascot</string>
+
+    <string name="mobile_uses_this_agent_s_selected_model_and_com_a3de7cdb">Uses this agent\'s selected model and computer setting on the paired computer.</string>
+
+    <string name="mobile_view_diff_39f85d34">View Diff</string>
+
+    <string name="mobile_waiting_for_a_frame_a772baa4">Waiting for a frame…</string>
+
+    <string name="mobile_webhooks_fdfe2da7">Webhooks</string>
+
+    <string name="mobile_what_this_bot_does_7a664f47">What this bot does</string>
+
+    <string name="mobile_what_s_next_3d4b36bc">What\'s next?</string>
+
+    <string name="mobile_when_a_bot_stops_for_an_answer_is_mid_ta_6141a0c8">When a bot stops for an answer, is mid-task, or finishes something, it shows up here.</string>
+
+    <string name="mobile_where_does_it_run_6e4a5297">Where does it run?</string>
+
+    <string name="mobile_who_7d531617">Who</string>
+
+    <string name="mobile_won_t_f51153fe">Won\'t</string>
+
+    <string name="mobile_work_00040bab">Work</string>
+
+    <string name="mobile_yesterday_da24830f">Yesterday</string>
+
+    <string name="mobile_model_settings_footer">Provider accounts and API keys stay on your computer. Default sends no reasoning level and lets the provider decide.</string>
+    <string name="mobile_model_none_available">No model providers are available</string>
+    <string name="mobile_model_busy_note">Stop this bot before changing its model.</string>
+    <string name="mobile_model_unavailable_note">Choose an available provider to change this bot\'s model.</string>
+    <string name="mobile_model_unavailable">Unavailable</string>
+    <string name="mobile_profile_avatar_footer">PNG, JPEG, GIF, or WebP, up to 10 MB. Images are stored on your paired computer and loaded with this phone\'s pairing token.</string>
+    <string name="mobile_profile_generate_ready">Generation uses the shared image provider configured on your computer. No provider key is sent to or stored on this phone.</string>
+    <string name="mobile_profile_generate_blocked">To generate images, configure the shared image provider in OpenMausBot on your computer. Provider keys cannot be added from a phone.</string>
+    <string name="mobile_profile_elevenlabs_unconfigured">ElevenLabs is not configured</string>
+    <string name="mobile_profile_builtin_voices_unavailable">Your computer\'s built-in voices are unavailable</string>
+    <string name="mobile_profile_voice_unconfigured_footer">Add the shared ElevenLabs key in this agent\'s profile on the computer. The key is never returned to this phone.</string>
+    <string name="mobile_profile_system_voice_unconfigured_footer">Your computer\'s built-in voices need no key, and it reports none it can use. Switch the voice engine in OpenMausBot on the computer to turn speech back on.</string>
+    <string name="mobile_profile_elevenlabs_no_default_footer">No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses the shared ElevenLabs key on your computer.</string>
+    <string name="mobile_profile_fish_unconfigured">Fish Audio is not configured</string>
+    <string name="mobile_profile_fish_voice_unconfigured_footer">Add the shared Fish Audio API key in OpenMausBot on the computer. The key is never returned to this phone.</string>
+    <string name="mobile_profile_fish_no_default_footer">No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses Fish Audio on your computer.</string>
+    <string name="mobile_profile_system_no_default_footer">No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses your computer\'s built-in voices.</string>
+    <string name="mobile_profile_chatterbox_unconfigured">The Chatterbox server is not connected</string>
+    <string name="mobile_profile_chatterbox_voice_unconfigured_footer">Add the address of your Chatterbox server in OpenMausBot on the computer to turn speech back on.</string>
+    <string name="mobile_profile_chatterbox_no_default_footer">No workspace default voice is selected. Choose an agent-specific voice above; synthesis still uses your Chatterbox server.</string>
+    <string name="mobile_profile_voice_ready_footer">The voice choice belongs to this agent. Workspace default uses the shared voice selected on your computer.</string>
+    <string name="mobile_profile_pick_voice">Pick a voice for this agent before enabling speech.</string>
+    <string name="mobile_profile_preview_refused">Pick an agent voice or configure a workspace default on your computer first.</string>
+
+    <string name="mobile_roster_header_connected">%1$s · connected</string>
+    <string name="mobile_roster_header_connecting">%1$s · connecting…</string>
+    <string name="mobile_roster_header_offline">%1$s · offline</string>
+    <string name="mobile_roster_header_unpaired">%1$s · unpaired</string>
+
+    <string name="mobile_overview_title">What %1$s does</string>
+
+    <string name="mobile_updates_headline_needs_you">%1$s needs you</string>
+    <string name="mobile_updates_headline_working">%1$s is working</string>
+    <string name="mobile_updates_headline_review">%1$s has an update</string>
+    <string name="mobile_updates_active_count">%1$d active</string>
+    <string name="mobile_updates_more_count">%1$d more updates</string>
+    <string name="mobile_updates_one_more">1 more update</string>
+    <string name="mobile_updates_queued_waiting">Queued — waiting for an available slot</string>
+    <string name="mobile_updates_queued_count">%1$d messages queued</string>
+
+    <string name="mobile_allow_once_c551e6cf">Allow once</string>
+
+    <string name="mobile_always_allow_41325daa">Always allow</string>
+
+    <string name="mobile_deny_53577bb5">Deny</string>
+
+    <string name="mobile_every_day_3b2eb513">Every day</string>
+
+    <string name="mobile_file_2c3cafa4">File</string>
+
+    <string name="mobile_image_50e19fda">Image</string>
+
+    <string name="mobile_listening_6c19a476">Listening…</string>
+
+    <string name="mobile_running_73989d9c">Running</string>
+
+    <string name="mobile_weekdays_4ffc67b6">Weekdays</string>
+
+    <string name="mobile_computer_c60266a8">computer</string>
+
+    <string name="mobile_queued_efcc7714">queued</string>
+
+    <string name="mobile_running_3c49d9cc">running</string>
+
+    <string name="mobile_chat_add_attachment_failed">Couldn\'t add that attachment.</string>
+    <string name="mobile_chat_open_file_failed">Couldn\'t open that file. Try again.</string>
+    <string name="mobile_chat_open_link_failed">This link can\'t be opened on this phone.</string>
+    <string name="mobile_chat_open_link_insecure">This link can\'t be opened securely.</string>
+    <string name="mobile_chat_create_thread_failed">Couldn\'t create this thread. Try again.</string>
+    <string name="mobile_chat_send_failed">Couldn\'t send this message. Try again.</string>
+    <string name="mobile_chat_opening_file">Opening %1$s…</string>
+    <string name="mobile_chat_thread_update_failed">Couldn\'t update this thread. Try again.</string>
+    <string name="mobile_chat_attachment_unsupported">%1$s isn\'t a supported attachment. Try an image, PDF, text, Word, Excel, or PowerPoint file.</string>
+    <string name="mobile_cloud_desktop_open_failed">Could not open the cloud desktop.</string>
+    <string name="mobile_connected_apps_no_browser">This phone has no browser available to open the authorization page.</string>
+    <string name="mobile_connected_apps_auth_page_failed">The authorization page could not be opened. Check your browser restrictions and try again.</string>
+    <string name="mobile_file_open_other_computer">Open links to other computer files from the original message.</string>
+    <string name="mobile_file_open_link_failed">That link couldn\'t be opened on this phone.</string>
+    <string name="mobile_image_unavailable">Image unavailable</string>
+    <string name="mobile_pairing_removed_reason">It was removed from the computer\'s Phone settings, or the pairing was reset.</string>
+    <string name="mobile_share_route_automatic">Automatic</string>
+    <string name="mobile_share_route_secure_https">Secure HTTPS</string>
+    <string name="mobile_share_route_local_network">Local network</string>
+    <string name="mobile_share_bot">Bot</string>
+    <string name="mobile_share_channel">Channel</string>
+    <string name="mobile_share_bot_thread">Bot · %1$s</string>
+    <string name="mobile_share_channel_thread">Channel · %1$s</string>
+    <string name="mobile_share_instruction_limit">Keep the optional instruction under 20,000 characters.</string>
+    <string name="mobile_share_channel_image_compatibility">Every bot that may answer in this channel must use a model that supports images.</string>
+    <string name="mobile_share_bot_image_compatibility">%1$s\'s current model doesn\'t support images. Choose another bot or share without the image.</string>
+    <string name="mobile_share_not_paired">Open the OpenMausBot app once after updating. If this phone still isn\'t connected, pair it before sharing.</string>
+    <string name="mobile_share_no_destinations">There aren\'t any bots or channels to send this to yet. Create one on your computer first.</string>
+    <string name="mobile_share_image_support_unavailable">Update OpenMausBot on this computer before sharing images.</string>
+    <string name="mobile_share_offline">Couldn\'t reach %1$s. Keep OpenMausBot open and Phone access on, then try again.</string>
+    <string name="mobile_share_nothing_supported">There isn\'t any text, link, image, or supported document to send.</string>
+    <string name="mobile_share_too_many_items">Send up to 4 items at a time.</string>
+    <string name="mobile_share_too_much_text">That text is too large to share. Send a shorter selection.</string>
+    <string name="mobile_share_too_large">%1$s is larger than %2$d MB.</string>
+    <string name="mobile_share_unsupported_document">%1$s isn\'t a supported document. Try PDF, text, Word, Excel, or PowerPoint.</string>
+    <string name="mobile_share_unreadable">OpenMausBot couldn\'t read %1$s. Try exporting it to Files first.</string>
+    <string name="mobile_share_send_timed_out">Sending took too long. Check your connection and try again.</string>
+    <string name="mobile_share_generic_error">OpenMausBot couldn\'t send this. Please try again.</string>
+    <string name="mobile_share_pairing_expired">This phone\'s pairing has expired. Open OpenMausBot and pair it again.</string>
+    <string name="mobile_share_one_item_omitted">1 unsupported item was left out.</string>
+    <string name="mobile_share_items_omitted">%1$d unsupported items were left out.</string>
+    <string name="mobile_share_link">Link</string>
+    <string name="mobile_share_links">%1$d links</string>
+    <string name="mobile_share_text">Text</string>
+    <string name="mobile_share_text_items">%1$d text items</string>
+    <string name="mobile_share_preparing">Preparing your share…</string>
+    <string name="mobile_share_choose_destination">Choose where this should go</string>
+    <string name="mobile_share_sending_securely">Sending securely…</string>
+    <string name="mobile_share_sent">Sent</string>
+    <string name="mobile_share_needs_attention">Needs your attention</string>
+    <string name="mobile_unlock_phone">Unlock this phone, then try sharing again.</string>
+    <string name="mobile_share_saved_connection_unavailable">This saved connection is no longer available on this phone. Remove it and pair again.</string>
+
+    <string name="mobile_chat_download_preview_failed">The downloaded file couldn\'t be previewed.</string>
+
+    <string name="mobile_attachment_too_large">%1$s is larger than the %2$s remaining attachment limit.</string>
+    <string name="mobile_file_no_viewer">No app on this phone can open %1$s.</string>
+    <string name="mobile_file_share_title">Share %1$s</string>
+    <string name="mobile_file_no_share_app">No app on this phone can share %1$s.</string>
+
+    <string name="mobile_pairing_notice_https">Only continue if this is the computer whose QR code you just scanned. Confirming establishes an authenticated HTTPS companion connection.</string>
+    <string name="mobile_pairing_notice_scan">Only continue if this is the computer whose QR code you just scanned. Confirming establishes an authenticated companion connection. Use a trusted Wi-Fi network or a tailnet; OpenMausBot does not encrypt local Wi-Fi traffic.</string>
+    <string name="mobile_pairing_enter_code_notice">Enter the 6-digit code shown on your desktop:</string>
+    <string name="mobile_pairing_rescan_notice">This app restarted before the pairing finished. That one-time code is never reused, because it may already have been redeemed. Start pairing again on your computer and scan the new QR code.</string>
+
+    <string name="mobile_composer_ask_bot">Ask %1$s</string>
+    <string name="mobile_composer_sends_into_turn">Sends into this turn</string>
+    <string name="mobile_composer_sends_after_turn">Sends after this turn</string>
+    <string name="mobile_date_today_with_time">Today %1$s</string>
+    <string name="mobile_date_yesterday_with_time">Yesterday %1$s</string>
+    <string name="mobile_routine_every_minutes">Every %1$d min</string>
+    <string name="mobile_routine_interval_with_start">%1$s · starting %2$s</string>
+    <string name="mobile_routine_daily_at">%1$s at %2$s</string>
+    <string name="mobile_timeout_minutes_limit">%1$s min limit</string>
+    <string name="mobile_routine_subtitle">%1$s · %2$s · %3$s</string>
+    <string name="mobile_routine_run_subtitle">%1$s · %2$s</string>
+    <string name="mobile_routine_interval_unavailable">Interval unavailable</string>
+    <string name="mobile_routine_date_unavailable">One time · date unavailable</string>
+    <string name="mobile_routine_newer_schedule">Newer schedule</string>
+    <string name="mobile_routine_weekday_separator">, </string>
+    <string name="mobile_routine_sunday">Sunday</string>
+    <string name="mobile_routine_monday">Monday</string>
+    <string name="mobile_routine_tuesday">Tuesday</string>
+    <string name="mobile_routine_wednesday">Wednesday</string>
+    <string name="mobile_routine_thursday">Thursday</string>
+    <string name="mobile_routine_friday">Friday</string>
+    <string name="mobile_routine_saturday">Saturday</string>
+    <string name="mobile_routine_sunday_short">Sun</string>
+    <string name="mobile_routine_monday_short">Mon</string>
+    <string name="mobile_routine_tuesday_short">Tue</string>
+    <string name="mobile_routine_wednesday_short">Wed</string>
+    <string name="mobile_routine_thursday_short">Thu</string>
+    <string name="mobile_routine_friday_short">Fri</string>
+    <string name="mobile_routine_saturday_short">Sat</string>
+
+    <string name="mobile_diff_show_first_lines">Show first %1$d lines</string>
+    <string name="mobile_diff_show_all_lines">Show all %1$d lines</string>
+    <string name="mobile_steps_count">%1$d steps</string>
+    <string name="mobile_camera_unavailable">This phone\'s camera could not be started. Use its Camera app to read the QR code, or enter the address and code by hand.</string>
+    <string name="mobile_thread_snoozed">Snoozed</string>
+    <string name="mobile_pairing_code_placeholder">6-digit or ABCD-EFGH-JKLM code</string>
 </resources>

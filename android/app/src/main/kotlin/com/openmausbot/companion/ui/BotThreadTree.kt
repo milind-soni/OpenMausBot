@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -81,17 +85,24 @@ internal fun BotThreadTree(
                 modifier = Modifier
                     .weight(1f)
                     .testTag("threads-toggle.${bot.id}")
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = "${bot.name}'s threads"
-                        stateDescription = "${if (isExpanded) "Expanded" else "Collapsed"}, $count threads"
-                    }
+                    .localizedSemantics(
+                        mergeDescendants = true,
+                        contentDescription = { stringResource(R.string.mobile_a11y_bot_threads, bot.name) },
+                        stateDescription = {
+                            stringResource(
+                                if (isExpanded) R.string.mobile_a11y_thread_state_expanded
+                                else R.string.mobile_a11y_thread_state_collapsed,
+                                count,
+                            )
+                        },
+                    )
                     .clickable(enabled = !searching, role = Role.Button, onClick = onToggle)
                     .heightIn(min = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 DisclosureIcon(isExpanded)
-                Text("Threads", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = secondaryTint)
+                Text(stringResource(R.string.mobile_threads_bb12e8aa), fontSize = 13.sp, fontWeight = FontWeight.Medium, color = secondaryTint)
                 Text(count.toString(), fontSize = 13.sp, color = secondaryTint)
             }
             if (isExpanded) {
@@ -99,14 +110,14 @@ internal fun BotThreadTree(
                     onClick = onCreate,
                     enabled = !creating,
                     size = 48.dp,
-                    contentDescription = "New thread with ${bot.name}",
+                    contentDescription = stringResource(R.string.mobile_new_thread_with_bot_name_80fb4510, bot.name),
                 ) {
                     Icon(Icons.Filled.Add, contentDescription = null, tint = secondaryTint)
                 }
                 TouchTarget(
                     onClick = onManage,
                     size = 48.dp,
-                    contentDescription = "Manage ${bot.name}'s threads",
+                    contentDescription = stringResource(R.string.mobile_manage_bot_name_s_threads_f3530e9f, bot.name),
                 ) {
                     Icon(Icons.Filled.MoreVert, contentDescription = null, tint = secondaryTint)
                 }
@@ -124,10 +135,16 @@ internal fun BotThreadTree(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("thread-folder.$key")
-                            .semantics(mergeDescendants = true) {
-                                contentDescription = "${folder.name} folder"
-                                stateDescription = if (folderExpanded) "Expanded" else "Collapsed"
-                            }
+                            .localizedSemantics(
+                                mergeDescendants = true,
+                                contentDescription = { stringResource(R.string.mobile_a11y_folder, folder.name) },
+                                stateDescription = {
+                                    stringResource(
+                                        if (folderExpanded) R.string.mobile_a11y_expanded
+                                        else R.string.mobile_a11y_collapsed,
+                                    )
+                                },
+                            )
                             .clickable(enabled = !searching, role = Role.Button) { onToggleFolder(key) }
                             .heightIn(min = 48.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),

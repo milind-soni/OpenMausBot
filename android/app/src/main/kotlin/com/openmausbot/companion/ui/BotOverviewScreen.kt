@@ -24,6 +24,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,7 +78,7 @@ fun BotOverviewScreen(botId: String, onBack: () -> Unit) {
     }
 
     val name = overview?.who?.name ?: state.bot(botId)?.name.orEmpty()
-    val title = OverviewRules.title(name)
+    val title = stringResource(R.string.mobile_overview_title, name)
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -114,7 +115,7 @@ fun BotOverviewScreen(botId: String, onBack: () -> Unit) {
                     }
                     current != null -> OverviewBody(current)
                     failed -> FormSection(header = null) {
-                        Text(OverviewRules.FAILED, color = secondaryTint)
+                        Text(localizedMobileCopy(OverviewRules.FAILED), color = secondaryTint)
                     }
                 }
             }
@@ -139,7 +140,7 @@ private fun OverviewBody(overview: BotOverview) {
 
     FormSection(header = OverviewRules.DOES) {
         if (overview.does.isEmpty()) {
-            Text(OverviewRules.EMPTY_DOES, color = secondaryTint)
+            Text(localizedMobileCopy(OverviewRules.EMPTY_DOES), color = secondaryTint)
         } else {
             overview.does.forEach { line ->
                 IconNote(text = line, painter = R.drawable.ic_schedule)
@@ -164,7 +165,7 @@ private fun OverviewBody(overview: BotOverview) {
 
     FormSection(header = OverviewRules.RECENT) {
         if (overview.recent.isEmpty()) {
-            Text(OverviewRules.EMPTY_RECENT, color = secondaryTint)
+            Text(localizedMobileCopy(OverviewRules.EMPTY_RECENT), color = secondaryTint)
         } else {
             overview.recent.forEach { entry ->
                 Column {

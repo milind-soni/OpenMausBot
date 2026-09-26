@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -453,7 +457,7 @@ internal fun FilePreviewSheet(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    TextButton(onClick = onDismiss) { Text("Done") }
+                    TextButton(onClick = onDismiss) { Text(stringResource(R.string.mobile_done_e9b450d1)) }
                     Text(
                         text = item.filename,
                         fontSize = 17.sp,
@@ -463,13 +467,13 @@ internal fun FilePreviewSheet(
                         textAlign = TextAlign.Center,
                         modifier = Modifier.weight(1f).padding(horizontal = 4.dp),
                     )
-                    TextButton(onClick = { actionError = onShare() }) { Text("Share") }
-                    TextButton(onClick = { actionError = onOpen() }) { Text("Open") }
+                    TextButton(onClick = { actionError = onShare() }) { Text(stringResource(R.string.mobile_share_09ca55ca)) }
+                    TextButton(onClick = { actionError = onOpen() }) { Text(stringResource(R.string.mobile_open_cf9b7706)) }
                 }
                 HorizontalDivider()
                 actionError?.let { message ->
                     Text(
-                        text = message,
+                        text = localizedMobileCopy(message),
                         color = MaterialTheme.colorScheme.error,
                         fontSize = 13.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -539,7 +543,7 @@ private fun FullScreenImage(item: FilePreviewItem) {
         when {
             image != null -> ZoomableImage(image, item.filename)
             !finished -> CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
-            else -> Text("This image couldn't be displayed.", color = Color.White)
+            else -> Text(stringResource(R.string.mobile_this_image_couldn_t_be_displayed_34d0827e), color = Color.White)
         }
     }
 }
@@ -587,7 +591,7 @@ private fun ZoomableImage(image: ImageBitmap, name: String) {
                     .padding(8.dp)
                     .background(Color.Black.copy(alpha = 0.55f), androidx.compose.foundation.shape.RoundedCornerShape(18.dp)),
             ) {
-                Text("Reset", color = Color.White)
+                Text(stringResource(R.string.mobile_reset_44c57abd), color = Color.White)
             }
         }
     }
@@ -645,7 +649,7 @@ private fun GenericFilePreview(item: FilePreviewItem) {
             modifier = Modifier.padding(top = 6.dp),
         )
         Text(
-            text = "Use Open to view this file in a compatible app.",
+            text = stringResource(R.string.mobile_use_open_to_view_this_file_in_a_co_9a046473),
             color = secondaryTint,
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 16.dp),

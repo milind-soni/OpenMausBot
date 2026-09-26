@@ -1,5 +1,9 @@
 package com.openmausbot.companion.ui
 
+import com.openmausbot.companion.R
+
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -76,13 +80,13 @@ fun CommandSkillHud(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "SLASH COMMANDS",
+                text = stringResource(R.string.mobile_slash_commands_e7bb82f3),
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = secondaryTint,
                 modifier = Modifier.weight(1f),
             )
-            TouchTarget(onClick = onClose, contentDescription = "Close slash commands") {
+            TouchTarget(onClick = onClose, contentDescription = stringResource(R.string.mobile_close_slash_commands_5ff49abb)) {
                 Icon(
                     imageVector = Icons.Filled.Close,
                     contentDescription = null,
@@ -139,7 +143,7 @@ private fun CommandCard(command: SlashCommand, onSelect: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = command.description,
+                text = localizedSlashCommandDescription(command.id),
                 fontSize = 11.sp,
                 color = secondaryTint,
                 maxLines = 2,
@@ -147,6 +151,15 @@ private fun CommandCard(command: SlashCommand, onSelect: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun localizedSlashCommandDescription(id: SlashCommandId): String = when (id) {
+    SlashCommandId.COMPUTER -> stringResource(R.string.mobile_slash_computer_description)
+    SlashCommandId.TASKS -> stringResource(R.string.mobile_slash_threads_description)
+    SlashCommandId.DIFF -> stringResource(R.string.mobile_slash_diff_description)
+    SlashCommandId.RETRY -> stringResource(R.string.mobile_slash_retry_description)
+    SlashCommandId.STEER -> stringResource(R.string.mobile_slash_steer_description)
 }
 
 /**

@@ -1,5 +1,7 @@
 package com.openmausbot.companion.ui
 
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.openmausbot.companion.R
 import com.openmausbot.companion.core.BotTask
 import com.openmausbot.companion.core.bylineLabel
 import com.openmausbot.companion.core.displayTitle
@@ -53,13 +56,20 @@ internal fun BotThreadRow(
      * it, so the row derives it here rather than parsing activity. */
     queued: Boolean = false,
 ) {
-    val runtime = task.runtimeLabel(queued)
+    val runtimeLabel = task.runtimeLabel(queued)
+    val runtime = when (runtimeLabel) {
+        "Waiting on you" -> stringResource(R.string.mobile_waiting_on_you_edab5b72)
+        "Waiting on teammate" -> stringResource(R.string.mobile_waiting_on_teammate_158d309b)
+        "Working" -> stringResource(R.string.mobile_thread_working)
+        "Queued" -> stringResource(R.string.mobile_queued_6a599877)
+        else -> null
+    }
     val snoozed = task.isSnoozed(now)
     val dimmed = (task.isClosed || task.isArchived || snoozed) && runtime == null && task.unread != true
     val foldedState = when {
-        task.isClosed -> "Closed"
-        task.isArchived -> "Archived"
-        snoozed -> "Snoozed"
+        task.isClosed -> stringResource(R.string.mobile_thread_closed)
+        task.isArchived -> stringResource(R.string.mobile_archived_eddc813f)
+        snoozed -> stringResource(R.string.mobile_thread_snoozed)
         else -> null
     }
     Row(
@@ -89,17 +99,16 @@ internal fun BotThreadRow(
                             text = runtime,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
-                            color = when (runtime) {
+                            color = when (runtimeLabel) {
                                 "Waiting on you" -> MaterialTheme.colorScheme.error
-                                "Waiting on teammate" -> secondaryTint
-                                "Queued" -> secondaryTint
+                                "Waiting on teammate", "Queued" -> secondaryTint
                                 else -> MaterialTheme.colorScheme.primary
                             },
                         )
                     }
                     if (task.unread == true) {
                         Text(
-                            "Unread",
+                            stringResource(R.string.mobile_unread_07b032b5),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.primary,
@@ -109,7 +118,7 @@ internal fun BotThreadRow(
             }
             val byline = listOfNotNull(
                 RelativeStamp.updated(task.listStamp).takeIf { it.isNotEmpty() },
-                "Pinned".takeIf { task.pinned == true },
+                stringResource(R.string.mobile_roster_pinned).takeIf { task.pinned == true },
                 task.bylineLabel(now),
             ).joinToString(" · ")
             if (byline.isNotEmpty()) {
