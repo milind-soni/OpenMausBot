@@ -37,20 +37,32 @@ it("keeps independent fixture chats and health requests usable during queued his
     } finally { db.close(); }
     await Promise.all(bots.map((bot, i) => control(["send", "--bot", bot.id, "--text", `concurrent-search-probe-${i}`])));
     let completed = 0;
-    const scans = Array.from({ length: 8 }, async () => {
+    let signalSaturation!: () => void;
+    const saturated = new Promise<void>(resolve => { signalSaturation = resolve; });
+    const scans = Array.from({ length: 16 }, async () => {
       const response = await fetch(`${fixture.info.url}/api/search?q=absent-benchmark-query`);
       const body = await response.json();
+      if (response.status === 503) {
+        expect(body).toEqual({ error: "Search is busy. Try again shortly." });
+        signalSaturation();
+        return;
+      }
       completed++;
       expect(response.status).toBe(200);
       expect(body).toEqual({ hits: [] });
     });
+    const allScans = Promise.all(scans);
+    // Busy proves eight scans were admitted before health is sent. Merely
+    // starting fetches could let health win before any search reached HTTP.
+    await Promise.race([saturated, allScans.then(() => { throw new Error("Fixture never reached the bounded search queue"); })]);
     const at = performance.now();
     const health = await fetch(`${fixture.info.url}/api/health`);
     const healthMs = performance.now() - at;
     expect(health.status).toBe(200);
+    const completedAtHealth = completed;
     evidence.push({ healthMs, completedScansAtHealth: completed });
-    expect(completed).toBeLessThan(scans.length);
-    await Promise.all(scans);
+    await allScans;
+    expect(completedAtHealth).toBeLessThan(completed);
     for (const bot of bots) {
       const wait = await control(["wait", "--bot", bot.id, "--timeout", "30"]);
       expect(wait).toMatchObject({ status: "settled", messages: expect.arrayContaining([

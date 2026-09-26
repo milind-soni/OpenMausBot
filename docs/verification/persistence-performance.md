@@ -26,6 +26,10 @@ and event-loop delay are distinct measurements. Bursts yield between batches;
 they are not 50 live models or a production capacity estimate. Run comparisons
 serially on an idle host, not alongside builds or other benchmarks.
 
+The loop histogram is armed before work and drained afterwards so a final
+synchronous stall is sampled. Only its maximum is reported; idle setup/drain
+samples would dilute a percentile, so the earlier diagnostic p99 was removed.
+
 `--checkpoint-seed` checkpoints fixture construction and waits one second
 outside the timed region; it does not change production checkpoint policy.
 `--paced` uses 100 batches, separated by 20 ms, with one canonical and one
@@ -102,10 +106,17 @@ pnpm test:packaged-server
 
 The search fixture uses the standard isolated launcher, seeds only its new
 database, sends two real fake-engine turns through `control:omb`, performs
-eight HTTP searches, checks a health response arrives before they all finish,
+sixteen HTTP searches, waits for a queue-full 503 proving eight were admitted,
+then checks a health response arrives before the accepted scans all finish,
 and verifies both settled replies and scoped active-branch search results.
 It prints a retained evidence JSON/log path and removes the disposable data.
-The visibility fixture changes a bot's audience while a large scan is pending.
+The visibility fixture explicitly preloads a test-only result barrier. It waits
+for the real worker to return a private hit, changes that bot's audience, then
+releases delivery and asserts no private results escape. No arbitrary scan
+duration or request-arrival ordering is assumed, and no hook is bundled.
+As a negative check, temporarily reusing the pre-await visibility set made this
+test fail with the private Payroll hit; restoring the fresh set passes. The
+temporary regression is not part of the change.
 Worker tests cover parity, committed writes/deletes, queue bounds, timeouts,
 read-only failure and database replacement. Packaged smoke invokes search
 outside the checkout, with no `node_modules` available.

@@ -46,6 +46,8 @@ try {
     const writes: number[] = [], searches: number[] = [], logs: number[] = [];
     appendMaxMs = 0;
     const lag = monitorEventLoopDelay({ resolution: 2 });
+    // Arm before synchronous work and let its final delayed sample fire.
+    // Report maxima only: idle setup/drain samples would dilute percentiles.
     lag.enable();
     await delay(20);
     const start = performance.now();
@@ -80,7 +82,7 @@ try {
     lag.disable();
     console.log(JSON.stringify({ concurrency, search, writes: writes.length, durationMs: Math.round(durationMs),
       writeP95Ms: percentile(writes, .95), writeMaxMs: percentile(writes, 1), logBatchP95Ms: percentile(logs, .95), logBatchMaxMs: percentile(logs, 1), canonicalAppendMaxMs: Number(appendMaxMs.toFixed(2)), searchP95Ms: searches.length ? percentile(searches, .95) : null,
-      eventLoopP99Ms: Number((lag.percentile(99) / 1e6).toFixed(2)), eventLoopMaxMs: Number((lag.max / 1e6).toFixed(2)) }));
+      eventLoopMaxMs: Number((lag.max / 1e6).toFixed(2)) }));
   }
 } finally {
   await db.closeMessageSearch();

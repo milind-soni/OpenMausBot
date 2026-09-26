@@ -14,11 +14,10 @@
 // This is access control, not an approval gate: no card, prompt or dialog
 // is involved anywhere.
 import { spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { SessionRegistry } from "./sessions.ts";
@@ -51,7 +50,7 @@ const api = async (method: string, path: string, body?: unknown, as?: string): P
 const status = async (method: string, path: string, as?: string, body?: unknown) => (await api(method, path, body, as)).status;
 
 async function start() {
-  child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+  child = spawn(process.execPath, ["--import", pathToFileURL(join(SERVER_DIR, "testing", "hold-search-result.ts")).href, join(SERVER_DIR, "index.ts")], {
     cwd: join(SERVER_DIR, ".."),
     env: {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
@@ -324,33 +323,33 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(JSON.stringify(map)).not.toContain(ids.hr);
   });
 
-  it("withdraws results when an audience changes while a large search is pending", async () => {
-    const db = new DatabaseSync(join(home, ".openmausbot", "messages.db"));
+  it("withdraws real scan results when an audience changes before the response", async () => {
+    const hold = join(home, ".openmausbot", "hold-search-result");
     let pending: Promise<{ status: number; body: any }> | undefined;
     try {
-      // A real scan on this disposable fixture, not a fake search response.
-      // Unowned rows create work but must never become visible search results.
-      const text = "synthetic search history ".repeat(50);
-      const insert = db.prepare("INSERT INTO messages(thread_id,id,at,role,kind,text,json) VALUES('search-race',?,1,'user','text',?,?)");
-      db.exec("BEGIN");
-      for (let i = 0; i < 50_000; i++) insert.run(`race-${i}`, text, JSON.stringify({ text }));
-      db.exec("COMMIT");
+      expect((await api("GET", "/api/search?q=Zebra", undefined, ADA)).body.hits).toEqual(expect.arrayContaining([
+        expect.objectContaining({ threadId: ids.hrThread }),
+      ]));
+      writeFileSync(hold, "fixture only");
       let finished = false;
       pending = api("GET", "/api/search?q=Zebra", undefined, ADA).finally(() => { finished = true; });
-      // The health round-trip allows the search request to enter the server;
-      // the following edit must finish before the scan does, or this run has
-      // not demonstrated the interleaving we intend to protect.
-      await api("GET", "/api/health");
+      expect(await waitFor(() => existsSync(`${hold}.ready`), 5000)).toBe(true);
+      // The real worker already found the private row. Pause only delivery,
+      // so this cannot pass merely because revocation beat request admission.
+      expect(JSON.parse(readFileSync(`${hold}.ready`, "utf8"))).toEqual(expect.arrayContaining([
+        expect.objectContaining({ threadId: ids.hrThread }),
+      ]));
       expect((await api("PATCH", `/api/bots/${ids.hr}`, { visibility: "admins" }, BOSS)).status).toBe(200);
       expect(finished).toBe(false);
+      rmSync(hold);
       const result = await pending;
       expect(result.status).toBe(200);
       expect(result.body.hits).toEqual([]);
     } finally {
+      rmSync(hold, { force: true });
+      rmSync(`${hold}.ready`, { force: true });
       await pending;
       await api("PATCH", `/api/bots/${ids.hr}`, { visibility: { people: [ADA] } }, BOSS);
-      db.prepare("DELETE FROM messages WHERE thread_id='search-race'").run();
-      db.close();
     }
   }, 20_000);
 
