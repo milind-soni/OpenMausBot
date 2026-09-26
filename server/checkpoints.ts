@@ -10,8 +10,8 @@
 //
 // Restore is redo-friendly on purpose: it commits a safety point, then moves
 // the index and work tree back with `git restore --source` + `git clean -fd`
-// while HEAD stays put — so the state that was just replaced is itself a
-// checkpoint, and "undo the undo" is one more restore. Ignored/excluded files
+// while HEAD keeps the safety point — so the state just replaced is the one
+// retained checkpoint, and "undo the undo" is one more restore. Ignored/excluded files
 // (node_modules, .env, media) are never snapshotted and never removed by one.
 //
 // Failure policy: checkpointing is best-effort convenience, never load-bearing.
@@ -25,7 +25,7 @@
 // service, and the snapshot-before-every-turn cadence follows Cline.
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, resolve } from "node:path";
 
@@ -127,8 +127,9 @@ Thumbs.db
 `;
 
 // gpgsign off: the user's global config may demand signing, and a shadow
-// commit must never block on a passphrase prompt. gc off: background gc in
-// a repo we treat as disposable only risks lock contention with snapshots.
+// commit must never block on a passphrase prompt. Automatic GC stays off:
+// explicit GC runs inside the same serialization as snapshot/restore, after
+// their source objects are no longer needed.
 const GITCONFIG = "[commit]\n\tgpgsign = false\n[core]\n\tautocrlf = false\n[gc]\n\tauto = 0\n";
 
 /** One failed git call disables checkpoints for that bot until restart —
@@ -284,6 +285,24 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
   }
   mkdirSync(join(shadow, ".git", "info"), { recursive: true });
   writeFileSync(join(shadow, ".git", "info", "exclude"), EXCLUDES);
+  // Cargo and other tools can put caches outside conventional target/ or
+  // build/ paths. Honor the standard tag even for previously indexed caches.
+  const tags = (await runGit(["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "**/CACHEDIR.TAG"], cwd, env, signal)).split("\0");
+  const cachePatterns = new Set<string>();
+  for (const tag of tags) {
+    if (!tag.includes("/") || /[\r\n]/.test(tag)) continue;
+    try {
+      const path = join(cwd, tag);
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.size > 4096) continue;
+      if (!readFileSync(path, "utf8").startsWith("Signature: 8a477f597d28d172789f06886806bc55")) continue;
+      const directory = tag.slice(0, -"CACHEDIR.TAG".length);
+      cachePatterns.add("/" + directory.replace(/[\\*?[\]#! ]/g, "\\$&"));
+    } catch {
+      // A disappearing/unreadable tag is not evidence that a path is a cache.
+    }
+  }
+  writeFileSync(join(shadow, ".git", "info", "exclude"), EXCLUDES + [...cachePatterns].join("\n") + "\n");
   try {
     await runGit(["rev-parse", "--verify", "HEAD"], cwd, env, signal);
   } catch {
@@ -294,23 +313,41 @@ async function ensureShadow(cwd: string, env: NodeJS.ProcessEnv, shadow: string,
 
 type CommitResult = { hash: string; complete: boolean };
 
-/** Stage everything and commit if anything actually changed. `complete`
- * records whether every path was indexable: ordinary snapshots may keep the
- * useful subset, but restore must not delete files its safety point missed. */
+/** Capture fully before advancing HEAD. A partial add must never replace
+ * the last usable checkpoint or authorize removal of its objects. */
 async function commitAll(cwd: string, env: NodeJS.ProcessEnv, label: string, signal?: AbortSignal): Promise<CommitResult> {
-  // --ignore-errors skips files git cannot index (unreadable, FIFOs) instead
-  // of aborting — but still exits 1 when it skipped an unreadable file, so
-  // the exit code is retained even though a partial snapshot remains useful.
-  // Restore treats an incomplete safety point as a hard stop before touching
-  // the work tree.
-  let complete = true;
-  await runGit(["add", "-A", "--ignore-errors", "."], cwd, env, signal).catch(() => {
-    complete = false;
-  });
-  if (await hasStagedChanges(cwd, env, signal)) {
-    await runGit(["commit", "--no-verify", "-m", label], cwd, env, signal);
+  const previous = (await runGit(["rev-parse", "HEAD"], cwd, env, signal)).trim();
+  try {
+    // Rebuild only the shadow index so newly ignored/cache-tagged files stop
+    // pinning old blobs; no user index or work-tree file is changed.
+    await runGit(["read-tree", "--empty"], cwd, env, signal);
+    await runGit(["add", "-A", "--ignore-errors", "."], cwd, env, signal);
+  } catch {
+    return { hash: previous, complete: false };
   }
-  return { hash: (await runGit(["rev-parse", "HEAD"], cwd, env, signal)).trim(), complete };
+  const changed = await hasStagedChanges(cwd, env, signal);
+  const base = (await runGit(["rev-list", "--max-parents=0", "HEAD"], cwd, env, signal)).trim();
+  const count = (await runGit(["rev-list", "--count", "HEAD"], cwd, env, signal)).trim();
+  if (!changed && Number(count) <= 2) return { hash: previous, complete: true };
+  const tree = (await runGit(["write-tree"], cwd, env, signal)).trim();
+  const message = changed ? label : (await runGit(["show", "-s", "--format=%B", "HEAD"], cwd, env, signal)).trim();
+  // Parent only the empty marker, never the previous snapshot: keeping the
+  // previous commit as an ancestor would retain every old tree indefinitely.
+  const hash = (await runGit(["commit-tree", tree, "-p", base, "-m", message], cwd, env, signal)).trim();
+  await runGit(["update-ref", "HEAD", hash, previous], cwd, env, signal);
+  return { hash, complete: true };
+}
+
+async function collectObsolete(cwd: string, env: NodeJS.ProcessEnv): Promise<void> {
+  // No caller may still need the previous tree. In particular, restore runs
+  // this only AFTER using its source; the safety checkpoint stays reachable.
+  try {
+    await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env);
+    await runGit(["gc", "--prune=now", "--quiet"], cwd, env);
+  } catch {
+    // A busy/full disk must not hide an otherwise usable restore point.
+    console.warn("checkpoint cleanup deferred; the latest restore point is preserved");
+  }
 }
 
 /** Snapshot the folder. Returns the checkpoint hash, or null when the
@@ -327,7 +364,10 @@ export async function snapshot(botId: string, cwd: string, label: string, signal
     return await serialize(shadow, async () => {
       const env = gitEnv(shadow, worktree);
       await ensureShadow(worktree, env, shadow, signal);
-      return (await commitAll(worktree, env, label, signal)).hash;
+      const result = await commitAll(worktree, env, label, signal);
+      if (!result.complete) return null;
+      await collectObsolete(worktree, env);
+      return result.hash;
     });
   } catch (e) {
     if (!signal?.aborted) disable(botId, e instanceof Error ? e.message : String(e));
@@ -341,39 +381,37 @@ export interface CheckpointDiff {
   deleted: string[];
 }
 
-/** Paths that differ between two checkpoints of the same bot+folder, from
- * `git diff --name-status` against the shadow repo. Null when the hashes
- * are equal, the folder is refused or checkpoints are off, or git fails —
- * the digest then simply omits its file list. Never throws (turn path). */
-export async function diffStat(botId: string, cwd: string, fromHash: string, toHash: string, signal?: AbortSignal): Promise<CheckpointDiff | null> {
-  if (signal?.aborted) return null;
-  if (fromHash === toHash) return null;
-  if (disabledBots.has(botId)) return null;
-  if (!(await gitAvailable())) return null;
-  if (refusalReason(cwd) !== null) return null;
+/** Diff the settled workspace without replacing its pre-turn restore point.
+ * Staging is confined to the shadow index; the user's files and Git are untouched. */
+export async function diffWorkingTree(botId: string, cwd: string, fromHash: string, signal?: AbortSignal): Promise<CheckpointDiff | null> {
+  if (signal?.aborted || !COMMIT_HASH.test(fromHash)) return null;
+  if (disabledBots.has(botId) || !(await gitAvailable()) || refusalReason(cwd) !== null) return null;
   try {
     const worktree = realpathSync(resolve(cwd));
     const shadow = shadowDir(botId, worktree);
     const env = gitEnv(shadow, worktree);
-    const out = await serialize(shadow, () =>
-      runGit(["diff", "--name-status", "--no-renames", "-z", fromHash, toHash], worktree, env, signal),
-    );
-    const diff: CheckpointDiff = { changed: [], added: [], deleted: [] };
-    const fields = out.split("\0").filter((field) => field.length > 0);
-    for (let i = 0; i + 1 < fields.length; i += 2) {
-      const status = fields[i]!;
-      const path = fields[i + 1]!;
-      if (status.startsWith("A")) diff.added.push(path);
-      else if (status.startsWith("D")) diff.deleted.push(path);
-      else diff.changed.push(path);
-    }
-    return diff;
+    return await serialize(shadow, async () => {
+      await ensureShadow(worktree, env, shadow, signal);
+      await runGit(["read-tree", "--empty"], worktree, env, signal);
+      await runGit(["add", "-A", "--ignore-errors", "."], worktree, env, signal);
+      const out = await runGit(["diff", "--cached", "--name-status", "--no-renames", "-z", fromHash], worktree, env, signal);
+      const diff: CheckpointDiff = { changed: [], added: [], deleted: [] };
+      const fields = out.split("\0").filter((field) => field.length > 0);
+      for (let i = 0; i + 1 < fields.length; i += 2) {
+        const status = fields[i]!;
+        const path = fields[i + 1]!;
+        if (status.startsWith("A")) diff.added.push(path);
+        else if (status.startsWith("D")) diff.deleted.push(path);
+        else diff.changed.push(path);
+      }
+      return diff;
+    });
   } catch {
     return null;
   }
 }
 
-/** Every checkpoint for this bot+folder, newest first. Empty when nothing
+/** The latest usable checkpoint (plus legacy history until the next snapshot). Empty when nothing
  * was ever snapshotted (listing never creates the shadow repo). The empty
  * base marker is omitted — it is not a state anyone should return to. */
 export async function listCheckpoints(botId: string, cwd: string): Promise<Checkpoint[]> {
@@ -434,6 +472,7 @@ export async function restore(botId: string, cwd: string, hash: string): Promise
       const base = (await runGit(["rev-list", "--max-parents=0", "HEAD"], worktree, env)).trim();
       if (base === hash) return { ok: false, error: "that is the empty base marker, not a checkpoint" };
       // safety point: whatever is about to be overwritten becomes restorable
+      await ensureShadow(worktree, env, shadow);
       const safety = await commitAll(worktree, env, "before restore");
       if (!safety.complete) {
         return {
@@ -451,9 +490,10 @@ export async function restore(botId: string, cwd: string, hash: string): Promise
       // (unreadable files, add races) — never ignored/excluded files (no -x).
       await runGit(["restore", "--source", hash, "--staged", "--worktree", "--", "."], worktree, env);
       await runGit(["clean", "-fd"], worktree, env);
-      // record the post-restore state (also re-syncs the index with the
-      // deletions restore made), so the timeline shows the rollback
-      await commitAll(worktree, env, `restored ${hash.slice(0, 8)}`);
+      // Retain the pre-restore safety point, not another copy of the state
+      // now on disk. Reset only the shadow index so it cannot pin old blobs.
+      await runGit(["read-tree", "HEAD"], worktree, env);
+      await collectObsolete(worktree, env);
       return { ok: true };
     });
   } catch (e) {
