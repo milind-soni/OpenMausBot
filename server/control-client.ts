@@ -32,7 +32,21 @@ export interface ControlClient {
   requestHelp(reason: string): Promise<string | null>;
   /** Close only the unanswered plea opened by this client. */
   expireHelp(requestId: string): Promise<void>;
+  /** The chooser's context for the current turn: what the user asked for.
+   * Always a fresh read — the goal changes per turn. */
+  decisionContext(): Promise<{ goal: string } | null>;
+  /** Record one chooser outcome in the thread's event log. Best effort. */
+  reportDecision(report: DecisionReportPayload): Promise<void>;
   readonly configured: boolean;
+}
+
+export interface DecisionReportPayload {
+  outcome: "acted" | "abstained" | "reobserve" | "below-threshold" | "superseded" | "error";
+  selectedId?: string;
+  confidence?: number;
+  model?: string;
+  flow?: string;
+  detail?: string;
 }
 
 const DISENGAGED: ControlState = { held: false, helpOpen: false };
@@ -108,6 +122,31 @@ export function createControlClient(options?: {
       } catch {
         // Best effort: the harness also clears the in-memory request on
         // release/restart, and an unavailable harness cannot show the card.
+      }
+    },
+    async decisionContext(): Promise<{ goal: string } | null> {
+      if (!configured) return null;
+      try {
+        const res = await fetchImpl(url, { headers, signal: AbortSignal.timeout(2_000) });
+        if (!res.ok) return null;
+        const body: any = await res.json().catch(() => null);
+        const goal = body?.decision?.goal;
+        return typeof goal === "string" && goal.trim() ? { goal: goal.slice(0, 4_000) } : null;
+      } catch {
+        return null;
+      }
+    },
+    async reportDecision(report: DecisionReportPayload): Promise<void> {
+      if (!configured) return;
+      try {
+        await fetchImpl(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ decision: report }),
+          signal: AbortSignal.timeout(2_000),
+        });
+      } catch {
+        // Best effort: outcomes are metrics, never control flow.
       }
     },
   };

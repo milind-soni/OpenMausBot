@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StoreProvider } from "@/state/store";
 import * as store from "@/state/store";
-import { ApiKeyRow, OpenAiCompatUrl } from "./ApiKeys";
+import { ApiKeyRow, DecisionModelRouting, OpenAiCompatUrl } from "./ApiKeys";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -54,5 +54,69 @@ describe("provider key rows", () => {
     expect(html).toContain("OpenAI-compatible base URL");
     expect(html).toContain('placeholder="https://openrouter.ai/api/v1"');
     expect(html).toContain("api.openai.com/v1");
+  });
+
+  it("renders the decision-model key write-only like every other provider key", () => {
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: {
+        ...store.initialState.config, decisionModel: { configured: true, url: "", model: "jev-latest", threshold: 0.9 },
+      } as store.ConfigStatus },
+      dispatch: vi.fn(),
+      flushBotPatches: vi.fn(),
+      refreshInstances: vi.fn(),
+      refreshModels: vi.fn(),
+    });
+    const html = render(createElement(ApiKeyRow, { section: "decisionModel", testProvider: "decisionModel" }));
+    expect(html).toContain("Decision model key");
+    expect(html).toContain('type="password"');
+    expect(html).toContain('value=""');
+    expect(html).not.toContain("Connected");
+    expect(html).toContain(">Test<");
+  });
+});
+
+describe("decision model routing", () => {
+  const mockStore = (config?: store.ConfigStatus["decisionModel"]) => {
+    vi.spyOn(store, "useStore").mockReturnValue({
+      state: { ...store.initialState, config: { ...store.initialState.config, ...(config ? { decisionModel: config } : {}) } as store.ConfigStatus },
+      dispatch: vi.fn(),
+      flushBotPatches: vi.fn(),
+      refreshInstances: vi.fn(),
+      refreshModels: vi.fn(),
+    });
+  };
+
+  it("offers every lane with routing fields and saves nothing until complete", () => {
+    mockStore(undefined);
+    const html = render(createElement(DecisionModelRouting));
+    expect(html).toContain("TypeSafe");
+    expect(html).toContain("Vercel AI Gateway");
+    expect(html).toContain("OpenRouter");
+    expect(html).toContain("Custom OpenAI-compatible endpoint");
+    expect(html).toContain('<option value="" selected="">Not configured</option>');
+    expect(html).toContain('aria-label="Lane"');
+    expect(html).toContain('aria-label="Model"');
+    expect(html).toContain('aria-label="Base URL"');
+    expect(html).toContain('aria-label="Confidence threshold"');
+    expect(html).toContain('value="0.9"');
+    // An unconfigured connection starts clean and incomplete: Save stays off.
+    expect(html).toMatch(/<button[^>]*disabled/);
+    expect(html).not.toContain("Use Test to run the calibration probe");
+  });
+
+  it("echoes a saved connection and points at the calibration probe", () => {
+    mockStore({ configured: true, provider: "custom", url: "http://127.0.0.1:8787/v1", model: "local", threshold: 0.75 });
+    const html = render(createElement(DecisionModelRouting));
+    expect(html).toContain('value="local"');
+    expect(html).toContain('value="http://127.0.0.1:8787/v1"');
+    expect(html).toContain('value="0.75"');
+    expect(html).toContain("Use Test to run the calibration probe");
+  });
+
+  it("offers Not configured only before a lane is saved, so a saved route has no dead-end selection", () => {
+    mockStore({ configured: true, provider: "typesafe", url: "", model: "jev-latest", threshold: 0.9 });
+    const html = render(createElement(DecisionModelRouting));
+    expect(html).not.toContain('<option value="">');
+    expect(html).toContain('value="typesafe"');
   });
 });
