@@ -199,6 +199,14 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
           // on `grok` because its depth-1 turn runs without the agents
           // integration either way (the depth guard), so it just plays
           // plain happy text.
+          // lists peers through the agents proxy on every turn, and keeps the
+          // proxy it was handed at session/new — the Hermes shape, on the
+          // Hermes driver
+          poolLister: {
+            driver: "hermesAgent",
+            environment: { FAKE_ACP_MODE: "list-peers" },
+            config: { cli: FAKE_CLI, fullAuto: true },
+          },
           askerDelegate: {
             driver: "grokAgent",
             environment: { FAKE_ACP_MODE: "delegate-peer" },
@@ -399,6 +407,48 @@ describe("legacy routine comms e2e (fake ACP fleet)", () => {
       expect(helperBot.busy).toBeFalsy();
     },
     40_000,
+  );
+
+  it(
+    "keeps OpenMausBot tools authorized on the second turn of a pooled ACP session",
+    async () => {
+      // The fake keeps the agents MCP server it was given at session/new,
+      // like Hermes: its session/load is idempotent by server name, so the
+      // proxy never sees a later turn's token. Every OMB tool call on the
+      // second turn then used the first turn's revoked bearer and came back
+      // "unauthorized".
+      for (const existing of (await api("GET", "/api/bots")).body.bots) {
+        await api("PATCH", `/api/bots/${existing.id}`, { hidden: true });
+      }
+      const selection = { instanceId: "grok", model: "fake-model" };
+      const helper = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${helper.id}`, { name: "PoolHelper", modelSelection: selection });
+      const asker = (await api("POST", "/api/bots")).body.bot;
+      await api("PATCH", `/api/bots/${asker.id}`, { name: "PoolAsker", modelSelection: { instanceId: "poolLister", model: "fake-model" } });
+
+      const replies = async (count: number) => {
+        const deadline = Date.now() + 25_000;
+        for (;;) {
+          const bot = (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === asker.id);
+          const done = bot.messages.filter((m: any) => m.kind === "text" && m.role === "bot" && m.text?.startsWith("peers"));
+          if (done.length >= count && !bot.busy) return done;
+          if (Date.now() > deadline) {
+            throw new Error(`turn ${count} never settled: ${JSON.stringify(bot.messages.slice(-4))}\nstderr: ${stderr.slice(-1500)}`);
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      };
+
+      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "first: who is on the team?" })).status).toBe(202);
+      const [first] = await replies(1);
+      expect(first.text).toContain("PoolHelper");
+
+      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "second: who is on the team now?" })).status).toBe(202);
+      const second = (await replies(2))[1];
+      expect(second.text).not.toContain("unauthorized");
+      expect(second.text).toContain("PoolHelper");
+    },
+    60_000,
   );
 
   it(

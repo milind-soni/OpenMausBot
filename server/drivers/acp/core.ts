@@ -254,6 +254,12 @@ export interface AcpSupport {
   ): Promise<ProviderSnapshot>;
   /** Google Antigravity resumes through session/resume, not session/load. */
   resumeMethod?: "load" | "resume";
+  /** The agent keeps an MCP server it already started for the life of the
+   *  process and ignores a new config under the same name on session/load
+   *  (Hermes registers servers idempotently by name). The per-turn bearer
+   *  in the agents proxy env would then stay at the first turn's revoked
+   *  token, so a change to the turn's MCP servers respawns the process. */
+  mcpServersPinnedToProcess?: boolean;
   /** Route workspace file access through ACP so edits retain approval cards. */
   clientFileSystem?: boolean;
   /** Do not retain stderr from providers that may place OAuth material there. */
@@ -1272,7 +1278,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // establishment inputs — they ride session/new and session/load over
         // the wire — and the harness mints fresh integration bearer tokens
         // every turn, so they must not respawn the process; a change instead
-        // re-establishes the session below (see sessionKey).
+        // re-establishes the session below (see sessionKey) — unless the
+        // agent pins them to its process (mcpServersPinnedToProcess).
         // The env the spawned child actually receives is part of the
         // contract too, and arrives hashed as envFingerprint for the same
         // reason.
@@ -1283,8 +1290,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // riding a child spawned under the old env. Hash it so secrets
         // never sit in the key itself.
         const envFingerprint = createHash("sha256").update(JSON.stringify(spawnEnv)).digest("hex").slice(0, 16);
-        const contractKey = JSON.stringify([launch.command, launch.args ?? [], spawnArgs, cwd, turnConfig.fullAuto === true, envFingerprint]);
         const sessionKey = JSON.stringify(mcpServers);
+        // An agent that pins its MCP servers to the process cannot take a
+        // fresh token over session/load, so for it they join the contract
+        // (hashed: the key must never hold the bearer itself).
+        const mcpFingerprint = support.mcpServersPinnedToProcess
+          ? createHash("sha256").update(sessionKey).digest("hex").slice(0, 16)
+          : null;
+        const contractKey = JSON.stringify([launch.command, launch.args ?? [], spawnArgs, cwd, turnConfig.fullAuto === true, envFingerprint, mcpFingerprint]);
 
         if (turn.sessionReset) {
           closeSession(threadId, "reset");
